@@ -86,6 +86,15 @@ describe("PerfProcessTable", () => {
     expect(within(screen.getByTestId("perf-proc-row-2")).getByText("Sidecar")).toBeInTheDocument()
   })
 
+  it("pins the name column so a scrolled row keeps its label", () => {
+    render(<PerfProcessTable history={hist([proc(1, "cognia", "main", 10)])} />)
+    expect(screen.getByTestId("perf-proc-row-1").querySelector("td")).toHaveClass(
+      "sticky",
+      "left-0"
+    )
+    expect(screen.getByTestId("perf-proc-th-name")).toHaveClass("sticky", "left-0")
+  })
+
   it("renders the tree-wide summary cards", () => {
     render(
       <PerfProcessTable
@@ -264,12 +273,12 @@ describe("PerfProcessTable", () => {
     )
 
     const cpu1 = screen.getByTestId("perf-proc-cpu-1")
-    expect(cpu1.className).not.toContain("bg-yellow")
-    expect(cpu1.className).not.toContain("bg-orange")
-    expect(cpu1.className).not.toContain("bg-red")
-    expect(screen.getByTestId("perf-proc-cpu-2").className).toContain("bg-yellow")
-    expect(screen.getByTestId("perf-proc-cpu-3").className).toContain("bg-orange")
-    expect(screen.getByTestId("perf-proc-cpu-4").className).toContain("bg-red")
+    // Theme tokens (warning → destructive), not the raw palette.
+    expect(cpu1.className).not.toMatch(/bg-(warning|destructive)/)
+    expect(screen.getByTestId("perf-proc-cpu-2").className).toContain("bg-warning/10")
+    expect(screen.getByTestId("perf-proc-cpu-3").className).toContain("bg-warning/20")
+    expect(screen.getByTestId("perf-proc-cpu-4").className).toContain("bg-destructive/15")
+    expect(screen.getByTestId("perf-proc-cpu-4").className).not.toMatch(/red-|orange-|yellow-/)
   })
 
   it("applies relative heat-map coloring to memory cells", () => {
@@ -287,9 +296,9 @@ describe("PerfProcessTable", () => {
       />
     )
 
-    expect(screen.getByTestId("perf-proc-mem-1").className).not.toContain("bg-yellow")
-    expect(screen.getByTestId("perf-proc-mem-2").className).toContain("bg-yellow")
-    expect(screen.getByTestId("perf-proc-mem-3").className).toContain("bg-orange")
-    expect(screen.getByTestId("perf-proc-mem-4").className).toContain("bg-red")
+    expect(screen.getByTestId("perf-proc-mem-1").className).not.toMatch(/bg-(warning|destructive)/)
+    expect(screen.getByTestId("perf-proc-mem-2").className).toContain("bg-warning/10")
+    expect(screen.getByTestId("perf-proc-mem-3").className).toContain("bg-warning/20")
+    expect(screen.getByTestId("perf-proc-mem-4").className).toContain("bg-destructive/15")
   })
 })

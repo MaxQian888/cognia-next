@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table"
 import { formatCount, formatMs } from "@/lib/perf/backend/format"
 import { OPERATION_GROUPS, getOperationPerformanceRecorder } from "@/lib/perf/operation-performance"
+import { PIN_START } from "./perf-table-pin"
 
 const COUNTS = ["count", "errors", "cancelled", "inFlight", "samples"] as const
 const DURATIONS = ["lastMs", "p50Ms", "p95Ms", "maxMs"] as const
@@ -35,12 +36,12 @@ export function PerfOperationTimings() {
   )
 
   return (
-    <section className="min-w-0 rounded-lg border bg-background" aria-labelledby={`${id}-title`}>
+    <section className="min-w-0 border-y bg-background" aria-labelledby={`${id}-title`}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
         <div>
-          <h3 id={`${id}-title`} className="text-base font-medium">
+          <h2 id={`${id}-title`} className="text-base font-medium">
             {t("title")}
-          </h3>
+          </h2>
           <p className="mt-1 max-w-prose text-xs text-muted-foreground">{t("description")}</p>
         </div>
         <Button
@@ -102,7 +103,7 @@ export function PerfOperationTimings() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t("columns.name")}</TableHead>
+              <TableHead className={PIN_START}>{t("columns.name")}</TableHead>
               {[...COUNTS, ...DURATIONS].map((key) => (
                 <TableHead key={key} className="text-right">
                   {t(`columns.${key}`)}
@@ -113,7 +114,7 @@ export function PerfOperationTimings() {
           <TableBody>
             {visible.map((row) => (
               <TableRow key={row.name}>
-                <TableCell className="min-w-44">
+                <TableCell className={`min-w-44 ${PIN_START}`}>
                   <p className="text-sm">{t(`names.${row.name}`)}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t(`groups.${row.group}.label`)}

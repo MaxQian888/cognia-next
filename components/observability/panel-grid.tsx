@@ -2,7 +2,8 @@
 
 /**
  * react-grid-layout (v2) wrapper. Renders one draggable/resizable cell per
- * panel in the registry. v2 is a hooks-based rewrite (no `findDOMNode`, so it
+ * chart and breakdown in the registry (`GRID_PANELS`); the KPI stats render
+ * in the `KpiStrip` above it. v2 is a hooks-based rewrite (no `findDOMNode`, so it
  * is React-19 safe): `useContainerWidth` measures the container via
  * ResizeObserver and feeds the required `width` to `ResponsiveGridLayout`;
  * drag/resize live in `dragConfig`/`resizeConfig`. The drag handle is the
@@ -30,7 +31,7 @@ import {
   type ResponsiveLayouts,
 } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
-import { PANELS, defaultLayouts, type PanelDef } from "./panel-registry"
+import { GRID_PANELS, defaultLayouts, type PanelDef } from "./panel-registry"
 import { normalizePanelLayouts } from "@/lib/observability/dashboard-config"
 import type {
   Breakpoint,
@@ -85,7 +86,7 @@ export function PanelGrid({
 }: PanelGridProps) {
   const { width, containerRef, mounted } = useContainerWidth()
   const hidden = new Set(hiddenPanels ?? [])
-  const visiblePanels = PANELS.filter((p) => !hidden.has(p.id))
+  const visiblePanels = GRID_PANELS.filter((p) => !hidden.has(p.id))
   // A stored layout from an older registry (or a hand-edited import) is made
   // whole before RGL sees it, so it never has to invent a tile.
   const complete = useMemo(() => normalizePanelLayouts(layouts, defaultLayouts()), [layouts])

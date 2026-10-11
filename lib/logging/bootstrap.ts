@@ -885,7 +885,16 @@ function applyTransportSettings(
     removeTransport("observability-spool")
   }
 
-  if (transports.native) {
+  // Both native legs are Tauri-only: `NativeTransport` and
+  // `BreadcrumbTransport` drop every entry outside the desktop shell and
+  // report `offline` from construction. Registering them on the web or in the
+  // Capacitor app on the strength of the (default-on) native toggle put two
+  // permanently-offline transports in every health read — `/logs` showed an
+  // amber "5/7" and two red tiles on a browser that had nothing wrong with it.
+  // The toggle still decides on the desktop; elsewhere there is no native leg
+  // to turn on.
+  const nativeLeg = transports.native && isTauri()
+  if (nativeLeg) {
     addTransport(
       createNativeTransport({
         minLevel: transports.nativeConfig.minLevel,
@@ -905,7 +914,7 @@ function applyTransportSettings(
   // on desktop (it forwards to the Rust crash-context ring), and it's the
   // first real consumer of `pushCrashBreadcrumb`. No separate setting — when
   // native logging is on we also want crash breadcrumbs.
-  if (transports.native) {
+  if (nativeLeg) {
     addTransport(createBreadcrumbTransport())
   } else {
     removeTransport("breadcrumb")

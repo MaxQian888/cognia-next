@@ -110,16 +110,22 @@ describe("StatPanel", () => {
     expect(screen.queryByTestId("stat-drill-kpi-cost")).not.toBeInTheDocument()
   })
 
-  it("does not drill in edit mode, where a click starts a drag", () => {
+  it("is a flat label/value cell, not a framed panel", () => {
     render(
-      <StatPanel
-        panel={panelById("kpi-tool-failures")!}
-        kpis={kpis()}
-        onDrill={jest.fn()}
-        editMode
-      />
+      <dl>
+        <StatPanel panel={panelById("kpi-spans")!} kpis={kpis({ totalSpans: 3 })} />
+      </dl>
     )
-    expect(screen.queryByTestId("stat-drill-kpi-tool-failures")).not.toBeInTheDocument()
+    const cell = screen.getByTestId("stat-panel-kpi-spans")
+    expect(cell.querySelector("dt")).toHaveTextContent("panels.totalSpans")
+    expect(cell.querySelector("dd")).toHaveTextContent("3")
+    expect(cell.querySelector("section")).toBeNull()
+    expect(screen.queryByTestId("panel-drag-handle")).not.toBeInTheDocument()
+  })
+
+  it("announces a non-ok threshold level to screen readers", () => {
+    render(<StatPanel panel={panelById("kpi-errors")!} kpis={kpis({ errorRate: 0.5 })} />)
+    expect(screen.getByTestId("panel-threshold-sr")).toHaveTextContent("crit")
   })
 
   it("formats through the app-locale formatter set", () => {

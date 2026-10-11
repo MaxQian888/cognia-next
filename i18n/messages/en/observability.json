@@ -40,6 +40,9 @@
       "plugin-hook": "Plugin hook",
       "retrieval": "Retrieval",
       "workflow": "Workflow"
+    },
+    "model": {
+      "none": "No model"
     }
   },
   "export": {
@@ -205,5 +208,8 @@
     "failed": "Failed",
     "toggleEvents": "Toggle details for {name}",
     "tokens": "{count} tokens"
+  },
+  "kpiStrip": {
+    "label": "Key metrics"
   }
 }

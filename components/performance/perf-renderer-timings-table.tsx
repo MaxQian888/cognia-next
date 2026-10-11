@@ -35,6 +35,7 @@ import {
   type RendererTimingCategory,
 } from "@/lib/perf/renderer-timings"
 import { cn } from "@/lib/utils"
+import { PIN_START, PIN_START_MAX_WIDTH } from "./perf-table-pin"
 
 const CATEGORY_BADGE: Record<RendererTimingCategory, string> = {
   chat: "bg-chart-1/15 text-foreground",
@@ -74,7 +75,7 @@ export function PerfRendererTimingsTable({
     <section className="border-y bg-background" data-testid="perf-renderer-timings">
       <header className="flex flex-row flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div className="min-w-0">
-          <h3 className="text-base font-medium">{t("title")}</h3>
+          <h2 className="text-base font-medium">{t("title")}</h2>
           <p className="mt-1 text-xs text-muted-foreground">{t("description")}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -118,7 +119,7 @@ export function PerfRendererTimingsTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t("columns.name")}</TableHead>
+              <TableHead className={PIN_START}>{t("columns.name")}</TableHead>
               <TableHead className="text-right">{t("columns.count")}</TableHead>
               <TableHead className="text-right">{t("columns.last")}</TableHead>
               <TableHead className="text-right">{t("columns.p50")}</TableHead>
@@ -129,7 +130,7 @@ export function PerfRendererTimingsTable({
           <TableBody>
             {visible.map((row) => (
               <TableRow key={row.name} data-testid={`perf-renderer-timing-${row.name}`}>
-                <TableCell>
+                <TableCell className={cn(PIN_START, PIN_START_MAX_WIDTH)}>
                   <div className="flex min-w-0 items-center gap-2">
                     <Badge
                       variant="secondary"

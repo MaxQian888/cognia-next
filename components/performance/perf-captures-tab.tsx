@@ -39,14 +39,6 @@ import {
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
@@ -75,6 +67,8 @@ import { getPerformanceCaptureController } from "@/lib/perf/capture-controller"
 import {
   deletePerformanceCapture,
   PERFORMANCE_CAPTURE_DEFAULT_DURATION_MS,
+  PERFORMANCE_CAPTURE_RETENTION_COUNT,
+  PERFORMANCE_CAPTURE_RETENTION_MS,
 } from "@/lib/perf/capture-service"
 import {
   exportPerformanceCapture,
@@ -130,6 +124,11 @@ const STATUS_TONE: Record<
   ready: "outline",
   failed: "destructive",
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const SECTION = "border-y bg-background"
+const SECTION_HEADER = "flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3"
+const SECTION_TITLE = "text-base font-medium"
 
 export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
   const t = useTranslations("performance.captures")
@@ -348,12 +347,20 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
 
   return (
     <div className="space-y-4" data-testid="perf-captures-tab">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("active.title")}</CardTitle>
-          <CardDescription className="text-xs">{t("active.description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      {/* Three ruled sections, not three cards. They are the page's own
+          sections, and as cards each one framed boxes of its own — library
+          rows, the compare panel, the budget check — two and three levels
+          deep. */}
+      <section className={SECTION} aria-labelledby="perf-capture-active-title">
+        <header className={SECTION_HEADER}>
+          <div className="min-w-0 space-y-1">
+            <h2 id="perf-capture-active-title" className={SECTION_TITLE}>
+              {t("active.title")}
+            </h2>
+            <p className="text-xs text-muted-foreground">{t("active.description")}</p>
+          </div>
+        </header>
+        <div className="space-y-4 p-4">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="perf-capture-source">{t("controls.source")}</Label>
@@ -460,20 +467,24 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
               {describeError(state.error)}
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("library.title")}</CardTitle>
-          <CardDescription className="text-xs">
-            {t("library.retention", {
-              count: 20,
-              days: 30,
-              quota: Math.round(PERFORMANCE_ACCOUNT_QUOTA_BYTES / 1024 / 1024 / 1024),
-            })}
-          </CardDescription>
-          <CardAction>
+      <section className={SECTION} aria-labelledby="perf-capture-library-title">
+        <header className={SECTION_HEADER}>
+          <div className="min-w-0 space-y-1">
+            <h2 id="perf-capture-library-title" className={SECTION_TITLE}>
+              {t("library.title")}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {t("library.retention", {
+                count: PERFORMANCE_CAPTURE_RETENTION_COUNT,
+                days: Math.round(PERFORMANCE_CAPTURE_RETENTION_MS / DAY_MS),
+                quota: Math.round(PERFORMANCE_ACCOUNT_QUOTA_BYTES / 1024 / 1024 / 1024),
+              })}
+            </p>
+          </div>
+          <div className="shrink-0">
             <input
               ref={fileRef}
               type="file"
@@ -495,21 +506,33 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
               <UploadIcon />
               {t("controls.import")}
             </Button>
-          </CardAction>
-        </CardHeader>
-        <CardContent className="space-y-3">
+          </div>
+        </header>
+        <div className="space-y-3 p-4">
           {captures.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">{t("library.empty")}</p>
           ) : (
             <>
               <p className="text-xs text-muted-foreground">{t("library.compareHint")}</p>
-              <ul className="space-y-2" data-testid="perf-capture-library">
+              {/* Above the list, not after it: the second tick is usually near
+                  the top, and on a phone the comparison it opened landed
+                  below twenty rows. */}
+              {comparePair ? (
+                <PerfCaptureCompare
+                  key={comparePair.map((row) => row.id).join(":")}
+                  captures={comparePair}
+                  loadCapture={loadCapture}
+                  describeError={describeError}
+                  disabled={busy || !accountId}
+                />
+              ) : null}
+              <ul className="divide-y border-y" data-testid="perf-capture-library">
                 {captures.map((capture) => {
                   const endedAt = capture.stoppedAt ?? capture.updatedAt
                   return (
                     <li
                       key={capture.id}
-                      className="flex flex-wrap items-center gap-3 rounded-md border p-3"
+                      className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3"
                       data-testid={`perf-capture-${capture.id}`}
                     >
                       <Checkbox
@@ -527,7 +550,10 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
                           )
                         }
                       />
-                      <div className="min-w-0 flex-1">
+                      {/* A real minimum: at basis 0 the date and meta line were
+                          squeezed by four badges and three buttons; now those
+                          wrap below on a phone instead. */}
+                      <div className="min-w-48 flex-1">
                         <p className="text-sm font-medium">
                           {formatter.dateTime(capture.startedAt, {
                             dateStyle: "medium",
@@ -600,28 +626,18 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
               </ul>
             </>
           )}
-          {comparePair ? (
-            <PerfCaptureCompare
-              key={comparePair.map((row) => row.id).join(":")}
-              captures={comparePair}
-              loadCapture={loadCapture}
-              describeError={describeError}
-              disabled={busy || !accountId}
-            />
-          ) : null}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card>
-        <CardContent className="pt-6">
-          <PerfBudgetPanel
-            store={budgetStore}
-            captures={readyCaptures}
-            loadCapture={loadCapture}
-            describeError={describeError}
-          />
-        </CardContent>
-      </Card>
+      {/* The budget panel is its own titled section. */}
+      <div className="border-y bg-background p-4">
+        <PerfBudgetPanel
+          store={budgetStore}
+          captures={readyCaptures}
+          loadCapture={loadCapture}
+          describeError={describeError}
+        />
+      </div>
 
       <AlertDialog
         open={deleteTarget !== null}

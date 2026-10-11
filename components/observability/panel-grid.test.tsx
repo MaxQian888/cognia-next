@@ -4,7 +4,7 @@
 import type { ReactNode } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { PanelGrid, mergeHidden } from "./panel-grid"
-import { defaultLayouts, PANELS } from "./panel-registry"
+import { defaultLayouts, GRID_PANELS, KPI_PANELS } from "./panel-registry"
 
 // Mock RGL (v2) to a passthrough: a stable container-width + a grid that
 // renders children and exposes a button to fire onLayoutChange. JSX uses the
@@ -31,7 +31,7 @@ jest.mock("react-grid-layout", () => ({
         data-testid="rgl-fire-change"
         onClick={() =>
           onLayoutChange([], {
-            lg: [{ i: "kpi-cost", x: 1, y: 2, w: 3, h: 4 }],
+            lg: [{ i: "ts-cost", x: 1, y: 2, w: 3, h: 4 }],
             md: [],
             sm: [],
           })
@@ -45,7 +45,7 @@ jest.mock("react-grid-layout", () => ({
 }))
 
 describe("PanelGrid", () => {
-  it("renders a cell for every registered panel", () => {
+  it("renders a cell for every chart and breakdown, and none for a KPI", () => {
     render(
       <PanelGrid
         layouts={defaultLayouts()}
@@ -54,8 +54,12 @@ describe("PanelGrid", () => {
         renderPanel={(p) => <div data-testid={`cell-${p.id}`}>{p.id}</div>}
       />
     )
-    for (const p of PANELS) {
+    for (const p of GRID_PANELS) {
       expect(screen.getByTestId(`cell-${p.id}`)).toBeInTheDocument()
+    }
+    // The stats live in the KPI strip above the grid.
+    for (const p of KPI_PANELS) {
+      expect(screen.queryByTestId(`cell-${p.id}`)).not.toBeInTheDocument()
     }
   })
 
@@ -69,7 +73,7 @@ describe("PanelGrid", () => {
         renderPanel={(p) => <div data-testid={`cell-${p.id}`}>{p.id}</div>}
       />
     )
-    expect(screen.getByTestId("cell-kpi-cost")).toBeInTheDocument()
+    expect(screen.getByTestId("cell-ts-cost")).toBeInTheDocument()
     expect(screen.queryByTestId("cell-ts-tokens")).not.toBeInTheDocument()
     expect(screen.queryByTestId("cell-bd-tool")).not.toBeInTheDocument()
   })
@@ -99,10 +103,10 @@ describe("PanelGrid", () => {
     fireEvent.click(screen.getByTestId("rgl-fire-change"))
     const saved = onLayoutChange.mock.calls[0][0]
     // The moved tile keeps its new geometry, with the registry's min sizes.
-    expect(saved.lg[0]).toEqual({ i: "kpi-cost", x: 1, y: 2, w: 3, h: 4, minW: 2, minH: 2 })
+    expect(saved.lg[0]).toEqual({ i: "ts-cost", x: 1, y: 2, w: 3, h: 4, minW: 3, minH: 4 })
     // Every other panel survives — RGL only reported one.
     for (const bp of ["lg", "md", "sm"] as const) {
-      expect(saved[bp]).toHaveLength(PANELS.length)
+      expect(saved[bp]).toHaveLength(GRID_PANELS.length)
     }
   })
 
@@ -116,7 +120,7 @@ describe("PanelGrid", () => {
         renderPanel={() => null}
       />
     )
-    expect(screen.getByTestId("rgl")).toHaveAttribute("data-lg-count", String(PANELS.length))
+    expect(screen.getByTestId("rgl")).toHaveAttribute("data-lg-count", String(GRID_PANELS.length))
   })
 })
 
@@ -131,9 +135,15 @@ describe("mergeHidden", () => {
   })
 
   it("leaves a breakpoint RGL did not report untouched", () => {
-    const merged = mergeHidden({ lg: [{ i: "kpi-cost", x: 5, y: 0, w: 2, h: 2 }] }, previous)
+    const merged = mergeHidden({ lg: [{ i: "ts-rate", x: 5, y: 0, w: 4, h: 6 }] }, previous)
     expect(merged.md).toEqual(previous.md)
     expect(merged.sm).toEqual(previous.sm)
+  })
+
+  it("drops a KPI tile a pre-strip layout still carries", () => {
+    const merged = mergeHidden({ lg: [{ i: "kpi-cost", x: 0, y: 0, w: 2, h: 2 }] }, previous)
+    expect(merged.lg.some((item) => item.i === "kpi-cost")).toBe(false)
+    expect(merged.lg).toHaveLength(GRID_PANELS.length)
   })
 
   it("clamps an undersized reported tile back to the registry minimum", () => {

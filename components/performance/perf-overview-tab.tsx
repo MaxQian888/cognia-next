@@ -20,6 +20,7 @@ import { AlertCircleIcon, ChevronRightIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import type { PerfConnectionState, PerfFrame, PerfSourceDescriptor } from "@/lib/perf/backend/types"
 import {
   formatPerfMetricValue,
@@ -31,6 +32,9 @@ import {
 } from "@/lib/perf/metric-catalog"
 import { cn } from "@/lib/utils"
 import { PerfGraphCard } from "./perf-graph-card"
+
+const GRAPH_HEIGHT = 320
+const COMPACT_GRAPH_HEIGHT = 220
 import { PerfMetricTile } from "./perf-metric-tile"
 import { PerfMemoryPressure } from "./perf-memory-pressure"
 
@@ -86,6 +90,7 @@ export function PerfOverviewTab({
 }: PerfOverviewTabProps) {
   const t = useTranslations("performance")
   const colors = useThemeColors()
+  const compact = useCompactLayout()
 
   const groups = useMemo<RailGroup[]>(() => {
     const build = (kind: "host" | "renderer", history: PerfFrame[]): RailGroup => {
@@ -125,8 +130,15 @@ export function PerfOverviewTab({
   const windowSeconds = Math.round(((active?.points.length ?? 0) * intervalMs) / 1000)
 
   return (
+    // Two columns by the dashboard's own width (`@container/perf`), not the
+    // viewport's. Stacked, the chart comes FIRST: it is what a tile selects,
+    // and below the rail it sat under up to ~28 tiles — on a phone a tap on
+    // "Frame rate" changed a chart three screens down. In the stacked layout
+    // the rail's tiles also pair up once there is room for two. Only the
+    // two-column layout fills the height: stacked, a filling chart stretched
+    // to most of the screen above a rail the user then had to find.
     <div
-      className="grid h-full grid-cols-1 gap-4 md:grid-cols-[280px_1fr]"
+      className="grid grid-cols-1 gap-4 @3xl/perf:h-full @3xl/perf:grid-cols-[280px_1fr]"
       data-testid="perf-overview"
     >
       {/* `group`, not `tablist`: the tiles are `aria-pressed` toggle buttons,
@@ -141,12 +153,12 @@ export function PerfOverviewTab({
             data-testid={`perf-rail-${group.kind}`}
           >
             <header className="flex items-center justify-between gap-2 px-1 pb-1.5">
-              <h3
+              <h2
                 id={`perf-rail-${group.kind}`}
                 className="text-xs font-medium uppercase tracking-wider text-muted-foreground"
               >
                 {t(`overview.groups.${group.kind}`)}
-              </h3>
+              </h2>
               <Badge
                 variant={group.state === "live" ? "secondary" : "outline"}
                 className="h-5 gap-1 px-1.5 text-[10px]"
@@ -172,7 +184,10 @@ export function PerfOverviewTab({
               </div>
             ) : null}
             {group.metrics.length > 0 ? (
-              <div className="flex flex-col gap-1">
+              <div
+                className="grid grid-cols-1 gap-1 @md/perf:grid-cols-2 @3xl/perf:grid-cols-1"
+                data-testid={`perf-rail-${group.kind}-tiles`}
+              >
                 {group.metrics.map((metric) => (
                   <PerfMetricTile
                     key={metric.definition.id}
@@ -234,12 +249,15 @@ export function PerfOverviewTab({
           }
           description={t(`metricDescriptions.${active.definition.labelKey}`)}
           fill
-          height={320}
+          // A 320px plot made the stacked card ~500px — most of a phone's
+          // screen before the first tile. Compact gets a shorter one.
+          height={compact ? COMPACT_GRAPH_HEIGHT : GRAPH_HEIGHT}
+          className="order-first @3xl/perf:order-none"
           data-testid="perf-overview-graph"
         />
       ) : (
         <div
-          className="flex min-h-[320px] items-center justify-center border-y text-sm text-muted-foreground"
+          className="order-first flex min-h-[320px] items-center justify-center border-y text-sm text-muted-foreground @3xl/perf:order-none"
           data-testid="perf-overview-no-metrics"
         >
           {t("overview.noMetrics")}

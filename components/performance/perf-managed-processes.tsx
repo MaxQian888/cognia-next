@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { StatCard } from "@/components/observability/stat-card"
 import { cn, formatDurationShort } from "@/lib/utils"
+import { PIN_END, PIN_START, PIN_START_MAX_WIDTH } from "./perf-table-pin"
 import { formatBytes, formatCount, formatPercent } from "@/lib/perf/backend/format"
 import { controlManaged } from "@/lib/perf/backend/managed-control"
 import { managedProcessBusyKey } from "@/lib/perf/managed-control-challenges"
@@ -78,10 +79,15 @@ const SUBSYSTEM_ORDER = (Object.keys(SUBSYSTEM_RANK) as ManagedSubsystem[]).sort
 /** Status badge tint by lifecycle state. */
 const STATUS_BADGE: Record<ManagedStatus, string> = {
   running: "bg-chart-4/15 text-chart-4",
-  starting: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
-  stopping: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
+  starting: "bg-warning/15 text-warning",
+  stopping: "bg-warning/15 text-warning",
   stopped: "bg-muted text-muted-foreground",
-  error: "bg-red-500/20 text-red-600 dark:text-red-400",
+  error: "bg-destructive/15 text-destructive",
+}
+
+/** Restart is not offered for this process (unsupported, or it has exited). */
+function restartUnavailable(mp: ManagedProcess): boolean {
+  return !(mp.supportedActions?.includes("restart") ?? mp.canRestart) || mp.alive === false
 }
 
 export interface PerfManagedProcessesProps {
@@ -207,7 +213,7 @@ export function PerfManagedProcesses({ latest }: PerfManagedProcessesProps) {
           data-testid={`perf-managed-group-${subsystem}`}
         >
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold">{t(`subsystems.${subsystem}`)}</h3>
+            <h2 className="text-sm font-semibold">{t(`subsystems.${subsystem}`)}</h2>
             <Badge variant="secondary" className="tabular-nums">
               {rows.length}
             </Badge>
@@ -216,13 +222,15 @@ export function PerfManagedProcesses({ latest }: PerfManagedProcessesProps) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t("columns.name")}</TableHead>
+                  <TableHead className={PIN_START}>{t("columns.name")}</TableHead>
                   <TableHead>{t("columns.status")}</TableHead>
                   <TableHead className="text-right">{t("columns.pid")}</TableHead>
                   <TableHead className="text-right">{t("columns.cpu")}</TableHead>
                   <TableHead className="text-right">{t("columns.memory")}</TableHead>
                   <TableHead className="text-right">{t("columns.uptime")}</TableHead>
-                  <TableHead className="text-right">{t("columns.actions")}</TableHead>
+                  <TableHead className={cn("text-right", PIN_END)}>
+                    {t("columns.actions")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -231,9 +239,11 @@ export function PerfManagedProcesses({ latest }: PerfManagedProcessesProps) {
                     key={managedProcessBusyKey(mp)}
                     data-testid={`perf-managed-row-${mp.id}`}
                   >
-                    <TableCell>
+                    <TableCell className={cn(PIN_START, PIN_START_MAX_WIDTH)}>
                       <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate font-medium">{mp.name}</span>
+                        <span className="truncate font-medium" title={mp.name}>
+                          {mp.name}
+                        </span>
                         {mp.detail ? (
                           <span className="truncate text-xs text-muted-foreground">
                             {mp.detail}
@@ -262,29 +272,43 @@ export function PerfManagedProcesses({ latest }: PerfManagedProcessesProps) {
                     <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
                       {proc ? formatDurationShort(proc.runSecs * 1000) : "—"}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className={cn("text-right", PIN_END)}>
                       <div className="flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 gap-1 px-2 text-xs"
-                          disabled={
-                            !(mp.supportedActions?.includes("restart") ?? mp.canRestart) ||
-                            mp.alive === false ||
-                            busyId === managedProcessBusyKey(mp)
-                          }
+                        {/* Why Restart is unavailable rides on a wrapper: a
+                            disabled button gets no pointer events, so a `title`
+                            on it never showed. Screen readers get the same
+                            reason through `aria-describedby`. */}
+                        <span
+                          className="inline-flex"
                           title={
-                            (mp.supportedActions?.includes("restart") ?? mp.canRestart) &&
-                            mp.alive !== false
-                              ? undefined
-                              : t("actions.restartUnavailable")
+                            restartUnavailable(mp) ? t("actions.restartUnavailable") : undefined
                           }
-                          onClick={() => runAction(mp, "restart")}
-                          data-testid={`perf-managed-restart-${mp.id}`}
+                          data-testid={`perf-managed-restart-wrap-${mp.id}`}
                         >
-                          <RotateCwIcon className="size-3.5" />
-                          {t("actions.restart")}
-                        </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-xs"
+                            disabled={
+                              restartUnavailable(mp) || busyId === managedProcessBusyKey(mp)
+                            }
+                            aria-describedby={
+                              restartUnavailable(mp)
+                                ? `perf-managed-restart-reason-${mp.id}`
+                                : undefined
+                            }
+                            onClick={() => runAction(mp, "restart")}
+                            data-testid={`perf-managed-restart-${mp.id}`}
+                          >
+                            <RotateCwIcon className="size-3.5" />
+                            {t("actions.restart")}
+                          </Button>
+                          {restartUnavailable(mp) ? (
+                            <span id={`perf-managed-restart-reason-${mp.id}`} className="sr-only">
+                              {t("actions.restartUnavailable")}
+                            </span>
+                          ) : null}
+                        </span>
                         <Button
                           variant="ghost"
                           size="sm"

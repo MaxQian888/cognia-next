@@ -12,8 +12,13 @@ import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
 export interface TraceRollupRow {
   traceId: string
-  /** Name of the earliest-starting (root-ish) span. */
+  /** Name of the earliest-starting (root-ish) span, raw (`invoke_agent · Planner`)
+   * — what CSV export and search carry. */
   rootName: string
+  /** The root span's name parts, so the UI can translate the operation. */
+  rootOperation: string
+  rootAgentName?: string
+  rootToolName?: string
   startTime: number
   /** Wall-clock span of the whole trace (last end − first start). */
   durationMs: number
@@ -61,6 +66,9 @@ export function rollupTraces(spans: AgentTraceSpan[]): TraceRollupRow[] {
     rows.push({
       traceId,
       rootName: spanLabel(root),
+      rootOperation: root.operationName,
+      rootAgentName: root.agentName,
+      rootToolName: root.toolName,
       startTime: minStart,
       durationMs: Math.max(0, maxEnd - minStart),
       spanCount: group.length,

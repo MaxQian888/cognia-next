@@ -72,14 +72,18 @@ export function ObservabilityPanel({
       : undefined
   switch (panel.kind) {
     case "stat":
+      // The dashboard renders stats in its `KpiStrip`, not as grid tiles; this
+      // branch is what a lone stat looks like anywhere else (stories, an
+      // embed), a one-cell description list.
       return (
-        <StatPanel
-          panel={panel}
-          kpis={series.kpis}
-          editMode={editMode}
-          thresholds={thresholds}
-          onDrill={onDrill && panel.drillErrors ? () => onDrill({ kind: "errors" }) : undefined}
-        />
+        <dl>
+          <StatPanel
+            panel={panel}
+            kpis={series.kpis}
+            thresholds={thresholds}
+            onDrill={onDrill && panel.drillErrors ? () => onDrill({ kind: "errors" }) : undefined}
+          />
+        </dl>
       )
     case "timeseries":
       return (

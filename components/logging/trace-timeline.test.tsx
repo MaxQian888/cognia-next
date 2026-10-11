@@ -37,7 +37,7 @@ jest.mock("@/hooks/logging/use-theme-colors", () => ({
   }),
 }))
 
-import { TraceTimeline } from "./trace-timeline"
+import { TraceTimeline, placeHoverCard, thinnedOnNarrow, tickAnchor } from "./trace-timeline"
 
 function spans(): AgentTraceSpan[] {
   return [
@@ -103,6 +103,55 @@ function stubTrackWidth(width = 1000): void {
     releasePointerCapture: jest.fn(),
   })
 }
+
+describe("tickAnchor", () => {
+  it("hangs the end ticks inward so the total is never clipped", () => {
+    expect(tickAnchor(0)).toBe("start")
+    expect(tickAnchor(50)).toBe("center")
+    expect(tickAnchor(100)).toBe("end")
+  })
+})
+
+describe("placeHoverCard", () => {
+  const card = { width: 120, height: 40 }
+
+  it("sits above the block, aligned to its left edge", () => {
+    expect(placeHoverCard({ left: 30, top: 80, bottom: 100 }, { width: 400 }, card)).toEqual({
+      left: 30,
+      top: 36,
+      placement: "above",
+    })
+  })
+
+  it("clamps to the strip's right edge instead of running off it", () => {
+    expect(placeHoverCard({ left: 350, top: 80, bottom: 100 }, { width: 400 }, card).left).toBe(280)
+  })
+
+  it("flips below a block with no room above it", () => {
+    expect(placeHoverCard({ left: 0, top: 10, bottom: 30 }, { width: 400 }, card)).toEqual({
+      left: 0,
+      top: 34,
+      placement: "below",
+    })
+  })
+
+  it("pins a card wider than the strip to its left edge", () => {
+    expect(placeHoverCard({ left: 50, top: 80, bottom: 100 }, { width: 100 }, card).left).toBe(0)
+  })
+})
+
+describe("thinnedOnNarrow", () => {
+  it("drops odd interior ticks and never the start or the total", () => {
+    expect([0, 1, 2, 3, 4].map((i) => thinnedOnNarrow(i, 5))).toEqual([
+      false,
+      true,
+      false,
+      true,
+      false,
+    ])
+    expect(thinnedOnNarrow(1, 2)).toBe(false)
+  })
+})
 
 describe("TraceTimeline", () => {
   it("renders a loading state before the spans arrive", () => {
@@ -235,6 +284,24 @@ describe("TraceTimeline", () => {
     expect(screen.getByTestId("timeline-hover-card")).toHaveTextContent("Bash")
 
     fireEvent.pointerLeave(screen.getByTestId("timeline-block-tool-a"))
+    expect(screen.queryByTestId("timeline-hover-card")).not.toBeInTheDocument()
+  })
+
+  it("renders the card outside the lanes scroller, so the scroller cannot clip it", () => {
+    renderTimeline()
+    fireEvent.pointerEnter(screen.getByTestId("timeline-block-tool-a"))
+    const card = screen.getByTestId("timeline-hover-card")
+    expect(screen.getByTestId("trace-timeline-lanes")).not.toContainElement(card)
+    expect(screen.getByTestId("trace-timeline-gesture")).toContainElement(card)
+    // Placed in a layout effect against the block it describes.
+    expect(card).toHaveStyle({ visibility: "visible" })
+    expect(card).toHaveAttribute("data-placement")
+  })
+
+  it("drops the card when the lanes scroll out from under it", () => {
+    renderTimeline()
+    fireEvent.pointerEnter(screen.getByTestId("timeline-block-tool-a"))
+    fireEvent.scroll(screen.getByTestId("trace-timeline-lanes"))
     expect(screen.queryByTestId("timeline-hover-card")).not.toBeInTheDocument()
   })
 
@@ -405,7 +472,13 @@ describe("TraceTimeline — header, zoom and search", () => {
 
   it("labels ruler ticks with app-locale durations", () => {
     renderTimeline()
-    expect(screen.getByTestId("trace-timeline-ruler")).toHaveTextContent("1s")
+    const ruler = screen.getByTestId("trace-timeline-ruler")
+    expect(ruler).toHaveTextContent("1s")
+    const anchors = Array.from(ruler.querySelectorAll("[data-anchor]")).map((el) =>
+      el.getAttribute("data-anchor")
+    )
+    expect(anchors[0]).toBe("start")
+    expect(anchors.at(-1)).toBe("end")
   })
 
   it("keeps the raw lane id as the lane label's title", () => {

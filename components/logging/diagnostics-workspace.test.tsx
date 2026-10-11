@@ -104,7 +104,7 @@ jest.mock("@/components/logging/trace-workspace", () => ({
 }))
 
 jest.mock("@/hooks/ui", () => ({
-  useIsNarrow: () => false,
+  useCompactLayout: () => false,
   // Wide: the incident detail is the side pane, not a sheet.
   useMediaQuery: () => true,
   useEdgeResize: () => ({
@@ -204,6 +204,18 @@ describe("DiagnosticsWorkspace", () => {
     )
     const label = screen.getByTestId("logs-channel-logs-label")
     expect(label).toHaveClass("hidden", "@5xl/feature-header:inline")
+  })
+
+  it("names the active channel at every header width", () => {
+    render(<DiagnosticsWorkspace />)
+    // The active tab's label is unhidden by its own state, so a phone header —
+    // title gone, icons only — still says which channel is on screen.
+    expect(screen.getByTestId("logs-channel-logs")).toHaveClass("group")
+    expect(screen.getByTestId("logs-channel-logs-label")).toHaveClass(
+      "group-data-[state=active]:inline"
+    )
+    expect(screen.getByTestId("logs-channel-logs")).toHaveAttribute("data-state", "active")
+    expect(screen.getByTestId("logs-channel-traces")).toHaveAttribute("data-state", "inactive")
   })
 
   it("aggregates live transport health into a single header chip", () => {

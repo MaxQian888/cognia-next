@@ -426,6 +426,17 @@ describe("LogEntry interactions", () => {
     expect(onToggleBookmark).toHaveBeenCalledWith("log-1")
   })
 
+  it("gives a phone row back the width its action cluster held", () => {
+    renderWithTooltip(<LogHarness log={makeLog({ module: "ui:onboarding-gate" })} />)
+    // Below `sm` the cluster is out of the row (tap → detail sheet, long press
+    // → context menu carry the same actions), so the meta line fits time +
+    // module and the row is two lines, not three.
+    expect(screen.getByTestId("log-entry-actions")).toHaveClass("max-sm:hidden")
+    const badge = screen.getByText("ui:onboarding-gate")
+    expect(badge).toHaveClass("max-sm:truncate")
+    expect(badge).toHaveAttribute("title", "ui:onboarding-gate")
+  })
+
   it("keeps the row actions reachable without a hover", () => {
     const onToggleBookmark = jest.fn()
     const onSelect = jest.fn()

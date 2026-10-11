@@ -35,6 +35,7 @@ import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { StatCard } from "@/components/observability/stat-card"
 import { cn, formatDurationShort } from "@/lib/utils"
+import { PIN_START, PIN_START_MAX_WIDTH } from "./perf-table-pin"
 import type { PerfSample, ProcessRole } from "@/lib/perf/backend/types"
 import {
   formatBytes,
@@ -55,11 +56,12 @@ const ROLE_BADGE: Record<ProcessRole, string> = {
   child: "bg-muted text-muted-foreground",
 }
 
-/** Tailwind heat-map classes for CPU% cells. */
+/** Heat-map classes for CPU% cells — theme tokens, so they follow the theme
+ * and the style pack instead of the raw red / orange / yellow palette. */
 function cpuHeatClass(pct: number): string {
-  if (pct >= 80) return "bg-red-500/20 text-red-600 dark:text-red-400"
-  if (pct >= 60) return "bg-orange-500/15 text-orange-600 dark:text-orange-400"
-  if (pct >= 30) return "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
+  if (pct >= 80) return "bg-destructive/15 text-destructive"
+  if (pct >= 60) return "bg-warning/20 text-warning"
+  if (pct >= 30) return "bg-warning/10 text-warning"
   return ""
 }
 
@@ -67,9 +69,9 @@ function cpuHeatClass(pct: number): string {
 function memHeatClass(bytes: number, maxBytes: number): string {
   if (maxBytes <= 0) return ""
   const ratio = bytes / maxBytes
-  if (ratio >= 0.8) return "bg-red-500/20 text-red-600 dark:text-red-400"
-  if (ratio >= 0.6) return "bg-orange-500/15 text-orange-600 dark:text-orange-400"
-  if (ratio >= 0.3) return "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
+  if (ratio >= 0.8) return "bg-destructive/15 text-destructive"
+  if (ratio >= 0.6) return "bg-warning/20 text-warning"
+  if (ratio >= 0.3) return "bg-warning/10 text-warning"
   return ""
 }
 
@@ -163,7 +165,7 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
   // the control separate from the cell preserves keyboard and screen-reader access.
   const header = (key: SortKey, label: string, numeric = false) => (
     <TableHead
-      className={cn("select-none", numeric && "text-right")}
+      className={cn("select-none", numeric && "text-right", key === "name" && PIN_START)}
       data-testid={`perf-proc-th-${key}`}
       aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
     >
@@ -264,9 +266,9 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
             <TableBody>
               {sorted.map(({ process: p, depth, orphaned }) => (
                 <TableRow key={p.pid} data-testid={`perf-proc-row-${p.pid}`}>
-                  <TableCell>
+                  <TableCell className={cn(PIN_START, PIN_START_MAX_WIDTH)}>
                     <div
-                      className="flex items-center gap-2"
+                      className="flex min-w-0 items-center gap-2"
                       style={{ paddingInlineStart: `${depth * 16}px` }}
                     >
                       {depth > 0 && (
@@ -277,7 +279,9 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
                       <Badge variant="secondary" className={cn("shrink-0", ROLE_BADGE[p.role])}>
                         {t(`roles.${p.role}`)}
                       </Badge>
-                      <span className="truncate font-medium">{p.name}</span>
+                      <span className="min-w-0 truncate font-medium" title={p.name}>
+                        {p.name}
+                      </span>
                       {orphaned && <Badge variant="outline">{t("orphaned")}</Badge>}
                     </div>
                   </TableCell>

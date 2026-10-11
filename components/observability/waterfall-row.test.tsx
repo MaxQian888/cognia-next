@@ -40,6 +40,22 @@ function node(over: Partial<WaterfallNode> = {}): WaterfallNode {
 const noop = () => {}
 
 describe("WaterfallRow", () => {
+  it("prints the span's display name and keeps the raw label as its title", () => {
+    render(
+      <WaterfallRow
+        node={node({
+          span: makeSpan({ spanId: "s1", operationName: "execute_tool", toolName: "read_file" }),
+          label: "execute_tool:raw",
+        })}
+        totalMs={200}
+        color="#abc"
+        onSelect={noop}
+      />
+    )
+    const name = screen.getByText("read_file")
+    expect(name).toHaveAttribute("title", "execute_tool:raw")
+  })
+
   it("positions the timing bar by offset and width", () => {
     render(
       <WaterfallRow

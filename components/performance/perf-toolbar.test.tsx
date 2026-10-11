@@ -72,6 +72,31 @@ describe("PerfToolbar", () => {
     expect(props.onReset).toHaveBeenCalledTimes(1)
   })
 
+  it("folds its labels below the header's @2xl, keeping each button named", () => {
+    setup()
+    for (const id of ["perf-toggle-pause", "perf-reset", "perf-export-trigger"]) {
+      const button = screen.getByTestId(id)
+      expect(button).toHaveAccessibleName()
+      expect(button).toHaveClass("size-8", "@2xl/feature-header:w-auto")
+      expect(button.querySelector("span")).toHaveClass("hidden", "@2xl/feature-header:inline")
+    }
+    expect(screen.getByTestId("perf-interval-trigger")).toHaveClass(
+      "w-auto",
+      "@2xl/feature-header:w-[130px]"
+    )
+    // One row: the header's actions slot does not shrink, so wrapping never
+    // happened — the row was clipped instead.
+    expect(screen.getByTestId("perf-toolbar")).not.toHaveClass("flex-wrap")
+  })
+
+  it("carries the live / paused state where the header hides its status slot", () => {
+    setup({ paused: false, intervalMs: 2000 })
+    const dot = screen.getByTestId("perf-toolbar-live-dot")
+    expect(dot).toHaveAttribute("data-state", "live")
+    expect(dot).toHaveAccessibleName("Live · 2s")
+    expect(dot).toHaveClass("@md/feature-header:hidden")
+  })
+
   it("renders the interval trigger", () => {
     setup({ intervalMs: 2000 })
     expect(screen.getByTestId("perf-interval-trigger")).toBeInTheDocument()

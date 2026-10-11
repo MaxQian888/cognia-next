@@ -44,10 +44,14 @@ export interface PerfRuntimeTabProps {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-2">
-      <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
         {title}
-      </h3>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{children}</div>
+      </h2>
+      {/* An odd last tile spans the row in the 2-column (phone) grid: the
+          three Queues stats laid out 2 + 1 with a hole beside the third. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 [&>*:last-child:nth-child(odd)]:col-span-2 md:[&>*:last-child:nth-child(odd)]:col-span-1">
+        {children}
+      </div>
     </div>
   )
 }
@@ -67,10 +71,16 @@ export function PerfRuntimeTab({ runtime, history = [] }: PerfRuntimeTabProps) {
 
   useEffect(() => {
     aliveRef.current = true
-    void (async () => {
-      const list = await perfListTraces()
-      if (aliveRef.current) setTraces(list)
-    })()
+    // A failed listing is an empty list, not an unhandled rejection: the
+    // traces section already says "no traces" for that.
+    void perfListTraces().then(
+      (list) => {
+        if (aliveRef.current) setTraces(list)
+      },
+      () => {
+        if (aliveRef.current) setTraces([])
+      }
+    )
     return () => {
       aliveRef.current = false
     }
@@ -189,7 +199,7 @@ export function PerfRuntimeTab({ runtime, history = [] }: PerfRuntimeTabProps) {
 
       <section className="border-y bg-background" data-testid="perf-rt-per-worker">
         <header className="border-b px-4 py-3">
-          <h3 className="text-base font-medium">{t("perWorker")}</h3>
+          <h2 className="text-base font-medium">{t("perWorker")}</h2>
         </header>
         <div className="flex flex-col gap-2 p-4">
           {runtime.perWorkerBusyPct.map((pct, i) => (
@@ -216,7 +226,7 @@ export function PerfRuntimeTab({ runtime, history = [] }: PerfRuntimeTabProps) {
       <section className="border-y bg-background" data-testid="perf-rt-traces">
         <header className="flex flex-row flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div>
-            <h3 className="text-base font-medium">{t("traces.title")}</h3>
+            <h2 className="text-base font-medium">{t("traces.title")}</h2>
             <p className="mt-1 text-xs text-muted-foreground">{t("traces.description")}</p>
           </div>
           <Button variant="outline" size="sm" onClick={openTraces} data-testid="perf-open-traces">

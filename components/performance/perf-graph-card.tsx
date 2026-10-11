@@ -6,7 +6,8 @@
  * memory, runtime busy %, and task count.
  */
 
-import { useMemo } from "react"
+import { useId, useMemo } from "react"
+import { useFormatter } from "next-intl"
 import {
   Area,
   AreaChart,
@@ -35,6 +36,17 @@ export function perfYDomain(max?: number): [number, YDomainMax] {
   // The `- 1e-9` absorbs float noise (e.g. `50 * 1.1 === 55.00000000000001`)
   // so integer peaks get clean headroom instead of an off-by-one tick.
   return [0, (dataMax: number) => (dataMax <= 0 ? 1 : Math.ceil(dataMax * 1.1 - 1e-9))]
+}
+
+/**
+ * The tooltip's time label, in the app locale. `toLocaleTimeString` used the
+ * browser's, so a zh-CN UI showed a 12-hour English clock. Exported for its test.
+ */
+export function tooltipTimeLabel(
+  ts: number | null | undefined,
+  format: Pick<ReturnType<typeof useFormatter>, "dateTime">
+): string {
+  return typeof ts === "number" ? format.dateTime(ts, { timeStyle: "medium" }) : ""
 }
 
 export interface PerfGraphCardProps {
@@ -92,11 +104,15 @@ export function PerfGraphCard({
   formatValue,
 }: PerfGraphCardProps) {
   const colors = useThemeColors()
+  const format = useFormatter()
   const data = useMemo(
     () => points.map((value, index) => ({ index, value, ts: timestamps?.[index] ?? null })),
     [points, timestamps]
   )
-  const gradientId = useMemo(() => `perf-grad-${title.replace(/[^a-zA-Z0-9]/g, "")}`, [title])
+  // `useId`, not the title: stripping a title to [a-zA-Z0-9] left every
+  // non-Latin title ("帧率", "内存") the same `perf-grad-`, so two graphs on
+  // one page shared — and fought over — one gradient definition.
+  const gradientId = `perf-grad-${useId().replace(/:/g, "")}`
 
   const yDomain = perfYDomain(max)
 
@@ -161,10 +177,12 @@ export function PerfGraphCard({
                   strokeOpacity: 0.5,
                   strokeDasharray: "3 3",
                 }}
-                labelFormatter={(_label, payload) => {
-                  const ts = (payload?.[0]?.payload as { ts?: number | null } | undefined)?.ts
-                  return typeof ts === "number" ? new Date(ts).toLocaleTimeString() : ""
-                }}
+                labelFormatter={(_label, payload) =>
+                  tooltipTimeLabel(
+                    (payload?.[0]?.payload as { ts?: number | null } | undefined)?.ts,
+                    format
+                  )
+                }
                 formatter={(value) => [
                   formatValue ? formatValue(Number(value)) : Number(value).toFixed(1),
                   title,

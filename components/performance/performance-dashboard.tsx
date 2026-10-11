@@ -68,6 +68,15 @@ import { PerfWebVitalsPanel } from "./perf-web-vitals-panel"
 import { PerfBrowserDiagnostics } from "./perf-browser-diagnostics"
 import { PerfOperationTimings } from "./perf-operation-timings"
 
+/**
+ * Main tabs: icon + label, but only the ACTIVE tab keeps its label below
+ * `@lg/perf`. Four labelled triggers are ~400px, so on a phone Captures sat
+ * past the edge of a scrolling strip; four bare icons left nothing saying
+ * which tab this was. The same rule as the `/logs` channel tabs.
+ */
+const MAIN_TAB = "group gap-1"
+const MAIN_TAB_LABEL = "hidden group-data-[state=active]:inline @lg/perf:inline"
+
 /** Where the trace dashboard lives (`/logs` → Traces → Dashboard). */
 export const PERF_TRACE_DASHBOARD_HREF = "/logs?channel=traces&tview=dashboard"
 
@@ -182,7 +191,7 @@ export function PerformanceDashboard() {
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col"
+      className="@container/perf flex h-full min-h-0 flex-col"
       data-bg-target="chat"
       data-testid="performance-dashboard"
     >
@@ -214,22 +223,54 @@ export function PerformanceDashboard() {
         onValueChange={(value) => openTab(value as PerfDashboardTab)}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <TabsList className="mx-4 mt-3 flex w-auto max-w-[calc(100%-2rem)] justify-start overflow-x-auto">
-          <TabsTrigger value="overview" data-testid="perf-tab-overview">
-            <CpuIcon className="mr-1 size-4" />
-            {t("tabs.overview")}
+        <TabsList className="mx-4 mt-3 flex w-auto max-w-[calc(100%-2rem)] justify-start">
+          <TabsTrigger
+            value="overview"
+            data-testid="perf-tab-overview"
+            aria-label={t("tabs.overview")}
+            title={t("tabs.overview")}
+            className={MAIN_TAB}
+          >
+            <CpuIcon className="size-4" aria-hidden />
+            <span className={MAIN_TAB_LABEL} data-testid="perf-tab-overview-label">
+              {t("tabs.overview")}
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="diagnose" data-testid="perf-tab-diagnose">
-            <StethoscopeIcon className="mr-1 size-4" />
-            {t("tabs.diagnose")}
+          <TabsTrigger
+            value="diagnose"
+            data-testid="perf-tab-diagnose"
+            aria-label={t("tabs.diagnose")}
+            title={t("tabs.diagnose")}
+            className={MAIN_TAB}
+          >
+            <StethoscopeIcon className="size-4" aria-hidden />
+            <span className={MAIN_TAB_LABEL} data-testid="perf-tab-diagnose-label">
+              {t("tabs.diagnose")}
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="resources" data-testid="perf-tab-resources">
-            <BoxesIcon className="mr-1 size-4" />
-            {t("tabs.resources")}
+          <TabsTrigger
+            value="resources"
+            data-testid="perf-tab-resources"
+            aria-label={t("tabs.resources")}
+            title={t("tabs.resources")}
+            className={MAIN_TAB}
+          >
+            <BoxesIcon className="size-4" aria-hidden />
+            <span className={MAIN_TAB_LABEL} data-testid="perf-tab-resources-label">
+              {t("tabs.resources")}
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="captures" data-testid="perf-tab-captures">
-            <CameraIcon className="mr-1 size-4" />
-            {t("tabs.captures")}
+          <TabsTrigger
+            value="captures"
+            data-testid="perf-tab-captures"
+            aria-label={t("tabs.captures")}
+            title={t("tabs.captures")}
+            className={MAIN_TAB}
+          >
+            <CameraIcon className="size-4" aria-hidden />
+            <span className={MAIN_TAB_LABEL} data-testid="perf-tab-captures-label">
+              {t("tabs.captures")}
+            </span>
             {capture.active ? (
               <span
                 aria-hidden
@@ -316,7 +357,14 @@ export function PerformanceDashboard() {
                 value={view.resource}
                 onValueChange={(value) => updateView({ resource: value as PerfResourceSection })}
               >
-                <TabsList className="mb-4 flex w-auto justify-start overflow-x-auto">
+                {/* Underlined, not a second segmented bar: two identical full-
+                    width bars stacked read as two peers, not a section inside
+                    a tab. */}
+                <TabsList
+                  variant="line"
+                  className="mb-4 flex w-auto max-w-full justify-start overflow-x-auto"
+                  data-testid="perf-resource-tabs"
+                >
                   <TabsTrigger value="processes" data-testid="perf-resource-processes">
                     {t("tabs.processes")}
                   </TabsTrigger>

@@ -22088,6 +22088,7 @@
         "recent": "最近"
       },
       "summary": {
+        "autoRefresh": "自动刷新",
         "native": "原生日志",
         "recent": "最近错误",
         "recentDescription": "当前会话内存中的失败记录",
@@ -22136,6 +22137,7 @@
       "spanDays": "{value} 天",
       "spanHours": "{value} 小时",
       "spanMinutes": "{value} 分钟",
+      "summaryLabel": "日志概览",
       "timeSpan": "时间跨度",
       "topErrors": "高频错误",
       "topModule": "最活跃模块",
@@ -27323,6 +27325,9 @@
       "widen": "放宽至近 30 天"
     },
     "enums": {
+      "model": {
+        "none": "无模型"
+      },
       "operation": {
         "chat": "模型调用",
         "embeddings": "向量嵌入",
@@ -27377,6 +27382,9 @@
       "label": "筛选",
       "search": "搜索…",
       "searchLabel": "搜索{dimension}取值"
+    },
+    "kpiStrip": {
+      "label": "关键指标"
     },
     "loadError": {
       "hint": "本地数据库没有响应，通常是暂时的，请稍后重试。",

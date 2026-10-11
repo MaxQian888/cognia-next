@@ -33,7 +33,19 @@ jest.mock("@/components/ui/tabs", () => {
       value: string
       onValueChange: (v: string) => void
     }) => ReactLib.createElement(Ctx.Provider, { value: { value, onValueChange } }, children),
-    TabsList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    TabsList: ({
+      children,
+      variant,
+      ...rest
+    }: {
+      children: React.ReactNode
+      variant?: string
+      "data-testid"?: string
+    }) => (
+      <div data-variant={variant ?? "default"} data-testid={rest["data-testid"]}>
+        {children}
+      </div>
+    ),
     TabsTrigger: ({ children, value, ...rest }: { children: React.ReactNode; value: string }) => {
       const ctx = ReactLib.useContext(Ctx)
       return (
@@ -207,6 +219,27 @@ describe("PerformanceDashboard", () => {
     })
     render(<PerformanceDashboard />)
     expect(screen.getByTestId("rt")).toBeInTheDocument()
+  })
+
+  it("names every main tab and keeps the active tab's label at any width", () => {
+    usePerfStreamMock.mockReturnValue(baseState)
+    render(<PerformanceDashboard />)
+    expect(screen.getByTestId("performance-dashboard")).toHaveClass("@container/perf")
+    for (const tab of ["overview", "diagnose", "resources", "captures"]) {
+      expect(screen.getByTestId(`perf-tab-${tab}`)).toHaveAccessibleName()
+      expect(screen.getByTestId(`perf-tab-${tab}-label`)).toHaveClass(
+        "hidden",
+        "group-data-[state=active]:inline",
+        "@lg/perf:inline"
+      )
+    }
+  })
+
+  it("draws the Resources sections as an underlined sub-tab row, not a second bar", () => {
+    mockSearch = "tab=resources"
+    usePerfStreamMock.mockReturnValue(baseState)
+    render(<PerformanceDashboard />)
+    expect(screen.getByTestId("perf-resource-tabs")).toHaveAttribute("data-variant", "line")
   })
 
   it("writes tab and metric changes to the URL in place", () => {

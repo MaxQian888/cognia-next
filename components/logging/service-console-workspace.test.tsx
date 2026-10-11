@@ -19,9 +19,11 @@ jest.mock("next-intl", () => ({
 
 // The detail is a pane at xl and a sheet below it, chosen in JS.
 let wide = true
+let compact = false
 jest.mock("@/hooks/ui", () => ({
   ...jest.requireActual("@/hooks/ui"),
   useMediaQuery: () => wide,
+  useCompactLayout: () => compact,
 }))
 
 const toastSuccess = jest.fn()
@@ -46,6 +48,7 @@ import {
 
 beforeEach(() => {
   wide = true
+  compact = false
   toastSuccess.mockClear()
   toastError.mockClear()
   downloadBlobMock.mockClear()
@@ -488,7 +491,22 @@ describe("ServiceConsoleWorkspace detail", () => {
     expect(screen.queryByTestId("console-detail-drawer")).toBeNull()
     await userEvent.click(screen.getByTestId("console-group-row"))
     expect(selectGroup).toHaveBeenCalledWith(group.id)
-    expect(await screen.findByTestId("console-detail-drawer")).toBeInTheDocument()
+    const drawer = await screen.findByTestId("console-detail-drawer")
+    expect(drawer).toHaveClass("[&_[data-detail-header]]:pr-10")
+  })
+
+  it("slides the sheet up from the bottom in the compact (phone / native) layout", async () => {
+    wide = false
+    compact = true
+    renderConsole({
+      console: {
+        selectedGroupId: group.id,
+        detail: { group, incidents: [] },
+        selectGroup: jest.fn(),
+      },
+    })
+    await userEvent.click(screen.getByTestId("console-group-row"))
+    expect(await screen.findByTestId("console-detail-drawer")).toHaveClass("bottom-0", "h-dvh")
   })
 
   it("shows a loading state for a selected group whose detail has not arrived", () => {

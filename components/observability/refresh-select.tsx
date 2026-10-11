@@ -42,6 +42,15 @@ export function refreshLabel(
   return ms === 0 ? t("off") : fmt.duration(ms)
 }
 
+/**
+ * The trigger's width. Compact sizes to its value instead of a fixed 74px:
+ * "10秒" / "1 min" plus the icon and chevron did not fit, and the value
+ * clipped to a single stroke. Exported for its test.
+ */
+export function refreshTriggerClass(compact: boolean): string {
+  return compact ? "w-auto shrink-0 gap-1 px-2" : "w-[112px]"
+}
+
 export function RefreshSelect({ value, onChange, compact = false }: RefreshSelectProps) {
   const t = useTranslations("observability.refresh")
   const fmt = useObservabilityFormatters()
@@ -49,7 +58,7 @@ export function RefreshSelect({ value, onChange, compact = false }: RefreshSelec
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v) as RefreshMs)}>
       <SelectTrigger
         size="sm"
-        className={compact ? "w-[74px]" : "w-[112px]"}
+        className={refreshTriggerClass(compact)}
         data-testid="refresh-select"
         aria-label={t("label")}
       >

@@ -118,7 +118,7 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
     return (
       <Empty
         className={cn(
-          "flex flex-col items-center justify-center gap-2 border-y border-dashed p-8 text-center",
+          "flex flex-col items-center justify-center gap-2 border-0 p-8 text-center",
           className
         )}
       >
@@ -146,7 +146,7 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
           value={query.file ?? "structured"}
           onValueChange={(value) => setQuery({ file: value as "structured" | "plain" })}
         >
-          <SelectTrigger className="w-[150px] h-8" aria-label={t("fileSelectLabel")}>
+          <SelectTrigger className="h-8 w-full sm:w-[150px]" aria-label={t("fileSelectLabel")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -167,7 +167,7 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
             })
           }
         >
-          <SelectTrigger className="w-[120px] h-8" aria-label={t("levelSelectLabel")}>
+          <SelectTrigger className="h-8 w-full sm:w-[120px]" aria-label={t("levelSelectLabel")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -185,7 +185,7 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
           onChange={(event) => setSearch(event.target.value)}
           placeholder={t("searchPlaceholder")}
           aria-label={t("searchLabel")}
-          className="h-8 w-[200px] flex-1 min-w-[140px]"
+          className="h-8 w-full min-w-[140px] flex-1 sm:w-[200px]"
         />
         <Button
           size="sm"
@@ -235,7 +235,7 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
           <Skeleton className="h-6 w-2/3" />
         </div>
       ) : entries.length === 0 && error ? null : entries.length === 0 ? (
-        <Empty className="border-y border-dashed p-6">
+        <Empty className="border-0 p-6">
           <EmptyHeader>
             <EmptyDescription>{t("empty")}</EmptyDescription>
           </EmptyHeader>

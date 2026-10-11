@@ -22088,6 +22088,7 @@
         "recent": "Recent"
       },
       "summary": {
+        "autoRefresh": "Auto-refresh",
         "native": "Native Logging",
         "recent": "Recent Errors",
         "recentDescription": "In-memory failures from this session",
@@ -22136,6 +22137,7 @@
       "spanDays": "{value}d",
       "spanHours": "{value}h",
       "spanMinutes": "{value}m",
+      "summaryLabel": "Log summary",
       "timeSpan": "Time Span",
       "topErrors": "Top Errors",
       "topModule": "Most Active Module",
@@ -27323,6 +27325,9 @@
       "widen": "Widen to last 30d"
     },
     "enums": {
+      "model": {
+        "none": "No model"
+      },
       "operation": {
         "chat": "Model call",
         "embeddings": "Embeddings",
@@ -27377,6 +27382,9 @@
       "label": "Filters",
       "search": "Search…",
       "searchLabel": "Search {dimension} values"
+    },
+    "kpiStrip": {
+      "label": "Key metrics"
     },
     "loadError": {
       "hint": "The local database didn’t answer. This is usually temporary — retry in a moment.",

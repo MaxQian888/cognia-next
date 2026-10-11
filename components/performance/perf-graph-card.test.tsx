@@ -65,7 +65,7 @@ jest.mock("@/hooks/logging/use-theme-colors", () => ({
   useThemeColors: () => ({ destructive: "#ef4444", "muted-foreground": "#888" }),
 }))
 
-import { PerfGraphCard, perfYDomain } from "./perf-graph-card"
+import { PerfGraphCard, perfYDomain, tooltipTimeLabel } from "./perf-graph-card"
 
 describe("PerfGraphCard", () => {
   it("renders the title, current value, and the series", () => {
@@ -116,9 +116,11 @@ describe("PerfGraphCard", () => {
       "data-formatted",
       JSON.stringify(["42 fps", "Frame rate"])
     )
+    // Through the app formatter (the setup mock prints ISO), not the browser's
+    // `toLocaleTimeString`.
     expect(screen.getByTestId("tooltip")).toHaveAttribute(
       "data-label-ts",
-      new Date(0).toLocaleTimeString()
+      new Date(0).toISOString()
     )
     expect(screen.getByTestId("perf-graph-description")).toHaveTextContent("Frames per second")
     // An unmeasured interval stays a gap in the series, not a zero.
@@ -179,6 +181,21 @@ describe("PerfGraphCard", () => {
   })
 })
 
+describe("PerfGraphCard gradient", () => {
+  it("gives every graph its own gradient, whatever script its title is in", () => {
+    const { container } = render(
+      <>
+        <PerfGraphCard title="帧率" current="1" points={[1]} color="#fff" />
+        <PerfGraphCard title="内存" current="1" points={[1]} color="#fff" />
+      </>
+    )
+    const ids = Array.from(container.querySelectorAll("linearGradient")).map((node) => node.id)
+    expect(ids).toHaveLength(2)
+    expect(new Set(ids).size).toBe(2)
+    expect(ids.every((id) => id.length > "perf-grad-".length)).toBe(true)
+  })
+})
+
 describe("perfYDomain", () => {
   it("pins the axis exactly when a fixed max is given", () => {
     expect(perfYDomain(100)).toEqual([0, 100])
@@ -195,5 +212,17 @@ describe("perfYDomain", () => {
     // Degenerate peaks (flat-zero / empty series) floor to 1 so the axis is valid.
     expect(fn(0)).toBe(1)
     expect(fn(-Infinity)).toBe(1)
+  })
+})
+
+describe("tooltipTimeLabel", () => {
+  it("formats through the app formatter, medium time style", () => {
+    const dateTime = jest.fn(() => "12:00:05")
+    expect(tooltipTimeLabel(5000, { dateTime } as never)).toBe("12:00:05")
+    expect(dateTime).toHaveBeenCalledWith(5000, { timeStyle: "medium" })
+  })
+
+  it("is empty for a point without a timestamp", () => {
+    expect(tooltipTimeLabel(null, { dateTime: jest.fn() } as never)).toBe("")
   })
 })

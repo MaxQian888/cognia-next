@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { ObservabilityDashboard } from "./observability-dashboard"
 import { panelById } from "./panel-registry"
 import { buildSeries, makeRange } from "@/lib/storybook/fixtures/observability"
@@ -45,13 +45,12 @@ jest.mock("./panel-grid", () => ({
         <button
           data-testid="fire-layout"
           onClick={() =>
-            onLayoutChange({ lg: [{ i: "kpi-cost", x: 5, y: 0, w: 2, h: 2 }], md: [], sm: [] })
+            onLayoutChange({ lg: [{ i: "bd-model", x: 5, y: 0, w: 6, h: 7 }], md: [], sm: [] })
           }
         >
           layout
         </button>
-        {renderPanel(byId("kpi-cost"))}
-        {renderPanel(byId("kpi-errors"))}
+        {renderPanel(byId("bd-model"))}
       </div>
     )
   },
@@ -84,11 +83,21 @@ function renderDashboard(overrides: Partial<Parameters<typeof ObservabilityDashb
 }
 
 describe("ObservabilityDashboard", () => {
-  it("renders the grid and dispatches a panel through the registry", () => {
+  it("renders the KPI strip above the grid and dispatches a panel through the registry", () => {
     renderDashboard()
-    expect(screen.getByTestId("observability-dashboard")).toBeInTheDocument()
-    expect(screen.getByTestId("panel-grid")).toBeInTheDocument()
-    expect(screen.getByTestId("stat-panel-kpi-cost")).toBeInTheDocument()
+    const dashboard = screen.getByTestId("observability-dashboard")
+    const strip = screen.getByTestId("kpi-strip")
+    const grid = screen.getByTestId("panel-grid")
+    expect(strip.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(dashboard).toContainElement(strip)
+    expect(within(strip).getByTestId("stat-panel-kpi-cost")).toBeInTheDocument()
+    expect(within(grid).getByTestId("donut-panel-bd-model")).toBeInTheDocument()
+  })
+
+  it("hides a stat in the strip the same way it hides a chart in the grid", () => {
+    renderDashboard({ hiddenPanels: ["kpi-cost"] })
+    expect(screen.queryByTestId("stat-panel-kpi-cost")).not.toBeInTheDocument()
+    expect(screen.getByTestId("stat-panel-kpi-spans")).toBeInTheDocument()
   })
 
   it("forwards hidden panels to the grid", () => {
@@ -116,7 +125,7 @@ describe("ObservabilityDashboard", () => {
       act(() => jest.advanceTimersByTime(300))
       expect(onLayoutChange).toHaveBeenCalledTimes(1)
       const written = onLayoutChange.mock.calls[0][0] as PanelLayouts
-      expect(written.lg[0]).toMatchObject({ i: "kpi-cost", x: 5 })
+      expect(written.lg[0]).toMatchObject({ i: "bd-model", x: 5 })
     } finally {
       jest.useRealTimers()
     }
@@ -132,6 +141,12 @@ describe("ObservabilityDashboard", () => {
     expect(screen.getByTestId("observability-dashboard")).toHaveAttribute("aria-busy", "true")
     expect(screen.getByRole("status")).toHaveTextContent("loading")
     expect(screen.queryByTestId("panel-grid")).not.toBeInTheDocument()
+    // The skeleton is shaped by the pane's width, like the strip and grid it
+    // stands in for — not a fixed 12-column desktop grid.
+    expect(screen.getByTestId("observability-dashboard").className).toContain("@container/obs")
+    expect(screen.getByTestId("observability-dashboard-skeleton").innerHTML).not.toContain(
+      "grid-cols-12"
+    )
   })
 
   it("shows a failed read with a retry", () => {

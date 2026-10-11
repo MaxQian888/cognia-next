@@ -53,7 +53,7 @@ export function PanelFrame({
       )}
       data-testid={testId}
     >
-      <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-2">
+      <div className="flex shrink-0 items-center gap-1.5 px-3 pt-2.5 pb-1">
         {editMode && (
           <span
             className="panel-drag-handle -ml-1 cursor-grab text-muted-foreground active:cursor-grabbing"
@@ -81,7 +81,7 @@ export function PanelFrame({
         </h3>
         {actions}
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden p-3">{children}</div>
+      <div className="min-h-0 flex-1 overflow-hidden px-3 pt-1 pb-3">{children}</div>
     </section>
   )
 }

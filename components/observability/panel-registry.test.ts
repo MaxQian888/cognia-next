@@ -1,4 +1,4 @@
-import { PANELS, defaultLayouts, panelById } from "./panel-registry"
+import { GRID_PANELS, KPI_PANELS, PANELS, defaultLayouts, panelById } from "./panel-registry"
 
 describe("panel-registry", () => {
   it("defines a unique id for every panel", () => {
@@ -46,13 +46,21 @@ describe("panel-registry", () => {
     expect(panelById("nope")).toBeUndefined()
   })
 
+  it("splits the catalog into the KPI strip and the grid, losing nothing", () => {
+    expect(KPI_PANELS.every((p) => p.kind === "stat")).toBe(true)
+    expect(GRID_PANELS.some((p) => p.kind === "stat")).toBe(false)
+    expect([...KPI_PANELS, ...GRID_PANELS].map((p) => p.id).sort()).toEqual(
+      PANELS.map((p) => p.id).sort()
+    )
+  })
+
   describe("defaultLayouts", () => {
     const layouts = defaultLayouts()
 
-    it("covers every panel in every breakpoint", () => {
+    it("covers every grid panel — and no KPI — in every breakpoint", () => {
       for (const bp of ["lg", "md", "sm"] as const) {
         const ids = layouts[bp].map((l) => l.i).sort()
-        expect(ids).toEqual(PANELS.map((p) => p.id).sort())
+        expect(ids).toEqual(GRID_PANELS.map((p) => p.id).sort())
       }
     })
 
@@ -74,16 +82,10 @@ describe("panel-registry", () => {
       }
     })
 
-    it("pairs KPI tiles and keeps anything with an axis full-width on a phone", () => {
-      const byId = new Map(layouts.sm.map((l) => [l.i, l]))
-      for (const panel of PANELS) {
-        expect(byId.get(panel.id)!.w).toBe(panel.kind === "stat" ? 1 : 2)
+    it("keeps every chart full-width on a phone", () => {
+      for (const item of layouts.sm) {
+        expect(item.w).toBe(2)
       }
-      // Eight stat tiles → four rows, not eight.
-      const statRows = new Set(
-        PANELS.filter((p) => p.kind === "stat").map((p) => byId.get(p.id)!.y)
-      )
-      expect(statRows.size).toBe(4)
     })
 
     it("never overlaps two panels on the phone grid", () => {

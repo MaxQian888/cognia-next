@@ -15,6 +15,16 @@ describe("PanelFrame", () => {
     expect(screen.getByText("body")).toBeInTheDocument()
   })
 
+  it("draws no rule under its title — the section's own rules frame it", () => {
+    render(
+      <PanelFrame title="Cost">
+        <div>body</div>
+      </PanelFrame>
+    )
+    const header = screen.getByText("Cost").parentElement!
+    expect(header).not.toHaveClass("border-b")
+  })
+
   it("hides the drag handle when not in edit mode", () => {
     render(<PanelFrame title="x">c</PanelFrame>)
     expect(screen.queryByTestId("panel-drag-handle")).not.toBeInTheDocument()

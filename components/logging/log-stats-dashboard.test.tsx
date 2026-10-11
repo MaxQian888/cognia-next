@@ -190,23 +190,31 @@ describe("LogStatsDashboard", () => {
     expect(screen.queryByText("info")).not.toBeInTheDocument()
   })
 
-  it("renders the responsive 1/2/3/4 columns grid on the stat cards row", () => {
-    const { container } = render(<LogStatsDashboard logs={buildLogs(10)} />)
-    const grid = container.querySelector(
-      ".grid.grid-cols-1.sm\\:grid-cols-2.md\\:grid-cols-3.lg\\:grid-cols-4"
-    )
-    expect(grid).toBeInTheDocument()
+  it("renders the summary as one ruled strip that reflows by its own width", () => {
+    render(<LogStatsDashboard logs={buildLogs(10)} />)
+    const strip = screen.getByTestId("log-stats-summary")
+    expect(strip).toHaveAccessibleName("Log summary")
+    const grid = strip.firstElementChild!
+    expect(grid).toHaveClass("grid-cols-2", "@2xl/logstats:grid-cols-4")
+    // Cells, not free-standing tiles: no rule of their own beyond the strip's.
+    const cells = strip.querySelectorAll('[data-variant="cell"]')
+    expect(cells).toHaveLength(8)
+    for (const cell of Array.from(cells)) {
+      expect(cell).toHaveClass("border-t", "border-l")
+      expect(cell).not.toHaveClass("border-y")
+    }
   })
 
-  it("renders responsive Tailwind chart heights, not inline 220px", () => {
+  it("keys chart heights and columns on its own width, not the viewport", () => {
     const { container } = render(<LogStatsDashboard logs={buildLogs(30)} />)
+    expect(container.firstElementChild).toHaveClass("@container/logstats")
     expect(container.querySelector('[data-testid="dashboard-chart-pie"]')).toHaveClass(
-      "h-[180px]",
-      "sm:h-[200px]",
-      "md:h-[220px]",
-      "lg:h-[260px]"
+      "h-[200px]",
+      "@3xl/logstats:h-[220px]",
+      "@5xl/logstats:h-[260px]"
     )
     expect(container.querySelector('[data-testid="dashboard-chart-area"]')).toBeInTheDocument()
+    expect(container.innerHTML).not.toMatch(/\b(sm|md|lg|xl):(grid-cols|h-\[|col-span)/)
   })
 
   it("renders Recharts AreaChart Area series with localized names", () => {

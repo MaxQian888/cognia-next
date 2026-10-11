@@ -162,7 +162,7 @@ const mockUseResizableLayout = jest.fn((..._args: unknown[]) => ({
 }))
 jest.mock("@/hooks/ui", () => ({
   useMediaQuery: (...args: unknown[]) => mockUseMediaQuery(...args),
-  useIsNarrow: () => mockUseIsNarrow(),
+  useCompactLayout: () => mockUseIsNarrow(),
   useResizableLayout: (...args: unknown[]) => mockUseResizableLayout(...args),
 }))
 

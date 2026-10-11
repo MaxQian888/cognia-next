@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import { useBreakdownLabel } from "@/hooks/observability/use-span-labels"
 import { distinctValues, type Dimension } from "@/lib/observability/breakdown"
 import {
   FILTER_DIMENSIONS,
@@ -292,10 +293,16 @@ function OptionList({
   onToggle,
 }: OptionListProps) {
   const [query, setQuery] = useState("")
-  const filtered = useMemo(
-    () => options.filter((o) => o.toLowerCase().includes(query.toLowerCase())),
-    [options, query]
-  )
+  // The same labels the breakdown panels print: a translated operation or
+  // surface, "No model" for the sentinel. Search matches the label AND the
+  // raw id — the id is what a user pastes from a span.
+  const labelFor = useBreakdownLabel(dim)
+  const filtered = useMemo(() => {
+    const needle = query.toLowerCase()
+    return options.filter(
+      (o) => o.toLowerCase().includes(needle) || labelFor(o).toLowerCase().includes(needle)
+    )
+  }, [labelFor, options, query])
 
   return (
     <>
@@ -333,7 +340,9 @@ function OptionList({
                   <CheckIcon
                     className={cn("size-3.5 shrink-0", isSelected ? "opacity-100" : "opacity-0")}
                   />
-                  <span className="truncate">{opt}</span>
+                  <span className="truncate" title={opt}>
+                    {labelFor(opt)}
+                  </span>
                 </Button>
               </li>
             )

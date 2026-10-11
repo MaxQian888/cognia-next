@@ -348,80 +348,113 @@ export function LogStatsDashboard({
   }
 
   return (
-    <div className={cn("space-y-4 p-4", className)}>
-      {/* Summary Cards — responsive 1 → 2 → 3 → 4 columns */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        <StatCard
-          icon={Layers}
-          label={t("dashboard.totalLogs")}
-          value={format.number(logs.length)}
-          color="bg-chart-3/10 text-chart-3"
-        />
-        <StatCard
-          icon={AlertTriangle}
-          label={t("dashboard.errorRate")}
-          value={percent(stats.errorRate)}
-          sub={t("dashboard.errorCount", { count: stats.errorCount })}
-          color="bg-destructive/10 text-destructive"
-          trend={stats.errorTrend}
-          data-testid="dashboard-stat-errors"
-          onClick={onLevelFilter && stats.errorCount > 0 ? () => onLevelFilter("error") : undefined}
-          actionLabel={t("dashboard.showErrors")}
-        />
-        <StatCard
-          icon={Activity}
-          label={t("dashboard.topModule")}
-          value={stats.topModule?.[0] || "-"}
-          sub={stats.topModule ? t("dashboard.logCount", { count: stats.topModule[1] }) : undefined}
-          color="bg-success/10 text-success"
-          data-testid="dashboard-stat-top-module"
-          onClick={
-            onModuleFilter && stats.topModule
-              ? () => onModuleFilter(stats.topModule![0])
-              : undefined
-          }
-          actionLabel={t("dashboard.showModule")}
-        />
-        <StatCard
-          icon={Clock}
-          label={t("dashboard.timeSpan")}
-          value={stats.timeSpan || "-"}
-          color="bg-chart-4/10 text-chart-4"
-        />
-        <StatCard
-          icon={Gauge}
-          label={t("dashboard.logRate")}
-          value={logRate > 0 ? format.number(logRate) : "-"}
-          sub={logRate > 0 ? t("dashboard.logsPerMinUnit") : undefined}
-          color="bg-chart-2/10 text-chart-2"
-        />
-        <StatCard
-          icon={AlertCircle}
-          label={t("dashboard.warningRate")}
-          value={percent(stats.warnRate)}
-          sub={t("dashboard.warningCount", { count: stats.warnCount })}
-          color="bg-warning/10 text-warning"
-          data-testid="dashboard-stat-warnings"
-          onClick={onLevelFilter && stats.warnCount > 0 ? () => onLevelFilter("warn") : undefined}
-          actionLabel={t("dashboard.showWarnings")}
-        />
-        <StatCard
-          icon={Grid3X3}
-          label={t("dashboard.uniqueModules")}
-          value={format.number(stats.uniqueModules)}
-          color="bg-chart-5/10 text-chart-5"
-        />
-        <StatCard
-          icon={Hash}
-          label={t("dashboard.uniqueTraces")}
-          value={format.number(stats.uniqueTraces)}
-          color="bg-chart-1/10 text-chart-1"
-        />
-      </div>
+    // Every column count below keys on this view's own width: it renders
+    // inside the Logs channel and in Settings → MCP, where a viewport
+    // breakpoint put four columns into a pane a third of the window wide.
+    <div className={cn("@container/logstats space-y-4 p-4", className)}>
+      {/* Summary — one ruled strip, 2 → 4 columns by width. These were eight
+          separately-ruled tiles, one per row on a phone: two screens of
+          numbers before the first chart. The cells carry `border-t border-l`
+          and the grid is pulled up/left a pixel, so only the rules BETWEEN
+          cells show. */}
+      <section
+        className="-mx-4 -mt-4 overflow-hidden border-b"
+        aria-label={t("dashboard.summaryLabel")}
+        data-testid="log-stats-summary"
+      >
+        <div className="-mt-px -ml-px grid grid-cols-2 @2xl/logstats:grid-cols-4">
+          <StatCard
+            variant="cell"
+            className="border-t border-l"
+            icon={Layers}
+            label={t("dashboard.totalLogs")}
+            value={format.number(logs.length)}
+            color="bg-chart-3/10 text-chart-3"
+          />
+          <StatCard
+            variant="cell"
+            className="border-t border-l"
+            icon={AlertTriangle}
+            label={t("dashboard.errorRate")}
+            value={percent(stats.errorRate)}
+            sub={t("dashboard.errorCount", { count: stats.errorCount })}
+            color="bg-destructive/10 text-destructive"
+            trend={stats.errorTrend}
+            data-testid="dashboard-stat-errors"
+            onClick={
+              onLevelFilter && stats.errorCount > 0 ? () => onLevelFilter("error") : undefined
+            }
+            actionLabel={t("dashboard.showErrors")}
+          />
+          <StatCard
+            variant="cell"
+            className="border-t border-l"
+            icon={Activity}
+            label={t("dashboard.topModule")}
+            value={stats.topModule?.[0] || "-"}
+            sub={
+              stats.topModule ? t("dashboard.logCount", { count: stats.topModule[1] }) : undefined
+            }
+            color="bg-success/10 text-success"
+            data-testid="dashboard-stat-top-module"
+            onClick={
+              onModuleFilter && stats.topModule
+                ? () => onModuleFilter(stats.topModule![0])
+                : undefined
+            }
+            actionLabel={t("dashboard.showModule")}
+          />
+          <StatCard
+            variant="cell"
+            className="border-t border-l"
+            icon={Clock}
+            label={t("dashboard.timeSpan")}
+            value={stats.timeSpan || "-"}
+            color="bg-chart-4/10 text-chart-4"
+          />
+          <StatCard
+            variant="cell"
+            className="border-t border-l"
+            icon={Gauge}
+            label={t("dashboard.logRate")}
+            value={logRate > 0 ? format.number(logRate) : "-"}
+            sub={logRate > 0 ? t("dashboard.logsPerMinUnit") : undefined}
+            color="bg-chart-2/10 text-chart-2"
+          />
+          <StatCard
+            variant="cell"
+            className="border-t border-l"
+            icon={AlertCircle}
+            label={t("dashboard.warningRate")}
+            value={percent(stats.warnRate)}
+            sub={t("dashboard.warningCount", { count: stats.warnCount })}
+            color="bg-warning/10 text-warning"
+            data-testid="dashboard-stat-warnings"
+            onClick={onLevelFilter && stats.warnCount > 0 ? () => onLevelFilter("warn") : undefined}
+            actionLabel={t("dashboard.showWarnings")}
+          />
+          <StatCard
+            variant="cell"
+            className="border-t border-l"
+            icon={Grid3X3}
+            label={t("dashboard.uniqueModules")}
+            value={format.number(stats.uniqueModules)}
+            color="bg-chart-5/10 text-chart-5"
+          />
+          <StatCard
+            variant="cell"
+            className="border-t border-l"
+            icon={Hash}
+            label={t("dashboard.uniqueTraces")}
+            value={format.number(stats.uniqueTraces)}
+            color="bg-chart-1/10 text-chart-1"
+          />
+        </div>
+      </section>
 
       {nativeLogging?.runtime === "tauri" && (
         <DashboardSection title={t("dashboard.platformLogging")}>
-          <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 text-sm @lg/logstats:grid-cols-2 @5xl/logstats:grid-cols-4">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">{t("dashboard.platformBackend")}</p>
               <p className="font-medium">
@@ -459,7 +492,7 @@ export function LogStatsDashboard({
               </p>
             </div>
             {nativeLogging.platformLogging.error && (
-              <div className="space-y-1 sm:col-span-2 xl:col-span-4">
+              <div className="space-y-1 @lg/logstats:col-span-2 @5xl/logstats:col-span-4">
                 <p className="text-xs text-muted-foreground">{t("dashboard.platformError")}</p>
                 <p className="text-sm text-destructive">{nativeLogging.platformLogging.error}</p>
               </div>
@@ -469,12 +502,12 @@ export function LogStatsDashboard({
       )}
 
       {/* Charts Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 @3xl/logstats:grid-cols-2 @5xl/logstats:grid-cols-3">
         {/* Level Distribution - Pie Chart */}
         <DashboardSection title={t("dashboard.levelDistribution")}>
           <div
             data-testid="dashboard-chart-pie"
-            className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+            className="h-[200px] w-full @3xl/logstats:h-[220px] @5xl/logstats:h-[260px]"
           >
             <ResponsiveContainer
               minWidth={1}
@@ -486,8 +519,11 @@ export function LogStatsDashboard({
                   data={levelData}
                   cx="50%"
                   cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
+                  // Relative to the box, not fixed: an 80px radius in the
+                  // 200px-tall phone box left the outside labels no room, and
+                  // the top one ("Info 61%") was cut in half.
+                  innerRadius="42%"
+                  outerRadius="64%"
                   paddingAngle={2}
                   dataKey="value"
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -546,10 +582,10 @@ export function LogStatsDashboard({
         </DashboardSection>
 
         {/* Log Volume Timeline - Area Chart */}
-        <DashboardSection title={t("dashboard.logVolume")} className="lg:col-span-2">
+        <DashboardSection title={t("dashboard.logVolume")} className="@5xl/logstats:col-span-2">
           <div
             data-testid="dashboard-chart-area"
-            className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+            className="h-[200px] w-full @3xl/logstats:h-[220px] @5xl/logstats:h-[260px]"
           >
             <ResponsiveContainer
               minWidth={1}
@@ -623,7 +659,7 @@ export function LogStatsDashboard({
         <DashboardSection title={t("dashboard.errorTrend")}>
           <div
             data-testid="dashboard-chart-line"
-            className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+            className="h-[200px] w-full @3xl/logstats:h-[220px] @5xl/logstats:h-[260px]"
           >
             <ResponsiveContainer
               minWidth={1}
@@ -663,7 +699,7 @@ export function LogStatsDashboard({
       )}
 
       {/* Bottom Row: Module Activity + Top Errors */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 @3xl/logstats:grid-cols-2">
         {/* Module Activity - Bar Chart */}
         {moduleData.length > 0 && (
           <DashboardSection title={t("dashboard.moduleActivity")}>

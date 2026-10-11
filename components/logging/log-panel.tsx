@@ -73,7 +73,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { useIsNarrow, useResizableLayout, type UseResizableLayoutResult } from "@/hooks/ui"
+import { useCompactLayout, useResizableLayout, type UseResizableLayoutResult } from "@/hooks/ui"
 import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import type { AgentTraceStatsWindow } from "@/lib/observability/trace-window"
 import type { PresetTimeRange } from "@/types/logging"
@@ -311,7 +311,11 @@ export function LogPanel({
   // `0` until measured (see `useElementWidth`), which reads as "not wide".
   const panelWidth = useElementWidth(rootRef)
   const sideDetail = panelWidth >= DETAIL_SIDE_PANE_MIN_WIDTH
-  const narrow = useIsNarrow()
+  // Bottom sheet vs side sheet follows the app's compact predicate, not the
+  // viewport alone: a native tablet renders the phone shell (bottom tab bar),
+  // and its detail must slide up like a phone's — `useIsNarrow` sent it in
+  // from the right on any tablet 768px or wider.
+  const narrow = useCompactLayout()
   const deferredSearchQuery = useDeferredValue(filters.searchQuery)
   const { customTimeRange } = filters
 

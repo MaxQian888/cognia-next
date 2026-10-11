@@ -42,11 +42,11 @@ export function PerfBrowserDiagnostics() {
   const navigation = navigationState === "ready" ? snapshot.navigation : null
 
   return (
-    <section className="rounded-lg border bg-background" aria-labelledby={`${id}-title`}>
+    <section className="border-y bg-background" aria-labelledby={`${id}-title`}>
       <header className="space-y-1 border-b p-4">
-        <h3 id={`${id}-title`} className="text-base font-medium">
+        <h2 id={`${id}-title`} className="text-base font-medium">
           {t("title")}
-        </h3>
+        </h2>
         <p className="max-w-prose text-xs text-muted-foreground">{t("description")}</p>
       </header>
       <div className="space-y-4 p-4">
@@ -105,9 +105,9 @@ export function PerfBrowserDiagnostics() {
         </div>
         <section aria-labelledby={`${id}-navigation-title`} className="rounded-md border p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h4 id={`${id}-navigation-title`} className="text-sm font-medium">
+            <h3 id={`${id}-navigation-title`} className="text-sm font-medium">
               {t("navigation.title")}
-            </h4>
+            </h3>
             <Button
               type="button"
               variant="outline"

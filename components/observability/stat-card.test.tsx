@@ -47,6 +47,19 @@ describe("StatCard", () => {
     expect(container.querySelectorAll("svg").length).toBeGreaterThanOrEqual(2)
   })
 
+  it("is a free-standing ruled tile by default and a bare strip cell as `cell`", () => {
+    const { rerender } = render(
+      <StatCard icon={ActivityIcon} label="Total" value="7" data-testid="stat" />
+    )
+    expect(screen.getByTestId("stat")).toHaveAttribute("data-variant", "tile")
+    expect(screen.getByTestId("stat")).toHaveClass("border-y")
+    rerender(
+      <StatCard icon={ActivityIcon} label="Total" value="7" data-testid="stat" variant="cell" />
+    )
+    expect(screen.getByTestId("stat")).toHaveAttribute("data-variant", "cell")
+    expect(screen.getByTestId("stat")).not.toHaveClass("border-y")
+  })
+
   it("is a plain tile, not a control, without onClick", () => {
     render(<StatCard icon={ActivityIcon} label="X" value={1} />)
     expect(screen.queryByRole("button")).not.toBeInTheDocument()

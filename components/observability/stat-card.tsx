@@ -38,6 +38,15 @@ export interface StatCardProps {
    * read after the tile's own label and value; only used with `onClick`.
    */
   actionLabel?: string
+  /**
+   * `tile` (default): a free-standing KPI tile with its own top and bottom
+   * rule, for a grid of separate metrics (the performance panels).
+   * `cell`: no rule of its own and a smaller icon — a cell of a ruled KPI
+   * strip that draws the hairlines between its cells (the logs dashboard).
+   * Eight `tile`s in a row read as eight cards; a strip of cells reads as one
+   * summary.
+   */
+  variant?: "tile" | "cell"
 }
 
 export function StatCard({
@@ -51,21 +60,24 @@ export function StatCard({
   "data-testid": testId,
   onClick,
   actionLabel,
+  variant = "tile",
 }: StatCardProps) {
+  const cell = variant === "cell"
   const body = (
     <>
       <div
         className={cn(
-          "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+          "flex shrink-0 items-center justify-center",
+          cell ? "size-8 rounded-md" : "h-10 w-10 rounded-lg",
           color || "bg-primary/10 text-primary"
         )}
       >
-        <Icon className="h-5 w-5" />
+        <Icon className={cell ? "size-4" : "h-5 w-5"} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs text-muted-foreground">{label}</p>
         <div className="flex items-center gap-1.5">
-          <p className="text-lg font-semibold leading-tight">{value}</p>
+          <p className="min-w-0 truncate text-lg font-semibold leading-tight">{value}</p>
           {trend === "up" && <TrendingUpIcon className="h-3.5 w-3.5 text-destructive" />}
           {trend === "down" && <TrendingDownIcon className="h-3.5 w-3.5 text-success" />}
           {trend === "stable" && <MinusIcon className="h-3.5 w-3.5 text-muted-foreground" />}
@@ -75,7 +87,9 @@ export function StatCard({
       {onClick && actionLabel ? <span className="sr-only">{actionLabel}</span> : null}
     </>
   )
-  const baseClass = "flex items-center gap-3 border-y bg-background p-4"
+  const baseClass = cell
+    ? "flex min-w-0 items-center gap-2.5 bg-background px-3 py-2.5"
+    : "flex min-w-0 items-center gap-3 border-y bg-background p-4"
   if (onClick) {
     return (
       <button
@@ -89,13 +103,14 @@ export function StatCard({
           className
         )}
         data-testid={testId}
+        data-variant={variant}
       >
         {body}
       </button>
     )
   }
   return (
-    <div className={cn(baseClass, className)} data-testid={testId}>
+    <div className={cn(baseClass, className)} data-testid={testId} data-variant={variant}>
       {body}
     </div>
   )

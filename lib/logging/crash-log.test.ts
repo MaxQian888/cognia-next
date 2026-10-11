@@ -9,6 +9,7 @@ import {
   isCrashRelevantLogEntry,
   serializeCrashLogBundle,
   summarizeCrashLogItems,
+  summaryAddsToTitle,
   type CrashDiagnosticsSnapshot,
   type CrashLogItem,
   type CrashLogExportBundle,
@@ -55,6 +56,27 @@ function makeReadiness(
     ...overrides,
   }
 }
+
+describe("summaryAddsToTitle", () => {
+  it("drops a summary that only repeats the title", () => {
+    expect(summaryAddsToTitle("Poll failed", "Poll failed")).toBe(false)
+    expect(summaryAddsToTitle("Poll failed", "  Poll failed ")).toBe(false)
+  })
+
+  it("drops a summary that is the title behind a plain `Error:` prefix", () => {
+    expect(summaryAddsToTitle("Poll failed", "Error: Poll failed")).toBe(false)
+  })
+
+  it("keeps a specific error type, which says something the title does not", () => {
+    expect(summaryAddsToTitle("Poll failed", "TypeError: Poll failed")).toBe(true)
+  })
+
+  it("keeps a different summary and drops an empty one", () => {
+    expect(summaryAddsToTitle("Poll failed", "Error: ECONNREFUSED 127.0.0.1:9000")).toBe(true)
+    expect(summaryAddsToTitle("Poll failed", "")).toBe(false)
+    expect(summaryAddsToTitle("Poll failed", undefined)).toBe(false)
+  })
+})
 
 describe("isCrashRelevantLogEntry", () => {
   it("treats error and fatal as crash-relevant", () => {

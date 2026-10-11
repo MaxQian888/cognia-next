@@ -39,6 +39,17 @@ describe("trace-rollup", () => {
       expect(rows[0].rootName).toBe("Bash")
     })
 
+    it("carries the root's name parts for a translated label", () => {
+      const rows = rollupTraces([
+        makeSpan({ traceId: "r", operationName: "invoke_agent", agentName: "Planner" }),
+      ])
+      expect(rows[0]).toMatchObject({
+        rootName: "invoke_agent · Planner",
+        rootOperation: "invoke_agent",
+        rootAgentName: "Planner",
+      })
+    })
+
     it("returns empty for no spans", () => {
       expect(rollupTraces([])).toEqual([])
     })

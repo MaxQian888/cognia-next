@@ -40,6 +40,9 @@
       "plugin-hook": "插件钩子",
       "retrieval": "检索",
       "workflow": "工作流"
+    },
+    "model": {
+      "none": "无模型"
     }
   },
   "export": {
@@ -205,5 +208,8 @@
     "failed": "失败",
     "toggleEvents": "展开或收起 {name} 的详情",
     "tokens": "{count} tokens"
+  },
+  "kpiStrip": {
+    "label": "关键指标"
   }
 }

@@ -522,14 +522,18 @@ export function DiagnosticsWorkspace() {
                     // the tab; the label shows once the header can fit it.
                     title={`${t(`views.${view}`)} — ${t(`viewDescriptions.${view}`)}`}
                     data-testid={`logs-channel-${view}`}
-                    className="gap-1.5"
+                    className="group gap-1.5"
                   >
                     <Icon className="size-4" aria-hidden />
-                    {/* Labels from @5xl, not @xl: with them the tab strip is
-                        ~470px, and at @xl..@5xl it crushed the page title
-                        beside it to a clipped "Logs ar / diagno.". */}
+                    {/* Every label from @5xl, not @xl: with them the tab strip
+                        is ~470px, and at @xl..@5xl it crushed the page title
+                        beside it to a clipped "Logs ar / diagno.". The ACTIVE
+                        tab's label shows at every width: below @5xl the page
+                        title is gone too, and five bare icons (a waveform for
+                        Errors, a stack for Service) left nothing on screen
+                        saying which channel this was. */}
                     <span
-                      className="hidden @5xl/feature-header:inline"
+                      className="hidden group-data-[state=active]:inline @5xl/feature-header:inline"
                       data-testid={`logs-channel-${view}-label`}
                     >
                       {t(`views.${view}`)}

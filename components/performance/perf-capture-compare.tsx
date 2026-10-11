@@ -117,10 +117,10 @@ export function PerfCaptureCompare({
   return (
     <section className="space-y-3 rounded-md border p-3" data-testid="perf-capture-compare">
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="flex items-center gap-2 text-sm font-medium">
+        <h3 className="flex items-center gap-2 text-sm font-medium">
           <GitCompareIcon className="size-4" aria-hidden />
           {t("title")}
-        </h4>
+        </h3>
         <Button
           type="button"
           variant="ghost"
@@ -136,13 +136,13 @@ export function PerfCaptureCompare({
         </Button>
       </header>
       <dl className="grid gap-2 text-xs sm:grid-cols-2">
-        <div className="rounded border p-2">
+        <div className="min-w-0 rounded-md bg-muted/40 px-2 py-1.5">
           <dt className="text-muted-foreground">{t("baseline")}</dt>
           <dd className="truncate font-mono" data-testid="perf-compare-baseline">
             {baseline.id}
           </dd>
         </div>
-        <div className="rounded border p-2">
+        <div className="min-w-0 rounded-md bg-muted/40 px-2 py-1.5">
           <dt className="text-muted-foreground">{t("candidate")}</dt>
           <dd className="truncate font-mono" data-testid="perf-compare-candidate">
             {candidate.id}
@@ -155,7 +155,7 @@ export function PerfCaptureCompare({
         </p>
       ) : null}
       <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1.5">
+        <div className="w-full space-y-1.5 sm:w-auto">
           <Label htmlFor="perf-compare-metric">{t("metric")}</Label>
           <Select
             value={metric?.id}
@@ -164,7 +164,11 @@ export function PerfCaptureCompare({
               setResult(null)
             }}
           >
-            <SelectTrigger id="perf-compare-metric" className="w-[240px]" aria-label={t("metric")}>
+            <SelectTrigger
+              id="perf-compare-metric"
+              className="w-full sm:w-[240px]"
+              aria-label={t("metric")}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -206,7 +210,9 @@ export function PerfCaptureCompare({
         <div className="space-y-3" role="status" data-testid="perf-compare-result">
           <div
             className={cn(
-              "flex items-start gap-2 rounded-md border p-2 text-sm",
+              // A status strip, not a box: this sits inside the compare
+              // panel, which is already the frame.
+              "flex items-start gap-2 rounded-sm border-l-2 px-2 py-1.5 text-sm",
               result.eligibility.eligible
                 ? "border-success/40 bg-success/5"
                 : "border-warning/40 bg-warning/5"

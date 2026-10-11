@@ -23,9 +23,11 @@ jest.mock("next-intl", () => ({
 
 // The detail is a pane at xl and a sheet below it, chosen in JS.
 let wide = true
+let compact = false
 jest.mock("@/hooks/ui", () => ({
   ...jest.requireActual("@/hooks/ui"),
   useMediaQuery: () => wide,
+  useCompactLayout: () => compact,
 }))
 
 import {
@@ -43,6 +45,7 @@ function render(ui: React.ReactElement) {
 
 beforeEach(() => {
   wide = true
+  compact = false
 })
 
 /** Submission controls whose every incident is in `state`. */
@@ -253,13 +256,35 @@ describe("IncidentWorkspace", () => {
     expect(screen.queryByTestId("incident-detail-drawer")).not.toBeInTheDocument()
   })
 
+  it("slides the sheet up from the bottom in the compact (phone / native) layout", () => {
+    wide = false
+    compact = true
+    renderWorkspace({ selected: incident })
+    fireEvent.click(screen.getByTestId("incident-row"))
+    expect(screen.getByTestId("incident-detail-drawer")).toHaveClass("bottom-0", "h-dvh")
+  })
+
+  it("uses a side sheet outside the compact layout", () => {
+    wide = false
+    renderWorkspace({ selected: incident })
+    fireEvent.click(screen.getByTestId("incident-row"))
+    expect(screen.getByTestId("incident-detail-drawer")).toHaveClass("right-0")
+  })
+
   it("uses a sheet below xl, opened only by a click", () => {
     wide = false
     renderWorkspace({ selected: incident })
     expect(screen.queryByTestId("incident-detail-pane")).not.toBeInTheDocument()
     expect(screen.queryByTestId("incident-detail-drawer")).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId("incident-row"))
-    expect(screen.getByTestId("incident-detail-drawer")).toBeInTheDocument()
+    const drawer = screen.getByTestId("incident-detail-drawer")
+    expect(drawer).toBeInTheDocument()
+    // The header makes room for the sheet's close button, which used to sit
+    // on top of the delete button.
+    expect(drawer).toHaveClass("[&_[data-detail-header]]:pr-12")
+    expect(drawer.querySelector("[data-detail-header]")).toContainElement(
+      screen.getByTestId("incident-delete-local")
+    )
   })
 })
 

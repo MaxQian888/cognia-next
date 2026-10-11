@@ -65,6 +65,13 @@ describe("PerfSystemTab", () => {
     expect(screen.getByTestId("perf-system-features")).toHaveTextContent("vector")
   })
 
+  it("keeps a truncated fact readable on hover", async () => {
+    renderTab(async () => details())
+    await waitFor(() =>
+      expect(screen.getByTestId("perf-system-cpu")).toHaveAttribute("title", "Apple M3 Max")
+    )
+  })
+
   it("formats memory as bytes rather than raw numbers", async () => {
     renderTab(async () => details())
     await waitFor(() => expect(screen.getByTestId("perf-system-total-mem")).toBeInTheDocument())

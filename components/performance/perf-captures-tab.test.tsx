@@ -170,7 +170,18 @@ describe("PerfCapturesTab", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /Select capture capture-1/ }))
     expect(screen.queryByTestId("perf-capture-compare")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("checkbox", { name: /Select capture capture-2/ }))
-    expect(screen.getByTestId("perf-capture-compare")).toBeInTheDocument()
+    const compare = screen.getByTestId("perf-capture-compare")
+    // Above the list it was opened from, not after every row of it.
+    expect(
+      compare.compareDocumentPosition(screen.getByTestId("perf-capture-library")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it("lays the tab out as ruled sections, not cards, with the service's retention", () => {
+    render(<PerfCapturesTab hostAvailable={false} />)
+    expect(document.querySelector('[data-slot="card"]')).toBeNull()
+    expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThanOrEqual(2)
   })
 
   it("localizes a controller error code", () => {

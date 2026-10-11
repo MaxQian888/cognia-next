@@ -46,12 +46,14 @@
 import {
   memo,
   useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
+  type RefObject,
 } from "react"
 import { useTranslations } from "next-intl"
 import {
@@ -455,6 +457,35 @@ function tickText(
     : fmt.duration(Math.max(0, tick.at - timeline.traceStart))
 }
 
+/**
+ * How a ruler label hangs off its tick. Centred, except at the two ends: the
+ * last tick sits at 100%, so a centred label put half of itself past the
+ * pane's edge and the total read "24.6" with the rest clipped; the first one
+ * likewise slid under the lane-label gutter. Exported for its test.
+ */
+export function tickAnchor(offsetPct: number): "start" | "center" | "end" {
+  if (offsetPct <= 1) return "start"
+  if (offsetPct >= 99) return "end"
+  return "center"
+}
+
+const TICK_ANCHOR_CLASS = {
+  start: "translate-x-0",
+  center: "-translate-x-1/2",
+  end: "-translate-x-full",
+} as const
+
+/** An interior tick at an odd index — dropped on a narrow ruler. The first
+ * and last always stay: they are the trace's start and its total. Exported
+ * for its test. */
+export function thinnedOnNarrow(index: number, count: number): boolean {
+  return index > 0 && index < count - 1 && index % 2 === 1
+}
+
+function tickAnchorClass(offsetPct: number): string {
+  return TICK_ANCHOR_CLASS[tickAnchor(offsetPct)]
+}
+
 function TimelineRuler({ timeline }: { timeline: TraceTimelineModel }) {
   const t = useTranslations("logging.workspace.traces.timeline")
   const fmt = useObservabilityFormatters()
@@ -462,12 +493,21 @@ function TimelineRuler({ timeline }: { timeline: TraceTimelineModel }) {
   return (
     <div className="flex items-end gap-2" aria-hidden data-testid="trace-timeline-ruler">
       <div className="shrink-0" style={{ width: LANE_LABEL_WIDTH }} />
-      <div className="relative h-3 min-w-0 flex-1">
-        {timeline.ticks.map((tick) => (
+      {/* Below ~20rem of track (a phone sheet) every other interior label is
+          dropped: five labels of "18.51s" width do not fit in 210px, and the
+          last two ran together once the end label was anchored inward. */}
+      <div className="@container/ruler relative h-3 min-w-0 flex-1">
+        {timeline.ticks.map((tick, index) => (
           <span
             key={`${tick.at}-${tick.offsetPct}`}
-            className="absolute top-0 -translate-x-1/2 text-[10px] text-muted-foreground tabular-nums"
+            className={cn(
+              "absolute top-0 text-[10px] whitespace-nowrap text-muted-foreground tabular-nums",
+              tickAnchorClass(tick.offsetPct),
+              thinnedOnNarrow(index, timeline.ticks.length) && "hidden @xs/ruler:inline"
+            )}
+            data-thinned={thinnedOnNarrow(index, timeline.ticks.length) || undefined}
             style={{ left: `${tick.offsetPct}%` }}
+            data-anchor={tickAnchor(tick.offsetPct)}
           >
             {tickText(tick, timeline, fmt, (index) => t("sequenceTick", { index }))}
           </span>
@@ -500,8 +540,17 @@ function TimelineLanes({
   const trackRef = useRef<HTMLDivElement | null>(null)
   const lanesRef = useRef<HTMLDivElement | null>(null)
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
+  const stripRef = useRef<HTMLDivElement | null>(null)
   // One hovered span for the whole strip, so exactly one hover card exists.
   const [hovered, setHovered] = useState<string | null>(null)
+  const hoveredBlock = useMemo(() => {
+    if (!hovered) return null
+    for (const lane of timeline.lanes) {
+      const block = lane.blocks.find((candidate) => candidate.spanId === hovered)
+      if (block) return block
+    }
+    return null
+  }, [hovered, timeline.lanes])
   const [focusKey, setFocusKey] = useState<FocusKey | null>(null)
 
   /** ↑/↓ between lanes, landing on the nearest block by position. */
@@ -587,6 +636,7 @@ function TimelineLanes({
     // The gesture surface spans the lanes AND the brush, so a drag anywhere in
     // the strip means the same thing; blocks opt out (see pointer-down).
     <div
+      ref={stripRef}
       className="relative flex flex-col gap-1"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -598,6 +648,9 @@ function TimelineLanes({
         className="flex max-h-40 flex-col gap-1 overflow-y-auto"
         data-testid="trace-timeline-lanes"
         ref={lanesRef}
+        // The card is placed from the block's rect at hover time; a scroll
+        // moves the block out from under it, so it goes rather than float.
+        onScroll={() => setHovered(null)}
       >
         {timeline.lanes.map((lane, laneIndex) => (
           <div key={lane.id} data-lane-index={laneIndex}>
@@ -609,12 +662,10 @@ function TimelineLanes({
               needle={needle}
               selectedSpanId={selectedSpanId}
               onSelectSpan={onSelectSpan}
-              hovered={hovered}
               onHoverChange={setHovered}
               focusKey={focusKey}
               onFocusKeyChange={setFocusKey}
               onMoveLane={moveLane}
-              operationLabel={labels.operation}
             />
           </div>
         ))}
@@ -641,6 +692,16 @@ function TimelineLanes({
           ))}
         </div>
       </div>
+
+      {hoveredBlock && (
+        <TimelineHoverCard
+          key={hoveredBlock.spanId}
+          block={hoveredBlock}
+          operation={labels.operation(hoveredBlock.operationName)}
+          stripRef={stripRef}
+          lanesRef={lanesRef}
+        />
+      )}
 
       {selection && (
         // Drawn over every row of the plotting area, offset past the label
@@ -670,9 +731,9 @@ function TimelineLanes({
  * Giving every span its own tab stop turned a 400-span trace into 400 stops
  * between the search box and the waterfall.
  *
- * The hover card is rendered ONCE per lane, by the lane that owns the hovered
- * block, rather than wrapping every block in a Radix `Tooltip` — that mounted
- * a popper per span and was the single most expensive thing on this screen.
+ * The hover card is rendered ONCE for the whole strip (`TimelineHoverCard`),
+ * rather than wrapping every block in a Radix `Tooltip` — that mounted a
+ * popper per span and was the single most expensive thing on this screen.
  */
 function LaneRow({
   lane,
@@ -682,12 +743,10 @@ function LaneRow({
   needle,
   selectedSpanId,
   onSelectSpan,
-  hovered,
   onHoverChange,
   focusKey,
   onFocusKeyChange,
   onMoveLane,
-  operationLabel,
 }: {
   lane: TimelineLane
   label: string
@@ -696,12 +755,10 @@ function LaneRow({
   needle: string
   selectedSpanId: string | null
   onSelectSpan?: (spanId: string) => void
-  hovered: string | null
   onHoverChange: (spanId: string | null) => void
   focusKey: FocusKey | null
   onFocusKeyChange: (key: FocusKey) => void
   onMoveLane: (fromLane: number, delta: -1 | 1, blockIndex: number) => void
-  operationLabel: (value: string) => string
 }) {
   const t = useTranslations("logging.workspace.traces.timeline")
   const fmt = useObservabilityFormatters()
@@ -759,10 +816,6 @@ function LaneRow({
     [laneIndex, onFocusKeyChange]
   )
 
-  const hoveredBlock = hovered
-    ? (lane.blocks.find((block) => block.spanId === hovered) ?? null)
-    : null
-
   return (
     <div className="flex items-center gap-2" data-testid={`timeline-lane-${lane.id}`}>
       <div className="flex min-w-0 shrink-0 items-center gap-1" style={{ width: LANE_LABEL_WIDTH }}>
@@ -812,40 +865,95 @@ function LaneRow({
             duration={fmt.duration(block.durationMs)}
           />
         ))}
-        {hoveredBlock && (
-          <TimelineHoverCard
-            block={hoveredBlock}
-            operation={operationLabel(hoveredBlock.operationName)}
-          />
-        )}
       </div>
     </div>
   )
 }
 
+/** Gap between a block and its card, and the card's margin from the strip's edges. */
+const HOVER_CARD_GAP = 4
+
 /**
- * The single hover card for whichever block the pointer or focus is on. Anchored
- * inside the lane track, flipped to the left half when the block sits past the
- * midpoint so it never runs off the pane.
+ * Where the hover card goes, in the strip's own coordinates: above the block,
+ * left-aligned to it, then clamped so it never leaves the strip horizontally,
+ * and flipped below the block when there is no room above it.
+ *
+ * The card used to live inside the lane track, which sits in the lanes'
+ * `overflow-y-auto` scroller — and a scroller clips on both axes. The first
+ * lane's card was cut off at the top, and on a phone sheet (a ~210px track) a
+ * card anchored at the block ran off the right edge. It is now rendered by the
+ * strip, outside the scroller, at a measured position. Exported for its test.
  */
-function TimelineHoverCard({ block, operation }: { block: TimelineBlock; operation: string }) {
+export function placeHoverCard(
+  block: { left: number; top: number; bottom: number },
+  strip: { width: number },
+  card: { width: number; height: number }
+): { left: number; top: number; placement: "above" | "below" } {
+  const maxLeft = Math.max(0, strip.width - card.width)
+  const left = Math.min(Math.max(0, block.left), maxLeft)
+  const above = block.top - HOVER_CARD_GAP - card.height
+  if (above >= 0) return { left, top: above, placement: "above" }
+  return { left, top: block.bottom + HOVER_CARD_GAP, placement: "below" }
+}
+
+/**
+ * The single hover card for whichever block the pointer or focus is on,
+ * placed by `placeHoverCard`. Positioned in a layout effect that writes the
+ * node's style directly, so it lands before paint and costs no re-render.
+ */
+function TimelineHoverCard({
+  block,
+  operation,
+  stripRef,
+  lanesRef,
+}: {
+  block: TimelineBlock
+  operation: string
+  stripRef: RefObject<HTMLDivElement | null>
+  lanesRef: RefObject<HTMLDivElement | null>
+}) {
   const t = useTranslations("logging.workspace.traces.timeline")
   const fmt = useObservabilityFormatters()
-  const anchorRight = block.offsetPct > 55
+  const cardRef = useRef<HTMLDivElement | null>(null)
   const parts = [operation, fmt.duration(block.durationMs)]
   if (block.tokens > 0) parts.push(t("tokens", { value: fmt.compact(block.tokens) }))
   if (block.costUsd > 0) parts.push(fmt.usd(block.costUsd))
+
+  useLayoutEffect(() => {
+    const card = cardRef.current
+    const strip = stripRef.current
+    if (!card || !strip) return
+    const target = Array.from(
+      lanesRef.current?.querySelectorAll<HTMLElement>("[data-timeline-block]") ?? []
+    ).find((node) => node.dataset.spanId === block.spanId)
+    if (!target) return
+    const stripRect = strip.getBoundingClientRect()
+    const blockRect = target.getBoundingClientRect()
+    const place = placeHoverCard(
+      {
+        left: blockRect.left - stripRect.left,
+        top: blockRect.top - stripRect.top,
+        bottom: blockRect.bottom - stripRect.top,
+      },
+      { width: stripRect.width },
+      { width: card.offsetWidth, height: card.offsetHeight }
+    )
+    card.style.left = `${place.left}px`
+    card.style.top = `${place.top}px`
+    card.style.visibility = "visible"
+    card.dataset.placement = place.placement
+  }, [block.spanId, lanesRef, stripRef])
+
   return (
     <div
+      ref={cardRef}
       role="tooltip"
       data-testid="timeline-hover-card"
-      className={cn(
-        "pointer-events-none absolute bottom-full z-20 mb-1 w-max max-w-xs rounded-md border bg-popover px-2 py-1.5 shadow-md",
-        anchorRight ? "right-0" : "left-0"
-      )}
-      style={anchorRight ? undefined : { left: `${Math.min(block.offsetPct, 92)}%` }}
+      // Hidden until placed: the first frame would otherwise draw it at 0,0.
+      style={{ left: 0, top: 0, visibility: "hidden" }}
+      className="pointer-events-none absolute z-20 w-max max-w-[min(20rem,100%)] rounded-md border bg-popover px-2 py-1.5 shadow-md"
     >
-      <div className="text-xs font-medium">{block.label}</div>
+      <div className="text-xs font-medium break-words">{block.label}</div>
       <div className="text-[11px] text-muted-foreground tabular-nums" title={block.operationName}>
         {parts.join(" · ")}
       </div>
@@ -888,6 +996,7 @@ const TimelineBlockButton = memo(function TimelineBlockButton({
     <button
       type="button"
       data-timeline-block=""
+      data-span-id={block.spanId}
       data-block-index={index}
       data-testid={`timeline-block-${block.spanId}`}
       aria-current={selected ? "true" : undefined}

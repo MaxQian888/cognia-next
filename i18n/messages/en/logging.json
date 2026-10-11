@@ -79,7 +79,8 @@
       "native": "Native Logging",
       "recent": "Recent Errors",
       "recentDescription": "In-memory failures from this session",
-      "total": "Visible errors"
+      "total": "Visible errors",
+      "autoRefresh": "Auto-refresh"
     },
     "snapshot": {
       "title": "Diagnostic snapshot",
@@ -151,7 +152,8 @@
     "showModule": "Show this module in the list",
     "platformBackendNone": "None",
     "platformError": "Platform Error",
-    "moduleListLabel": "Filter by module"
+    "moduleListLabel": "Filter by module",
+    "summaryLabel": "Log summary"
   },
   "description": "View, search, and export application logs",
   "detail": {

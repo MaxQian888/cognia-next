@@ -21,8 +21,10 @@ export const PERFORMANCE_ATTACHMENT_MAX_BYTES = 256 * 1024 * 1024
 export const PERFORMANCE_CAPTURE_FLUSH_MS = 5000
 export const PERFORMANCE_CAPTURE_FLUSH_FRAMES = 64
 export const PERFORMANCE_CAPTURE_FLUSH_BYTES = 1024 * 1024
-const PERFORMANCE_CAPTURE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
-const PERFORMANCE_CAPTURE_RETENTION_COUNT = 20
+/** Unpinned captures older than this are pruned. Exported for the library's copy. */
+export const PERFORMANCE_CAPTURE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+/** At most this many unpinned captures are kept per target. */
+export const PERFORMANCE_CAPTURE_RETENTION_COUNT = 20
 
 export interface PerformanceCaptureSessionOptions {
   accountId: string

@@ -33,6 +33,7 @@ import { AlertTriangleIcon, ChevronRightIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useObservabilityFormatters } from "@/hooks/observability/use-observability-formatters"
+import { useSpanLabels } from "@/hooks/observability/use-span-labels"
 import type { WaterfallNode } from "@/lib/observability/trace-rollup"
 
 export interface WaterfallRowProps {
@@ -66,6 +67,10 @@ export function WaterfallRow({
 }: WaterfallRowProps) {
   const t = useTranslations("observability.waterfall")
   const fmt = useObservabilityFormatters()
+  const labels = useSpanLabels()
+  // Translated for the row; the raw `node.label` (`invoke_agent · Planner`)
+  // stays as the hover title, which is what a user greps for.
+  const name = labels.spanName(node.span)
   const [open, setOpen] = useState(false)
   const events = node.span.events ?? []
   const hasEvents = events.length > 0
@@ -107,7 +112,7 @@ export function WaterfallRow({
               onClick={() => setOpen((o) => !o)}
               aria-expanded={open}
               aria-controls={open ? metaId : undefined}
-              aria-label={t("toggleEvents", { name: node.label })}
+              aria-label={t("toggleEvents", { name })}
               data-testid={`waterfall-toggle-${spanId}`}
               className="size-4 text-muted-foreground hover:text-foreground"
             >
@@ -143,7 +148,7 @@ export function WaterfallRow({
               />
             )}
             <span className="max-w-[180px] truncate font-medium" title={node.label}>
-              {node.label}
+              {name}
             </span>
           </span>
 

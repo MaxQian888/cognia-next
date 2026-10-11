@@ -18,6 +18,8 @@ jest.mock("recharts", () => ({
   YAxis: () => null,
   Tooltip: () => null,
 }))
+let mockCompact = false
+jest.mock("@/hooks/ui/use-compact-layout", () => ({ useCompactLayout: () => mockCompact }))
 jest.mock("@/lib/observability/chart-config", () => ({ TOOLTIP_STYLE: { contentStyle: {} } }))
 jest.mock("@/hooks/logging/use-theme-colors", () => ({
   useThemeColors: () => ({
@@ -144,6 +146,37 @@ describe("PerfOverviewTab", () => {
     expect(screen.getByTestId("perf-tile-renderer.long-task.count")).toBeInTheDocument()
     // No heap capability → no heap tile, rather than a zero line.
     expect(screen.queryByTestId("perf-tile-renderer.js-heap.used-bytes")).not.toBeInTheDocument()
+  })
+
+  it("puts the chart above the rail when stacked, beside it once the dashboard is wide", () => {
+    renderTab()
+    expect(screen.getByTestId("perf-overview")).toHaveClass("@3xl/perf:grid-cols-[280px_1fr]")
+    expect(screen.getByTestId("perf-overview")).not.toHaveClass("md:grid-cols-[280px_1fr]")
+    // Fills the height only side by side; stacked, the chart keeps its own height.
+    expect(screen.getByTestId("perf-overview")).toHaveClass("@3xl/perf:h-full")
+    expect(screen.getByTestId("perf-overview")).not.toHaveClass("h-full")
+    expect(screen.getByTestId("perf-overview-graph")).toHaveClass(
+      "order-first",
+      "@3xl/perf:order-none"
+    )
+    // Stacked tiles pair up when there is room, and go back to one column in the rail.
+    expect(screen.getByTestId("perf-rail-renderer-tiles")).toHaveClass(
+      "@md/perf:grid-cols-2",
+      "@3xl/perf:grid-cols-1"
+    )
+  })
+
+  it("gives the chart a shorter plot in the compact (phone) layout", () => {
+    mockCompact = true
+    try {
+      renderTab()
+      const plot = screen
+        .getByTestId("perf-overview-graph")
+        .querySelector<HTMLElement>('[style*="min-height"]')!
+      expect(plot.style.minHeight).toBe("220px")
+    } finally {
+      mockCompact = false
+    }
   })
 
   it("charts the first available metric by default with its description and summary", () => {

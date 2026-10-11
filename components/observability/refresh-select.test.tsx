@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from "@testing-library/react"
-import { RefreshSelect, refreshLabel } from "./refresh-select"
+import { RefreshSelect, refreshLabel, refreshTriggerClass } from "./refresh-select"
 
 jest.mock("next-intl", () => {
   // Key-echo translator (with `has`, which the enum-label hook asks before
@@ -50,6 +50,14 @@ jest.mock("@/components/ui/select", () => ({
     <option value={value}>{children}</option>
   ),
 }))
+
+describe("refreshTriggerClass", () => {
+  it("sizes the compact trigger to its value rather than a width it overflows", () => {
+    expect(refreshTriggerClass(true)).toContain("w-auto")
+    expect(refreshTriggerClass(true)).not.toMatch(/w-\[/)
+    expect(refreshTriggerClass(false)).toBe("w-[112px]")
+  })
+})
 
 describe("RefreshSelect", () => {
   it("renders an option per cadence with friendly labels", () => {

@@ -5,6 +5,7 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import {
   NEUTRAL_CHART_FORMATTERS,
   TimeSeriesPanel,
+  Y_AXIS_WIDTH,
   buildChartConfig,
   clickedBucket,
   seriesSpanMs,
@@ -45,6 +46,12 @@ function makeSeries() {
   ]
   return renderHook(() => useObservabilitySeries(spans, range)).result.current
 }
+
+describe("Y_AXIS_WIDTH", () => {
+  it("lets the value axis measure its ticks instead of clipping them", () => {
+    expect(Y_AXIS_WIDTH).toBe("auto")
+  })
+})
 
 describe("buildChartConfig", () => {
   const series = makeSeries()

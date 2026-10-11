@@ -55,6 +55,23 @@ function summarizeLog(log: StructuredLogEntry): string {
   return log.message
 }
 
+/**
+ * Whether a row's summary says anything its title does not.
+ *
+ * A logged error's summary is its stack's first line, which for a plain
+ * `Error` is `Error: <the message>` — the title again behind a prefix that
+ * carries nothing. Rows printed both, so every entry in the Errors channel
+ * read its message twice. A specific type (`TypeError: …`, `AbortError: …`)
+ * does add something and still shows; so does any summary that differs.
+ */
+export function summaryAddsToTitle(title: string, summary: string | null | undefined): boolean {
+  const body = summary?.trim()
+  if (!body) return false
+  const head = title.trim()
+  if (body === head) return false
+  return body.replace(/^Error:\s*/, "") !== head
+}
+
 function toTimestampValue(timestamp: string): number {
   const parsed = Date.parse(timestamp)
   return Number.isNaN(parsed) ? 0 : parsed

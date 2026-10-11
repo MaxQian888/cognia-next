@@ -22,12 +22,12 @@ export function PerfWebVitalsPanel() {
   const { settings, metrics, supported, error, persistenceError } = snapshot
 
   return (
-    <section className="rounded-lg border bg-background" aria-labelledby={`${id}-title`}>
+    <section className="border-y bg-background" aria-labelledby={`${id}-title`}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
         <div className="min-w-0 flex-1">
-          <h3 id={`${id}-title`} className="text-base font-medium">
+          <h2 id={`${id}-title`} className="text-base font-medium">
             {t("title")}
-          </h3>
+          </h2>
           <p className="mt-1 max-w-prose text-xs text-muted-foreground">{t("description")}</p>
         </div>
         <Button

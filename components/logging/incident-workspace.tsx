@@ -81,7 +81,7 @@ import {
   incidentSubmissionKey,
   type IncidentSubmissionApi,
 } from "@/hooks/logging/use-incident-submission"
-import { useIsNarrow, useMediaQuery, type useEdgeResize } from "@/hooks/ui"
+import { useCompactLayout, useMediaQuery, type useEdgeResize } from "@/hooks/ui"
 import { isIncidentProcessingState } from "@/lib/diagnostic-service/types"
 import { cn } from "@/lib/utils"
 import {
@@ -241,7 +241,11 @@ export function IncidentWorkspace({
   const t = useTranslations("logging.workspace")
   const format = useFormatter()
   const wide = useMediaQuery(INCIDENT_DETAIL_PANE_QUERY)
-  const narrow = useIsNarrow()
+  // Bottom sheet vs side sheet follows the app's compact predicate, not the
+  // viewport alone: a native tablet renders the phone shell (bottom tab bar),
+  // and its detail must slide up like a phone's — `useIsNarrow` sent it in
+  // from the right on any tablet 768px or wider.
+  const narrow = useCompactLayout()
   // The list auto-selects; only a click means "show me the detail" below `xl`.
   const [sheetOpen, setSheetOpen] = useState(false)
 
@@ -252,7 +256,7 @@ export function IncidentWorkspace({
   if (!collects && !loading && !error && incidents.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
-        <Empty className="max-w-md border-y py-8" data-testid="incident-uncollected">
+        <Empty className="max-w-md border-0 py-8" data-testid="incident-uncollected">
           <EmptyHeader>
             <MonitorSmartphoneIcon className="mx-auto size-6 text-muted-foreground" aria-hidden />
             <EmptyTitle className="text-base">{t("incidents.uncollectedTitle")}</EmptyTitle>
@@ -350,7 +354,7 @@ export function IncidentWorkspace({
                 {t("incidents.loading")}
               </div>
             ) : incidents.length === 0 ? (
-              <Empty className="w-full min-w-0 border-y py-8">
+              <Empty className="w-full min-w-0 border-0 py-8">
                 <EmptyHeader className="w-full min-w-0">
                   <EmptyTitle className="text-base">
                     {t(receiptsOnly ? "receipts.emptyTitle" : "incidents.emptyTitle")}
@@ -435,7 +439,13 @@ export function IncidentWorkspace({
       <Sheet open={!wide && sheetOpen && detail !== null} onOpenChange={setSheetOpen}>
         <SheetContent
           side={narrow ? "bottom" : "right"}
-          className={cn("p-0", narrow ? "h-dvh max-h-dvh" : "w-[min(92vw,560px)] sm:max-w-none")}
+          // The sheet's own close button is pinned top-right, exactly where
+          // the detail header keeps its delete button; the header makes room
+          // for it here, and only here (the docked pane has no close button).
+          className={cn(
+            "p-0 [&_[data-detail-header]]:pr-12",
+            narrow ? "h-dvh max-h-dvh" : "w-[min(92vw,560px)] sm:max-w-none"
+          )}
           data-testid="incident-detail-drawer"
         >
           <SheetHeader className="sr-only">
@@ -494,7 +504,7 @@ export function IncidentDetail({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 items-start gap-2 border-b p-4">
+      <header className="flex shrink-0 items-start gap-2 border-b p-4" data-detail-header>
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold">{t("detail.title")}</h3>
           <p className="mt-1 font-mono text-xs break-all text-muted-foreground">{incident.id}</p>

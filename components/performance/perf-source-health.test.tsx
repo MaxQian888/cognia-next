@@ -60,6 +60,19 @@ it("renders explicit source, capability, overhead, error, and gap states", () =>
   // The gap reason is a translated phrase, not the wire enum.
   expect(screen.getByRole("status")).toHaveTextContent("missed frames")
   expect(screen.getByRole("status")).not.toHaveTextContent("sequence-gap")
+  // Times go through the app formatter (the test mock prints ISO), not the
+  // browser's own `toLocaleTimeString`.
+  expect(screen.getByTestId("perf-source-health-gap")).toHaveTextContent("1970-01-01T00:00:00.100Z")
+  // A ruled section, not a card.
+  expect(screen.getByTestId("perf-source-health").tagName).toBe("SECTION")
+  expect(screen.getByRole("heading", { level: 2 })).toBeInTheDocument()
+})
+
+it("tones a source's state badge by severity, not live-versus-everything", () => {
+  render(<PerfSourceHealth sources={[hostSource]} hostState="error" gaps={[]} error={null} />)
+  const badge = screen.getByTestId("perf-source-state-host")
+  expect(badge).toHaveAttribute("data-state", "error")
+  expect(badge).toHaveClass("text-destructive")
 })
 
 describe("PerfSourceNotice", () => {

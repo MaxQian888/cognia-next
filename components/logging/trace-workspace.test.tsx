@@ -194,6 +194,8 @@ function row(over: Partial<TraceRollupRow> = {}): TraceRollupRow {
   return {
     traceId: "trace-1",
     rootName: "invoke_agent · planner",
+    rootOperation: "invoke_agent",
+    rootAgentName: "planner",
     startTime: 1_700_000_000_000,
     durationMs: 1_234,
     spanCount: 4,
@@ -326,7 +328,11 @@ describe("TraceWorkspace", () => {
       matchedTotal: 2,
     })
     renderWorkspace()
-    expect(screen.getByTestId("trace-row-trace-1")).toHaveTextContent("invoke_agent · planner")
+    // The operation is translated (the key-echo `t` here has no `has`, so it
+    // degrades to the id); the raw name stays the row's title.
+    const first = screen.getByTestId("trace-row-trace-1")
+    expect(first).toHaveTextContent("invoke_agent · planner")
+    expect(first.querySelector('[title="invoke_agent · planner"]')).not.toBeNull()
     expect(screen.getByTestId("trace-row-trace-2")).toHaveClass("border-l-destructive")
   })
 
@@ -338,6 +344,7 @@ describe("TraceWorkspace", () => {
   })
 
   it("prompts for a selection before a trace is picked", () => {
+    Object.assign(traceListResult, { traces: [row()], windowTotal: 1, matchedTotal: 1 })
     renderWorkspace()
     expect(screen.getByTestId("trace-waterfall-pane")).toHaveTextContent(
       "logging.workspace.traces.selectPrompt"
@@ -597,6 +604,24 @@ describe("TraceWorkspace", () => {
     expect(screen.getByTestId("trace-columns-layout")).toBeInTheDocument()
   })
 
+  it("gives an empty list the whole width instead of two blank panes beside it", () => {
+    containerWidth = 1400
+    Object.assign(traceListResult, { traces: [], windowTotal: 0, matchedTotal: 0 })
+    renderWorkspace()
+    expect(screen.getByTestId("trace-empty-layout")).toBeInTheDocument()
+    expect(screen.getByTestId("trace-list-empty")).toBeInTheDocument()
+    expect(screen.queryByTestId("trace-columns-layout")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("trace-waterfall-pane")).not.toBeInTheDocument()
+  })
+
+  it("keeps the panes for a deep-linked trace even when the list is empty", () => {
+    containerWidth = 1400
+    Object.assign(traceListResult, { traces: [], windowTotal: 0, matchedTotal: 0 })
+    renderWorkspace({ selectedTraceId: "trace-1" })
+    expect(screen.queryByTestId("trace-empty-layout")).not.toBeInTheDocument()
+    expect(screen.getByTestId("trace-columns-layout")).toBeInTheDocument()
+  })
+
   it("mounts no pane group before the first measurement lands", () => {
     containerWidth = 0
     renderWorkspace()
@@ -686,7 +711,15 @@ describe("TraceWorkspace", () => {
     act(() =>
       onImportConfig({
         version: 1,
-        layouts: { lg: [{ i: "kpi-cost", x: 0, y: 0, w: 1, h: 1 }], md: [], sm: [] },
+        layouts: {
+          lg: [
+            { i: "ts-cost", x: 0, y: 0, w: 1, h: 1 },
+            // A pre-strip export still carries KPI tiles; the grid has none now.
+            { i: "kpi-cost", x: 6, y: 0, w: 2, h: 2 },
+          ],
+          md: [],
+          sm: [],
+        },
         hiddenPanels: ["kpi-cost", "no-such-panel"],
         thresholds: {},
         rangePreset: "1h",
@@ -698,7 +731,8 @@ describe("TraceWorkspace", () => {
     )
     const state = useObservabilityStore.getState()
     expect(state.hiddenPanels).toEqual(["kpi-cost"])
-    expect(state.layouts!.lg.find((item) => item.i === "kpi-cost")).toMatchObject({ w: 2, h: 2 })
+    expect(state.layouts!.lg.find((item) => item.i === "ts-cost")).toMatchObject({ w: 3, h: 4 })
+    expect(state.layouts!.lg.some((item) => item.i === "kpi-cost")).toBe(false)
     expect(state.layouts!.lg.length).toBeGreaterThan(1)
     expect(state.filters).toEqual({ provider: ["anthropic"] })
   })

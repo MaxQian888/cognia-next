@@ -31,7 +31,11 @@ function FactRow({ label, value, testId }: FactRowProps) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-1.5">
       <dt className="shrink-0 text-sm text-muted-foreground">{label}</dt>
-      <dd className="truncate text-right font-mono text-sm tabular-nums" data-testid={testId}>
+      <dd
+        className="min-w-0 truncate text-right font-mono text-sm tabular-nums"
+        title={value}
+        data-testid={testId}
+      >
         {value}
       </dd>
     </div>
@@ -94,10 +98,10 @@ export function PerfSystemTab({ load = perfSystemDetails }: PerfSystemTabProps) 
     <div className="grid gap-4 md:grid-cols-3" data-testid="perf-system-tab">
       <section className="border-y bg-background">
         <header className="border-b px-4 py-3">
-          <h3 className="flex items-center gap-2 text-sm font-medium">
+          <h2 className="flex items-center gap-2 text-sm font-medium">
             <MonitorIcon className="size-4 text-chart-1" />
             {t("host.title")}
-          </h3>
+          </h2>
         </header>
         <div className="px-4 py-3">
           <dl className="divide-y">
@@ -123,10 +127,10 @@ export function PerfSystemTab({ load = perfSystemDetails }: PerfSystemTabProps) 
 
       <section className="border-y bg-background">
         <header className="border-b px-4 py-3">
-          <h3 className="flex items-center gap-2 text-sm font-medium">
+          <h2 className="flex items-center gap-2 text-sm font-medium">
             <CpuIcon className="size-4 text-chart-2" />
             {t("hardware.title")}
-          </h3>
+          </h2>
         </header>
         <div className="px-4 py-3">
           <dl className="divide-y">
@@ -156,10 +160,10 @@ export function PerfSystemTab({ load = perfSystemDetails }: PerfSystemTabProps) 
 
       <section className="border-y bg-background">
         <header className="border-b px-4 py-3">
-          <h3 className="flex items-center gap-2 text-sm font-medium">
+          <h2 className="flex items-center gap-2 text-sm font-medium">
             <PackageIcon className="size-4 text-chart-5" />
             {t("build.title")}
-          </h3>
+          </h2>
         </header>
         <div className="px-4 py-3">
           <dl className="divide-y">

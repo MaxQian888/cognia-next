@@ -519,7 +519,11 @@ export function LogDetailPanel({
   const hasPivots = Boolean(onFocusTrace || onFocusSession || onOpenTrace)
 
   const body = (
-    <div className={cn("space-y-4", embedded ? "min-w-0" : "p-4")}>
+    // Its own width, not the viewport's, decides the metadata columns: this
+    // body renders in a docked pane that can be a third of a wide window, in
+    // a phone sheet, and embedded in the Errors detail. `sm:` (a 640px
+    // VIEWPORT) put two columns into a 300px pane.
+    <div className={cn("@container/log-detail space-y-4", embedded ? "min-w-0" : "p-4")}>
       {!embedded && (
         <>
           {/* Message */}
@@ -584,7 +588,7 @@ export function LogDetailPanel({
           not already print (session, source), and nothing at all when the
           entry has neither. */}
       {(!embedded || log.sessionId || log.source) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+        <div className="grid grid-cols-1 gap-3 text-xs @sm/log-detail:grid-cols-2">
           {!embedded && (
             <>
               <div className="flex items-center gap-1.5">
@@ -604,7 +608,7 @@ export function LogDetailPanel({
               </div>
 
               {log.traceId && (
-                <div className="flex items-center gap-1.5 sm:col-span-2">
+                <div className="flex items-center gap-1.5 @sm/log-detail:col-span-2">
                   <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
                     <p className="text-muted-foreground">{t("panel.traceId")}</p>
@@ -621,7 +625,7 @@ export function LogDetailPanel({
           )}
 
           {log.sessionId && (
-            <div className="flex items-center gap-1.5 sm:col-span-2">
+            <div className="flex items-center gap-1.5 @sm/log-detail:col-span-2">
               <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
                 <p className="text-muted-foreground">{t("detail.sessionId")}</p>
@@ -636,7 +640,7 @@ export function LogDetailPanel({
           )}
 
           {log.source && (
-            <div className="flex items-start gap-1.5 sm:col-span-2">
+            <div className="flex items-start gap-1.5 @sm/log-detail:col-span-2">
               <FileCode className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <div className="min-w-0">
                 <p className="text-muted-foreground">{t("panel.source")}</p>

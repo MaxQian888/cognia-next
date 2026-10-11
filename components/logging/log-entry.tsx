@@ -328,7 +328,11 @@ export function LogEntry({
                 {timeStr}
               </span>
 
-              <Badge variant="outline" className="text-xs shrink-0 font-mono">
+              <Badge
+                variant="outline"
+                className="text-xs shrink-0 font-mono max-sm:max-w-[60%] max-sm:truncate"
+                title={log.module}
+              >
                 {log.module}
               </Badge>
 
@@ -372,7 +376,16 @@ export function LogEntry({
                 click opens the entry, and the icon restated it. */}
             <div
               data-testid="log-entry-actions"
-              className={cn("flex items-center gap-0.5 shrink-0", HOVER_REVEAL_GROUP_CLASS)}
+              // Not below `sm`. Revealed or not, the four 24px buttons kept
+              // their width, so on a phone the module badge could never fit
+              // beside the timestamp and every entry took three lines (time /
+              // module / message) — six entries a screen. A tap there opens
+              // the detail sheet and a long press the context menu, and both
+              // carry every one of these actions.
+              className={cn(
+                "flex items-center gap-0.5 shrink-0 max-sm:hidden",
+                HOVER_REVEAL_GROUP_CLASS
+              )}
             >
               {onToggleBookmark && (
                 <Tooltip>

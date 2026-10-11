@@ -15,9 +15,11 @@ jest.mock("@/hooks/logging/use-crash-logs", () => ({
 
 // The detail is a pane at xl and a sheet below it, chosen in JS.
 let wide = true
+let compact = false
 jest.mock("@/hooks/ui", () => ({
   ...jest.requireActual("@/hooks/ui"),
   useMediaQuery: () => wide,
+  useCompactLayout: () => compact,
 }))
 
 const toastSuccess = jest.fn()
@@ -113,6 +115,7 @@ function setup(overrides: Partial<UseCrashLogsResult> = {}) {
 beforeEach(() => {
   jest.clearAllMocks()
   wide = true
+  compact = false
 })
 
 describe("counts strip", () => {
@@ -124,6 +127,14 @@ describe("counts strip", () => {
     // Translated, not the raw readiness enum.
     expect(strip.getByText("Healthy")).toBeInTheDocument()
     expect(strip.getByText(/^On/)).toBeInTheDocument()
+  })
+
+  it("names both status facts on screen instead of in a tooltip", () => {
+    setup()
+    expect(screen.getByTestId("crash-summary-native")).toHaveTextContent("Native Logging")
+    expect(screen.getByTestId("crash-summary-native")).toHaveTextContent("Healthy")
+    expect(screen.getByTestId("crash-summary-poll")).toHaveTextContent("Auto-refresh")
+    expect(screen.getByTestId("crash-summary-poll")).toHaveTextContent("On")
   })
 
   it("is the level filter: a chip applies its level, and the active one clears it", () => {
@@ -201,6 +212,29 @@ describe("list and detail", () => {
     expect(detail.getByText("Degraded")).toBeInTheDocument()
   })
 
+  it("does not print a stored error's message twice", () => {
+    const stored: CrashLogItem = {
+      ...errorItem,
+      id: "item-stored",
+      title: "Unhandled rejection in connector poll",
+      summary: "Error: Unhandled rejection in connector poll",
+    }
+    setup({ items: [stored], selectedItem: stored })
+    const row = screen.getByTestId("crash-row")
+    expect(within(row).getAllByText(/Unhandled rejection in connector poll/)).toHaveLength(1)
+  })
+
+  it("lays the native facts out as ruled sections of label/value rows, not nested boxes", () => {
+    setup()
+    const native = screen.getByTestId("crash-native-section")
+    expect(native).toHaveClass("border-t")
+    expect(native).not.toHaveClass("rounded-lg", "border")
+    const list = native.querySelector("dl")!
+    expect(within(list).getByText("C:\\cognia\\logs").tagName).toBe("DD")
+    expect(list.querySelector(".rounded-md.border")).toBeNull()
+    expect(screen.getByTestId("crash-diagnostics-section")).toHaveClass("border-t")
+  })
+
   it("translates the diagnostic snapshot instead of printing a code", () => {
     const snapshotItem: CrashLogItem = {
       id: "crash:diagnostic-snapshot",
@@ -248,13 +282,23 @@ describe("list and detail", () => {
     expect(screen.queryByTestId("crash-detail-drawer")).not.toBeInTheDocument()
   })
 
+  it("slides the sheet up from the bottom in the compact (phone / native) layout", () => {
+    wide = false
+    compact = true
+    setup()
+    fireEvent.click(screen.getAllByTestId("crash-row")[0])
+    expect(screen.getByTestId("crash-detail-drawer")).toHaveClass("bottom-0", "h-dvh")
+  })
+
   it("opens a sheet below xl only once a row is chosen", () => {
     wide = false
     setup()
     expect(screen.queryByTestId("crash-detail-aside")).not.toBeInTheDocument()
     expect(screen.queryByTestId("crash-detail-drawer")).not.toBeInTheDocument()
     fireEvent.click(screen.getAllByTestId("crash-row")[0])
-    expect(screen.getByTestId("crash-detail-drawer")).toBeInTheDocument()
+    const drawer = screen.getByTestId("crash-detail-drawer")
+    expect(drawer).toHaveClass("[&_[data-detail-header]]:pr-12")
+    expect(drawer.querySelector("[data-detail-header]")).not.toBeNull()
   })
 
   it("renders the empty state instead of a list when nothing matches", () => {

@@ -172,10 +172,10 @@ export function PerfBudgetPanel({
     <section className="space-y-3" data-testid="perf-budget-panel">
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="flex items-center gap-2 text-base font-medium">
+          <h2 className="flex items-center gap-2 text-base font-medium">
             <GaugeIcon className="size-4" aria-hidden />
             {t("title")}
-          </h3>
+          </h2>
           <p className="mt-1 max-w-prose text-xs text-muted-foreground">{t("description")}</p>
         </div>
         <Button
@@ -247,9 +247,9 @@ export function PerfBudgetPanel({
           </ul>
 
           <div className="space-y-3 rounded-md border p-3" data-testid="perf-budget-check">
-            <h4 className="text-sm font-medium">{t("check.title")}</h4>
+            <h3 className="text-sm font-medium">{t("check.title")}</h3>
             <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-1.5">
+              <div className="w-full space-y-1.5 sm:w-auto">
                 <Label htmlFor="perf-budget-check-budget">{t("check.budget")}</Label>
                 <Select
                   value={selectedBudget?.id}
@@ -258,7 +258,7 @@ export function PerfBudgetPanel({
                     setEvaluation(null)
                   }}
                 >
-                  <SelectTrigger id="perf-budget-check-budget" className="w-[220px]">
+                  <SelectTrigger id="perf-budget-check-budget" className="w-full sm:w-[220px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -270,7 +270,7 @@ export function PerfBudgetPanel({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
+              <div className="w-full space-y-1.5 sm:w-auto">
                 <Label htmlFor="perf-budget-check-capture">{t("check.capture")}</Label>
                 <Select
                   value={selectedCapture?.id}
@@ -280,7 +280,7 @@ export function PerfBudgetPanel({
                   }}
                   disabled={eligibleCaptures.length === 0}
                 >
-                  <SelectTrigger id="perf-budget-check-capture" className="w-[260px]">
+                  <SelectTrigger id="perf-budget-check-capture" className="w-full sm:w-[260px]">
                     <SelectValue placeholder={t("check.noCaptures")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -318,7 +318,11 @@ export function PerfBudgetPanel({
             {evaluation ? (
               <div
                 role="status"
-                className={cn("rounded-md border p-2 text-sm", VERDICT_TONE[evaluation.verdict])}
+                // A status strip inside the check block, not a box in a box.
+                className={cn(
+                  "rounded-sm border-l-2 px-2 py-1.5 text-sm",
+                  VERDICT_TONE[evaluation.verdict]
+                )}
                 data-testid="perf-budget-verdict"
                 data-verdict={evaluation.verdict}
               >

@@ -80,6 +80,20 @@ describe("VariableFilterBar", () => {
     expect(screen.getByTestId("filter-model-option-sonnet")).toBeInTheDocument()
   })
 
+  it("labels the no-model bucket and finds it by label or by raw id", () => {
+    const withUnknown = [...spans, makeSpan({ operationName: "execute_tool", toolName: "bash" })]
+    render(<VariableFilterBar windowSpans={withUnknown} filters={{}} onChange={jest.fn()} />)
+    fireEvent.click(screen.getByTestId("filter-model"))
+    const option = screen.getByTestId("filter-model-option-(unknown)")
+    // The key-echo translator prints the message key: the label, not the sentinel.
+    expect(option).toHaveTextContent("model.none")
+    expect(option.querySelector('[title="(unknown)"]')).not.toBeNull()
+    fireEvent.change(screen.getByTestId("filter-search-model"), { target: { value: "model.none" } })
+    expect(screen.getByTestId("filter-model-option-(unknown)")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("filter-search-model"), { target: { value: "unknown" } })
+    expect(screen.getByTestId("filter-model-option-(unknown)")).toBeInTheDocument()
+  })
+
   it("clears all filters", () => {
     const onChange = jest.fn()
     render(

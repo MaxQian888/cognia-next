@@ -99,13 +99,13 @@ import {
 } from "@/components/ui/sheet"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
-import { Surface } from "@/components/surface/surface"
 import { useCrashLogs } from "@/hooks/logging/use-crash-logs"
-import { useEdgeResize, useIsNarrow, useMediaQuery } from "@/hooks/ui"
-import type {
-  CrashLogItem,
-  CrashLogLevelFilter,
-  CrashLogSourceFilter,
+import { useCompactLayout, useEdgeResize, useMediaQuery } from "@/hooks/ui"
+import {
+  summaryAddsToTitle,
+  type CrashLogItem,
+  type CrashLogLevelFilter,
+  type CrashLogSourceFilter,
 } from "@/lib/logging/crash-log"
 import { cn } from "@/lib/utils"
 import {
@@ -294,9 +294,10 @@ function CrashRow({
           {format.dateTime(new Date(item.timestamp), { timeStyle: "medium" })}
         </span>
       </div>
-      {/* A recent-error item's summary is its message, which is also its title.
-          Printing it twice reads as a rendering bug, not as detail. */}
-      {text.summary && text.summary !== text.title ? (
+      {/* A recent-error item's summary is its message, which is also its title,
+          and a stored one's is `Error: <message>`. Printing it twice reads as
+          a rendering bug, not as detail (see `summaryAddsToTitle`). */}
+      {summaryAddsToTitle(text.title, text.summary) ? (
         <div className="truncate text-xs text-muted-foreground">{text.summary}</div>
       ) : null}
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -314,8 +315,10 @@ function CrashRow({
   )
 }
 
-/** A labelled read-only value. Used for the two native-logging facts that are
- * worth reading without expanding the raw snapshot. */
+/** A labelled read-only value: one row of the section's description list.
+ * These were `Surface` tiles — a bordered box per fact, inside a bordered
+ * section, inside the detail pane. A label beside its value needs a rule
+ * between rows, not a frame around each. */
 function DiagnosticsField({
   label,
   children,
@@ -326,25 +329,28 @@ function DiagnosticsField({
   mono?: boolean
 }) {
   return (
-    <Surface layer="raised" className="min-w-0 rounded-md border px-2.5 py-1.5">
-      <div className="text-[10px] tracking-wide text-muted-foreground uppercase">{label}</div>
-      <div className={cn("mt-0.5 text-sm", mono && "font-mono text-xs break-all")}>{children}</div>
-    </Surface>
+    <div className="flex min-w-0 items-baseline justify-between gap-3 py-1.5">
+      <dt className="shrink-0 text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn("min-w-0 text-right text-sm", mono && "font-mono text-xs break-all")}>
+        {children}
+      </dd>
+    </div>
   )
 }
 
 /** Raw snapshot, collapsed. Nothing here is readable at a glance; it exists so
- * an exported bundle can be checked against what the app actually saw. */
+ * an exported bundle can be checked against what the app actually saw. A
+ * disclosure row, not another bordered box. */
 function DiagnosticsJson({ title, data }: { title: string; data: unknown }) {
   const [open, setOpen] = useState(false)
   if (!data) return null
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded-md border">
+    <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
         <Button
           variant="ghost"
-          className="h-auto w-full justify-start gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium"
+          className="-mx-2 h-auto w-[calc(100%+1rem)] justify-start gap-2 px-2 py-1.5 text-xs font-medium"
         >
           <ChevronRightIcon
             className={cn("size-3.5 transition-transform", open && "rotate-90")}
@@ -354,7 +360,7 @@ function DiagnosticsJson({ title, data }: { title: string; data: unknown }) {
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="mx-2.5 mb-2.5 overflow-x-auto rounded-md bg-muted/40 p-2.5 text-[11px] leading-relaxed">
+        <pre className="mt-1 overflow-x-auto rounded-md bg-muted/40 p-2.5 text-[11px] leading-relaxed">
           {JSON.stringify(data, null, 2)}
         </pre>
       </CollapsibleContent>
@@ -385,7 +391,7 @@ function CrashDetail({
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="crash-detail-pane">
-      <header className="flex shrink-0 items-start gap-2 border-b p-3">
+      <header className="flex shrink-0 items-start gap-2 border-b p-3" data-detail-header>
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge
@@ -458,7 +464,7 @@ function CrashDetail({
           entry's message) and clipped every paragraph at that width. */}
       <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
         <div className="min-w-0 space-y-3 p-3">
-          {text.summary && text.summary !== text.title ? (
+          {summaryAddsToTitle(text.title, text.summary) ? (
             <p className="text-sm break-words text-muted-foreground">{text.summary}</p>
           ) : null}
 
@@ -469,12 +475,14 @@ function CrashDetail({
             <LogDetailPanel log={item.logEntry} relatedLogs={relatedLogs} variant="embedded" />
           ) : null}
 
-          <section className="space-y-2 rounded-lg border p-3">
+          {/* Ruled sections, not boxes: the pane is already the frame, and
+              these used to be a bordered section holding bordered tiles. */}
+          <section className="space-y-1 border-t pt-3" data-testid="crash-native-section">
             <h3 className="flex items-center gap-2 text-sm font-medium">
               <ScrollTextIcon className="size-4 text-muted-foreground" aria-hidden />
               {t("crash.native.title")}
             </h3>
-            <div className="grid gap-2 @[640px]/crash-detail:grid-cols-2">
+            <dl className="divide-y @[640px]/crash-detail:grid @[640px]/crash-detail:grid-cols-2 @[640px]/crash-detail:gap-x-6 @[640px]/crash-detail:divide-y-0">
               <DiagnosticsField label={t("crash.native.status")}>
                 <span
                   className={cn(
@@ -495,7 +503,7 @@ function CrashDetail({
               <DiagnosticsField label={t("crash.native.logDirectory")} mono>
                 {item.diagnostics?.logDirectoryPath ?? t("crash.native.unavailable")}
               </DiagnosticsField>
-            </div>
+            </dl>
             <DiagnosticsJson
               title={t("crash.native.details")}
               data={item.diagnostics?.nativeLogging}
@@ -503,7 +511,7 @@ function CrashDetail({
           </section>
 
           {item.diagnostics?.windowDiagnostics || item.diagnostics?.localRuntimeDiagnostics ? (
-            <section className="space-y-2 rounded-lg border p-3">
+            <section className="space-y-1 border-t pt-3" data-testid="crash-diagnostics-section">
               <h3 className="flex items-center gap-2 text-sm font-medium">
                 <AlertTriangleIcon className="size-4 text-muted-foreground" aria-hidden />
                 {t("crash.diagnostics.title")}
@@ -557,7 +565,11 @@ export function CrashDiagnosticsWorkspace() {
   // user who widened the detail pane there meant "detail panes are too narrow".
   const detailWidth = useLogWorkspaceStore((state) => state.detailWidth)
   const setDetailWidth = useLogWorkspaceStore((state) => state.setDetailWidth)
-  const narrow = useIsNarrow()
+  // Bottom sheet vs side sheet follows the app's compact predicate, not the
+  // viewport alone: a native tablet renders the phone shell (bottom tab bar),
+  // and its detail must slide up like a phone's — `useIsNarrow` sent it in
+  // from the right on any tablet 768px or wider.
+  const narrow = useCompactLayout()
   const wide = useMediaQuery(CRASH_DETAIL_PANE_QUERY)
 
   const [busy, setBusy] = useState(false)
@@ -832,16 +844,19 @@ export function CrashDiagnosticsWorkspace() {
             ))}
           </div>
           <span className="ms-auto flex items-center gap-3 text-[11px] text-muted-foreground">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className={cn("flex items-center gap-1.5", TONE_TEXT[nativeTone])}>
-                  <span aria-hidden className={cn("size-1.5 rounded-full", TONE_DOT[nativeTone])} />
-                  <span>{nativeStatusLabel(t, summary.nativeLoggingStatus)}</span>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{t("crash.summary.native")}</TooltipContent>
-            </Tooltip>
-            <span className="flex items-center gap-1.5">
+            {/* Both facts carry their name on screen. They were a bare "Off"
+                (the native status, named only in a tooltip a phone cannot
+                open) and a bare "On · 02:24:18" (the poll), which read as two
+                switches for the same unnamed thing. */}
+            <span className="flex items-center gap-1.5" data-testid="crash-summary-native">
+              <span>{t("crash.summary.native")}</span>
+              <span className={cn("flex items-center gap-1", TONE_TEXT[nativeTone])}>
+                <span aria-hidden className={cn("size-1.5 rounded-full", TONE_DOT[nativeTone])} />
+                <span>{nativeStatusLabel(t, summary.nativeLoggingStatus)}</span>
+              </span>
+            </span>
+            <span className="flex items-center gap-1.5" data-testid="crash-summary-poll">
+              <span>{t("crash.summary.autoRefresh")}</span>
               <span aria-hidden className="relative flex size-1.5">
                 {autoRefresh ? (
                   <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
@@ -878,7 +893,7 @@ export function CrashDiagnosticsWorkspace() {
           </div>
         ) : items.length === 0 ? (
           <div className="flex flex-1 items-center justify-center p-6">
-            <Empty className="max-w-md border-y py-8" data-testid="crash-empty">
+            <Empty className="max-w-md border-0 py-8" data-testid="crash-empty">
               <EmptyHeader>
                 <EmptyTitle className="text-base">{t("crash.emptyTitle")}</EmptyTitle>
                 <EmptyDescription>{t("crash.emptyDescription")}</EmptyDescription>
@@ -942,8 +957,10 @@ export function CrashDiagnosticsWorkspace() {
       <Sheet open={!wide && sheetOpen && selectedItem !== null} onOpenChange={setSheetOpen}>
         <SheetContent
           side={narrow ? "bottom" : "right"}
+          // Room for the sheet's own close button beside the header's copy /
+          // open-folder group, which it used to sit on top of.
           className={cn(
-            "@container/crash-detail p-0",
+            "@container/crash-detail p-0 [&_[data-detail-header]]:pr-12",
             narrow ? "h-dvh max-h-dvh" : "w-[min(92vw,560px)] sm:max-w-none"
           )}
           data-testid="crash-detail-drawer"

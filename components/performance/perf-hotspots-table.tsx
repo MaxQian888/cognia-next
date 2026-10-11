@@ -36,6 +36,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { PIN_START, PIN_START_MAX_WIDTH } from "./perf-table-pin"
 import type { SpanSnapshot } from "@/lib/perf/backend/types"
 import { formatCount, formatMs } from "@/lib/perf/backend/format"
 
@@ -124,7 +125,7 @@ export function PerfHotspotsTable({ spans, onReset }: PerfHotspotsTableProps) {
 
   const header = (key: SortKey, label: string, numeric = true) => (
     <TableHead
-      className={cn("select-none", numeric && "text-right")}
+      className={cn("select-none", numeric && "text-right", key === "name" && PIN_START)}
       data-testid={`perf-hot-th-${key}`}
       aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
     >
@@ -151,7 +152,7 @@ export function PerfHotspotsTable({ spans, onReset }: PerfHotspotsTableProps) {
     <section className="border-y bg-background" data-testid="perf-hotspots">
       <header className="flex flex-row flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div className="min-w-0">
-          <h3 className="text-base font-medium">{t("title")}</h3>
+          <h2 className="text-base font-medium">{t("title")}</h2>
           <p className="mt-1 text-xs text-muted-foreground">{t("description")}</p>
         </div>
         {onReset ? (
@@ -194,7 +195,18 @@ export function PerfHotspotsTable({ spans, onReset }: PerfHotspotsTableProps) {
                 const pct = maxTotal > 0 ? (s.totalMs / maxTotal) * 100 : 0
                 return (
                   <TableRow key={s.name} data-testid={`perf-hot-row-${s.name}`}>
-                    <TableCell className="font-mono text-xs font-medium">{s.name}</TableCell>
+                    {/* Truncated with a title: an untruncated span name widened
+                        the whole table, and it is the pinned column. */}
+                    <TableCell
+                      className={cn(
+                        "font-mono text-xs font-medium",
+                        PIN_START,
+                        PIN_START_MAX_WIDTH
+                      )}
+                      title={s.name}
+                    >
+                      <span className="block truncate">{s.name}</span>
+                    </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
                       {formatCount(s.count)}
                     </TableCell>

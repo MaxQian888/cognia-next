@@ -194,6 +194,13 @@ function toChartFormatters(
   }
 }
 
+/**
+ * The value axis measures its own ticks. It was a fixed 48px, which cut
+ * currency ticks to "JS$0.28" (the "U" of "US$" under the chart edge) and
+ * would do the same to any locale's longer unit. Exported for its test.
+ */
+export const Y_AXIS_WIDTH = "auto" as const
+
 export function TimeSeriesPanel({
   panel,
   series,
@@ -296,7 +303,7 @@ export function TimeSeriesPanel({
                 <XAxis dataKey="t" tickFormatter={axisTime} tick={{ fontSize: 11 }} />
                 <YAxis
                   tick={{ fontSize: 11 }}
-                  width={48}
+                  width={Y_AXIS_WIDTH}
                   tickFormatter={(v) => cfg.valueFormat(Number(v))}
                 />
                 <Tooltip
@@ -327,7 +334,7 @@ export function TimeSeriesPanel({
                 <XAxis dataKey="t" tickFormatter={axisTime} tick={{ fontSize: 11 }} />
                 <YAxis
                   tick={{ fontSize: 11 }}
-                  width={48}
+                  width={Y_AXIS_WIDTH}
                   domain={cfg.yDomain}
                   tickFormatter={(v) => cfg.valueFormat(Number(v))}
                 />

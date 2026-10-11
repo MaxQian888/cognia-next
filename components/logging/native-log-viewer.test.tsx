@@ -64,6 +64,25 @@ describe("NativeLogViewer", () => {
     expect(screen.getByText("Error")).toBeInTheDocument()
   })
 
+  it("lets the toolbar controls take the full width on a phone", () => {
+    render(<NativeLogViewer />)
+    for (const combo of screen.getAllByRole("combobox")) {
+      expect(combo).toHaveClass("w-full")
+      expect(combo.className).toMatch(/sm:w-\[/)
+    }
+    expect(screen.getByRole("textbox")).toHaveClass("w-full", "sm:w-[200px]")
+  })
+
+  it("draws the unavailable state without a dashed frame", () => {
+    useNativeLogQueryMock.mockReturnValue(makeState({ available: false, result: null }))
+    render(<NativeLogViewer />)
+    const empty = screen.getByText(/native logs unavailable/i).closest('[data-slot="empty"]')
+    expect(empty).not.toBeNull()
+    // `border-0` zeroes the width the base's `border-dashed` would draw.
+    expect(empty).toHaveClass("border-0")
+    expect(empty).not.toHaveClass("border-y")
+  })
+
   it("shows the file path and entry count metadata", () => {
     render(<NativeLogViewer />)
 

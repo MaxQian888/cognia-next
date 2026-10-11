@@ -38,6 +38,13 @@ describe("PerfHotspotsTable", () => {
     expect(screen.getByTestId("perf-hot-empty")).toBeInTheDocument()
   })
 
+  it("pins and truncates the span name instead of letting it widen the table", () => {
+    render(<PerfHotspotsTable spans={[span("a.very.long.span.name", 10, 0)]} />)
+    const cell = screen.getByTestId("perf-hot-row-a.very.long.span.name").querySelector("td")!
+    expect(cell).toHaveClass("sticky", "left-0")
+    expect(cell).toHaveAttribute("title", "a.very.long.span.name")
+  })
+
   it("renders a row per span and an error badge only when errors > 0", () => {
     render(<PerfHotspotsTable spans={[span("ocr.extract", 100, 2), span("vector.query", 50, 0)]} />)
     expect(screen.getByTestId("perf-hot-row-ocr.extract")).toBeInTheDocument()

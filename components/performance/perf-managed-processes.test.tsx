@@ -117,6 +117,29 @@ describe("PerfManagedProcesses", () => {
     expect(screen.getByTestId("perf-managed-row-cloudflared")).toBeInTheDocument()
   })
 
+  it("explains an unavailable Restart where hover and screen readers can reach it", () => {
+    render(
+      <PerfManagedProcesses
+        latest={sample([mp({ id: "gone", name: "exited", pid: 402, alive: false })])}
+      />
+    )
+    const button = screen.getByTestId("perf-managed-restart-gone")
+    expect(button).toBeDisabled()
+    // On the wrapper — a disabled button gets no pointer events for its own title.
+    expect(screen.getByTestId("perf-managed-restart-wrap-gone")).toHaveAttribute("title")
+    expect(button).toHaveAccessibleDescription()
+  })
+
+  it("pins the name and the Restart / Kill actions while the table scrolls sideways", () => {
+    render(
+      <PerfManagedProcesses latest={sample([mp({ id: "pin-1", name: "worker", pid: 401 })])} />
+    )
+    const cells = screen.getByTestId("perf-managed-row-pin-1").querySelectorAll("td")
+    expect(cells[0]).toHaveClass("sticky", "left-0")
+    expect(cells[cells.length - 1]).toHaveClass("sticky", "right-0")
+    expect(screen.getByText("worker")).toHaveAttribute("title", "worker")
+  })
+
   it("groups rows by subsystem and joins CPU/memory by PID", () => {
     render(
       <PerfManagedProcesses

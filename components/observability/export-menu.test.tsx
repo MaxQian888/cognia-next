@@ -80,6 +80,7 @@ const traces: TraceRollupRow[] = [
   {
     traceId: "t1",
     rootName: "chat",
+    rootOperation: "chat",
     startTime: 0,
     durationMs: 10,
     spanCount: 1,

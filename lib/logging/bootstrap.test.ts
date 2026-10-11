@@ -437,6 +437,25 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     )
   })
 
+  it("registers no native leg outside the desktop shell, even with the toggle on", async () => {
+    mockIsTauri.mockReturnValue(false)
+    const mod = await import("./bootstrap")
+    const state = mod.bootstrapLogger()
+    // The setting is untouched — it is the user's, and it decides on desktop.
+    expect(state.transports.native).toBe(true)
+    // But neither Tauri-only transport is registered, so neither can report a
+    // permanent `offline` into the health summary.
+    expect(mod.listRegisteredTransports()).not.toContain("native")
+    expect(mod.listRegisteredTransports()).not.toContain("breadcrumb")
+  })
+
+  it("registers the native leg and crash breadcrumbs on the desktop", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+    expect(mod.listRegisteredTransports()).toEqual(expect.arrayContaining(["native", "breadcrumb"]))
+  })
+
   it("registers the default transports on first run", async () => {
     const mod = await import("./bootstrap")
     const state = mod.bootstrapLogger()

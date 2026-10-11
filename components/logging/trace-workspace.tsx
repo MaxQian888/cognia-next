@@ -812,6 +812,18 @@ export function TraceWorkspace({
       return <div className="min-h-0 flex-1" data-testid="trace-layout-pending" />
     }
 
+    // Nothing in the list and nothing selected: the waterfall and span panes
+    // could only say "select a trace" / "select a span" about a list with no
+    // rows, so the empty state used to sit in a 30% column beside two blank
+    // ones. The list takes the width until there is something to open.
+    if (tier !== "stacked" && traces.length === 0 && selectedTraceId === null) {
+      return (
+        <div className="min-h-0 flex-1" data-testid="trace-empty-layout">
+          {renderList()}
+        </div>
+      )
+    }
+
     if (tier === "stacked") {
       const sheetOpen = sheetTraceId !== null && sheetTraceId === selectedTraceId
       return (
@@ -1122,7 +1134,11 @@ function TraceRow({
             />
           )}
           <span className="min-w-0 flex-1 truncate text-xs font-medium" title={trace.rootName}>
-            {trace.rootName}
+            {labels.spanName({
+              operationName: trace.rootOperation,
+              agentName: trace.rootAgentName,
+              toolName: trace.rootToolName,
+            })}
           </span>
           <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
             {fmt.duration(trace.durationMs)}

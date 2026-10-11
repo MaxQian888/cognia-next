@@ -93,6 +93,19 @@ describe("PerfRuntimeTab", () => {
     expect(openTraceDirMock).toHaveBeenCalled()
   })
 
+  it("treats a failed trace listing as no traces instead of an unhandled rejection", async () => {
+    listTracesMock.mockRejectedValue(new Error("ipc down"))
+    render(<PerfRuntimeTab runtime={makeRuntime()} />)
+    await waitFor(() => expect(screen.getByTestId("perf-traces-empty")).toBeInTheDocument())
+  })
+
+  it("spans an odd last stat across the phone grid instead of leaving a hole", () => {
+    render(<PerfRuntimeTab runtime={makeRuntime()} />)
+    const grid = screen.getByTestId("perf-rt-workers").parentElement!
+    expect(grid.className).toContain("[&>*:last-child:nth-child(odd)]:col-span-2")
+    expect(grid.className).toContain("md:[&>*:last-child:nth-child(odd)]:col-span-1")
+  })
+
   it("shows the empty-trace message when none exist", async () => {
     listTracesMock.mockResolvedValue([])
     render(<PerfRuntimeTab runtime={makeRuntime()} />)

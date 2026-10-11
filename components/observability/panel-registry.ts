@@ -142,79 +142,61 @@ export function panelById(id: string): PanelDef | undefined {
 }
 
 /** Two-column phone layout: stat tiles half-width and paired, the rest full. */
+/**
+ * The KPI stats. They render as the `KpiStrip` above the grid, not as grid
+ * tiles: the strip is one flat row of numbers that reflows by its own width,
+ * so a stat has no layout to persist, drag or resize.
+ */
+export const KPI_PANELS: readonly PanelDef[] = PANELS.filter((p) => p.kind === "stat")
+
+/** Everything with an axis or a breakdown — the tiles the draggable grid lays out. */
+export const GRID_PANELS: readonly PanelDef[] = PANELS.filter((p) => p.kind !== "stat")
+
+/** Phone layout: 2 columns, and every chart takes both — a ~170px chart is
+ * unreadable. */
 function packSmall(): PanelLayoutItem[] {
-  const out: PanelLayoutItem[] = []
   let y = 0
-  let column = 0
-  for (const panel of PANELS) {
-    if (panel.kind === "stat") {
-      out.push({ i: panel.id, x: column, y, w: 1, h: 2, minW: 1, minH: 2 })
-      column = column === 0 ? 1 : 0
-      if (column === 0) y += 2
-      continue
-    }
-    // A wide panel always starts its own row.
-    if (column === 1) {
-      y += 2
-      column = 0
-    }
-    out.push({ i: panel.id, x: 0, y, w: 2, h: 6, minW: 1, minH: 2 })
+  return GRID_PANELS.map((panel) => {
+    const item = { i: panel.id, x: 0, y, w: 2, h: 6, minW: 1, minH: 4 }
     y += 6
-  }
-  return out
+    return item
+  })
 }
 
 /**
- * Default grid layout. `lg` (12 col) is the curated Grafana-style arrangement;
- * `md` (8 col) and `sm` (2 col) stack progressively for narrow viewports.
+ * The grid's default layouts. Only `GRID_PANELS` appear: a stored layout that
+ * still carries a `kpi-*` tile from before the strip existed loses it in
+ * `normalizePanelLayouts` (which keeps only ids the defaults know), and RGL's
+ * vertical compaction closes the rows it leaves.
  */
 export function defaultLayouts(): PanelLayouts {
   return {
     lg: [
-      { i: "kpi-cost", x: 0, y: 0, w: 2, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-spans", x: 2, y: 0, w: 2, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-errors", x: 4, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-cache", x: 7, y: 0, w: 2, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-latency", x: 9, y: 0, w: 3, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-rate", x: 0, y: 2, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-tools", x: 4, y: 2, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-tool-failures", x: 8, y: 2, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "ts-cost", x: 0, y: 4, w: 6, h: 6, minW: 3, minH: 4 },
-      { i: "ts-rate", x: 6, y: 4, w: 6, h: 6, minW: 3, minH: 4 },
-      { i: "ts-errors", x: 0, y: 10, w: 6, h: 6, minW: 3, minH: 4 },
-      { i: "ts-latency", x: 6, y: 10, w: 6, h: 6, minW: 3, minH: 4 },
-      { i: "ts-tokens", x: 0, y: 16, w: 12, h: 6, minW: 4, minH: 4 },
-      { i: "bd-model", x: 0, y: 22, w: 6, h: 7, minW: 3, minH: 5 },
-      { i: "bd-surface", x: 6, y: 22, w: 6, h: 7, minW: 3, minH: 5 },
-      { i: "bd-provider", x: 0, y: 29, w: 6, h: 7, minW: 3, minH: 5 },
-      { i: "bd-project", x: 6, y: 29, w: 6, h: 7, minW: 3, minH: 5 },
-      { i: "bd-operation", x: 0, y: 36, w: 6, h: 7, minW: 3, minH: 5 },
-      { i: "bd-tool", x: 6, y: 36, w: 6, h: 7, minW: 3, minH: 5 },
+      { i: "ts-cost", x: 0, y: 0, w: 6, h: 6, minW: 3, minH: 4 },
+      { i: "ts-rate", x: 6, y: 0, w: 6, h: 6, minW: 3, minH: 4 },
+      { i: "ts-errors", x: 0, y: 6, w: 6, h: 6, minW: 3, minH: 4 },
+      { i: "ts-latency", x: 6, y: 6, w: 6, h: 6, minW: 3, minH: 4 },
+      { i: "ts-tokens", x: 0, y: 12, w: 12, h: 6, minW: 4, minH: 4 },
+      { i: "bd-model", x: 0, y: 18, w: 6, h: 7, minW: 3, minH: 5 },
+      { i: "bd-surface", x: 6, y: 18, w: 6, h: 7, minW: 3, minH: 5 },
+      { i: "bd-provider", x: 0, y: 25, w: 6, h: 7, minW: 3, minH: 5 },
+      { i: "bd-project", x: 6, y: 25, w: 6, h: 7, minW: 3, minH: 5 },
+      { i: "bd-operation", x: 0, y: 32, w: 6, h: 7, minW: 3, minH: 5 },
+      { i: "bd-tool", x: 6, y: 32, w: 6, h: 7, minW: 3, minH: 5 },
     ],
     md: [
-      { i: "kpi-cost", x: 0, y: 0, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-spans", x: 4, y: 0, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-errors", x: 0, y: 2, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-cache", x: 4, y: 2, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-latency", x: 0, y: 4, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-rate", x: 4, y: 4, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-tools", x: 0, y: 6, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "kpi-tool-failures", x: 4, y: 6, w: 4, h: 2, minW: 2, minH: 2 },
-      { i: "ts-cost", x: 0, y: 8, w: 8, h: 6, minW: 3, minH: 4 },
-      { i: "ts-rate", x: 0, y: 14, w: 8, h: 6, minW: 3, minH: 4 },
-      { i: "ts-errors", x: 0, y: 20, w: 8, h: 6, minW: 3, minH: 4 },
-      { i: "ts-latency", x: 0, y: 26, w: 8, h: 6, minW: 3, minH: 4 },
-      { i: "ts-tokens", x: 0, y: 32, w: 8, h: 6, minW: 4, minH: 4 },
-      { i: "bd-model", x: 0, y: 38, w: 4, h: 7, minW: 3, minH: 5 },
-      { i: "bd-surface", x: 4, y: 38, w: 4, h: 7, minW: 3, minH: 5 },
-      { i: "bd-provider", x: 0, y: 45, w: 4, h: 7, minW: 3, minH: 5 },
-      { i: "bd-project", x: 4, y: 45, w: 4, h: 7, minW: 3, minH: 5 },
-      { i: "bd-operation", x: 0, y: 52, w: 4, h: 7, minW: 3, minH: 5 },
-      { i: "bd-tool", x: 4, y: 52, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "ts-cost", x: 0, y: 0, w: 8, h: 6, minW: 3, minH: 4 },
+      { i: "ts-rate", x: 0, y: 6, w: 8, h: 6, minW: 3, minH: 4 },
+      { i: "ts-errors", x: 0, y: 12, w: 8, h: 6, minW: 3, minH: 4 },
+      { i: "ts-latency", x: 0, y: 18, w: 8, h: 6, minW: 3, minH: 4 },
+      { i: "ts-tokens", x: 0, y: 24, w: 8, h: 6, minW: 4, minH: 4 },
+      { i: "bd-model", x: 0, y: 30, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "bd-surface", x: 4, y: 30, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "bd-provider", x: 0, y: 37, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "bd-project", x: 4, y: 37, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "bd-operation", x: 0, y: 44, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "bd-tool", x: 4, y: 44, w: 4, h: 7, minW: 3, minH: 5 },
     ],
-    // 2 columns. KPI tiles pair up (a phone showing eight full-width numbers
-    // before the first chart is three screens of scrolling); everything with an
-    // axis takes the full width, because a ~170px chart is unreadable.
     sm: packSmall(),
   }
 }

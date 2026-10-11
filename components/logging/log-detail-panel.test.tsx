@@ -603,4 +603,11 @@ describe("LogDetailPanel — embedded variant", () => {
     const { container } = renderPanel({ log: makeLog(), variant: "embedded" })
     expect(container.querySelector('[data-slot="scroll-area"]')).toBeNull()
   })
+  it("sizes its metadata columns by its own width, not the viewport's", () => {
+    const { container } = renderPanel({ log: makeLog() })
+    expect(container.querySelector('[class*="@container/log-detail"]')).not.toBeNull()
+    const grid = container.querySelector('[class*="@sm/log-detail:grid-cols-2"]')!
+    expect(grid).not.toBeNull()
+    expect(grid).not.toHaveClass("sm:grid-cols-2")
+  })
 })

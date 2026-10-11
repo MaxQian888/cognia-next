@@ -31,6 +31,7 @@ describe("export-csv", () => {
       {
         traceId: "t1",
         rootName: "chat, main",
+        rootOperation: "chat",
         startTime: 0,
         durationMs: 1200,
         spanCount: 3,

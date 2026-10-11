@@ -78,7 +78,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { formatByteSize } from "@/components/logging/incident-workspace"
 import type { DiagnosticRoleStatus } from "@/hooks/diagnostic-service/use-diagnostic-connection"
 import type { useTriageConsole } from "@/hooks/diagnostic-service/use-triage-console"
-import { useEdgeResize, useIsNarrow, useMediaQuery } from "@/hooks/ui"
+import { useCompactLayout, useEdgeResize, useMediaQuery } from "@/hooks/ui"
 import { downloadBlob } from "@/lib/files/download"
 import {
   isArtifactKind,
@@ -169,7 +169,7 @@ function ConsoleGate({
 }) {
   return (
     <div className="flex flex-1 items-center justify-center p-6">
-      <Empty className="max-w-md border-y py-8" data-testid={testId}>
+      <Empty className="max-w-md border-0 py-8" data-testid={testId}>
         <EmptyHeader>
           <EmptyTitle className="text-base">{title}</EmptyTitle>
           <EmptyDescription>{description}</EmptyDescription>
@@ -284,7 +284,11 @@ function ReadyConsole({
   const t = useTranslations("logging.workspace.console")
   const format = useFormatter()
   const wide = useMediaQuery(CONSOLE_DETAIL_PANE_QUERY)
-  const narrow = useIsNarrow()
+  // Bottom sheet vs side sheet follows the app's compact predicate, not the
+  // viewport alone: a native tablet renders the phone shell (bottom tab bar),
+  // and its detail must slide up like a phone's — `useIsNarrow` sent it in
+  // from the right on any tablet 768px or wider.
+  const narrow = useCompactLayout()
   const detailWidth = useLogWorkspaceStore((state) => state.detailWidth)
   const setDetailWidth = useLogWorkspaceStore((state) => state.setDetailWidth)
   // Whether the user asked for the detail below `xl`; a selection carried over
@@ -381,7 +385,7 @@ function ReadyConsole({
                 {t("groups.loading")}
               </div>
             ) : triage.groups.length === 0 ? (
-              <Empty className="w-full min-w-0 border-y py-8">
+              <Empty className="w-full min-w-0 border-0 py-8">
                 <EmptyHeader className="w-full min-w-0">
                   <EmptyTitle className="text-base">{t("groups.empty")}</EmptyTitle>
                   <EmptyDescription>{t("groups.emptyDescription")}</EmptyDescription>
@@ -466,7 +470,12 @@ function ReadyConsole({
       <Sheet open={!wide && sheetOpen && detailBody !== null} onOpenChange={setSheetOpen}>
         <SheetContent
           side={narrow ? "bottom" : "right"}
-          className={cn("p-0", narrow ? "h-dvh max-h-dvh" : "w-[min(92vw,560px)] sm:max-w-none")}
+          // Room for the sheet's own close button: a long exception title ran
+          // underneath it.
+          className={cn(
+            "p-0 [&_[data-detail-header]]:pr-10",
+            narrow ? "h-dvh max-h-dvh" : "w-[min(92vw,560px)] sm:max-w-none"
+          )}
           data-testid="console-detail-drawer"
         >
           <SheetHeader className="sr-only">
@@ -540,7 +549,7 @@ function GroupDetailPanel({
   return (
     <ScrollArea className="h-full">
       <div className="space-y-4 p-4">
-        <div>
+        <div data-detail-header>
           <h3 className="font-semibold break-words">
             {detail.group.exception} · {detail.group.module}
           </h3>
