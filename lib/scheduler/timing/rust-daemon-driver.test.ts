@@ -13,13 +13,14 @@ const mockedListen = listenTaskDue as jest.MockedFunction<typeof listenTaskDue>
 
 describe("RustDaemonTimingDriver", () => {
   let driver: RustDaemonTimingDriver
-  let emit: (taskId: string, firedAtMs: number) => void
+  let emit: (taskId: string, firedAtMs: number, scheduledForMs?: number) => void
   const unlisten = jest.fn()
 
   beforeEach(() => {
     jest.clearAllMocks()
     mockedListen.mockImplementation(async (handler) => {
-      emit = (taskId, firedAtMs) => handler({ taskId, firedAtMs })
+      emit = (taskId, firedAtMs, scheduledForMs = firedAtMs) =>
+        handler({ taskId, firedAtMs, scheduledForMs })
       return unlisten
     })
     driver = new RustDaemonTimingDriver()
@@ -68,25 +69,33 @@ describe("RustDaemonTimingDriver", () => {
     expect(mockedDisarm).toHaveBeenCalledWith("task_2")
   })
 
-  it("reports the armed slot (not the daemon's fired-at) on due", async () => {
+  it("reports the slot the daemon fired, not when it got to it", async () => {
     const due = jest.fn()
     driver.onDue(due)
     await driver.start()
 
     driver.arm("task_1", 1700000000000)
-    // Daemon fires with a slightly-later actual instant.
-    emit("task_1", 1700000000050)
+    // The laptop slept through the slot; the daemon fires it two hours late.
+    emit("task_1", 1700007200000, 1700000000000)
 
     expect(due).toHaveBeenCalledWith("task_1", 1700000000000)
   })
 
-  it("falls back to the daemon's fired-at when no armed slot is known", async () => {
+  it("keeps a re-arm that landed between the fire and the listener", async () => {
     const due = jest.fn()
     driver.onDue(due)
     await driver.start()
 
-    emit("unknown_task", 1700000000099)
-    expect(due).toHaveBeenCalledWith("unknown_task", 1700000000099)
+    await driver.arm("task_1", 1700000000000)
+    await driver.arm("task_1", 1700000060000)
+    emit("task_1", 1700000000050, 1700000000000)
+    expect(due).toHaveBeenCalledWith("task_1", 1700000000000)
+
+    // The newer arm is still tracked, so stopping disarms it.
+    driver.stop()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mockedDisarm).toHaveBeenCalledWith("task_1")
   })
 
   it("start is idempotent and stop unlistens", async () => {
@@ -108,7 +117,8 @@ describe("RustDaemonTimingDriver", () => {
     mockedListen.mockImplementationOnce(
       (handler) =>
         new Promise((resolve) => {
-          emit = (taskId, firedAtMs) => handler({ taskId, firedAtMs })
+          emit = (taskId, firedAtMs, scheduledForMs = firedAtMs) =>
+            handler({ taskId, firedAtMs, scheduledForMs })
           resolveListen = resolve
         })
     )

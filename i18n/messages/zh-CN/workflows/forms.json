@@ -3554,6 +3554,11 @@
     }
   },
   "webhookTrigger": {
+    "deliveryIdHeader": {
+      "hint": "发送方重试同一次投递时会重复发送的请求头，例如 X-GitHub-Delivery。这样重试的投递不会再次启动运行。留空则读取 Idempotency-Key。",
+      "label": "投递 ID 请求头（可选）",
+      "placeholder": "X-GitHub-Delivery"
+    },
     "hmacSecret": {
       "hint": "校验 X-Signature-256 头部。留空跳过校验。",
       "label": "HMAC 密钥（可选）"

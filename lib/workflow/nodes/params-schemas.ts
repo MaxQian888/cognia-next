@@ -171,6 +171,12 @@ const WebhookTriggerParams = z.object({
   path: requiredString("required").regex(/^[a-z0-9][a-z0-9-_/]*$/i, "webhookPath"),
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "*"]).optional(),
   hmacSecret: optionalString,
+  // An HTTP header name (RFC 9110 token), so the receiver can read it.
+  deliveryIdHeader: z
+    .string()
+    .trim()
+    .regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]*$/, "headerName")
+    .optional(),
   responseStatus: numberRange(100, 599).optional(),
   responseTemplate: optionalString,
 })

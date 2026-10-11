@@ -44,6 +44,10 @@ describe("isTriggerEvent", () => {
     ["missing originAt", { workflowId: "wf", kind: "trigger.cron" }],
     ["non-numeric originAt", { workflowId: "wf", kind: "trigger.cron", originAt: "x" }],
     ["non-string triggerId", { workflowId: "wf", kind: "trigger.cron", triggerId: 7, originAt: 0 }],
+    [
+      "non-string occurrenceKey",
+      { workflowId: "wf", kind: "trigger.webhook", occurrenceKey: 7, originAt: 0 },
+    ],
   ])("rejects %s", (_label, value) => {
     expect(isTriggerEvent(value as unknown)).toBe(false)
   })
@@ -193,6 +197,27 @@ describe("dispatchTrigger", () => {
         idempotencyKey: expect.any(String),
       })
     )
+  })
+
+  it("keys a webhook on its delivery id, and leaves one without an id unkeyed", async () => {
+    const dispatchPlaced = jest.fn().mockResolvedValue({ kind: "local" })
+    const base: TriggerEvent = {
+      workflowId: "workflow-hook",
+      kind: "trigger.webhook",
+      triggerId: "hook-1",
+      payload: {},
+      originAt: 1_700_000_000_100,
+    }
+
+    await dispatchTrigger(base, undefined, { dispatchPlaced })
+    await dispatchTrigger({ ...base, originAt: 1_700_000_000_200 }, undefined, { dispatchPlaced })
+    await dispatchTrigger({ ...base, occurrenceKey: "guid-1" }, undefined, { dispatchPlaced })
+
+    const keys = dispatchPlaced.mock.calls.map(([input]) => input.idempotencyKey)
+    // Same second, no delivery id: two runs, neither able to absorb the other.
+    expect(keys[0]).toBeUndefined()
+    expect(keys[1]).toBeUndefined()
+    expect(keys[2]).toBe("trg:workflow-hook:hook-1:occ:guid-1")
   })
 
   it("propagates unexpected placement failures for triggers without an embedded id", async () => {

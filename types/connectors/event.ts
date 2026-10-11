@@ -207,6 +207,27 @@ export function deliveryTargetFromEvent(event: NormalizedInboundEvent): Conversa
   }
 }
 
+/**
+ * The platform's own identity for an inbound message, for keying the workflow
+ * runs it starts (ADR-0224 A9).
+ *
+ * Built from what the platform assigned — the bot account, the chat, the
+ * message id — and never from the local adapter id, which differs between two
+ * hosts connected to the same account. Several platforms only guarantee a
+ * message id within one chat, so the chat is part of it. The message id is the
+ * same one the bus deduplicates inbound messages on.
+ */
+export function connectorOccurrenceKey(event: NormalizedInboundEvent): string {
+  let chat: string
+  try {
+    const parsed = parseConversationKey(event.conversationKey)
+    chat = parsed.threadId ? `${parsed.remoteChatId}/${parsed.threadId}` : parsed.remoteChatId
+  } catch {
+    chat = event.channel.platformChannelId ?? event.channel.id
+  }
+  return `${event.platform}:${event.selfId}:${chat}:${event.messageId}`
+}
+
 /** Separator every `conversationKey` uses. Exported so a prefix scan cannot
  * hard-code it out of sync with {@link buildConversationKey}. */
 export const CONVERSATION_KEY_SEP = ":"

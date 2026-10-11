@@ -6,9 +6,10 @@
  * minimized to the tray (renderer timers are throttled on hidden webviews).
  * There is no leader election: the single native process is the sole authority.
  *
- * The daemon's `scheduler:task-due` event only signals "this id is due now"; to
- * keep the *scheduled slot* stable (important for interval cadence) we report
- * the originally-armed instant, tracked locally per task id.
+ * The daemon's `scheduler:task-due` event carries the instant the task was
+ * armed for, and that is the slot reported: it is the occurrence, so a fire
+ * the daemon reached late (a sleeping laptop) keeps the slot's identity, and a
+ * re-arm that lands between the fire and this listener cannot relabel it.
  */
 
 import type { SchedulerTimingDriver, TaskDueCallback } from "@/types/scheduler"
@@ -18,7 +19,7 @@ import { armTask, disarmTask, listenTaskDue } from "../daemon-bridge"
 export class RustDaemonTimingDriver implements SchedulerTimingDriver {
   readonly supportsLeaderElection = false as const
 
-  /** Armed instants by task id, so a fire reports the intended slot, not "now". */
+  /** Armed instants by task id; a re-arm that raced a fire stays armed. */
   private armedAt = new Map<string, number>()
   private dueCb: TaskDueCallback | null = null
   private unlisten: (() => void) | null = null
@@ -36,9 +37,9 @@ export class RustDaemonTimingDriver implements SchedulerTimingDriver {
     const startPromise = (async () => {
       const unlisten = await listenTaskDue((event) => {
         if (version !== this.lifecycleVersion) return
-        const fireAtMs = this.armedAt.get(event.taskId) ?? event.firedAtMs
-        this.armedAt.delete(event.taskId)
-        this.dueCb?.(event.taskId, fireAtMs)
+        const slotMs = event.scheduledForMs
+        if (this.armedAt.get(event.taskId) === slotMs) this.armedAt.delete(event.taskId)
+        this.dueCb?.(event.taskId, slotMs)
       })
 
       if (version !== this.lifecycleVersion) {

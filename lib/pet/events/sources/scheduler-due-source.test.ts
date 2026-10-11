@@ -16,8 +16,8 @@ describe("createSchedulerDueSource", () => {
     const dispose = createSchedulerDueSource({ subscribe })((e) => events.push({ ...e, at: 0 }))
     await flush()
 
-    push({ taskId: "t1", firedAtMs: 111 })
-    push({ taskId: "t2", firedAtMs: 222 })
+    push({ taskId: "t1", firedAtMs: 111, scheduledForMs: 110 })
+    push({ taskId: "t2", firedAtMs: 222, scheduledForMs: 220 })
 
     expect(events).toEqual([
       { source: "scheduler", kind: "scheduledRunDue", meta: { taskId: "t1" }, at: 0 },

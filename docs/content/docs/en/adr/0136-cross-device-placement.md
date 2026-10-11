@@ -90,11 +90,10 @@ simply stop the day that machine is shut down, with nothing explaining why.
 
 ### 4. Deterministic idempotency, not an election
 
-Cron double-fire is solved by making the *work* identifiable rather than by
-electing an owner. `deterministicTriggerIdempotencyKey` derives a key from what
-the hosts agree on — workflow, trigger, and the scheduled instant aligned to a
-second — so two hosts observing one occurrence compute one key and the existing
-invocation ledger absorbs the second.
+Double-fire is addressed by making the *work* identifiable rather than by
+electing an owner. `deterministicTriggerIdempotencyKey` derives a key from the
+occurrence itself, so every host that sees one occurrence computes the same
+key, and the invocation ledger absorbs a second start under it.
 
 The ledger was already sound (deterministic primary key, single-transaction
 insert, duplicate `add` resolving to the existing row); it was being bypassed.
@@ -104,6 +103,30 @@ minted per host.
 
 Only time-derived and externally-identified triggers get a key. Two manual
 clicks are two runs.
+
+> **Corrected (ADR-0224 A9).** This section first claimed that the ledger
+> absorbs the second of two *hosts* firing one occurrence. It does not: the
+> ledger lives in each host's own account database, and nothing shares it. A
+> key absorbs a duplicate on the host that holds it: a redelivered webhook, a
+> connector message replayed after a restart, a slot reached by two fire
+> paths. Two hosts compute the same key but can still both run the
+> occurrence. What keeps a schedule on one host is the explicit authority
+> (§3); a cross-host fence is phase B of ADR-0224.
+>
+> The keys themselves also changed:
+> - A time-derived trigger keys on its **slot**. The cron daemon and the
+>   scheduler's alarm now report the slot they fired, not their wake time. An
+>   OS-promoted wake runs as the last slot that elapsed.
+> - An event trigger keys on the **source's own id**: a webhook delivery id
+>   (a configured header, or `Idempotency-Key`), a connector's platform
+>   message id without the local adapter id, an integration delivery. It
+>   used to key on the second it arrived in, which folded two webhooks or two
+>   messages in the same second into one run. An event with no such id gets
+>   no key.
+> - An automatic fire of a scheduled task's slot gets an execution id named
+>   after the slot, so a second fire of that slot on the same host finds the
+>   first one's row instead of running again. A Bot's timed tick keys its
+>   event on the slot.
 
 ### 5. Visible degradation (`lib/placement/degraded-audit.ts`)
 
@@ -200,8 +223,9 @@ sketch:
 ## Not done
 
 - **Inter-host authority negotiation.** Deliberately absent — the authority is
-  explicit configuration, and the deterministic idempotency key is what makes a
-  race harmless rather than an election. The grace window is likewise a local
+  explicit configuration. The deterministic idempotency key does not make a
+  race between two hosts harmless, because each host's ledger is its own (see
+  the correction under decision 4); the lease fence of ADR-0224 phase B does. The grace window is likewise a local
   preference: no election, no lease negotiation, no host-config replication.
 - **A `remote-step` domain runner.** The domain is reserved; nothing enqueues it
   yet, and inventing a worker step protocol to fill it would freeze a contract

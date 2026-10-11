@@ -171,6 +171,10 @@ export async function publishIntegrationEvent(
     resourceKind: event.resource?.kind,
     resourceId: event.resource?.id,
   })
+  // Keyed on the delivery, the same identity the event row is deduplicated on
+  // above, so a redelivered event never starts a second run and two events in
+  // the same second never share one (ADR-0224 A9).
+  const occurrenceKey = `${pluginId}:${event.integrationId}:${event.accountId}:${event.deliveryId}`
   await Promise.all(
     matches.map(async (match) => {
       await dispatchTrigger({
@@ -179,6 +183,7 @@ export async function publishIntegrationEvent(
         triggerId: match.nodeId,
         payload,
         originAt: Date.now(),
+        occurrenceKey,
       })
     })
   )

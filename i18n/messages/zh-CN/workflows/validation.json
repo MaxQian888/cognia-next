@@ -2,6 +2,7 @@
   "blockedRunTitle": "请先修复校验问题再运行",
   "blockedSaveTitle": "工作流已保存，但仍有 {count} 个未解决的问题",
   "cronExpr": "请使用五字段 cron 表达式（分 时 日 月 周）",
+  "headerName": "请输入请求头名称：字母、数字和短划线，不能包含空格",
   "invalid": "无效值",
   "invalidFormat": "格式无效",
   "invalidType": "应为 {expected}",

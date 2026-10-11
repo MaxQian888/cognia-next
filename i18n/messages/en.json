@@ -63711,6 +63711,11 @@
         }
       },
       "webhookTrigger": {
+        "deliveryIdHeader": {
+          "hint": "A header the sender repeats when it retries a delivery, such as X-GitHub-Delivery. A retried delivery then does not start a second run. Leave blank to read Idempotency-Key.",
+          "label": "Delivery ID header (optional)",
+          "placeholder": "X-GitHub-Delivery"
+        },
         "hmacSecret": {
           "hint": "Verifies the X-Signature-256 header. Leave blank to skip verification.",
           "label": "HMAC secret (optional)"
@@ -66557,6 +66562,7 @@
       "blockedRunTitle": "Fix validation issues before running",
       "blockedSaveTitle": "Workflow saved with {count, plural, one {# unresolved issue} other {# unresolved issues}}",
       "cronExpr": "Use a 5-field cron expression (minute hour day month weekday)",
+      "headerName": "Use a header name: letters, digits, and dashes, with no spaces",
       "invalid": "Invalid value",
       "invalidFormat": "Invalid format",
       "invalidType": "Expected {expected}",

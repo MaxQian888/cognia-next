@@ -212,6 +212,27 @@ pub struct WebhookEntry {
     pub await_response: bool,
     /// How long to hold the request before falling back. 0 = use the default.
     pub response_timeout_ms: u64,
+    /// Request header naming the sender's delivery id. `None` reads the
+    /// standard `Idempotency-Key` header.
+    pub delivery_id_header: Option<String>,
+}
+
+/// Header read for a delivery id when a webhook trigger names none.
+const DEFAULT_DELIVERY_ID_HEADER: &str = "idempotency-key";
+
+/// Longest delivery id taken as an occurrence key. A longer value is not
+/// trimmed into one: two deliveries sharing a prefix must not become one run.
+const MAX_DELIVERY_ID_LEN: usize = 256;
+
+/// The sender's own id for this delivery, which a retry repeats. Without one
+/// the run is a one-off: two requests in the same second are two runs.
+fn webhook_occurrence_key(headers: &HeaderMap, configured: Option<&str>) -> Option<String> {
+    let name = configured
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(DEFAULT_DELIVERY_ID_HEADER);
+    let value = header_value(headers, name)?.trim();
+    (!value.is_empty() && value.len() <= MAX_DELIVERY_ID_LEN).then(|| value.to_string())
 }
 
 /// Public router handle. Held inside `WorkflowState`; cloneable so the axum
@@ -817,6 +838,7 @@ async fn handle_webhook(
         trigger_id: Some(entry.trigger_id.clone()),
         payload: payload_value,
         origin_at: chrono::Utc::now().timestamp_millis(),
+        occurrence_key: webhook_occurrence_key(&headers, entry.delivery_id_header.as_deref()),
         binding: entry.binding.clone(),
     };
     state.emitter.emit(event);
@@ -953,6 +975,7 @@ mod tests {
             response_body: None,
             await_response: false,
             response_timeout_ms: 0,
+            delivery_id_header: None,
         }
     }
 
@@ -1064,6 +1087,67 @@ mod tests {
         assert_eq!(events[0].kind, "trigger.webhook");
         assert_eq!(events[0].workflow_id, "wf_hello");
 
+        router.stop();
+    }
+
+    #[tokio::test]
+    async fn a_delivery_id_keys_the_occurrence_and_its_absence_keys_nothing() {
+        let router = WebhookRouter::new();
+        router.upsert(entry("plain")).unwrap();
+        let mut github = entry("github");
+        github.delivery_id_header = Some("X-GitHub-Delivery".into());
+        router.upsert(github).unwrap();
+        let recorder = Arc::new(RecordingEmitter::default());
+        let bound = router.start(recorder.clone(), 0).await.unwrap();
+        let client = http_client();
+        let post = |path: &str, header: Option<(&str, String)>| {
+            let mut request = client
+                .post(format!("http://{bound}/webhook/{path}"))
+                .body("{}");
+            if let Some((name, value)) = header {
+                request = request.header(name, value);
+            }
+            request.send()
+        };
+
+        // Two payloads in the same second with no delivery id: two
+        // occurrences, neither keyed, so neither can absorb the other.
+        post("plain", None).await.unwrap();
+        post("plain", None).await.unwrap();
+        // The standard header, and a named provider header.
+        post("plain", Some(("Idempotency-Key", " key-1 ".into())))
+            .await
+            .unwrap();
+        post("github", Some(("X-GitHub-Delivery", "guid-1".into())))
+            .await
+            .unwrap();
+        // A named header replaces the default one rather than adding to it.
+        post("github", Some(("Idempotency-Key", "ignored".into())))
+            .await
+            .unwrap();
+        // Too long to be an id: not trimmed into a key that could collide.
+        post("plain", Some(("Idempotency-Key", "x".repeat(257))))
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let keys: Vec<_> = recorder
+            .fired
+            .lock()
+            .iter()
+            .map(|event| event.occurrence_key.clone())
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                None,
+                None,
+                Some("key-1".to_string()),
+                Some("guid-1".to_string()),
+                None,
+                None,
+            ]
+        );
         router.stop();
     }
 

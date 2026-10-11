@@ -466,6 +466,7 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
   const path = readString(params, "path")
   const method = readString(params, "method", "POST")
   const hmacSecret = readString(params, "hmacSecret")
+  const deliveryIdHeader = readString(params, "deliveryIdHeader")
   const responseStatus = readNumber(params, "responseStatus", 200)
   const responseTemplate = readString(params, "responseTemplate")
   return (
@@ -513,6 +514,20 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
           type="password"
           value={hmacSecret}
           onChange={(e) => onChange(patchParam(params, "hmacSecret", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("deliveryIdHeader.label")}
+        htmlFor="wh-delivery-id"
+        hint={t("deliveryIdHeader.hint")}
+        name="deliveryIdHeader"
+      >
+        <Input
+          id="wh-delivery-id"
+          value={deliveryIdHeader}
+          onChange={(e) => onChange(patchParam(params, "deliveryIdHeader", e.target.value))}
+          placeholder={t("deliveryIdHeader.placeholder")}
+          className="font-mono text-xs"
         />
       </Field>
       <FieldRow columns={3}>

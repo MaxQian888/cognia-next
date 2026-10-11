@@ -88,6 +88,7 @@ mod tests {
             trigger_id: Some("trg".into()),
             payload: serde_json::Value::Null,
             origin_at: 0,
+            occurrence_key: None,
             binding: None,
         });
         assert_eq!(*count.lock().unwrap(), 1);

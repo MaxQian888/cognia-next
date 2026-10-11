@@ -92,6 +92,7 @@ function unrefTimer(handle: ReturnType<typeof setInterval> | null): void {
 }
 import { normalizeConversationalTaskPayload } from "./conversational-task-authoring"
 import { resolveCatchupDefaults } from "./catchup-policy"
+import { latestElapsedSlot, scheduledOccurrenceExecutionId } from "./occurrence"
 import {
   promoteToSystemTask,
   promotionTokenMatches,
@@ -513,6 +514,12 @@ class TaskSchedulerImpl {
   private executionControllers: Map<string, AbortController> = new Map()
   /** Buffered starts per task for the queue-one / queue-all overlap policies. */
   private queues: Map<string, QueuedStart[]> = new Map()
+  /**
+   * Slot occurrences a start is deciding on right now (see `executeTask`).
+   * Held from before the row lookup until the start is running, buffered or
+   * recorded, so two fires of one slot cannot both miss each other.
+   */
+  private occurrenceClaims: Set<string> = new Set()
   private retryChains: Set<string> = new Set()
   /** Retry timers must not outlive pause/delete/stop lifecycle transitions. */
   private retryTimers: Map<string, Set<ReturnType<typeof setTimeout>>> = new Map()
@@ -1833,7 +1840,18 @@ class TaskSchedulerImpl {
       log.info(`Ignored promoted-task wake for ${taskId}: task is ${task.status}`)
       return null
     }
-    return this.executeTask(task, 0, { triggerSource: "schedule", scheduledFor: new Date() })
+    // The OS timer fired for a slot; name the run after that slot, not the
+    // moment the wake reached us (ADR-0224 A9). A wake late by hours, or a
+    // second wake for the same slot, still belongs to the same occurrence.
+    // A wake with no elapsed slot (it came early, or the row has no
+    // `nextRunAt`) has nothing to anchor to and runs as itself.
+    const now = new Date()
+    const slot = latestElapsedSlot({
+      nextRunAt: task.nextRunAt,
+      now,
+      next: (after) => this.getNextRunAfter(task.trigger, after),
+    })
+    return this.executeTask(task, 0, { triggerSource: "schedule", scheduledFor: slot ?? now })
   }
 
   /**
@@ -2327,6 +2345,63 @@ class TaskSchedulerImpl {
     task: ScheduledTask,
     retryAttempt: number = 0,
     context: ExecuteTaskContext = {}
+  ): Promise<TaskExecution> {
+    // An automatic fire of a slot is that slot's one start on this host
+    // (ADR-0224 A9). Its row is named after the slot, so a second fire of the
+    // same slot (the catch-up path and a late alarm, an OS wake and a
+    // restart) finds the first one instead of running again.
+    const occurrenceId = context.executionId
+      ? undefined
+      : scheduledOccurrenceExecutionId({
+          taskId: task.id,
+          triggerSource: context.triggerSource ?? (retryAttempt > 0 ? "retry" : "schedule"),
+          ...(context.scheduledFor ? { scheduledFor: context.scheduledFor } : {}),
+        })
+    if (!occurrenceId) return this.startTask(task, retryAttempt, context)
+    const live = this.liveOccurrence(task, occurrenceId)
+    if (live) {
+      log.info(`Task ${task.name}: slot already started (${occurrenceId}); not starting it again`)
+      return live
+    }
+    this.occurrenceClaims.add(occurrenceId)
+    try {
+      const recorded = await schedulerDb.getExecution(occurrenceId)
+      if (recorded?.id === occurrenceId && recorded.taskId === task.id) {
+        log.info(`Task ${task.name}: slot already ran (${occurrenceId}); not running it again`)
+        return recorded
+      }
+      return await this.startTask(task, retryAttempt, { ...context, executionId: occurrenceId })
+    } finally {
+      this.occurrenceClaims.delete(occurrenceId)
+    }
+  }
+
+  /**
+   * The start already holding a slot occurrence on this host: running,
+   * buffered, or still deciding. `undefined` when nothing holds it.
+   */
+  private liveOccurrence(task: ScheduledTask, occurrenceId: string): TaskExecution | undefined {
+    const running = this.runningByTask.get(task.id)?.get(occurrenceId)
+    if (running) return running
+    const queued = this.queues.get(task.id)?.find((start) => start.executionId === occurrenceId)
+    if (queued) return this.createQueuedPlaceholderExecution(task, occurrenceId, queued)
+    if (!this.occurrenceClaims.has(occurrenceId)) return undefined
+    return {
+      id: occurrenceId,
+      taskId: task.id,
+      taskName: task.name,
+      taskType: task.type,
+      status: "pending",
+      retryAttempt: 0,
+      startedAt: new Date(),
+      logs: [this.createLog("info", "This slot is already being started")],
+    }
+  }
+
+  private async startTask(
+    task: ScheduledTask,
+    retryAttempt: number,
+    context: ExecuteTaskContext
   ): Promise<TaskExecution> {
     const executionLifecycleVersion = this.lifecycleVersion
     const taskLifecycleVersion = this.getTaskLifecycleVersion(task.id)

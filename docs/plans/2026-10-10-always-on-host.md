@@ -265,6 +265,28 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
    - Two hosts' keys match for the same occurrence.
    - Cron keys are stable across a wake boundary.
 
+**A9 outcome (2026-10-12).** Built against the plan with these deviations:
+
+- **Event keys.** `TriggerEvent` (Rust and TS) gains `occurrenceKey`, the source's own id for the event. `deterministicTriggerIdempotencyKey` (`lib/workflow/runtime/trigger-idempotency.ts`) keys slot triggers (cron, schedule) on the aligned slot. It keys event triggers (webhook, connector inbound and system, integration) only on `occurrenceKey`. Without one, the event gets no key, so two in the same second are two runs. That fixes the data-loss defect.
+  - **Webhooks:** the receiver reads the delivery id from a header the trigger names (new `deliveryIdHeader` param and inspector field), or from `Idempotency-Key`. An empty or over-256-character value is not a key.
+  - **Connector messages:** keyed by `connectorOccurrenceKey` (`types/connectors/event.ts`) on platform, bot account, platform chat and thread, and the message id the bus deduplicates on. The local adapter id is left out.
+  - **Connector system events (gestures)** stay unkeyed. Their ids are adapter-built and nothing deduplicates them, so keying would fold a second identical reaction into the first.
+  - **Integration events** key on plugin, integration, account and delivery id: the identity the event row is already deduplicated on.
+- **Slots.** The Rust cron daemon emits the entry's slot as `originAt` (and `payload.scheduledFor`) rather than its wake time. The scheduler alarm's `scheduler:task-due` gains `scheduledForMs`, the armed instant, which the Rust timing driver now reports. Before, a re-arm landing between the fire and the listener could relabel the slot.
+  - The plan's line numbers in `alarm_daemon.rs` needed no change: the generic loop already hands each emitter its entry, which carries the slot.
+  - An OS-promoted wake ran as the wake time. It now runs as the last slot that elapsed after the persisted `nextRunAt` (`latestElapsedSlot`, `lib/scheduler/occurrence.ts`).
+- **Bot ticks** key their event on the slot for `schedule` and `catch-up` fires, with `occurredAt` set to the slot. A tick started by hand, or a retry (whose `scheduledFor` is the retry time), stays a one-off.
+- **Scheduler executions, deviation.** The plan asked for a unique `(taskId, scheduledFor)` index. Several rows legitimately share a slot (a skipped row, a displaced buffered start, the retries of one occurrence), so a unique index would break them; the scheduler run table is also local, so the index would not reach across hosts either.
+  - Instead, an automatic fire of a slot (`schedule` or `catch-up`) gets a deterministic execution id `occ-<taskId>-<slot>`. A second fire of the same slot finds the first one's row, its running entry or its buffered start, and does not run again. An in-memory claim covers two fires racing the row lookup.
+  - No schema bump.
+- **Corrections.** ADR-0136 §4 and its "Not done" entry (both locales), and the `trigger-idempotency.ts` header, now say that the invocation ledger is per host. A key absorbs duplicates on the host that holds it; two hosts compute the same key but can both run, which the phase B lease fence closes.
+- **Protocol:** the `workflow_handoff_create` request schema's closed `trigger` object accepts `occurrenceKey`, so a handed-off trigger keeps its key.
+- **Tests** cover each plan item:
+  - Same-second payloads are two runs: the router, the bridge, the bus and the key function.
+  - Two hosts' keys match: connector keys across adapter ids, and the key function.
+  - Cron and alarm slots are stable across a wake: the Rust cron and alarm tests, the driver, the promoted-wake test.
+  - Concurrent fires of one slot start once.
+
 ### A10 — Updates and exact-version UX
 
 1. **New update kinds** `host-server` and `host-brain`, shipped as one unit:
@@ -343,6 +365,6 @@ Record the evidence in `docs/reports/`. Run `preflight` and the gates for every 
 | `scheduled_task_import` copies the OS promotion and forces paused tasks active                                                  | A5                     |
 | Push credential config and bot install/arm have no approval gate                                                                | A6                     |
 | T2 Compose proxy sets `EXEC=0` but the pool needs exec; comments claim otherwise (fixed)                                        | A8                     |
-| Webhook and connector events in the same second collapse into one run (data loss)                                               | A9                     |
-| Cron occurrence key is the wake time, not the slot                                                                              | A9                     |
+| Webhook and connector events in the same second collapse into one run (data loss) (fixed)                                       | A9                     |
+| Cron occurrence key is the wake time, not the slot (fixed)                                                                      | A9                     |
 | Signaling live join path does not enforce `SIGNALING_MAX_*` (docs claim it does)                                                | out of scope; reported |

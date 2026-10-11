@@ -1432,7 +1432,7 @@ describe("OS-tier audit", () => {
     it("places through the adapter, runs every call there and attests the tier", async () => {
       const deps = createDeps()
       const adapter = containerAdapter()
-      deps.getContainerAdapter!.mockReturnValue(adapter)
+      jest.mocked(deps.getContainerAdapter!).mockReturnValue(adapter)
       const runtime = new SandboxSessionRuntime(deps)
 
       const ref = await runtime.bindSession(input)
@@ -1458,7 +1458,7 @@ describe("OS-tier audit", () => {
       let refs = 0
       deps.makeRef.mockImplementation(() => `sandbox-runtime:c-${++refs}`)
       const adapter = containerAdapter()
-      deps.getContainerAdapter!.mockReturnValue(adapter)
+      jest.mocked(deps.getContainerAdapter!).mockReturnValue(adapter)
       const runtime = new SandboxSessionRuntime(deps)
 
       const first = await runtime.bindSession(input)

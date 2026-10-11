@@ -69,16 +69,36 @@ describe("executeBotTask", () => {
     expect(rows[0].envelope.type).toBe("bot.schedule")
   })
 
-  it("gives every tick its own event, so a second tick is not deduplicated away", async () => {
+  it("gives every tick started by hand its own event, so a second is not deduplicated away", async () => {
     await seed([{ id: "morning", kind: "schedule", cron: "0 9 * * *" }])
     const payload = task({ installationId: "boti_1", triggerId: "morning" })
+    const byHand = { triggerSource: "run-now" } as TaskExecution
 
-    await executeBotTask(payload, execution, live)
-    await executeBotTask(payload, execution, live)
+    await executeBotTask(payload, byHand, live)
+    await executeBotTask(payload, byHand, live)
 
-    // A deterministic event id would collapse the second tick onto the first
-    // delivery and the Bot would run once, ever.
     expect(await getDb().botEventDeliveries.count()).toBe(2)
+  })
+
+  it("keys a timed tick on its slot: two slots are two events, one slot fired twice is one", async () => {
+    await seed([{ id: "morning", kind: "schedule", cron: "0 9 * * *" }])
+    const payload = task({ installationId: "boti_1", triggerId: "morning" })
+    const slot = new Date("2026-10-12T09:00:00.000Z")
+    const fire = (scheduledFor: Date, triggerSource: TaskExecution["triggerSource"]) =>
+      ({ scheduledFor, triggerSource }) as TaskExecution
+
+    await executeBotTask(payload, fire(slot, "schedule"), live)
+    // The same slot again, reached late by the catch-up path.
+    await executeBotTask(payload, fire(slot, "catch-up"), live)
+    await executeBotTask(payload, fire(new Date(slot.getTime() + 86_400_000), "schedule"), live)
+
+    const rows = await getDb().botEventDeliveries.toArray()
+    expect(rows).toHaveLength(2)
+    // The event happened at the slot, not when this host fired it.
+    expect(rows.map((row) => row.envelope.occurredAt).sort()).toEqual([
+      slot.getTime(),
+      slot.getTime() + 86_400_000,
+    ])
   })
 
   it("carries the stored cursor to a poll trigger", async () => {

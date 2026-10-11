@@ -129,6 +129,24 @@ describe("ConnectorBus workflow trigger fan-out", () => {
     }
   })
 
+  it("keys each inbound run on the platform message, not on the local adapter or the second", async () => {
+    const adapterId = await seedAutoAdapter()
+    findMatchingWorkflowsMock.mockReturnValue([{ workflowId: "wf_a", nodeId: "n1", params: {} }])
+
+    // Two messages in the same second are two occurrences.
+    await getBus().dispatchInboundFull(privateEvent(adapterId, "msg_1"))
+    await getBus().dispatchInboundFull(privateEvent(adapterId, "msg_2"))
+    await getBus().flushInboundTurns()
+
+    const keys = dispatchTriggerMock.mock.calls.map(
+      ([arg]) => (arg as { occurrenceKey?: string }).occurrenceKey
+    )
+    // The adapter id is the local instance's; the key leaves it out, so a
+    // second host on the same bot computes the same one.
+    expect(keys).toEqual(["telegram:bot_1:private:msg_1", "telegram:bot_1:private:msg_2"])
+    for (const key of keys) expect(key).not.toContain(adapterId)
+  })
+
   it("fans gesture-class system events out to trigger.connector.system nodes", async () => {
     const adapterId = await seedAutoAdapter()
     const conversationKey = `telegram:${adapterId}:private`
@@ -158,9 +176,14 @@ describe("ConnectorBus workflow trigger fan-out", () => {
       targetDeliveredByUs: true,
     })
     expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
-    const [arg] = dispatchTriggerMock.mock.calls[0] as [{ kind: string; workflowId: string }]
+    const [arg] = dispatchTriggerMock.mock.calls[0] as [
+      { kind: string; workflowId: string; occurrenceKey?: string },
+    ]
     expect(arg.kind).toBe("trigger.connector.system")
     expect(arg.workflowId).toBe("wf_react")
+    // A gesture's id is the adapter's construction and nothing deduplicates
+    // it, so the run is not keyed: a second identical reaction is its own run.
+    expect(arg.occurrenceKey).toBeUndefined()
 
     // …and the gesture is audited under its own kind (never adapter.error).
     const audits = await getDb().connectorAudit.where("adapterId").equals(adapterId).toArray()

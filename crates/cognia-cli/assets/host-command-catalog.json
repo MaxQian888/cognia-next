@@ -75530,6 +75530,9 @@
               "originAt": {
                 "type": "number"
               },
+              "occurrenceKey": {
+                "type": "string"
+              },
               "binding": {
                 "type": "object"
               }
@@ -77003,5 +77006,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "4dbfe7af4e3f2eeda5ff7097a7ef0ba821cbf8e16a6a3db77b32d856a414b6fd"
+  "catalogHash": "ceea13b306ab4dfa799bb115fa939dfdca77369ea01e90afdeb41186bb4108af"
 }

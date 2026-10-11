@@ -94,7 +94,7 @@ import { classifySiblingSender, type SiblingClassification } from "./sibling-bot
 import { applyMediaModelGate, resolveMediaModelPolicy } from "./media-model-gate"
 import { consumeSiblingInterplayBudget, DEFAULT_BOT_INTERPLAY_BUDGET } from "./at-gate"
 import { observeUnmentionedDeliveryProbe } from "./at-gate"
-import { deliveryTargetFromEvent } from "@/types/connectors/event"
+import { connectorOccurrenceKey, deliveryTargetFromEvent } from "@/types/connectors/event"
 import {
   refreshConnectorConversationDeliveryTarget,
   stampConnectorConversationPrincipal,
@@ -1896,6 +1896,10 @@ export class ConnectorBus {
     }
     if (matches.length === 0) return
     const originAt = Date.now()
+    // No occurrence key: a gesture's id is the adapter's own construction, not
+    // a platform message id, and nothing deduplicates on it, so a second
+    // identical reaction can share it. Keyed, it would be folded into the
+    // first one's run. Unkeyed, each gesture is its own run (ADR-0224 A9).
     await Promise.all(
       matches.map(async (m) => {
         try {
@@ -1957,6 +1961,10 @@ export class ConnectorBus {
     if (matches.length === 0) return
 
     const originAt = Date.now()
+    // Keyed on the platform's message, not on the second it arrived in: two
+    // messages in one second are two runs, and a message replayed after a
+    // restart is still one (ADR-0224 A9).
+    const occurrenceKey = connectorOccurrenceKey(event)
     const dispatches = matches.map(async (m) => {
       try {
         await dispatchTrigger({
@@ -1965,6 +1973,7 @@ export class ConnectorBus {
           triggerId: m.nodeId,
           payload: event,
           originAt,
+          occurrenceKey,
           binding: {
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,

@@ -24,7 +24,12 @@ pub struct ArmTaskInput {
 #[serde(rename_all = "camelCase")]
 pub struct TaskDueEvent {
     pub task_id: String,
+    /// When the loop got to it.
     pub fired_at_ms: i64,
+    /// The instant the task was armed for. This is the occurrence: a host
+    /// that slept through it fires late but reports the same slot
+    /// (ADR-0224 A9).
+    pub scheduled_for_ms: i64,
 }
 
 /// Run level for task execution

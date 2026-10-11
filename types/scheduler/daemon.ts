@@ -77,5 +77,8 @@ export interface LeaderAwareTimingDriver extends SchedulerTimingDriver {
  */
 export interface DaemonTaskDueEvent {
   taskId: string
+  /** When the daemon got to it. */
   firedAtMs: number
+  /** The instant the task was armed for: the occurrence (ADR-0224 A9). */
+  scheduledForMs: number
 }

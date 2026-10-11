@@ -1,4 +1,5 @@
 import {
+  alignOccurrenceInstant,
   deterministicTriggerIdempotencyKey,
   isSharedTriggerKind,
   scheduledOccurrenceIdempotencyKey,
@@ -6,8 +7,8 @@ import {
 
 describe("deterministicTriggerIdempotencyKey", () => {
   it("gives two hosts the same key for one cron occurrence", () => {
-    // This is the whole point: without it each host minted a random invocation
-    // id, the ledger lookup was skipped, and the workflow ran twice.
+    // Without a key each fire minted a random invocation id and the ledger
+    // lookup was skipped outright.
     const hostA = deterministicTriggerIdempotencyKey({
       workflowId: "wf_1",
       triggerKind: "trigger.cron",
@@ -81,6 +82,55 @@ describe("deterministicTriggerIdempotencyKey", () => {
         })
       ).toBeUndefined()
     }
+  })
+
+  it("keys an event on the source's id for it, never on when it arrived", () => {
+    const kinds = [
+      "trigger.webhook",
+      "trigger.connector.inbound",
+      "trigger.connector.system",
+      "trigger.integration.event",
+    ]
+    for (const triggerKind of kinds) {
+      const base = { workflowId: "wf_1", triggerKind, triggerId: "t_1" }
+      expect(isSharedTriggerKind(triggerKind)).toBe(true)
+      // Two payloads in the same second with no source id: neither is keyed,
+      // so the ledger cannot fold the second into the first.
+      expect(
+        deterministicTriggerIdempotencyKey({ ...base, originAt: 1_700_000_000_000 })
+      ).toBeUndefined()
+      expect(
+        deterministicTriggerIdempotencyKey({
+          ...base,
+          originAt: 1_700_000_000_000,
+          occurrenceKey: "  ",
+        })
+      ).toBeUndefined()
+      // Two deliveries in the same second with their own ids: two keys.
+      const first = deterministicTriggerIdempotencyKey({
+        ...base,
+        originAt: 1_700_000_000_100,
+        occurrenceKey: "delivery-1",
+      })
+      const second = deterministicTriggerIdempotencyKey({
+        ...base,
+        originAt: 1_700_000_000_200,
+        occurrenceKey: "delivery-2",
+      })
+      expect(first).toBeDefined()
+      expect(first).not.toBe(second)
+      // One delivery seen by two hosts, or redelivered a minute later: one key.
+      const redelivered = deterministicTriggerIdempotencyKey({
+        ...base,
+        originAt: 1_700_000_060_000,
+        occurrenceKey: "delivery-1",
+      })
+      expect(redelivered).toBe(first)
+    }
+  })
+
+  it("aligns a slot to the second", () => {
+    expect(alignOccurrenceInstant(1_700_000_000_999)).toBe(1_700_000_000_000)
   })
 
   it("declines rather than inventing an instant when none was supplied", () => {

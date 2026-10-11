@@ -134,6 +134,8 @@ describe("Integration event publication", () => {
         triggerId: "trigger-1",
         kind: "trigger.integration.event",
         payload: expect.objectContaining({ subscriptionId: subscription.id }),
+        // The run is keyed on the delivery, not on when it arrived.
+        occurrenceKey: `example-delivery:example:${account.id}:delivery-1`,
       })
     )
 

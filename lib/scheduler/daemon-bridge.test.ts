@@ -65,13 +65,13 @@ describe("daemon-bridge (Tauri mode)", () => {
     const unsub = jest.fn()
     listenMock.mockImplementation(async (_event: string, cb: (e: unknown) => void) => {
       // Simulate the daemon firing.
-      cb({ payload: { taskId: "task_1", firedAtMs: 42 } })
+      cb({ payload: { taskId: "task_1", firedAtMs: 42, scheduledForMs: 40 } })
       return unsub
     })
 
     const stop = await listenTaskDue((e) => received.push(e))
     expect(listenMock).toHaveBeenCalledWith("scheduler:task-due", expect.any(Function))
-    expect(received).toEqual([{ taskId: "task_1", firedAtMs: 42 }])
+    expect(received).toEqual([{ taskId: "task_1", firedAtMs: 42, scheduledForMs: 40 }])
     expect(unsub).not.toHaveBeenCalled()
     stop()
     expect(unsub).toHaveBeenCalledTimes(1)

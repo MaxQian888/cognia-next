@@ -1,5 +1,6 @@
 import {
   buildConversationKey,
+  connectorOccurrenceKey,
   deliveryTargetFromEvent,
   parseConversationKey,
   type NormalizedInboundEvent,
@@ -161,5 +162,49 @@ describe("conversationKey", () => {
       scopeKind: "private",
       containerId: "chat-1",
     })
+  })
+})
+
+describe("connectorOccurrenceKey", () => {
+  const event = (overrides: Partial<NormalizedInboundEvent>): NormalizedInboundEvent =>
+    ({
+      platform: "telegram",
+      adapterId: "tg-desktop",
+      selfId: "bot-1",
+      messageId: "42",
+      conversationKey: "telegram:tg-desktop:12345",
+      channel: { id: "telegram:tg-desktop:12345", kind: "group", platformChannelId: "12345" },
+      ...overrides,
+    }) as NormalizedInboundEvent
+
+  it("is the same on two hosts connected to the same bot", () => {
+    const desktop = connectorOccurrenceKey(event({}))
+    const host = connectorOccurrenceKey(
+      event({
+        adapterId: "tg-host",
+        conversationKey: "telegram:tg-host:12345",
+        channel: { id: "telegram:tg-host:12345", kind: "group", platformChannelId: "12345" },
+      })
+    )
+    expect(desktop).toBe(host)
+    expect(desktop).toBe("telegram:bot-1:12345:42")
+  })
+
+  it("keeps two messages apart, even with the same id in two chats or threads", () => {
+    const base = connectorOccurrenceKey(event({}))
+    expect(connectorOccurrenceKey(event({ messageId: "43" }))).not.toBe(base)
+    expect(connectorOccurrenceKey(event({ conversationKey: "telegram:tg-desktop:999" }))).not.toBe(
+      base
+    )
+    expect(connectorOccurrenceKey(event({ conversationKey: "telegram:tg-desktop:12345:7" }))).toBe(
+      "telegram:bot-1:12345/7:42"
+    )
+    expect(connectorOccurrenceKey(event({ selfId: "bot-2" }))).not.toBe(base)
+  })
+
+  it("falls back to the platform channel when the conversation key cannot be read", () => {
+    expect(connectorOccurrenceKey(event({ conversationKey: "broken" }))).toBe(
+      "telegram:bot-1:12345:42"
+    )
   })
 })

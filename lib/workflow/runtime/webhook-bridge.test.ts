@@ -121,6 +121,23 @@ describe("syncWorkflowTriggers", () => {
     })
   })
 
+  it("passes the delivery id header, and none when it is blank", async () => {
+    await syncWorkflowTriggers(
+      workflow([
+        node("trg", "trigger.webhook", {
+          path: "incoming",
+          deliveryIdHeader: " X-GitHub-Delivery ",
+        }),
+        node("blank", "trigger.webhook", { path: "other", deliveryIdHeader: "  " }),
+      ])
+    )
+    const calls = mockRegister.mock.calls.map(([input]) => input)
+    expect(calls.find((c) => c.triggerId === "trg")).toMatchObject({
+      webhookDeliveryIdHeader: "X-GitHub-Delivery",
+    })
+    expect(calls.find((c) => c.triggerId === "blank")?.webhookDeliveryIdHeader).toBeUndefined()
+  })
+
   it("sets webhookAwaitResponse when the workflow has an io.webhook.respond node", async () => {
     await syncWorkflowTriggers(
       workflow([

@@ -84,7 +84,7 @@ impl TriggerEmitter for AppHandleEmitter {
 
 ### Cron 守护进程——触发路径
 
-cron 守护进程不同于 `crate::scheduler`（OS 级）：它是进程内的，只要进程运行就触发（托盘 / 最小化）。`CronEntry:34` 缓存 `next_fire_at`；`recompute:46` 用 `schedule.after(&anchor).next()`；`next_fire:66` 是已启用条目的最小值；`due_ids:76` 收集可触发 id。`spawn:177` 必须用 `tauri::async_runtime::spawn`（普通 `tokio::spawn` 在 setup 中会 panic）；`run_loop:186` 睡到下次触发（下限 25ms，空闲上限 1h 由 `Notify` 唤醒）；`fire:229` 发出 `kind:"trigger.cron"`，载荷 `{triggerId, firedAt}`。
+cron 守护进程不同于 `crate::scheduler`（OS 级）：它是进程内的，只要进程运行就触发（托盘 / 最小化）。`CronEntry:34` 缓存 `next_fire_at`；`recompute:46` 用 `schedule.after(&anchor).next()`；`next_fire:66` 是已启用条目的最小值；`due_ids:76` 收集可触发 id。`spawn:177` 必须用 `tauri::async_runtime::spawn`（普通 `tokio::spawn` 在 setup 中会 panic）；`run_loop:186` 睡到下次触发（下限 25ms，空闲上限 1h 由 `Notify` 唤醒）；`fire:229` 发出 `kind:"trigger.cron"`，`originAt` 为时间槽，载荷 `{triggerId, firedAt, scheduledFor}`。运行以 `originAt` 为键，因此迟到触发的时间槽仍保持该时间槽的身份（ADR-0224 A9）。
 
 ```rust
 // src-tauri/src/workflow/triggers/cron_daemon.rs:66
@@ -110,7 +110,7 @@ sequenceDiagram
 
 ### Webhook 接收器——POST 路径
 
-`start:210` 绑定 `127.0.0.1`，路由 `/webhook/{*path}`（任意方法）外加 404 的 `/webhook/`，套用 `RequestBodyLimitLayer`，并经 `stop:257` 支持优雅关停。`upsert:153` 以 path 为键并拒绝跨触发器冲突；`bound_url_for_path:197` 返回 `http://{addr}/webhook/{path}`（仅在绑定后经 `workflow_get_webhook_url` 可知）。`handle_webhook:292` 按序把关：404 未知 -> 503 禁用 -> 405 方法 -> 401 HMAC -> 解析 body -> 发出 `kind:"trigger.webhook"` -> 以 `response_status` / `response_body` 响应。`SignatureMode:63` 默认 `Cognia`（头 `x-signature-256`）vs `github`（`x-hub-signature-256`）；注册在 kind 为 github 风味时默认 github，否则 cognia。
+`start:210` 绑定 `127.0.0.1`，路由 `/webhook/{*path}`（任意方法）外加 404 的 `/webhook/`，套用 `RequestBodyLimitLayer`，并经 `stop:257` 支持优雅关停。`upsert:153` 以 path 为键并拒绝跨触发器冲突；`bound_url_for_path:197` 返回 `http://{addr}/webhook/{path}`（仅在绑定后经 `workflow_get_webhook_url` 可知）。`handle_webhook:292` 按序把关：404 未知 -> 503 禁用 -> 405 方法 -> 401 HMAC -> 解析 body -> 发出 `kind:"trigger.webhook"` -> 以 `response_status` / `response_body` 响应。`SignatureMode:63` 默认 `Cognia`（头 `x-signature-256`）vs `github`（`x-hub-signature-256`）；注册在 kind 为 github 风味时默认 github，否则 cognia。发出事件的 `occurrenceKey` 是发送方的投递 ID，从触发器指定的请求头（`deliveryIdHeader`）或 `Idempotency-Key` 读取。重试的投递会重复这个 ID，不会再次启动运行；没有投递 ID 时运行不带键，因此同一秒内的两个请求就是两次运行。
 
 ```rust
 // src-tauri/src/workflow/triggers/webhook_router.rs:404

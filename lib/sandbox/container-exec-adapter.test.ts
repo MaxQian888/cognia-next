@@ -32,6 +32,7 @@ function payload(overrides: Partial<MicrovmExecPayload["command"]> = {}): Microv
       maxCpuSeconds: 0,
       maxMemoryMb: 0,
       network: "off",
+      networkHosts: [],
     },
   } as MicrovmExecPayload
 }

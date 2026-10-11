@@ -2,6 +2,7 @@
   "blockedRunTitle": "Fix validation issues before running",
   "blockedSaveTitle": "Workflow saved with {count, plural, one {# unresolved issue} other {# unresolved issues}}",
   "cronExpr": "Use a 5-field cron expression (minute hour day month weekday)",
+  "headerName": "Use a header name: letters, digits, and dashes, with no spaces",
   "invalid": "Invalid value",
   "invalidFormat": "Invalid format",
   "invalidType": "Expected {expected}",

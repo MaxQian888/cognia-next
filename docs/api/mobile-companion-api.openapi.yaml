@@ -131675,6 +131675,8 @@ paths:
                     payload: {}
                     originAt:
                       type: number
+                    occurrenceKey:
+                      type: string
                     binding:
                       type: object
                   additionalProperties: false

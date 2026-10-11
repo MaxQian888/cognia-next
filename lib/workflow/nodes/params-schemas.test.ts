@@ -168,6 +168,16 @@ describe("trigger schemas", () => {
     ).toBe(true)
   })
 
+  it("trigger.webhook takes a delivery id header only as a header name", () => {
+    const schema = PARAMS_SCHEMAS["trigger.webhook"]
+    expect(schema.safeParse({ path: "x", deliveryIdHeader: "X-GitHub-Delivery" }).success).toBe(
+      true
+    )
+    expect(schema.safeParse({ path: "x", deliveryIdHeader: "" }).success).toBe(true)
+    expect(schema.safeParse({ path: "x", deliveryIdHeader: "X Delivery" }).success).toBe(false)
+    expect(schema.safeParse({ path: "x", deliveryIdHeader: "X-Id:" }).success).toBe(false)
+  })
+
   it("trigger.webhook validates path and status range", () => {
     expect(PARAMS_SCHEMAS["trigger.webhook"].safeParse({ path: "" }).success).toBe(false)
     expect(PARAMS_SCHEMAS["trigger.webhook"].safeParse({ path: "INVALID PATH" }).success).toBe(

@@ -533,6 +533,7 @@ impl FileWatchDaemon {
                         "catchUp": false,
                     }),
                     origin_at: now,
+                    occurrence_key: None,
                     binding: binding.clone(),
                 });
 
@@ -668,6 +669,7 @@ impl FileWatchDaemon {
                     "since": since,
                 }),
                 origin_at: now_ms(),
+                occurrence_key: None,
                 binding: registration.binding.clone(),
             });
         }

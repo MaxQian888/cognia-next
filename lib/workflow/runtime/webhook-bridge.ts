@@ -33,6 +33,7 @@ interface WebhookParams {
   path?: string
   method?: string
   hmacSecret?: string
+  deliveryIdHeader?: string
   responseStatus?: number
   responseTemplate?: string
   responseTimeoutMs?: number
@@ -197,6 +198,7 @@ async function syncOneTrigger(
           typeof webhookParams.responseTimeoutMs === "number"
             ? webhookParams.responseTimeoutMs
             : undefined,
+        webhookDeliveryIdHeader: webhookParams.deliveryIdHeader?.trim() || undefined,
       })
       return
     }

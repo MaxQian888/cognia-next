@@ -19,6 +19,8 @@
 
 import type { ScheduledTask, TaskExecution, TaskExecutorResult } from "@/types/scheduler"
 
+import { scheduledBotTickRecordId } from "../occurrence"
+
 export interface BotTaskPayload extends Record<string, unknown> {
   installationId: string
   triggerId: string
@@ -26,7 +28,7 @@ export interface BotTaskPayload extends Record<string, unknown> {
 
 export async function executeBotTask(
   task: ScheduledTask,
-  _execution: TaskExecution,
+  execution: TaskExecution,
   signal: AbortSignal
 ): Promise<TaskExecutorResult> {
   const payload = (task.payload ?? {}) as Partial<BotTaskPayload>
@@ -92,15 +94,23 @@ export async function executeBotTask(
 
   const state = await readBotTriggerState(installationId, triggerId)
   const now = Date.now()
+  const slot = execution.scheduledFor?.getTime()
   const envelope = buildBotEventEnvelope({
     source: "schedule",
-    // Every tick is its own event. A deterministic id would make the second
-    // tick collapse onto the first one's delivery and the Bot would run once.
-    sourceRecordId: oneOffSourceRecordId(`${installationId}-${triggerId}`),
+    // Every slot is its own event, keyed on the slot and not on when this host
+    // got to it: two slots are two deliveries, and the same slot fired twice
+    // lands on one. A tick started by hand is always its own (ADR-0224 A9).
+    sourceRecordId: scheduledBotTickRecordId({
+      installationId,
+      triggerId,
+      triggerSource: execution.triggerSource ?? "schedule",
+      ...(execution.scheduledFor ? { scheduledFor: execution.scheduledFor } : {}),
+      oneOff: oneOffSourceRecordId,
+    }),
     type: `bot.${trigger.kind}`,
     installationId,
     triggerId,
-    occurredAt: now,
+    occurredAt: slot !== undefined && Number.isFinite(slot) ? slot : now,
     receivedAt: now,
     payload: {
       triggerKind: trigger.kind,

@@ -3554,6 +3554,11 @@
     }
   },
   "webhookTrigger": {
+    "deliveryIdHeader": {
+      "hint": "A header the sender repeats when it retries a delivery, such as X-GitHub-Delivery. A retried delivery then does not start a second run. Leave blank to read Idempotency-Key.",
+      "label": "Delivery ID header (optional)",
+      "placeholder": "X-GitHub-Delivery"
+    },
     "hmacSecret": {
       "hint": "Verifies the X-Signature-256 header. Leave blank to skip verification.",
       "label": "HMAC secret (optional)"

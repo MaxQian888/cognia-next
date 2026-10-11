@@ -84,7 +84,7 @@ impl TriggerEmitter for AppHandleEmitter {
 
 ### Cron daemon — fire path
 
-The cron daemon is distinct from `crate::scheduler` (OS-level): it is in-process and fires while the process runs (tray / minimized). `CronEntry:34` caches `next_fire_at`; `recompute:46` uses `schedule.after(&anchor).next()`; `next_fire:66` is the min over enabled entries; `due_ids:76` collects fireable ids. `spawn:177` must use `tauri::async_runtime::spawn` (a plain `tokio::spawn` panics in setup); `run_loop:186` sleeps until the next fire (floored to 25ms, capped at a 1h idle woken by `Notify`); `fire:229` emits `kind:"trigger.cron"` with payload `{triggerId, firedAt}`.
+The cron daemon is distinct from `crate::scheduler` (OS-level): it is in-process and fires while the process runs (tray / minimized). `CronEntry:34` caches `next_fire_at`; `recompute:46` uses `schedule.after(&anchor).next()`; `next_fire:66` is the min over enabled entries; `due_ids:76` collects fireable ids. `spawn:177` must use `tauri::async_runtime::spawn` (a plain `tokio::spawn` panics in setup); `run_loop:186` sleeps until the next fire (floored to 25ms, capped at a 1h idle woken by `Notify`); `fire:229` emits `kind:"trigger.cron"` with `originAt` set to the slot and payload `{triggerId, firedAt, scheduledFor}`. A slot fired late keeps the slot's identity, because the run is keyed on `originAt` (ADR-0224 A9).
 
 ```rust
 // src-tauri/src/workflow/triggers/cron_daemon.rs:66
@@ -110,7 +110,7 @@ sequenceDiagram
 
 ### Webhook receiver — POST path
 
-`start:210` binds `127.0.0.1`, routes `/webhook/{*path}` (any method) plus a 404 `/webhook/`, applies `RequestBodyLimitLayer`, and supports graceful shutdown via `stop:257`. `upsert:153` is path-keyed and rejects cross-trigger collisions; `bound_url_for_path:197` returns `http://{addr}/webhook/{path}` (knowable only after bind, via `workflow_get_webhook_url`). `handle_webhook:292` gates in order: 404 unknown -> 503 disabled -> 405 method -> 401 HMAC -> parse body -> emit `kind:"trigger.webhook"` -> respond with `response_status` / `response_body`. `SignatureMode:63` defaults `Cognia` (header `x-signature-256`) vs `github` (`x-hub-signature-256`); register defaults to github when the kind is github-flavored, else cognia.
+`start:210` binds `127.0.0.1`, routes `/webhook/{*path}` (any method) plus a 404 `/webhook/`, applies `RequestBodyLimitLayer`, and supports graceful shutdown via `stop:257`. `upsert:153` is path-keyed and rejects cross-trigger collisions; `bound_url_for_path:197` returns `http://{addr}/webhook/{path}` (knowable only after bind, via `workflow_get_webhook_url`). `handle_webhook:292` gates in order: 404 unknown -> 503 disabled -> 405 method -> 401 HMAC -> parse body -> emit `kind:"trigger.webhook"` -> respond with `response_status` / `response_body`. `SignatureMode:63` defaults `Cognia` (header `x-signature-256`) vs `github` (`x-hub-signature-256`); register defaults to github when the kind is github-flavored, else cognia. The emitted event's `occurrenceKey` is the sender's delivery id, read from the header the trigger names (`deliveryIdHeader`) or from `Idempotency-Key`. A retried delivery repeats it and does not start a second run; without one the run is unkeyed, so two requests in the same second are two runs.
 
 ```rust
 // src-tauri/src/workflow/triggers/webhook_router.rs:404

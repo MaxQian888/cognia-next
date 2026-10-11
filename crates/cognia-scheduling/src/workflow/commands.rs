@@ -81,6 +81,7 @@ pub fn workflow_register_trigger_for_state(
                 response_body: input.webhook_response_body.clone(),
                 await_response: input.webhook_await_response.unwrap_or(false),
                 response_timeout_ms: input.webhook_response_timeout_ms.unwrap_or(0),
+                delivery_id_header: input.webhook_delivery_id_header.clone(),
             };
             state.webhook.upsert(entry)?;
             Ok(())

@@ -63,12 +63,13 @@ impl DueEmitter<DateTime<Utc>> for SchedulerDueAdapter {
     fn emit(
         &self,
         id: &str,
-        _entry: DateTime<Utc>,
+        armed_for: DateTime<Utc>,
         fired_at: DateTime<Utc>,
     ) -> Option<DateTime<Utc>> {
         self.inner.emit(TaskDueEvent {
             task_id: id.to_string(),
             fired_at_ms: fired_at.timestamp_millis(),
+            scheduled_for_ms: armed_for.timestamp_millis(),
         });
         None
     }
@@ -188,6 +189,9 @@ mod tests {
         let fired = recorder.fired.lock().clone();
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].task_id, "task_1");
+        // Fired late, it still reports the instant it was armed for.
+        assert_eq!(fired[0].scheduled_for_ms, past);
+        assert!(fired[0].fired_at_ms >= past);
         // One-shot: the entry is gone after firing.
         assert_eq!(daemon.entry_count(), 0);
     }

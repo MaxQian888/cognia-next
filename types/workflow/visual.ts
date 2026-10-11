@@ -965,8 +965,18 @@ export interface TriggerEvent {
   triggerId?: string
   /** Free-form payload — chat message body, webhook headers/body, etc. */
   payload: unknown
-  /** Wall-clock when the trigger fired (Rust mirror or webview Date.now()). */
+  /**
+   * When the occurrence happened (Rust mirror or webview Date.now()). A
+   * scheduled trigger reports its slot, not when a host got to it.
+   */
   originAt: number
+  /**
+   * The source's own id for this occurrence: a provider delivery id, a
+   * platform message id. The same occurrence always carries the same key and
+   * two occurrences never share one. Absent when the source gives none
+   * (ADR-0224 A9).
+   */
+  occurrenceKey?: string
   /** Optional binding identifier — adapter id, conversation key, session id. */
   binding?: WorkflowTriggerBinding
 }
@@ -1445,6 +1455,11 @@ export interface RegisterTriggerInput {
    * the static response. Absent / 0 = the Rust default (~25s).
    */
   webhookResponseTimeoutMs?: number
+  /**
+   * Header naming the sender's delivery id, which keys the run so a retried
+   * delivery does not start a second one. Absent: `Idempotency-Key`.
+   */
+  webhookDeliveryIdHeader?: string
   binding?: WorkflowTriggerBinding
   enabled: boolean
 }

@@ -124,6 +124,11 @@ pub struct RegisterTriggerInput {
     /// to the static response. Absent / 0 = the Rust default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_response_timeout_ms: Option<u64>,
+    /// Request header carrying the sender's delivery id. A retried delivery
+    /// repeats it, so the run it started is not started again. Absent: the
+    /// standard `Idempotency-Key` header is read instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_delivery_id_header: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<TriggerBinding>,
     // ── trigger.file.watch ────────────────────────────────────────────────
@@ -166,8 +171,15 @@ pub struct TriggerEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger_id: Option<String>,
     pub payload: serde_json::Value,
-    /// Wall-clock time the trigger fired (ms since epoch).
+    /// When the occurrence happened (ms since epoch). A scheduled trigger
+    /// reports its slot, not the moment this host woke up to fire it.
     pub origin_at: i64,
+    /// The source's own identity for this occurrence: a provider delivery id
+    /// for a webhook. Two hosts that see the same occurrence report the same
+    /// key; two different occurrences never share one. Absent when the source
+    /// gives none, so the run is keyed as a one-off (ADR-0224 A9).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<TriggerBinding>,
 }
@@ -365,6 +377,7 @@ mod tests {
             trigger_id: Some("trg_1".into()),
             payload: serde_json::json!({ "tick": true }),
             origin_at: 1_700_000_000_000,
+            occurrence_key: None,
             binding: None,
         };
         let s = serde_json::to_string(&ev).unwrap();

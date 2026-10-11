@@ -208,6 +208,11 @@ struct CronDueAdapter {
 
 impl DueEmitter<CronEntry> for CronDueAdapter {
     fn emit(&self, _id: &str, mut entry: CronEntry, fired_at: DateTime<Utc>) -> Option<CronEntry> {
+        // The occurrence is the slot the schedule named, not the moment this
+        // loop got to it. A host that slept through the slot and fires it on
+        // wake must report the same instant as one that fired on time, or the
+        // two runs get two keys (ADR-0224 A9).
+        let slot = entry.next_fire_at.unwrap_or(fired_at);
         let event = TriggerEvent {
             workflow_id: entry.workflow_id.clone(),
             kind: "trigger.cron".into(),
@@ -215,8 +220,10 @@ impl DueEmitter<CronEntry> for CronDueAdapter {
             payload: serde_json::json!({
                 "triggerId": entry.trigger_id,
                 "firedAt": fired_at.timestamp_millis(),
+                "scheduledFor": slot.timestamp_millis(),
             }),
-            origin_at: fired_at.timestamp_millis(),
+            origin_at: slot.timestamp_millis(),
+            occurrence_key: None,
             binding: entry.binding.clone(),
         };
         self.inner.emit(event);
@@ -391,6 +398,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_fire_reports_its_slot_whenever_the_host_got_to_it() {
+        // Two hosts: one fires the 09:00 slot on time, the other slept through
+        // it and fires it on wake two hours later. Both must report 09:00.
+        let slot = DateTime::parse_from_rfc3339("2026-10-12T09:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let entry = || CronEntry {
+            trigger_id: "trg".into(),
+            workflow_id: "wf".into(),
+            schedule: parse_workflow_schedule("0 9 * * *").unwrap(),
+            timezone: None,
+            enabled: true,
+            binding: None,
+            next_fire_at: Some(slot),
+        };
+        let mut reported = Vec::new();
+        for fired_at in [slot, slot + chrono::Duration::hours(2)] {
+            let recorder = RecordingEmitter::default();
+            let adapter = CronDueAdapter {
+                inner: Arc::new(recorder.clone()),
+            };
+            let rearmed = adapter.emit("wf::trg", entry(), fired_at).unwrap();
+            assert!(rearmed.next_fire_at.unwrap() > fired_at);
+            let event = recorder.fired.lock()[0].clone();
+            assert_eq!(event.payload["firedAt"], fired_at.timestamp_millis());
+            reported.push((event.origin_at, event.payload["scheduledFor"].clone()));
+        }
+        assert_eq!(reported[0], reported[1]);
+        assert_eq!(reported[0].0, slot.timestamp_millis());
     }
 
     #[test]

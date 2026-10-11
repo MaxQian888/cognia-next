@@ -86,14 +86,14 @@ export async function dispatchTrigger(
   // / chat / plugin all route through here). Resume does NOT call this, so a
   // resumed run correctly does not re-fire the trigger hook.
   // Without a key the ledger lookup in `execution-authority` is skipped
-  // outright (`existingInvocation` is only read when one is present), so every
-  // trigger minted a fresh invocation and two hosts observing the same cron
-  // occurrence both ran it.
+  // outright (`existingInvocation` is only read when one is present), so a
+  // redelivered event or a slot reached twice ran twice.
   const idempotencyKey = deterministicTriggerIdempotencyKey({
     workflowId: event.workflowId,
     triggerKind: normalizedEvent.kind,
     ...(normalizedEvent.triggerId ? { triggerId: normalizedEvent.triggerId } : {}),
     ...(typeof normalizedEvent.originAt === "number" ? { originAt: normalizedEvent.originAt } : {}),
+    ...(normalizedEvent.occurrenceKey ? { occurrenceKey: normalizedEvent.occurrenceKey } : {}),
   })
   try {
     await deps.dispatchPlaced({
@@ -141,6 +141,7 @@ export function isTriggerEvent(value: unknown): value is TriggerEvent {
     typeof v.workflowId === "string" &&
     typeof v.kind === "string" &&
     typeof v.originAt === "number" &&
-    (v.triggerId === undefined || typeof v.triggerId === "string")
+    (v.triggerId === undefined || typeof v.triggerId === "string") &&
+    (v.occurrenceKey === undefined || typeof v.occurrenceKey === "string")
   )
 }

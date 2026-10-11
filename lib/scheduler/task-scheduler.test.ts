@@ -39,6 +39,7 @@ import type {
   CreateScheduledTaskInput,
   SchedulerTimingDriver,
   TaskDueCallback,
+  TaskExecution,
 } from "@/types/scheduler"
 
 // Mock plugin lifecycle hooks
@@ -4930,6 +4931,70 @@ describe("TaskScheduler", () => {
       expect(await sched.runPromotedTask("task-p", "secret")).toBeNull()
       mockSchedulerDb.getTask.mockResolvedValue(makeTask())
       expect(await sched.runPromotedTask("task-p", "secret")).toBeNull()
+    })
+
+    it("runPromotedTask runs a late OS wake as the slot it was for, and only once", async () => {
+      const executor = jest.fn().mockResolvedValue({ success: true })
+      registerTaskExecutor("test", executor)
+      const sched = createTaskScheduler(makeMockDriver())
+      // The slot was ten minutes ago on a one-minute interval; the wake came
+      // late (the machine slept), so the last elapsed slot is the occurrence.
+      const nextRunAt = new Date(Date.now() - 10 * 60_000)
+      const promoted = makeTask({
+        nextRunAt,
+        promotion: { systemTaskId: "sys-1", token: "secret", promotedAt: new Date() },
+      })
+      mockSchedulerDb.getTask.mockResolvedValue(promoted)
+      const execution = await sched.runPromotedTask("task-p", "secret")
+      const slot = execution?.scheduledFor?.getTime() ?? 0
+      expect((slot - nextRunAt.getTime()) % 60_000).toBe(0)
+      expect(slot).toBeLessThanOrEqual(Date.now())
+      expect(Date.now() - slot).toBeLessThan(60_000)
+      expect(execution?.id).toBe(`occ-task-p-${Math.floor(slot / 1000) * 1000}`)
+
+      // A second wake for the same slot finds the first run's row.
+      mockSchedulerDb.getExecution.mockResolvedValueOnce({ ...execution!, taskId: "task-p" })
+      const again = await sched.runPromotedTask("task-p", "secret")
+      expect(again?.id).toBe(execution?.id)
+      expect(executor).toHaveBeenCalledTimes(1)
+    })
+
+    it("starts one slot once when two fire paths reach it together", async () => {
+      let release!: () => void
+      const executor = jest.fn(
+        () =>
+          new Promise<{ success: boolean }>((resolve) => {
+            release = () => resolve({ success: true })
+          })
+      )
+      registerTaskExecutor("test", executor)
+      const sched = createTaskScheduler(makeMockDriver())
+      const task = makeTask({ config: { ...makeTask().config, overlapPolicy: "allow" } })
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+      const fire = (
+        sched as unknown as {
+          executeTask(
+            task: ScheduledTask,
+            attempt: number,
+            context: { triggerSource: string; scheduledFor: Date }
+          ): Promise<TaskExecution>
+        }
+      ).executeTask.bind(sched)
+      const slot = new Date("2026-10-12T09:00:00.000Z")
+
+      // The live alarm and the catch-up path both reach the 09:00 slot, even
+      // under the "allow" overlap policy that would run two starts side by side.
+      const first = fire(task, 0, { triggerSource: "schedule", scheduledFor: slot })
+      const second = fire(task, 0, { triggerSource: "catch-up", scheduledFor: slot })
+      const duplicate = await second
+      expect(duplicate.id).toBe(`occ-task-p-${slot.getTime()}`)
+      for (let tick = 0; tick < 1_000 && executor.mock.calls.length === 0; tick += 1) {
+        await Promise.resolve()
+      }
+      release()
+      const started = await first
+      expect(started.id).toBe(duplicate.id)
+      expect(executor).toHaveBeenCalledTimes(1)
     })
 
     it("pause/resume mirror onto the OS task and delete removes it", async () => {
