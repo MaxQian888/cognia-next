@@ -243,6 +243,8 @@
     "lifecycleEphemeral": "Ephemeral — a fresh sandbox for every run",
     "lifecyclePersistent": "Persistent — keeps its workspace between runs",
     "loading": "Reading the image catalog…",
+    "hostProcess": "Run as host processes on an always-on host",
+    "hostProcessHint": "An always-on host runs a project's Bots, scheduled tasks and phone turns in this runtime environment by default. Turn this on to run them as host processes instead. Other devices ignore it.",
     "localContainer": "Run in a local container on this device",
     "localContainerDormant": "This device cannot run local containers yet, so a project that turns this on is refused rather than run unsandboxed.",
     "noEnvironment": "Create and enable an environment above to choose a runtime environment for it.",

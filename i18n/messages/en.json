@@ -35017,6 +35017,8 @@
       "egress": "Network presets",
       "egressAll": "Every preset the deployment defines",
       "egressNotEnforced": "Recorded, not yet enforced: until the egress proxy ships, only a sandbox with networking off is actually restricted.",
+      "hostProcess": "Run as host processes on an always-on host",
+      "hostProcessHint": "An always-on host runs a project's Bots, scheduled tasks and phone turns in this runtime environment by default. Turn this on to run them as host processes instead. Other devices ignore it.",
       "isolation": "Minimum isolation",
       "isolationFloor": "The deployment floor ({tier})",
       "isolationMandatoryHint": "Naming a tier makes isolation mandatory: if no sandbox can be started, the run is refused instead of falling back.",

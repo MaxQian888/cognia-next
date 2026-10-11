@@ -222,6 +222,36 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
 4. Compose enables the pool for always-on hosts (`COGNIA_SANDBOX_POOL_ENABLED`, workspaces dir and volume, agent bundle image).
 5. Tests: proxy allow and deny tables, placement for each surface, opt-out.
 
+**A8 outcome (2026-10-11).** Shipped in three commits: A8a the proxy and Compose, A8b a container tier for built-in tools, A8c host-authored placement. Deviations from the plan:
+
+- **Docker proxy (A8a):** `crates/cognia-docker-proxy` reads bodies rather than URL prefixes.
+  - A container is created only with this deployment's `cognia.owner`/`cognia.deployment` labels, the workspaces volume and its own bundle volumes, and no privileged mode, binds, devices, host namespaces, extra capabilities beyond the five the supervisor adds back, or unconfined security options.
+  - Lifecycle calls and exec reach only containers the daemon confirms carry those labels. Lists are filtered.
+  - Builds, networks, swarm, secrets and archives are refused.
+  - The T2 override swaps it in, turns the pool on by default, and refuses `COGNIA_RUNNER_NETWORK=host`/`container:<id>`.
+- **Container tier (A8b), not in the plan.** The plan placed only external agents. Built-in turns run Bash, Edit and Write through the sidecar's sandboxed tools, which had no container tier, so a phone or scheduled built-in turn would still have run on the Host. A new `container` shell tier fixes that:
+  - **Pool:** `SandboxRuntimeControl::exec_task_shell`/`release_task_shell` in `cognia-sandbox-pool`. Each session gets a retained runtime with its own key and label, so it never shares an agent's runtime. Output is capped at 1 MiB per stream. Release removes only idle runtimes; the orphan sweep reaps another process's.
+  - **sandboxd:** task commands skip the `postAttach` lifecycle and symlink the host's workspace path to the mount.
+  - **Commands:** service-only `environment_task_shell_exec`/`_release`.
+  - **Brain:** the session runtime binds the tier on headless hosts only (`lib/sandbox/container-exec-adapter.ts`, `task-shell-placement.ts`).
+  - **Attestation:** `SandboxAttestationV1.tier` accepts `container`, so A7's sandbox auto-allow covers it.
+- **Placement (A8c).**
+  - **Built-in turns.** `resolveSendOptions` asks `resolveHostTaskPlacement` (`lib/sandbox/host-task-placement.ts`). On a headless Host every turn gets sandboxed tools on the `container` tier, whatever the session, character or app default chose, and the Restricted Mode tool denials. A turn with no session gets an unplaced record, so its sandboxed tools refuse. This one seam covers phone turns, Bots, scheduled chat and goal tasks, teammates and plugin agent turns.
+  - **External agents.** Each dispatch site calls `ensureHostAgentPlacement`/`placeDispatchedAgent` (`lib/sandbox/host-agent-placement.ts`). The sites are phone turns (`remote-run-service.ts`), scheduled external-agent tasks, teammates (`dispatch-teammate.ts`), delegations, plugin SDK dispatch, and the plugin external-agent API, including its Bot path.
+    - The project comes from the session, or from the closest project root holding the run's directory. A task lease's working copy is matched by the checkout it came from.
+    - A project with no selection gets `{ source: auto }`, the deployment default.
+    - A refusal throws before any process starts.
+    - An agent connected elsewhere is reconnected where the run belongs.
+  - **Phone turns** take their working directory from the session's workspace root (`resolveSessionWorkspaceRoot`) and pass it to the run.
+  - **Scheduled leases.** After a scheduled task takes a task-workspace lease, its options are re-bound to the lease (`rebindSendOptionsWorkspace`), so the container mounts the lease, not the project checkout.
+  - **T2 task workspaces.** `COGNIA_TASK_WORKSPACE_EXECUTION_ROOT` moves `executions/` and `scratch/` into the workspaces volume (`/workspaces/.cognia-task-workspaces`), because `resolve_mount` refuses `<data>/task-workspaces/executions`. `SpawnPolicy::from_env` follows the same variable.
+- **Opt-out:** `ProjectRuntimeSelection.hostProcess` is a switch in the environment's runtime settings, on the workspace page's Environments tab. It is read only on a headless Host. An unreadable selection is not an opt-out.
+- **Limits:**
+  - A run with no project stays on the Host: its built-in sandboxed tools refuse, and an external agent runs in the launcher sandbox. Bot runs in an isolated workspace with no project fall here.
+  - A Host without the pool refuses built-in sandboxed tools unless the project opts out.
+  - No Tauri or live T2 smoke was run for A8.
+  - `Dockerfile.docker-proxy` pins Rust 1.96.1 and follows the toolchain bump.
+
 ### A9 — Occurrence keys
 
 1. **Webhook and integration events** key on the provider delivery id (`webhook_router.rs:507-512`, `integration_spool.rs:57`; `lib/integrations/events.ts:176`).
@@ -312,7 +342,7 @@ Record the evidence in `docs/reports/`. Run `preflight` and the gates for every 
 | Global timing authority's liveness goes stale for hosts that are not being routed to, so the desktop takes over and fires twice | A5                     |
 | `scheduled_task_import` copies the OS promotion and forces paused tasks active                                                  | A5                     |
 | Push credential config and bot install/arm have no approval gate                                                                | A6                     |
-| T2 Compose proxy sets `EXEC=0` but the pool needs exec; comments claim otherwise                                                | A8                     |
+| T2 Compose proxy sets `EXEC=0` but the pool needs exec; comments claim otherwise (fixed)                                        | A8                     |
 | Webhook and connector events in the same second collapse into one run (data loss)                                               | A9                     |
 | Cron occurrence key is the wake time, not the slot                                                                              | A9                     |
 | Signaling live join path does not enforce `SIGNALING_MAX_*` (docs claim it does)                                                | out of scope; reported |

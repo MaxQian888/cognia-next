@@ -196,8 +196,17 @@ What it adds:
   teams, plugin agents) runs in a container per task. Containers start only
   once `COGNIA_AGENT_BUNDLE_IMAGE` names a digest-pinned bundle (see
   [Runtime environments](#runtime-environments-docker-compose-runtime-environmentyml));
-  until then a run that does not require isolation falls back to the server
-  process. Set the variable to `false` to keep every run there.
+  until then an external agent whose project does not require isolation
+  falls back to the server process, while a built-in turn's Bash, Edit and
+  Write are refused (a headless host never runs them in its own process
+  unless the project opts out with **Run as host processes on an always-on
+  host**). Set the variable to `false` to keep external agents in the server
+  process.
+- **Task workspace root** — `COGNIA_TASK_WORKSPACE_EXECUTION_ROOT` moves task
+  working copies (`executions/`, `scratch/`) to
+  `/workspaces/.cognia-task-workspaces`, inside the workspaces volume, so a
+  scheduled task's lease can be mounted into its container. The agent
+  launcher follows the same variable.
 - **`cognia_workspaces` volume** — shared between cognia-server (mounted at
   `/workspaces`) and the runners (each gets a volume-subpath mount of ONLY
   its own workspace). `COGNIA_WORKSPACES_VOLUME` must name the volume

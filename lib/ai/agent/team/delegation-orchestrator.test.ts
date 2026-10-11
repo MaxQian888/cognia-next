@@ -44,6 +44,11 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: jest.fn(() => ({ execute: externalExecuteMock })),
 }))
 
+const placeDispatchedAgentMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/sandbox/host-agent-placement", () => ({
+  placeDispatchedAgent: (...args: unknown[]) => placeDispatchedAgentMock(...args),
+}))
+
 jest.mock("@/lib/connectors/outbound-runner", () => ({
   isInQuietHours: jest.fn(() => false),
 }))
@@ -332,6 +337,22 @@ describe("delegation-orchestrator", () => {
       const settled = await completionPromise
       expect(settled.status).toBe("failed")
       expect(settled.result).toBe("agent exploded")
+    })
+
+    it("places the agent before it runs and fails the delegation on a refusal (ADR-0224 A8)", async () => {
+      placeDispatchedAgentMock.mockClear()
+      placeDispatchedAgentMock.mockRejectedValueOnce(new Error("environment refused"))
+      const { completionPromise } = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        prompt: "x",
+        reason: "y",
+      })
+      const settled = await completionPromise
+      expect(placeDispatchedAgentMock).toHaveBeenCalledWith("codex", undefined, expect.anything())
+      expect(settled.status).toBe("failed")
+      expect(externalExecuteMock).not.toHaveBeenCalled()
     })
 
     it("settles to timeout when the watchdog fires", async () => {

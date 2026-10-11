@@ -62,6 +62,10 @@ reqwest = { workspace = true, features = ["json", "rustls-no-provider"], optiona
 # still builds without the workspace-runtime backend.
 cognia-net = { path = "../cognia-net", optional = true }
 
+[dev-dependencies]
+# Pins TASK_WORKSPACE_EXECUTION_ROOT_ENV to the service that reads it.
+cognia-task-workspace = { path = "../cognia-task-workspace" }
+
 [target.'cfg(unix)'.dependencies]
 # Process-group kills for the local backend.
 libc.workspace = true

@@ -79,6 +79,10 @@ services:
       # so a host bind would hand every runner an empty directory.
       COGNIA_WORKSPACES_DIR: /workspaces
       COGNIA_WORKSPACES_VOLUME: ${COGNIA_INSTANCE:-cognia}_workspaces
+      # A task's working copies live on the same volume (ADR-0224 A8), so the
+      # container its tools run in can mount the copy the task runs on. Under
+      # the data directory they would sit on another volume no runner sees.
+      COGNIA_TASK_WORKSPACE_EXECUTION_ROOT: /workspaces/.cognia-task-workspaces
       # ADR-0085 hard gate. Both this server flag and each user's local
       # experiment toggle must be true before `browser` is advertised.
       COGNIA_REMOTE_BROWSER_ENABLED: ${COGNIA_REMOTE_BROWSER_ENABLED:-false}

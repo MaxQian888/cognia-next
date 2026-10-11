@@ -132,7 +132,9 @@ import {
   AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
   type AgentCapabilityGrantV1,
 } from "@cognia/agent-config-types/agent-capability-grant"
-import { executeOnExternalAgent } from "@/lib/ai/agent/external/manager"
+import { executeOnExternalAgent, getExternalAgentManager } from "@/lib/ai/agent/external/manager"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { ensureHostAgentPlacement } from "@/lib/sandbox/host-agent-placement"
 import { loggers } from "@cognia/logging"
 import { assertTaskTypeSupportedOnHost } from "../host-support"
 import { executeTestTask } from "./test-executor"
@@ -875,6 +877,11 @@ async function runChatPrompt(
   }
   // Last rewrite of cwd / additionalDirectories above: confinement follows it.
   finalOptions = alignConfinementRoots(finalOptions)
+  // So does a placement that mounts the root it was bound with (ADR-0224 A8).
+  if (taskLease) {
+    const { rebindSendOptionsWorkspace } = await import("@/lib/sandbox/session-runtime")
+    finalOptions = await rebindSendOptionsWorkspace(finalOptions)
+  }
   // So does the trust proof, alias by alias.
   if (taskLease) {
     finalOptions = alignTrustedWorkspaceRoots(
@@ -1301,6 +1308,19 @@ async function executeExternalAgentTask(
     workspaceLease = payload.cwd
       ? await openScheduledWritableBundle(task, execution, payload.cwd, "scheduled-external-agent")
       : null
+    // An always-on Host starts the agent in the project's runtime environment
+    // (ADR-0224 A8); a refusal fails the run before anything starts.
+    if (isHeadlessHost()) {
+      const workingDirectory = workspaceLease?.primaryAlias ?? payload.cwd
+      await ensureHostAgentPlacement(
+        {
+          agentId: payload.agentId,
+          ...(workingDirectory ? { cwd: workingDirectory } : {}),
+          ...(payload.cwd ? { projectPath: payload.cwd } : {}),
+        },
+        getExternalAgentManager()
+      )
+    }
     const result = await executeOnExternalAgent(payload.prompt, {
       agentId: payload.agentId,
       permissionMode: payload.permissionMode,

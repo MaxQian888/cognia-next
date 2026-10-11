@@ -5199,6 +5199,80 @@ describe("resolveSendOptions — workflow-editor (Workflow Copilot mode)", () =>
   })
 })
 
+describe("resolveSendOptions — always-on host placement (ADR-0224 A8)", () => {
+  const globals = globalThis as Record<string, unknown>
+  beforeEach(() => {
+    globals.__COGNIA_HEADLESS__ = true
+  })
+  afterEach(() => {
+    delete globals.__COGNIA_HEADLESS__
+  })
+
+  it("runs a turn's tools in the container tier whatever the session chose", async () => {
+    const bindSpy = jest
+      .spyOn(sandboxSessionRuntime, "bindSession")
+      .mockResolvedValueOnce("sandbox-runtime:host")
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", sandboxEnabled: false }))
+    try {
+      const opts = await resolveSendOptions({
+        session: makeSession({
+          id: "s1",
+          characterId: "c1",
+          sandboxEnabled: false,
+          sandboxTier: "os",
+        }),
+      })
+      expect(bindSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "s1",
+          sandboxEnabled: true,
+          binding: expect.objectContaining({ shellTier: "container" }),
+        })
+      )
+      expect(opts.sandboxRuntimeRef).toBe("sandbox-runtime:host")
+      // Every other tool that would write the disk or run a process on the
+      // Host is gone, not only the SDK builtins.
+      const { RESTRICTED_MODE_DENIED_TOOLS } = await import("@/lib/workspace/restricted-tools")
+      expect(opts.disallowedTools).toEqual(
+        expect.arrayContaining([...RESTRICTED_MODE_DENIED_TOOLS])
+      )
+      expect(opts.appendSystemPrompt ?? "").toContain("sandbox_bash")
+    } finally {
+      bindSpy.mockRestore()
+    }
+  })
+
+  it("refuses a conversation-less turn's sandboxed tools instead of running them here", async () => {
+    const opts = await resolveSendOptions({ session: null })
+    expect(opts.sandboxRuntimeRef).toBeDefined()
+    await expect(
+      sandboxSessionRuntime.executeSandbox(opts.sandboxRuntimeRef!, {
+        tool: "sandbox_bash",
+        command: { argv: ["true"], cwd: "/", env: {}, stdin: null, timeout: 1 },
+        request: {
+          writable: [],
+          readable: [],
+          targetFiles: [],
+          maxCpuSeconds: 0,
+          maxMemoryMb: 0,
+          network: "off",
+          networkHosts: [],
+        },
+      })
+    ).rejects.toMatchObject({ code: "placement-unavailable" })
+    expect(opts.disallowedTools ?? []).toContain("Bash")
+  })
+
+  it("changes nothing on a host that is not always-on", async () => {
+    delete globals.__COGNIA_HEADLESS__
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1" }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+    })
+    expect(opts.disallowedTools ?? []).not.toContain("Bash")
+  })
+})
+
 describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
   it("keeps wrapped native processes available while denying SDK bypasses", async () => {
     const builtinProcessSandbox = {

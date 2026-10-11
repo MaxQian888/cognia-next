@@ -147,6 +147,10 @@ function runExternalDelegation(
     try {
       const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
       const workingDirectory = useAgentTeamStore.getState().teams[sourceTeamId]?.config?.workingDir
+      // An always-on Host starts the agent in its project's runtime
+      // environment (ADR-0224 A8); a refusal fails the delegation.
+      const { placeDispatchedAgent } = await import("@/lib/sandbox/host-agent-placement")
+      await placeDispatchedAgent(targetAgentId, workingDirectory, getExternalAgentManager())
       const result = await getExternalAgentManager().execute(targetAgentId, prompt, {
         systemPrompt,
         ...(workingDirectory ? { workingDirectory } : {}),

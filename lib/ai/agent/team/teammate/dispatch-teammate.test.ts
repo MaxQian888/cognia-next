@@ -192,6 +192,11 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
   }),
 }))
 
+const placeDispatchedAgentMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/sandbox/host-agent-placement", () => ({
+  placeDispatchedAgent: (...args: unknown[]) => placeDispatchedAgentMock(...args),
+}))
+
 const applyTeammateTwinContextMock = jest.fn()
 jest.mock("./twin-context", () => ({
   applyTeammateTwinContext: (...a: Parameters<typeof applyTeammateTwinContextMock>) =>
@@ -1808,6 +1813,21 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
       "spawn failed"
     )
     expect(pool.recordFailure).toHaveBeenCalled()
+  })
+
+  it("places an external teammate before it runs and stops it on a refusal (ADR-0224 A8)", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockClear()
+    placeDispatchedAgentMock.mockClear()
+    placeDispatchedAgentMock.mockRejectedValueOnce(new Error("environment refused"))
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })).rejects.toThrow(
+      "environment refused"
+    )
+    expect(placeDispatchedAgentMock).toHaveBeenCalledWith("agent-1", undefined, expect.anything())
+    expect(externalExecuteMock).not.toHaveBeenCalled()
   })
 
   it("honours preferToolEnabled=false even on desktop", async () => {

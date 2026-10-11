@@ -31,8 +31,12 @@ bot 和连接器，所以笔记本休眠时这些照常工作。
 ```bash
 git clone https://github.com/MaxQian888/cognia-next.git && cd cognia-next/deploy/compose
 cp .env.example .env
-# 编辑 .env：设置 SHARE_UPLOAD_SECRET（openssl rand -hex 32）
+# 编辑 .env：设置 SHARE_UPLOAD_SECRET（openssl rand -hex 32），并把 COGNIA_AGENT_BUNDLE_IMAGE
+# 设为按摘要固定的智能体工具包镜像，可用下面的命令得到：
+#   docker buildx imagetools inspect ghcr.io/maxqian888/cognia-agent-bundle:latest \
+#     --format '{{.Name}}@{{.Manifest.Digest}}'
 
+export COMPOSE_FILE=docker-compose.yml:docker-compose.t2.yml
 docker compose --profile server run --rm cognia-server init   # 一次性写入 /data/master.key
 docker compose --profile server up -d --wait
 docker compose exec cognia-server cognia-server pair
@@ -40,6 +44,11 @@ docker compose exec cognia-server cognia-server pair
 
 `init` 在数据卷里创建主密钥，永远不会替换已有的密钥。容器会自动重启
 （`restart: unless-stopped`），机器开机后随 Docker 一起启动。
+
+`docker-compose.t2.yml` 让 host 在容器里执行任务（见[host 在哪里执行任务](#host-在哪里执行任务)）。
+服务器只能通过 Cognia 自己的代理访问 Docker，只能创建和运行自己的加固容器。
+在 `COGNIA_AGENT_BUNDLE_IMAGE` 指向按摘要固定的工具包之前，容器无法启动，
+不要求隔离的任务会改在服务器进程中执行。
 
 ## 用 host 安装包运行在 Mac 上
 
@@ -199,6 +208,29 @@ Bot 和定时任务在 host 上运行时无人看守。每个 Bot 和任务都�
 运行需要你确认时会暂停，而不是失败。已配对的手机会收到通知，通知只说明等待的是哪类审批，从不包含运行想发送的内容。
 打开通知后在 **Bots** 或 **定时任务** 页面查看请求并批准或拒绝。30 分钟内无人回应的请求会被拒绝。
 等待的时间不计入任务的超时。Bot 自身的审批步骤也会出现在同一个列表里。
+
+## host 在哪里执行任务
+
+用 `docker-compose.t2.yml` 启动的 host 会把你派发的任务放进容器执行，从不在 host 自己的进程里执行。
+这包括手机聊天、Bot、定时任务、目标、智能体团队和插件。
+
+- 对话中的 Bash、Edit 和 Write 在项目的运行环境中执行：即 host 沙箱池里的容器，以该环境的用户身份运行，
+  任务工作区的路径保持不变。其他会在 host 上写文件或启动进程的工具在这些运行中会被关闭。
+- 外部智能体（Claude Code、Codex、Pi 等）也在同一个环境中启动。
+- 没有选择运行环境的项目使用部署的默认镜像。
+- 无法放置的运行会被拒绝，而不会改在 host 上执行。例如项目的运行环境可能仍在等待你批准。
+
+由于这些运行在 host 验证过的沙箱中执行，[无人值守运行可以做什么](#无人值守运行可以做什么)中会把它们视为在沙箱中运行。
+
+有两类运行会留在 host 上。不属于任何项目的对话没有可供容器挂载的工作区，因此它的沙箱工具会被拒绝，
+外部智能体则在 host 上的智能体沙箱中运行。项目也可以选择不使用容器：在项目的工作区页面打开 **环境** 标签页，
+进入运行环境的运行时设置，开启 **在常驻主机上以主机进程运行**。其他设备会忽略这个开关。
+
+没有沙箱池的 host（启动时未使用 `docker-compose.t2.yml`，或设置了 `COGNIA_SANDBOX_POOL_ENABLED=false`）
+无法提供容器。在这样的 host 上，对话中的 Bash、Edit 和 Write 会被拒绝，外部智能体在 host 上的智能体沙箱中运行。
+如需在这样的 host 上以主机进程运行项目的工具，请让该项目选择不使用容器。
+
+对话不再使用的容器会被移除。服务器上一次运行遗留的容器会在启动时移除。
 
 ## 保护好主密钥
 

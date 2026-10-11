@@ -228,6 +228,10 @@ pub struct ValidatedSpawn {
     pub dropped_env_keys: Vec<String>,
 }
 
+/// `cognia_task_workspace::EXECUTION_ROOT_ENV`, which this crate does not
+/// depend on; a test pins the two together (ADR-0224 A8).
+pub const TASK_WORKSPACE_EXECUTION_ROOT_ENV: &str = "COGNIA_TASK_WORKSPACE_EXECUTION_ROOT";
+
 /// The spawn policy for one server process.
 #[derive(Debug, Clone)]
 pub struct SpawnPolicy {
@@ -275,8 +279,14 @@ impl SpawnPolicy {
     /// Standard construction: workspaces root from `COGNIA_WORKSPACES_DIR`
     /// (default `<data_dir>/workspaces`), smoke stub gated on
     /// `COGNIA_SMOKE_AGENT=1`, and the managed execution root this same
-    /// `data_dir` gives `TaskWorkspaceService::open`.
+    /// `data_dir` (or [`TASK_WORKSPACE_EXECUTION_ROOT_ENV`]) gives
+    /// `TaskWorkspaceService::open`.
     pub fn from_env(data_dir: &Path) -> Self {
+        let execution_root = std::env::var(TASK_WORKSPACE_EXECUTION_ROOT_ENV)
+            .ok()
+            .map(|raw| PathBuf::from(raw.trim()))
+            .filter(|path| path.is_absolute())
+            .unwrap_or_else(|| data_dir.join("task-workspaces"));
         let workspaces_dir = std::env::var(WORKSPACES_DIR_ENV)
             .ok()
             .filter(|raw| !raw.trim().is_empty())
@@ -286,7 +296,7 @@ impl SpawnPolicy {
             .map(|v| v == "1")
             .unwrap_or(false);
         Self::new(workspaces_dir, smoke)
-            .with_managed_execution_dir(data_dir.join("task-workspaces").join("executions"))
+            .with_managed_execution_dir(execution_root.join("executions"))
             .with_operator_allowlists(
                 std::env::var(COMMAND_ALLOWLIST_ENV),
                 std::env::var(ENV_ALLOWLIST_ENV),
@@ -2004,5 +2014,42 @@ mod tests {
             Some(value) => std::env::set_var(WORKSPACES_DIR_ENV, value),
             None => std::env::remove_var(WORKSPACES_DIR_ENV),
         }
+    }
+
+    /// An always-on Host moves working copies onto the workspaces volume
+    /// (ADR-0224 A8); the policy must admit them where they now are and no
+    /// longer under the data directory.
+    #[test]
+    fn from_env_follows_a_moved_task_workspace_execution_root() {
+        let _lock = HOST_ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(TASK_WORKSPACE_EXECUTION_ROOT_ENV);
+        let data = tempfile::tempdir().expect("tempdir");
+        let moved = tempfile::tempdir().expect("tempdir");
+        let run_root = moved.path().join("executions").join("bundle-c");
+        std::fs::create_dir_all(&run_root).expect("mkdir run root");
+        let old_root = data.path().join("task-workspaces").join("executions").join("b");
+        std::fs::create_dir_all(&old_root).expect("mkdir old root");
+        std::env::set_var(TASK_WORKSPACE_EXECUTION_ROOT_ENV, moved.path());
+
+        let policy = SpawnPolicy::from_env(data.path());
+
+        assert!(policy
+            .validate_cwd(Some(run_root.to_str().expect("utf8")))
+            .is_ok());
+        assert!(policy
+            .validate_cwd(Some(old_root.to_str().expect("utf8")))
+            .is_err());
+        match previous {
+            Some(value) => std::env::set_var(TASK_WORKSPACE_EXECUTION_ROOT_ENV, value),
+            None => std::env::remove_var(TASK_WORKSPACE_EXECUTION_ROOT_ENV),
+        }
+    }
+
+    #[test]
+    fn the_execution_root_env_matches_the_task_workspace_service() {
+        assert_eq!(
+            TASK_WORKSPACE_EXECUTION_ROOT_ENV,
+            cognia_task_workspace::EXECUTION_ROOT_ENV
+        );
     }
 }

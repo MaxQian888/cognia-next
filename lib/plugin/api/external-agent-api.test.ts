@@ -62,6 +62,10 @@ jest.mock("@/lib/ai/agent/external/config/presets", () => ({
       : { id: "preset-id", protocol: "acp", process: { command: "devin", args: ["acp"] } },
 }))
 jest.mock("@/lib/bot/runtime/run", () => ({ getLiveBotRunSignal: jest.fn() }))
+const mockPlaceDispatchedAgent = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/sandbox/host-agent-placement", () => ({
+  placeDispatchedAgent: (...args: unknown[]) => mockPlaceDispatchedAgent(...args),
+}))
 const mockStoreAgents = new Map<string, Record<string, unknown>>()
 const mockStoreState = {
   enabled: true,
@@ -186,6 +190,50 @@ it("persists identity before execution, uses owned cwd, and returns host tool ev
   expect(mockManager.removeAgent).toHaveBeenCalledWith(result.agentId)
   expect(mockAgents.size).toBe(0)
   expect(mockSteps.has("run:__host:external-agent:result")).toBe(true)
+})
+
+it("places a Bot run's agent before it starts and its session opens (ADR-0224 A8)", async () => {
+  const order: string[] = []
+  mockPlaceDispatchedAgent.mockImplementationOnce(async () => {
+    order.push("place")
+  })
+  mockManager.createSession.mockImplementationOnce(async () => {
+    order.push("session")
+    return { id: "session" }
+  })
+  await runPluginExternalAgent("plugin", "devin", "fix issue", options)
+  expect(mockPlaceDispatchedAgent).toHaveBeenCalledWith(
+    expect.stringMatching(/^bot-/),
+    "/isolated",
+    mockManager
+  )
+  expect(order).toEqual(["place", "session"])
+})
+
+it("does not start a Bot run's agent when its environment is refused", async () => {
+  mockPlaceDispatchedAgent.mockRejectedValueOnce(new Error("environment refused"))
+  await expect(runPluginExternalAgent("plugin", "devin", "fix issue", options)).rejects.toThrow(
+    "environment refused"
+  )
+  expect(mockManager.addAgent).not.toHaveBeenCalled()
+  expect(mockManager.execute).not.toHaveBeenCalled()
+})
+
+it("places a plain plugin call's agent at its working directory before it runs", async () => {
+  mockManager.execute.mockResolvedValueOnce({
+    success: true,
+    finalResponse: "ok",
+    messages: [],
+    steps: [],
+    toolCalls: [],
+    duration: 1,
+  })
+  await runPluginExternalAgent("plugin", "devin", "look", { workingDirectory: "/workspaces/repo" })
+  expect(mockPlaceDispatchedAgent).toHaveBeenCalledWith(
+    "preset-id",
+    "/workspaces/repo",
+    mockManager
+  )
 })
 
 it("releases more than ten sequential transient agents only after checkpointing each result", async () => {

@@ -33,8 +33,12 @@ sit behind a home router with no public domain and no open port.
 ```bash
 git clone https://github.com/MaxQian888/cognia-next.git && cd cognia-next/deploy/compose
 cp .env.example .env
-# edit .env: set SHARE_UPLOAD_SECRET (openssl rand -hex 32)
+# edit .env: set SHARE_UPLOAD_SECRET (openssl rand -hex 32) and COGNIA_AGENT_BUNDLE_IMAGE
+# to the agent bundle pinned by digest, which this prints:
+#   docker buildx imagetools inspect ghcr.io/maxqian888/cognia-agent-bundle:latest \
+#     --format '{{.Name}}@{{.Manifest.Digest}}'
 
+export COMPOSE_FILE=docker-compose.yml:docker-compose.t2.yml
 docker compose --profile server run --rm cognia-server init   # writes /data/master.key once
 docker compose --profile server up -d --wait
 docker compose exec cognia-server cognia-server pair
@@ -43,6 +47,13 @@ docker compose exec cognia-server cognia-server pair
 `init` creates the master key inside the data volume. It never replaces an existing
 key. The container restarts on its own (`restart: unless-stopped`) and starts again
 with Docker when the machine boots.
+
+`docker-compose.t2.yml` is what makes the host run work in containers (see
+[Where the host runs work](#where-the-host-runs-work)). The server reaches Docker only
+through Cognia's own proxy, which lets it create and run nothing but its own hardened
+containers. Until `COGNIA_AGENT_BUNDLE_IMAGE` names a digest-pinned bundle, no
+container can start, and work that does not require isolation runs in the server
+process instead.
 
 ## Mac with the host archive
 
@@ -241,6 +252,39 @@ wants to send. Open it to see the request on the **Bots** or **Scheduled tasks**
 and approve or deny it there. A run nobody answers is denied after 30 minutes. The
 time it spends waiting does not count against the task's timeout. A Bot's own approval
 steps arrive in the same list.
+
+## Where the host runs work
+
+On a host started with `docker-compose.t2.yml`, the work you dispatch runs in a
+container, never in the host's own process. That covers phone chats, Bots, scheduled
+tasks, goals, Agent Teams and plugins.
+
+- A conversation's Bash, Edit and Write run in its project's runtime environment: a
+  container from the host's sandbox pool, as the environment's user, in the task's
+  workspace under the same paths. Other tools that would write files or start processes
+  on the host are turned off for these runs.
+- An external agent (Claude Code, Codex, Pi and the others) is started in the same
+  environment.
+- A project with no runtime environment selected gets the deployment's default image.
+- A run that cannot be placed is refused, never run on the host instead. For example,
+  the project's environment may still be waiting for your approval.
+
+Because these runs execute in a sandbox the host has verified, they count as sandboxed
+for [what unattended runs may do](#what-unattended-runs-may-do).
+
+Two kinds of run stay on the host. A chat that belongs to no project has no workspace
+for a container to mount, so its sandboxed tools are refused and an external agent runs
+in the agent sandbox on the host. A project can also opt out: on the project's workspace page,
+open the **Environments** tab, then the environment's runtime settings, and turn on
+**Run as host processes on an always-on host**. Other devices ignore that switch.
+
+A host without the sandbox pool (started without `docker-compose.t2.yml`, or with
+`COGNIA_SANDBOX_POOL_ENABLED=false`) has no containers to offer. There a conversation's
+Bash, Edit and Write are refused, and external agents run in the agent sandbox on the
+host. Opt a project out to run its tools as host processes on such a host.
+
+Containers a conversation no longer uses are removed. Ones a previous run of the server
+left behind are removed when it starts.
 
 ## Keep the master key safe
 

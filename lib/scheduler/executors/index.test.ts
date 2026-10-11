@@ -182,9 +182,18 @@ jest.mock("@/types/agent/agent-mode", () => ({
 }))
 
 const executeOnExternalAgentMock = jest.fn(async (..._args: unknown[]) => null as unknown)
+const hostAgentManager = { getAgent: () => undefined, reconnect: async () => undefined }
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   executeOnExternalAgent: (prompt: string, opts: unknown) =>
     executeOnExternalAgentMock(prompt, opts),
+  getExternalAgentManager: () => hostAgentManager,
+}))
+
+const ensureHostAgentPlacementMock = jest.fn(async (..._args: unknown[]) => ({
+  kind: "not-a-host",
+}))
+jest.mock("@/lib/sandbox/host-agent-placement", () => ({
+  ensureHostAgentPlacement: (...args: unknown[]) => ensureHostAgentPlacementMock(...args),
 }))
 
 const executeScriptMock = jest.fn()
@@ -1479,6 +1488,46 @@ describe("executeChatTask — owning workspace (ADR-0144)", () => {
     })
   })
 
+  it("moves the session's sandbox placement onto the leased alias (ADR-0224 A8)", async () => {
+    const { sandboxSessionRuntime } = await import("@/lib/sandbox/session-runtime")
+    const rebind = jest
+      .spyOn(sandboxSessionRuntime, "rebindWorkspaceRoot")
+      .mockResolvedValueOnce("sandbox-runtime:moved")
+    getAllProjectsMock.mockResolvedValueOnce([makeProject("project-1")])
+    resolveSendOptionsMock.mockResolvedValueOnce({
+      cwd: "/repo",
+      sandboxRuntimeRef: "sandbox-runtime:bound",
+    } as unknown as Record<string, unknown>)
+    emitTerminalResult()
+
+    try {
+      const r = await executeChatTask(
+        makeTask({
+          payload: {
+            prompt: "hi",
+            executionContext: {
+              location: "local",
+              projectId: "project-1",
+              projectRoot: "/repo",
+              taskWorkspace: { taskId: "task-1", workspaceKey: "session-1" },
+            },
+          },
+        }),
+        makeExecution(),
+        makeSignal()
+      )
+
+      expect(r.success).toBe(true)
+      // A container placement mounts the root it was bound with; the run
+      // writes in the alias, so the placement has to follow it there.
+      expect(rebind).toHaveBeenCalledWith("sandbox-runtime:bound", "/bundle/primary")
+      const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
+      expect(options.sandboxRuntimeRef).toBe("sandbox-runtime:moved")
+    } finally {
+      rebind.mockRestore()
+    }
+  })
+
   it("extends confinement to the task's own additional directories", async () => {
     resolveSendOptionsMock.mockResolvedValueOnce({
       cwd: "/proj-task",
@@ -2068,6 +2117,75 @@ describe("executeExternalAgentTask", () => {
     expect(settleTaskWorkspaceMock).toHaveBeenCalledWith("ready")
     expect(r.success).toBe(true)
   })
+  describe("on an always-on host (ADR-0224 A8)", () => {
+    const globals = globalThis as Record<string, unknown>
+    beforeEach(() => {
+      globals.__COGNIA_HEADLESS__ = true
+      ensureHostAgentPlacementMock.mockClear()
+    })
+    afterEach(() => {
+      delete globals.__COGNIA_HEADLESS__
+    })
+
+    it("places the agent in the project's environment at the leased working copy", async () => {
+      executeOnExternalAgentMock.mockResolvedValueOnce({
+        success: true,
+        sessionId: "s",
+        finalResponse: "done",
+        duration: 1,
+        messages: [],
+        steps: [],
+        toolCalls: [],
+      })
+      const r = await executeExternalAgentTask(
+        makeTask({ payload: { prompt: "hi", agentId: "a", cwd: "/tmp" } }),
+        makeExecution(),
+        makeSignal()
+      )
+      expect(r.success).toBe(true)
+      expect(ensureHostAgentPlacementMock).toHaveBeenCalledWith(
+        { agentId: "a", cwd: "/bundle/primary", projectPath: "/tmp" },
+        hostAgentManager
+      )
+    })
+
+    it("fails the run before the agent starts when its environment is refused", async () => {
+      ensureHostAgentPlacementMock.mockRejectedValueOnce(
+        new Error("Approve this project's environment first.")
+      )
+      const r = await executeExternalAgentTask(
+        makeTask({ payload: { prompt: "hi", agentId: "a", cwd: "/tmp" } }),
+        makeExecution(),
+        makeSignal()
+      )
+      expect(r).toMatchObject({
+        success: false,
+        error: "Approve this project's environment first.",
+      })
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+      expect(settleTaskWorkspaceMock).toHaveBeenCalledWith("failed")
+    })
+  })
+
+  it("does not place anything off an always-on host", async () => {
+    ensureHostAgentPlacementMock.mockClear()
+    executeOnExternalAgentMock.mockResolvedValueOnce({
+      success: true,
+      sessionId: "s",
+      finalResponse: "",
+      duration: 0,
+      messages: [],
+      steps: [],
+      toolCalls: [],
+    })
+    await executeExternalAgentTask(
+      makeTask({ payload: { prompt: "hi", agentId: "a", cwd: "/tmp" } }),
+      makeExecution(),
+      makeSignal()
+    )
+    expect(ensureHostAgentPlacementMock).not.toHaveBeenCalled()
+  })
+
   it("fails closed when the requested cwd cannot acquire a Registry Bundle", async () => {
     acquireWorkspaceBundleMock.mockRejectedValueOnce(new Error("registry unavailable"))
 

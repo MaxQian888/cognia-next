@@ -40,6 +40,7 @@ import {
   resolveProxyEnv,
 } from "@/lib/claude/env-resolver"
 import { resolveSandboxEnabled, resolveSandboxSessionBinding } from "@/lib/sandbox/binding"
+import { resolveHostTaskPlacement } from "@/lib/sandbox/host-task-placement"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { applyUnattendedPermissionProfile } from "./unattended-permission-options"
 import {
@@ -1219,6 +1220,14 @@ function appendStableSection(
   const trimmed = existing.trim()
   return trimmed ? `${trimmed}\n\n${section}` : section
 }
+
+/**
+ * The sandbox runtime owner for a turn with no conversation on an always-on
+ * Host (ADR-0224 A8). Shared, so such turns replace one another's unplaced
+ * record instead of each leaving one behind; a ref a later turn replaced is
+ * refused as released, which is still a refusal.
+ */
+const HOST_SESSIONLESS_SANDBOX_OWNER = "__always_on_host_sessionless__"
 
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
   const { session, appSettings, memberOverride } = ctx
@@ -4074,12 +4083,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // anthropic models do follow disallowedTools strictly, but the prompt
   // hint reduces "I notice Bash is disabled, can you tell me why?"
   // back-and-forth.
-  const sandboxEnabled = resolveSandboxEnabled({
-    session: { sandboxEnabled: session?.sandboxEnabled },
-    character: { sandboxEnabled: character?.sandboxEnabled },
-    appSettings: { sandboxDefaultEnabled: appSettings?.sandboxDefaultEnabled },
-  })
-  const sandboxBinding = resolveSandboxSessionBinding({
+  //
+  // An always-on Host decides placement itself (ADR-0224 A8): nothing a task
+  // runs there may run on the Host, so sandboxed tools are on and run in the
+  // session's runtime environment unless the project opted out.
+  const hostPlacement = await resolveHostTaskPlacement(session)
+  const hostContainer = hostPlacement.kind === "container"
+  const sandboxEnabled =
+    hostContainer ||
+    resolveSandboxEnabled({
+      session: { sandboxEnabled: session?.sandboxEnabled },
+      character: { sandboxEnabled: character?.sandboxEnabled },
+      appSettings: { sandboxDefaultEnabled: appSettings?.sandboxDefaultEnabled },
+    })
+  const ladderBinding = resolveSandboxSessionBinding({
     session: {
       sandboxTier: session?.sandboxTier,
       computerUseTarget: session?.computerUseTarget,
@@ -4090,6 +4107,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     },
     appSettings: { sandboxTier: appSettings?.sandboxTier },
   })
+  const sandboxBinding = hostContainer
+    ? { ...ladderBinding, shellTier: "container" as const }
+    : ladderBinding
   const resolvedSandboxPolicy = character?.sandboxPolicy ?? appSettings?.sandboxPolicy ?? null
   const computerUseNeedsConfine =
     computerUseAllowedForChat && sandboxBinding.computerTarget === "bound"
@@ -4142,6 +4162,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       })
       opts.sandboxRuntimeRef = sandboxSessionRuntime.bindUnplacedSession(bindInput, err)
     }
+  } else if (hostContainer) {
+    // A turn with no conversation has no runtime environment to place, and on
+    // an always-on Host its tools must not run here instead. The unplaced
+    // record makes every sandboxed call refuse; one shared owner keeps such
+    // turns from accumulating records.
+    opts.sandboxRuntimeRef = sandboxSessionRuntime.bindUnplacedSession(
+      {
+        sessionId: HOST_SESSIONLESS_SANDBOX_OWNER,
+        binding: sandboxBinding,
+        policy: resolvedSandboxPolicy,
+        confine: null,
+        sandboxEnabled: true,
+        computerUseEnabled: false,
+      },
+      new Error(
+        "This turn belongs to no conversation, so it has no runtime environment for its tools."
+      )
+    )
   } else if (session?.id) {
     // Same invariant as the catch above, for the same reason: `releaseSession`
     // rethrows a provider that refused to close, and a send must not be
@@ -4199,6 +4237,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         continue
       disallowed.add(t)
     }
+    // On an always-on Host every other tool that writes the disk or runs a
+    // process would do it on the Host itself, so none of them stays.
+    if (hostContainer) for (const t of RESTRICTED_MODE_DENIED_TOOLS) disallowed.add(t)
     opts.disallowedTools = [...disallowed]
     if (Array.isArray(opts.anthropicTools)) {
       opts.anthropicTools = opts.anthropicTools.filter(

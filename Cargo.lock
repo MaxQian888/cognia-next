@@ -2414,6 +2414,7 @@ dependencies = [
  "cognia-exec-sandbox",
  "cognia-net",
  "cognia-sandboxd",
+ "cognia-task-workspace",
  "futures-util",
  "hex",
  "k8s-openapi",

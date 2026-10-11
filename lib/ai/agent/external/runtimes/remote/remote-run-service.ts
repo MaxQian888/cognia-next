@@ -29,6 +29,7 @@ import { z } from "zod"
 import type { ExternalAgentManager } from "../../manager"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { publishHostEvent } from "@/lib/companion/host-event-publisher"
+import { isHeadlessHost } from "@/lib/platform/detect"
 import type {
   AcpConfigOption,
   AcpElicitationResponse,
@@ -266,6 +267,18 @@ export interface RemoteRunDeps {
   ) => Promise<ExternalAgentImageContent[] | null>
   /** Spend the run's refs once the turn is over, freeing their bytes. */
   consumeAttachments: (refs: readonly string[]) => Promise<void>
+  /**
+   * Where the turn runs on an always-on Host (ADR-0224 A8): the chat
+   * session's project and working directory, placed in its runtime
+   * environment before the agent starts. Answers the working directory the
+   * turn hands the agent; throws when the environment is refused. Called only
+   * on such a Host.
+   */
+  placeRun: (input: {
+    agentId: string
+    chatSessionId: string
+    manager: ExternalRunManager
+  }) => Promise<{ workingDirectory?: string }>
 }
 
 /** The slice of `ExternalAgentManager` this module uses. */
@@ -295,6 +308,7 @@ export interface ExternalRunManager extends Partial<
     | "cancel"
     | "steerSession"
     | "addEventListener"
+    | "reconnect"
   >
 > {
   getAgent(agentId: string): unknown | undefined
@@ -313,6 +327,7 @@ export interface ExternalRunManager extends Partial<
       systemPrompt?: string
       allowedTools?: string[]
       cogniaModel?: ExternalAgentCogniaModelBinding | null
+      workingDirectory?: string
       context?: { custom: { chatSessionId: string; callerDeviceId?: string } }
       onEvent?: (event: ExternalAgentEvent) => void
       signal?: AbortSignal
@@ -383,6 +398,34 @@ const defaultDeps: RemoteRunDeps = {
   consumeAttachments: async (refs) => {
     const { consumeAttachmentRefs } = await import("@/lib/db/session-attachment-uploads")
     await consumeAttachmentRefs(refs)
+  },
+  placeRun: async ({ agentId, chatSessionId, manager }) => {
+    const [{ getSession }, { resolveSessionWorkspaceRoot }, { ensureHostAgentPlacement }] =
+      await Promise.all([
+        import("@/lib/db/sessions"),
+        import("@/lib/task-workspace/session-execution-context"),
+        import("@/lib/sandbox/host-agent-placement"),
+      ])
+    const session = await getSession(chatSessionId)
+    const context = session?.executionContext
+    const cwd = context ? resolveSessionWorkspaceRoot(context) : undefined
+    const projectId = context?.projectId || session?.projectId
+    await ensureHostAgentPlacement(
+      {
+        agentId,
+        ...(projectId ? { projectId } : {}),
+        ...(context?.environmentId ? { environmentId: context.environmentId } : {}),
+        ...(cwd ? { cwd } : {}),
+      },
+      {
+        getAgent: (id) => manager.getAgent(id) as { connectionStatus?: string } | undefined,
+        reconnect: async (id) => {
+          if (!manager.reconnect) throw new Error("this agent manager cannot restart an agent")
+          await manager.reconnect(id)
+        },
+      }
+    )
+    return cwd ? { workingDirectory: cwd } : {}
   },
 }
 
@@ -823,9 +866,15 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
           request.chatSessionId,
           request.callerDeviceId
         )
+      // Placed before anything starts: a refused environment fails the turn
+      // here instead of starting the agent where it must not run.
+      const placed = isHeadlessHost()
+        ? await deps.placeRun({ agentId, chatSessionId: request.chatSessionId, manager })
+        : {}
       const images = await deliverableRunImages(run, manager, request, staged)
       const result = await manager.execute(agentId, request.prompt, {
         sessionId: request.externalSessionId,
+        ...(placed.workingDirectory ? { workingDirectory: placed.workingDirectory } : {}),
         ...(images.length > 0 ? { attachments: images } : {}),
         // Omitted rather than passed as undefined so the manager's own
         // `if (options?.model)` gate reads the same on both lanes: an absent

@@ -58,6 +58,10 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
       (externalGetAllAgents() as Array<{ config: { id: string } }>).find((i) => i.config.id === id),
   }),
 }))
+const placeDispatchedAgentMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/sandbox/host-agent-placement", () => ({
+  placeDispatchedAgent: (...args: unknown[]) => placeDispatchedAgentMock(...args),
+}))
 const externalStoreState: {
   agents: Record<string, unknown>
   connectionStatus: Record<string, string>
@@ -384,6 +388,19 @@ describe("dispatchSubagent — external backing (A2)", () => {
     })
     expect(res.runId).toEqual(expect.any(String))
     expect(mockExecute).not.toHaveBeenCalled() // built-in executor never ran
+  })
+
+  it("places the external subagent before it runs and stops it on a refusal (ADR-0224 A8)", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-9", metadata: { preset: "claude-code" } })
+    externalExecute.mockClear()
+    placeDispatchedAgentMock.mockClear()
+    placeDispatchedAgentMock.mockRejectedValueOnce(new Error("environment refused"))
+
+    await expect(dispatchSubagent(externalDef, "build it", { cwd: "/repo" })).rejects.toThrow(
+      "environment refused"
+    )
+    expect(placeDispatchedAgentMock).toHaveBeenCalledWith("ext-9", "/repo", expect.anything())
+    expect(externalExecute).not.toHaveBeenCalled()
   })
 
   it("forwards the subagent's declared model to the external agent", async () => {

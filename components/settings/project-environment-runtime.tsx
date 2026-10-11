@@ -565,6 +565,22 @@ export function ProjectEnvironmentRuntime({
             onChange={(checked) => update({ localContainer: checked || undefined })}
           />
 
+          {/* Live, unlike the dormant toggles above: an always-on Host reads it
+              for every dispatched turn (ADR-0224 A8). */}
+          <div className="flex items-start justify-between gap-3 @xl/environment-card:col-span-2">
+            <div className="min-w-0">
+              <Label htmlFor={`${environment.id}-runtime-host-process`} className="text-xs">
+                {t("hostProcess")}
+              </Label>
+              <p className="text-[11px] text-muted-foreground">{t("hostProcessHint")}</p>
+            </div>
+            <Switch
+              id={`${environment.id}-runtime-host-process`}
+              checked={draft.hostProcess === true}
+              onCheckedChange={(checked) => update({ hostProcess: checked || undefined })}
+            />
+          </div>
+
           <p
             className="text-[11px] text-muted-foreground @xl/environment-card:col-span-2"
             data-dormant="credentials"

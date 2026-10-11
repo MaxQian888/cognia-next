@@ -5,6 +5,7 @@ jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
 import { transport } from "@/lib/tauri"
 import {
   __resetSandboxSessionRuntimeForTesting,
+  rebindSendOptionsWorkspace,
   HOST_FALLBACK_RUNTIME_REF,
   sandboxSessionRuntime,
   SandboxSessionRuntime,
@@ -1486,6 +1487,33 @@ describe("OS-tier audit", () => {
         })
       )
       expect(runtime.attest(ref)).toBeNull()
+    })
+  })
+
+  describe("rebindSendOptionsWorkspace", () => {
+    afterEach(() => jest.restoreAllMocks())
+
+    it("moves the placement with a rewritten cwd and keeps the options otherwise", async () => {
+      const rebind = jest
+        .spyOn(sandboxSessionRuntime, "rebindWorkspaceRoot")
+        .mockResolvedValueOnce("sandbox-runtime:moved")
+      const options = { sandboxRuntimeRef: "sandbox-runtime:old", cwd: "/alias", model: "m" }
+      await expect(rebindSendOptionsWorkspace(options)).resolves.toEqual({
+        ...options,
+        sandboxRuntimeRef: "sandbox-runtime:moved",
+      })
+      expect(rebind).toHaveBeenCalledWith("sandbox-runtime:old", "/alias")
+    })
+
+    it("returns the same options when nothing is bound or the root did not move", async () => {
+      const rebind = jest
+        .spyOn(sandboxSessionRuntime, "rebindWorkspaceRoot")
+        .mockImplementation(async (ref) => ref)
+      const unbound = { cwd: "/alias" }
+      expect(await rebindSendOptionsWorkspace(unbound)).toBe(unbound)
+      expect(rebind).not.toHaveBeenCalled()
+      const same = { sandboxRuntimeRef: "sandbox-runtime:same", cwd: "/w" }
+      expect(await rebindSendOptionsWorkspace(same)).toBe(same)
     })
   })
 })

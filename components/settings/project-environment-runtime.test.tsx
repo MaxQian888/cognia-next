@@ -434,6 +434,13 @@ describe("ProjectEnvironmentRuntime", () => {
       expect(screen.getByRole("option", { name: "Container" })).toBeInTheDocument()
     })
 
+    it("writes the always-on host's opt-out to host processes", () => {
+      renderPanel()
+      expect(screen.getByText(en.runtime.hostProcessHint)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("switch", { name: en.runtime.hostProcess }))
+      expect(setDraft).toHaveBeenLastCalledWith(expect.objectContaining({ hostProcess: true }))
+    })
+
     it("writes the local-container request so a run refuses instead of silently ignoring it", () => {
       renderPanel()
       fireEvent.click(screen.getByRole("switch", { name: en.runtime.localContainer }))

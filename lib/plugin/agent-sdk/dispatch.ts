@@ -489,6 +489,11 @@ async function runExternalSubagent(
     await import("@/lib/ai/agent/external/session/external-event-progress")
   const onEvent = options._onEvent ? pipeExternalEventsToCapture(options._onEvent) : undefined
 
+  // An always-on Host starts the subagent in its project's runtime
+  // environment (ADR-0224 A8); a refusal stops it before it starts.
+  const { placeDispatchedAgent } = await import("@/lib/sandbox/host-agent-placement")
+  await placeDispatchedAgent(agentId, options.cwd, manager)
+
   const result = await manager.execute(agentId, prompt, {
     // A preset names an executable, not another saved agent's model/account.
     // A pinned config IS the saved agent, so without an explicit override its

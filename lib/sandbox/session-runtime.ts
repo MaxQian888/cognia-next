@@ -980,6 +980,24 @@ export const sandboxSessionRuntime = new SandboxSessionRuntime({
   recordAudit: recordSandboxAudit,
 })
 
+/**
+ * Follow a working directory rewritten after `resolveSendOptions` bound the
+ * session: a task lease swaps the checkout for its execution alias. A
+ * `container` or `microvm` placement mounts the root it was bound with, so it
+ * has to move with the turn (ADR-0224 A8). Unchanged options when nothing is
+ * bound or the root did not move.
+ */
+export async function rebindSendOptionsWorkspace<
+  T extends { sandboxRuntimeRef?: SandboxRuntimeRef; cwd?: string },
+>(options: T): Promise<T> {
+  if (!options.sandboxRuntimeRef) return options
+  const ref = await sandboxSessionRuntime.rebindWorkspaceRoot(
+    options.sandboxRuntimeRef,
+    options.cwd
+  )
+  return ref === options.sandboxRuntimeRef ? options : { ...options, sandboxRuntimeRef: ref }
+}
+
 /** Test-only — wipe every binding held by the module singleton. */
 export function __resetSandboxSessionRuntimeForTesting(): void {
   sandboxSessionRuntime.__resetForTesting()

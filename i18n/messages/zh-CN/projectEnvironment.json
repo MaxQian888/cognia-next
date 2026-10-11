@@ -243,6 +243,8 @@
     "lifecycleEphemeral": "临时 — 每次运行使用全新的沙箱",
     "lifecyclePersistent": "持久 — 多次运行之间保留工作区",
     "loading": "正在读取镜像目录…",
+    "hostProcess": "在常驻主机上以主机进程运行",
+    "hostProcessHint": "常驻主机默认在此运行环境中执行项目的 Bot、定时任务和手机端对话。开启后改为以主机进程运行。其他设备会忽略此项。",
     "localContainer": "在本设备的本地容器中运行",
     "localContainerDormant": "本设备暂时无法运行本地容器；开启此项的项目会被拒绝运行，而不会在无沙箱的情况下继续。",
     "noEnvironment": "请先在上方创建并启用一个环境，再为它选择运行环境。",

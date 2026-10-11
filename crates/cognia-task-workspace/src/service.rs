@@ -26,11 +26,20 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Moves execution working copies out of the data directory (ADR-0224 A8):
+/// an absolute directory that holds `executions/` and the `scratch/` beside
+/// it. An always-on Host whose sandbox pool mounts workspaces from one volume
+/// points this into that volume, so the runtime a turn's tools run in can
+/// mount the working copy the turn runs on.
+pub const EXECUTION_ROOT_ENV: &str = "COGNIA_TASK_WORKSPACE_EXECUTION_ROOT";
+
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
     pub data_dir: PathBuf,
     pub retention: Duration,
     pub max_blob_bytes: u64,
+    /// See [`EXECUTION_ROOT_ENV`]. Absent: `<data_dir>/task-workspaces`.
+    pub execution_root: Option<PathBuf>,
 }
 
 impl ServiceConfig {
@@ -39,7 +48,27 @@ impl ServiceConfig {
             data_dir,
             retention: Duration::from_secs(30 * 24 * 60 * 60),
             max_blob_bytes: 1024 * 1024 * 1024,
+            execution_root: None,
         }
+    }
+
+    /// Where execution working copies are created.
+    pub fn execution_dir(&self) -> PathBuf {
+        self.execution_root
+            .clone()
+            .unwrap_or_else(|| self.data_dir.join("task-workspaces"))
+            .join("executions")
+    }
+}
+
+/// The execution root an [`EXECUTION_ROOT_ENV`] value names. Unset or blank
+/// is no override; a relative path is refused rather than resolved against
+/// whatever the working directory happens to be.
+pub fn execution_root_from(raw: Option<&str>) -> Result<Option<PathBuf>, String> {
+    match raw.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(None),
+        Some(value) if std::path::Path::new(value).is_absolute() => Ok(Some(PathBuf::from(value))),
+        Some(value) => Err(format!("{EXECUTION_ROOT_ENV}={value:?} must be an absolute path")),
     }
 }
 
@@ -268,7 +297,7 @@ struct ResourceIndexFold {
 impl TaskWorkspaceService {
     pub fn open(config: ServiceConfig) -> Result<Self, String> {
         let service_dir = config.data_dir.join("task-workspaces");
-        let execution_dir = service_dir.join("executions");
+        let execution_dir = config.execution_dir();
         fs::create_dir_all(&execution_dir).map_err(|error| {
             format!("create execution dir {}: {error}", execution_dir.display())
         })?;
@@ -6712,6 +6741,43 @@ mod tests {
             .export_resource_manifest("task-export", Some("run-export"))
             .unwrap();
         assert_eq!(reexported.resources[0].path, opaque_path);
+    }
+
+    #[test]
+    fn an_execution_root_override_moves_working_copies_out_of_the_data_dir() {
+        let data = TempDir::new().unwrap();
+        let moved = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("a.txt"), "a\n").unwrap();
+        let mut config = ServiceConfig::new(data.path().into());
+        config.execution_root = Some(moved.path().into());
+        assert_eq!(config.execution_dir(), moved.path().join("executions"));
+        let service = TaskWorkspaceService::open(config).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-moved", "run-moved"))
+            .unwrap();
+        assert!(
+            Path::new(&run.execution_root).starts_with(moved.path().join("executions")),
+            "{}",
+            run.execution_root
+        );
+        assert!(!data.path().join("task-workspaces").join("executions").exists());
+        service.settle_run("run-moved").unwrap();
+    }
+
+    #[test]
+    fn execution_root_values_are_absolute_or_absent() {
+        assert_eq!(execution_root_from(None).unwrap(), None);
+        assert_eq!(execution_root_from(Some("  ")).unwrap(), None);
+        assert_eq!(
+            execution_root_from(Some("/workspaces/.cognia-task-workspaces")).unwrap(),
+            Some(PathBuf::from("/workspaces/.cognia-task-workspaces"))
+        );
+        assert!(execution_root_from(Some("relative/dir")).is_err());
+        assert_eq!(
+            ServiceConfig::new("/data".into()).execution_dir(),
+            PathBuf::from("/data/task-workspaces/executions")
+        );
     }
 
     #[test]

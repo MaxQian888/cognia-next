@@ -221,6 +221,13 @@ export interface ProjectRuntimeSelection {
    * containers keep the user's own credentials (ADR-0182 desktop exception).
    */
   localContainer?: boolean
+  /**
+   * Always-on Host only: run this project's dispatched work (its Bots,
+   * scheduled tasks, phone turns) as Host processes instead of in this
+   * runtime environment (ADR-0224 A8). Absent: in a container, the Host's
+   * default. Every other host ignores it.
+   */
+  hostProcess?: boolean
   /** Which of the Host's sandbox drivers runs this project (ADR-0221). Absent: `auto`. */
   target?: SandboxTarget
   updatedAt: number

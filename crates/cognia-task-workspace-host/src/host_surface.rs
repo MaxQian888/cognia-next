@@ -53,6 +53,11 @@ pub fn install(data_dir: PathBuf) -> Result<Arc<TaskWorkspaceService>, String> {
     // the root is set once and the first writer wins.
     cognia_git_mirror::set_root(data_dir.join("task-workspaces").join("mirrors"));
     let mut config = ServiceConfig::new(data_dir);
+    config.execution_root = cognia_task_workspace::execution_root_from(
+        std::env::var(cognia_task_workspace::EXECUTION_ROOT_ENV)
+            .ok()
+            .as_deref(),
+    )?;
     if let Ok(days) = std::env::var("COGNIA_TASK_WORKSPACE_RETENTION_DAYS") {
         let days = days
             .parse::<u64>()

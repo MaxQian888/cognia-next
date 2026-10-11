@@ -212,6 +212,10 @@ async function dispatchPluginExternalAgent(
       options.permissionMode,
       { manager, createAgentFromPreset, registerCleanup }
     )
+    // An always-on Host starts the agent in its project's runtime environment
+    // (ADR-0224 A8); a refusal stops it before it starts.
+    const { placeDispatchedAgent } = await import("@/lib/sandbox/host-agent-placement")
+    await placeDispatchedAgent(agentId, options.workingDirectory, manager)
     const result = await manager.execute(agentId, prompt, { ...options, permissionMode })
     return {
       ...result,
@@ -339,6 +343,11 @@ async function dispatchPluginExternalAgent(
     throw new Error("A caller cannot attach an unowned or unfinished external session to a Bot run")
   const agentId = checkpoint?.agentId ?? priorSession?.agentId ?? `bot-${crypto.randomUUID()}`
   ownTransientAgent(agentId)
+  // Before the agent starts and its session opens: an always-on Host starts
+  // it in its project's runtime environment (ADR-0224 A8), and a restart
+  // after the session opened would lose the session.
+  const { placeDispatchedAgent } = await import("@/lib/sandbox/host-agent-placement")
+  await placeDispatchedAgent(agentId, workspace.root, manager).catch(failSessionSetup)
   if (!manager.getAgent(agentId))
     await manager
       .addAgent({

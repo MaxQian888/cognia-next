@@ -331,6 +331,80 @@ describe("starting a run", () => {
   })
 })
 
+describe("placement on an always-on host (ADR-0224 A8)", () => {
+  const globals = globalThis as Record<string, unknown>
+  beforeEach(() => {
+    globals.__COGNIA_HEADLESS__ = true
+  })
+  afterEach(() => {
+    delete globals.__COGNIA_HEADLESS__
+  })
+
+  it("places the run first and hands the agent the session's working directory", async () => {
+    const placeRun = jest.fn(async () => ({ workingDirectory: "/workspaces/repo" }))
+    const undo = __setRemoteRunDepsForTests({ placeRun })
+    try {
+      await startRemoteExternalRun({
+        runId: "run-1",
+        chatSessionId: "chat-1",
+        stamp: STAMP,
+        prompt: "hi",
+      })
+      await flush()
+      expect(placeRun).toHaveBeenCalledWith(
+        expect.objectContaining({ agentId: "eac_1", chatSessionId: "chat-1" })
+      )
+      expect(h.manager.executed[0]).toMatchObject({ workingDirectory: "/workspaces/repo" })
+    } finally {
+      undo()
+    }
+  })
+
+  it("fails the turn without starting the agent when its environment is refused", async () => {
+    const undo = __setRemoteRunDepsForTests({
+      placeRun: async () => {
+        throw new Error("Approve this project's environment first.")
+      },
+    })
+    try {
+      await startRemoteExternalRun({
+        runId: "run-1",
+        chatSessionId: "chat-1",
+        stamp: STAMP,
+        prompt: "hi",
+      })
+      await flush()
+      await flush()
+      expect(h.manager.executed).toEqual([])
+      const terminal = h.frames.filter((f) => f.terminal)
+      expect(terminal).toHaveLength(1)
+      expect(terminal[0]).toMatchObject({
+        terminal: "failed",
+        error: "Approve this project's environment first.",
+      })
+      expect(h.released).toContain("run-1")
+    } finally {
+      undo()
+    }
+  })
+
+  it("changes nothing off an always-on host", async () => {
+    delete globals.__COGNIA_HEADLESS__
+    const placeRun = jest.fn(async () => ({ workingDirectory: "/never" }))
+    const undo = __setRemoteRunDepsForTests({ placeRun })
+    await startRemoteExternalRun({
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "hi",
+    })
+    await flush()
+    undo()
+    expect(placeRun).not.toHaveBeenCalled()
+    expect(h.manager.executed[0]).not.toHaveProperty("workingDirectory")
+  })
+})
+
 describe("the run's images", () => {
   const png = (data: string) =>
     ({ type: "image", source: { type: "base64", data, mediaType: "image/png" } }) as const

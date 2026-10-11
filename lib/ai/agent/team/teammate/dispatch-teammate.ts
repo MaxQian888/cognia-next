@@ -622,6 +622,10 @@ async function runExternalBacked(
       })
   }
   const capture = onCaptureEvent ? pipeExternalEventsToCapture(onCaptureEvent) : undefined
+  // An always-on Host starts the teammate in its project's runtime
+  // environment (ADR-0224 A8); a refusal stops it before it starts.
+  const { placeDispatchedAgent } = await import("@/lib/sandbox/host-agent-placement")
+  await placeDispatchedAgent(agentId, cwdOverride ?? teamCtx.team.config?.workingDir, manager)
   try {
     const result = await manager.execute(agentId, prompt, {
       // The preset is only the executable. An absent teammate binding selects

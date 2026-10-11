@@ -17,6 +17,7 @@ const full: ProjectRuntimeSelection = {
   egressPresetIds: ["npm-mirror", "github"],
   browserSidecar: true,
   localContainer: false,
+  hostProcess: true,
   updatedAt: 1_700_000_000_000,
 }
 
@@ -52,6 +53,7 @@ describe("runtimeSelectionProblems", () => {
         egressPresetIds: ["github", "github", "Bad"],
         browserSidecar: "yes",
         localContainer: 1,
+        hostProcess: "yes",
         updatedAt: Number.NaN,
         image: "node:22",
       })
@@ -67,6 +69,7 @@ describe("runtimeSelectionProblems", () => {
       "egressPresetIds[2]",
       "browserSidecar",
       "localContainer",
+      "hostProcess",
       "updatedAt",
     ])
   })

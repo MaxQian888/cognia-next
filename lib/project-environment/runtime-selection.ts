@@ -65,6 +65,7 @@ export function runtimeSelectionProblems(selection: unknown): RuntimeSelectionPr
     "egressPresetIds",
     "browserSidecar",
     "localContainer",
+    "hostProcess",
     "target",
     "updatedAt",
   ])
@@ -158,7 +159,7 @@ export function runtimeSelectionProblems(selection: unknown): RuntimeSelectionPr
     }
   }
 
-  for (const flag of ["browserSidecar", "localContainer"] as const) {
+  for (const flag of ["browserSidecar", "localContainer", "hostProcess"] as const) {
     if (selection[flag] !== undefined && typeof selection[flag] !== "boolean")
       add(flag, "must be a boolean")
   }

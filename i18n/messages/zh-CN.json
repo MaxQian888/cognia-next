@@ -35017,6 +35017,8 @@
       "egress": "网络预设",
       "egressAll": "部署定义的全部预设",
       "egressNotEnforced": "仅记录，尚未强制执行：在出站代理上线之前，只有关闭网络的沙箱才会真正受限。",
+      "hostProcess": "在常驻主机上以主机进程运行",
+      "hostProcessHint": "常驻主机默认在此运行环境中执行项目的 Bot、定时任务和手机端对话。开启后改为以主机进程运行。其他设备会忽略此项。",
       "isolation": "最低隔离级别",
       "isolationFloor": "部署下限（{tier}）",
       "isolationMandatoryHint": "指定隔离级别即表示必须隔离：若无法启动沙箱，本次运行会被拒绝，而不是回退到普通执行路径。",
