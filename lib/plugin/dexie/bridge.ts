@@ -360,3 +360,64 @@ export async function removePluginTables(
     await deletePluginDexiaMeta(pluginId)
   })
 }
+
+/**
+ * Erase every row in a plugin's tables while keeping the plugin, its tables
+ * and their schema in place.
+ *
+ * This is the "Delete plugin data" action. It used to call
+ * `uninstallPlugin(id, { purgeData: true })`, which uninstalled the plugin
+ * outright (runtime, files, permissions, secrets) behind a dialog that
+ * promised "the plugin itself will not be uninstalled". Clearing the stores
+ * instead keeps that promise: no schema bump, no meta change, and the plugin
+ * resumes against empty tables. Dropping the stores is what
+ * `removePluginTables(..., "purge")` on the uninstall path does.
+ *
+ * Runs under the schema lock so a concurrent purge-mode removal cannot drop a
+ * store between reading the meta and clearing it.
+ *
+ * A store can be physically present but absent from the live Dexie schema
+ * (a plugin that is gone left its meta row behind, so the boot-time restore
+ * never re-declared it). Dexie cannot address an undeclared store, so those
+ * are cleared through the native IndexedDB handle.
+ *
+ * @returns the namespaced table names that were cleared (empty when the plugin
+ * has no registered tables or none of them exist any more).
+ */
+export async function clearPluginTables(
+  dbSource: DexieSource,
+  pluginId: string
+): Promise<string[]> {
+  const dbName = resolveDb(dbSource).name
+  return runSchemaMutationExclusive(dbName, async () => {
+    const db = resolveDb(dbSource)
+    const meta = await getPluginDexieMeta(pluginId)
+    if (!meta || meta.tableNames.length === 0) return []
+    if (!db.isOpen()) await db.open()
+
+    const declared = new Set(db.tables.map((table) => table.name))
+    const physical = new Set(Array.from(db.backendDB().objectStoreNames))
+    const live = meta.tableNames.filter((name) => declared.has(name))
+    const undeclared = meta.tableNames.filter((name) => !declared.has(name) && physical.has(name))
+
+    if (live.length > 0) {
+      await db.transaction("rw", live, async () => {
+        await Promise.all(live.map((name) => db.table(name).clear()))
+      })
+    }
+    if (undeclared.length > 0) {
+      await clearNativeStores(db.backendDB(), undeclared)
+    }
+    return [...live, ...undeclared]
+  })
+}
+
+function clearNativeStores(idb: IDBDatabase, names: readonly string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = idb.transaction([...names], "readwrite")
+    for (const name of names) tx.objectStore(name).clear()
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error(`Clearing ${names.join(", ")} failed`))
+    tx.onabort = () => reject(tx.error ?? new Error(`Clearing ${names.join(", ")} was aborted`))
+  })
+}

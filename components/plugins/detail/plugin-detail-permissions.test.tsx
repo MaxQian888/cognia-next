@@ -2,13 +2,20 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { PluginPermission } from "@/types/plugin"
-import type { PluginPermissionTier } from "@/lib/plugin/security/permission-guard"
+import type {
+  PermissionAuditEntry,
+  PluginPermissionTier,
+} from "@/lib/plugin/security/permission-guard"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${JSON.stringify(values)}` : key,
+  // Audit rows format their time through next-intl.
+  useFormatter: () => ({ dateTime: (v: Date | number) => new Date(v).toISOString() }),
 }))
 
 let mockPlugin: PluginRow | undefined
@@ -41,6 +48,7 @@ jest.mock("@/lib/plugin/core/manager", () => ({
 
 const mockGetGranted = jest.fn<PluginPermission[], [string]>(() => [])
 const mockSetTier = jest.fn()
+let mockAuditLog: PermissionAuditEntry[] = []
 
 jest.mock("@/hooks/plugins", () => ({
   usePluginPermissions: () => ({
@@ -49,7 +57,7 @@ jest.mock("@/hooks/plugins", () => ({
     descriptions: {},
     getGranted: mockGetGranted,
     getHolders: jest.fn(() => []),
-    auditLog: [],
+    auditLog: mockAuditLog,
     grant: jest.fn(),
     revoke: jest.fn(),
     revokeAll: jest.fn(),
@@ -90,6 +98,7 @@ function makePlugin(perms: PluginPermission[]): PluginRow {
 describe("PluginDetailPermissions", () => {
   beforeEach(() => {
     mockGetGranted.mockReturnValue([])
+    mockAuditLog = []
   })
 
   it("renders the no-permissions empty state when nothing declared, optional, or granted", () => {
@@ -175,5 +184,91 @@ describe("PluginDetailPermissions", () => {
     mockPlugin = { ...makePlugin(["clipboard:read"]), type: "wasm" }
     render(<PluginDetailPermissions pluginId="alpha" />)
     expect(screen.queryByTestId("plugin-frontend-trust-card")).not.toBeInTheDocument()
+  })
+
+  // The tab owns the pane's full height and the pane is the scroller: no
+  // outer border box, no nested scroll region.
+  it("renders the permission list flat, under a small heading with a count", () => {
+    mockPlugin = makePlugin(["clipboard:read", "shell:execute"])
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    const group = screen.getByTestId("plugin-permissions-list")
+    expect(within(group).getByRole("heading", { name: "listTitle" })).toBeInTheDocument()
+    expect(within(group).getByText("2")).toBeInTheDocument()
+    const list = within(group).getByRole("list", { name: "listTitle" })
+    let node: HTMLElement | null = list
+    while (node && node !== group) {
+      expect(node.className).not.toMatch(/(^|\s)(rounded(-\w+)?|border)(\s|$)/)
+      node = node.parentElement
+    }
+    // Rows are flush with the heading; only the dialog insets them.
+    const row = screen.getByText("clipboard:read").closest("li") as HTMLElement
+    expect(row.className).not.toContain("px-3")
+  })
+
+  it("shows the empty audit state as plain text", () => {
+    mockPlugin = makePlugin(["clipboard:read"])
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    const audit = screen.getByTestId("plugin-permissions-audit")
+    expect(within(audit).getByText("auditEmpty")).toBeInTheDocument()
+    expect(within(audit).queryByRole("button")).not.toBeInTheDocument()
+  })
+
+  it("shows the newest 10 audit events and expands in place to the rest", async () => {
+    const user = userEvent.setup()
+    mockPlugin = makePlugin(["clipboard:read"])
+    // 30 events for this plugin (the tab keeps the last 25) plus one for
+    // another plugin that must never appear.
+    mockAuditLog = [
+      ...Array.from({ length: 30 }, (_, i) => ({
+        pluginId: "alpha",
+        permission: "clipboard:read" as PluginPermission,
+        action: "check" as const,
+        allowed: true,
+        timestamp: Date.UTC(2026, 0, 1, 0, 0, i),
+      })),
+      {
+        pluginId: "beta",
+        permission: "shell:execute" as PluginPermission,
+        action: "deny" as const,
+        allowed: false,
+        timestamp: Date.UTC(2026, 0, 1, 0, 1, 0),
+      },
+    ]
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    const audit = screen.getByTestId("plugin-permissions-audit")
+    const list = () => within(audit).getAllByRole("list")[0]
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(10)
+    // Newest first: second 29 leads.
+    expect(within(list()).getAllByRole("listitem")[0]).toHaveTextContent(
+      new Date(Date.UTC(2026, 0, 1, 0, 0, 29)).toISOString()
+    )
+    expect(audit.querySelector("[data-radix-scroll-area-viewport]")).toBeNull()
+
+    const toggle = within(audit).getByRole("button", { name: 'auditShowAll:{"count":25}' })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(toggle).toHaveAttribute("aria-controls", list().id)
+    await user.click(toggle)
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(25)
+    expect(within(audit).queryByText("shell:execute")).not.toBeInTheDocument()
+
+    const collapse = within(audit).getByRole("button", { name: "auditShowFewer" })
+    expect(collapse).toHaveAttribute("aria-expanded", "true")
+    await user.click(collapse)
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(10)
+  })
+
+  it("offers no toggle when every audit event already fits", () => {
+    mockPlugin = makePlugin(["clipboard:read"])
+    mockAuditLog = Array.from({ length: 10 }, (_, i) => ({
+      pluginId: "alpha",
+      permission: "clipboard:read" as PluginPermission,
+      action: "grant" as const,
+      allowed: true,
+      timestamp: i + 1,
+    }))
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    const audit = screen.getByTestId("plugin-permissions-audit")
+    expect(within(audit).getAllByRole("listitem")).toHaveLength(10)
+    expect(within(audit).queryByRole("button")).not.toBeInTheDocument()
   })
 })

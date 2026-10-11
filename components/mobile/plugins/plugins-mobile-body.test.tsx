@@ -48,12 +48,19 @@ jest.mock("@/components/plugins/plugin-batch-actions-bar", () => ({
 jest.mock("@/components/plugins/plugin-panel-toolbar", () => ({
   PluginPanelToolbar: ({
     onSyncRegistry,
+    onCheckUpdates,
     syncing,
+    layout,
   }: {
     onSyncRegistry?: () => void
+    onCheckUpdates?: () => void
     syncing?: boolean
+    layout?: string
   }) => (
-    <div data-testid="stub-toolbar">
+    <div data-testid="stub-toolbar" data-layout={layout}>
+      <button type="button" data-testid="stub-toolbar-check" onClick={() => onCheckUpdates?.()}>
+        check
+      </button>
       <button
         type="button"
         data-testid="stub-toolbar-sync"
@@ -86,7 +93,23 @@ jest.mock("@/components/plugins/plugin-section-pane", () => ({
   useVisiblePluginSection: (section: string) => section,
 }))
 jest.mock("@/components/plugins/detail/plugin-detail-pane", () => ({
-  PluginDetailPane: () => <div data-testid="stub-detail-pane" />,
+  PluginDetailPane: ({
+    onClose,
+    onFilterApplied,
+  }: {
+    onClose?: () => void
+    onFilterApplied?: () => void
+  }) => (
+    <div data-testid="stub-detail-pane">
+      <button type="button" data-testid="stub-detail-close" onClick={() => onClose?.()} />
+      <button type="button" data-testid="stub-detail-filter" onClick={() => onFilterApplied?.()} />
+    </div>
+  ),
+}))
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: ({ point }: { point: string }) => (
+    <div data-testid={`stub-slot-${point}`} />
+  ),
 }))
 
 const mockIsMirrored = jest.fn(() => false)
@@ -126,7 +149,7 @@ beforeEach(() => {
   mockSync.mockClear()
   mockIsMirrored.mockReturnValue(false)
   mockDevtoolsGate.mockReturnValue(false)
-  usePluginsStore.setState({ activeSection: "library", detailPluginId: null })
+  usePluginsStore.setState({ activeSection: "library", detailPluginId: null, updateDialog: null })
 })
 
 describe("PluginsMobileBody", () => {
@@ -232,7 +255,7 @@ describe("PluginsMobileBody", () => {
     usePluginsStore.setState({ activeSection: "governance" })
     render(<PluginsMobileBody />)
     const refresh = screen.getByTestId("plugins-mobile-refresh")
-    expect(refresh).toHaveClass("size-9")
+    expect(refresh).toHaveClass("size-10")
     fireEvent.click(refresh)
     expect(mockSync).toHaveBeenCalled()
   })
@@ -267,15 +290,57 @@ describe("PluginsMobileBody", () => {
 
   // The detail header already opens with the name; titling the drawer with it
   // too printed the name twice, one line apart.
-  it("titles the drawer with the section label, not the plugin name", () => {
+  // The pane's own header shows the name, so the drawer's title is for
+  // assistive tech only (a visible one printed the name twice).
+  it("titles the drawer by the plugin for assistive tech, without a visible second header", () => {
     render(<PluginsMobileBody />)
     act(() => usePluginsStore.getState().openDetail("web-tools"))
-    expect(screen.queryByText("Plugin web-tools")).toBeNull()
-    expect(screen.getByText("detailSheetLabel")).toBeInTheDocument()
+    const title = screen.getByText("web-tools")
+    expect(title.closest(".sr-only")).not.toBeNull()
+    expect(screen.queryByText("detailSheetLabel")).toBeNull()
     expect(screen.getByTestId("plugins-mobile-detail-body")).toHaveClass(
-      "h-[70dvh]",
+      "min-h-0",
+      "flex-1",
       "pb-[env(safe-area-inset-bottom)]"
     )
+  })
+
+  // A drawer with no visible close control left only the swipe (which not
+  // everyone knows) and the overlay.
+  it("closes the drawer from the pane's own close button", () => {
+    render(<PluginsMobileBody />)
+    act(() => usePluginsStore.getState().openDetail("web-tools"))
+    fireEvent.click(screen.getByTestId("stub-detail-close"))
+    expect(usePluginsStore.getState().detailPluginId).toBeNull()
+  })
+
+  // The drawer covers the list; after a keyword filter the user must see it.
+  it("steps the drawer aside when the detail filters the list", () => {
+    render(<PluginsMobileBody />)
+    act(() => usePluginsStore.getState().openDetail("web-tools"))
+    fireEvent.click(screen.getByTestId("stub-detail-filter"))
+    expect(usePluginsStore.getState().detailPluginId).toBeNull()
+  })
+
+  it("puts the Library's actions in the title row, compact, instead of a row of their own", () => {
+    render(<PluginsMobileBody />)
+    const toolbar = screen.getByTestId("stub-toolbar")
+    expect(toolbar).toHaveAttribute("data-layout", "compact")
+    expect(toolbar.closest("header")).not.toBeNull()
+    fireEvent.click(screen.getByTestId("stub-toolbar-check"))
+    expect(usePluginsStore.getState().updateDialog).toEqual({ pluginId: null })
+  })
+
+  it("keeps the Library's actions reachable under a host-supplied header", () => {
+    render(<PluginsMobileBody showHeader={false} />)
+    expect(screen.getByTestId("plugins-mobile-actions-row")).toContainElement(
+      screen.getByTestId("stub-toolbar")
+    )
+  })
+
+  it("mounts the plugins extension slot on the phone too", () => {
+    render(<PluginsMobileBody />)
+    expect(screen.getByTestId("stub-slot-settings.plugins")).toBeInTheDocument()
   })
 
   /**

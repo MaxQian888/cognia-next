@@ -9,9 +9,15 @@ let mockJobs: PluginScheduledJobView[] | undefined
 const mockNow = new Date(Date.UTC(2026, 4, 21, 12, 0, 0))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
-    if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
-    return key
+  useLocale: () => "en",
+  useTranslations: () => {
+    const t = (key: string, vars?: Record<string, unknown>) => {
+      if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
+      if (vars && typeof vars.interval === "string") return `${key}:${vars.interval}`
+      return key
+    }
+    t.has = () => false
+    return t
   },
   // Sentinel formatter + fixed clock: pins the run columns to next-intl's
   // locale-aware formatting (and the options / reference instant it uses),
@@ -40,7 +46,7 @@ function makeJob(overrides: Partial<PluginScheduledJobView> = {}): PluginSchedul
   return {
     id: "job-1",
     pluginId: "plugin-a",
-    cron: "*/5 * * * *",
+    trigger: { type: "cron", cron: "*/5 * * * *" },
     handler: "doThing",
     status: "active",
     nextRunAt: 1_700_000_000_000,
@@ -62,10 +68,38 @@ describe("PluginScheduledJobs", () => {
 
   it("renders empty state with deep link when no jobs", () => {
     mockJobs = []
-    render(<PluginScheduledJobs />)
+    const { container } = render(<PluginScheduledJobs />)
     expect(screen.getByText("empty")).toBeInTheDocument()
     const link = screen.getByText("openScheduler").closest("a")
     expect(link).toHaveAttribute("href", "/settings?section=scheduled-tasks")
+    // Plain text, not a dashed box.
+    expect(container.querySelector(".border-dashed")).toBeNull()
+  })
+
+  it("offers exactly one scheduler link when jobs exist", () => {
+    mockJobs = [makeJob()]
+    render(<PluginScheduledJobs />)
+    expect(screen.getAllByRole("link", { name: /openScheduler/ })).toHaveLength(1)
+  })
+
+  it("says a status filter matched nothing instead of drawing an empty table", () => {
+    mockJobs = [makeJob({ id: "1", pluginId: "alpha", status: "active" })]
+    render(<PluginScheduledJobs />)
+    fireEvent.click(screen.getByRole("radio", { name: /status\.paused/i }))
+    expect(screen.getByTestId("plugin-jobs-no-match")).toHaveTextContent("noMatch")
+    expect(screen.queryByRole("table")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "showAllJobs" }))
+    expect(screen.getByText("alpha")).toBeInTheDocument()
+  })
+
+  it("phrases an interval trigger through the scheduler, not as raw milliseconds", () => {
+    mockJobs = [
+      makeJob({ pluginId: "plugin_i", trigger: { type: "interval", intervalMs: 300_000 } }),
+    ]
+    const { container } = render(<PluginScheduledJobs />)
+    expect(screen.getByText("every:5m")).toBeInTheDocument()
+    expect(container.textContent).not.toContain("300000")
+    expect(container.textContent).not.toMatch(/\dms\b/)
   })
 
   it("renders one row per job", () => {
@@ -73,14 +107,14 @@ describe("PluginScheduledJobs", () => {
       makeJob({
         id: "job1",
         pluginId: "plugin_a",
-        cron: "0 * * * *",
+        trigger: { type: "cron", cron: "0 * * * *" },
         handler: "myHandler",
         status: "active",
       }),
       makeJob({
         id: "job2",
         pluginId: "plugin_b",
-        cron: "@daily",
+        trigger: { type: "cron", cron: "@daily" },
         handler: "dailyHandler",
         status: "paused",
         nextRunAt: undefined,
@@ -146,23 +180,49 @@ describe("PluginScheduledJobs", () => {
     expect(screen.getByRole("radio", { name: "status.disabled 1" })).toBeInTheDocument()
   })
 
-  it("hides the handler column on narrow viewports via hidden sm:table-cell", () => {
-    mockJobs = [makeJob({ pluginId: "plugin_x", handler: "myHandler", cron: "0 * * * *" })]
+  it("hides the handler column in a narrow container via hidden @sm:table-cell", () => {
+    mockJobs = [
+      makeJob({
+        pluginId: "plugin_x",
+        handler: "myHandler",
+        trigger: { type: "cron", cron: "0 * * * *" },
+      }),
+    ]
     render(<PluginScheduledJobs />)
     const handlerCell = screen.getByText("myHandler").closest("td")
     expect(handlerCell?.className).toContain("hidden")
-    expect(handlerCell?.className).toContain("sm:table-cell")
+    expect(handlerCell?.className).toContain("@sm:table-cell")
+    expect(screen.getByTestId("plugin-scheduled-jobs")).toHaveClass("@container")
   })
 
   it("filters to a single plugin when pluginId is set", () => {
     mockJobs = [
-      makeJob({ id: "1", pluginId: "alpha", cron: "0 * * * *" }),
-      makeJob({ id: "2", pluginId: "beta", cron: "*/5 * * * *" }),
-      makeJob({ id: "3", pluginId: "alpha", cron: "@daily" }),
+      makeJob({ id: "1", pluginId: "alpha", trigger: { type: "cron", cron: "0 * * * *" } }),
+      makeJob({ id: "2", pluginId: "beta", trigger: { type: "cron", cron: "*/5 * * * *" } }),
+      makeJob({ id: "3", pluginId: "alpha", trigger: { type: "cron", cron: "@daily" } }),
     ]
     render(<PluginScheduledJobs pluginId="alpha" />)
-    expect(screen.getAllByText("alpha")).toHaveLength(2)
+    // Two rows (header + 2), and no plugin column: inside one plugin's Data
+    // tab every row is that plugin.
+    expect(screen.getAllByRole("row")).toHaveLength(3)
+    expect(screen.queryByText("colPlugin")).toBeNull()
+    expect(screen.queryByText("alpha")).toBeNull()
     expect(screen.queryByText("beta")).not.toBeInTheDocument()
+  })
+
+  it("names each plugin by its localized name in the cross-plugin view", async () => {
+    const { usePluginStore } = await import("@/stores/plugin-runtime/plugin-store")
+    usePluginStore.setState((state) => ({
+      ...state,
+      plugins: {
+        ...state.plugins,
+        named: { manifest: { id: "named", name: "工作模式", version: "1" } },
+      } as never,
+    }))
+    mockJobs = [makeJob({ id: "9", pluginId: "named" })]
+    render(<PluginScheduledJobs />)
+    expect(screen.getByText("工作模式")).toBeInTheDocument()
+    expect(screen.getByText("named")).toHaveClass("font-mono")
   })
 
   it("renders next run relative to now and last run as a localized absolute time", () => {
@@ -184,17 +244,19 @@ describe("PluginScheduledJobs", () => {
     expect(screen.queryByText("2026-05-21 12:05")).not.toBeInTheDocument()
   })
 
-  it("renders an em dash for a missing or unparseable run time", () => {
+  it("renders a translated answer for a missing or unparseable run time", () => {
     mockJobs = [makeJob({ pluginId: "plugin_d", nextRunAt: undefined, lastRunAt: Number.NaN })]
     const { container } = render(<PluginScheduledJobs />)
     const row = screen.getByText("plugin_d").closest("tr") as HTMLElement
-    expect(within(row).getAllByText("—")).toHaveLength(2)
+    expect(within(row).getByText("noNextRun")).toBeInTheDocument()
+    expect(within(row).getByText("noLastRun")).toBeInTheDocument()
+    expect(row.textContent).not.toContain("—")
     expect(container.querySelector("time")).toBeNull()
     expect(container.textContent).not.toContain("Invalid Date")
   })
 
   it("renders the empty state when pluginId has no jobs", () => {
-    mockJobs = [makeJob({ pluginId: "other", cron: "0 * * * *" })]
+    mockJobs = [makeJob({ pluginId: "other", trigger: { type: "cron", cron: "0 * * * *" } })]
     render(<PluginScheduledJobs pluginId="alpha" />)
     expect(screen.getByText("empty")).toBeInTheDocument()
   })

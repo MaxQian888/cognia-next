@@ -5,6 +5,9 @@
   "colPlugin": "插件",
   "empty": "尚无统计事件。",
   "loading": "加载使用统计中…",
+  "noLastEvent": "无",
+  "showAll": "显示全部 {count} 项",
+  "showLess": "收起",
   "summaryErrors": "错误数",
   "summaryEvents": "事件总数",
   "summaryKeys": "事件类型"

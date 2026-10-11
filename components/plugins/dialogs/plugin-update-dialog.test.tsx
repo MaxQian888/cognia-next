@@ -5,8 +5,11 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
+    if (key === "versionChange" && vars) return `v${vars.from} → v${vars.to}`
+    if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
     return key
   },
 }))
@@ -96,5 +99,42 @@ describe("PluginUpdateDialog", () => {
     expect(dialog.querySelector("[data-slot='dialog-footer']")).toHaveClass("shrink-0")
     // The list keeps its own `min-h-0 flex-1` scroller, the one that flexes.
     expect(dialog.querySelector("[data-slot='scroll-area']")).toHaveClass("min-h-0", "flex-1")
+  })
+
+  it("names each update by the plugin's display name, falling back to its id", async () => {
+    const { usePluginStore } = await import("@/stores/plugin-runtime/plugin-store")
+    usePluginStore.setState((state) => ({
+      ...state,
+      plugins: {
+        ...state.plugins,
+        alpha: { manifest: { id: "alpha", name: "Alpha Tools", version: "1.0.0" } },
+      } as never,
+    }))
+    const client = makeClient([
+      { pluginId: "alpha", currentVersion: "1.0.0", latestVersion: "1.1.0" },
+      { pluginId: "beta", currentVersion: "2.0.0", latestVersion: "2.1.0" },
+    ])
+    __resetPluginUpdateClientForTests(client)
+    render(<PluginUpdateDialog open onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText("Alpha Tools")).toBeInTheDocument())
+    expect(screen.getByText("beta")).toBeInTheDocument()
+  })
+
+  it("scopes the check to one plugin when opened from its detail view", async () => {
+    const client = makeClient([])
+    __resetPluginUpdateClientForTests(client)
+    render(<PluginUpdateDialog open pluginId="gamma" onClose={() => {}} />)
+    await waitFor(() => expect(client.checkForUpdates).toHaveBeenCalledWith("gamma"))
+    expect(screen.getByText("titleSingle:gamma")).toBeInTheDocument()
+    expect(screen.getByText("descriptionSingle")).toBeInTheDocument()
+    expect(screen.getByText("upToDateSingle")).toBeInTheDocument()
+  })
+
+  it("checks every plugin when no plugin is given", async () => {
+    const client = makeClient([])
+    __resetPluginUpdateClientForTests(client)
+    render(<PluginUpdateDialog open onClose={() => {}} />)
+    await waitFor(() => expect(client.checkForUpdates).toHaveBeenCalledWith(undefined))
+    expect(screen.getByText("title")).toBeInTheDocument()
   })
 })

@@ -18,7 +18,8 @@
     "mirroredHint": "Switching is sent to your desktop, which applies it. Cogsets are edited on the desktop.",
     "queued": "Sent to your desktop. It switches to {name} when it is online.",
     "switched": "Switched to {name}",
-    "switchFailed": "Could not switch to {name}"
+    "switchFailed": "Could not switch to {name}",
+    "triggerLabel": "Cogset"
   },
   "confirmRuns": {
     "title": "Switch while agents are running?",

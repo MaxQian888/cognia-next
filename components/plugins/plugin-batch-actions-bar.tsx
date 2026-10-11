@@ -1,20 +1,27 @@
 "use client"
 
-// Floating toolbar that appears when one or more plugin rows are selected
-// in the InstalledTab grid. Drives off `usePluginsStore.selection` and
-// dispatches enable/disable/uninstall through the same host paths the single
-// row uses. Uninstall queues a delete confirmation per row so the user gets
-// the cascade option.
+// Floating toolbar that appears when one or more Library rows (list or card
+// view) are selected. Drives off `usePluginsStore.selection` and dispatches
+// enable/disable/uninstall through the same host paths the single row uses.
+// Uninstall queues a delete confirmation per row so the user gets the cascade
+// option.
+//
+// A batch action only ever reaches what the user can SEE: the targets are the
+// selected rows that are also in the current filtered list, the count says
+// how many that is, and whenever the filtered set changes the selection is
+// pruned to it (`pruneSelection`). Without that, selecting ten plugins and
+// then filtering down to one left a bar offering to uninstall all ten. The
+// bar is also Library-only: on Discover or Governance there are no rows on
+// screen for it to act on, so it steps aside until the user is back.
 //
 // Bulk enable/disable is a sequence of real activations (seconds each), so the
 // bar shows it: the buttons are disabled while it runs, the toggle says how far
 // it got, and the outcome is ONE summary toast (applied / queued / failed, with
 // the failed plugin names) instead of silence or N separate toasts.
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { localizePluginText } from "@/hooks/plugins/use-localized-plugin-text"
-import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 import { DownloadIcon, PowerIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -26,7 +33,7 @@ import {
   useEffectivePluginRuntimeProfile,
 } from "@/hooks/plugins/use-plugin-enable-gate"
 import { pluginUninstallBlockReason } from "@/hooks/plugins/use-plugin-uninstall"
-import { listPlugins } from "@/lib/db/plugins"
+import { usePlugins } from "@/hooks/plugins/use-plugins"
 import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import { cn } from "@/lib/utils"
 import type { PluginRow } from "@/lib/db/plugin-types"
@@ -61,14 +68,31 @@ export function PluginBatchActionsBar({ className }: PluginBatchActionsBarProps 
   const clearSelection = usePluginsStore((s) => s.clearSelection)
   const enqueueDeleteTargets = usePluginsStore((s) => s.enqueueDeleteTargets)
   const clearDeleteQueue = usePluginsStore((s) => s.clearDeleteQueue)
-  const rows = useLiveQuery(() => listPlugins(), [])
+  const pruneSelection = usePluginsStore((s) => s.pruneSelection)
+  const onLibrary = usePluginsStore((s) => s.activeSection === "library")
+  const { filtered, loading } = usePlugins()
   const profile = useEffectivePluginRuntimeProfile()
   const [updating, setUpdating] = useState(false)
   const [toggling, setToggling] = useState<{ done: number; total: number } | null>(null)
 
-  if (selection.size === 0) return null
+  // Drop selections the filter has hidden. Not while the rows are still
+  // loading: an empty `filtered` then means "not known yet", not "nothing
+  // visible", and pruning against it would wipe a selection restored from a
+  // deep link or carried across a remount.
+  useEffect(() => {
+    if (loading) return
+    pruneSelection(filtered.map((row) => row.id))
+  }, [filtered, loading, pruneSelection])
 
-  const targets = (rows ?? []).filter((r) => selection.has(r.id))
+  // Derived as well as pruned: the effect runs after the render that changed
+  // the filter, and a click in between must still not reach a hidden row.
+  const targets = useMemo(
+    () => filtered.filter((row) => selection.has(row.id)),
+    [filtered, selection]
+  )
+
+  if (!onLibrary || targets.length === 0) return null
+
   const allEnabled = targets.every((r) => r.enabled)
   const updatable = targets.filter(hasUpdate)
   const busy = toggling !== null || updating
@@ -184,13 +208,13 @@ export function PluginBatchActionsBar({ className }: PluginBatchActionsBarProps 
       aria-busy={busy || undefined}
     >
       <Badge variant="secondary" className="text-xs">
-        {t("selected", { count: selection.size })}
+        {t("selected", { count: targets.length })}
       </Badge>
       <div className="h-4 w-px bg-border mx-1" />
       <Button
         size="sm"
         variant="ghost"
-        className="pointer-coarse:h-9"
+        className="pointer-coarse:h-10"
         onClick={() => void handleToggleAll()}
         disabled={busy}
         aria-label={allEnabled ? t("disableAll") : t("enableAll")}
@@ -218,6 +242,7 @@ export function PluginBatchActionsBar({ className }: PluginBatchActionsBarProps 
         <Button
           size="sm"
           variant="ghost"
+          className="pointer-coarse:h-10"
           onClick={() => void handleUpdateAll()}
           disabled={busy}
           aria-label={t("updateAll", { count: updatable.length })}
@@ -231,7 +256,7 @@ export function PluginBatchActionsBar({ className }: PluginBatchActionsBarProps 
       <Button
         size="sm"
         variant="ghost"
-        className="text-destructive"
+        className="text-destructive pointer-coarse:h-10"
         onClick={handleUninstallAll}
         disabled={busy}
         aria-label={t("uninstall")}
@@ -243,7 +268,7 @@ export function PluginBatchActionsBar({ className }: PluginBatchActionsBarProps 
       <Button
         size="icon"
         variant="ghost"
-        className="size-7 pointer-coarse:size-9"
+        className="size-7 pointer-coarse:size-10"
         onClick={handleClearSelection}
         disabled={busy}
         aria-label={t("clearSelection")}

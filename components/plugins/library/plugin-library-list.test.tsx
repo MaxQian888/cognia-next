@@ -37,6 +37,16 @@ jest.mock("@/hooks/plugins", () => ({
   usePlugins: () => mockState,
 }))
 
+let mockBreakpoint: "mobile" | "tablet" | "desktop" = "desktop"
+jest.mock("@/hooks/ui", () => ({
+  ...jest.requireActual("@/hooks/ui"),
+  useBreakpoint: () => mockBreakpoint,
+}))
+
+jest.mock("../dialogs/plugin-category-sheet", () => ({
+  PluginCategorySheet: () => <button type="button" data-testid="categories-trigger" />,
+}))
+
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginLibraryList } from "./plugin-library-list"
 
@@ -86,10 +96,18 @@ describe("PluginLibraryList", () => {
     expect(usePluginsStore.getState().activeSection).toBe("discover")
   })
 
-  it("renders the filtered-empty card when filters yield zero rows", () => {
+  it("offers a way out when filters yield zero rows", () => {
     mockState.totals.total = 3
+    usePluginsStore.setState({
+      filters: { ...usePluginsStore.getState().filters, capability: "themes", tag: "ocr" },
+    })
     render(<PluginLibraryList />)
     expect(screen.getByText("emptyFiltered")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("plugin-library-clear-filters"))
+    const { filters, librarySubFilter } = usePluginsStore.getState()
+    expect(filters.capability).toBe("all")
+    expect(filters.tag).toBeNull()
+    expect(librarySubFilter).toBe("all")
   })
 
   it("renders one PluginLibraryRow per filtered plugin in list mode", () => {
@@ -148,5 +166,91 @@ describe("PluginLibraryList", () => {
     const { container } = render(<PluginLibraryList />)
     const activeRow = container.querySelector('[data-plugin-id="b"]')
     expect(activeRow?.getAttribute("data-active")).toBe("true")
+  })
+})
+
+describe("head bar and selection by layout", () => {
+  beforeEach(() => {
+    mockState.filtered = [makePlugin("a"), makePlugin("b")]
+    mockState.totals.total = 2
+    usePluginsStore.setState({ selectionMode: false, selection: new Set<string>() })
+  })
+  afterEach(() => {
+    mockBreakpoint = "desktop"
+  })
+
+  it("desktop: checkboxes always on, no Categories trigger (the facets are in the rail)", () => {
+    mockBreakpoint = "desktop"
+    render(<PluginLibraryList />)
+    expect(screen.getByTestId("plugin-library-select-all")).toBeInTheDocument()
+    expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(2)
+    expect(screen.queryByTestId("categories-trigger")).toBeNull()
+    expect(screen.queryByTestId("plugin-library-selection-mode")).toBeNull()
+  })
+
+  it("tablet: the Categories trigger joins the head bar", () => {
+    mockBreakpoint = "tablet"
+    render(<PluginLibraryList />)
+    expect(screen.getByTestId("categories-trigger")).toBeInTheDocument()
+  })
+
+  it("phone: no checkboxes until Select, a count and Categories in their place", () => {
+    mockBreakpoint = "mobile"
+    render(<PluginLibraryList />)
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0)
+    expect(screen.getByTestId("plugin-library-count")).toHaveTextContent("pluginCount:2")
+    expect(screen.getByTestId("categories-trigger")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("plugin-library-selection-mode"))
+    expect(usePluginsStore.getState().selectionMode).toBe(true)
+  })
+
+  it("phone selection mode: a tap toggles the row instead of opening the drawer", () => {
+    mockBreakpoint = "mobile"
+    usePluginsStore.setState({ selectionMode: true })
+    render(<PluginLibraryList />)
+    fireEvent.click(screen.getByTestId("plugin-library-row-a"))
+    expect(usePluginsStore.getState().selection.has("a")).toBe(true)
+    expect(usePluginsStore.getState().detailPluginId).toBeNull()
+    // Done leaves the mode and drops the selection.
+    fireEvent.click(screen.getByTestId("plugin-library-selection-mode"))
+    expect(usePluginsStore.getState().selectionMode).toBe(false)
+    expect(usePluginsStore.getState().selection.size).toBe(0)
+  })
+
+  it("keeps the head bar pinned while the rows scroll", () => {
+    render(<PluginLibraryList />)
+    expect(screen.getByTestId("plugin-library-head")).toHaveClass("sticky", "top-0")
+  })
+})
+
+describe("keyboard", () => {
+  beforeEach(() => {
+    mockState.filtered = [makePlugin("a"), makePlugin("b"), makePlugin("c")]
+    mockState.totals.total = 3
+  })
+
+  it("moves between rows with the arrow keys and jumps with Home / End", () => {
+    render(<PluginLibraryList />)
+    const list = screen.getByTestId("plugin-library-list")
+    const a = screen.getByTestId("plugin-library-row-a")
+    const b = screen.getByTestId("plugin-library-row-b")
+    const c = screen.getByTestId("plugin-library-row-c")
+    a.focus()
+    fireEvent.keyDown(list, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(b)
+    fireEvent.keyDown(list, { key: "ArrowDown" })
+    fireEvent.keyDown(list, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(c)
+    fireEvent.keyDown(list, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(b)
+    fireEvent.keyDown(list, { key: "Home" })
+    expect(document.activeElement).toBe(a)
+    fireEvent.keyDown(list, { key: "End" })
+    expect(document.activeElement).toBe(c)
+  })
+
+  it("names the list for assistive tech", () => {
+    render(<PluginLibraryList />)
+    expect(screen.getByRole("list", { name: "listAria" })).toBeInTheDocument()
   })
 })

@@ -10,6 +10,10 @@
  * label. It is one component now, disclosed through `PluginHint` (tooltip on
  * hover, popover on tap, a real button for the keyboard). With no mapped
  * contribution surface it stays a plain, non-interactive badge.
+ *
+ * The chip prints the capability's NAME (`capabilityLabel`), not its id, so a
+ * Chinese UI reads "主题包 · 5" rather than "theme-pack · 5". The id stays in
+ * the disclosure, next to the entries it groups.
  */
 
 import { useTranslations } from "next-intl"
@@ -18,6 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 import { PluginHint } from "./plugin-hint"
+import { capabilityLabel } from "../plugin-capabilities"
 
 export interface PluginContributionChipProps {
   capability: string
@@ -34,11 +39,17 @@ export function PluginContributionChip({
   className,
 }: PluginContributionChipProps) {
   const t = useTranslations("plugins.card")
-  const label = count > 0 ? `${capability} · ${count}` : capability
+  const tCapability = useTranslations("plugins.categorySidebar")
+  const { label: name, known } = capabilityLabel(tCapability as never, capability)
+  const label = count > 0 ? t("capabilityChipLabel", { name, count }) : name
 
   if (entries.length === 0) {
     return (
-      <Badge variant="outline" className={cn("shrink-0 text-xs", className)}>
+      <Badge
+        variant="outline"
+        className={cn("shrink-0 text-xs", !known && "font-mono", className)}
+        title={capability}
+      >
         {label}
       </Badge>
     )
@@ -46,14 +57,21 @@ export function PluginContributionChip({
 
   return (
     <PluginHint
-      label={t("capabilityChipAria", { capability, count })}
+      label={t("capabilityChipAria", { capability: name, count })}
       side="bottom"
       align="start"
       className={className}
       contentClassName="w-72"
       content={
         <div className="space-y-2">
-          <div className="text-xs font-semibold">{label}</div>
+          <div className="flex items-baseline gap-1.5 text-xs font-semibold">
+            {label}
+            {known ? (
+              <code className="font-mono text-[10px] font-normal text-muted-foreground">
+                {capability}
+              </code>
+            ) : null}
+          </div>
           <ul className="space-y-0.5 text-xs">
             {entries.map((entry) => (
               <li key={entry.id} className="flex min-w-0 items-baseline gap-1.5">
@@ -69,7 +87,10 @@ export function PluginContributionChip({
         </div>
       }
     >
-      <Badge variant="outline" className="shrink-0 cursor-help text-xs">
+      <Badge
+        variant="outline"
+        className={cn("shrink-0 cursor-help text-xs", !known && "font-mono")}
+      >
         {label}
       </Badge>
     </PluginHint>

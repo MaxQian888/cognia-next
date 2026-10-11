@@ -20,6 +20,7 @@
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { usePlugins } from "@/hooks/plugins"
+import { countLibrarySubFilters } from "@/hooks/plugins/use-plugins"
 import { usePluginsStore, type PluginLibrarySubFilter } from "@/stores/plugins"
 import { PLUGIN_LIBRARY_SUBFILTERS } from "../plugin-nav-config"
 import type { PluginSectionToolbarProps } from "../plugin-section-toolbar"
@@ -51,19 +52,10 @@ export function useLibrarySubFilterSegments(): NonNullable<PluginSectionToolbarP
   const setSub = usePluginsStore((s) => s.setLibrarySubFilter)
   const { all } = usePlugins()
 
-  const counts = useMemo(() => {
-    let enabled = 0
-    let updates = 0
-    let configurable = 0
-    let errored = 0
-    for (const row of all) {
-      if (row.status === "enabled") enabled++
-      if (row.status === "error") errored++
-      if ((row.manifest as { updateAvailable?: boolean })?.updateAvailable) updates++
-      if ((row.manifest as { configSchema?: unknown })?.configSchema) configurable++
-    }
-    return { all: all.length, enabled, updates, configurable, errored }
-  }, [all])
+  // The same predicates the filter narrows by (`pluginExposesConfig`,
+  // `row.enabled`, the lifecycle error), so a segment's count is the number
+  // of rows it shows.
+  const counts = useMemo(() => countLibrarySubFilters(all), [all])
 
   return {
     ariaLabel: tSections("library"),

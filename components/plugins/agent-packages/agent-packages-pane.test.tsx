@@ -234,6 +234,17 @@ describe("AgentPackagesPane", () => {
     expect(toastMock.success).not.toHaveBeenCalled()
   })
 
+  it("says a failed install gave no reason instead of ending on an empty colon", async () => {
+    const mutate = jest.fn(async () => ({ ok: false, plan: { strategy: "pi-cli" as const } }))
+    setup({ mutate })
+    await userEvent.click(screen.getByTestId("pi-catalog-install-pi-memory"))
+    await userEvent.click(screen.getByTestId("pi-install-confirm"))
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled())
+    const message = String(toastMock.error.mock.calls[0][0])
+    expect(message).toContain("Pi reported no reason")
+    expect(message).not.toMatch(/:\s*$/)
+  })
+
   it("removes a package through the hook", async () => {
     const { mutate } = setup({ user: ["npm:pi-memory@0.4.2"] })
     await userEvent.click(screen.getByRole("button", { name: /remove/i }))

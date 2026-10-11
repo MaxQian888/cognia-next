@@ -7,9 +7,9 @@ import { PluginDataManagement } from "./plugin-data-management"
 type PluginDataManagementProps = { pluginId?: string }
 
 // `PluginDataManagement` lists plugins that have declared Dexie tables (rows in
-// `pluginDexieMeta`) and offers a per-plugin "delete data" action. It reads the
+// `pluginDexieMeta`) and offers a per-plugin "delete data" action (clears rows, keeps the plugin). It reads the
 // table via `useLiveQuery`; with an empty Storybook IndexedDB there are no
-// registrations, so it renders the empty-state card — different copy for the
+// registrations, so it renders the plain empty-state line — different copy for the
 // global (no prop) vs single-plugin (`pluginId`) modes.
 const meta = {
   title: "Settings/Plugins/PluginDataManagement",

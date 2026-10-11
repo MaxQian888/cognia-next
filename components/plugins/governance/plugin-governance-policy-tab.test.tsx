@@ -15,9 +15,11 @@ jest.mock("@/lib/plugin/core/policy-runtime", () => ({
 
 const mockSetPluginSecurityPosture = jest.fn()
 let mockPluginPosture: "strict" | "balanced" | undefined
+let mockSettingsLoaded = true
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
     selector({
+      loaded: mockSettingsLoaded,
       settings: mockPluginPosture ? { pluginSecurityPosture: mockPluginPosture } : null,
       setPluginSecurityPosture: mockSetPluginSecurityPosture,
     }),
@@ -30,6 +32,7 @@ beforeEach(() => {
   applyPolicy.mockReset()
   mockSetPluginSecurityPosture.mockReset()
   mockPluginPosture = undefined
+  mockSettingsLoaded = true
 })
 
 // Switch order: [0] governance, [1] signatureRequired, [2] trustedPublishersOnly,
@@ -100,5 +103,24 @@ describe("PluginGovernancePolicyTab", () => {
     applyPolicy.mockClear()
     fireEvent.click(screen.getAllByRole("switch")[0])
     expect(applyPolicy).toHaveBeenLastCalledWith(expect.objectContaining({ governance: "block" }))
+  })
+
+  // A strict user must not see "off" while the settings store is loading.
+  it("holds the posture switch behind a loading state until settings load", () => {
+    mockSettingsLoaded = false
+    mockPluginPosture = "strict"
+    render(<PluginGovernancePolicyTab />)
+    expect(screen.getAllByRole("switch")).toHaveLength(4)
+    expect(screen.getByTestId("plugin-governance-posture-loading")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("securityPostureLoading")
+  })
+
+  // Flat rows, no card: the pane is already the surface.
+  it("renders flat hairline rows rather than a card", () => {
+    render(<PluginGovernancePolicyTab />)
+    const root = screen.getByTestId("plugin-governance-policy")
+    expect(root.querySelector("[data-slot='card']")).toBeNull()
+    expect(root).toHaveClass("@container")
+    expect(root.querySelector(".divide-y")).not.toBeNull()
   })
 })

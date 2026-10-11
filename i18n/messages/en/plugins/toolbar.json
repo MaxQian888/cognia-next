@@ -35,5 +35,9 @@
   "syncRegistryAria": "Refresh marketplace registry and check installed plugins for updates",
   "convertPlugin": "Convert plugin…",
   "fromCogpack": "Cogpack…",
-  "groupCogpack": "Cogpacks"
+  "groupCogpack": "Cogpacks",
+  "groupConvert": "From another ecosystem",
+  "moreActions": "More plugin actions",
+  "syncing": "Syncing registry…",
+  "syncRegistryHint": "Refresh the marketplace catalog and mark installed plugins that have updates."
 }

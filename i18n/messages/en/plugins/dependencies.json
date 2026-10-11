@@ -6,6 +6,7 @@
   "minVersion": "≥ {version}",
   "missing": "Missing",
   "notFound": "not found",
+  "openDependencyAria": "Open {name}",
   "optional": "optional",
   "pluginDeps": "Plugins",
   "pythonDeps": "Python packages",

@@ -1,5 +1,6 @@
 {
   "cancel": "取消",
+  "count": "{count, plural, =0 {暂无备份} other {# 个备份}}",
   "create": "创建备份",
   "createFailed": "备份失败。",
   "creating": "创建中…",
@@ -8,7 +9,6 @@
   "deleteConfirmBody": "{date} 的 v{version} 备份将被永久删除，之后无法再回滚到它。",
   "deleteConfirmTitle": "删除此备份？",
   "desktopOnlyHint": "备份通过原生桥接写入，仅在桌面端可写。",
-  "empty": "暂无备份。",
   "reason": {
     "auto": "自动",
     "manual": "手动",
@@ -21,5 +21,9 @@
   "restoreAria": "恢复 {date} 的 v{version} 备份",
   "restoreConfirmBody": "插件当前的文件、设置和数据将被 {date} 的 v{version} 备份替换，此后的所有更改都会丢失。",
   "restoreConfirmTitle": "恢复此备份？",
-  "title": "备份"
+  "rowDetail": "<time>{date}</time> · {size}",
+  "showAll": "显示全部 {count} 项",
+  "showLess": "收起",
+  "title": "备份",
+  "versionLabel": "v{version}"
 }

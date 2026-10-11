@@ -1,27 +1,24 @@
 "use client"
 
-// Card grid that renders the filtered plugin list. Decomposed out of
-// `plugin-panel.tsx` so other surfaces (Settings overlay / embedded
-// shells) can reuse the grid without bringing in the full panel header
-// and tabs.
+// Card grid that renders the filtered plugin list — the Library's "card"
+// view mode. Its one caller, `PluginLibraryList`, owns the loading skeleton
+// and both empty states (nothing installed / nothing matches) and only mounts
+// the grid once there is at least one row to show. The grid used to carry its
+// own copies of those three branches, which no render could reach; they were
+// removed rather than left to drift from the list's real ones.
 
 import { useCallback } from "react"
-import { useLocale, useTranslations } from "next-intl"
-import { BoxesIcon } from "lucide-react"
-import { Card } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { useLocale } from "next-intl"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePlugins } from "@/hooks/plugins"
 import { usePluginEnableAction } from "@/hooks/plugins/use-plugin-enable-action"
 import { localizePluginText } from "@/hooks/plugins/use-localized-plugin-text"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginCard } from "./plugin-card"
-import { PluginLibraryGridSkeleton } from "./library/plugin-library-skeleton"
 
 export function PluginPanelGrid() {
-  const t = useTranslations("plugins.grid")
   const locale = useLocale()
-  const { filtered, totals, loading } = usePlugins()
+  const { filtered } = usePlugins()
   const selection = usePluginsStore((s) => s.selection)
   const toggleSelection = usePluginsStore((s) => s.toggleSelection)
   const openDetail = usePluginsStore((s) => s.openDetail)
@@ -29,7 +26,6 @@ export function PluginPanelGrid() {
   const setDeleteTarget = usePluginsStore((s) => s.setDeleteTarget)
   const openPermissionReview = usePluginsStore((s) => s.openPermissionReview)
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
-  const setActiveSection = usePluginsStore((s) => s.setActiveSection)
 
   // Stable handlers keep the memoized PluginCards from re-rendering when
   // unrelated store state (search query, selection elsewhere) changes.
@@ -46,31 +42,6 @@ export function PluginPanelGrid() {
       setDeleteTarget({ pluginId: plugin.id, name: localizePluginText(plugin, locale).name }),
     [setDeleteTarget, locale]
   )
-
-  if (loading) {
-    return <PluginLibraryGridSkeleton />
-  }
-
-  if (totals.total === 0) {
-    return (
-      <Card className="p-6 md:p-8 text-center space-y-3">
-        <BoxesIcon className="size-10 mx-auto text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{t("emptyAll")}</p>
-        <Button size="sm" onClick={() => setActiveSection("discover")}>
-          {t("browseMarketplace")}
-        </Button>
-      </Card>
-    )
-  }
-
-  if (filtered.length === 0) {
-    return (
-      <Card className="p-6 md:p-8 text-center space-y-2">
-        <BoxesIcon className="size-10 mx-auto text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{t("emptyFiltered")}</p>
-      </Card>
-    )
-  }
 
   // Column count tracks the grid's OWN width (`@container/plugin-grid`),
   // not the viewport. The grid renders inside the center pane (and is reused

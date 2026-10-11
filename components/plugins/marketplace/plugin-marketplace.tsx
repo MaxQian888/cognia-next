@@ -231,7 +231,13 @@ export function PluginMarketplace() {
   const vscodePreInstall = usePluginPreInstall(vscodeClient)
 
   const runInstall = (entry: PluginMarketplaceEntry, version?: string) => {
-    if (!client) return
+    // The client is a lazy import; a click that lands before it resolves
+    // used to do nothing at all. Say so, so the user knows to try again
+    // rather than wondering whether the click registered.
+    if (!client) {
+      toast.message(t("installerLoading"))
+      return
+    }
     void preInstall.install(entry.id, version, entry.name).then((result) => {
       if (result.status === "installed") {
         toast.success(t("installSucceeded", { name: entry.name }), {
@@ -254,7 +260,11 @@ export function PluginMarketplace() {
    * single-plugin GitHub dialog.
    */
   const runPreset = (preset: MarketplacePreset) => {
-    if (!client || presetRun) return
+    if (presetRun) return
+    if (!client) {
+      toast.message(t("installerLoading"))
+      return
+    }
     if (!canUseTauriInvoke()) {
       toast.error(t("presets.desktopOnly"))
       return
@@ -431,7 +441,12 @@ export function PluginMarketplace() {
           the one thing saying the shared registry is down. */}
       {status.kind !== "error" && <PluginMarketplaceModeBanner />}
       {showDiscovery && (
-        <PluginDiscovery market={market} onInstall={(id, version) => onInstallById(id, version)} />
+        <PluginDiscovery
+          market={market}
+          installedIds={installedIds}
+          onInstall={(id, version) => onInstallById(id, version)}
+          onUninstall={requestUninstall}
+        />
       )}
       {/* Search, ranking and source now live in the page header's controls
           tier (`PluginDiscoverHeader`), the same tier every other section
@@ -636,7 +651,12 @@ export function PluginMarketplace() {
     // permissions from the real bundle).
     const vscodeEntry = openVsx.entries.find((e) => e.id === id)
     if (vscodeEntry) {
-      if (!vscodeClient) return
+      // Loaded on first visit to the Open VSX origin; until then an install
+      // has nothing to run through.
+      if (!vscodeClient) {
+        toast.message(t("installerLoading"))
+        return
+      }
       void vscodePreInstall.install(id, version, vscodeEntry.name).then((result) => {
         if (result.status === "installed") {
           toast.success(t("installSucceeded", { name: vscodeEntry.name }), {
@@ -654,6 +674,13 @@ export function PluginMarketplace() {
     const entry = [...allResults, ...market.featured, ...market.popular, ...market.recent].find(
       (e) => e.id === id
     )
-    if (entry) runInstall(entry, version)
+    if (entry) {
+      runInstall(entry, version)
+      return
+    }
+    // The entry left every list between render and click (a refresh, a
+    // source removed). Nothing to install, and silence would read as a
+    // dead button.
+    toast.error(t("installEntryMissing"))
   }
 }

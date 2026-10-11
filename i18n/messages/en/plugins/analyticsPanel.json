@@ -5,6 +5,9 @@
   "colPlugin": "Plugin",
   "empty": "No analytics events yet.",
   "loading": "Loading analytics…",
+  "noLastEvent": "None",
+  "showAll": "Show all {count}",
+  "showLess": "Show fewer",
   "summaryErrors": "Errors",
   "summaryEvents": "Total events",
   "summaryKeys": "Distinct keys"

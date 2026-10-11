@@ -90,7 +90,11 @@
     "exited": "宿主进程已退出",
     "openInPanel": "在日志面板中查看该插件的输出",
     "runtimeStrip": "Python {version} · 已加载 {plugins}（{lazy} 空闲）· {calls} 次调用",
-    "streamEnd": "— 流结束 —"
+    "streamEnd": "— 流结束 —",
+    "openInPanelShort": "查看日志",
+    "missing": {
+      "wasm-no-channel": "WASM 插件没有独立的输出通道。"
+    }
   },
   "metaAuthor": "作者",
   "metaCreatedAt": "安装时间",
@@ -158,7 +162,8 @@
       "uvInstall": "安装 uv",
       "uvInstalling": "正在安装 uv…",
       "uvMissing": "PATH 上没有 uv，将使用 pip。",
-      "uvPresent": "PATH 上有 uv {version}"
+      "uvPresent": "PATH 上有 uv {version}",
+      "versionUnknown": "未知"
     },
     "idleShutdownMin": "闲置关闭(分钟,0 表示从不)",
     "interpreterPath": "解释器路径覆盖",
@@ -166,7 +171,9 @@
     "maxConcurrentCalls": "最大并发调用数",
     "maxOutboundHostCalls": "最大反向调用并发数",
     "maxOutboundHostCallsHint": "插件回调宿主的并发上限。超出的调用会排队，而不是失败。",
+    "reset": "重置",
     "save": "保存",
+    "saveError": "无法保存宿主设置：{message}",
     "saved": "已保存",
     "title": "Python 宿主设置",
     "useVenv": "存在 venv 时使用它"
@@ -230,10 +237,38 @@
     "lastSuccessfulAt": "最近成功 {date}",
     "rollbackTo": "回滚到 v{version}",
     "title": "运行校验",
-    "verifiedAt": "校验时间 {date}"
+    "verifiedAt": "校验时间 {date}",
+    "stage": {
+      "manifest_validation": "清单校验",
+      "compatibility": "兼容性",
+      "installation": "安装",
+      "activation": "激活",
+      "runtime_execution": "运行",
+      "reload": "重新加载",
+      "cleanup": "清理"
+    }
   },
   "viewInfo": "信息",
   "viewManifest": "原始 JSON",
   "viewToggleAria": "在插件信息与原始 manifest 之间切换",
-  "workflowTriggers": "工作流触发"
+  "workflowTriggers": "工作流触发",
+  "aboutTitle": "关于",
+  "backToInfo": "返回详情",
+  "closeAria": "关闭「{name}」的详情",
+  "disabledLabel": "未启用",
+  "enabledLabel": "已启用",
+  "noReadme": "此插件未提供 README。",
+  "notFoundHint": "它可能已被卸载。请从列表中选择其他插件。",
+  "notFoundAction": "关闭",
+  "unknownDate": "未知",
+  "update": "更新",
+  "versionLabel": "v{version}",
+  "tabCountAria": "{label}，{count}",
+  "pluginType": {
+    "frontend": "前端",
+    "python": "Python",
+    "hybrid": "前端 + Python",
+    "wasm": "WASM",
+    "vscode-extension": "VS Code 扩展"
+  }
 }

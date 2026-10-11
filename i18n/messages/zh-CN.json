@@ -30891,7 +30891,8 @@
         "signedOnly": "仅签名",
         "sort": "排序：{value}",
         "source": "来源：{value}",
-        "status": "状态：{value}"
+        "status": "状态：{value}",
+        "tag": "标签：{value}"
       },
       "clearAll": "全部清除",
       "removeAria": "移除 {name}"
@@ -31090,11 +31091,13 @@
         "commandLabel": "Cognia 将执行",
         "confirm": "安装",
         "failureToast": "无法安装 {name}：{message}",
+        "failureToastNoReason": "无法安装 {name}。Pi 未给出原因，请查看安装对话框中的输出或重试。",
         "fallbackLabel": "Cognia 将编辑",
         "outputLabel": "输出",
         "overlapWarning": "它与你已有的某个包重叠。",
         "removeBody": "这会从 {scope} 配置中删除该条目。你的 Pi 设置的其他部分不受影响。",
         "removeFailureToast": "无法移除 {name}：{message}",
+        "removeFailureToastNoReason": "无法移除 {name}。Pi 未给出原因，请重试。",
         "removeSuccessToast": "已移除 {name}",
         "removeTitle": "移除 {name}？",
         "scopeLabel": "作用域",
@@ -31191,6 +31194,9 @@
       "colPlugin": "插件",
       "empty": "尚无统计事件。",
       "loading": "加载使用统计中…",
+      "noLastEvent": "无",
+      "showAll": "显示全部 {count} 项",
+      "showLess": "收起",
       "summaryErrors": "错误数",
       "summaryEvents": "事件总数",
       "summaryKeys": "事件类型"
@@ -31233,6 +31239,7 @@
     },
     "backup": {
       "cancel": "取消",
+      "count": "{count, plural, =0 {暂无备份} other {# 个备份}}",
       "create": "创建备份",
       "createFailed": "备份失败。",
       "creating": "创建中…",
@@ -31241,7 +31248,6 @@
       "deleteConfirmBody": "{date} 的 v{version} 备份将被永久删除，之后无法再回滚到它。",
       "deleteConfirmTitle": "删除此备份？",
       "desktopOnlyHint": "备份通过原生桥接写入，仅在桌面端可写。",
-      "empty": "暂无备份。",
       "reason": {
         "auto": "自动",
         "manual": "手动",
@@ -31254,7 +31260,11 @@
       "restoreAria": "恢复 {date} 的 v{version} 备份",
       "restoreConfirmBody": "插件当前的文件、设置和数据将被 {date} 的 v{version} 备份替换，此后的所有更改都会丢失。",
       "restoreConfirmTitle": "恢复此备份？",
-      "title": "备份"
+      "rowDetail": "<time>{date}</time> · {size}",
+      "showAll": "显示全部 {count} 项",
+      "showLess": "收起",
+      "title": "备份",
+      "versionLabel": "v{version}"
     },
     "batchActions": {
       "ariaLabel": "批量操作",
@@ -31275,6 +31285,7 @@
     "card": {
       "actionsMenuAria": "{name} 的操作菜单",
       "capabilityChipAria": "{capability} 能力——共 {count} 项贡献",
+      "capabilityChipLabel": "{name} · {count}",
       "configure": "配置",
       "dangerousPermissionsAria": "{count} 项敏感权限",
       "disable": "停用",
@@ -31327,6 +31338,85 @@
         "themes": "主题",
         "tools": "工具"
       },
+      "capabilityName": {
+        "a2ui": "A2UI",
+        "agent-team-template": "智能体团队模板",
+        "ai-provider": "AI 提供商",
+        "auth-provider": "认证提供方",
+        "automation": "自动化",
+        "balance-adapter": "余额适配器",
+        "bot": "Bot",
+        "canvas": "画布",
+        "character-pack": "角色包",
+        "chat-middleware": "聊天中间件",
+        "cli-tools": "命令行工具",
+        "command-hooks": "命令 Hook",
+        "commands": "命令",
+        "compaction-strategy": "上下文压缩策略",
+        "companion": "伴侣设备",
+        "components": "界面组件",
+        "configuration": "配置",
+        "connectors": "连接器",
+        "context-panel": "上下文面板",
+        "context-provider": "上下文提供方",
+        "decision-provider": "决策提供方",
+        "density-preset": "密度预设",
+        "deployment-filter": "部署过滤器",
+        "editor": "编辑器",
+        "exporters": "导出器",
+        "external-agent-adapter": "外部智能体适配器",
+        "external-agent-preset": "外部智能体预设",
+        "fonts": "字体",
+        "glance": "速览模块",
+        "hooks": "生命周期 Hook",
+        "im-rate-source": "即时通讯速率来源",
+        "importers": "导入器",
+        "integrations": "集成",
+        "limits-source": "用量限额来源",
+        "link-matcher": "链接匹配器",
+        "lsp-server": "语言服务器",
+        "mcp-server-preset": "MCP 服务器预设",
+        "media": "媒体",
+        "message-renderer": "消息渲染器",
+        "modal-mount": "弹窗挂载",
+        "modes": "智能体模式",
+        "native-anthropic-tool": "Anthropic 原生工具",
+        "pet": "桌面宠物",
+        "pet-achievement": "宠物成就",
+        "pet-item": "宠物道具",
+        "pi-package": "Pi 扩展包",
+        "processors": "处理器",
+        "protocol-adapter": "协议适配器",
+        "provider-operation-adapter": "提供商操作适配器",
+        "providers": "提供方",
+        "python": "Python",
+        "quick-action": "快捷操作",
+        "routing-strategy": "路由策略",
+        "scheduler": "调度器",
+        "session-importer": "会话导入器",
+        "shared-memory-adapter": "共享记忆适配器",
+        "skills": "技能",
+        "subagent": "子智能体",
+        "subscription-provider": "订阅提供方",
+        "template-package": "模板包",
+        "terminal-completion": "终端补全",
+        "theme-pack": "主题包",
+        "themes": "主题",
+        "tool-renderer": "工具结果卡片",
+        "tool-route": "工具路由",
+        "tools": "智能体工具",
+        "tray": "托盘菜单",
+        "tree-view": "树视图",
+        "uri-handler": "URI 处理器",
+        "view-container": "视图容器",
+        "wallpapers": "壁纸",
+        "webview": "Webview",
+        "workflow": "工作流节点",
+        "workflow-template": "工作流模板",
+        "workflow-trigger": "工作流触发器",
+        "workspace-backend": "工作区后端"
+      },
+      "heading": "按能力",
       "otherHeading": "其它"
     },
     "cliInstall": {
@@ -31659,7 +31749,8 @@
         "scopeWorkspace": "工作区",
         "switchFailed": "无法切换到{name}",
         "switchTo": "切换到",
-        "switched": "已切换到{name}"
+        "switched": "已切换到{name}",
+        "triggerLabel": "齿轮组"
       }
     },
     "comparison": {
@@ -31700,8 +31791,10 @@
     },
     "configForm": {
       "arrayAdd": "添加条目",
+      "arrayItem": "第 {index} 项",
       "arrayPlaceholder": "每行一个值",
       "arrayRemove": "删除",
+      "arrayRemoveAria": "移除第 {index} 项",
       "cancel": "取消",
       "close": "关闭",
       "deprecated": "已弃用",
@@ -31710,6 +31803,7 @@
       "loading": "正在加载插件配置…",
       "loadingComponent": "正在加载插件的设置面板…",
       "noSchema": "此插件未声明 configSchema。下方为原始配置预览。",
+      "notFound": "此插件已不再安装，没有可配置的内容。",
       "oneOfVariant": "变体",
       "save": "保存",
       "saveFailed": "无法保存 {name} 的设置",
@@ -31729,7 +31823,8 @@
         "minLength": "至少 {min} 个字符。",
         "notNumber": "必须是数字。",
         "pattern": "必须匹配模式 {pattern}。"
-      }
+      },
+      "variantFallback": "方案 {index}"
     },
     "conflict": {
       "abort": "中止",
@@ -31881,26 +31976,42 @@
       "minVersion": "≥ {version}",
       "missing": "缺失",
       "notFound": "未找到",
+      "openDependencyAria": "打开 {name}",
       "optional": "可选",
       "pluginDeps": "插件",
       "pythonDeps": "Python 包",
       "title": "依赖"
     },
     "dependencyGraph": {
+      "allResolved": "所有依赖均已解析",
+      "atVersion": "@ {version}",
+      "conflictLine": "{dependencyId}：{reason}",
       "conflictsTitle": "{count} 个冲突",
       "cyclesTitle": "{count} 个依赖循环",
       "graphLabel": "依赖关系图，按安装顺序分层",
+      "hideGraph": "隐藏依赖图",
       "loading": "解析依赖中…",
       "missing": "缺失",
+      "missingCount": "缺失 {count} 个",
       "noDependencies": "该插件没有声明任何依赖。",
       "root": "根",
+      "showAll": "显示全部 {count} 项",
+      "showGraph": "显示依赖图",
+      "showLess": "收起",
+      "source": {
+        "installed": "已安装",
+        "marketplace": "市场",
+        "missing": "缺失"
+      },
       "title": "依赖图",
       "unresolved": "未解决",
       "warningsTitle": "{count} 个警告"
     },
     "description": "浏览、安装并治理在 Cognia 中运行的插件。",
     "detail": {
+      "aboutTitle": "关于",
       "activation": "激活事件",
+      "backToInfo": "返回详情",
       "capabilitiesTitle": "能力",
       "cliTools": {
         "available": "可用 {version}",
@@ -31910,6 +32021,7 @@
         "reprobe": "重新检测",
         "title": "CLI 工具"
       },
+      "closeAria": "关闭「{name}」的详情",
       "contributed": {
         "a2uiComponents": "A2UI 组件",
         "a2uiTemplates": "A2UI 模板",
@@ -31957,9 +32069,11 @@
         "showMore": "再显示 {count} 条",
         "title": "{count} 条诊断记录"
       },
+      "disabledLabel": "未启用",
       "emptyCapabilities": "此插件未声明任何能力。",
       "emptyDescription": "从列表中选择插件即可查看、配置并治理它。",
       "emptyTitle": "选择一个插件",
+      "enabledLabel": "已启用",
       "frontendTrust": {
         "blockedHint": "在你信任它之前，此插件不会加载。请只信任你了解的作者的插件。",
         "description": "此插件的代码会直接在应用内运行且不受沙箱限制——它能访问你的数据以及应用能做的一切。它来自不受信任的来源，因此需要你信任后才会运行。",
@@ -31989,7 +32103,11 @@
         "clear": "清空",
         "empty": "还没有输出。插件通过宿主打日志后会出现在这里；Python 插件则要等它的宿主跑起来。",
         "exited": "宿主进程已退出",
+        "missing": {
+          "wasm-no-channel": "WASM 插件没有独立的输出通道。"
+        },
         "openInPanel": "在日志面板中查看该插件的输出",
+        "openInPanelShort": "查看日志",
         "runtimeStrip": "Python {version} · 已加载 {plugins}（{lazy} 空闲）· {calls} 次调用",
         "streamEnd": "— 流结束 —"
       },
@@ -32010,9 +32128,19 @@
       "noCapabilities": "此插件未贡献任何能力。",
       "noConfigSchema": "此插件没有可配置项。",
       "noPermissions": "此插件未声明任何权限。",
+      "noReadme": "此插件未提供 README。",
       "notFound": "未找到该插件。",
+      "notFoundAction": "关闭",
+      "notFoundHint": "它可能已被卸载。请从列表中选择其他插件。",
       "optional": "可选权限",
       "optionalEmpty": "无可选权限。",
+      "pluginType": {
+        "frontend": "前端",
+        "hybrid": "前端 + Python",
+        "python": "Python",
+        "vscode-extension": "VS Code 扩展",
+        "wasm": "WASM"
+      },
       "pythonHost": {
         "applyHint": "更改会在插件下次加载时生效。",
         "callTimeoutMs": "调用超时(毫秒)",
@@ -32059,7 +32187,8 @@
           "uvInstall": "安装 uv",
           "uvInstalling": "正在安装 uv…",
           "uvMissing": "PATH 上没有 uv，将使用 pip。",
-          "uvPresent": "PATH 上有 uv {version}"
+          "uvPresent": "PATH 上有 uv {version}",
+          "versionUnknown": "未知"
         },
         "idleShutdownMin": "闲置关闭(分钟,0 表示从不)",
         "interpreterPath": "解释器路径覆盖",
@@ -32067,7 +32196,9 @@
         "maxConcurrentCalls": "最大并发调用数",
         "maxOutboundHostCalls": "最大反向调用并发数",
         "maxOutboundHostCallsHint": "插件回调宿主的并发上限。超出的调用会排队，而不是失败。",
+        "reset": "重置",
         "save": "保存",
+        "saveError": "无法保存宿主设置：{message}",
         "saved": "已保存",
         "title": "Python 宿主设置",
         "useVenv": "存在 venv 时使用它"
@@ -32116,6 +32247,7 @@
       "tabAnalytics": "使用统计",
       "tabCapabilities": "能力",
       "tabContributed": "贡献",
+      "tabCountAria": "{label}，{count}",
       "tabData": "数据",
       "tabGeneral": "总览",
       "tabLifecycle": "生命周期",
@@ -32124,19 +32256,41 @@
       "tabOverview": "概览",
       "tabPermissions": "权限",
       "tabTriggers": "触发",
+      "unknownDate": "未知",
+      "update": "更新",
       "verification": {
         "current": "当前",
         "lastFailureAt": "失败时间 {date}",
         "lastGood": "上次可用",
         "lastSuccessfulAt": "最近成功 {date}",
         "rollbackTo": "回滚到 v{version}",
+        "stage": {
+          "activation": "激活",
+          "cleanup": "清理",
+          "compatibility": "兼容性",
+          "installation": "安装",
+          "manifest_validation": "清单校验",
+          "reload": "重新加载",
+          "runtime_execution": "运行"
+        },
         "title": "运行校验",
         "verifiedAt": "校验时间 {date}"
       },
+      "versionLabel": "v{version}",
       "viewInfo": "信息",
       "viewManifest": "原始 JSON",
       "viewToggleAria": "在插件信息与原始 manifest 之间切换",
       "workflowTriggers": "工作流触发"
+    },
+    "detailData": {
+      "dataManagement": {
+        "deleting": "删除中…",
+        "mirroredBlocked": "该插件的数据保存在运行它的桌面端，请在桌面端删除。",
+        "purgeFailed": "无法删除 {pluginId} 的数据。",
+        "purged": "{count, plural, =0 {{pluginId} 没有可清除的数据表。} other {已删除 {pluginId} 的 # 张数据表中的数据。}}",
+        "tableCount": "{count, plural, other {# 张表}}"
+      },
+      "dependencyCount": "{count, plural, =0 {未声明} other {已声明 # 个}}"
     },
     "devSession": {
       "actions": {
@@ -32454,7 +32608,7 @@
       "any": "任意",
       "apply": "应用",
       "capability": "能力",
-      "description": "按能力、权限、来源或状态精细筛选已安装插件。",
+      "description": "按能力、权限、来源、状态或标签精细筛选已安装插件。",
       "hasUpdate": "有更新",
       "permission": "权限",
       "query": "搜索",
@@ -32470,6 +32624,8 @@
       },
       "source": "来源",
       "status": "状态",
+      "tag": "标签",
+      "tagNone": "已安装的插件均未声明关键词。",
       "title": "插件筛选"
     },
     "githubDialog": {
@@ -32499,6 +32655,7 @@
         "rateLimitsNote": "速率限制与沙箱默认值在全局配置；每个插件的实际用量在插件详情中可见。",
         "securityPosture": "严格沙箱",
         "securityPostureHint": "拒绝未声明白名单插件的网络出口，并对每一项已声明权限都弹窗确认。关闭（平衡）保持默认：危险权限仍会弹窗，未声明白名单的插件保持不受限出口。",
+        "securityPostureLoading": "正在加载沙箱设置…",
         "signatureRequired": "强制签名",
         "signatureRequiredHint": "拒绝加载未通过发布者签名验证的插件。",
         "trustedPublishersOnly": "仅信任的发布者",
@@ -32507,11 +32664,16 @@
     },
     "grid": {
       "browseMarketplace": "浏览市场",
+      "clearFilters": "清除筛选",
       "emptyAll": "尚未安装任何插件。",
       "emptyFiltered": "没有插件匹配当前筛选条件。",
+      "listAria": "已安装的插件",
       "loading": "加载插件中…",
+      "pluginCount": "{count} 个插件",
       "selectAll": "全选（{count}）",
-      "selectAllAria": "选择所有可见插件"
+      "selectAllAria": "选择所有可见插件",
+      "selectionDone": "完成",
+      "selectionStart": "选择"
     },
     "import": {
       "cancel": "取消",
@@ -32571,8 +32733,10 @@
         "conflict": "已在冲突审查步骤取消安装。",
         "permission": "已在权限审查步骤取消安装。"
       },
+      "installEntryMissing": "该插件已不在列表中，请刷新插件市场后重试。",
       "installFailed": "安装失败：{message}",
       "installSucceeded": "{name} 已安装。",
+      "installerLoading": "安装程序仍在加载，请稍后再试。",
       "loadMore": "加载更多 ({shown}/{total})",
       "loading": "加载市场中…",
       "manageSources": "GitHub 源",
@@ -32604,6 +32768,8 @@
     },
     "marketplaceCard": {
       "addToCompareAria": "将 {name} 加入对比",
+      "compareFull": "对比栏已有两个插件，请先移除一个再对比此插件。",
+      "compareFullLabel": "为何无法对比此插件",
       "dangerous": "危险",
       "install": "安装",
       "installing": "安装中…",
@@ -32716,23 +32882,28 @@
     "permissionReview": {
       "auditEmpty": "尚无审计事件。",
       "auditLogTitle": "最近审计事件",
+      "auditShowAll": "显示全部 {count} 条",
+      "auditShowFewer": "收起",
       "cancel": "取消",
       "close": "关闭",
       "colActions": "",
       "colDeclared": "声明",
-      "colGranted": "已授予",
       "colOptional": "可选",
       "colPermission": "权限",
+      "colStatus": "状态",
       "colTier": "等级",
       "description": "查看该插件声明的、当前已授予的权限，并按需调整运行时授权。危险权限会高亮显示。",
       "empty": "此插件未声明或持有任何权限。",
       "grant": "授予",
+      "listTitle": "权限",
       "nodeNetworkUnavailable": "Node 运行时不可用：尚未实现进程内的精确网络代理。",
       "nodeSubprocessUnavailable": "Node 运行时不可用：尚未实现进程内的精确子进程代理。",
       "revoke": "撤销",
       "revokeAll": "全部撤销",
       "revokeAllConfirmBody": "{name} 将失去全部 {count} 项已授予的权限，包括其清单声明的权限。在重新授予之前，它可能无法正常工作。",
       "revokeAllConfirmTitle": "撤销全部权限？",
+      "statusGranted": "已授予",
+      "statusNotGranted": "未授予",
       "tierHint": {
         "confirm": "每次调用都弹出授权确认。",
         "forbid": "始终拒绝 — 即使 manifest 声明了。",
@@ -33016,7 +33187,19 @@
       "title": "安装 {name} 前确认"
     },
     "resourceManager": {
-      "noLimits": "该插件未配置任何速率限制。",
+      "loadingUsage": "正在加载已记录的用量…",
+      "note": "每类操作都使用令牌桶：允许短时突发，之后按所示的持续速率补充。已记录次数为累计总数，并非当前时间窗口内的用量。",
+      "rate": {
+        "day": "{count, plural, =1 {每天 {limit, number} 次} other {每 # 天 {limit, number} 次}}",
+        "hour": "{count, plural, =1 {每小时 {limit, number} 次} other {每 # 小时 {limit, number} 次}}",
+        "millisecond": "{count, plural, =1 {每毫秒 {limit, number} 次} other {每 # 毫秒 {limit, number} 次}}",
+        "minute": "{count, plural, =1 {每分钟 {limit, number} 次} other {每 # 分钟 {limit, number} 次}}",
+        "second": "{count, plural, =1 {每秒 {limit, number} 次} other {每 # 秒 {limit, number} 次}}",
+        "total": "共 {limit, number} 次，不再补充"
+      },
+      "rateWithBurst": "{rate} · 可突发 {burst, number} 次",
+      "recorded": "{count, plural, =0 {尚无调用记录} other {累计记录 # 次}}",
+      "recordedLast": "{recorded} · 最近一次 <time>{date}</time>",
       "title": "资源用量"
     },
     "rollback": {
@@ -33058,7 +33241,11 @@
       "countTotal": "{count} 项任务",
       "empty": "尚无插件贡献的定时任务。",
       "loading": "加载定时任务中…",
+      "noLastRun": "从未运行",
+      "noMatch": "没有符合此筛选条件的任务。",
+      "noNextRun": "未排期",
       "openScheduler": "打开调度器",
+      "showAllJobs": "显示全部任务",
       "status": {
         "active": "活动",
         "all": "全部",
@@ -33090,7 +33277,8 @@
         "enabled": "已启用",
         "errored": "出错",
         "updates": "可更新"
-      }
+      },
+      "navAria": "插件分区"
     },
     "shared": {
       "capabilityCount": "{count} 项能力",
@@ -33166,16 +33354,20 @@
       "fromVsix": "从 .vsix 安装…",
       "fromWasmGit": "从 Git 安装（WASM）…",
       "groupCogpack": "齿轮包",
+      "groupConvert": "从其他生态转换",
       "groupGit": "Git",
       "groupLocal": "本地插件",
       "groupManifest": "清单",
       "groupWasm": "插件包",
       "install": "安装",
       "loadUnpacked": "加载本地目录…",
+      "moreActions": "更多插件操作",
       "syncDone": "注册表已同步 — {count, plural, =0 {暂无可用更新} other {# 个插件有更新}}",
       "syncFailed": "注册表同步失败：{message}",
       "syncRegistry": "同步注册表",
-      "syncRegistryAria": "刷新市场注册表并检查已安装插件的更新"
+      "syncRegistryAria": "刷新市场注册表并检查已安装插件的更新",
+      "syncRegistryHint": "刷新插件市场目录，并标记有可用更新的已安装插件。",
+      "syncing": "正在同步注册表…"
     },
     "triggers": {
       "badge": {
@@ -33221,17 +33413,21 @@
       "checking": "检查中…",
       "close": "关闭",
       "description": "从市场拉取的更新列表。",
+      "descriptionSingle": "在插件市场中检查此插件是否有新版本。",
       "install": "安装",
       "installAll": "全部安装",
       "recheck": "重新检查",
       "title": "插件更新",
+      "titleSingle": "更新 {name}",
       "upToDate": "全部插件均为最新版本。",
+      "upToDateSingle": "此插件已是最新版本。",
       "updatesAvailable": {
         "description": "自动更新设置为仅通知，未安装任何内容。",
         "descriptionPinned": "{count, plural, other {其中 # 个的版本被当前齿轮组锁定，未安装。}}",
         "review": "去查看",
         "title": "{count, plural, other {有 # 个插件可更新}}"
-      }
+      },
+      "versionChange": "v{from} → v{to}"
     },
     "view": {
       "card": "卡片",

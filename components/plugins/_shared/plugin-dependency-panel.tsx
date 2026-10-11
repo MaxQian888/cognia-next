@@ -10,13 +10,8 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckCircle2Icon, CircleHelpIcon, XCircleIcon } from "lucide-react"
-import {
-  PackageInfo,
-  PackageInfoHeader,
-  PackageInfoName,
-  PackageInfoVersion,
-} from "@/components/ai-elements/package-info"
 import { Badge } from "@/components/ui/badge"
+import { usePluginDisplayName } from "@/hooks/plugins/use-plugin-display-name"
 import { listPlugins } from "@/lib/db/plugins"
 import { detectCli, satisfiesMinVersion } from "@/lib/cli-bridge/detect-cli"
 import type { PluginManifest } from "@/types/plugin"
@@ -29,6 +24,12 @@ type ManifestDeps = Pick<
 interface Props {
   manifest: ManifestDeps
   className?: string
+  /**
+   * Makes an INSTALLED plugin dependency a link to its own detail. Passed by
+   * the installed-plugin overview only: in the marketplace sheet and the
+   * GitHub install preview there is no detail pane to move to.
+   */
+  onOpenDependency?: (pluginId: string) => void
 }
 
 interface BinaryProbe {
@@ -36,7 +37,7 @@ interface BinaryProbe {
   version: string | null
 }
 
-export function PluginDependencyPanel({ manifest, className }: Props) {
+export function PluginDependencyPanel({ manifest, className, onOpenDependency }: Props) {
   const t = useTranslations("plugins.dependencies")
 
   const required = useMemo(
@@ -97,25 +98,29 @@ export function PluginDependencyPanel({ manifest, className }: Props) {
       {(required.length > 0 || optional.length > 0) && (
         <div className="space-y-1.5">
           <div className="text-[11px] font-medium text-muted-foreground">{t("pluginDeps")}</div>
-          {required.map(([dep, version]) => (
-            <DepRow
-              key={dep}
-              name={dep}
-              version={version}
-              installed={installedIds.has(dep)}
-              t={t}
-            />
-          ))}
-          {optional.map(([dep, version]) => (
-            <DepRow
-              key={dep}
-              name={dep}
-              version={version}
-              installed={installedIds.has(dep)}
-              optional
-              t={t}
-            />
-          ))}
+          <ul className="divide-y">
+            {required.map(([dep, version]) => (
+              <DepRow
+                key={dep}
+                name={dep}
+                version={version}
+                installed={installedIds.has(dep)}
+                onOpen={onOpenDependency}
+                t={t}
+              />
+            ))}
+            {optional.map(([dep, version]) => (
+              <DepRow
+                key={dep}
+                name={dep}
+                version={version}
+                installed={installedIds.has(dep)}
+                optional
+                onOpen={onOpenDependency}
+                t={t}
+              />
+            ))}
+          </ul>
         </div>
       )}
 
@@ -178,48 +183,68 @@ export function PluginDependencyPanel({ manifest, className }: Props) {
   )
 }
 
+/**
+ * One dependency per divided row: name, the version range it asks for, and
+ * whether it is installed. It used to be a bordered package card per
+ * dependency, so two dependencies cost two boxes inside a section inside the
+ * pane, with the version on a line of its own.
+ */
 function DepRow({
   name,
   version,
   installed,
   optional,
+  onOpen,
   t,
 }: {
   name: string
   version: string
   installed: boolean
   optional?: boolean
+  onOpen?: (pluginId: string) => void
   t: ReturnType<typeof useTranslations>
 }) {
+  const displayName = usePluginDisplayName(name)
+  const showsId = displayName !== name
+  const label = (
+    <span className="flex min-w-0 flex-col">
+      <span className="truncate font-medium">{displayName}</span>
+      {showsId ? (
+        <span className="truncate font-mono text-[10px] text-muted-foreground">{name}</span>
+      ) : null}
+    </span>
+  )
   return (
-    <PackageInfo
-      className="rounded-md p-2"
-      currentVersion={version}
-      data-testid={`dep-${name}`}
-      name={name}
-    >
-      <PackageInfoHeader>
-        <div className="flex min-w-0 items-center gap-1.5">
-          <PackageInfoName className="min-w-0 [&>span]:truncate" />
-          {optional && (
-            <Badge variant="outline" className="text-[10px]">
-              {t("optional")}
-            </Badge>
-          )}
-        </div>
-        {installed ? (
-          <span className="flex items-center gap-1 text-xs text-emerald-600">
-            <CheckCircle2Icon className="size-3" />
-            {t("installed")}
-          </span>
-        ) : (
-          <span className="flex items-center gap-1 text-xs text-amber-600">
-            <XCircleIcon className="size-3" />
-            {t("missing")}
-          </span>
-        )}
-      </PackageInfoHeader>
-      <PackageInfoVersion className="mt-1" />
-    </PackageInfo>
+    <li className="flex items-center gap-2 py-1.5 text-xs" data-testid={`dep-${name}`}>
+      {installed && onOpen ? (
+        <button
+          type="button"
+          onClick={() => onOpen(name)}
+          className="min-w-0 rounded-sm text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring pointer-coarse:min-h-10"
+          aria-label={t("openDependencyAria", { name: displayName })}
+        >
+          {label}
+        </button>
+      ) : (
+        <span className="min-w-0">{label}</span>
+      )}
+      <code className="shrink-0 font-mono text-[11px] text-muted-foreground">{version}</code>
+      {optional && (
+        <Badge variant="outline" className="shrink-0 text-[10px]">
+          {t("optional")}
+        </Badge>
+      )}
+      {installed ? (
+        <span className="ml-auto flex shrink-0 items-center gap-1 text-emerald-600">
+          <CheckCircle2Icon className="size-3" aria-hidden />
+          {t("installed")}
+        </span>
+      ) : (
+        <span className="ml-auto flex shrink-0 items-center gap-1 text-amber-600">
+          <XCircleIcon className="size-3" aria-hidden />
+          {t("missing")}
+        </span>
+      )}
+    </li>
   )
 }

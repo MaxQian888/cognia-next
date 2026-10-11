@@ -7,7 +7,7 @@
 // without scrolling forever. Action set is shared with PluginCard via
 // PluginRowActionsMenu so the two views can't drift.
 //
-// Two structural rules this file exists to hold:
+// The structural rules this file exists to hold:
 //
 //   1. **No nested interactive elements.** The row used to wrap the avatar,
 //      title, capability chips (focusable HoverCard triggers) and the
@@ -31,12 +31,23 @@
 //      the name and truncated it to three or four characters. At that width
 //      the version and badges move to line two, and the redundant icons drop
 //      out (the detail header still shows the signature).
+//
+//   4. **The signature icon only speaks when it has something to say.** A
+//      "not verified" glyph sat on every built-in and local row, which is
+//      the normal state for them, so the column read as a warning on 50 rows
+//      and meant nothing. Rows show verified and failed; the detail header
+//      still shows all three states.
+//
+//   5. **Selection can be a mode.** On a phone the list hides the checkbox
+//      until the user selects (`selectable`), and a long press on a row is a
+//      shortcut into that mode (`onLongPress`).
 
-import { memo, useMemo } from "react"
+import { memo, useMemo, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { CircleAlertIcon, ShieldCheckIcon, TriangleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { useLocalizedPluginText } from "@/hooks/plugins/use-localized-plugin-text"
+import { isPluginRowErrored } from "@/hooks/plugins/use-plugins"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
@@ -54,7 +65,14 @@ import { PluginContributionChip } from "../_shared/plugin-contribution-chip"
 interface Props {
   plugin: PluginRow
   selected: boolean
+  /** Whether the selection checkbox shows. Defaults to true (desktop). */
+  selectable?: boolean
   active: boolean
+  /**
+   * Long press (~500ms, touch or pen) on the row. The phone list passes this
+   * to enter selection mode with the pressed row selected.
+   */
+  onLongPress?: (id: string) => void
   onToggleSelect: (id: string) => void
   onOpen: (id: string) => void
   onConfigure: (id: string) => void
@@ -77,7 +95,9 @@ function readAuthor(manifest: PluginRow["manifest"]): string | undefined {
 export const PluginLibraryRow = memo(function PluginLibraryRow({
   plugin,
   selected,
+  selectable = true,
   active,
+  onLongPress,
   onToggleSelect,
   onOpen,
   onConfigure,
@@ -89,7 +109,9 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
   const t = useTranslations("plugins.card")
   // The manifest's own localized name (nameKey), for enabled and disabled rows alike.
   const { name: displayName } = useLocalizedPluginText(plugin)
-  const errored = plugin.status === "error"
+  // Lifecycle-aware: `status` alone missed every runtime failure, which is
+  // recorded on the lifecycle (the filter and the card use the same rule).
+  const errored = isPluginRowErrored(plugin)
   const isLoading =
     plugin.status === "loading" || plugin.status === "enabling" || plugin.status === "updating"
   const signatureState: SignatureState = (() => {
@@ -108,6 +130,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
     () => getAllContributions(plugin.capabilities, plugin.manifest),
     [plugin.capabilities, plugin.manifest]
   )
+  const longPress = useLongPress(onLongPress ? () => onLongPress(plugin.id) : undefined)
 
   return (
     <div
@@ -133,18 +156,23 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
       data-plugin-id={plugin.id}
       data-active={active}
       data-errored={errored || undefined}
+      aria-current={active ? "true" : undefined}
+      {...longPress.handlers}
+      onClickCapture={longPress.swallowClickAfterPress}
     >
       {/* The label is the hit area: a 16px box on a phone is a miss, so the
           label pads it to 36px on a coarse pointer and the negative margin
           keeps the row's painted layout unchanged. */}
-      <label className="relative z-10 -m-1.5 flex shrink-0 cursor-pointer items-center p-1.5 pointer-coarse:-m-2.5 pointer-coarse:p-2.5">
-        <Checkbox
-          checked={selected}
-          onCheckedChange={() => onToggleSelect(plugin.id)}
-          aria-label={t("selectAria", { name: displayName })}
-          className="shrink-0"
-        />
-      </label>
+      {selectable ? (
+        <label className="relative z-10 -m-1.5 flex shrink-0 cursor-pointer items-center p-1.5 pointer-coarse:-m-2.5 pointer-coarse:p-2.5">
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => onToggleSelect(plugin.id)}
+            aria-label={t("selectAria", { name: displayName })}
+            className="shrink-0"
+          />
+        </label>
+      ) : null}
       <PluginAvatar
         name={plugin.name}
         icon={(plugin.manifest as { icon?: string })?.icon}
@@ -163,6 +191,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
             onClick={() => onOpen(plugin.id)}
             className="min-w-0 truncate text-left font-medium after:absolute after:inset-0 after:content-[''] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
             data-testid={`plugin-library-row-${plugin.id}`}
+            data-row-open=""
           >
             {displayName}
           </button>
@@ -207,11 +236,13 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
               labelClassName="hidden @xl/plugin-list:inline"
               className="relative z-10"
             />
-            <PluginSignatureBadge
-              state={signatureState}
-              compact
-              className="relative z-10 hidden @sm/plugin-list:inline-flex"
-            />
+            {signatureState !== "unverified" ? (
+              <PluginSignatureBadge
+                state={signatureState}
+                compact
+                className="relative z-10 hidden @sm/plugin-list:inline-flex"
+              />
+            ) : null}
             {errored && (
               <TriangleAlertIcon
                 className="hidden size-3.5 shrink-0 text-destructive @sm/plugin-list:block"
@@ -318,3 +349,62 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
     </div>
   )
 })
+
+/**
+ * Long press for touch and pen, without a library: a timer started on
+ * pointerdown and cancelled by movement, release or a mouse. The click that
+ * follows a completed press is swallowed so it does not also open the row.
+ */
+function useLongPress(onLongPress: (() => void) | undefined) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const start = useRef<{ x: number; y: number } | null>(null)
+  const fired = useRef(false)
+
+  const cancel = () => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = null
+    start.current = null
+  }
+
+  if (!onLongPress) {
+    return { handlers: {}, swallowClickAfterPress: undefined }
+  }
+
+  return {
+    handlers: {
+      onPointerDown: (event: React.PointerEvent) => {
+        if (event.pointerType === "mouse") return
+        fired.current = false
+        start.current = { x: event.clientX, y: event.clientY }
+        timer.current = setTimeout(() => {
+          fired.current = true
+          timer.current = null
+          onLongPress()
+        }, LONG_PRESS_MS)
+      },
+      onPointerMove: (event: React.PointerEvent) => {
+        if (!start.current) return
+        const dx = Math.abs(event.clientX - start.current.x)
+        const dy = Math.abs(event.clientY - start.current.y)
+        // A scroll gesture is not a press.
+        if (dx > LONG_PRESS_SLOP_PX || dy > LONG_PRESS_SLOP_PX) cancel()
+      },
+      onPointerUp: cancel,
+      onPointerCancel: cancel,
+      onPointerLeave: cancel,
+      // The OS long-press menu (text selection, "open link") would race ours.
+      onContextMenu: (event: React.MouseEvent) => {
+        if (fired.current || timer.current) event.preventDefault()
+      },
+    },
+    swallowClickAfterPress: (event: React.MouseEvent) => {
+      if (!fired.current) return
+      fired.current = false
+      event.preventDefault()
+      event.stopPropagation()
+    },
+  }
+}
+
+const LONG_PRESS_MS = 500
+const LONG_PRESS_SLOP_PX = 10

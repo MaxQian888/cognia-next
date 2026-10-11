@@ -24,8 +24,9 @@ export const SeveralActive: Story = {
         ...usePluginsStore.getState().filters,
         query: "web",
         capability: "tools",
+        source: "marketplace",
+        tag: "productivity",
       },
-      librarySubFilter: "enabled",
     })
     return () => resetStore(usePluginsStore)
   },

@@ -384,4 +384,145 @@ describe("PluginPythonHostSettings", () => {
     expect(outcome).toHaveTextContent("/data/venvs/_shared/py312")
     expect(outcome.textContent).not.toContain("deps.downgraded")
   })
+
+  // Save / Reset follow the config form: Save only once something changed,
+  // Reset back to what is saved.
+  describe("dirty tracking", () => {
+    it("disables Save and Reset until a field changes", async () => {
+      getSettingsMock.mockResolvedValue({ interpreterPath: "/usr/bin/python3" })
+      await renderLoaded()
+      expect(screen.getByRole("button", { name: "save" })).toBeDisabled()
+      expect(screen.getByRole("button", { name: "reset" })).toBeDisabled()
+
+      fireEvent.change(screen.getByLabelText("interpreterPath"), {
+        target: { value: "/opt/py/bin/python" },
+      })
+      expect(screen.getByRole("button", { name: "save" })).toBeEnabled()
+      expect(screen.getByRole("button", { name: "reset" })).toBeEnabled()
+
+      // Typing the saved value back makes the form clean again.
+      fireEvent.change(screen.getByLabelText("interpreterPath"), {
+        target: { value: "/usr/bin/python3" },
+      })
+      expect(screen.getByRole("button", { name: "save" })).toBeDisabled()
+    })
+
+    it("Reset restores every field to the saved values", async () => {
+      getSettingsMock.mockResolvedValue({
+        interpreterPath: "/usr/bin/python3",
+        callTimeoutMs: 5000,
+        installer: { kind: "uv" },
+      })
+      await renderLoaded()
+      fireEvent.change(screen.getByLabelText("interpreterPath"), { target: { value: "x" } })
+      fireEvent.change(screen.getByLabelText("callTimeoutMs"), { target: { value: "1" } })
+      fireEvent.click(screen.getByRole("switch"))
+
+      fireEvent.click(screen.getByRole("button", { name: "reset" }))
+
+      expect(screen.getByLabelText("interpreterPath")).toHaveValue("/usr/bin/python3")
+      expect(screen.getByLabelText("callTimeoutMs")).toHaveValue(5000)
+      expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true")
+      expect(screen.getByRole("button", { name: "save" })).toBeDisabled()
+      expect(screen.getByRole("button", { name: "reset" })).toBeDisabled()
+      expect(setSettingsMock).not.toHaveBeenCalled()
+    })
+
+    it("a successful save becomes the new clean baseline", async () => {
+      await renderLoaded()
+      fireEvent.change(screen.getByLabelText("idleShutdownMin"), { target: { value: "10" } })
+      fireEvent.click(screen.getByRole("button", { name: "save" }))
+      await waitFor(() => expect(setSettingsMock).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(screen.getByRole("button", { name: "save" })).toBeDisabled())
+      expect(screen.getByRole("button", { name: "reset" })).toBeDisabled()
+      // Reset now targets the saved value, not the original empty field.
+      fireEvent.change(screen.getByLabelText("idleShutdownMin"), { target: { value: "20" } })
+      fireEvent.click(screen.getByRole("button", { name: "reset" }))
+      expect(screen.getByLabelText("idleShutdownMin")).toHaveValue(10)
+    })
+
+    it("a failed save leaves the form dirty", async () => {
+      setSettingsMock.mockRejectedValueOnce(new Error("disk full"))
+      await renderLoaded()
+      fireEvent.change(screen.getByLabelText("idleShutdownMin"), { target: { value: "10" } })
+      fireEvent.click(screen.getByRole("button", { name: "save" }))
+      // The failure is reported inline, not swallowed or left unhandled.
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        'saveError:{"message":"Error: disk full"}'
+      )
+      expect(screen.getByRole("button", { name: "save" })).toBeEnabled()
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "reset" })).toBeEnabled()
+
+      // A later successful save clears the error.
+      fireEvent.click(screen.getByRole("button", { name: "save" }))
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
+    })
+  })
+
+  it("clears the saved-confirmation timer on unmount", async () => {
+    const { unmount } = render(<PluginPythonHostSettings pluginId="demo" />)
+    await waitFor(() => expect(screen.getByTestId("python-host-settings")).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText("idleShutdownMin"), { target: { value: "10" } })
+    jest.useFakeTimers()
+    const setSpy = jest.spyOn(global, "setTimeout")
+    const clearSpy = jest.spyOn(global, "clearTimeout")
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "save" }))
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByRole("status")).toHaveTextContent("saved")
+      const tickIndex = setSpy.mock.calls.findIndex(([, delay]) => delay === 2000)
+      expect(tickIndex).toBeGreaterThanOrEqual(0)
+      const tickTimer = setSpy.mock.results[tickIndex].value
+      expect(clearSpy).not.toHaveBeenCalledWith(tickTimer)
+      unmount()
+      // The pending "Saved" timer is cancelled rather than left to fire into
+      // the unmounted card.
+      expect(clearSpy).toHaveBeenCalledWith(tickTimer)
+    } finally {
+      setSpy.mockRestore()
+      clearSpy.mockRestore()
+      jest.useRealTimers()
+    }
+  })
+
+  it("names an unknown interpreter version through i18n instead of a dash", async () => {
+    runtimeInfoMock.mockResolvedValue({ available: true, version: null, uv_version: "0.4.9" })
+    await renderLoaded()
+    expect(
+      await screen.findByText(
+        'environment.interpreterVersion:{"version":"environment.versionUnknown"}'
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/—/)).not.toBeInTheDocument()
+  })
+
+  // The card renders in a pane that is often narrower than the viewport, so
+  // its grids follow the card's width, not the screen's.
+  it("lays out by container width, not viewport breakpoints", async () => {
+    await renderLoaded()
+    const root = screen.getByTestId("python-host-settings")
+    expect(root.className).toContain("@container")
+    const html = root.innerHTML
+    expect(html).toContain("@md:grid-cols-2")
+    expect(html).not.toMatch(/[\s"](sm|md|lg):(grid-cols|col-span)/)
+  })
+
+  it("reports the install outcome as a flat note, not a boxed panel", async () => {
+    installDepsMock.mockResolvedValue({
+      venvDir: "/data/venvs/demo",
+      scope: "isolated",
+      installer: "uv",
+      downgradedReason: null,
+    })
+    const user = userEvent.setup()
+    await renderLoaded(["requests"])
+    await user.click(screen.getByRole("button", { name: /deps\.install/ }))
+    await user.click(screen.getByRole("button", { name: "deps.confirm" }))
+    const outcome = await screen.findByTestId("py-install-outcome")
+    expect(outcome.className).not.toMatch(/(^|\s)(rounded(-\w+)?|bg-muted\/40)(\s|$)/)
+    expect(outcome.className).toContain("border-l-2")
+  })
 })

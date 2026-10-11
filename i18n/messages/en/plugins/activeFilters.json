@@ -9,7 +9,8 @@
     "signedOnly": "Signed only",
     "sort": "Sort: {value}",
     "source": "Source: {value}",
-    "status": "Status: {value}"
+    "status": "Status: {value}",
+    "tag": "Tag: {value}"
   },
   "clearAll": "Clear all",
   "removeAria": "Remove {name}"

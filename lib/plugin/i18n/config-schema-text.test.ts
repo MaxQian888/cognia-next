@@ -1,7 +1,10 @@
 import {
+  VARIANT_ALIASES_FIELD,
+  VARIANT_ID_FIELD,
   collectConfigSchemaI18nKeys,
   localizeConfigSchema,
   resolvePluginI18nText,
+  variantSourceId,
 } from "./config-schema-text"
 
 const i18n = {
@@ -75,6 +78,66 @@ describe("localizeConfigSchema", () => {
     expect(plain.properties.project.title).toBe("Default project id (raw)")
     expect(JSON.stringify(schema)).toBe(before)
     expect(localizeConfigSchema("not a schema", i18n, "en")).toBe("not a schema")
+  })
+})
+
+describe("oneOf variant identity", () => {
+  const variantI18n = {
+    locales: {
+      en: { "auth.oauth": "OAuth" },
+      "zh-CN": { "auth.oauth": "OAuth 登录" },
+    },
+  }
+  const auth = (variants: Record<string, unknown>[], field: "oneOf" | "anyOf" = "oneOf") => ({
+    type: "object",
+    properties: { auth: { [field]: variants } },
+  })
+  const variantsOf = (out: unknown, field: "oneOf" | "anyOf" = "oneOf") =>
+    (out as { properties: { auth: Record<string, Record<string, unknown>[]> } }).properties.auth[
+      field
+    ]
+
+  it("records the source text as a locale-independent id, and every localized title as an alias", () => {
+    const schemaIn = auth([
+      { type: "object", titleKey: "auth.oauth", properties: {} },
+      { type: "object", title: "API key", properties: {} },
+      { type: "object", properties: {} },
+    ])
+    const [oauth, apiKey, untitled] = variantsOf(
+      localizeConfigSchema(schemaIn, variantI18n, "zh-CN")
+    )
+    expect(oauth.title).toBe("OAuth 登录")
+    expect(oauth[VARIANT_ID_FIELD]).toBe("auth.oauth")
+    expect(oauth[VARIANT_ALIASES_FIELD]).toEqual(["OAuth", "OAuth 登录"])
+    expect(apiKey[VARIANT_ID_FIELD]).toBe("API key")
+    expect(apiKey[VARIANT_ALIASES_FIELD]).toBeUndefined()
+    // No source text at all: the form falls back to its positional id.
+    expect(untitled[VARIANT_ID_FIELD]).toBeUndefined()
+  })
+
+  it("gives the same id whatever the locale", () => {
+    const schemaIn = auth([{ type: "object", titleKey: "auth.oauth", properties: {} }])
+    const en = variantsOf(localizeConfigSchema(schemaIn, variantI18n, "en"))[0]
+    const zh = variantsOf(localizeConfigSchema(schemaIn, variantI18n, "zh-CN"))[0]
+    expect(en[VARIANT_ID_FIELD]).toBe(zh[VARIANT_ID_FIELD])
+    expect(en.title).not.toBe(zh.title)
+  })
+
+  it("keeps an author-supplied id, and localizes anyOf the same way", () => {
+    const schemaIn = auth(
+      [{ type: "object", titleKey: "auth.oauth", [VARIANT_ID_FIELD]: "oauth", properties: {} }],
+      "anyOf"
+    )
+    const [variant] = variantsOf(localizeConfigSchema(schemaIn, variantI18n, "zh-CN"), "anyOf")
+    expect(variant[VARIANT_ID_FIELD]).toBe("oauth")
+    expect(variant.title).toBe("OAuth 登录")
+  })
+
+  it("reads the source id from title, then label, then titleKey", () => {
+    expect(variantSourceId({ title: "T", label: "L", titleKey: "k" })).toBe("T")
+    expect(variantSourceId({ label: "L", titleKey: "k" })).toBe("L")
+    expect(variantSourceId({ titleKey: "k" })).toBe("k")
+    expect(variantSourceId({ title: "" })).toBeUndefined()
   })
 })
 

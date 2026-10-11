@@ -5,7 +5,8 @@ import { PluginDependencyGraph } from "./plugin-dependency-graph"
 // Dependency-tree visualization for the Data sub-tab. Resolves the plugin's
 // declared dependencies against the installed set (a Dexie read — empty in this
 // Storybook), so any declared dependency resolves as unresolved/missing and the
-// "unresolved" badge appears. A manifest with no dependencies resolves cleanly.
+// verdict line reads "Unresolved". A manifest with no dependencies resolves
+// cleanly. The canvas sits behind the "Show dependency graph" disclosure.
 
 const meta = {
   title: "Plugins/Detail/PluginDependencyGraph",

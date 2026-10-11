@@ -11,6 +11,7 @@
 // That is why this is one card rather than a parallel VS Code card that would
 // drift from this one on the first styling change.
 
+import { useId } from "react"
 import { useTranslations } from "next-intl"
 import {
   DownloadIcon,
@@ -22,6 +23,7 @@ import {
   PlugZapIcon,
   ShieldCheckIcon,
   PowerOffIcon,
+  InfoIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,12 +40,20 @@ import { PluginSourceBadge } from "../plugin-source-badge"
 import { PluginAvatar } from "../plugin-avatar"
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
 import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
+import { DANGEROUS_PERMISSIONS } from "@/lib/plugin/security/permission-guard"
 import { cn } from "@/lib/utils"
 import { CapabilityChips } from "../_shared/capability-chips"
 import { InstallButton } from "../_shared/install-button"
 import { InstalledMarker } from "../_shared/installed-marker"
 import { PluginHint } from "../_shared/plugin-hint"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
+
+const DANGEROUS = new Set<string>(DANGEROUS_PERMISSIONS)
+
+/** Whether any requested permission is on the guard's canonical dangerous list. */
+export function requestsDangerousPermission(permissions: readonly string[] | undefined): boolean {
+  return (permissions ?? []).some((p) => DANGEROUS.has(p))
+}
 
 interface Props {
   entry: PluginMarketplaceEntry & {
@@ -148,14 +158,10 @@ export function PluginMarketplaceCard({
   const removeFromComparison = usePluginMarketplaceStore((s) => s.removeFromComparison)
   const inComparison = comparisonIds.includes(entry.id)
   const comparisonFull = !inComparison && comparisonIds.length >= 2
-  const dangerous =
-    (entry.permissions ?? []).filter(
-      (p) =>
-        p === "shell:execute" ||
-        p === "process:spawn" ||
-        p === "python:execute" ||
-        p === "filesystem:write"
-    ).length > 0
+  const compareReasonId = useId()
+  // The guard's canonical list (network egress, chat interception, secrets
+  // writes, …), not the four ids this card used to hard-code.
+  const dangerous = requestsDangerousPermission(entry.permissions)
   const sigState = entry.signatureState ?? (entry.signed ? "verified" : "unverified")
   // Built-in plugins ship with the app and can't be installed / uninstalled —
   // they show a read-only Built-in badge in place of the install CTA.
@@ -296,7 +302,7 @@ export function PluginMarketplaceCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className={cn("size-7 pointer-coarse:size-9", inComparison && "text-primary")}
+                className={cn("size-7 pointer-coarse:size-10", inComparison && "text-primary")}
                 onClick={() =>
                   inComparison ? removeFromComparison(entry.id) : addToComparison(entry.id)
                 }
@@ -307,10 +313,29 @@ export function PluginMarketplaceCard({
                     : t("addToCompareAria", { name: entry.name })
                 }
                 aria-pressed={inComparison}
+                // Disabled controls are skipped by touch and often by screen
+                // readers' focus; the reason rides along as a description
+                // and behind the tap-to-open hint beside the button.
+                aria-describedby={comparisonFull ? compareReasonId : undefined}
                 data-testid={`plugin-marketplace-compare-toggle-${entry.id}`}
               >
                 <GitCompareIcon className="size-3.5" />
               </Button>
+              {comparisonFull && (
+                <>
+                  <span id={compareReasonId} className="sr-only">
+                    {t("compareFull")}
+                  </span>
+                  <PluginHint
+                    label={t("compareFullLabel")}
+                    content={<p>{t("compareFull")}</p>}
+                    className="size-7 justify-center pointer-coarse:size-10"
+                    testId={`plugin-marketplace-compare-full-${entry.id}`}
+                  >
+                    <InfoIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                  </PluginHint>
+                </>
+              )}
               <InstallButton
                 installed={false}
                 installing={installing}

@@ -1,5 +1,6 @@
 {
   "cancel": "Cancel",
+  "count": "{count, plural, =0 {No backups} one {# backup} other {# backups}}",
   "create": "Create backup",
   "createFailed": "Backup failed.",
   "creating": "Creating…",
@@ -8,7 +9,6 @@
   "deleteConfirmBody": "The v{version} backup from {date} is deleted for good. You can't roll back to it afterwards.",
   "deleteConfirmTitle": "Delete this backup?",
   "desktopOnlyHint": "Backups run through the native bridge and are only writable in the desktop build.",
-  "empty": "No backups yet.",
   "reason": {
     "auto": "Automatic",
     "manual": "Manual",
@@ -21,5 +21,9 @@
   "restoreAria": "Restore the v{version} backup from {date}",
   "restoreConfirmBody": "The plugin's current files, settings and data are replaced with the v{version} backup from {date}. Anything changed since then is lost.",
   "restoreConfirmTitle": "Restore this backup?",
-  "title": "Backups"
+  "rowDetail": "<time>{date}</time> · {size}",
+  "showAll": "Show all {count}",
+  "showLess": "Show fewer",
+  "title": "Backups",
+  "versionLabel": "v{version}"
 }

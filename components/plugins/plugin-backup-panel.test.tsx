@@ -2,11 +2,26 @@
  * @jest-environment jsdom
  */
 
+import React from "react"
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
+  useTranslations: () => {
+    const t = (key: string, vars?: Record<string, unknown>) =>
+      vars ? `${key}:${JSON.stringify(vars)}` : key
+    // Rich messages: render the `time` tag around the date and the size after
+    // it, the shape the real `<time>{date}</time> · {size}` template produces.
+    t.rich = (
+      key: string,
+      vars: { date: string; size: string; time: (chunks: string) => React.ReactNode }
+    ) => (
+      <>
+        {vars.time(vars.date)}
+        {` ${key}:${vars.size}`}
+      </>
+    )
+    return t
+  },
   useFormatter: () => ({
     dateTime: (d: Date) => `fmt:${d.toISOString()}`,
     number: (n: number) => `num:${n}`,
@@ -68,7 +83,10 @@ describe("PluginBackupPanel", () => {
       deleteBackup: jest.fn(),
     })
     render(<PluginBackupPanel pluginId="alpha" />)
-    expect(screen.getByText("empty")).toBeInTheDocument()
+    // The count line says it once ("No backups"); no second empty line.
+    expect(screen.getByText('count:{"count":0}')).toBeInTheDocument()
+    expect(screen.queryByText("empty")).toBeNull()
+    expect(screen.queryByRole("list")).toBeNull()
   })
 
   it("renders snapshot rows from getBackups", () => {
@@ -80,10 +98,65 @@ describe("PluginBackupPanel", () => {
     })
     render(<PluginBackupPanel pluginId="alpha" />)
     expect(screen.getByText(/snap1234/)).toBeInTheDocument()
-    expect(screen.getByText(/v1\.2\.3/)).toBeInTheDocument()
+    expect(screen.getByText('versionLabel:{"version":"1.2.3"}')).toBeInTheDocument()
     expect(screen.getByText("reason.manual")).toBeInTheDocument()
-    // Locale-formatted, not a raw ISO string.
-    expect(screen.getByText("fmt:2026-05-03T12:00:00.000Z")).toBeInTheDocument()
+    // Locale-formatted, not a raw ISO string, inside a machine-readable <time>.
+    const time = screen.getByText("fmt:2026-05-03T12:00:00.000Z")
+    expect(time.tagName).toBe("TIME")
+    expect(time).toHaveAttribute("dateTime", "2026-05-03T12:00:00.000Z")
+    // The size joins the date through the translated template.
+    expect(screen.getByText(/rowDetail:num:4/)).toBeInTheDocument()
+  })
+
+  it("draws a flat divided list with no card or nested scroller", () => {
+    __resetPluginBackupClientForTests({
+      createBackup: jest.fn(),
+      restore: jest.fn(),
+      getBackups: () => [sampleBackup],
+      deleteBackup: jest.fn(),
+    })
+    const { container } = render(<PluginBackupPanel pluginId="alpha" />)
+    expect(container.querySelector("[data-slot='card']")).toBeNull()
+    expect(container.querySelector("[data-slot='scroll-area']")).toBeNull()
+    expect(screen.getByRole("list", { name: "title" })).toHaveClass("divide-y")
+    expect(screen.getByTestId("plugin-backup-panel")).toHaveClass("@container")
+  })
+
+  it("caps a long history and expands it on request", () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({
+      ...sampleBackup,
+      id: `snap000${i}xxxx`,
+      version: `1.0.${i}`,
+    }))
+    __resetPluginBackupClientForTests({
+      createBackup: jest.fn(),
+      restore: jest.fn(),
+      getBackups: () => many,
+      deleteBackup: jest.fn(),
+    })
+    render(<PluginBackupPanel pluginId="alpha" />)
+    const list = screen.getByRole("list", { name: "title" })
+    expect(within(list).getAllByRole("listitem")).toHaveLength(5)
+    const toggle = screen.getByRole("button", { name: 'showAll:{"count":7}' })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(toggle)
+    expect(within(list).getAllByRole("listitem")).toHaveLength(7)
+    expect(screen.getByRole("button", { name: "showLess" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+  })
+
+  it("does not offer the toggle for a short history", () => {
+    __resetPluginBackupClientForTests({
+      createBackup: jest.fn(),
+      restore: jest.fn(),
+      getBackups: () => [sampleBackup],
+      deleteBackup: jest.fn(),
+    })
+    render(<PluginBackupPanel pluginId="alpha" />)
+    expect(screen.queryByRole("button", { name: /^showAll/ })).not.toBeInTheDocument()
+    expect(screen.getByText('count:{"count":1}')).toBeInTheDocument()
   })
 
   it("create button invokes createBackup and refreshes the list", async () => {
@@ -185,7 +258,7 @@ describe("PluginBackupPanel", () => {
     render(<PluginBackupPanel pluginId="alpha" />)
     expect(
       screen.getByLabelText('restoreAria:{"version":"1.2.3","date":"fmt:2026-05-03T12:00:00.000Z"}')
-    ).toHaveClass("pointer-coarse:size-9")
+    ).toHaveClass("pointer-coarse:size-10")
   })
 
   it("disables mutating actions and shows hint outside Tauri", () => {

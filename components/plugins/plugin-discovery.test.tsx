@@ -49,9 +49,15 @@ function market(overrides: Partial<MarketState> = {}): MarketState {
   }
 }
 
+function extra(installed: string[] = []) {
+  return { installedIds: new Set(installed), onUninstall: jest.fn() }
+}
+
 describe("PluginDiscovery", () => {
   it("renders featured entries from the panel's marketplace state", () => {
-    const { container } = render(<PluginDiscovery market={market()} onInstall={jest.fn()} />)
+    const { container } = render(
+      <PluginDiscovery market={market()} onInstall={jest.fn()} {...extra()} />
+    )
     expect(screen.getByText("Plugin 1")).toBeInTheDocument()
     expect(container.querySelector("[data-slot='card-header']")).not.toBeNull()
     expect(container.querySelector("[data-slot='card-content']")).not.toBeNull()
@@ -61,22 +67,49 @@ describe("PluginDiscovery", () => {
   it("renders nothing while loading or when nothing is featured", () => {
     // The marketplace below owns the spinner and the empty card.
     const { container, rerender } = render(
-      <PluginDiscovery market={market({ state: { kind: "loading" } })} onInstall={jest.fn()} />
+      <PluginDiscovery
+        market={market({ state: { kind: "loading" } })}
+        onInstall={jest.fn()}
+        {...extra()}
+      />
     )
     expect(container).toBeEmptyDOMElement()
-    rerender(<PluginDiscovery market={market({ featured: [] })} onInstall={jest.fn()} />)
+    rerender(
+      <PluginDiscovery market={market({ featured: [] })} onInstall={jest.fn()} {...extra()} />
+    )
     expect(container).toBeEmptyDOMElement()
   })
 
   it("install button delegates to the onInstall prop with id + version", () => {
     const onInstall = jest.fn()
-    render(<PluginDiscovery market={market()} onInstall={onInstall} />)
+    render(<PluginDiscovery market={market()} onInstall={onInstall} {...extra()} />)
     fireEvent.click(screen.getByText("install"))
     expect(onInstall).toHaveBeenCalledWith("p1", "1.0.0")
   })
 
   it("shows the installing state for the entry the panel is installing", () => {
-    render(<PluginDiscovery market={market({ installingId: "p1" })} onInstall={jest.fn()} />)
+    render(
+      <PluginDiscovery market={market({ installingId: "p1" })} onInstall={jest.fn()} {...extra()} />
+    )
     expect(screen.getByText("installing")).toBeInTheDocument()
+  })
+
+  it("offers Uninstall, not Install, for a featured plugin already installed", () => {
+    const props = extra(["p1"])
+    render(<PluginDiscovery market={market()} onInstall={jest.fn()} {...props} />)
+    expect(screen.queryByText("install")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "uninstall" }))
+    expect(props.onUninstall).toHaveBeenCalledWith("p1", "Plugin 1")
+  })
+
+  // Columns follow the strip's width, not the viewport's.
+  it("lays the grid out with container queries", () => {
+    const { container } = render(
+      <PluginDiscovery market={market()} onInstall={jest.fn()} {...extra()} />
+    )
+    const grid = container.querySelector(".grid") as HTMLElement
+    expect(grid.className).toContain("@lg:grid-cols-2")
+    expect(grid.className).not.toMatch(/(^|\s)(sm|lg):grid-cols/)
+    expect(grid.parentElement).toHaveClass("@container")
   })
 })

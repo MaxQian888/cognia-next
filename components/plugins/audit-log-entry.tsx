@@ -22,6 +22,13 @@ export interface AuditLogEntryProps {
    * already names the plugin.
    */
   showPlugin?: boolean
+  /**
+   * The plugin's display name in the UI language, when the caller knows it.
+   * Shown instead of the id (which stays reachable as the hover title), so
+   * the Governance log names plugins the way the Library does. Absent for a
+   * plugin that is no longer installed: the id is then the honest answer.
+   */
+  pluginName?: string
 }
 
 // The audit ring is session-scoped, so the row shows the local time of day to
@@ -35,7 +42,7 @@ function badgeVariantForAction(action: PermissionAuditEntry["action"]) {
   return "outline" as const
 }
 
-export function AuditLogEntry({ entry, showPlugin = false }: AuditLogEntryProps) {
+export function AuditLogEntry({ entry, showPlugin = false, pluginName }: AuditLogEntryProps) {
   const format = useFormatter()
   const at = new Date(entry.timestamp)
   const hasTime = !Number.isNaN(at.getTime())
@@ -45,7 +52,16 @@ export function AuditLogEntry({ entry, showPlugin = false }: AuditLogEntryProps)
         {entry.action}
       </Badge>
       {showPlugin ? (
-        <code className="font-mono shrink-0 text-muted-foreground">{entry.pluginId}</code>
+        pluginName ? (
+          <span
+            className="max-w-[40%] shrink-0 truncate text-muted-foreground"
+            title={entry.pluginId}
+          >
+            {pluginName}
+          </span>
+        ) : (
+          <code className="font-mono shrink-0 text-muted-foreground">{entry.pluginId}</code>
+        )
       ) : null}
       <code className="font-mono flex-1 truncate">{entry.permission}</code>
       {hasTime ? (

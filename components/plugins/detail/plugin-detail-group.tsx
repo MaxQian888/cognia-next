@@ -11,6 +11,7 @@
 
 import type { ReactNode } from "react"
 
+import { ExternalLink } from "@/components/shared/external-link"
 import { cn } from "@/lib/utils"
 
 export interface PluginDetailGroupProps {
@@ -48,7 +49,14 @@ export function PluginDetailGroup({
   )
 }
 
-/** Dense label/value list. One row per fact, no box around it. */
+/**
+ * Dense label/value list. One row per fact, no box around it.
+ *
+ * Two aligned columns: labels sized to the longest label, values left-aligned
+ * right beside them. The values used to be pushed to the far right edge
+ * (`justify-between`), so on a wide pane "Author" and its value sat 600px
+ * apart and the eye had to cross the whole pane to pair them.
+ */
 export function PluginMetaList({
   children,
   className,
@@ -57,7 +65,10 @@ export function PluginMetaList({
   className?: string
 }) {
   return (
-    <dl className={cn("grid grid-cols-1 gap-y-1", className)} data-slot="plugin-meta-list">
+    <dl
+      className={cn("grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1", className)}
+      data-slot="plugin-meta-list"
+    >
       {children}
     </dl>
   )
@@ -66,21 +77,34 @@ export function PluginMetaList({
 export interface PluginMetaRowProps {
   label: string
   value: string
-  /** Ids, versions, URLs and timestamps read better in the mono face. */
+  /** Ids, versions, URLs and paths read better in the mono face. */
   mono?: boolean
+  /** Renders the value as an external link (homepage, repository). */
+  href?: string
 }
 
-export function PluginMetaRow({ label, value, mono }: PluginMetaRowProps) {
+export function PluginMetaRow({ label, value, mono, href }: PluginMetaRowProps) {
   return (
-    <div className="flex items-baseline justify-between gap-3 text-xs">
-      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+    // `contents`: the row is a grouping for the reader of the source, the two
+    // cells belong to the list's grid so every label lines up.
+    <div className="contents text-xs">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
         className={cn(
-          "min-w-0 flex-1 text-right break-all text-foreground",
-          mono && "font-mono text-[11px]"
+          "min-w-0 text-xs text-foreground",
+          // Ids, URLs and paths have no spaces to break at.
+          mono ? "font-mono text-[11px] break-all" : "break-words"
         )}
       >
-        {value}
+        {href ? (
+          // Opens in the OS browser on Tauri and the in-app sheet on
+          // Capacitor; a bare `target="_blank"` does neither.
+          <ExternalLink href={href} className="underline-offset-2 hover:underline">
+            {value}
+          </ExternalLink>
+        ) : (
+          value
+        )}
       </dd>
     </div>
   )
@@ -92,6 +116,9 @@ export function PluginMetaRow({ label, value, mono }: PluginMetaRowProps) {
  * Distinct from a disabled control or an empty JSON dump: a plugin that
  * declares no settings must say so, because rendering `{}` in an uneditable
  * code block reads as a broken editor rather than as an absence.
+ *
+ * Plain muted text, not a dashed box: an absence drawn as a container reads
+ * as a drop zone or a slot waiting to be filled.
  */
 export function PluginDetailNone({
   message,
@@ -103,11 +130,7 @@ export function PluginDetailNone({
   testId?: string
 }) {
   return (
-    <div
-      className="rounded-control border border-dashed px-3 py-4 text-center"
-      data-testid={testId}
-      data-slot="plugin-detail-none"
-    >
+    <div className="px-3 py-4 text-center" data-testid={testId} data-slot="plugin-detail-none">
       <p className="text-xs text-muted-foreground">{message}</p>
       {hint ? <p className="mt-1 text-[11px] text-muted-foreground/80">{hint}</p> : null}
     </div>

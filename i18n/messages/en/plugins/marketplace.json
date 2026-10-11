@@ -9,8 +9,10 @@
     "conflict": "Install cancelled at the conflict-review step.",
     "permission": "Install cancelled at the permission-review step."
   },
+  "installEntryMissing": "This plugin is no longer listed. Refresh the marketplace and try again.",
   "installFailed": "Install failed: {message}",
   "installSucceeded": "{name} installed.",
+  "installerLoading": "The installer is still loading. Try again in a moment.",
   "loadMore": "Load more ({shown}/{total})",
   "loading": "Loading marketplace…",
   "manageSources": "GitHub sources",

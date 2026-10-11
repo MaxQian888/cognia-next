@@ -113,7 +113,10 @@ export function AgentPackagesPane() {
         scope: pending.scope,
       })
       if (outcome.ok) toast.success(t("install.successToast", { name }))
-      else toast.error(t("install.failureToast", { name, message: outcome.error ?? "" }))
+      // A failure with no message used to read "Could not install x: ".
+      else if (outcome.error?.trim())
+        toast.error(t("install.failureToast", { name, message: outcome.error }))
+      else toast.error(t("install.failureToastNoReason", { name }))
     } finally {
       setBusySpec(null)
       closePending()
@@ -127,7 +130,9 @@ export function AgentPackagesPane() {
       try {
         const outcome = await pi.mutate({ kind: "remove", spec, scope })
         if (outcome.ok) toast.success(t("install.removeSuccessToast", { name }))
-        else toast.error(t("install.removeFailureToast", { name, message: outcome.error ?? "" }))
+        else if (outcome.error?.trim())
+          toast.error(t("install.removeFailureToast", { name, message: outcome.error }))
+        else toast.error(t("install.removeFailureToastNoReason", { name }))
       } finally {
         setBusySpec(null)
       }

@@ -24,13 +24,23 @@
 // the reason) and Cancel really cancels: it resets the form to the saved
 // values and is only enabled once something has changed. Before, Save failed
 // silently and Cancel was wired to a no-op.
+//
+// Nesting is drawn with a left rule and a small muted heading, never a boxed
+// panel: object groups, array items and oneOf blocks used to be bordered,
+// tinted boxes that nested three deep inside the detail pane's Configure tab.
+// Array items are split by hairlines and named by a localized index.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { useSecretReveal } from "@/hooks/use-secret-reveal"
 import { useLocalizedPluginText } from "@/hooks/plugins/use-localized-plugin-text"
-import { localizeConfigSchema } from "@/lib/plugin/i18n/config-schema-text"
-import { useLiveQuery } from "dexie-react-hooks"
+import {
+  VARIANT_ALIASES_FIELD,
+  VARIANT_ID_FIELD,
+  localizeConfigSchema,
+  variantSourceId,
+} from "@/lib/plugin/i18n/config-schema-text"
+import { usePluginRow } from "@/hooks/plugins/use-plugin-row"
 import { toast } from "sonner"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
@@ -52,7 +62,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Surface } from "@/components/surface/surface"
-import { getPlugin } from "@/lib/db/plugins"
 import { applyPluginConfig } from "@/lib/plugin/core/apply-plugin-config"
 import { PluginDetailGroup, PluginDetailNone } from "./plugin-detail-group"
 import type { PluginRow } from "@/lib/db/plugin-types"
@@ -79,7 +88,28 @@ interface FieldValidator {
 }
 
 interface OneOfVariant {
-  label: string
+  /**
+   * The identity persisted as `__variant`. It is the variant's SOURCE text
+   * (`title`, else `label`, else `titleKey`; recorded by `localizeConfigSchema`
+   * as `x-cognia-variantId`), or `variant_<n>` when it has none, and never
+   * changes with the UI language. It used to be the title as rendered, which
+   * for a `titleKey` variant was the user's-language title, so a choice saved
+   * in one language matched nothing in another. The `variant_<n>` fallback is
+   * an id, never a label: the user sees `title` or the localized
+   * `variantFallback` instead.
+   */
+  key: string
+  /**
+   * Other values that name this variant: its title in every locale the
+   * manifest ships, plus the title as rendered. A `__variant` saved before the
+   * identity was made stable holds one of these; it resolves, and the form
+   * rewrites it to `key` on load (`normalizeVariantChoice`).
+   */
+  aliases: readonly string[]
+  /** The plugin-authored name, when the variant has one. */
+  title?: string
+  /** 1-based position, for the localized fallback name. */
+  index: number
   fields: Record<string, SchemaField>
 }
 
@@ -170,8 +200,27 @@ function parseOneOfVariants(variantsRaw: unknown): OneOfVariant[] | undefined {
     const obj = v as Record<string, unknown>
     if (obj.type !== "object") continue
     const titleRaw = obj.title ?? obj.label
-    const label = typeof titleRaw === "string" ? titleRaw : `variant_${i + 1}`
-    variants.push({ label, fields: parseObjectProperties(obj) })
+    const title = typeof titleRaw === "string" ? titleRaw : undefined
+    const recordedId = obj[VARIANT_ID_FIELD]
+    const key =
+      typeof recordedId === "string" && recordedId.length > 0
+        ? recordedId
+        : (variantSourceId(obj) ?? `variant_${i + 1}`)
+    const recordedAliases = Array.isArray(obj[VARIANT_ALIASES_FIELD])
+      ? (obj[VARIANT_ALIASES_FIELD] as unknown[]).filter(
+          (alias): alias is string => typeof alias === "string"
+        )
+      : []
+    const aliases = [...new Set([...recordedAliases, ...(title ? [title] : [])])].filter(
+      (alias) => alias !== key
+    )
+    variants.push({
+      key,
+      aliases,
+      title,
+      index: i + 1,
+      fields: parseObjectProperties(obj),
+    })
   }
   return variants.length > 0 ? variants : undefined
 }
@@ -458,15 +507,61 @@ export function PluginConfigFormContent({
   onClose: () => void
 }) {
   const t = useTranslations("plugins.configForm")
-  const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
+  // `usePluginRow` tells "the live query has not answered yet" apart from
+  // "there is no such row"; a bare `useLiveQuery` reads `undefined` for both,
+  // which left an uninstalled plugin's form on "Loading…" forever.
+  const rowState = usePluginRow(pluginId)
 
-  if (!plugin) {
-    return <p className="text-sm text-muted-foreground p-4">{t("loading")}</p>
+  if (rowState.state === "loading") {
+    return (
+      <p
+        className="text-sm text-muted-foreground"
+        role="status"
+        data-testid="plugin-config-loading"
+      >
+        {t("loading")}
+      </p>
+    )
+  }
+
+  if (rowState.state === "not-found") {
+    return <PluginDetailNone message={t("notFound")} testId="plugin-config-not-found" />
   }
 
   return (
-    <PluginConfigFormBody key={pluginId} pluginId={pluginId} plugin={plugin} onClose={onClose} />
+    <PluginConfigFormBody
+      key={pluginId}
+      pluginId={pluginId}
+      plugin={rowState.row}
+      onClose={onClose}
+    />
   )
+}
+
+/**
+ * The variant a stored `__variant` names: by its stable key, or by one of its
+ * aliases (a choice saved before the key was made locale-independent).
+ */
+function findVariant(variants: readonly OneOfVariant[], stored: unknown): OneOfVariant | undefined {
+  if (typeof stored !== "string") return undefined
+  return (
+    variants.find((variant) => variant.key === stored) ??
+    variants.find((variant) => variant.aliases.includes(stored))
+  )
+}
+
+/**
+ * Rewrite a legacy `__variant` (a localized title) to the variant's stable key.
+ * Done when the form seeds, so the baseline already holds the stable key: the
+ * migration is not a pending edit, and the next save writes it.
+ */
+export function normalizeVariantChoice(field: SchemaField, value: unknown): unknown {
+  if (field.type !== "oneOf" || !field.variants) return value
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value
+  const record = value as Record<string, unknown>
+  const variant = findVariant(field.variants, record.__variant)
+  if (!variant || variant.key === record.__variant) return value
+  return { ...record, __variant: variant.key }
 }
 
 function seedValues(
@@ -480,6 +575,8 @@ function seedValues(
       // doesn't wipe out unrelated user values.
       if (field.type === "object" && field.children) {
         seed[key] = seedValues(field.children, (persisted[key] as Record<string, unknown>) ?? {})
+      } else if (field.type === "oneOf") {
+        seed[key] = normalizeVariantChoice(field, persisted[key])
       } else {
         seed[key] = persisted[key]
       }
@@ -608,6 +705,7 @@ function SchemaConfigBody({
       <FormFooter>
         <Button
           variant="outline"
+          className="pointer-coarse:h-10"
           onClick={reset}
           disabled={saving || !dirty}
           data-testid="plugin-config-cancel"
@@ -615,6 +713,7 @@ function SchemaConfigBody({
           {t("cancel")}
         </Button>
         <Button
+          className="pointer-coarse:h-10"
           onClick={handleSave}
           disabled={saving || hasErrors}
           data-testid="plugin-config-save"
@@ -703,7 +802,9 @@ function CustomConfigBody({
     return (
       <>
         <FormHeader description={t("description")} />
-        <p className="text-sm text-muted-foreground p-4">{t("loadingComponent")}</p>
+        <p className="text-sm text-muted-foreground" role="status">
+          {t("loadingComponent")}
+        </p>
       </>
     )
   }
@@ -739,8 +840,21 @@ function FormHeader({ description }: HeaderProps) {
   )
 }
 
+/**
+ * Save / Cancel. Sticky to the bottom of the nearest scroller: inline in the
+ * detail pane that is the pane body, so the actions stay reachable at the end
+ * of a long form. With no scrolling ancestor `sticky` behaves as static, so
+ * the bar simply sits at the end of the form.
+ */
 function FormFooter({ children }: { children: React.ReactNode }) {
-  return <div className="flex items-center justify-end gap-2 pt-2 border-t">{children}</div>
+  return (
+    <div
+      className="sticky bottom-0 z-10 flex items-center justify-end gap-2 border-t bg-background/95 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      data-testid="plugin-config-actions"
+    >
+      {children}
+    </div>
+  )
 }
 
 function FieldRow({
@@ -774,6 +888,30 @@ function FieldRow({
     "aria-invalid": error ? true : undefined,
     "aria-describedby": [errorId, descriptionId].filter(Boolean).join(" ") || undefined,
   }
+  if (GROUP_TYPES.has(field.type)) {
+    // A group has no single control for a `<label>` to point at, so it is a
+    // fieldset named by its legend. Its children sit behind a left rule
+    // (see `ObjectGroup` / `ObjectArray` / `OneOfGroup`) rather than in a box,
+    // so three levels of nesting cost three small indents, not three frames.
+    return (
+      <fieldset className="min-w-0" aria-describedby={descriptionId} data-field-group={field.type}>
+        <legend className="mb-1.5 text-xs font-semibold text-muted-foreground">{title}</legend>
+        <div className="space-y-1.5">
+          {field.description && (
+            <p id={descriptionId} className="text-xs text-muted-foreground">
+              {field.description}
+            </p>
+          )}
+          {deprecation && (
+            <p className="text-[10px] text-amber-600 dark:text-amber-400">
+              {t("deprecated")}: {deprecation}
+            </p>
+          )}
+          {renderInput({ field, fieldPath, id, value, errors, onChange, t, a11y, idPrefix })}
+        </div>
+      </fieldset>
+    )
+  }
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className="text-xs font-medium">
@@ -799,6 +937,9 @@ function FieldRow({
   )
 }
 
+/** Field types rendered as a fieldset of child fields rather than one control. */
+const GROUP_TYPES: ReadonlySet<FieldType> = new Set<FieldType>(["object", "objectArray", "oneOf"])
+
 interface FieldA11y {
   "aria-invalid"?: boolean
   "aria-describedby"?: string
@@ -811,7 +952,7 @@ interface RenderArgs {
   value: unknown
   errors: Record<string, string>
   onChange: (v: unknown) => void
-  t: (key: string) => string
+  t: ConfigFormTranslate
   a11y: FieldA11y
   idPrefix: string
 }
@@ -865,7 +1006,7 @@ function renderInput(args: RenderArgs) {
     case "enum":
       return (
         <Select value={typeof value === "string" ? value : ""} onValueChange={(v) => onChange(v)}>
-          <SelectTrigger id={id} {...a11y}>
+          <SelectTrigger id={id} className="pointer-coarse:h-10" {...a11y}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -929,6 +1070,7 @@ function renderInput(args: RenderArgs) {
     case "objectArray":
       return (
         <ObjectArray
+          id={id}
           field={field}
           fieldPath={fieldPath}
           value={Array.isArray(value) ? (value as Record<string, unknown>[]) : []}
@@ -941,6 +1083,7 @@ function renderInput(args: RenderArgs) {
     case "oneOf":
       return (
         <OneOfGroup
+          id={id}
           field={field}
           fieldPath={fieldPath}
           value={(value as Record<string, unknown>) ?? {}}
@@ -972,8 +1115,8 @@ function ObjectGroup({
 }) {
   if (!field.children) return null
   return (
-    <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-3">
-      {Object.entries(field.children).map(([childKey, childField]) => (
+    <div className="space-y-3 border-l pl-3" data-slot="config-object-group">
+      {orderedFieldEntries(field.children).map(([childKey, childField]) => (
         <FieldRow
           key={childKey}
           fieldKey={childKey}
@@ -990,6 +1133,7 @@ function ObjectGroup({
 }
 
 function ObjectArray({
+  id,
   field,
   fieldPath,
   value,
@@ -998,66 +1142,80 @@ function ObjectArray({
   t,
   idPrefix,
 }: {
+  id: string
   field: SchemaField
   fieldPath: string
   value: Record<string, unknown>[]
   errors: Record<string, string>
   onChange: (v: unknown) => void
-  t: (key: string) => string
+  t: ConfigFormTranslate
   idPrefix: string
 }) {
   if (!field.children) return null
-  const emptyRow = (): Record<string, unknown> =>
-    seedValues(field.children!, {}) as Record<string, unknown>
+  const children = field.children
+  const emptyRow = (): Record<string, unknown> => seedValues(children, {})
   return (
     <div className="space-y-2">
-      {value.length === 0 && (
+      {value.length === 0 ? (
         <p className="text-[11px] text-muted-foreground italic">{t("emptyArray")}</p>
+      ) : (
+        // Items share one left rule and are split by hairlines; each carries
+        // a localized index so "Remove" says which item it removes.
+        <ol className="divide-y border-l pl-3" data-slot="config-object-array">
+          {value.map((row, idx) => {
+            const itemLabelId = `${id}-item-${idx}`
+            return (
+              <li key={idx} className="py-3 first:pt-0 last:pb-0">
+                <div role="group" aria-labelledby={itemLabelId} className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      id={itemLabelId}
+                      className="text-[11px] font-medium text-muted-foreground"
+                    >
+                      {t("arrayItem", { index: idx + 1 })}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="pointer-coarse:h-10"
+                      aria-label={t("arrayRemoveAria", { index: idx + 1 })}
+                      onClick={() => {
+                        const next = [...value]
+                        next.splice(idx, 1)
+                        onChange(next)
+                      }}
+                    >
+                      {t("arrayRemove")}
+                    </Button>
+                  </div>
+                  {orderedFieldEntries(children).map(([childKey, childField]) => (
+                    <FieldRow
+                      key={childKey}
+                      fieldKey={childKey}
+                      fieldPath={`${fieldPath}[${idx}].${childKey}`}
+                      field={childField}
+                      value={row[childKey] ?? childField.default ?? ""}
+                      errors={errors}
+                      idPrefix={idPrefix}
+                      onChange={(v) => {
+                        const next = [...value]
+                        next[idx] = { ...row, [childKey]: v }
+                        onChange(next)
+                      }}
+                    />
+                  ))}
+                </div>
+              </li>
+            )
+          })}
+        </ol>
       )}
-      {value.map((row, idx) => (
-        <div
-          key={idx}
-          className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-3 relative"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              #{idx + 1}
-            </span>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                const next = [...value]
-                next.splice(idx, 1)
-                onChange(next)
-              }}
-            >
-              {t("arrayRemove")}
-            </Button>
-          </div>
-          {Object.entries(field.children!).map(([childKey, childField]) => (
-            <FieldRow
-              key={childKey}
-              fieldKey={childKey}
-              fieldPath={`${fieldPath}[${idx}].${childKey}`}
-              field={childField}
-              value={row[childKey] ?? childField.default ?? ""}
-              errors={errors}
-              idPrefix={idPrefix}
-              onChange={(v) => {
-                const next = [...value]
-                next[idx] = { ...row, [childKey]: v }
-                onChange(next)
-              }}
-            />
-          ))}
-        </div>
-      ))}
       <Button
         type="button"
         size="sm"
         variant="outline"
+        className="pointer-coarse:h-10"
         onClick={() => onChange([...value, emptyRow()])}
       >
         {t("arrayAdd")}
@@ -1067,6 +1225,7 @@ function ObjectArray({
 }
 
 function OneOfGroup({
+  id,
   field,
   fieldPath,
   value,
@@ -1075,49 +1234,49 @@ function OneOfGroup({
   t,
   idPrefix,
 }: {
+  id: string
   field: SchemaField
   fieldPath: string
   value: Record<string, unknown>
   errors: Record<string, string>
   onChange: (v: unknown) => void
-  t: (key: string) => string
+  t: ConfigFormTranslate
   idPrefix: string
 }) {
   const variants = field.variants ?? []
-  const variantKey =
-    typeof value.__variant === "string" && variants.some((v) => v.label === value.__variant)
-      ? (value.__variant as string)
-      : variants[0]?.label
+  const variantKey = findVariant(variants, value.__variant)?.key ?? variants[0]?.key
   if (!variantKey) return null
-  const variant = variants.find((v) => v.label === variantKey) ?? variants[0]
+  const variant = variants.find((v) => v.key === variantKey) ?? variants[0]
+  const selectId = `${id}-variant`
+  const variantName = (v: OneOfVariant) => v.title ?? t("variantFallback", { index: v.index })
   return (
-    <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-3">
+    <div className="space-y-3 border-l pl-3" data-slot="config-one-of">
       <div className="space-y-1">
-        <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        <Label htmlFor={selectId} className="text-[11px] font-medium text-muted-foreground">
           {t("oneOfVariant")}
         </Label>
         <Select
           value={variantKey}
           onValueChange={(nextVariant) =>
             onChange({
-              ...seedValues(variants.find((v) => v.label === nextVariant)?.fields ?? {}, {}),
+              ...seedValues(variants.find((v) => v.key === nextVariant)?.fields ?? {}, {}),
               __variant: nextVariant,
             })
           }
         >
-          <SelectTrigger>
+          <SelectTrigger id={selectId} className="pointer-coarse:h-10">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {variants.map((v) => (
-              <SelectItem key={v.label} value={v.label}>
-                {v.label}
+              <SelectItem key={v.key} value={v.key}>
+                {variantName(v)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
-      {Object.entries(variant.fields).map(([childKey, childField]) => (
+      {orderedFieldEntries(variant.fields).map(([childKey, childField]) => (
         <FieldRow
           key={childKey}
           fieldKey={childKey}
@@ -1153,7 +1312,7 @@ function SecretInput({
   id: string
   value: string
   onChange: (next: string) => void
-  t: (key: string) => string
+  t: ConfigFormTranslate
   a11y: FieldA11y
 }) {
   const [revealed, setRevealed] = useState(false)

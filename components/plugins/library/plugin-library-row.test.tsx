@@ -8,6 +8,8 @@ import type { PluginRow } from "@/lib/db/plugin-types"
 jest.mock("next-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
+    // Chips print the capability's name and count through one template.
+    if (key === "capabilityChipLabel" && vars) return `${vars.name} · ${vars.count}`
     if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
     return key
@@ -219,9 +221,9 @@ describe("PluginLibraryRow", () => {
         {...h}
       />
     )
-    // Capability label is "tools · 2" / "modes · 1" once contribution count is known.
-    expect(screen.getByText("tools · 2")).toBeInTheDocument()
-    expect(screen.getByText("modes · 1")).toBeInTheDocument()
+    // Capability NAME and count once the contribution count is known.
+    expect(screen.getByText("capability.tools · 2")).toBeInTheDocument()
+    expect(screen.getByText("capability.modes · 1")).toBeInTheDocument()
   })
 
   it("falls back to a plain capability label when no manifest entries match", () => {
@@ -234,7 +236,7 @@ describe("PluginLibraryRow", () => {
         {...h}
       />
     )
-    expect(screen.getByText("hooks")).toBeInTheDocument()
+    expect(screen.getByText("capability.hooks")).toBeInTheDocument()
   })
 
   // Both of these were being produced and shown nowhere in the DEFAULT view:
@@ -391,5 +393,129 @@ describe("PluginLibraryRow", () => {
     render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...handlers()} />)
     const label = screen.getByRole("checkbox").closest("label")
     expect(label).toHaveClass("pointer-coarse:p-2.5")
+  })
+
+  describe("selection, focus and long press", () => {
+    it("marks the open row for assistive tech, not only with a colour bar", () => {
+      const h = handlers()
+      const { container, rerender } = render(
+        <PluginLibraryRow plugin={baseRow} selected={false} active {...h} />
+      )
+      expect(container.querySelector('[role="listitem"]')).toHaveAttribute("aria-current", "true")
+      rerender(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />)
+      expect(container.querySelector('[role="listitem"]')).not.toHaveAttribute("aria-current")
+    })
+
+    it("tags the open affordance for the list's arrow-key navigation", () => {
+      const h = handlers()
+      render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />)
+      expect(screen.getByTestId("plugin-library-row-p1")).toHaveAttribute("data-row-open")
+    })
+
+    it("drops the checkbox when the list is not selectable", () => {
+      const h = handlers()
+      render(
+        <PluginLibraryRow
+          plugin={baseRow}
+          selected={false}
+          selectable={false}
+          active={false}
+          {...h}
+        />
+      )
+      expect(screen.queryByRole("checkbox")).toBeNull()
+    })
+
+    it("enters selection on a touch long press and swallows the click that follows", () => {
+      jest.useFakeTimers()
+      try {
+        const h = handlers()
+        const onLongPress = jest.fn()
+        const { container } = render(
+          <PluginLibraryRow
+            plugin={baseRow}
+            selected={false}
+            active={false}
+            onLongPress={onLongPress}
+            {...h}
+          />
+        )
+        const row = container.querySelector('[role="listitem"]') as HTMLElement
+        fireEvent.pointerDown(row, { pointerType: "touch", clientX: 10, clientY: 10 })
+        jest.advanceTimersByTime(600)
+        expect(onLongPress).toHaveBeenCalledWith("p1")
+        fireEvent.pointerUp(row, { pointerType: "touch" })
+        fireEvent.click(screen.getByTestId("plugin-library-row-p1"))
+        expect(h.onOpen).not.toHaveBeenCalled()
+        // The next ordinary tap opens again.
+        fireEvent.click(screen.getByTestId("plugin-library-row-p1"))
+        expect(h.onOpen).toHaveBeenCalledWith("p1")
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("does not treat a scroll as a long press, nor a mouse at all", () => {
+      jest.useFakeTimers()
+      try {
+        const h = handlers()
+        const onLongPress = jest.fn()
+        const { container } = render(
+          <PluginLibraryRow
+            plugin={baseRow}
+            selected={false}
+            active={false}
+            onLongPress={onLongPress}
+            {...h}
+          />
+        )
+        const row = container.querySelector('[role="listitem"]') as HTMLElement
+        fireEvent.pointerDown(row, { pointerType: "touch", clientX: 10, clientY: 10 })
+        fireEvent.pointerMove(row, { pointerType: "touch", clientX: 10, clientY: 60 })
+        jest.advanceTimersByTime(600)
+        fireEvent.pointerDown(row, { pointerType: "mouse", clientX: 10, clientY: 10 })
+        jest.advanceTimersByTime(600)
+        expect(onLongPress).not.toHaveBeenCalled()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+  })
+
+  describe("signal, not noise", () => {
+    it("hides the signature icon for the ordinary unverified state", () => {
+      const h = handlers()
+      const { rerender } = render(
+        <PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />
+      )
+      expect(screen.queryByTestId("plugin-signature-hint")).toBeNull()
+      // A verified (or failed) signature is information, so it stays.
+      rerender(
+        <PluginLibraryRow
+          plugin={{ ...baseRow, manifest: { ...baseRow.manifest, signature: { verified: true } } }}
+          selected={false}
+          active={false}
+          {...h}
+        />
+      )
+      expect(screen.getByTestId("plugin-signature-hint")).toBeInTheDocument()
+    })
+
+    it("treats a lifecycle failure as errored even when status was never updated", () => {
+      const h = handlers()
+      const { container } = render(
+        <PluginLibraryRow
+          plugin={{
+            ...baseRow,
+            status: "discovered",
+            lifecycle: { intent: "enabled", actual: "error", revision: 1, updatedAt: 1 },
+          }}
+          selected={false}
+          active={false}
+          {...h}
+        />
+      )
+      expect(container.querySelector('[data-errored="true"]')).not.toBeNull()
+    })
   })
 })

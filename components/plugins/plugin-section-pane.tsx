@@ -9,7 +9,6 @@
 // grows a controls row, arrives on both shells at once instead of on whichever
 // one someone remembered.
 
-import { useDeveloperMode } from "@/lib/plugin/devtools/developer-mode"
 import type { PluginNavSection } from "@/stores/plugins"
 
 import { AgentPackagesPane } from "./agent-packages/agent-packages-pane"
@@ -22,15 +21,9 @@ import { PluginLibraryHeader } from "./library/plugin-library-header"
 import { PluginLibraryPane } from "./library/plugin-library-pane"
 import type { PluginSectionToolbarProps } from "./plugin-section-toolbar"
 
-/**
- * Devtools is the one section whose entry can vanish under the user (the flag
- * is a localStorage toggle in Settings), so every consumer has to answer
- * "which section am I actually showing" the same way.
- */
-export function useVisiblePluginSection(section: PluginNavSection): PluginNavSection {
-  const developerMode = useDeveloperMode()
-  return section === "devtools" && !developerMode ? "library" : section
-}
+// Lives in its own leaf module so the nav rail can use it without importing
+// every section pane (and, through them, half the app).
+export { useVisiblePluginSection } from "./plugin-visible-section"
 
 export function PluginSectionPane({ section }: { section: PluginNavSection }) {
   switch (section) {

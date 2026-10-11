@@ -19,6 +19,19 @@ describe("PluginStatusPill", () => {
     expect(screen.getByText("error")).toBeInTheDocument()
   })
 
+  // Runtime failures land on the lifecycle; the row's `status` stays at its
+  // discovery value, so a status-only check showed "Enabled" for a crash.
+  it("renders the error variant for a lifecycle error even when status says otherwise", () => {
+    render(
+      <PluginStatusPill
+        status="discovered"
+        enabled={true}
+        lifecycle={{ intent: "enabled", actual: "error" }}
+      />
+    )
+    expect(screen.getByText("error")).toBeInTheDocument()
+  })
+
   it("renders the loading variant when loading=true", () => {
     render(<PluginStatusPill status="enabled" enabled={true} loading />)
     expect(screen.getByText("loading")).toBeInTheDocument()

@@ -68,6 +68,21 @@ describe("AuditLogEntry", () => {
     expect(screen.getByText("alpha")).toBeInTheDocument()
   })
 
+  it("shows the display name instead of the id when one is given, keeping the id as title", () => {
+    render(
+      <ul>
+        <AuditLogEntry
+          entry={makeEntry({ pluginId: "work-mode" })}
+          showPlugin
+          pluginName="工作模式"
+        />
+      </ul>
+    )
+    const name = screen.getByText("工作模式")
+    expect(name).toHaveAttribute("title", "work-mode")
+    expect(screen.queryByText("work-mode")).not.toBeInTheDocument()
+  })
+
   it.each([
     ["grant", "secondary"],
     ["request", "outline"],

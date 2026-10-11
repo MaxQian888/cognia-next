@@ -90,7 +90,11 @@
     "exited": "Host process exited",
     "openInPanel": "Open this plugin's output in the log panel",
     "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
-    "streamEnd": "— stream ended —"
+    "streamEnd": "— stream ended —",
+    "openInPanelShort": "Open logs",
+    "missing": {
+      "wasm-no-channel": "WASM plugins have no output channel of their own."
+    }
   },
   "metaAuthor": "Author",
   "metaCreatedAt": "Installed at",
@@ -158,7 +162,8 @@
       "uvInstall": "Install uv",
       "uvInstalling": "Installing uv…",
       "uvMissing": "uv is not on PATH — pip will be used.",
-      "uvPresent": "uv {version} on PATH"
+      "uvPresent": "uv {version} on PATH",
+      "versionUnknown": "unknown"
     },
     "idleShutdownMin": "Idle shutdown (minutes, 0 = never)",
     "interpreterPath": "Interpreter path override",
@@ -166,7 +171,9 @@
     "maxConcurrentCalls": "Max concurrent calls",
     "maxOutboundHostCalls": "Max outbound host calls",
     "maxOutboundHostCallsHint": "Concurrent plugin → host RPC calls. Excess calls queue rather than fail.",
+    "reset": "Reset",
     "save": "Save",
+    "saveError": "Could not save the host settings: {message}",
     "saved": "Saved",
     "title": "Python host settings",
     "useVenv": "Use plugin venv when present"
@@ -230,10 +237,38 @@
     "lastSuccessfulAt": "Last success {date}",
     "rollbackTo": "Rollback to v{version}",
     "title": "Verification",
-    "verifiedAt": "Verified {date}"
+    "verifiedAt": "Verified {date}",
+    "stage": {
+      "manifest_validation": "Manifest check",
+      "compatibility": "Compatibility",
+      "installation": "Installation",
+      "activation": "Activation",
+      "runtime_execution": "Runtime",
+      "reload": "Reload",
+      "cleanup": "Cleanup"
+    }
   },
   "viewInfo": "Details",
   "viewManifest": "Raw JSON",
   "viewToggleAria": "Switch between plugin details and the raw manifest",
-  "workflowTriggers": "Workflow triggers"
+  "workflowTriggers": "Workflow triggers",
+  "aboutTitle": "About",
+  "backToInfo": "Back to details",
+  "closeAria": "Close details for {name}",
+  "disabledLabel": "Not enabled",
+  "enabledLabel": "Enabled",
+  "noReadme": "This plugin ships no README.",
+  "notFoundHint": "It may have been uninstalled. Pick another plugin from the list.",
+  "notFoundAction": "Close",
+  "unknownDate": "Unknown",
+  "update": "Update",
+  "versionLabel": "v{version}",
+  "tabCountAria": "{label}, {count}",
+  "pluginType": {
+    "frontend": "Frontend",
+    "python": "Python",
+    "hybrid": "Frontend + Python",
+    "wasm": "WASM",
+    "vscode-extension": "VS Code extension"
+  }
 }

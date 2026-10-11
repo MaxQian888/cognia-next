@@ -70,10 +70,41 @@ describe("PluginCategorySidebar", () => {
     expect(usePluginsStore.getState().filters.capability).toBe("tools")
   })
 
-  it("zero-count categories are disabled", () => {
+  // A facet that can only filter to an empty list is noise; the rail used to
+  // list ten of them, disabled.
+  it("does not list a curated capability nothing declares", () => {
     render(<PluginCategorySidebar />)
-    const button = screen.getByText("capability.python").closest("button")
-    expect(button).toBeDisabled()
+    expect(screen.queryByText("capability.python")).toBeNull()
+    expect(screen.getByText("capability.tools")).toBeInTheDocument()
+  })
+
+  it("keeps the ACTIVE facet listed even at zero, so it can be seen and cleared", () => {
+    usePluginsStore.setState({ filters: { ...DEFAULT_PLUGIN_FILTERS, capability: "python" } })
+    render(<PluginCategorySidebar />)
+    const button = screen.getByText("capability.python").closest("button")!
+    expect(button).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByText("all"))
+    expect(usePluginsStore.getState().filters.capability).toBe("all")
+  })
+
+  it("names an uncurated capability instead of printing its id", () => {
+    mockRows.push({ ...mockRows[0], id: "c", capabilities: ["agent-team-template"] })
+    try {
+      render(<PluginCategorySidebar />)
+      expect(screen.getByText("capabilityName.agent-team-template")).toBeInTheDocument()
+      expect(
+        screen.getByText("capabilityName.agent-team-template").closest("button")
+      ).toHaveAttribute("title", "agent-team-template")
+    } finally {
+      mockRows.pop()
+    }
+  })
+
+  it("tells its host when a facet was chosen", () => {
+    const onSelect = jest.fn()
+    render(<PluginCategorySidebar onSelect={onSelect} />)
+    fireEvent.click(screen.getByText("capability.tools"))
+    expect(onSelect).toHaveBeenCalled()
   })
 })
 

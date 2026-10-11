@@ -7,6 +7,7 @@ import type { PluginRow } from "@/lib/db/plugin-types"
 import type { PluginPermission } from "@/types/plugin"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "zh-CN",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
@@ -23,7 +24,7 @@ jest.mock("@/stores/plugins", () => ({
   usePluginsStore: (selector: (s: unknown) => unknown) => selector({ openPermissionReview }),
 }))
 
-import { PluginPermissionsTab } from "./plugin-permissions-tab"
+import { buildPermissionMatrix, PluginPermissionsTab } from "./plugin-permissions-tab"
 
 function makeRow(overrides: Partial<PluginRow> = {}): PluginRow {
   return {
@@ -79,7 +80,7 @@ describe("PluginPermissionsTab", () => {
     expect(screen.getByText("emptyAll")).toBeInTheDocument()
   })
 
-  it("renders no-permissions card when plugins exist but none declare permissions", () => {
+  it("renders the no-permissions note when plugins exist but none declare permissions", () => {
     mockUsePlugins.mockReturnValue({
       all: [makeRow({ id: "a", name: "Alpha", manifest: {} })],
       loading: false,
@@ -205,5 +206,74 @@ describe("PluginPermissionsTab", () => {
     const row = screen.getByText("clipboard:read").closest("tr")!
     const alphaChips = row.querySelectorAll("button[aria-label*='Alpha']")
     expect(alphaChips.length).toBe(1)
+  })
+
+  // Governance used to say "Work Mode" where the Library says "工作模式".
+  it("names plugins by their localized manifest name everywhere", () => {
+    mockUsePlugins.mockReturnValue({
+      all: [
+        makeRow({
+          id: "work-mode",
+          name: "Work Mode",
+          manifest: {
+            nameKey: "plugin.name",
+            permissions: ["shell:execute", "clipboard:read"],
+            i18n: { locales: { "zh-CN": { "plugin.name": "工作模式" } } },
+          },
+        }),
+      ],
+      loading: false,
+    })
+    render(<PluginPermissionsTab />)
+    // Bulk strip + sensitive table + standard table.
+    expect(screen.getAllByRole("button", { name: /reviewAria.*工作模式/ })).toHaveLength(3)
+    expect(screen.queryByText("Work Mode")).not.toBeInTheDocument()
+  })
+
+  it("lays out flat sections without cards or a bordered table box", () => {
+    mockUsePlugins.mockReturnValue({
+      all: [makeRow({ id: "a", name: "Alpha", manifest: { permissions: ["shell:execute"] } })],
+      loading: false,
+    })
+    const { container } = render(<PluginPermissionsTab />)
+    expect(container.querySelector("[data-slot='card']")).toBeNull()
+    // The table's own wrapper is the only thing around it — no bordered box.
+    const tableWrapper = container.querySelector("table")!.parentElement!
+    expect(tableWrapper).toHaveAttribute("data-slot", "table-container")
+    expect(tableWrapper.parentElement!.tagName).toBe("SECTION")
+    expect(screen.getByTestId("plugin-permissions-tab")).toHaveClass("@container")
+  })
+
+  it("renders the empty state without a card", () => {
+    mockUsePlugins.mockReturnValue({ all: [], loading: false })
+    const { container } = render(<PluginPermissionsTab />)
+    expect(container.querySelector("[data-slot='card']")).toBeNull()
+  })
+})
+
+describe("buildPermissionMatrix", () => {
+  it("splits sensitive from standard and names holders through the given function", () => {
+    const rows = [
+      makeRow({ id: "a", name: "A", manifest: { permissions: ["shell:execute"] } }),
+      makeRow({ id: "b", name: "B", manifest: { optionalPermissions: ["clipboard:read"] } }),
+    ]
+    const matrix = buildPermissionMatrix(
+      rows,
+      (id) => (id === "a" ? (["clipboard:read"] as PluginPermission[]) : []),
+      new Set(["shell:execute"]),
+      (row) => `name:${row.id}`
+    )
+    expect(matrix.dangerous).toEqual([
+      { permission: "shell:execute", holders: [{ id: "a", name: "name:a" }] },
+    ])
+    expect(matrix.normal).toEqual([
+      {
+        permission: "clipboard:read",
+        holders: [
+          { id: "a", name: "name:a" },
+          { id: "b", name: "name:b" },
+        ],
+      },
+    ])
   })
 })

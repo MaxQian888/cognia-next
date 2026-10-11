@@ -45,6 +45,9 @@ const RESET = {
   permissionReviewTarget: null,
   conflictDialogTarget: null,
   rollbackTarget: null,
+  updateDialog: null,
+  selectionMode: false,
+  detailOverviewView: "info" as const,
 }
 
 describe("usePluginsStore", () => {
@@ -69,6 +72,9 @@ describe("usePluginsStore", () => {
     expect(result.current.permissionReviewTarget).toBeNull()
     expect(result.current.conflictDialogTarget).toBeNull()
     expect(result.current.rollbackTarget).toBeNull()
+    expect(result.current.updateDialog).toBeNull()
+    expect(result.current.selectionMode).toBe(false)
+    expect(result.current.detailOverviewView).toBe("info")
   })
 
   describe("sections and filters", () => {
@@ -211,10 +217,41 @@ describe("usePluginsStore", () => {
       expect(result.current.selection.has("z")).toBe(false)
     })
 
+    it("pruneSelection keeps only ids that are still visible", () => {
+      const { result } = renderHook(() => usePluginsStore())
+      act(() => result.current.selectAll(["a", "b", "c"]))
+      act(() => result.current.pruneSelection(["b", "c", "d"]))
+      expect([...result.current.selection].sort()).toEqual(["b", "c"])
+    })
+
+    it("pruneSelection leaves the state object alone when nothing is dropped", () => {
+      act(() => usePluginsStore.getState().selectAll(["a", "b"]))
+      const before = usePluginsStore.getState()
+      act(() => usePluginsStore.getState().pruneSelection(new Set(["a", "b", "c"])))
+      expect(usePluginsStore.getState()).toBe(before)
+      act(() => usePluginsStore.getState().clearSelection())
+      const empty = usePluginsStore.getState()
+      act(() => usePluginsStore.getState().pruneSelection([]))
+      expect(usePluginsStore.getState()).toBe(empty)
+    })
+
     it("clearSelection empties the set", () => {
       const { result } = renderHook(() => usePluginsStore())
       act(() => result.current.selectAll(["x", "y"]))
       act(() => result.current.clearSelection())
+      expect(result.current.selection.size).toBe(0)
+    })
+
+    it("leaving selection mode clears the selection it held; entering keeps it", () => {
+      const { result } = renderHook(() => usePluginsStore())
+      act(() => result.current.setSelectionMode(true))
+      act(() => result.current.toggleSelection("a"))
+      expect(result.current.selectionMode).toBe(true)
+      expect(result.current.selection.has("a")).toBe(true)
+      act(() => result.current.setSelectionMode(true))
+      expect(result.current.selection.has("a")).toBe(true)
+      act(() => result.current.setSelectionMode(false))
+      expect(result.current.selectionMode).toBe(false)
       expect(result.current.selection.size).toBe(0)
     })
   })
@@ -351,6 +388,32 @@ describe("usePluginsStore", () => {
       expect(result.current.conflictDialogTarget).toEqual(summary)
       act(() => result.current.setConflictDialogTarget(null))
       expect(result.current.conflictDialogTarget).toBeNull()
+    })
+
+    it("keeps the active tab across plugins but resets the overview face", () => {
+      const { result } = renderHook(() => usePluginsStore())
+      act(() => result.current.openDetail("plugin_a"))
+      act(() => result.current.setDetailSubTab("permissions"))
+      act(() => result.current.openDetailManifest())
+      expect(result.current.detailSubTab).toBe("overview")
+      expect(result.current.detailOverviewView).toBe("manifest")
+      // Re-selecting the same plugin keeps the face the user chose.
+      act(() => result.current.openDetail("plugin_a"))
+      expect(result.current.detailOverviewView).toBe("manifest")
+      act(() => result.current.setDetailSubTab("permissions"))
+      act(() => result.current.openDetail("plugin_b"))
+      expect(result.current.detailSubTab).toBe("permissions")
+      expect(result.current.detailOverviewView).toBe("info")
+    })
+
+    it("openUpdateDialog scopes to one plugin or to all", () => {
+      const { result } = renderHook(() => usePluginsStore())
+      act(() => result.current.openUpdateDialog("plugin_a"))
+      expect(result.current.updateDialog).toEqual({ pluginId: "plugin_a" })
+      act(() => result.current.openUpdateDialog())
+      expect(result.current.updateDialog).toEqual({ pluginId: null })
+      act(() => result.current.closeUpdateDialog())
+      expect(result.current.updateDialog).toBeNull()
     })
 
     it("setRollbackTarget toggles the rollback dialog target", () => {

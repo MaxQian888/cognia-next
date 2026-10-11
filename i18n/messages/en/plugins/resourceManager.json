@@ -1,4 +1,16 @@
 {
-  "noLimits": "This plugin has no rate limits configured.",
+  "loadingUsage": "Loading recorded usage…",
+  "note": "Each operation draws from a token bucket: it allows a short burst, then refills at the sustained rate shown. Recorded counts are all-time totals, not usage within the current window.",
+  "rate": {
+    "day": "{count, plural, =1 {{limit, number} per day} other {{limit, number} every # days}}",
+    "hour": "{count, plural, =1 {{limit, number} per hour} other {{limit, number} every # hours}}",
+    "millisecond": "{count, plural, =1 {{limit, number} per millisecond} other {{limit, number} every # milliseconds}}",
+    "minute": "{count, plural, =1 {{limit, number} per minute} other {{limit, number} every # minutes}}",
+    "second": "{count, plural, =1 {{limit, number} per second} other {{limit, number} every # seconds}}",
+    "total": "{limit, number} in total, never refilled"
+  },
+  "rateWithBurst": "{rate} · bursts up to {burst, number}",
+  "recorded": "{count, plural, =0 {No calls recorded} one {# call recorded (all time)} other {# calls recorded (all time)}}",
+  "recordedLast": "{recorded} · last <time>{date}</time>",
   "title": "Resource usage"
 }

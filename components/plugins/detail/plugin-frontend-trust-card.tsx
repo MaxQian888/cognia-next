@@ -14,12 +14,14 @@
 // signature vouches for it (a dropped `.vsix`, or one signed by a key Cognia
 // does not pin): it runs with real file, network and process access, so it
 // starts only once the user trusts it.
+//
+// Rendered as a flat callout (left amber rule, heading, text, switch) at the
+// top of the Permissions tab, never as a bordered card.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { ShieldAlert } from "lucide-react"
 
-import { Card } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { getPluginManager } from "@/lib/plugin/core/manager"
@@ -29,6 +31,7 @@ import type { PluginSource, PluginType } from "@/types/plugin"
 const RENDERER_JS_TYPES: readonly PluginType[] = ["frontend", "hybrid"]
 
 const SWITCH_ID = "plugin-frontend-trust-switch"
+const TITLE_ID = "plugin-frontend-trust-title"
 
 export function PluginFrontendTrustCard({
   pluginId,
@@ -68,31 +71,38 @@ export function PluginFrontendTrustCard({
     setTrusted(next)
   }
 
+  // A flat callout, not a card: the Permissions tab owns the pane, so a boxed
+  // notice would be a frame inside a frame. The amber rule carries the
+  // warning; the switch is the action.
   return (
-    <Card
-      className="border-amber-500/40 bg-amber-500/5 p-3"
+    <section
+      className="@container border-l-2 border-amber-500 py-1 pl-3"
       data-testid="plugin-frontend-trust-card"
+      aria-labelledby={TITLE_ID}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
+      <div className="flex items-start justify-between gap-3 @sm:gap-4">
+        <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-1.5">
-            <ShieldAlert className="size-4 text-amber-500" aria-hidden="true" />
-            <Label htmlFor={SWITCH_ID} className="text-sm font-semibold">
+            <ShieldAlert className="size-4 shrink-0 text-amber-500" aria-hidden="true" />
+            <Label id={TITLE_ID} htmlFor={SWITCH_ID} className="text-sm font-semibold">
               {t(key("title"))}
             </Label>
           </div>
           <p className="text-xs text-muted-foreground">{t(key("description"))}</p>
           {!trusted ? (
-            <p className="text-xs font-medium text-amber-600">{t(key("blockedHint"))}</p>
+            <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+              {t(key("blockedHint"))}
+            </p>
           ) : null}
         </div>
         <Switch
           id={SWITCH_ID}
+          className="mt-0.5 shrink-0"
           checked={trusted}
           onCheckedChange={onToggle}
           aria-label={t(key("switchAria"))}
         />
       </div>
-    </Card>
+    </section>
   )
 }

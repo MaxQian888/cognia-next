@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -43,6 +44,10 @@ let mockDiagnostics: ReadonlyArray<{
 }> = []
 jest.mock("@/hooks/plugins", () => ({
   usePluginDiagnostics: () => mockDiagnostics,
+}))
+
+jest.mock("@/hooks/plugins/use-plugin-rollback-availability", () => ({
+  usePluginRollbackAvailable: () => false,
 }))
 
 import { toast } from "sonner"
@@ -92,7 +97,7 @@ describe("PluginDetailHeader", () => {
   it("renders identity, description, status pill and source badge", () => {
     render(<PluginDetailHeader plugin={makePlugin()} />)
     expect(screen.getByText("Alpha")).toBeInTheDocument()
-    expect(screen.getByText("v1.2.3")).toBeInTheDocument()
+    expect(screen.getByText('versionLabel:{"version":"1.2.3"}')).toBeInTheDocument()
     expect(screen.getByText("An alpha plugin.")).toBeInTheDocument()
     // Asserting the testid, not the text: the intl mock echoes the key, so
     // `t("marketplace")` and the old raw `{plugin.source}` render identically
@@ -135,33 +140,110 @@ describe("PluginDetailHeader", () => {
     expect(setPluginEnabledForHostMock).toHaveBeenCalledWith("alpha", false)
   })
 
-  it("Configure button only renders when the manifest declares a configSchema", () => {
-    const { rerender } = render(<PluginDetailHeader plugin={makePlugin()} />)
-    expect(screen.getByText("configure")).toBeInTheDocument()
-    rerender(<PluginDetailHeader plugin={makePlugin({ manifest: { id: "alpha" } })} />)
+  async function openMenu() {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.click(screen.getByLabelText(/actionsMenuAria/))
+    return user
+  }
+
+  it("labels the switch with its state, not only its colour", () => {
+    const { rerender } = render(<PluginDetailHeader plugin={makePlugin({ enabled: true })} />)
+    expect(screen.getByLabelText("enabledLabel")).toBe(
+      screen.getByTestId("plugin-detail-enable-toggle")
+    )
+    rerender(<PluginDetailHeader plugin={makePlugin({ enabled: false })} />)
+    expect(screen.getByLabelText("disabledLabel")).toBe(
+      screen.getByTestId("plugin-detail-enable-toggle")
+    )
+  })
+
+  it("offers Configure in the actions menu only when there is a config surface", async () => {
+    const withSchema = makePlugin({
+      manifest: {
+        id: "alpha",
+        configSchema: { type: "object", properties: { key: { type: "string" } } },
+      },
+    })
+    const { unmount } = render(<PluginDetailHeader plugin={withSchema} />)
+    const user = await openMenu()
+    await user.click(await screen.findByText("configure"))
+    expect(usePluginsStore.getState().detailSubTab).toBe("configure")
+    unmount()
+
+    render(<PluginDetailHeader plugin={makePlugin({ manifest: { id: "alpha" } })} />)
+    await openMenu()
+    await screen.findByTestId("plugin-detail-view-manifest")
     expect(screen.queryByText("configure")).not.toBeInTheDocument()
   })
 
-  it("Review permissions button only renders when the manifest declares permissions", () => {
+  it("Review permissions opens the review dialog target", async () => {
     render(<PluginDetailHeader plugin={makePlugin()} />)
-    expect(screen.getByText("reviewPermissions")).toBeInTheDocument()
-    fireEvent.click(screen.getByText("reviewPermissions"))
+    const user = await openMenu()
+    await user.click(await screen.findByText("reviewPermissions"))
     expect(usePluginsStore.getState().permissionReviewTarget).toEqual({ pluginId: "alpha" })
   })
 
-  it("clicking Configure routes the detail pane to the Configure sub-tab", () => {
+  it("Uninstall from the menu sets the delete target with the display name", async () => {
     render(<PluginDetailHeader plugin={makePlugin()} />)
-    fireEvent.click(screen.getByText("configure"))
-    expect(usePluginsStore.getState().detailSubTab).toBe("configure")
-  })
-
-  it("clicking Uninstall sets the delete target", () => {
-    render(<PluginDetailHeader plugin={makePlugin()} />)
-    fireEvent.click(screen.getByText("uninstall"))
+    const user = await openMenu()
+    await user.click(await screen.findByTestId("plugin-row-uninstall"))
     expect(usePluginsStore.getState().deleteTarget).toEqual({
       pluginId: "alpha",
       name: "Alpha",
     })
+  })
+
+  it("View raw manifest switches the Overview tab to its manifest face", async () => {
+    usePluginsStore.setState({ detailSubTab: "permissions", detailOverviewView: "info" })
+    render(<PluginDetailHeader plugin={makePlugin()} />)
+    const user = await openMenu()
+    await user.click(await screen.findByTestId("plugin-detail-view-manifest"))
+    expect(usePluginsStore.getState().detailSubTab).toBe("overview")
+    expect(usePluginsStore.getState().detailOverviewView).toBe("manifest")
+  })
+
+  it("links to the log panel for a runtime with a log channel", async () => {
+    render(<PluginDetailHeader plugin={makePlugin({ type: "frontend" })} />)
+    await openMenu()
+    const item = await screen.findByTestId("plugin-detail-open-logs")
+    expect(item.tagName).toBe("A")
+    expect(item.getAttribute("href")).toContain("q=alpha")
+  })
+
+  it("keeps the logs item for wasm, disabled, with the reason", async () => {
+    render(<PluginDetailHeader plugin={makePlugin({ type: "wasm" })} />)
+    await openMenu()
+    const item = await screen.findByTestId("plugin-detail-open-logs")
+    expect(item).toHaveAttribute("data-disabled")
+    expect(item).toHaveTextContent("logs.missing.wasm-no-channel")
+  })
+
+  it("shows Update only when the marketplace has a newer version, scoped to this plugin", () => {
+    const { rerender } = render(<PluginDetailHeader plugin={makePlugin()} />)
+    expect(screen.queryByTestId("plugin-detail-update")).toBeNull()
+    rerender(
+      <PluginDetailHeader
+        plugin={makePlugin({ manifest: { id: "alpha", updateAvailable: true } })}
+      />
+    )
+    fireEvent.click(screen.getByTestId("plugin-detail-update"))
+    expect(usePluginsStore.getState().updateDialog).toEqual({ pluginId: "alpha" })
+  })
+
+  it("keeps the top-right corner clear for a host-drawn close button", () => {
+    const { rerender } = render(<PluginDetailHeader plugin={makePlugin()} />)
+    expect(screen.getByTestId("plugin-detail-header")).not.toHaveClass("pr-11")
+    rerender(<PluginDetailHeader plugin={makePlugin()} reserveCloseCorner />)
+    expect(screen.getByTestId("plugin-detail-header")).toHaveClass("pr-11")
+  })
+
+  it("renders a close button only when the host passes onClose", () => {
+    const onClose = jest.fn()
+    const { rerender } = render(<PluginDetailHeader plugin={makePlugin()} />)
+    expect(screen.queryByTestId("plugin-detail-close")).toBeNull()
+    rerender(<PluginDetailHeader plugin={makePlugin()} onClose={onClose} />)
+    fireEvent.click(screen.getByTestId("plugin-detail-close"))
+    expect(onClose).toHaveBeenCalled()
   })
 
   it("surfaces dirty lifecycle state and retries authoritative cleanup", async () => {
@@ -178,41 +260,44 @@ describe("PluginDetailHeader", () => {
       />
     )
     expect(screen.getByText("lifecycle.dirty")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "lifecycle.retryCleanup" }))
+    fireEvent.click(screen.getByTestId("plugin-detail-retry-cleanup"))
     await waitFor(() => expect(recoverPluginRuntimeMock).toHaveBeenCalledWith("alpha"))
   })
 
-  it("hides the diagnostics preview when none are recorded", () => {
+  it("hides the diagnostics summary when none are recorded", () => {
     mockDiagnostics = []
     render(<PluginDetailHeader plugin={makePlugin()} />)
     expect(screen.queryByTestId("plugin-detail-diagnostics-preview")).not.toBeInTheDocument()
   })
 
-  it("renders the diagnostics preview with the latest 2 entries inline", () => {
+  it("collapses diagnostics to one summary line showing the newest message", () => {
     mockDiagnostics = [
       { code: "x", severity: "error", message: "first failure" },
       { code: "y", severity: "warning", message: "second issue" },
       { code: "z", severity: "warning", message: "third issue" },
     ]
     render(<PluginDetailHeader plugin={makePlugin()} />)
+    const toggle = screen.getByTestId("plugin-detail-diagnostics-toggle")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(toggle.textContent).toContain("third issue")
     const region = screen.getByTestId("plugin-detail-diagnostics-preview")
-    expect(region).toBeInTheDocument()
-    // Latest two are displayed by default (reverse-chronological).
-    expect(region.textContent).toContain("third issue")
-    expect(region.textContent).toContain("second issue")
     expect(region.textContent).not.toContain("first failure")
   })
 
-  it("expanding the diagnostics preview reveals the older entries", () => {
+  it("expanding the diagnostics summary lists every entry, newest first", () => {
     mockDiagnostics = [
-      { code: "x", severity: "error", message: "older entry" },
+      { code: "x", severity: "error", message: "older entry", hint: "try again" },
       { code: "y", severity: "warning", message: "newer 1" },
       { code: "z", severity: "warning", message: "newer 2" },
     ]
     render(<PluginDetailHeader plugin={makePlugin()} />)
-    fireEvent.click(screen.getByText(/showMore/))
-    const region = screen.getByTestId("plugin-detail-diagnostics-preview")
-    expect(region.textContent).toContain("older entry")
+    fireEvent.click(screen.getByTestId("plugin-detail-diagnostics-toggle"))
+    const items = screen.getAllByRole("listitem")
+    expect(items.map((li) => li.textContent)).toEqual([
+      "newer 2",
+      "newer 1",
+      "older entrytry again",
+    ])
   })
 
   describe("enable gate", () => {
@@ -257,21 +342,21 @@ describe("PluginDetailHeader", () => {
   })
 
   describe("uninstall gate", () => {
-    it("explains instead of confirming for a built-in plugin", () => {
+    it("disables Uninstall for a built-in plugin with the reason inline", async () => {
       render(<PluginDetailHeader plugin={makePlugin({ source: "builtin" })} />)
-      const button = screen.getByRole("button", { name: "uninstall" })
-      expect(button).toHaveAttribute("aria-disabled", "true")
-      fireEvent.click(button)
-      expect(usePluginsStore.getState().deleteTarget).toBeNull()
-      expect(toast.message).toHaveBeenCalledWith("uninstallBlocked.builtin")
+      await openMenu()
+      const item = await screen.findByTestId("plugin-row-uninstall")
+      expect(item).toHaveAttribute("data-disabled")
+      expect(item).toHaveTextContent("uninstallBlocked.builtin")
     })
 
-    it("explains instead of confirming on a mirrored client", () => {
+    it("disables Uninstall on a mirrored client with the reason inline", async () => {
       mockMirrored.mockReturnValue(true)
       render(<PluginDetailHeader plugin={makePlugin()} />)
-      fireEvent.click(screen.getByRole("button", { name: "uninstall" }))
-      expect(usePluginsStore.getState().deleteTarget).toBeNull()
-      expect(toast.message).toHaveBeenCalledWith("uninstallBlocked.mirrored")
+      await openMenu()
+      const item = await screen.findByTestId("plugin-row-uninstall")
+      expect(item).toHaveAttribute("data-disabled")
+      expect(item).toHaveTextContent("uninstallBlocked.mirrored")
     })
   })
 
@@ -282,8 +367,15 @@ describe("PluginDetailHeader", () => {
     expect(screen.getByTestId("plugin-detail-header")).toHaveClass("relative")
   })
 
-  it("gives header actions a 36px target on a coarse pointer", () => {
-    render(<PluginDetailHeader plugin={makePlugin()} />)
-    expect(screen.getByRole("button", { name: "uninstall" })).toHaveClass("pointer-coarse:h-9")
+  it("gives header actions a 40px target on a coarse pointer", () => {
+    render(
+      <PluginDetailHeader
+        plugin={makePlugin({ manifest: { id: "alpha", updateAvailable: true } })}
+        onClose={() => undefined}
+      />
+    )
+    expect(screen.getByLabelText(/actionsMenuAria/)).toHaveClass("pointer-coarse:size-10")
+    expect(screen.getByTestId("plugin-detail-update")).toHaveClass("pointer-coarse:h-10")
+    expect(screen.getByTestId("plugin-detail-close")).toHaveClass("pointer-coarse:size-10")
   })
 })

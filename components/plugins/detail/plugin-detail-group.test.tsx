@@ -67,7 +67,37 @@ describe("PluginMetaRow", () => {
   })
 })
 
+describe("PluginMetaList layout", () => {
+  it("aligns values beside their labels instead of at the far edge", () => {
+    render(
+      <PluginMetaList>
+        <PluginMetaRow label="Author" value="cognia" />
+      </PluginMetaList>
+    )
+    const value = screen.getByText("cognia")
+    expect(value.closest("dl")).toHaveClass("grid-cols-[auto_minmax(0,1fr)]")
+    expect(value.className).not.toContain("text-right")
+  })
+
+  it("renders an external link value when given an href", () => {
+    render(
+      <PluginMetaList>
+        <PluginMetaRow label="Homepage" value="example.com" href="https://example.com" mono />
+      </PluginMetaList>
+    )
+    expect(screen.getByRole("link", { name: "example.com" })).toHaveAttribute(
+      "href",
+      "https://example.com"
+    )
+  })
+})
+
 describe("PluginDetailNone", () => {
+  it("draws no container around an absence", () => {
+    render(<PluginDetailNone message="No settings" testId="none" />)
+    expect(screen.getByTestId("none").className).not.toMatch(/border|rounded/)
+  })
+
   it("states the absence and can add a hint", () => {
     render(<PluginDetailNone message="No settings" hint="Nothing to configure" testId="none" />)
     expect(screen.getByTestId("none")).toBeInTheDocument()

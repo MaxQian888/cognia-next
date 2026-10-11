@@ -9,8 +9,10 @@
     "conflict": "已在冲突审查步骤取消安装。",
     "permission": "已在权限审查步骤取消安装。"
   },
+  "installEntryMissing": "该插件已不在列表中，请刷新插件市场后重试。",
   "installFailed": "安装失败：{message}",
   "installSucceeded": "{name} 已安装。",
+  "installerLoading": "安装程序仍在加载，请稍后再试。",
   "loadMore": "加载更多 ({shown}/{total})",
   "loading": "加载市场中…",
   "manageSources": "GitHub 源",

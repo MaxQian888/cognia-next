@@ -1,6 +1,7 @@
 {
   "actionsMenuAria": "Plugin actions for {name}",
   "capabilityChipAria": "{capability} capability — {count} contributions",
+  "capabilityChipLabel": "{name} · {count}",
   "configure": "Configure",
   "dangerousPermissionsAria": "{count, plural, =1 {1 sensitive permission} other {# sensitive permissions}}",
   "disable": "Disable",

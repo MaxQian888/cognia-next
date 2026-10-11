@@ -11,6 +11,8 @@ import { useSecretReveal } from "@/hooks/use-secret-reveal"
 const mockReveal = jest.fn()
 
 let mockPlugin: PluginRow | undefined
+/** Hold the live query unresolved, as Dexie does before its first answer. */
+let mockLiveQueryPending = false
 const setPluginConfigMock = jest.fn(async (_id: string, _cfg: Record<string, unknown>) => undefined)
 
 // `CustomConfigBody` lazily imports these; mock them so the configComponent
@@ -54,8 +56,11 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }))
 
+// `usePluginRow` passes a loading sentinel as the live query's default; an
+// unresolved query hands that default back.
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => mockPlugin,
+  useLiveQuery: (_querier: unknown, _deps: unknown, pendingDefault?: unknown) =>
+    mockLiveQueryPending ? pendingDefault : mockPlugin,
 }))
 
 jest.mock("@/lib/db/plugins", () => ({
@@ -63,7 +68,8 @@ jest.mock("@/lib/db/plugins", () => ({
   setPluginConfig: (id: string, cfg: Record<string, unknown>) => setPluginConfigMock(id, cfg),
 }))
 
-import { renderHook } from "@testing-library/react"
+import { renderHook, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
 
 import {
@@ -119,6 +125,7 @@ beforeEach(() => {
   })
   jest.mocked(useSecretReveal).mockReturnValue(mockReveal)
   mockPlugin = schemaPlugin
+  mockLiveQueryPending = false
   mockConfigComponentResult = null
   jest.mocked(toast.success).mockClear()
   jest.mocked(toast.error).mockClear()
@@ -479,6 +486,71 @@ describe("PluginConfigFormContent", () => {
     expect(screen.getByDisplayValue("abc")).toBeInTheDocument()
   })
 
+  // A `titleKey` variant used to be saved under its title AS RENDERED, i.e. in
+  // the UI language at the time; switching languages left the saved choice
+  // matching nothing, and the form fell back to the first variant.
+  describe("locale-independent variant choice", () => {
+    const localizedPlugin = (saved: string): PluginRow => ({
+      ...schemaPlugin,
+      manifest: {
+        ...schemaPlugin.manifest,
+        i18n: {
+          defaultLocale: "en",
+          locales: {
+            en: { "auth.key": "API key", "auth.oauth": "OAuth" },
+            "zh-CN": { "auth.key": "API 密钥", "auth.oauth": "OAuth 登录" },
+          },
+        },
+        configSchema: {
+          type: "object",
+          properties: {
+            auth: {
+              oneOf: [
+                {
+                  type: "object",
+                  titleKey: "auth.key",
+                  properties: { key: { type: "string", default: "" } },
+                },
+                {
+                  type: "object",
+                  titleKey: "auth.oauth",
+                  properties: { clientId: { type: "string", default: "" } },
+                },
+              ],
+            },
+          },
+        },
+      } as never,
+      config: { auth: { __variant: saved, clientId: "cid" } },
+    })
+
+    it("resolves a choice saved in another language and migrates it on the next save", async () => {
+      // Saved while the UI was Chinese; the form now renders in English.
+      mockPlugin = localizedPlugin("OAuth 登录")
+      renderForm()
+      // The second variant is selected and shown by its English title.
+      expect(screen.getByLabelText("oneOfVariant")).toHaveTextContent("OAuth")
+      expect(screen.getByDisplayValue("cid")).toBeInTheDocument()
+      // Resolving is not an edit: nothing is pending until the user changes something.
+      expect(screen.getByTestId("plugin-config-cancel")).toBeDisabled()
+
+      fireEvent.change(screen.getByDisplayValue("cid"), { target: { value: "cid-2" } })
+      fireEvent.click(screen.getByTestId("plugin-config-save"))
+      await waitFor(() =>
+        expect(setPluginConfigMock).toHaveBeenCalledWith(
+          "p_conf",
+          expect.objectContaining({ auth: { __variant: "auth.oauth", clientId: "cid-2" } })
+        )
+      )
+    })
+
+    it("accepts the stable id as saved", () => {
+      mockPlugin = localizedPlugin("auth.oauth")
+      renderForm()
+      expect(screen.getByDisplayValue("cid")).toBeInTheDocument()
+    })
+  })
+
   it("renders a plugin's configComponent when the manifest declares one", async () => {
     mockPlugin = configComponentPlugin
     mockConfigComponentResult = ({ config }) => (
@@ -721,5 +793,155 @@ describe("useConfigSchemaForm + ConfigSchemaFields", () => {
     }
     render(<Harness />)
     expect(document.getElementById("pre-install-config-nested_depth")).not.toBeNull()
+  })
+})
+
+// "Loading" and "gone" used to be the same `undefined`, so an uninstalled
+// plugin's form said "Loading…" forever.
+describe("PluginConfigFormContent loading / not found", () => {
+  it("shows the loading line while the plugin row has not been read yet", () => {
+    mockLiveQueryPending = true
+    renderForm()
+    expect(screen.getByTestId("plugin-config-loading")).toHaveTextContent("loading")
+    expect(screen.queryByTestId("plugin-config-not-found")).not.toBeInTheDocument()
+  })
+
+  it("says the plugin is gone once the read finds no row", () => {
+    mockPlugin = undefined
+    renderForm()
+    expect(screen.getByTestId("plugin-config-not-found")).toHaveTextContent("notFound")
+    expect(screen.queryByTestId("plugin-config-loading")).not.toBeInTheDocument()
+  })
+})
+
+// Nesting reads as a left rule + small heading, never as boxes three deep.
+describe("PluginConfigFormContent nested layout", () => {
+  const BOXED = /(^|\s)(rounded(-\w+)?|bg-muted\/30|border-border\/60)(\s|$)/
+
+  function nestedPlugin(): PluginRow {
+    return {
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        configSchema: {
+          type: "object",
+          properties: {
+            db: {
+              type: "object",
+              title: "Database",
+              description: "Database settings",
+              properties: {
+                host: { type: "string", default: "localhost" },
+                replicas: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: { url: { type: "string", default: "" } },
+                  },
+                },
+              },
+            },
+            auth: {
+              oneOf: [
+                { type: "object", properties: { key: { type: "string", default: "" } } },
+                {
+                  type: "object",
+                  properties: { clientId: { type: "string", default: "" } },
+                },
+              ],
+            },
+          },
+        },
+      },
+      config: {
+        db: { host: "prod.db", replicas: [{ url: "https://a" }, { url: "https://b" }] },
+        auth: { __variant: "variant_2", clientId: "cid" },
+      },
+    }
+  }
+
+  it("renders an object as a fieldset named by its legend, indented by a left rule", () => {
+    mockPlugin = nestedPlugin()
+    renderForm()
+    const group = screen.getByRole("group", { name: "Database" })
+    expect(group.tagName).toBe("FIELDSET")
+    expect(group).toHaveAccessibleDescription("Database settings")
+    const body = group.querySelector("[data-slot='config-object-group']") as HTMLElement
+    expect(body.className).toContain("border-l")
+    expect(body.className).toContain("pl-3")
+    expect(body.className).not.toMatch(BOXED)
+  })
+
+  it("splits array items with hairlines and names each by a localized index", () => {
+    mockPlugin = nestedPlugin()
+    renderForm()
+    const list = document.querySelector("[data-slot='config-object-array']") as HTMLElement
+    expect(list.tagName).toBe("OL")
+    expect(list.className).toContain("divide-y")
+    expect(list.className).toContain("border-l")
+    expect(list.className).not.toMatch(BOXED)
+    // The next-intl mock echoes keys, so every item is named "arrayItem";
+    // there is no hard-coded `#1` left.
+    const items = screen.getAllByRole("group", { name: "arrayItem" })
+    expect(items).toHaveLength(2)
+    expect(screen.queryByText(/^#\d+$/)).not.toBeInTheDocument()
+    expect(within(items[1]).getByDisplayValue("https://b")).toBeInTheDocument()
+    expect(within(items[0]).getByRole("button", { name: "arrayRemoveAria" })).toHaveTextContent(
+      "arrayRemove"
+    )
+  })
+
+  it("removes the item whose Remove was pressed", () => {
+    mockPlugin = nestedPlugin()
+    renderForm()
+    const items = screen.getAllByRole("group", { name: "arrayItem" })
+    fireEvent.click(within(items[0]).getByRole("button", { name: "arrayRemoveAria" }))
+    expect(screen.getAllByRole("group", { name: "arrayItem" })).toHaveLength(1)
+    expect(screen.queryByDisplayValue("https://a")).not.toBeInTheDocument()
+    expect(screen.getByDisplayValue("https://b")).toBeInTheDocument()
+  })
+
+  it("labels the oneOf variant select and names untitled variants through i18n", async () => {
+    const user = userEvent.setup()
+    mockPlugin = nestedPlugin()
+    renderForm()
+    const select = screen.getByLabelText("oneOfVariant")
+    expect(select).toHaveAttribute("role", "combobox")
+    expect(select.className).toContain("pointer-coarse:h-10")
+    // The stored id stays `variant_2`; the user sees the localized fallback.
+    expect(select).toHaveTextContent("variantFallback")
+    expect(screen.queryByText(/variant_\d/)).not.toBeInTheDocument()
+    expect(screen.getByDisplayValue("cid")).toBeInTheDocument()
+    const body = document.querySelector("[data-slot='config-one-of']") as HTMLElement
+    expect(body.className).toContain("border-l")
+    expect(body.className).not.toMatch(BOXED)
+
+    await user.click(select)
+    const options = await screen.findAllByRole("option")
+    expect(options).toHaveLength(2)
+    options.forEach((option) => expect(option).toHaveTextContent("variantFallback"))
+  })
+
+  it("keeps saving the stable variant id, not the display name", async () => {
+    mockPlugin = nestedPlugin()
+    renderForm()
+    fireEvent.click(screen.getByTestId("plugin-config-save"))
+    await waitFor(() =>
+      expect(setPluginConfigMock).toHaveBeenCalledWith(
+        "p_conf",
+        expect.objectContaining({ auth: { __variant: "variant_2", clientId: "cid" } })
+      )
+    )
+  })
+
+  it("pins Save / Cancel to the bottom of the pane's scroller", () => {
+    renderForm()
+    const actions = screen.getByTestId("plugin-config-actions")
+    expect(actions.className).toContain("sticky")
+    expect(actions.className).toContain("bottom-0")
+    expect(actions.className).toContain("bg-background")
+    expect(within(actions).getByTestId("plugin-config-save").className).toContain(
+      "pointer-coarse:h-10"
+    )
   })
 })

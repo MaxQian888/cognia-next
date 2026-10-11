@@ -3,6 +3,7 @@
  */
 
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -20,10 +21,22 @@ jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(),
 }))
 
-// Stub heavy sub-tabs — we only verify the pane delegates to the right one
-// based on detailSubTab.
+// Stub heavy tabs — we only verify the pane shows the right one for
+// detailSubTab.
 jest.mock("./plugin-detail-overview", () => ({
-  PluginDetailOverview: () => <div data-testid="overview" />,
+  PluginDetailOverview: ({ onFilterApplied }: { onFilterApplied?: () => void }) => (
+    <div data-testid="overview">
+      <button type="button" data-testid="overview-filter" onClick={() => onFilterApplied?.()} />
+    </div>
+  ),
+}))
+// The header has its own suite; here only the props it is handed matter.
+jest.mock("./plugin-detail-header", () => ({
+  PluginDetailHeader: ({ onClose }: { onClose?: () => void }) => (
+    <header>
+      <button type="button" data-testid="header-close" onClick={() => onClose?.()} />
+    </header>
+  ),
 }))
 jest.mock("./plugin-detail-capabilities", () => ({
   PluginDetailCapabilities: () => <div data-testid="capabilities" />,
@@ -85,71 +98,91 @@ describe("PluginDetailPane", () => {
     expect(screen.getByTestId(testid)).toBeInTheDocument()
   })
 
-  it("keeps the README/overview body visible even when a section is expanded", () => {
+  it("shows exactly one tab body at a time", () => {
     usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "data" })
     render(<PluginDetailPane />)
-    // Overview is the always-visible body; the deep-linked section expands too.
-    expect(screen.getByTestId("overview")).toBeInTheDocument()
     expect(screen.getByTestId("data")).toBeInTheDocument()
-  })
-
-  it("renders collapsible section triggers for capabilities/configure/permissions/data", () => {
-    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
-    render(<PluginDetailPane />)
-    for (const v of ["capabilities", "configure", "permissions", "data"]) {
-      expect(screen.getByTestId(`plugin-detail-section-${v}`)).toBeInTheDocument()
-    }
-    // Collapsed sections don't mount their content.
+    expect(screen.queryByTestId("overview")).not.toBeInTheDocument()
     expect(screen.queryByTestId("capabilities")).not.toBeInTheDocument()
   })
 
-  it.each(["frontend", "python", "hybrid"] as const)(
-    "links to the log panel for %s, whose host has an output channel",
-    (type) => {
-      // It used to be python-only, which hid the frontend half of a hybrid
-      // plugin's output and left frontend authors with no log surface here at
-      // all.
-      mockPlugin = { ...makePlugin(), type }
-      usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
-      render(<PluginDetailPane />)
-      expect(screen.getByTestId("plugin-detail-section-logs")).toBeInTheDocument()
+  it("renders a tab for every section and switches through the store", async () => {
+    const user = userEvent.setup()
+    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
+    render(<PluginDetailPane />)
+    const tabs = screen.getAllByRole("tab")
+    expect(tabs.map((tab) => tab.getAttribute("data-testid"))).toEqual([
+      "plugin-detail-tab-overview",
+      "plugin-detail-tab-capabilities",
+      "plugin-detail-tab-configure",
+      "plugin-detail-tab-permissions",
+      "plugin-detail-tab-data",
+    ])
+    await user.click(screen.getByTestId("plugin-detail-tab-permissions"))
+    expect(usePluginsStore.getState().detailSubTab).toBe("permissions")
+    expect(screen.getByTestId("permissions")).toBeInTheDocument()
+  })
+
+  it("counts declared permissions and runtime capabilities on their tabs", () => {
+    mockPlugin = {
+      ...makePlugin(),
+      capabilities: ["tools", "themes"],
+      manifest: {
+        id: "alpha",
+        permissions: ["network:fetch", "clipboard:read"],
+        optionalPermissions: ["fs:read"],
+      } as never,
     }
-  )
-
-  it("carries the plugin filter into the log panel rather than reading logs itself", () => {
-    mockPlugin = { ...makePlugin(), type: "python" }
     usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
     render(<PluginDetailPane />)
-    const link = screen.getByTestId("plugin-detail-section-logs")
-    const href = link.getAttribute("href") ?? ""
-    const url = new URL(href, "http://localhost")
-    expect(url.pathname).toBe("/logs")
-    expect(url.searchParams.get("src")).toBe("plugin")
-    expect(url.searchParams.get("q")).toBe("alpha")
+    expect(screen.getByTestId("plugin-detail-tab-permissions")).toHaveTextContent("3")
+    expect(screen.getByTestId("plugin-detail-tab-permissions")).toHaveAttribute(
+      "aria-label",
+      "tabCountAria"
+    )
+    expect(screen.getByTestId("plugin-detail-tab-capabilities").textContent).toMatch(/\d/)
+    // Overview carries no count.
+    expect(screen.getByTestId("plugin-detail-tab-overview").textContent).toBe("subtab.overview")
   })
 
-  it("hides the log link for wasm, whose host serves no output channel", () => {
-    // A link into a panel that can only ever be empty for this runtime reads
-    // as a broken reader, so the entry is withheld instead.
-    mockPlugin = { ...makePlugin(), type: "wasm" }
+  it("mutes the Configure tab when the plugin has nothing to configure", () => {
     usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
     render(<PluginDetailPane />)
-    expect(screen.queryByTestId("plugin-detail-section-logs")).not.toBeInTheDocument()
+    expect(screen.getByTestId("plugin-detail-tab-configure").className).toContain(
+      "text-muted-foreground/70"
+    )
   })
 
-  it("links a VS Code extension to its log: its host's output and output channels", () => {
-    mockPlugin = { ...makePlugin(), type: "vscode-extension" }
+  it("makes the active tab body the pane's only scroller", () => {
     usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
     render(<PluginDetailPane />)
-    expect(screen.getByTestId("plugin-detail-section-logs")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-detail-tab-panel-overview")).toHaveClass(
+      "overflow-y-auto",
+      "min-h-0",
+      "flex-1"
+    )
   })
 
-  it("renders the not-found hint when detailPluginId is set but the row is missing", () => {
+  it("hands the close callback to the header and the filter callback to the overview", () => {
+    const onClose = jest.fn()
+    const onFilterApplied = jest.fn()
+    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
+    render(<PluginDetailPane onClose={onClose} onFilterApplied={onFilterApplied} />)
+    screen.getByTestId("header-close").click()
+    expect(onClose).toHaveBeenCalled()
+    screen.getByTestId("overview-filter").click()
+    expect(onFilterApplied).toHaveBeenCalled()
+  })
+
+  it("gives a missing plugin a way out instead of a dead end", () => {
     mockPlugin = undefined
     mockPhase = "resolved"
     usePluginsStore.setState({ detailPluginId: "missing" })
     render(<PluginDetailPane />)
     expect(screen.getByText("notFound")).toBeInTheDocument()
+    expect(screen.getByText("notFoundHint")).toBeInTheDocument()
+    screen.getByRole("button", { name: "notFoundAction" }).click()
+    expect(usePluginsStore.getState().detailPluginId).toBeNull()
   })
 
   it("renders a skeleton loader while the live-query is still resolving", () => {

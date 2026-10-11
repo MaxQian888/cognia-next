@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -94,7 +94,7 @@ jest.mock("@/lib/plugin/lifecycle/updater", () => ({
 }))
 
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
-import { usePluginsStore } from "@/stores/plugins"
+import { DEFAULT_PLUGIN_FILTERS, usePluginsStore } from "@/stores/plugins"
 import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
 
 beforeEach(() => {
@@ -113,6 +113,8 @@ beforeEach(() => {
   // Reset the update flag mutated by the batch-update tests.
   mockRows[0].manifest = { id: "a" }
   usePluginsStore.setState({
+    activeSection: "library",
+    filters: DEFAULT_PLUGIN_FILTERS,
     selection: new Set(["a", "b"]),
     deleteTarget: null,
     deleteQueue: [],
@@ -253,6 +255,54 @@ describe("PluginBatchActionsBar", () => {
     await waitFor(() => expect(installUpdateMock).toHaveBeenCalledWith("a", "2.0.0"))
     expect(checkForUpdatesMock).toHaveBeenCalledWith(["a"])
     expect(toastMock).toHaveBeenCalled()
+  })
+
+  describe("only what is visible", () => {
+    // "A" survives a query for "a"; "B" does not (ids, names and manifests
+    // are single letters, so the query is unambiguous).
+    const filterToA = () =>
+      usePluginsStore.setState({ filters: { ...DEFAULT_PLUGIN_FILTERS, query: "a" } })
+
+    it("counts and acts on selected rows the filter still shows", async () => {
+      filterToA()
+      render(<PluginBatchActionsBar />)
+      expect(screen.getByText(/selected:1/)).toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("plugin-batch-toggle"))
+      await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+      expect(setPluginEnabledForHostMock.mock.calls.map(([id]) => id)).toEqual(["a"])
+    })
+
+    it("never queues a hidden plugin for uninstall", () => {
+      filterToA()
+      render(<PluginBatchActionsBar />)
+      fireEvent.click(screen.getByLabelText("uninstall"))
+      const state = usePluginsStore.getState()
+      expect(state.deleteTarget?.pluginId).toBe("a")
+      expect(state.deleteQueue).toEqual([])
+    })
+
+    it("prunes the selection to the visible set when the filter changes", async () => {
+      render(<PluginBatchActionsBar />)
+      expect(usePluginsStore.getState().selection.size).toBe(2)
+      act(() => filterToA())
+      await waitFor(() => expect([...usePluginsStore.getState().selection]).toEqual(["a"]))
+      // Clearing the filter does not resurrect what was pruned.
+      act(() => usePluginsStore.setState({ filters: DEFAULT_PLUGIN_FILTERS }))
+      expect(screen.getByText(/selected:1/)).toBeInTheDocument()
+    })
+
+    it("renders nothing when every selected plugin is filtered out", () => {
+      usePluginsStore.setState({ filters: { ...DEFAULT_PLUGIN_FILTERS, query: "zzz" } })
+      const { container } = render(<PluginBatchActionsBar />)
+      expect(container.firstChild).toBeNull()
+    })
+
+    it("steps aside outside the Library without dropping the selection", () => {
+      usePluginsStore.setState({ activeSection: "discover" })
+      const { container } = render(<PluginBatchActionsBar />)
+      expect(container.firstChild).toBeNull()
+      expect(usePluginsStore.getState().selection.size).toBe(2)
+    })
   })
 
   it("Clear-selection drops any pending delete queue", () => {

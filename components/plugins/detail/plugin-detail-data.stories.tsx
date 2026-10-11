@@ -4,10 +4,11 @@ import { PluginDetailData } from "./plugin-detail-data"
 import { seedDb } from "@/lib/storybook/seed-db"
 import { makePluginRow } from "@/lib/storybook/fixtures/plugins"
 
-// Data sub-tab — a thin composition of the per-plugin operational surfaces:
+// Data tab — a thin composition of the per-plugin operational surfaces:
 // Dexie tables, scheduled jobs, analytics, backup, the rate-limit resource
-// manager, and the dependency graph, each in a collapsible. Tables open by
-// default; the rest are second-level collapsibles. Every child reads its own
+// manager, and the dependency graph, each a flat always-visible section under
+// a heading and hairline (only the dependency canvas waits behind its own
+// disclosure). Every child reads its own
 // data by pluginId (mostly empty live queries here), so the seeded row only
 // needs to exist for the pane to mount.
 
@@ -43,4 +44,16 @@ export const NotFound: Story = {
   beforeEach: async () => {
     await seedDb(async () => {})
   },
+}
+
+// Phone-drawer width: every child lays out by its own container, not the viewport.
+export const Narrow: Story = {
+  beforeEach: Loaded.beforeEach,
+  decorators: [
+    (Story) => (
+      <div className="w-[340px]">
+        <Story />
+      </div>
+    ),
+  ],
 }

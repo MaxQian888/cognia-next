@@ -1,16 +1,21 @@
 "use client"
 
 // Governance section content — cross-plugin aggregate views (permissions
-// matrix, scheduled jobs, analytics, audit log). The active view comes
-// from `usePluginsStore.governanceView`, which the left nav sub-items
-// also write to.
+// matrix, scheduled jobs, analytics, audit log, policy). The active view
+// comes from `usePluginsStore.governanceView`, which the segmented picker in
+// `PluginGovernanceHeader` writes.
 //
 // Each child surface is reused as-is:
-//   - PluginPermissionsTab  (existing — declared/granted matrix)
-//   - PluginScheduledJobs   (existing — runs across all plugins when no pluginId)
-//   - PluginAnalytics       (existing — totals across all plugins when no pluginId)
-//   - PluginAuditLog        (new in PR 3 — exports CSV + filters the guard's
-//                           in-memory ring buffer)
+//   - PluginPermissionsTab       (declared / optional / granted matrix)
+//   - PluginScheduledJobs        (runs across all plugins when no pluginId)
+//   - PluginAnalytics            (totals across all plugins when no pluginId)
+//   - PluginAuditLog             (filters + CSV export over the guard's
+//                                in-memory ring buffer)
+//   - PluginGovernancePolicyTab  (governance / signature / update / sandbox)
+//
+// This pane is the one scroll surface for every view, and an anonymous
+// `@container`, so the views lay themselves out by the pane's width rather
+// than the viewport's and none of them needs a scroller of its own.
 
 import { useTranslations } from "next-intl"
 import { usePluginsStore } from "@/stores/plugins"
@@ -25,13 +30,12 @@ export function PluginGovernancePane() {
   const view = usePluginsStore((s) => s.governanceView)
 
   return (
-    // No visible <h2>: the active view's name is already rendered by
-    // FeaturePageHeader's `context` slot and by the selected segment in
-    // PluginGovernanceHeader — a third copy was the page saying the same
-    // word three times. The name stays available to assistive tech as the
-    // region's accessible name.
+    // No visible <h2>: the active view's name is already the selected
+    // segment in PluginGovernanceHeader — a heading here was the page saying
+    // the same word twice. The name stays available to assistive tech as
+    // the region's accessible name.
     <div
-      className="flex h-full min-h-0 flex-col overflow-y-auto p-4"
+      className="@container flex h-full min-h-0 flex-col overflow-y-auto p-4"
       data-testid="plugin-governance-pane"
       data-view={view}
       role="region"

@@ -18,7 +18,8 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-import { PluginMarketplaceCard } from "./plugin-marketplace-card"
+import { PluginMarketplaceCard, requestsDangerousPermission } from "./plugin-marketplace-card"
+import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
 
 const baseEntry = {
   id: "p1",
@@ -332,7 +333,59 @@ describe("PluginMarketplaceCard", () => {
     expect(region).toHaveAttribute("data-slot", "button")
   })
 
-  it("gives the compare toggle a 36px target on a coarse pointer", () => {
+  it("flags network egress as dangerous, from the guard's canonical list", () => {
+    render(
+      <PluginMarketplaceCard
+        entry={{ ...baseEntry, permissions: ["network:fetch"] }}
+        installed={false}
+        installing={false}
+        {...callbacks()}
+      />
+    )
+    expect(screen.getByText("dangerous")).toBeInTheDocument()
+    expect(requestsDangerousPermission(["clipboard:read"])).toBe(false)
+    expect(requestsDangerousPermission(undefined)).toBe(false)
+  })
+
+  describe("compare toggle when the comparison is full", () => {
+    beforeEach(() => usePluginMarketplaceStore.setState({ comparisonIds: [] }))
+
+    it("says why it is disabled, as a description and a tappable hint", () => {
+      usePluginMarketplaceStore.setState({ comparisonIds: ["x", "y"] })
+      render(
+        <PluginMarketplaceCard
+          entry={baseEntry}
+          installed={false}
+          installing={false}
+          {...callbacks()}
+        />
+      )
+      const toggle = screen.getByTestId("plugin-marketplace-compare-toggle-p1")
+      expect(toggle).toBeDisabled()
+      expect(toggle).toHaveAccessibleDescription("compareFull")
+      expect(screen.getByTestId("plugin-marketplace-compare-full-p1")).toHaveAccessibleName(
+        "compareFullLabel"
+      )
+    })
+
+    it("has no reason to give while there is room", () => {
+      usePluginMarketplaceStore.setState({ comparisonIds: ["x"] })
+      render(
+        <PluginMarketplaceCard
+          entry={baseEntry}
+          installed={false}
+          installing={false}
+          {...callbacks()}
+        />
+      )
+      const toggle = screen.getByTestId("plugin-marketplace-compare-toggle-p1")
+      expect(toggle).toBeEnabled()
+      expect(toggle).not.toHaveAttribute("aria-describedby")
+      expect(screen.queryByTestId("plugin-marketplace-compare-full-p1")).toBeNull()
+    })
+  })
+
+  it("gives the compare toggle a 40px target on a coarse pointer", () => {
     render(
       <PluginMarketplaceCard
         entry={baseEntry}
@@ -342,7 +395,7 @@ describe("PluginMarketplaceCard", () => {
       />
     )
     expect(screen.getByTestId("plugin-marketplace-compare-toggle-p1")).toHaveClass(
-      "pointer-coarse:size-9"
+      "pointer-coarse:size-10"
     )
   })
 })

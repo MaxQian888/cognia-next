@@ -72,6 +72,7 @@ export function CogsetSwitcher() {
             size="sm"
             variant="outline"
             aria-label={t("aria", { name: label })}
+            className="pointer-coarse:h-10"
             data-testid="cogset-switcher"
             disabled={view.loading}
           >
@@ -80,6 +81,11 @@ export function CogsetSwitcher() {
             ) : (
               <CogIcon className="mr-1.5 size-3.5" />
             )}
+            {/* "Default" alone read as a mode of the page, not as which
+                cogset is running; the muted noun says what the name names. */}
+            <span className="mr-1 text-muted-foreground" data-testid="cogset-switcher-noun">
+              {t("triggerLabel")}
+            </span>
             <span className="max-w-40 truncate">
               {pendingCogset ? t("pending", { name: displayName(pendingCogset) }) : label}
             </span>

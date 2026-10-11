@@ -16,7 +16,13 @@ jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(() => Promise.resolve(mockRows ?? [])),
 }))
 
-import { buildView, usePlugins } from "./use-plugins"
+import {
+  buildView,
+  countLibrarySubFilters,
+  isPluginRowErrored,
+  pluginRowMatchesStatus,
+  usePlugins,
+} from "./use-plugins"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
 function row(over: Partial<PluginRow>): PluginRow {
@@ -28,6 +34,7 @@ function row(over: Partial<PluginRow>): PluginRow {
     source: over.source ?? "builtin",
     type: over.type ?? "frontend",
     enabled: over.enabled ?? true,
+    lifecycle: over.lifecycle,
     capabilities: over.capabilities ?? ["tools"],
     path: over.path ?? "builtin://x",
     manifest: over.manifest ?? { id: "p_" + (over.name ?? "x") },
@@ -286,5 +293,82 @@ describe("localized names", () => {
       "Browser Tools",
       "Clipboard History",
     ])
+  })
+})
+
+describe("status meaning: enabled / disabled / error", () => {
+  // The manager writes `row.status` at discovery and keeps the live status in
+  // its own store; enabling writes `enabled` and the lifecycle. These rows
+  // reproduce that shape: status and enabled disagree on purpose.
+  const lifecycle = (actual: "active" | "error" | "dirty" | "inactive") => ({
+    intent: "enabled" as const,
+    actual,
+    revision: 1,
+    updatedAt: 0,
+  })
+  const fixture = () => [
+    row({ name: "on", status: "installed", enabled: true, lifecycle: lifecycle("active") }),
+    row({ name: "off", status: "enabled", enabled: false }),
+    row({ name: "failed", status: "installed", enabled: true, lifecycle: lifecycle("error") }),
+    row({ name: "stuck", status: "installed", enabled: false, lifecycle: lifecycle("dirty") }),
+    row({ name: "legacy", status: "error", enabled: false }),
+  ]
+
+  it("'enabled' follows row.enabled, not row.status", () => {
+    const view = buildView(fixture(), { ...DEFAULT_PLUGIN_FILTERS, status: "enabled" })
+    expect(view.filtered.map((r) => r.name).sort()).toEqual(["failed", "on"])
+  })
+
+  it("'disabled' is the complement of 'enabled'", () => {
+    const view = buildView(fixture(), { ...DEFAULT_PLUGIN_FILTERS, status: "disabled" })
+    expect(view.filtered.map((r) => r.name).sort()).toEqual(["legacy", "off", "stuck"])
+  })
+
+  it("'error' covers a lifecycle error, a dirty teardown and a legacy error status", () => {
+    const view = buildView(fixture(), { ...DEFAULT_PLUGIN_FILTERS, status: "error" })
+    expect(view.filtered.map((r) => r.name).sort()).toEqual(["failed", "legacy", "stuck"])
+  })
+
+  it("totals, quick-filter counts and the filter agree", () => {
+    const rows = fixture()
+    const view = buildView(rows, DEFAULT_PLUGIN_FILTERS)
+    const counts = countLibrarySubFilters(rows)
+    const enabledShown = buildView(rows, { ...DEFAULT_PLUGIN_FILTERS, status: "enabled" })
+    const erroredShown = buildView(rows, { ...DEFAULT_PLUGIN_FILTERS, status: "error" })
+    expect(view.totals.enabled).toBe(counts.enabled)
+    expect(enabledShown.filtered).toHaveLength(counts.enabled)
+    expect(view.totals.errored).toBe(counts.errored)
+    expect(erroredShown.filtered).toHaveLength(counts.errored)
+  })
+
+  it("matches any other status against row.status verbatim", () => {
+    const [on] = fixture()
+    expect(pluginRowMatchesStatus(on, "installed")).toBe(true)
+    expect(pluginRowMatchesStatus(on, "loading")).toBe(false)
+    expect(pluginRowMatchesStatus(on, "all")).toBe(true)
+  })
+
+  it("an active lifecycle is not an error", () => {
+    expect(isPluginRowErrored({ status: "installed", lifecycle: lifecycle("active") })).toBe(false)
+    expect(isPluginRowErrored({ status: "installed" })).toBe(false)
+  })
+})
+
+describe("countLibrarySubFilters", () => {
+  it("counts 'configurable' with pluginExposesConfig, as the filter does", () => {
+    const rows = [
+      row({ name: "schema", manifest: { configSchema: { properties: { a: {} } } } }),
+      row({ name: "empty-schema", manifest: { configSchema: { type: "object" } } }),
+      row({ name: "component", manifest: { configComponent: { entry: "./c.js" } } }),
+      row({ name: "none" }),
+    ]
+    expect(countLibrarySubFilters(rows).configurable).toBe(2)
+    const shown = buildView(rows, { ...DEFAULT_PLUGIN_FILTERS, configurable: true })
+    expect(shown.filtered.map((r) => r.name).sort()).toEqual(["component", "schema"])
+  })
+
+  it("counts updates from manifest.updateAvailable", () => {
+    const rows = [row({ name: "u", manifest: { updateAvailable: true } }), row({ name: "n" })]
+    expect(countLibrarySubFilters(rows)).toMatchObject({ all: 2, updates: 1 })
   })
 })

@@ -1,0 +1,10 @@
+{
+  "dataManagement": {
+    "deleting": "删除中…",
+    "mirroredBlocked": "该插件的数据保存在运行它的桌面端，请在桌面端删除。",
+    "purgeFailed": "无法删除 {pluginId} 的数据。",
+    "purged": "{count, plural, =0 {{pluginId} 没有可清除的数据表。} other {已删除 {pluginId} 的 # 张数据表中的数据。}}",
+    "tableCount": "{count, plural, other {# 张表}}"
+  },
+  "dependencyCount": "{count, plural, =0 {未声明} other {已声明 # 个}}"
+}

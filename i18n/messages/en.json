@@ -30891,7 +30891,8 @@
         "signedOnly": "Signed only",
         "sort": "Sort: {value}",
         "source": "Source: {value}",
-        "status": "Status: {value}"
+        "status": "Status: {value}",
+        "tag": "Tag: {value}"
       },
       "clearAll": "Clear all",
       "removeAria": "Remove {name}"
@@ -31090,11 +31091,13 @@
         "commandLabel": "Cognia will run",
         "confirm": "Install",
         "failureToast": "Could not install {name}: {message}",
+        "failureToastNoReason": "Could not install {name}. Pi reported no reason; check its output in the install dialog or try again.",
         "fallbackLabel": "Cognia will edit",
         "outputLabel": "Output",
         "overlapWarning": "This overlaps something you already have.",
         "removeBody": "This removes the entry from {scope} settings. Nothing else about your Pi setup changes.",
         "removeFailureToast": "Could not remove {name}: {message}",
+        "removeFailureToastNoReason": "Could not remove {name}. Pi reported no reason; try again.",
         "removeSuccessToast": "Removed {name}",
         "removeTitle": "Remove {name}?",
         "scopeLabel": "Scope",
@@ -31191,6 +31194,9 @@
       "colPlugin": "Plugin",
       "empty": "No analytics events yet.",
       "loading": "Loading analytics…",
+      "noLastEvent": "None",
+      "showAll": "Show all {count}",
+      "showLess": "Show fewer",
       "summaryErrors": "Errors",
       "summaryEvents": "Total events",
       "summaryKeys": "Distinct keys"
@@ -31233,6 +31239,7 @@
     },
     "backup": {
       "cancel": "Cancel",
+      "count": "{count, plural, =0 {No backups} one {# backup} other {# backups}}",
       "create": "Create backup",
       "createFailed": "Backup failed.",
       "creating": "Creating…",
@@ -31241,7 +31248,6 @@
       "deleteConfirmBody": "The v{version} backup from {date} is deleted for good. You can't roll back to it afterwards.",
       "deleteConfirmTitle": "Delete this backup?",
       "desktopOnlyHint": "Backups run through the native bridge and are only writable in the desktop build.",
-      "empty": "No backups yet.",
       "reason": {
         "auto": "Automatic",
         "manual": "Manual",
@@ -31254,7 +31260,11 @@
       "restoreAria": "Restore the v{version} backup from {date}",
       "restoreConfirmBody": "The plugin's current files, settings and data are replaced with the v{version} backup from {date}. Anything changed since then is lost.",
       "restoreConfirmTitle": "Restore this backup?",
-      "title": "Backups"
+      "rowDetail": "<time>{date}</time> · {size}",
+      "showAll": "Show all {count}",
+      "showLess": "Show fewer",
+      "title": "Backups",
+      "versionLabel": "v{version}"
     },
     "batchActions": {
       "ariaLabel": "Batch actions",
@@ -31275,6 +31285,7 @@
     "card": {
       "actionsMenuAria": "Plugin actions for {name}",
       "capabilityChipAria": "{capability} capability — {count} contributions",
+      "capabilityChipLabel": "{name} · {count}",
       "configure": "Configure",
       "dangerousPermissionsAria": "{count, plural, =1 {1 sensitive permission} other {# sensitive permissions}}",
       "disable": "Disable",
@@ -31327,6 +31338,85 @@
         "themes": "Themes",
         "tools": "Tools"
       },
+      "capabilityName": {
+        "a2ui": "A2UI",
+        "agent-team-template": "Agent team templates",
+        "ai-provider": "AI providers",
+        "auth-provider": "Auth providers",
+        "automation": "Automation",
+        "balance-adapter": "Balance adapters",
+        "bot": "Bots",
+        "canvas": "Canvas",
+        "character-pack": "Character packs",
+        "chat-middleware": "Chat middleware",
+        "cli-tools": "CLI tools",
+        "command-hooks": "Command hooks",
+        "commands": "Commands",
+        "compaction-strategy": "Compaction strategies",
+        "companion": "Companion",
+        "components": "UI components",
+        "configuration": "Configuration",
+        "connectors": "Connectors",
+        "context-panel": "Context panels",
+        "context-provider": "Context providers",
+        "decision-provider": "Decision providers",
+        "density-preset": "Density presets",
+        "deployment-filter": "Deployment filters",
+        "editor": "Editors",
+        "exporters": "Exporters",
+        "external-agent-adapter": "External agent adapters",
+        "external-agent-preset": "External agent presets",
+        "fonts": "Fonts",
+        "glance": "Glance modules",
+        "hooks": "Lifecycle hooks",
+        "im-rate-source": "IM rate sources",
+        "importers": "Importers",
+        "integrations": "Integrations",
+        "limits-source": "Usage limit sources",
+        "link-matcher": "Link matchers",
+        "lsp-server": "Language servers",
+        "mcp-server-preset": "MCP server presets",
+        "media": "Media",
+        "message-renderer": "Message renderers",
+        "modal-mount": "Modal mounts",
+        "modes": "Agent modes",
+        "native-anthropic-tool": "Native Anthropic tools",
+        "pet": "Desktop pet",
+        "pet-achievement": "Pet achievements",
+        "pet-item": "Pet items",
+        "pi-package": "Pi packages",
+        "processors": "Processors",
+        "protocol-adapter": "Protocol adapters",
+        "provider-operation-adapter": "Provider operation adapters",
+        "providers": "Providers",
+        "python": "Python",
+        "quick-action": "Quick actions",
+        "routing-strategy": "Routing strategies",
+        "scheduler": "Scheduler",
+        "session-importer": "Session importers",
+        "shared-memory-adapter": "Shared memory adapters",
+        "skills": "Skills",
+        "subagent": "Subagents",
+        "subscription-provider": "Subscription providers",
+        "template-package": "Template packages",
+        "terminal-completion": "Terminal completions",
+        "theme-pack": "Theme packs",
+        "themes": "Themes",
+        "tool-renderer": "Tool result cards",
+        "tool-route": "Tool routes",
+        "tools": "Agent tools",
+        "tray": "Tray menu",
+        "tree-view": "Tree views",
+        "uri-handler": "URI handlers",
+        "view-container": "View containers",
+        "wallpapers": "Wallpapers",
+        "webview": "Webviews",
+        "workflow": "Workflow nodes",
+        "workflow-template": "Workflow templates",
+        "workflow-trigger": "Workflow triggers",
+        "workspace-backend": "Workspace backends"
+      },
+      "heading": "By capability",
       "otherHeading": "Other"
     },
     "cliInstall": {
@@ -31659,7 +31749,8 @@
         "scopeWorkspace": "Workspace",
         "switchFailed": "Could not switch to {name}",
         "switchTo": "Switch to",
-        "switched": "Switched to {name}"
+        "switched": "Switched to {name}",
+        "triggerLabel": "Cogset"
       }
     },
     "comparison": {
@@ -31700,8 +31791,10 @@
     },
     "configForm": {
       "arrayAdd": "Add item",
+      "arrayItem": "Item {index}",
       "arrayPlaceholder": "One value per line",
       "arrayRemove": "Remove",
+      "arrayRemoveAria": "Remove item {index}",
       "cancel": "Cancel",
       "close": "Close",
       "deprecated": "Deprecated",
@@ -31710,6 +31803,7 @@
       "loading": "Loading plugin configuration…",
       "loadingComponent": "Loading the plugin's settings panel…",
       "noSchema": "This plugin doesn't declare a configuration schema. Its raw config is shown below for reference.",
+      "notFound": "This plugin is no longer installed, so there is nothing to configure.",
       "oneOfVariant": "Variant",
       "save": "Save",
       "saveFailed": "Couldn't save settings for {name}",
@@ -31729,7 +31823,8 @@
         "minLength": "Must be at least {min} characters.",
         "notNumber": "Must be a number.",
         "pattern": "Must match pattern {pattern}."
-      }
+      },
+      "variantFallback": "Variant {index}"
     },
     "conflict": {
       "abort": "Abort",
@@ -31881,26 +31976,42 @@
       "minVersion": "≥ {version}",
       "missing": "Missing",
       "notFound": "not found",
+      "openDependencyAria": "Open {name}",
       "optional": "optional",
       "pluginDeps": "Plugins",
       "pythonDeps": "Python packages",
       "title": "Dependencies"
     },
     "dependencyGraph": {
+      "allResolved": "All dependencies resolved",
+      "atVersion": "@ {version}",
+      "conflictLine": "{dependencyId} — {reason}",
       "conflictsTitle": "{count} conflicts",
       "cyclesTitle": "{count} dependency cycles",
       "graphLabel": "Dependency graph, ranked by install order",
+      "hideGraph": "Hide dependency graph",
       "loading": "Resolving dependencies…",
       "missing": "missing",
+      "missingCount": "{count} missing",
       "noDependencies": "This plugin declares no dependencies.",
       "root": "root",
+      "showAll": "Show all {count}",
+      "showGraph": "Show dependency graph",
+      "showLess": "Show fewer",
+      "source": {
+        "installed": "Installed",
+        "marketplace": "Marketplace",
+        "missing": "Missing"
+      },
       "title": "Dependency graph",
       "unresolved": "Unresolved",
       "warningsTitle": "{count} warnings"
     },
     "description": "Browse, install, and govern the plugins running inside Cognia.",
     "detail": {
+      "aboutTitle": "About",
       "activation": "Activation events",
+      "backToInfo": "Back to details",
       "capabilitiesTitle": "Capabilities",
       "cliTools": {
         "available": "Available {version}",
@@ -31910,6 +32021,7 @@
         "reprobe": "Re-check",
         "title": "CLI tools"
       },
+      "closeAria": "Close details for {name}",
       "contributed": {
         "a2uiComponents": "A2UI components",
         "a2uiTemplates": "A2UI templates",
@@ -31957,9 +32069,11 @@
         "showMore": "Show {count} more",
         "title": "{count, plural, =1 {1 diagnostic entry} other {# diagnostic entries}}"
       },
+      "disabledLabel": "Not enabled",
       "emptyCapabilities": "This plugin declares no capabilities.",
       "emptyDescription": "Pick a plugin from the list to inspect, configure, and govern it.",
       "emptyTitle": "Select a plugin",
+      "enabledLabel": "Enabled",
       "frontendTrust": {
         "blockedHint": "Until trusted, this plugin will not load. Only trust plugins from authors you know.",
         "description": "This plugin runs its code directly in the app, unsandboxed — it can access your data and everything the app can. It came from an untrusted source, so it only runs after you trust it.",
@@ -31989,7 +32103,11 @@
         "clear": "Clear",
         "empty": "No output yet. Lines appear here once the plugin logs through the host, and for a Python plugin once its host runs.",
         "exited": "Host process exited",
+        "missing": {
+          "wasm-no-channel": "WASM plugins have no output channel of their own."
+        },
         "openInPanel": "Open this plugin's output in the log panel",
+        "openInPanelShort": "Open logs",
         "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
         "streamEnd": "— stream ended —"
       },
@@ -32010,9 +32128,19 @@
       "noCapabilities": "This plugin doesn't contribute any capabilities.",
       "noConfigSchema": "This plugin has no configurable settings.",
       "noPermissions": "This plugin doesn't declare any permissions.",
+      "noReadme": "This plugin ships no README.",
       "notFound": "Plugin not found.",
+      "notFoundAction": "Close",
+      "notFoundHint": "It may have been uninstalled. Pick another plugin from the list.",
       "optional": "Optional permissions",
       "optionalEmpty": "No optional permissions.",
+      "pluginType": {
+        "frontend": "Frontend",
+        "hybrid": "Frontend + Python",
+        "python": "Python",
+        "vscode-extension": "VS Code extension",
+        "wasm": "WASM"
+      },
       "pythonHost": {
         "applyHint": "Changes apply the next time the plugin loads.",
         "callTimeoutMs": "Call timeout (ms)",
@@ -32059,7 +32187,8 @@
           "uvInstall": "Install uv",
           "uvInstalling": "Installing uv…",
           "uvMissing": "uv is not on PATH — pip will be used.",
-          "uvPresent": "uv {version} on PATH"
+          "uvPresent": "uv {version} on PATH",
+          "versionUnknown": "unknown"
         },
         "idleShutdownMin": "Idle shutdown (minutes, 0 = never)",
         "interpreterPath": "Interpreter path override",
@@ -32067,7 +32196,9 @@
         "maxConcurrentCalls": "Max concurrent calls",
         "maxOutboundHostCalls": "Max outbound host calls",
         "maxOutboundHostCallsHint": "Concurrent plugin → host RPC calls. Excess calls queue rather than fail.",
+        "reset": "Reset",
         "save": "Save",
+        "saveError": "Could not save the host settings: {message}",
         "saved": "Saved",
         "title": "Python host settings",
         "useVenv": "Use plugin venv when present"
@@ -32116,6 +32247,7 @@
       "tabAnalytics": "Analytics",
       "tabCapabilities": "Capabilities",
       "tabContributed": "Contributed",
+      "tabCountAria": "{label}, {count}",
       "tabData": "Data",
       "tabGeneral": "General",
       "tabLifecycle": "Lifecycle",
@@ -32124,19 +32256,41 @@
       "tabOverview": "Overview",
       "tabPermissions": "Permissions",
       "tabTriggers": "Triggers",
+      "unknownDate": "Unknown",
+      "update": "Update",
       "verification": {
         "current": "Current",
         "lastFailureAt": "Failed {date}",
         "lastGood": "Last good",
         "lastSuccessfulAt": "Last success {date}",
         "rollbackTo": "Rollback to v{version}",
+        "stage": {
+          "activation": "Activation",
+          "cleanup": "Cleanup",
+          "compatibility": "Compatibility",
+          "installation": "Installation",
+          "manifest_validation": "Manifest check",
+          "reload": "Reload",
+          "runtime_execution": "Runtime"
+        },
         "title": "Verification",
         "verifiedAt": "Verified {date}"
       },
+      "versionLabel": "v{version}",
       "viewInfo": "Details",
       "viewManifest": "Raw JSON",
       "viewToggleAria": "Switch between plugin details and the raw manifest",
       "workflowTriggers": "Workflow triggers"
+    },
+    "detailData": {
+      "dataManagement": {
+        "deleting": "Deleting…",
+        "mirroredBlocked": "This plugin's data lives on the desktop that runs it. Delete it there.",
+        "purgeFailed": "Couldn't delete the data for {pluginId}.",
+        "purged": "{count, plural, =0 {{pluginId} had no stored tables left to clear.} one {Deleted the data in # table for {pluginId}.} other {Deleted the data in # tables for {pluginId}.}}",
+        "tableCount": "{count, plural, one {# table} other {# tables}}"
+      },
+      "dependencyCount": "{count, plural, =0 {None declared} other {# declared}}"
     },
     "devSession": {
       "actions": {
@@ -32454,7 +32608,7 @@
       "any": "Any",
       "apply": "Apply",
       "capability": "Capability",
-      "description": "Narrow the installed list by capability, permission, source, or status.",
+      "description": "Narrow the installed list by capability, permission, source, status, or tag.",
       "hasUpdate": "Has update",
       "permission": "Permission",
       "query": "Search",
@@ -32470,6 +32624,8 @@
       },
       "source": "Source",
       "status": "Status",
+      "tag": "Tag",
+      "tagNone": "No installed plugin declares keywords.",
       "title": "Plugin filters"
     },
     "githubDialog": {
@@ -32499,6 +32655,7 @@
         "rateLimitsNote": "Rate limits and sandbox defaults are configured globally and visible per-plugin in the plugin detail.",
         "securityPosture": "Strict sandboxing",
         "securityPostureHint": "Deny network egress for plugins that didn't declare an allowlist, and prompt for every declared permission. Off (balanced) keeps the default: dangerous permissions still prompt; plugins without a declared allowlist keep unrestricted egress.",
+        "securityPostureLoading": "Loading your sandboxing setting…",
         "signatureRequired": "Require signed plugins",
         "signatureRequiredHint": "Refuse to load plugins without a verified publisher signature.",
         "trustedPublishersOnly": "Trusted publishers only",
@@ -32507,11 +32664,16 @@
     },
     "grid": {
       "browseMarketplace": "Browse marketplace",
+      "clearFilters": "Clear filters",
       "emptyAll": "No plugins installed yet.",
       "emptyFiltered": "No plugins match the current filters.",
+      "listAria": "Installed plugins",
       "loading": "Loading plugins…",
+      "pluginCount": "{count, plural, =1 {1 plugin} other {# plugins}}",
       "selectAll": "Select all ({count})",
-      "selectAllAria": "Select all visible plugins"
+      "selectAllAria": "Select all visible plugins",
+      "selectionDone": "Done",
+      "selectionStart": "Select"
     },
     "import": {
       "cancel": "Cancel",
@@ -32571,8 +32733,10 @@
         "conflict": "Install cancelled at the conflict-review step.",
         "permission": "Install cancelled at the permission-review step."
       },
+      "installEntryMissing": "This plugin is no longer listed. Refresh the marketplace and try again.",
       "installFailed": "Install failed: {message}",
       "installSucceeded": "{name} installed.",
+      "installerLoading": "The installer is still loading. Try again in a moment.",
       "loadMore": "Load more ({shown}/{total})",
       "loading": "Loading marketplace…",
       "manageSources": "GitHub sources",
@@ -32604,6 +32768,8 @@
     },
     "marketplaceCard": {
       "addToCompareAria": "Add {name} to comparison",
+      "compareFull": "Comparison already holds two plugins. Remove one to compare this one.",
+      "compareFullLabel": "Why this plugin can't be compared",
       "dangerous": "Dangerous",
       "install": "Install",
       "installing": "Installing…",
@@ -32716,23 +32882,28 @@
     "permissionReview": {
       "auditEmpty": "No audit events for this plugin yet.",
       "auditLogTitle": "Recent audit events",
+      "auditShowAll": "Show all {count} entries",
+      "auditShowFewer": "Show fewer",
       "cancel": "Cancel",
       "close": "Close",
       "colActions": "",
       "colDeclared": "Manifest",
-      "colGranted": "Granted",
       "colOptional": "Optional",
       "colPermission": "Permission",
+      "colStatus": "Status",
       "colTier": "Tier",
       "description": "Review what this plugin declared, what's currently granted, and adjust at runtime. Dangerous permissions are highlighted.",
       "empty": "This plugin doesn't declare or hold any permissions.",
       "grant": "Grant",
+      "listTitle": "Permissions",
       "nodeNetworkUnavailable": "Unavailable in the Node runtime: scoped in-process network brokering is not implemented.",
       "nodeSubprocessUnavailable": "Unavailable in the Node runtime: scoped in-process subprocess brokering is not implemented.",
       "revoke": "Revoke",
       "revokeAll": "Revoke all",
       "revokeAllConfirmBody": "{name} loses {count, plural, =1 {its 1 granted permission} other {all # granted permissions}}, including the ones its manifest declares. It may stop working until you grant them again.",
       "revokeAllConfirmTitle": "Revoke every permission?",
+      "statusGranted": "Granted",
+      "statusNotGranted": "Not granted",
       "tierHint": {
         "confirm": "Show an overlay each time and wait for the user to allow or reject.",
         "forbid": "Always deny — even if the manifest declares it.",
@@ -33016,7 +33187,19 @@
       "title": "Review before installing {name}"
     },
     "resourceManager": {
-      "noLimits": "This plugin has no rate limits configured.",
+      "loadingUsage": "Loading recorded usage…",
+      "note": "Each operation draws from a token bucket: it allows a short burst, then refills at the sustained rate shown. Recorded counts are all-time totals, not usage within the current window.",
+      "rate": {
+        "day": "{count, plural, =1 {{limit, number} per day} other {{limit, number} every # days}}",
+        "hour": "{count, plural, =1 {{limit, number} per hour} other {{limit, number} every # hours}}",
+        "millisecond": "{count, plural, =1 {{limit, number} per millisecond} other {{limit, number} every # milliseconds}}",
+        "minute": "{count, plural, =1 {{limit, number} per minute} other {{limit, number} every # minutes}}",
+        "second": "{count, plural, =1 {{limit, number} per second} other {{limit, number} every # seconds}}",
+        "total": "{limit, number} in total, never refilled"
+      },
+      "rateWithBurst": "{rate} · bursts up to {burst, number}",
+      "recorded": "{count, plural, =0 {No calls recorded} one {# call recorded (all time)} other {# calls recorded (all time)}}",
+      "recordedLast": "{recorded} · last <time>{date}</time>",
       "title": "Resource usage"
     },
     "rollback": {
@@ -33058,7 +33241,11 @@
       "countTotal": "{count} jobs",
       "empty": "No plugin-contributed scheduled jobs yet.",
       "loading": "Loading scheduled jobs…",
+      "noLastRun": "Never",
+      "noMatch": "No jobs match this filter.",
+      "noNextRun": "Not scheduled",
       "openScheduler": "Open scheduler",
+      "showAllJobs": "Show all jobs",
       "status": {
         "active": "Active",
         "all": "All",
@@ -33090,7 +33277,8 @@
         "enabled": "Enabled",
         "errored": "Errored",
         "updates": "Updates available"
-      }
+      },
+      "navAria": "Plugin sections"
     },
     "shared": {
       "capabilityCount": "{count, plural, one {# capability} other {# capabilities}}",
@@ -33166,16 +33354,20 @@
       "fromVsix": "From .vsix…",
       "fromWasmGit": "From Git (WASM)…",
       "groupCogpack": "Cogpacks",
+      "groupConvert": "From another ecosystem",
       "groupGit": "Git",
       "groupLocal": "Local plugin",
       "groupManifest": "Manifest",
       "groupWasm": "Plugin bundle",
       "install": "Install",
       "loadUnpacked": "Load unpacked…",
+      "moreActions": "More plugin actions",
       "syncDone": "Registry synced — {count, plural, =0 {no updates available} one {# update available} other {# updates available}}",
       "syncFailed": "Registry sync failed: {message}",
       "syncRegistry": "Sync registry",
-      "syncRegistryAria": "Refresh marketplace registry and check installed plugins for updates"
+      "syncRegistryAria": "Refresh marketplace registry and check installed plugins for updates",
+      "syncRegistryHint": "Refresh the marketplace catalog and mark installed plugins that have updates.",
+      "syncing": "Syncing registry…"
     },
     "triggers": {
       "badge": {
@@ -33221,17 +33413,21 @@
       "checking": "Checking…",
       "close": "Close",
       "description": "Updates fetched from the marketplace.",
+      "descriptionSingle": "Checks the marketplace for a newer version of this plugin.",
       "install": "Install",
       "installAll": "Install all",
       "recheck": "Re-check",
       "title": "Plugin updates",
+      "titleSingle": "Update {name}",
       "upToDate": "All plugins are up to date.",
+      "upToDateSingle": "This plugin is up to date.",
       "updatesAvailable": {
         "description": "Auto-update is set to notify only, so nothing was installed.",
         "descriptionPinned": "{count, plural, =1 {1 of them is pinned by the active cogset, so it was not installed.} other {# of them are pinned by the active cogset, so they were not installed.}}",
         "review": "Review",
         "title": "{count, plural, =1 {1 plugin update available} other {# plugin updates available}}"
-      }
+      },
+      "versionChange": "v{from} → v{to}"
     },
     "view": {
       "card": "Cards",

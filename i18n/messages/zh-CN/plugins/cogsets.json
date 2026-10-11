@@ -18,7 +18,8 @@
     "mirroredHint": "切换请求会发送到桌面端并由其执行。齿轮组需在桌面端编辑。",
     "queued": "已发送到桌面端，桌面端在线时会切换到{name}。",
     "switched": "已切换到{name}",
-    "switchFailed": "无法切换到{name}"
+    "switchFailed": "无法切换到{name}",
+    "triggerLabel": "齿轮组"
   },
   "confirmRuns": {
     "title": "在智能体运行时切换？",

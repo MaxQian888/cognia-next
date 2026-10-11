@@ -8,11 +8,23 @@
 // shared `plugins-policy-storage` helpers; strict-sandboxing posture lives in
 // the settings store (Dexie). Every toggle re-applies to the live runtime so
 // changes take effect without a reload.
+//
+// Laid out as one flat list of setting rows divided by hairlines — no card:
+// the governance pane is already the surface, and a box around the list only
+// added a border and padding. Rows stack their control under the text in a
+// narrow pane and sit beside it once the PANE (anonymous `@container`, not the
+// viewport) has room.
+//
+// The four policy flags come from localStorage synchronously. Strict
+// sandboxing lives in the settings store, which loads asynchronously; until
+// it has, that row shows a placeholder instead of a switch that would read
+// "off" for a user who turned it on.
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Card } from "@/components/ui/card"
+import type { ReactNode } from "react"
 import { Label } from "@/components/ui/label"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 import { applyPluginPolicyToRuntime } from "@/lib/plugin/core/policy-runtime"
@@ -24,6 +36,7 @@ import {
 
 export function PluginGovernancePolicyTab() {
   const t = useTranslations("plugins.governance.policy")
+  const settingsLoaded = useSettingsStore((s) => s.loaded)
   const pluginSecurityPosture = useSettingsStore((s) => s.settings?.pluginSecurityPosture)
   const setPluginSecurityPosture = useSettingsStore((s) => s.setPluginSecurityPosture)
   const strictPosture = (pluginSecurityPosture ?? "balanced") === "strict"
@@ -45,74 +58,100 @@ export function PluginGovernancePolicyTab() {
   }
 
   return (
-    <Card className="p-4 space-y-4" data-testid="plugin-governance-policy">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1 min-w-0">
-          <Label htmlFor="plugins-governance-mode">{t("governance")}</Label>
-          <p className="text-xs text-muted-foreground">{t("governanceHint")}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">{t("governanceWarn")}</span>
-          <Switch
-            id="plugins-governance-mode"
-            checked={policy.governance === "block"}
-            onCheckedChange={(checked) => update({ governance: checked ? "block" : "warn" })}
-          />
-          <span className="text-xs text-muted-foreground">{t("governanceBlock")}</span>
-        </div>
-      </div>
+    <div className="@container" data-testid="plugin-governance-policy">
+      <div className="divide-y">
+        <PolicyRow id="plugins-governance-mode" label={t("governance")} hint={t("governanceHint")}>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{t("governanceWarn")}</span>
+            <Switch
+              id="plugins-governance-mode"
+              checked={policy.governance === "block"}
+              onCheckedChange={(checked) => update({ governance: checked ? "block" : "warn" })}
+            />
+            <span className="text-xs text-muted-foreground">{t("governanceBlock")}</span>
+          </div>
+        </PolicyRow>
 
-      <div className="flex items-start justify-between gap-4 border-t pt-4">
-        <div className="space-y-1 min-w-0">
-          <Label htmlFor="plugins-signature-required">{t("signatureRequired")}</Label>
-          <p className="text-xs text-muted-foreground">{t("signatureRequiredHint")}</p>
-        </div>
-        <Switch
+        <PolicyRow
           id="plugins-signature-required"
-          checked={policy.signatureRequired}
-          onCheckedChange={(checked) => update({ signatureRequired: checked })}
-        />
-      </div>
+          label={t("signatureRequired")}
+          hint={t("signatureRequiredHint")}
+        >
+          <Switch
+            id="plugins-signature-required"
+            checked={policy.signatureRequired}
+            onCheckedChange={(checked) => update({ signatureRequired: checked })}
+          />
+        </PolicyRow>
 
-      <div className="flex items-start justify-between gap-4 border-t pt-4">
-        <div className="space-y-1 min-w-0">
-          <Label htmlFor="plugins-trusted-publishers-only">{t("trustedPublishersOnly")}</Label>
-          <p className="text-xs text-muted-foreground">{t("trustedPublishersOnlyHint")}</p>
-        </div>
-        <Switch
+        <PolicyRow
           id="plugins-trusted-publishers-only"
-          checked={policy.trustedPublishersOnly}
-          onCheckedChange={(checked) => update({ trustedPublishersOnly: checked })}
-        />
-      </div>
+          label={t("trustedPublishersOnly")}
+          hint={t("trustedPublishersOnlyHint")}
+        >
+          <Switch
+            id="plugins-trusted-publishers-only"
+            checked={policy.trustedPublishersOnly}
+            onCheckedChange={(checked) => update({ trustedPublishersOnly: checked })}
+          />
+        </PolicyRow>
 
-      <div className="flex items-start justify-between gap-4 border-t pt-4">
-        <div className="space-y-1 min-w-0">
-          <Label htmlFor="plugins-auto-update">{t("autoUpdate")}</Label>
-          <p className="text-xs text-muted-foreground">{t("autoUpdateHint")}</p>
-        </div>
-        <Switch
-          id="plugins-auto-update"
-          checked={policy.autoUpdate}
-          onCheckedChange={(checked) => update({ autoUpdate: checked })}
-        />
-      </div>
+        <PolicyRow id="plugins-auto-update" label={t("autoUpdate")} hint={t("autoUpdateHint")}>
+          <Switch
+            id="plugins-auto-update"
+            checked={policy.autoUpdate}
+            onCheckedChange={(checked) => update({ autoUpdate: checked })}
+          />
+        </PolicyRow>
 
-      <div className="flex items-start justify-between gap-4 border-t pt-4">
-        <div className="space-y-1 min-w-0">
-          <Label htmlFor="plugins-security-posture">{t("securityPosture")}</Label>
-          <p className="text-xs text-muted-foreground">{t("securityPostureHint")}</p>
-        </div>
-        <Switch
+        <PolicyRow
           id="plugins-security-posture"
-          checked={strictPosture}
-          onCheckedChange={(checked) =>
-            void setPluginSecurityPosture(checked ? "strict" : "balanced")
-          }
-        />
-      </div>
+          label={t("securityPosture")}
+          hint={t("securityPostureHint")}
+        >
+          {settingsLoaded ? (
+            <Switch
+              id="plugins-security-posture"
+              checked={strictPosture}
+              onCheckedChange={(checked) =>
+                void setPluginSecurityPosture(checked ? "strict" : "balanced")
+              }
+            />
+          ) : (
+            <span role="status" className="inline-flex items-center">
+              <Skeleton
+                className="h-[1.15rem] w-8 rounded-full"
+                data-testid="plugin-governance-posture-loading"
+              />
+              <span className="sr-only">{t("securityPostureLoading")}</span>
+            </span>
+          )}
+        </PolicyRow>
 
-      <div className="border-t pt-4 text-xs text-muted-foreground">{t("rateLimitsNote")}</div>
-    </Card>
+        <p className="py-3 text-xs text-muted-foreground">{t("rateLimitsNote")}</p>
+      </div>
+    </div>
+  )
+}
+
+function PolicyRow({
+  id,
+  label,
+  hint,
+  children,
+}: {
+  id: string
+  label: string
+  hint: string
+  children: ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-2 py-3 first:pt-0 @md:flex-row @md:items-start @md:justify-between @md:gap-4">
+      <div className="min-w-0 space-y-1">
+        <Label htmlFor={id}>{label}</Label>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </div>
+      <div className="flex shrink-0 items-center pointer-coarse:min-h-10">{children}</div>
+    </div>
   )
 }

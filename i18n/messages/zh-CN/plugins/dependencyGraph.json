@@ -1,11 +1,24 @@
 {
+  "allResolved": "所有依赖均已解析",
+  "atVersion": "@ {version}",
+  "conflictLine": "{dependencyId}：{reason}",
   "conflictsTitle": "{count} 个冲突",
   "cyclesTitle": "{count} 个依赖循环",
   "graphLabel": "依赖关系图，按安装顺序分层",
+  "hideGraph": "隐藏依赖图",
   "loading": "解析依赖中…",
   "missing": "缺失",
+  "missingCount": "缺失 {count} 个",
   "noDependencies": "该插件没有声明任何依赖。",
   "root": "根",
+  "showAll": "显示全部 {count} 项",
+  "showGraph": "显示依赖图",
+  "showLess": "收起",
+  "source": {
+    "installed": "已安装",
+    "marketplace": "市场",
+    "missing": "缺失"
+  },
   "title": "依赖图",
   "unresolved": "未解决",
   "warningsTitle": "{count} 个警告"

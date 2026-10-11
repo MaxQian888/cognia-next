@@ -2,10 +2,11 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import type { PermissionAuditEntry } from "@/lib/plugin/security/permission-guard"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "zh-CN",
   useTranslations: () => (key: string) => key,
   // Rows render their time through `<AuditLogEntry>`'s next-intl formatter.
   useFormatter: () => ({
@@ -14,8 +15,20 @@ jest.mock("next-intl", () => ({
 }))
 
 let mockAuditLog: PermissionAuditEntry[] = []
+// "alpha" is installed with a zh-CN name; "beta" is no longer installed.
+const mockInstalled = [
+  {
+    id: "alpha",
+    name: "Alpha",
+    manifest: {
+      nameKey: "plugin.name",
+      i18n: { locales: { "zh-CN": { "plugin.name": "阿尔法" } } },
+    },
+  },
+]
 
 jest.mock("@/hooks/plugins", () => ({
+  usePlugins: () => ({ all: mockInstalled, loading: false }),
   usePluginPermissions: () => ({
     groups: {},
     dangerous: [],
@@ -105,5 +118,20 @@ describe("PluginAuditLog", () => {
     render(<PluginAuditLog />)
     expect(screen.getByTestId("plugin-audit-filter-plugin")).toBeInTheDocument()
     expect(screen.getByTestId("plugin-audit-filter-permission")).toBeInTheDocument()
+  })
+
+  it("names installed plugins by their localized name, and falls back to the id", () => {
+    render(<PluginAuditLog />)
+    const list = screen.getByTestId("plugin-audit-log-list")
+    expect(within(list).getAllByText("阿尔法")).toHaveLength(2)
+    expect(within(list).getByText("beta")).toBeInTheDocument()
+    expect(within(list).queryByText("alpha")).not.toBeInTheDocument()
+  })
+
+  it("lists the entries flat, with no card and no inner scroller", () => {
+    const { container } = render(<PluginAuditLog />)
+    expect(container.querySelector("[data-slot='card']")).toBeNull()
+    expect(container.querySelector("[data-slot='scroll-area']")).toBeNull()
+    expect(screen.getByTestId("plugin-audit-log")).toHaveClass("@container")
   })
 })

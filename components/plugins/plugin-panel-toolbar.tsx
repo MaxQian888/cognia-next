@@ -11,6 +11,14 @@
 //   • Git / local / WASM (desktop only) — these read a disk path or a git
 //     checkout and run in the Rust backend
 //
+// Layout: one primary action (Install, a menu of every install lane, plus
+// "Convert plugin…" since converting is how a plugin from another ecosystem
+// gets installed), the cogset switcher, Check for updates, and an overflow
+// menu for the rarely used registry sync. These used to be five equal-weight
+// buttons in a row, with Convert and Sync competing with Install for the eye.
+// `layout="compact"` (the phone) keeps Install and the cogset visible and
+// folds Check for updates into the overflow menu too.
+//
 // The desktop-only lanes are RENDERED EVERYWHERE and disabled off the desktop
 // shell, not hidden. Hiding them collapsed three different answers into one
 // blank menu: "this does not exist", "this exists and needs the desktop app",
@@ -34,6 +42,7 @@ import {
   FileArchiveIcon,
   GitMergeIcon,
   ArrowRightLeftIcon,
+  MoreHorizontalIcon,
   PackageIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -46,6 +55,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { canUseTauriInvoke } from "@/lib/native/utils"
+import { cn } from "@/lib/utils"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
 import { PluginInstallFromGithubDialog } from "./dialogs/plugin-install-from-github-dialog"
@@ -73,6 +83,12 @@ interface Props {
   onSyncRegistry?: () => Promise<void> | void
   /** Set by the parent while a sync is in flight to drive the spinner. */
   syncing?: boolean
+  /**
+   * `"row"` (default): the desktop header. `"compact"`: the phone, where only
+   * Install and the cogset stay on the bar and everything else is in the
+   * overflow menu.
+   */
+  layout?: "row" | "compact"
 }
 
 function DesktopOnlyChip({ label }: { label: string }) {
@@ -83,7 +99,13 @@ function DesktopOnlyChip({ label }: { label: string }) {
   )
 }
 
-export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = false }: Props) {
+export function PluginPanelToolbar({
+  onCheckUpdates,
+  onSyncRegistry,
+  syncing = false,
+  layout = "row",
+}: Props) {
+  const compact = layout === "compact"
   const t = useTranslations("plugins.toolbar")
   const setImportStaging = usePluginsStore((s) => s.setImportStaging)
   const [conversionOpen, setConversionOpen] = useState(false)
@@ -153,10 +175,19 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
 
   return (
     <>
-      <div className="flex items-center gap-2 flex-wrap">
+      <div
+        className={cn("flex items-center gap-2", compact ? "flex-nowrap" : "flex-wrap")}
+        data-layout={layout}
+        data-testid="plugin-panel-toolbar"
+      >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" disabled={busy || wasmLocal.busy}>
+            <Button
+              size="sm"
+              disabled={busy || wasmLocal.busy}
+              className="pointer-coarse:h-10"
+              data-testid="plugin-install-trigger"
+            >
               <PlusIcon className="size-3.5 mr-1.5" />
               {t("install")}
             </Button>
@@ -238,6 +269,19 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
               <GitMergeIcon className="size-3.5 mr-2" />
               {t("fromWasmGit")}
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="flex items-center justify-between gap-2">
+              {t("groupConvert")}
+              {!wasmAvailable && <DesktopOnlyChip label={t("desktopOnlyHint")} />}
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={() => setConversionOpen(true)}
+              disabled={!wasmAvailable}
+              data-testid="plugin-install-convert"
+            >
+              <ArrowRightLeftIcon className="size-3.5 mr-2" />
+              {t("convertPlugin")}
+            </DropdownMenuItem>
             {!wasmAvailable && (
               <p
                 className="px-2 py-1.5 text-xs text-muted-foreground"
@@ -248,39 +292,67 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
             )}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!wasmAvailable}
-          onClick={() => setConversionOpen(true)}
-          aria-label={t("convertPlugin")}
-          title={!wasmAvailable ? t("desktopOnlyHint") : undefined}
-        >
-          <ArrowRightLeftIcon className="size-3.5 lg:mr-1.5" />
-          <span className="hidden lg:inline">{t("convertPlugin")}</span>
-        </Button>
         <CogsetSwitcher />
-        <Button size="sm" variant="outline" onClick={onCheckUpdates} aria-label={t("checkUpdates")}>
-          <RefreshCcwIcon className="size-3.5 lg:mr-1.5" />
-          <span className="hidden lg:inline">{t("checkUpdates")}</span>
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void onSyncRegistry?.()}
-          disabled={syncing || !onSyncRegistry}
-          aria-label={t("syncRegistryAria")}
-        >
-          {syncing ? (
-            <Loader2Icon className="size-3.5 lg:mr-1.5 animate-spin" />
-          ) : (
-            <DownloadIcon className="size-3.5 lg:mr-1.5" />
-          )}
-          <span className="hidden lg:inline">{t("syncRegistry")}</span>
-        </Button>
-        <div className="ml-auto">
-          <CliStatusChip />
-        </div>
+        {compact ? null : (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onCheckUpdates}
+            aria-label={t("checkUpdates")}
+            data-testid="plugin-check-updates"
+          >
+            <RefreshCcwIcon className="size-3.5 @3xl/feature-header:mr-1.5" />
+            <span className="hidden @3xl/feature-header:inline">{t("checkUpdates")}</span>
+          </Button>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-8 shrink-0 pointer-coarse:size-10"
+              aria-label={t("moreActions")}
+              data-testid="plugin-toolbar-more"
+            >
+              {syncing ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : (
+                <MoreHorizontalIcon className="size-4" />
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            {compact ? (
+              <DropdownMenuItem onClick={onCheckUpdates} data-testid="plugin-check-updates">
+                <RefreshCcwIcon className="size-3.5 mr-2" />
+                {t("checkUpdates")}
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem
+              onClick={() => void onSyncRegistry?.()}
+              disabled={syncing || !onSyncRegistry}
+              className="items-start"
+              data-testid="plugin-sync-registry"
+            >
+              {syncing ? (
+                <Loader2Icon className="mt-0.5 size-3.5 mr-2 shrink-0 animate-spin" />
+              ) : (
+                <DownloadIcon className="mt-0.5 size-3.5 mr-2 shrink-0" />
+              )}
+              <span className="flex min-w-0 flex-col">
+                <span>{syncing ? t("syncing") : t("syncRegistry")}</span>
+                <span className="text-[11px] leading-snug whitespace-normal text-muted-foreground">
+                  {t("syncRegistryHint")}
+                </span>
+              </span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {compact ? null : (
+          <div className="ml-auto">
+            <CliStatusChip />
+          </div>
+        )}
       </div>
 
       {wasmLocal.error && (

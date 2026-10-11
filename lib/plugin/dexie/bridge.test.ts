@@ -12,7 +12,12 @@
 
 import "fake-indexeddb/auto"
 import Dexie from "dexie"
-import { applyPluginTables, removePluginTables, restorePluginTables } from "./bridge"
+import {
+  applyPluginTables,
+  clearPluginTables,
+  removePluginTables,
+  restorePluginTables,
+} from "./bridge"
 import { getPluginDexieMeta } from "./meta"
 
 // We bypass CogniaDB entirely and spin up a lightweight test Dexie instance
@@ -337,6 +342,82 @@ describe("removePluginTables", () => {
     const meta = await getPluginDexieMeta("github-delivery")
     expect(meta).toBeUndefined()
     expect(db.tables.map((t) => t.name)).not.toContain("github-delivery:repos")
+  })
+})
+
+describe("clearPluginTables", () => {
+  let db: Dexie
+
+  beforeEach(() => {
+    db = makeTestDb()
+    __setTestDb(db)
+  })
+
+  afterEach(async () => {
+    db.close()
+    await Dexie.delete(db.name)
+  })
+
+  it("erases every row but keeps the stores and the meta row", async () => {
+    await applyPluginTables(db, "github-delivery", {
+      tables: [
+        { name: "repos", schema: "++id" },
+        { name: "events", schema: "++id" },
+      ],
+    })
+    await db.table("github-delivery:repos").bulkAdd([{ name: "a" }, { name: "b" }])
+    await db.table("github-delivery:events").add({ kind: "push" })
+
+    const cleared = await clearPluginTables(db, "github-delivery")
+
+    expect(cleared.sort()).toEqual(["github-delivery:events", "github-delivery:repos"])
+    expect(await db.table("github-delivery:repos").count()).toBe(0)
+    expect(await db.table("github-delivery:events").count()).toBe(0)
+    // Not an uninstall: the tables and their registration survive.
+    expect(db.tables.map((t) => t.name)).toContain("github-delivery:repos")
+    expect(await getPluginDexieMeta("github-delivery")).toBeDefined()
+  })
+
+  it("leaves other plugins' tables untouched", async () => {
+    await applyPluginTables(db, "alpha", { tables: [{ name: "items", schema: "++id" }] })
+    await applyPluginTables(db, "beta", { tables: [{ name: "items", schema: "++id" }] })
+    await db.table("alpha:items").add({ v: 1 })
+    await db.table("beta:items").add({ v: 2 })
+
+    await clearPluginTables(db, "alpha")
+
+    expect(await db.table("alpha:items").count()).toBe(0)
+    expect(await db.table("beta:items").count()).toBe(1)
+  })
+
+  it("returns an empty list for a plugin with no registered tables", async () => {
+    await expect(clearPluginTables(db, "unknown-plugin")).resolves.toEqual([])
+  })
+
+  it("clears a store that exists physically but is not declared in the live schema", async () => {
+    await applyPluginTables(db, "gone", { tables: [{ name: "rows", schema: "++id" }] })
+    await db.table("gone:rows").bulkAdd([{ v: 1 }, { v: 2 }])
+    const name = db.name
+    db.close()
+
+    // A fresh process declares only the static schema; the plugin store is
+    // physical-only until a restore re-declares it.
+    const fresh = new Dexie(name)
+    fresh.version(1).stores({ pluginDexieMeta: "&pluginId, appliedAt" })
+    __setTestDb(fresh)
+    db = fresh
+    await fresh.open()
+    expect(fresh.tables.map((t) => t.name)).not.toContain("gone:rows")
+
+    const cleared = await clearPluginTables(fresh, "gone")
+
+    expect(cleared).toEqual(["gone:rows"])
+    const count = await new Promise<number>((resolve, reject) => {
+      const request = fresh.backendDB().transaction("gone:rows").objectStore("gone:rows").count()
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    expect(count).toBe(0)
   })
 })
 

@@ -1,8 +1,13 @@
 {
   "browseMarketplace": "浏览市场",
+  "clearFilters": "清除筛选",
   "emptyAll": "尚未安装任何插件。",
   "emptyFiltered": "没有插件匹配当前筛选条件。",
+  "listAria": "已安装的插件",
   "loading": "加载插件中…",
+  "pluginCount": "{count} 个插件",
   "selectAll": "全选（{count}）",
-  "selectAllAria": "选择所有可见插件"
+  "selectAllAria": "选择所有可见插件",
+  "selectionDone": "完成",
+  "selectionStart": "选择"
 }

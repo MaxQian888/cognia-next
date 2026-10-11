@@ -20,5 +20,6 @@
     "enabled": "已启用",
     "errored": "出错",
     "updates": "可更新"
-  }
+  },
+  "navAria": "插件分区"
 }

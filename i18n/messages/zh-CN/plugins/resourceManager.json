@@ -1,4 +1,16 @@
 {
-  "noLimits": "该插件未配置任何速率限制。",
+  "loadingUsage": "正在加载已记录的用量…",
+  "note": "每类操作都使用令牌桶：允许短时突发，之后按所示的持续速率补充。已记录次数为累计总数，并非当前时间窗口内的用量。",
+  "rate": {
+    "day": "{count, plural, =1 {每天 {limit, number} 次} other {每 # 天 {limit, number} 次}}",
+    "hour": "{count, plural, =1 {每小时 {limit, number} 次} other {每 # 小时 {limit, number} 次}}",
+    "millisecond": "{count, plural, =1 {每毫秒 {limit, number} 次} other {每 # 毫秒 {limit, number} 次}}",
+    "minute": "{count, plural, =1 {每分钟 {limit, number} 次} other {每 # 分钟 {limit, number} 次}}",
+    "second": "{count, plural, =1 {每秒 {limit, number} 次} other {每 # 秒 {limit, number} 次}}",
+    "total": "共 {limit, number} 次，不再补充"
+  },
+  "rateWithBurst": "{rate} · 可突发 {burst, number} 次",
+  "recorded": "{count, plural, =0 {尚无调用记录} other {累计记录 # 次}}",
+  "recordedLast": "{recorded} · 最近一次 <time>{date}</time>",
   "title": "资源用量"
 }

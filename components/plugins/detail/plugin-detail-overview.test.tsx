@@ -2,13 +2,18 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
   useLocale: () => "en",
+  useFormatter: () => ({
+    dateTime: (date: Date) => `fmt:${date.toISOString().slice(0, 10)}`,
+  }),
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
+    if (vars && typeof vars.version === "string") return `${key}:${vars.version}`
+    if (vars && typeof vars.date === "string") return `${key}:${vars.date}`
     return key
   },
 }))
@@ -45,6 +50,21 @@ jest.mock("@/components/chat/renderers/code-block", () => ({
   },
 }))
 
+// The dependency panel queries the plugin table on its own; its rows and
+// installed-state logic are pinned in its own test. Here only the wiring
+// matters: the overview hands it a way to open a dependency's detail.
+jest.mock("../_shared/plugin-dependency-panel", () => ({
+  PluginDependencyPanel: ({
+    onOpenDependency,
+  }: {
+    onOpenDependency?: (pluginId: string) => void
+  }) => (
+    <button type="button" data-testid="dep-open-beta" onClick={() => onOpenDependency?.("beta")}>
+      beta
+    </button>
+  ),
+}))
+
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginDetailOverview } from "./plugin-detail-overview"
 
@@ -76,15 +96,56 @@ describe("PluginDetailOverview", () => {
   beforeEach(() => {
     mockPlugin = makePlugin()
     mockPluginInMemory = undefined
-    usePluginsStore.setState({ rollbackTarget: null })
+    usePluginsStore.setState({ rollbackTarget: null, detailOverviewView: "info" })
   })
 
   it("renders core meta rows from the manifest", () => {
     render(<PluginDetailOverview pluginId="alpha" />)
     expect(screen.getByText("alpha")).toBeInTheDocument()
-    expect(screen.getByText("1.2.3")).toBeInTheDocument()
     expect(screen.getByText("MIT")).toBeInTheDocument()
-    expect(screen.getByText("https://example.com")).toBeInTheDocument()
+    // Scheme dropped for the narrow column; the link keeps the full URL.
+    expect(screen.getByRole("link", { name: "example.com" })).toHaveAttribute(
+      "href",
+      "https://example.com"
+    )
+  })
+
+  it("leaves the version to the header instead of repeating it", () => {
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.queryByText("metaVersion")).toBeNull()
+  })
+
+  it("localizes source, type and dates instead of printing stored values", () => {
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.getByText("marketplace")).toBeInTheDocument() // plugins.source:marketplace
+    expect(screen.getByText("pluginType.frontend")).toBeInTheDocument()
+    expect(screen.getByText("fmt:2026-01-01")).toBeInTheDocument()
+    expect(screen.getByText("fmt:2026-02-01")).toBeInTheDocument()
+  })
+
+  it("never turns a non-http homepage into a link", () => {
+    mockPlugin = makePlugin({
+      manifest: { id: "alpha", homepage: "javascript:alert(1)" } as PluginRow["manifest"],
+    })
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument()
+    expect(screen.queryByRole("link")).toBeNull()
+  })
+
+  it("renders the README in the flow, with no nested scroller", () => {
+    mockPlugin = makePlugin({ readme: "# Hello" })
+    render(<PluginDetailOverview pluginId="alpha" />)
+    const readme = screen.getByTestId("plugin-detail-readme")
+    expect(readme.innerHTML).not.toMatch(/max-h-\[|overflow-y-auto/)
+  })
+
+  it("says when there is no README", () => {
+    mockPlugin = makePlugin({
+      readme: undefined,
+      manifest: { id: "alpha" } as PluginRow["manifest"],
+    })
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.getByTestId("plugin-detail-no-readme")).toHaveTextContent("noReadme")
   })
 
   it("says what a VS Code extension uses that Cognia does not provide", () => {
@@ -105,27 +166,32 @@ describe("PluginDetailOverview", () => {
     expect(screen.queryByTestId("plugin-vscode-compat-section")).not.toBeInTheDocument()
   })
 
-  it("shows the error card when plugin.error is set", () => {
+  it("shows the last error as a ruled callout, not a box", () => {
     mockPlugin = makePlugin({ error: "boom", status: "error" })
     render(<PluginDetailOverview pluginId="alpha" />)
-    expect(screen.getByText("metaError")).toBeInTheDocument()
-    expect(screen.getByText("boom")).toBeInTheDocument()
+    const callout = screen.getByTestId("plugin-detail-last-error")
+    expect(callout).toHaveTextContent("metaError")
+    expect(callout).toHaveTextContent("boom")
+    expect(callout).toHaveAttribute("role", "alert")
+    expect(callout.className).toContain("border-l-2")
+    expect(callout.className).not.toContain("rounded")
   })
 
-  it("opens the rollback target when the Rollback button is clicked", () => {
+  it("offers no unconditional Rollback button (the header menu gates it)", () => {
     render(<PluginDetailOverview pluginId="alpha" />)
-    fireEvent.click(screen.getByLabelText("rollbackAria:Alpha"))
-    expect(usePluginsStore.getState().rollbackTarget).toBe("alpha")
+    expect(screen.queryByLabelText("rollbackAria:Alpha")).toBeNull()
   })
 
   it("swaps the details body for the raw manifest in place, without a dialog", () => {
     codeBlockPropsMock.mockClear()
-    render(<PluginDetailOverview pluginId="alpha" />)
+    const { rerender } = render(<PluginDetailOverview pluginId="alpha" />)
     // Details is the landing view, so the meta list is what renders first.
     expect(screen.getByText("metaId")).toBeInTheDocument()
     expect(screen.queryByTestId("plugin-detail-raw-manifest")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText("viewManifest"))
+    // The header's "View raw manifest" writes the store.
+    act(() => usePluginsStore.getState().openDetailManifest())
+    rerender(<PluginDetailOverview pluginId="alpha" />)
 
     expect(screen.getByTestId("plugin-detail-raw-manifest")).toBeInTheDocument()
     // The manifest is handed to the CodeBlock as JSON for syntax highlighting.
@@ -138,20 +204,20 @@ describe("PluginDetailOverview", () => {
   })
 
   it("returns to the details view from the raw manifest", () => {
+    usePluginsStore.setState({ detailOverviewView: "manifest" })
     render(<PluginDetailOverview pluginId="alpha" />)
-    fireEvent.click(screen.getByText("viewManifest"))
-    fireEvent.click(screen.getByText("viewInfo"))
+    fireEvent.click(screen.getByTestId("plugin-detail-back-to-info"))
     expect(screen.getByText("metaId")).toBeInTheDocument()
     expect(screen.queryByTestId("plugin-detail-raw-manifest")).not.toBeInTheDocument()
   })
 
-  it("keeps a view selected when the active toggle is clicked again", () => {
+  it("opens an installed dependency's own detail", () => {
+    mockPlugin = makePlugin({
+      manifest: { id: "alpha", dependencies: { beta: "^1.0.0" } } as PluginRow["manifest"],
+    })
     render(<PluginDetailOverview pluginId="alpha" />)
-    fireEvent.click(screen.getByText("viewManifest"))
-    // Radix deselects a pressed single-value item. The pane has no third state,
-    // so the empty value must be ignored rather than blanking the body.
-    fireEvent.click(screen.getByText("viewManifest"))
-    expect(screen.getByTestId("plugin-detail-raw-manifest")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("dep-open-beta"))
+    expect(usePluginsStore.getState().detailPluginId).toBe("beta")
   })
 
   it("hides the Verification card when no snapshot exists in memory", () => {
@@ -177,10 +243,12 @@ describe("PluginDetailOverview", () => {
     const card = screen.getByTestId("plugin-detail-verification-card")
     expect(card).toBeInTheDocument()
     expect(card.textContent).toContain("title")
-    // Snapshot status pill within the card.
-    expect(card.textContent).toContain("enabled")
-    // verificationStage badge within the card.
-    expect(card.textContent).toContain("activation")
+    // Snapshot status and stage, by their labels.
+    expect(card.textContent).toContain("runtimeStatus.enabled")
+    expect(card.textContent).toContain("stage.activation")
+    // Dates through the locale formatter, not raw ISO strings.
+    expect(card.textContent).toContain("lastSuccessfulAt:fmt:2026-05-22")
+    expect(card.textContent).not.toContain("2026-05-22T00:00:00Z")
   })
 
   it("surfaces a rollback CTA when current and last-good diverge", () => {
@@ -247,6 +315,16 @@ describe("manifest metadata that had no renderer", () => {
     expect(chips).toHaveTextContent("ocr")
     fireEvent.click(screen.getByText("ocr"))
     expect(usePluginsStore.getState().filters.tag).toBe("ocr")
+  })
+
+  it("tells a covering host to step aside after a keyword filter", () => {
+    mockPlugin = makePlugin({
+      manifest: { ...makePlugin().manifest, keywords: ["ocr"] } as PluginRow["manifest"],
+    })
+    const onFilterApplied = jest.fn()
+    render(<PluginDetailOverview pluginId="alpha" onFilterApplied={onFilterApplied} />)
+    fireEvent.click(screen.getByText("ocr"))
+    expect(onFilterApplied).toHaveBeenCalled()
   })
 
   it("renders no keyword block when the manifest advertises none", () => {

@@ -1,8 +1,13 @@
 {
   "browseMarketplace": "Browse marketplace",
+  "clearFilters": "Clear filters",
   "emptyAll": "No plugins installed yet.",
   "emptyFiltered": "No plugins match the current filters.",
+  "listAria": "Installed plugins",
   "loading": "Loading plugins…",
+  "pluginCount": "{count, plural, =1 {1 plugin} other {# plugins}}",
   "selectAll": "Select all ({count})",
-  "selectAllAria": "Select all visible plugins"
+  "selectAllAria": "Select all visible plugins",
+  "selectionDone": "Done",
+  "selectionStart": "Select"
 }

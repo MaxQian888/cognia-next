@@ -69,8 +69,10 @@ describe("PluginLibraryHeader", () => {
   it("puts the status filters in the toolbar's segments slot", () => {
     mockUsePlugins.mockReturnValue({
       all: [
-        { id: "a", status: "enabled", manifest: {} },
-        { id: "b", status: "error", manifest: {} },
+        // "Enabled" counts the persisted `enabled` flag (`isPluginRowEnabled`),
+        // not `row.status`, which the manager writes at discovery.
+        { id: "a", status: "installed", enabled: true, manifest: {} },
+        { id: "b", status: "error", enabled: false, manifest: {} },
       ],
       filtered: [],
       totals: { total: 2, enabled: 1, errored: 1, loading: 0, updateAvailable: 0 },

@@ -2,7 +2,7 @@
   "any": "任意",
   "apply": "应用",
   "capability": "能力",
-  "description": "按能力、权限、来源或状态精细筛选已安装插件。",
+  "description": "按能力、权限、来源、状态或标签精细筛选已安装插件。",
   "hasUpdate": "有更新",
   "permission": "权限",
   "query": "搜索",
@@ -18,5 +18,7 @@
   },
   "source": "来源",
   "status": "状态",
+  "tag": "标签",
+  "tagNone": "已安装的插件均未声明关键词。",
   "title": "插件筛选"
 }

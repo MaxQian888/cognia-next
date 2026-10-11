@@ -16,17 +16,19 @@
 // Section model:
 //   * `activeSection` drives the 3-pane shell's left nav. Legacy `?tab=`
 //     deep links are translated to the section vocabulary by a one-time
-//     redirect in `plugin-panel.tsx` — the store has no `activeTab` concept.
-//   * `librarySubFilter` is the single source of truth for the
-//     status/has-update/configurable filter dimensions: setting it mutates
-//     `filters.status` / `filters.hasUpdate` / `filters.configurable` so the
-//     existing filter pipeline keeps working without a parallel code path.
-//     The filter sheet owns the orthogonal dimensions only (capability /
-//     permission / source / signed-only / sort).
+//     redirect in `hooks/plugins/use-plugins-url-sync.ts` — the store has no
+//     `activeTab` concept.
+//   * `librarySubFilter` records the last quick-filter segment picked; the
+//     setter writes `filters.status` / `filters.hasUpdate` /
+//     `filters.configurable` so the one filter pipeline interprets it. The
+//     filter sheet can move status and has-update directly too, so the LIT
+//     segment is derived from `filters` (`deriveActiveSubFilter`), never read
+//     from this field. The sheet also owns capability / permission / source /
+//     tag / signed-only; sort lives in the Library header.
 //   * `governanceView` picks between the cross-plugin aggregate views.
-//   * `detailSubTab` is the expanded right-pane section when a plugin is
+//   * `detailSubTab` is the detail pane's active tab when a plugin is
 //     selected. `openConfigure(pluginId)` opens the detail pane on the
-//     Configure section.
+//     Configure tab.
 //   * `listViewMode` is the only persisted field (localStorage).
 
 import { create } from "zustand"
@@ -52,6 +54,12 @@ export type PluginGovernanceView = "permissions" | "scheduled" | "analytics" | "
  * collapsed with nothing saying why.
  */
 export type PluginDetailSubTab = "overview" | "capabilities" | "configure" | "permissions" | "data"
+
+/**
+ * Which face of the Overview tab is showing. "manifest" is the raw manifest
+ * JSON, reached from the header's actions menu ("View raw manifest").
+ */
+export type PluginDetailOverviewView = "info" | "manifest"
 
 export type PluginListViewMode = "list" | "card"
 
@@ -112,7 +120,15 @@ export interface PluginFilters {
   capability: PluginCapabilityFilter
   permission: PluginPermissionFilter
   source: PluginSourceFilter
+  /**
+   * "enabled" / "disabled" / "error" are the user-facing meanings resolved by
+   * `pluginRowMatchesStatus` (hooks/plugins/use-plugins.ts) — the persisted
+   * `enabled` flag and the lifecycle error, not the Dexie `row.status`
+   * column, which is written at discovery and never follows the runtime. Any
+   * other value is compared against `row.status` verbatim.
+   */
   status: PluginStatusFilter
+  /** A manifest keyword (the detail overview's keyword chips write it). */
   tag: string | null
   sort: PluginSortMode
   /** Show only plugins with verified publisher signatures. */
@@ -120,8 +136,9 @@ export interface PluginFilters {
   /** Show only plugins that have a marketplace update available. */
   hasUpdate: boolean
   /**
-   * "Configurable" library sub-filter — keep only plugins whose manifest
-   * carries a `configSchema`. Behaviour lives in `usePlugins.applyFilters`;
+   * "Configurable" library sub-filter — keep only plugins that expose
+   * configuration (`pluginExposesConfig`: a `configSchema` with properties or
+   * a custom `configComponent`). Behaviour lives in `usePlugins.applyFilters`;
    * the library sub-filter setter is the only writer.
    */
   configurable: boolean
@@ -160,13 +177,27 @@ interface PluginsStoreState {
   librarySubFilter: PluginLibrarySubFilter
   /** Which cross-plugin aggregate view is active under Governance. */
   governanceView: PluginGovernanceView
-  /** Active right-pane sub-tab when a plugin is selected. */
+  /**
+   * Active detail tab when a plugin is selected. Deliberately NOT reset when
+   * the selection changes: stepping through plugins on the Permissions tab
+   * (to compare what each one holds) is the point of a persistent tab bar.
+   */
   detailSubTab: PluginDetailSubTab
+  /** Info vs raw manifest on the Overview tab. Reset on every new selection. */
+  detailOverviewView: PluginDetailOverviewView
   /** Compact list vs card grid — persisted to localStorage. */
   listViewMode: PluginListViewMode
   filters: PluginFilters
   /** Set of selected plugin ids for batch operations. */
   selection: Set<string>
+  /**
+   * Whether row checkboxes are showing on a touch layout. The phone list
+   * hides them until the user asks to select (toolbar "Select" or a long
+   * press), so a row spends its width on the plugin, not on a control most
+   * visits never use. The desktop list ignores this flag and always shows
+   * them, because a pointer can reach a 16px box without costing a column.
+   */
+  selectionMode: boolean
   /** When non-null, show the detail panel for this plugin. */
   detailPluginId: string | null
   /** When true, the right-hand filter sheet is open. */
@@ -187,6 +218,12 @@ interface PluginsStoreState {
   conflictDialogTarget: ConflictSummary | null
   /** When non-null, open the rollback dialog scoped to this plugin id. */
   rollbackTarget: string | null
+  /**
+   * When non-null, the update dialog is open. `pluginId` scopes it to one
+   * plugin (the detail header's Update action); `null` checks every plugin
+   * (the toolbar's Check updates).
+   */
+  updateDialog: { pluginId: string | null } | null
   /** Discover's curation axis (which ranking), independent of the origin. */
   discoverCuration: PluginDiscoverCuration
   /** Discover's origin axis (which registry or catalog). */
@@ -202,6 +239,9 @@ interface PluginsStoreState {
   setLibrarySubFilter: (sub: PluginLibrarySubFilter) => void
   setGovernanceView: (view: PluginGovernanceView) => void
   setDetailSubTab: (sub: PluginDetailSubTab) => void
+  setDetailOverviewView: (view: PluginDetailOverviewView) => void
+  /** Show the selected plugin's raw manifest (Overview tab, manifest face). */
+  openDetailManifest: () => void
   setListViewMode: (mode: PluginListViewMode) => void
   setFilters: (patch: Partial<PluginFilters>) => void
   resetFilters: () => void
@@ -209,6 +249,16 @@ interface PluginsStoreState {
   toggleSelection: (id: string) => void
   selectAll: (ids: string[]) => void
   clearSelection: () => void
+  /**
+   * Drop every selected id that is not in `visibleIds`. The batch bar calls
+   * it whenever the visible (filtered) set changes, so a selection can never
+   * outlive the filter that hid it and a batch action can never reach a
+   * plugin the user can no longer see. A no-op (same state object, no
+   * re-render) when nothing would be dropped.
+   */
+  pruneSelection: (visibleIds: Iterable<string>) => void
+  /** Leaving selection mode also clears the selection it was holding. */
+  setSelectionMode: (on: boolean) => void
   openDetail: (pluginId: string) => void
   closeDetail: () => void
   setFilterSheetOpen: (open: boolean) => void
@@ -235,6 +285,8 @@ interface PluginsStoreState {
   closePermissionReview: () => void
   setConflictDialogTarget: (target: ConflictSummary | null) => void
   setRollbackTarget: (pluginId: string | null) => void
+  openUpdateDialog: (pluginId?: string) => void
+  closeUpdateDialog: () => void
 }
 
 export const DEFAULT_PLUGIN_FILTERS: PluginFilters = {
@@ -284,9 +336,11 @@ export const usePluginsStore = create<PluginsStoreState>()(
       librarySubFilter: "all",
       governanceView: "permissions",
       detailSubTab: "overview",
+      detailOverviewView: "info",
       listViewMode: "list",
       filters: DEFAULT_PLUGIN_FILTERS,
       selection: new Set<string>(),
+      selectionMode: false,
       detailPluginId: null,
       discoverCuration: "all",
       discoverOrigin: "all",
@@ -297,6 +351,7 @@ export const usePluginsStore = create<PluginsStoreState>()(
       permissionReviewTarget: null,
       conflictDialogTarget: null,
       rollbackTarget: null,
+      updateDialog: null,
 
       setActiveSection: (section) => set({ activeSection: section }),
       setLibrarySubFilter: (sub) =>
@@ -306,6 +361,8 @@ export const usePluginsStore = create<PluginsStoreState>()(
         })),
       setGovernanceView: (view) => set({ governanceView: view }),
       setDetailSubTab: (sub) => set({ detailSubTab: sub }),
+      setDetailOverviewView: (view) => set({ detailOverviewView: view }),
+      openDetailManifest: () => set({ detailSubTab: "overview", detailOverviewView: "manifest" }),
       setDiscoverCuration: (curation) => set({ discoverCuration: curation }),
       setDiscoverOrigin: (origin) =>
         set((state) => ({
@@ -325,7 +382,21 @@ export const usePluginsStore = create<PluginsStoreState>()(
         }),
       selectAll: (ids) => set({ selection: new Set(ids) }),
       clearSelection: () => set({ selection: new Set() }),
-      openDetail: (pluginId) => set({ detailPluginId: pluginId }),
+      pruneSelection: (visibleIds) =>
+        set((s) => {
+          if (s.selection.size === 0) return s
+          const visible = new Set(visibleIds)
+          const next = new Set([...s.selection].filter((id) => visible.has(id)))
+          return next.size === s.selection.size ? s : { selection: next }
+        }),
+      setSelectionMode: (on) =>
+        set(on ? { selectionMode: true } : { selectionMode: false, selection: new Set<string>() }),
+      openDetail: (pluginId) =>
+        set((s) =>
+          s.detailPluginId === pluginId
+            ? { detailPluginId: pluginId }
+            : { detailPluginId: pluginId, detailOverviewView: "info" }
+        ),
       closeDetail: () => set({ detailPluginId: null }),
       setFilterSheetOpen: (open) => set({ filterSheetOpen: open }),
       // Opening Configure drives the detail pane onto its Configure section.
@@ -333,6 +404,7 @@ export const usePluginsStore = create<PluginsStoreState>()(
         set({
           detailPluginId: pluginId,
           detailSubTab: "configure",
+          detailOverviewView: "info",
           activeSection: "library",
         }),
       setImportStaging: (staging) => set({ importStaging: staging }),
@@ -354,6 +426,8 @@ export const usePluginsStore = create<PluginsStoreState>()(
       closePermissionReview: () => set({ permissionReviewTarget: null }),
       setConflictDialogTarget: (target) => set({ conflictDialogTarget: target }),
       setRollbackTarget: (pluginId) => set({ rollbackTarget: pluginId }),
+      openUpdateDialog: (pluginId) => set({ updateDialog: { pluginId: pluginId ?? null } }),
+      closeUpdateDialog: () => set({ updateDialog: null }),
     }),
     {
       name: "plugins-ui-prefs",

@@ -10,11 +10,16 @@ import { PluginMarketplace } from "../marketplace/plugin-marketplace"
 
 export function PluginDiscoverPane() {
   return (
+    // Padding follows the PANE's width (anonymous `@container`), not the
+    // viewport: on a wide window beside an open detail pane, `sm:p-4` gave a
+    // narrow column the roomy padding and took width from the cards.
     <div
-      className="h-full min-h-0 min-w-0 max-w-full overflow-x-clip overflow-y-auto p-3 sm:p-4"
+      className="@container h-full min-h-0 min-w-0 max-w-full overflow-x-clip overflow-y-auto"
       data-testid="plugin-discover-pane"
     >
-      <PluginMarketplace />
+      <div className="p-3 @lg:p-4">
+        <PluginMarketplace />
+      </div>
     </div>
   )
 }

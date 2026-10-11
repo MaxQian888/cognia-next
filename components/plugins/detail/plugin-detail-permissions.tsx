@@ -1,54 +1,56 @@
 "use client"
 
-// Permissions sub-tab — inline twin of the modal PluginPermissionReview.
-// Renders the same responsive permission rows with declaration metadata,
-// grant state, tier select, and grant/revoke buttons, using the exported
-// `PermissionRow` from `plugin-permission-review.tsx` so behavior can't
-// drift between the two surfaces.
+// Permissions tab — inline twin of the modal PluginPermissionReview. Renders
+// the same permission list (declaration metadata, grant state, tier select,
+// grant/revoke) through the exported `PermissionList` from
+// `plugin-permission-review.tsx`, so behavior can't drift between the two
+// surfaces.
+//
+// The tab owns the pane's full height, and the pane is the scroller. So
+// nothing here draws an outer box or a nested scroll region: the trust notice
+// is a flat callout, and each group (permissions, approved binaries, audit
+// events) is a hairline + small heading over a plain divided list. The audit
+// list shows its newest 10 entries and expands in place to the full ring
+// (last 25) instead of scrolling inside a 20vh box.
 //
 // Tier API is already exposed end-to-end (`getTier` / `setTier` on
 // `usePluginPermissions`) — nothing new required at the data layer.
 
-import { useMemo } from "react"
+import { useId, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
-import { usePermissionDescription, usePluginPermissions, usePluginRow } from "@/hooks/plugins"
+import { usePluginPermissions, usePluginRow } from "@/hooks/plugins"
 import { Skeleton } from "@/components/ui/skeleton"
-import { PermissionRow } from "../plugin-permission-review"
-import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
+import type { PermissionAuditEntry } from "@/lib/plugin/security/permission-guard"
+import { collectListedPermissions, PermissionList } from "../plugin-permission-review"
 import { AuditLogEntry } from "../audit-log-entry"
 import { PluginApprovedBinariesCard } from "./plugin-approved-binaries-card"
 import { PluginFrontendTrustCard } from "./plugin-frontend-trust-card"
-import type { PluginManifest, PluginPermission, PluginSource, PluginType } from "@/types/plugin"
-import { nodePermissionSupport } from "@/lib/plugin/launcher/launchPluginJs"
+import { PluginDetailGroup } from "./plugin-detail-group"
+import type { PluginManifest, PluginSource, PluginType } from "@/types/plugin"
+
+/** How many audit events the tab shows before "Show all". */
+export const AUDIT_PREVIEW_COUNT = 10
+/** The per-plugin audit ring the tab reads (newest first). */
+const AUDIT_RING_SIZE = 25
 
 export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.permissionReview")
   const tDetail = useTranslations("plugins.detail")
   const rowState = usePluginRow(pluginId)
   const perms = usePluginPermissions()
-  // Localized; `perms.descriptions` is the English-only source map.
-  const describePermission = usePermissionDescription()
 
   const manifest =
     rowState.state === "ready" ? (rowState.row.manifest as unknown as PluginManifest) : undefined
-  const declared = useMemo(() => manifest?.permissions ?? [], [manifest])
-  const optional = useMemo(() => manifest?.optionalPermissions ?? [], [manifest])
-  const justifications = useMemo(() => manifest?.permissionJustifications ?? {}, [manifest])
   const granted = useMemo(() => new Set(perms.getGranted(pluginId)), [perms, pluginId])
-  const allListed = useMemo<PluginPermission[]>(() => {
-    const set = new Set<PluginPermission>([...declared, ...optional, ...granted])
-    return Array.from(set).sort()
-  }, [declared, optional, granted])
-  const isNodeRuntime =
-    Boolean(manifest?.engines?.node) || manifest?.runtimeCompatibility?.tauri?.entrypoint === "node"
+  const allListed = useMemo(() => collectListedPermissions(manifest, granted), [manifest, granted])
 
   const auditLog = useMemo(
     () =>
       perms.auditLog
         .filter((entry) => entry.pluginId === pluginId)
-        .slice(-25)
+        .slice(-AUDIT_RING_SIZE)
         .reverse(),
     [perms.auditLog, pluginId]
   )
@@ -67,9 +69,9 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
   }
 
   // PluginRow stores type/source as plain strings (Dexie row shape); narrow
-  // them the same way the manifest is narrowed above. The card renders null
-  // unless the plugin is renderer-JS from an untrusted source, or a VS Code
-  // extension no Open VSX signature vouches for.
+  // them the same way the manifest is narrowed above. The callout renders
+  // null unless the plugin is renderer-JS from an untrusted source, or a VS
+  // Code extension no Open VSX signature vouches for.
   const trustCard = (
     <PluginFrontendTrustCard
       pluginId={pluginId}
@@ -81,7 +83,7 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
 
   if (allListed.length === 0) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-4">
         {trustCard}
         <p className="text-sm text-muted-foreground">{tDetail("noPermissions")}</p>
       </div>
@@ -89,68 +91,71 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {trustCard}
-      <div className="overflow-hidden rounded-md border">
-        <Table className="table-fixed">
-          <TableHeader className="hidden sm:table-header-group">
-            <TableRow>
-              <TableHead>{t("colPermission")}</TableHead>
-              <TableHead className="w-20 text-center">{t("colGranted")}</TableHead>
-              <TableHead className="w-40">{t("colTier")}</TableHead>
-              <TableHead className="w-24 text-right">{t("colActions")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {allListed.map((perm) => {
-              const support = isNodeRuntime
-                ? nodePermissionSupport(perm)
-                : ({ available: true } as const)
-              const unavailableReason = support.available
-                ? undefined
-                : support.reason === "network-broker-missing"
-                  ? t("nodeNetworkUnavailable")
-                  : t("nodeSubprocessUnavailable")
-              return (
-                <PermissionRow
-                  key={perm}
-                  perm={perm}
-                  declared={declared.includes(perm)}
-                  optional={optional.includes(perm)}
-                  granted={granted.has(perm)}
-                  dangerous={perms.isDangerous(perm)}
-                  onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
-                  onRevoke={() => perms.revoke(pluginId, perm)}
-                  tier={perms.getTier(pluginId, perm)}
-                  onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
-                  description={justifications[perm] ?? describePermission(perm)}
-                  runtimeAvailable={support.available}
-                  unavailableReason={unavailableReason}
-                />
-              )
-            })}
-          </TableBody>
-        </Table>
-      </div>
+
+      <PluginDetailGroup
+        title={t("listTitle")}
+        actions={
+          <span className="text-[11px] tabular-nums text-muted-foreground">{allListed.length}</span>
+        }
+        testId="plugin-permissions-list"
+      >
+        <PermissionList
+          pluginId={pluginId}
+          manifest={manifest}
+          permissions={allListed}
+          granted={granted}
+        />
+      </PluginDetailGroup>
 
       <PluginApprovedBinariesCard pluginId={pluginId} />
 
-      <div className="space-y-1">
-        <h3 className="text-xs font-semibold">{t("auditLogTitle")}</h3>
-        <div className="rounded-md border">
-          <ScrollArea className="max-h-[20vh]">
-            {auditLog.length === 0 ? (
-              <p className="p-3 text-xs text-muted-foreground">{t("auditEmpty")}</p>
-            ) : (
-              <ul className="divide-y">
-                {auditLog.map((entry, idx) => (
-                  <AuditLogEntry key={idx} entry={entry} />
-                ))}
-              </ul>
-            )}
-          </ScrollArea>
-        </div>
-      </div>
+      <PermissionAuditList entries={auditLog} />
     </div>
+  )
+}
+
+/**
+ * The plugin's recent permission audit events as a flat divided list. The
+ * pane is the scroller, so the list grows in place: the newest
+ * `AUDIT_PREVIEW_COUNT` show by default and a toggle reveals the rest.
+ */
+export function PermissionAuditList({ entries }: { entries: PermissionAuditEntry[] }) {
+  const t = useTranslations("plugins.permissionReview")
+  const [expanded, setExpanded] = useState(false)
+  const listId = useId()
+  const overflow = entries.length > AUDIT_PREVIEW_COUNT
+  const visible = expanded || !overflow ? entries : entries.slice(0, AUDIT_PREVIEW_COUNT)
+
+  return (
+    <PluginDetailGroup title={t("auditLogTitle")} testId="plugin-permissions-audit">
+      {entries.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("auditEmpty")}</p>
+      ) : (
+        <>
+          {/* `AuditLogEntry` pads itself for a framed list; flush it with the
+              heading here, where the list is flat. */}
+          <ul className="divide-y [&>li]:px-0" id={listId}>
+            {visible.map((entry, idx) => (
+              <AuditLogEntry key={`${entry.timestamp}-${idx}`} entry={entry} />
+            ))}
+          </ul>
+          {overflow ? (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto px-0 py-1 text-xs pointer-coarse:h-10"
+              aria-expanded={expanded}
+              aria-controls={listId}
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? t("auditShowFewer") : t("auditShowAll", { count: entries.length })}
+            </Button>
+          ) : null}
+        </>
+      )}
+    </PluginDetailGroup>
   )
 }

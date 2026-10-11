@@ -1,0 +1,10 @@
+{
+  "dataManagement": {
+    "deleting": "Deleting…",
+    "mirroredBlocked": "This plugin's data lives on the desktop that runs it. Delete it there.",
+    "purgeFailed": "Couldn't delete the data for {pluginId}.",
+    "purged": "{count, plural, =0 {{pluginId} had no stored tables left to clear.} one {Deleted the data in # table for {pluginId}.} other {Deleted the data in # tables for {pluginId}.}}",
+    "tableCount": "{count, plural, one {# table} other {# tables}}"
+  },
+  "dependencyCount": "{count, plural, =0 {None declared} other {# declared}}"
+}

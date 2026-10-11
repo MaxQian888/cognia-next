@@ -2,7 +2,7 @@
   "any": "Any",
   "apply": "Apply",
   "capability": "Capability",
-  "description": "Narrow the installed list by capability, permission, source, or status.",
+  "description": "Narrow the installed list by capability, permission, source, status, or tag.",
   "hasUpdate": "Has update",
   "permission": "Permission",
   "query": "Search",
@@ -18,5 +18,7 @@
   },
   "source": "Source",
   "status": "Status",
+  "tag": "Tag",
+  "tagNone": "No installed plugin declares keywords.",
   "title": "Plugin filters"
 }

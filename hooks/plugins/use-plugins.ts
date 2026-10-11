@@ -28,7 +28,11 @@ export interface PluginsView {
   countsByCapability: Record<string, number>
   /** Aggregated counts by status. */
   countsByStatus: Record<string, number>
-  /** Counts of enabled / disabled / errored / loading. */
+  /**
+   * Counts of enabled / errored / loading. `enabled` and `errored` use
+   * `isPluginRowEnabled` / `isPluginRowErrored`, the same predicates the
+   * status filter and the Library quick-filter counts use.
+   */
   totals: {
     total: number
     enabled: number
@@ -72,6 +76,81 @@ export function usePlugins(): PluginsView {
 }
 
 /**
+ * Whether the user has this plugin enabled.
+ *
+ * `row.enabled` is what an enable / disable writes (`setPluginEnabledForHost`
+ * and the batch bar), and what the status pill, the nav badge and the
+ * totals already report. `row.status` cannot answer it: the manager writes
+ * that column at discovery / install ("discovered", "installed") and keeps
+ * the live runtime status in its own store, so an enabled plugin's row still
+ * reads "installed". Every "Enabled" count and filter goes through here.
+ */
+export function isPluginRowEnabled(row: Pick<PluginRow, "enabled">): boolean {
+  return row.enabled
+}
+
+/**
+ * Whether the plugin last failed. A failed activation is recorded on the
+ * row's lifecycle (`actual: "error"`, or `"dirty"` when the failed teardown
+ * also left resources behind); a legacy or mirrored row may still carry
+ * `status: "error"`. Either counts.
+ */
+export function isPluginRowErrored(row: Pick<PluginRow, "status" | "lifecycle">): boolean {
+  if (row.status === "error") return true
+  const actual = row.lifecycle?.actual
+  return actual === "error" || actual === "dirty"
+}
+
+/**
+ * The status facet. "enabled" / "disabled" / "error" are the meanings the
+ * Library quick filters and the filter sheet offer, resolved through the two
+ * predicates above so a count and the list it filters can never disagree.
+ * Any other value (an older deep link, a mirrored host's raw status) is
+ * matched against `row.status` as written.
+ */
+export function pluginRowMatchesStatus(row: PluginRow, status: string): boolean {
+  if (status === "all") return true
+  if (status === "enabled") return isPluginRowEnabled(row)
+  if (status === "disabled") return !isPluginRowEnabled(row)
+  if (status === "error") return isPluginRowErrored(row)
+  return row.status === status
+}
+
+export interface PluginLibrarySubCounts {
+  all: number
+  enabled: number
+  updates: number
+  configurable: number
+  errored: number
+}
+
+function rowHasUpdate(row: PluginRow): boolean {
+  return !!(row.manifest as { updateAvailable?: boolean })?.updateAvailable
+}
+
+/**
+ * Live counts for the Library quick filters, computed with exactly the
+ * predicates `applyFilters` narrows by, so a segment that says "3" shows
+ * three rows.
+ */
+export function countLibrarySubFilters(rows: readonly PluginRow[]): PluginLibrarySubCounts {
+  const counts: PluginLibrarySubCounts = {
+    all: rows.length,
+    enabled: 0,
+    updates: 0,
+    configurable: 0,
+    errored: 0,
+  }
+  for (const row of rows) {
+    if (isPluginRowEnabled(row)) counts.enabled++
+    if (isPluginRowErrored(row)) counts.errored++
+    if (rowHasUpdate(row)) counts.updates++
+    if (pluginExposesConfig(row)) counts.configurable++
+  }
+  return counts
+}
+
+/**
  * `locale` is the UI language the rows are shown in. Rows display their
  * manifest's localized name (`nameKey`), so search has to find that name and
  * the name sort has to order by it, or a zh-CN user searching for the name on
@@ -97,14 +176,12 @@ export function buildView(
     for (const cap of row.capabilities) {
       countsByCapability[cap] = (countsByCapability[cap] ?? 0) + 1
     }
-    if (row.enabled) enabled++
-    if (row.status === "error") errored++
+    if (isPluginRowEnabled(row)) enabled++
+    if (isPluginRowErrored(row)) errored++
     if (row.status === "loading" || row.status === "enabling" || row.status === "updating") {
       loading++
     }
-    if ((row.manifest as { updateAvailable?: boolean })?.updateAvailable) {
-      updateAvailable++
-    }
+    if (rowHasUpdate(row)) updateAvailable++
   }
 
   const localized = new Map(
@@ -155,7 +232,7 @@ function applyFilters(
   const q = filters.query.trim().toLowerCase()
   return rows.filter((row) => {
     if (filters.source !== "all" && row.source !== filters.source) return false
-    if (filters.status !== "all" && row.status !== filters.status) return false
+    if (!pluginRowMatchesStatus(row, filters.status)) return false
     if (filters.capability !== "all" && !row.capabilities.includes(filters.capability)) {
       return false
     }
@@ -167,10 +244,7 @@ function applyFilters(
       const signed = !!(row.manifest as { signature?: { verified?: boolean } })?.signature?.verified
       if (!signed) return false
     }
-    if (filters.hasUpdate) {
-      const hasUpdate = !!(row.manifest as { updateAvailable?: boolean })?.updateAvailable
-      if (!hasUpdate) return false
-    }
+    if (filters.hasUpdate && !rowHasUpdate(row)) return false
     if (filters.tag) {
       // `PluginFilters.tag` was declared and defaulted to null, and no
       // component set it and no selector applied it. It is what a keyword

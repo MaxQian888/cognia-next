@@ -1,5 +1,7 @@
 {
   "addToCompareAria": "Add {name} to comparison",
+  "compareFull": "Comparison already holds two plugins. Remove one to compare this one.",
+  "compareFullLabel": "Why this plugin can't be compared",
   "dangerous": "Dangerous",
   "install": "Install",
   "installing": "Installing…",

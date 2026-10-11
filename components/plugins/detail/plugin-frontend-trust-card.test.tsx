@@ -100,4 +100,18 @@ describe("PluginFrontendTrustCard", () => {
     expect(screen.getByRole("switch")).toBeChecked()
     expect(screen.queryByText("blockedHint")).not.toBeInTheDocument()
   })
+
+  // The Permissions tab owns the pane: the notice is a flat callout (left
+  // amber rule, heading, text, switch), not a bordered card inside it.
+  it("renders as a flat callout with a left amber rule, named by its heading", () => {
+    render(<PluginFrontendTrustCard pluginId="a" type="frontend" source="local" />)
+    const callout = screen.getByTestId("plugin-frontend-trust-card")
+    expect(callout.tagName).toBe("SECTION")
+    expect(callout.className).toContain("border-l-2")
+    expect(callout.className).toContain("border-amber-500")
+    expect(callout.className).not.toMatch(/(^|\s)rounded/)
+    expect(callout.className).not.toMatch(/(^|\s)bg-/)
+    expect(callout.getAttribute("data-slot")).not.toBe("card")
+    expect(screen.getByRole("region", { name: "title" })).toBe(callout)
+  })
 })

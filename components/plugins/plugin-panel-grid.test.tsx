@@ -41,13 +41,8 @@ beforeEach(() => {
 })
 
 describe("PluginPanelGrid", () => {
-  it("renders the all-empty state with a marketplace CTA", () => {
-    mockRows.length = 0
-    render(<PluginPanelGrid />)
-    expect(screen.getByText("emptyAll")).toBeInTheDocument()
-    expect(screen.getByText("browseMarketplace")).toBeInTheDocument()
-  })
-
+  // Loading and both empty states belong to `PluginLibraryList`, which only
+  // mounts the grid once it has rows (see its own tests).
   it("renders cards for each plugin row", () => {
     mockRows.push({
       id: "a",
@@ -67,25 +62,31 @@ describe("PluginPanelGrid", () => {
     expect(screen.getByText("Alpha")).toBeInTheDocument()
   })
 
-  it("renders the filtered-empty state when filters exclude all rows", () => {
-    mockRows.push({
-      id: "a",
-      name: "Alpha",
-      version: "1.0.0",
-      status: "enabled",
-      source: "builtin",
-      type: "frontend",
-      enabled: true,
-      capabilities: ["tools"],
-      path: "/",
-      manifest: { id: "a" },
-      createdAt: 1,
-      updatedAt: 1,
-    })
+  it("renders only the rows the filters keep", () => {
+    for (const [id, capability] of [
+      ["a", "tools"],
+      ["b", "themes"],
+    ]) {
+      mockRows.push({
+        id,
+        name: id === "a" ? "Alpha" : "Beta",
+        version: "1.0.0",
+        status: "installed",
+        source: "builtin",
+        type: "frontend",
+        enabled: true,
+        capabilities: [capability],
+        path: "/",
+        manifest: { id },
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    }
     usePluginsStore.setState({
       filters: { ...DEFAULT_PLUGIN_FILTERS, capability: "themes" },
     })
     render(<PluginPanelGrid />)
-    expect(screen.getByText("emptyFiltered")).toBeInTheDocument()
+    expect(screen.getByText("Beta")).toBeInTheDocument()
+    expect(screen.queryByText("Alpha")).not.toBeInTheDocument()
   })
 })

@@ -20,4 +20,13 @@ describe("PluginDiscoverPane", () => {
     )
     expect(screen.getByTestId("plugin-marketplace-stub")).toBeInTheDocument()
   })
+
+  it("pads by the pane's own width, not the viewport's", () => {
+    render(<PluginDiscoverPane />)
+    const pane = screen.getByTestId("plugin-discover-pane")
+    expect(pane).toHaveClass("@container")
+    expect(pane.className).not.toMatch(/(^|\s)sm:/)
+    const inner = screen.getByTestId("plugin-marketplace-stub").parentElement!
+    expect(inner).toHaveClass("p-3", "@lg:p-4")
+  })
 })

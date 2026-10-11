@@ -11,9 +11,10 @@ jest.mock("next-intl", () => ({
 
 let devtoolsEnabled = false
 let pluginTotals = { total: 0, enabled: 0, errored: 0, loading: 0, updateAvailable: 0 }
+let countsByCapability: Record<string, number> = {}
 jest.mock("@/hooks/plugins", () => ({
   useDevtoolsGate: () => devtoolsEnabled,
-  usePlugins: () => ({ totals: pluginTotals }),
+  usePlugins: () => ({ totals: pluginTotals, countsByCapability }),
 }))
 
 let inDesktopShell = false
@@ -26,6 +27,7 @@ beforeEach(() => {
   devtoolsEnabled = false
   inDesktopShell = false
   pluginTotals = { total: 0, enabled: 0, errored: 0, loading: 0, updateAvailable: 0 }
+  countsByCapability = {}
   usePluginsStore.setState({
     activeSection: "library",
     librarySubFilter: "all",
@@ -123,12 +125,10 @@ describe("PluginNavSidebar", () => {
     expect(usePluginsStore.getState().activeSection).toBe("discover")
   })
 
-  // The rail carries one axis: which section you are in. Library's status
-  // filter moved to PluginLibraryHeader and Governance's aggregate-view
-  // picker to PluginGovernanceHeader — both as segments in the shared
-  // second header tier. Rendering either here too would put two axes back
-  // in one column, so these two tests pin the rail's emptiness rather than
-  // its old sub-lists.
+  // Library's status filter lives in PluginLibraryHeader and Governance's
+  // aggregate-view picker in PluginGovernanceHeader — both as segments in the
+  // shared second header tier. These tests pin that neither comes back as a
+  // sub-list here (the capability facets are a separate, headed group).
   it("never renders the library sub-filters, even on the Library section", () => {
     usePluginsStore.setState({ activeSection: "library" })
     render(<PluginNavSidebar />)
@@ -159,5 +159,27 @@ describe("PluginNavSidebar", () => {
     fireEvent.click(screen.getByTestId("plugin-nav-governance"))
     expect(usePluginsStore.getState().activeSection).toBe("governance")
     expect(usePluginsStore.getState().governanceView).toBe("audit")
+  })
+
+  // The capability facets used to be a second rail beside this one. They now
+  // live here, under their own heading, only while Library is the section.
+  it("carries the capability facets under Library, and only there", () => {
+    countsByCapability = { tools: 2 }
+    pluginTotals = { ...pluginTotals, total: 2 }
+    usePluginsStore.setState({ activeSection: "library" })
+    const { unmount } = render(<PluginNavSidebar />)
+    const facets = screen.getByTestId("plugin-nav-capability-facets")
+    expect(facets).toHaveTextContent("heading")
+    expect(facets).toHaveTextContent("capability.tools")
+    unmount()
+
+    usePluginsStore.setState({ activeSection: "discover" })
+    render(<PluginNavSidebar />)
+    expect(screen.queryByTestId("plugin-nav-capability-facets")).toBeNull()
+  })
+
+  it("labels the nav by what it is, not by one of its entries", () => {
+    render(<PluginNavSidebar />)
+    expect(screen.getByRole("navigation")).toHaveAttribute("aria-label", "navAria")
   })
 })

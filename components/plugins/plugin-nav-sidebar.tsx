@@ -5,13 +5,18 @@
 // inherits the resize handle + mobile Sheet treatment from the feature
 // shell.
 //
-// The rail carries exactly one axis: which section you are in (Library /
-// Discover / Governance / Devtools). Anything that switches the *view
-// inside* a section — Library's status filter, Governance's aggregate
-// view picker — belongs to `PluginSectionToolbar` in the page header's
-// second tier instead. Mixing the two axes in one column is what made the
-// rail read as neither navigation nor filter; both pickers have now moved,
-// so this file renders a flat list and nothing else.
+// The rail's first job is which section you are in (Library / Discover /
+// Agent packages / Governance / Devtools). Status-like pickers that switch
+// the *view inside* a section — Library's All / Enabled / Updates segments,
+// Governance's aggregate views — stay in `PluginSectionToolbar` in the page
+// header's second tier.
+//
+// The one thing below the sections is Library's capability facets, under
+// their own heading and only while Library is the section. They used to be a
+// second fixed-width rail beside this one, so a desktop window spent two
+// columns of chrome before the list. A facet list is a natural rail citizen
+// (a long vertical list of short labels); what keeps it from blurring with
+// navigation is the heading and the fact that it disappears with the section.
 //
 // Click handlers route through the plugins store — no prop drilling.
 //
@@ -33,6 +38,8 @@ import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { visiblePluginSections } from "./plugin-nav-config"
+import { PluginCategorySidebar } from "./plugin-category-sidebar"
+import { useVisiblePluginSection } from "./plugin-visible-section"
 
 /**
  * Which shell we are in, read SSR-safely.
@@ -53,7 +60,9 @@ const useDesktopShell = () =>
 
 export function PluginNavSidebar() {
   const t = useTranslations("plugins.sections")
+  const tFacets = useTranslations("plugins.categorySidebar")
   const activeSection = usePluginsStore((s) => s.activeSection)
+  const visibleSection = useVisiblePluginSection(activeSection)
   const setActiveSection = usePluginsStore((s) => s.setActiveSection)
   const devtoolsEnabled = useDevtoolsGate()
   const { totals } = usePlugins()
@@ -63,10 +72,10 @@ export function PluginNavSidebar() {
   const visibleSections = visiblePluginSections({ devtoolsEnabled, isDesktop })
 
   return (
-    <nav aria-label={t("library")} className="flex h-full min-h-0 flex-col overflow-y-auto p-2">
+    <nav aria-label={t("navAria")} className="flex h-full min-h-0 flex-col overflow-y-auto p-2">
       <ul className="space-y-0.5">
         {visibleSections.map(({ section, labelKey, icon: Icon, disabled }) => {
-          const active = activeSection === section
+          const active = visibleSection === section
           return (
             <li key={section}>
               <Button
@@ -78,7 +87,7 @@ export function PluginNavSidebar() {
                 title={disabled ? t("desktopOnlyHint") : undefined}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "w-full justify-start gap-2 px-2 font-normal",
+                  "w-full justify-start gap-2 px-2 font-normal pointer-coarse:h-10",
                   active ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground"
                 )}
                 data-testid={`plugin-nav-${section}`}
@@ -98,6 +107,21 @@ export function PluginNavSidebar() {
           )
         })}
       </ul>
+      {visibleSection === "library" ? (
+        <section
+          className="mt-3 border-t pt-3"
+          aria-labelledby="plugin-nav-facets-heading"
+          data-testid="plugin-nav-capability-facets"
+        >
+          <h2
+            id="plugin-nav-facets-heading"
+            className="px-2 pb-1.5 text-[11px] font-medium text-muted-foreground"
+          >
+            {tFacets("heading")}
+          </h2>
+          <PluginCategorySidebar variant="rail" />
+        </section>
+      ) : null}
     </nav>
   )
 }

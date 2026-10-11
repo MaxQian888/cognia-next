@@ -17,6 +17,8 @@ jest.mock("@/lib/native/utils", () => ({
 // description namespace resolves ids to a recognisable "localized" string, and
 // reports no entry for `custom:*` ids so the raw-id fallback can be asserted.
 jest.mock("next-intl", () => ({
+  // The dependency rows name an installed plugin in the active locale.
+  useLocale: () => "en",
   useTranslations: (namespace?: string) => {
     const localized = namespace === "plugins.permissions.descriptions"
     const t = (key: string) => (localized ? `localized:${key}` : key)

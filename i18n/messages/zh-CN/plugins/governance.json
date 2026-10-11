@@ -9,6 +9,7 @@
     "rateLimitsNote": "速率限制与沙箱默认值在全局配置；每个插件的实际用量在插件详情中可见。",
     "securityPosture": "严格沙箱",
     "securityPostureHint": "拒绝未声明白名单插件的网络出口，并对每一项已声明权限都弹窗确认。关闭（平衡）保持默认：危险权限仍会弹窗，未声明白名单的插件保持不受限出口。",
+    "securityPostureLoading": "正在加载沙箱设置…",
     "signatureRequired": "强制签名",
     "signatureRequiredHint": "拒绝加载未通过发布者签名验证的插件。",
     "trustedPublishersOnly": "仅信任的发布者",

@@ -8,7 +8,11 @@
   "countTotal": "{count} jobs",
   "empty": "No plugin-contributed scheduled jobs yet.",
   "loading": "Loading scheduled jobs…",
+  "noLastRun": "Never",
+  "noMatch": "No jobs match this filter.",
+  "noNextRun": "Not scheduled",
   "openScheduler": "Open scheduler",
+  "showAllJobs": "Show all jobs",
   "status": {
     "active": "Active",
     "all": "All",

@@ -11,7 +11,7 @@ const now = Date.parse("2025-06-20T12:00:00.000Z")
 const makeJob = (over: Partial<PluginScheduledJobView> = {}): PluginScheduledJobView => ({
   id: "job-1",
   pluginId: "com.acme.web-tools",
-  cron: "0 */6 * * *",
+  trigger: { type: "cron", cron: "0 */6 * * *" },
   handler: "refreshIndex",
   status: "active",
   lastRunAt: now - 6 * 3_600_000,
@@ -24,7 +24,7 @@ const JOBS: PluginScheduledJobView[] = [
   makeJob({
     id: "job-2",
     handler: "syncCache",
-    cron: "*/15 * * * *",
+    trigger: { type: "cron", cron: "*/15 * * * *" },
     status: "paused",
     nextRunAt: undefined,
   }),
@@ -32,7 +32,7 @@ const JOBS: PluginScheduledJobView[] = [
     id: "job-3",
     pluginId: "com.acme.ocr",
     handler: "reindexDocs",
-    cron: "0 3 * * *",
+    trigger: { type: "cron", cron: "0 3 * * *" },
     status: "disabled",
     nextRunAt: now + 86_400_000,
   }),
@@ -67,6 +67,16 @@ export const AllJobs: Story = {
 // Scoped to a single plugin via `pluginId`.
 export const ScopedToPlugin: Story = {
   args: { jobsOverride: JOBS, pluginId: "com.acme.web-tools" },
+}
+
+// An interval trigger reads through the scheduler's own phrasing ("Every 5m").
+export const IntervalTrigger: Story = {
+  args: {
+    jobsOverride: [
+      makeJob({ id: "job-4", trigger: { type: "interval", intervalMs: 300_000 } }),
+      ...JOBS,
+    ],
+  },
 }
 
 // No jobs → the empty state.

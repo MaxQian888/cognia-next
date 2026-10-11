@@ -84,4 +84,37 @@ describe("PluginApprovedBinariesCard", () => {
     renderCard()
     expect(listMock).toHaveBeenCalledWith("acme")
   })
+
+  // The Permissions tab owns the pane: a small heading over a plain divided
+  // list, with no bordered box around it.
+  it("renders as a flat group: heading, description, divided list, no frame", () => {
+    listMock.mockReturnValue([ROW, { ...ROW, binaryPath: "/plugins/acme/bin/other" }])
+    renderCard()
+    const group = screen.getByTestId("plugin-approved-binaries")
+    expect(screen.getByRole("heading", { name: "Approved binaries" })).toBeInTheDocument()
+    const list = screen.getByRole("list")
+    expect(list.className).toContain("divide-y")
+    expect(screen.getAllByRole("listitem")).toHaveLength(2)
+    let node: HTMLElement | null = list
+    while (node && node !== group) {
+      expect(node.className).not.toMatch(/(^|\s)(rounded(-\w+)?|border)(\s|$)/)
+      node = node.parentElement
+    }
+  })
+
+  it("shows the whole path, wrapped, rather than truncating the binary's name", () => {
+    listMock.mockReturnValue([ROW])
+    renderCard()
+    const path = screen.getByText("/plugins/acme/bin/tool")
+    expect(path.className).not.toContain("truncate")
+    expect(path.className).toContain("[overflow-wrap:anywhere]")
+  })
+
+  it("sizes the revoke action for touch", () => {
+    listMock.mockReturnValue([ROW])
+    renderCard()
+    expect(screen.getByRole("button", { name: /Revoke the approval for/i }).className).toContain(
+      "pointer-coarse:h-10"
+    )
+  })
 })

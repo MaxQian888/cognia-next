@@ -6,7 +6,12 @@ import { render, screen } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: (namespace: string) => {
+    const t = (key: string) => `${namespace}:${key}`
+    // Only "tools" has a contributed-group label in this fake catalogue.
+    t.has = (key: string) => namespace.endsWith("contributed") && key === "tools"
+    return t
+  },
   useLocale: () => "en",
 }))
 
@@ -65,8 +70,19 @@ describe("PluginDetailCapabilities", () => {
   it("renders capability badges from the plugin row", () => {
     mockPlugin = makePlugin()
     render(<PluginDetailCapabilities pluginId="alpha" />)
-    expect(screen.getByText("tools")).toBeInTheDocument()
-    expect(screen.getByText("commands")).toBeInTheDocument()
+    // Names, not ids: the curated rail labels.
+    expect(screen.getByText("plugins.categorySidebar:capability.tools")).toBeInTheDocument()
+    expect(screen.getByText("plugins.categorySidebar:capability.commands")).toBeInTheDocument()
+  })
+
+  it("names a capability outside the curated rail through the catalog names", () => {
+    mockPlugin = makePlugin({ capabilities: ["agent-team-template", "from-a-newer-sdk"] })
+    render(<PluginDetailCapabilities pluginId="alpha" />)
+    expect(
+      screen.getByText("plugins.categorySidebar:capabilityName.agent-team-template")
+    ).toBeInTheDocument()
+    // Unknown to this host: printed as stored, in the mono face.
+    expect(screen.getByText("from-a-newer-sdk")).toHaveClass("font-mono")
   })
 
   it("renders contributes + activation events when present in the manifest", () => {
@@ -74,12 +90,13 @@ describe("PluginDetailCapabilities", () => {
       capabilities: [],
       manifest: {
         id: "alpha",
-        contributes: { tools: 1 },
+        contributes: { tools: 1, mysteryField: 1 },
         activationEvents: ["onStartup"],
       },
     })
     render(<PluginDetailCapabilities pluginId="alpha" />)
-    expect(screen.getByText("tools")).toBeInTheDocument()
+    expect(screen.getByText("plugins.detail.contributed:tools")).toBeInTheDocument()
+    expect(screen.getByText("mysteryField")).toHaveClass("font-mono")
     expect(screen.getByText("onStartup")).toBeInTheDocument()
   })
 
@@ -94,10 +111,14 @@ describe("PluginDetailCapabilities", () => {
     expect(section).toHaveAttribute("data-count", "1")
   })
 
-  it("renders the noCapabilities message when nothing to show", () => {
+  // The runtime contributions below may well list things; a "contributes
+  // nothing" line above them contradicted the very next section.
+  it("says nothing about manifest capabilities when there are none, leaving the runtime list", () => {
     mockPlugin = makePlugin({ capabilities: [], manifest: { id: "alpha" } })
     render(<PluginDetailCapabilities pluginId="alpha" />)
-    expect(screen.getByText("noCapabilities")).toBeInTheDocument()
+    expect(screen.queryByText(/noCapabilities/)).toBeNull()
+    expect(screen.queryByTestId("plugin-detail-capability-list")).toBeNull()
+    expect(screen.getByTestId("contributed")).toBeInTheDocument()
   })
 
   it("composes the existing PluginContributedTab + PluginTriggersTab", () => {

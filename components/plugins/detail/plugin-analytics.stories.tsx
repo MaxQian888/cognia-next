@@ -5,7 +5,7 @@ import { seedDb } from "@/lib/storybook/seed-db"
 import { samplePluginRows } from "@/lib/storybook/fixtures/plugins"
 
 // Per-plugin (or all-plugin) analytics panel. Reads `pluginAnalytics` rows via a
-// Dexie live query and rolls them up into summary cards + a per-key table. With
+// Dexie live query and rolls them up into an inline stat row + a per-plugin table. With
 // an empty store it shows the empty-state card.
 
 const now = Date.parse("2025-06-20T12:00:00.000Z")
@@ -26,7 +26,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Seeded counters across two plugins → summary cards + table.
+// Seeded counters across two plugins → stat row + table.
 export const WithData: Story = {
   beforeEach: async () => {
     await seedDb(async (db) => {

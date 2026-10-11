@@ -13,6 +13,8 @@ jest.mock("@/hooks/plugins/use-plugin-rollback-availability", () => ({
 jest.mock("next-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
+    // Chips print the capability's name and count through one template.
+    if (key === "capabilityChipLabel" && vars) return `${vars.name} · ${vars.count}`
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
     if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
     return key
@@ -93,7 +95,7 @@ describe("PluginCard", () => {
 
     // Source badge sits in the footer's left group; that group and the footer
     // itself both wrap so the status pill drops below instead of overflowing.
-    const sourceBadge = screen.getByText("marketplace")
+    const sourceBadge = screen.getByTestId("plugin-source-badge-marketplace")
     const leftGroup = sourceBadge.parentElement as HTMLElement
     expect(leftGroup).toHaveClass("flex-wrap", "min-w-0")
     const footer = leftGroup.parentElement as HTMLElement
@@ -103,8 +105,8 @@ describe("PluginCard", () => {
   it("renders capability chips with overflow indicator beyond the 3-chip cap", () => {
     const cb = callbacks()
     render(<PluginCard plugin={baseRow} selected={false} {...cb} />)
-    expect(screen.getByText("tools")).toBeInTheDocument()
-    expect(screen.getByText("commands")).toBeInTheDocument()
+    expect(screen.getByText("capability.tools")).toBeInTheDocument()
+    expect(screen.getByText("capability.commands")).toBeInTheDocument()
     // 5 caps total, 3 shown + "+2" — aligned with the marketplace card
     // so the same plugin renders consistently across browse vs library.
     expect(screen.getByText("+2")).toBeInTheDocument()
@@ -217,7 +219,7 @@ describe("PluginCard", () => {
         {...cb}
       />
     )
-    expect(screen.getByText("tools · 3")).toBeInTheDocument()
+    expect(screen.getByText("capability.tools · 3")).toBeInTheDocument()
   })
 
   it("tags the errored card with data-errored and a destructive tint", () => {
@@ -232,5 +234,80 @@ describe("PluginCard", () => {
     const card = container.querySelector('[data-errored="true"]') as HTMLElement
     expect(card).toBeTruthy()
     expect(card.className).toContain("bg-destructive/5")
+  })
+
+  it("names the source with the shared source badge, not the raw enum", () => {
+    const cb = callbacks()
+    render(<PluginCard plugin={{ ...baseRow, source: "dev" }} selected={false} {...cb} />)
+    // The badge renders `plugins.source.dev` (the mocked translator returns
+    // the key) and marks a development build.
+    expect(screen.getByTestId("plugin-source-badge-dev")).toHaveTextContent("dev")
+  })
+
+  it("flags every canonical dangerous permission, not a hand-picked four", () => {
+    const cb = callbacks()
+    render(
+      <PluginCard
+        plugin={{
+          ...baseRow,
+          manifest: { id: "plugin_test", permissions: ["network:fetch", "clipboard:read"] },
+        }}
+        selected={false}
+        {...cb}
+      />
+    )
+    expect(screen.getByRole("img", { name: "dangerousPermissionsAria:1" })).toBeInTheDocument()
+  })
+
+  it("does not flag a plugin holding only standard permissions", () => {
+    const cb = callbacks()
+    render(
+      <PluginCard
+        plugin={{ ...baseRow, manifest: { id: "plugin_test", permissions: ["clipboard:read"] } }}
+        selected={false}
+        {...cb}
+      />
+    )
+    expect(screen.queryByRole("img", { name: /dangerousPermissionsAria/ })).toBeNull()
+  })
+
+  // A <button> may only hold phrasing content; the card used to put block
+  // <div>s (and every badge) inside one.
+  it("keeps the open button free of block content and other controls", () => {
+    const cb = callbacks()
+    render(<PluginCard plugin={baseRow} selected={false} {...cb} />)
+    const open = screen.getByTestId("plugin-card-open-plugin_test")
+    expect(open.tagName).toBe("BUTTON")
+    expect(open.querySelector("div, button, [role='button']")).toBeNull()
+    expect(open).toHaveAccessibleName("Test Plugin")
+    // The stretched pseudo-element makes the whole card the hit area.
+    expect(open.className).toContain("after:inset-0")
+    // Controls above the stretched area keep their own clicks.
+    const checkboxLabel = screen.getByLabelText("selectAria:Test Plugin").closest("label")!
+    expect(checkboxLabel.className).toContain("z-10")
+  })
+
+  it("treats a lifecycle error as errored and shows its message", () => {
+    const cb = callbacks()
+    const { container } = render(
+      <PluginCard
+        plugin={{
+          ...baseRow,
+          status: "installed",
+          lifecycle: {
+            intent: "enabled",
+            actual: "error",
+            revision: 1,
+            lastError: "activation threw",
+            updatedAt: 0,
+          },
+        }}
+        selected={false}
+        {...cb}
+      />
+    )
+    expect(container.querySelector('[data-errored="true"]')).not.toBeNull()
+    expect(screen.getByText("activation threw")).toBeInTheDocument()
+    expect(screen.getAllByText("error").length).toBeGreaterThan(0)
   })
 })

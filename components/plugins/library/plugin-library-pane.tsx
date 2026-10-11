@@ -1,68 +1,39 @@
 "use client"
 
-// Center-pane container for the Library section. Composes a two-column
-// layout: the capability rail (PluginCategorySidebar) on the left when the
-// *pane* is wide enough, the filtered list (PluginLibraryList) on the
-// right. Narrow panes collapse the rail away and this pane surfaces a
-// PluginCategorySheet trigger in its place, gated on the SAME container
-// query, so capability filtering stays reachable at every width.
+// Center-pane container for the Library section: the filter/result strip on
+// top, the list (rows or cards) below.
 //
-// Breakpoints are container-relative (`@container/plugin-pane`), NOT
-// viewport-relative: this pane only occupies a fraction of the window, so
-// a `lg:` viewport rule would wrongly render the rail (and a multi-column
-// grid) inside a cramped column on a wide screen and overlap the content.
+// The capability facets are NOT here any more. On a desktop-width window they
+// live in the section nav rail under Library (`plugin-nav-sidebar.tsx`), which
+// is always on screen beside this pane. They used to be a second fixed 13rem
+// rail inside this pane, so the window spent two rails of chrome before the
+// list began and the list itself was squeezed below the width its rows needed.
 //
-// The rail and the library list both write to / read from the same store
-// filters (`filters.capability` + `librarySubFilter`), so the two axes
+// Where the nav rail is NOT on screen (the tablet overlay, where it sits in a
+// sheet, and the phone body, which has no rail), the facets stay one tap away
+// through the "Categories" trigger in the list's head bar
+// (`plugin-library-list.tsx`). Its gate is the same breakpoint
+// `FeaturePageShell` uses to decide between inline rails and sheets, so
+// exactly one entry point exists at every width.
+//
+// The facets and the library list both write to / read from the same store
+// filters (`filters.capability` + the status sub-filter), so the two axes
 // compose as AND.
 
-import { useTranslations } from "next-intl"
-import { cn } from "@/lib/utils"
-import { PLUGIN_RAIL_WIDTH_CLASS } from "../plugin-rail-width"
-import { PluginCategorySheet } from "../dialogs/plugin-category-sheet"
-import { PluginCategorySidebar } from "../plugin-category-sidebar"
 import { PluginLibraryList } from "./plugin-library-list"
 import { PluginLibraryStatusBar } from "./plugin-library-status-bar"
 
 export function PluginLibraryPane() {
-  const t = useTranslations("plugins.panel")
   return (
-    <div className="@container/plugin-pane flex h-full min-h-0" data-testid="plugin-library-pane">
-      <aside
-        className={cn(
-          "hidden @xl/plugin-pane:block shrink-0 overflow-y-auto border-r p-2",
-          // Same constant as the section-nav pane on its left, so the two
-          // rails read as one column pair instead of two arbitrary widths.
-          PLUGIN_RAIL_WIDTH_CLASS
-        )}
-        aria-label={t("categoriesButton")}
-        data-testid="plugin-library-capability-rail"
-      >
-        <PluginCategorySidebar />
-      </aside>
-      {/* Nested container so the list body (cards / rows) measures the space
-          it actually gets — i.e. after the rail is subtracted. */}
-      <div
-        className="@container/plugin-list flex min-h-0 flex-1 flex-col overflow-hidden"
-        data-testid="plugin-library-list-column"
-      >
-        {/* Filter chips + result count — first in the list column, never the
-            page header. Why: `plugin-library-status-bar.tsx`. */}
-        <PluginLibraryStatusBar />
-        {/* The rail's fallback lives HERE, not in the page header, and is
-            gated on the SAME container as the rail itself. It used to sit in
-            `PluginLibraryHeader` behind `lg:hidden` — a *viewport* rule
-            against a *container*-gated rail. Between a >=1024px viewport and
-            a <768px center pane both were hidden at once, which is the
-            default split on an ordinary desktop, so the capability axis had
-            no discoverable entry point at all. One container, one gate, no
-            gap. */}
-        <div className="@xl/plugin-pane:hidden shrink-0 border-b px-2 py-1.5">
-          <PluginCategorySheet />
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <PluginLibraryList />
-        </div>
+    <div
+      className="@container/plugin-list flex h-full min-h-0 flex-col overflow-hidden"
+      data-testid="plugin-library-pane"
+    >
+      {/* Filter chips + result count — first in the list column, never the
+          page header. Why: `plugin-library-status-bar.tsx`. */}
+      <PluginLibraryStatusBar />
+      <div className="min-h-0 flex-1 overflow-y-auto" data-testid="plugin-library-list-column">
+        <PluginLibraryList />
       </div>
     </div>
   )

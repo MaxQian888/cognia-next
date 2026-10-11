@@ -7,9 +7,10 @@ import { makePluginRow } from "@/lib/storybook/fixtures/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 
 // Full detail pane. Reads the selected `detailPluginId` from the plugins store
-// and the row itself from a Dexie live query, then stacks the header, the
-// always-visible overview body, and the collapsible sub-tabs. With no selection
-// it shows the idle empty state.
+// and the row itself from a Dexie live query, then renders the header, the tab
+// bar, and the active tab's body. With no selection it shows the idle empty
+// state (the desktop panel does not mount the pane then, the tablet sheet and
+// the phone drawer close instead).
 
 const PLUGIN_ID = "com.acme.web-tools"
 
@@ -29,7 +30,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// A plugin is selected and seeded → header + overview + sub-tabs.
+// A plugin is selected and seeded → header + tab bar + Overview.
 export const Selected: Story = {
   beforeEach: async () => {
     await seedDb(async (db) => {
@@ -40,13 +41,25 @@ export const Selected: Story = {
   },
 }
 
-// Python plugin → the python-only Logs sub-tab is included.
+// Python plugin → the Configure tab carries the Python host settings.
 export const PythonPlugin: Story = {
   beforeEach: async () => {
     await seedDb(async (db) => {
       await db.plugins.bulkPut([makePluginRow({ id: PLUGIN_ID, type: "python" })])
     })
-    seedStore(usePluginsStore, { detailPluginId: PLUGIN_ID })
+    seedStore(usePluginsStore, { detailPluginId: PLUGIN_ID, detailSubTab: "configure" })
+    return () => resetStore(usePluginsStore)
+  },
+}
+
+// The inline desktop pane: a close button in the header, opened on Permissions.
+export const InlineWithClose: Story = {
+  args: { onClose: () => undefined },
+  beforeEach: async () => {
+    await seedDb(async (db) => {
+      await db.plugins.bulkPut([makePluginRow({ id: PLUGIN_ID })])
+    })
+    seedStore(usePluginsStore, { detailPluginId: PLUGIN_ID, detailSubTab: "permissions" })
     return () => resetStore(usePluginsStore)
   },
 }

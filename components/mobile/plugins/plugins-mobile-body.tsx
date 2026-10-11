@@ -19,6 +19,22 @@
  * This is also what `/me/plugins` renders. That route used to carry a separate
  * 94-line panel whose only affordance was an enable switch, with no install,
  * permissions, configuration or uninstall, and no code shared with `/plugins`.
+ *
+ * Vertical budget. Before the first plugin, a phone used to spend ~45% of the
+ * screen on chrome: title, section chips, search, segments + tools, a row of
+ * five icon-only toolbar buttons, a "Categories" row and a select-all row.
+ * Now:
+ *   - the Library's actions sit in the title row (Install, the cogset, and an
+ *     overflow menu with labels, `PluginPanelToolbar layout="compact"`);
+ *   - Categories and selection share the list's one head bar
+ *     (`plugin-library-list.tsx`), and checkboxes appear only in selection
+ *     mode;
+ * so the list starts right after the section chips and the search controls.
+ *
+ * The detail drawer is nearly full height, is titled by the plugin (for
+ * assistive tech; the pane's own header shows it), and closes from the pane's
+ * close button as well as by swipe: a drawer with no visible close control
+ * left a user who does not know the gesture with only the overlay to tap.
  */
 
 import { useState } from "react"
@@ -36,6 +52,7 @@ import { PluginPermissionReview } from "@/components/plugins/plugin-permission-r
 import { PluginRollbackDialog } from "@/components/plugins/dialogs/plugin-rollback-dialog"
 import { PluginUpdateDialog } from "@/components/plugins/dialogs/plugin-update-dialog"
 import { PluginPanelToolbar } from "@/components/plugins/plugin-panel-toolbar"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import {
   PluginSectionControls,
   PluginSectionPane,
@@ -55,6 +72,7 @@ import {
 } from "@/hooks/plugins"
 import { usePluginsUrlSync } from "@/hooks/plugins/use-plugins-url-sync"
 import { isMirroredPluginClient } from "@/lib/plugin/core/set-plugin-enabled-for-host"
+import { usePluginDisplayName } from "@/hooks/plugins/use-plugin-display-name"
 import { isTauri } from "@/lib/platform/detect"
 import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
 import { cn } from "@/lib/utils"
@@ -106,7 +124,9 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
   const closeDetail = usePluginsStore((s) => s.closeDetail)
   const rollbackTarget = usePluginsStore((s) => s.rollbackTarget)
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
-  const [updateOpen, setUpdateOpen] = useState(false)
+  const updateDialog = usePluginsStore((s) => s.updateDialog)
+  const openUpdateDialog = usePluginsStore((s) => s.openUpdateDialog)
+  const closeUpdateDialog = usePluginsStore((s) => s.closeUpdateDialog)
 
   const market = usePluginMarketplace({ autoLoad: false })
   const { syncing, sync } = usePluginRegistrySync(market.refresh)
@@ -140,7 +160,11 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
       <PluginDeleteDialogHost />
       <PluginImportDialog />
       <PluginConflictDialog />
-      <PluginUpdateDialog open={updateOpen} onClose={() => setUpdateOpen(false)} />
+      <PluginUpdateDialog
+        open={updateDialog !== null}
+        pluginId={updateDialog?.pluginId ?? null}
+        onClose={closeUpdateDialog}
+      />
       <PluginRollbackDialog
         open={rollbackTarget !== null}
         pluginId={rollbackTarget}
@@ -154,24 +178,36 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
           band and covers the bottom navigation. */}
       <PluginBatchActionsBar className={COMPACT_ABOVE_TAB_BAR_BOTTOM} />
 
-      {/* One refresh, not two. On the Library the toolbar below carries the
-          registry sync (it used to be permanently disabled here because this
-          body never passed it a handler, while this header button did the same
-          job); every other section gets it from the header. */}
+      {/* The title row carries the section's actions. On the Library that is
+          the compact toolbar (Install, cogset, overflow with Check updates and
+          the registry sync); every other section gets the catalog refresh.
+          Under `SubPageShell` the title and back arrow already exist, so the
+          same actions get a row of their own. */}
       {showHeader ? (
         <header className="safe-area-pt flex shrink-0 items-center gap-2 border-b px-3 py-2">
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{t("title")}</h1>
-          {visibleSection !== "library" ? (
-            <RefreshCatalogButton syncing={syncing} onSync={sync} label={tMobile("refresh")} />
-          ) : null}
+          <SectionActions
+            library={visibleSection === "library"}
+            syncing={syncing}
+            onSync={sync}
+            onCheckUpdates={() => openUpdateDialog()}
+            refreshLabel={tMobile("refresh")}
+          />
         </header>
-      ) : visibleSection !== "library" ? (
-        // Under `SubPageShell` the title and back arrow already exist, but the
-        // refresh still has to be reachable.
-        <div className="flex shrink-0 justify-end border-b px-2 py-1.5">
-          <RefreshCatalogButton syncing={syncing} onSync={sync} label={tMobile("refresh")} />
+      ) : (
+        <div
+          className="flex shrink-0 items-center justify-end gap-2 border-b px-2 py-1.5"
+          data-testid="plugins-mobile-actions-row"
+        >
+          <SectionActions
+            library={visibleSection === "library"}
+            syncing={syncing}
+            onSync={sync}
+            onCheckUpdates={() => openUpdateDialog()}
+            refreshLabel={tMobile("refresh")}
+          />
         </div>
-      ) : null}
+      )}
 
       {/* Says what a queued toggle actually promises. On this host the plugin
           runtime lives on the paired desktop, so "enabled" here means "the
@@ -214,7 +250,7 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
                 aria-disabled={disabled || undefined}
                 title={disabled ? tSections("desktopOnlyHint") : undefined}
                 className={cn(
-                  "h-8 gap-1.5 px-2.5 text-xs pointer-coarse:h-9",
+                  "h-8 gap-1.5 px-2.5 text-xs pointer-coarse:h-10",
                   disabled && "opacity-50"
                 )}
                 data-testid={`plugins-mobile-section-${section}`}
@@ -234,16 +270,6 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
         </div>
       ) : null}
 
-      {visibleSection === "library" ? (
-        <div className="shrink-0 border-b px-2 py-1.5">
-          <PluginPanelToolbar
-            onCheckUpdates={() => setUpdateOpen(true)}
-            onSyncRegistry={sync}
-            syncing={syncing}
-          />
-        </div>
-      ) : null}
-
       {/*
         No PullToRefresh here on purpose. Every section pane owns its own
         scroller, and PTR's wrapper only fires while ITS OWN scrollTop is 0,
@@ -254,6 +280,9 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
       <div className="min-h-0 flex-1">
         <PluginSectionPane section={visibleSection} />
       </div>
+      {/* Plugins extend this page through the same slot the desktop panel
+          mounts; it used to be desktop-only. */}
+      <PluginExtensionSlot point="settings.plugins" className="shrink-0 border-t px-3 py-2 empty:hidden" />
 
       <MobilePluginDetail
         pluginId={detailPluginId}
@@ -265,6 +294,33 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
         fallbackTitle={tSections("detailSheetLabel")}
       />
     </div>
+  )
+}
+
+function SectionActions({
+  library,
+  syncing,
+  onSync,
+  onCheckUpdates,
+  refreshLabel,
+}: {
+  library: boolean
+  syncing: boolean
+  onSync: () => Promise<void>
+  onCheckUpdates: () => void
+  refreshLabel: string
+}) {
+  // One refresh, not two: on the Library the toolbar's overflow carries the
+  // registry sync; every other section gets the refresh button.
+  return library ? (
+    <PluginPanelToolbar
+      layout="compact"
+      onCheckUpdates={onCheckUpdates}
+      onSyncRegistry={onSync}
+      syncing={syncing}
+    />
+  ) : (
+    <RefreshCatalogButton syncing={syncing} onSync={onSync} label={refreshLabel} />
   )
 }
 
@@ -281,7 +337,7 @@ function RefreshCatalogButton({
     <Button
       size="icon"
       variant="ghost"
-      className="size-9"
+      className="size-10"
       aria-label={label}
       disabled={syncing}
       onClick={() => void onSync()}
@@ -305,28 +361,33 @@ function MobilePluginDetail({
   onOpenChange,
   fallbackTitle,
 }: MobilePluginDetailProps) {
+  // The plugin's name titles the drawer for assistive tech. It is visually
+  // hidden because `PluginDetailHeader` opens the pane with the name, version
+  // and avatar; a visible drawer title above that printed it twice and spent
+  // a row of a phone screen on it.
+  const name = usePluginDisplayName(pluginId)
+  const close = () => onOpenChange(false)
   return (
     <ResponsiveDetailSheet
       open={open && pluginId !== null}
       onOpenChange={onOpenChange}
-      // The section label, not the plugin's name: `PluginDetailHeader` opens
-      // the pane with the name, version and avatar, so titling the drawer with
-      // the name as well printed it twice, one line apart.
-      title={fallbackTitle}
+      title={name || fallbackTitle}
+      headerVisuallyHidden
+      // Nearly full height: the pane has a tab bar now, and every tab wants
+      // the room. 92dvh still leaves the page visibly behind the drawer.
+      contentClassName="h-[92dvh] max-h-[92dvh] data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
     >
       {/*
-        The drawer caps itself at 85vh and `PluginDetailPane` is `h-full` with
-        its own scroller, so a bounded box between the two gives that scroller
-        something definite to resolve against. `dvh`, not `vh`: on a phone the
-        `vh` box is measured with the browser chrome collapsed and runs under
-        the toolbar. The bottom inset keeps the last section clear of the home
+        The drawer is a flex column; this box takes what is left under its
+        drag handle and gives the pane's own scroller something definite to
+        resolve against. The bottom inset keeps the last row clear of the home
         indicator.
       */}
       <div
-        className="h-[70dvh] min-h-0 pb-[env(safe-area-inset-bottom)]"
+        className="min-h-0 flex-1 pb-[env(safe-area-inset-bottom)]"
         data-testid="plugins-mobile-detail-body"
       >
-        <PluginDetailPane />
+        <PluginDetailPane onClose={close} onFilterApplied={close} />
       </div>
     </ResponsiveDetailSheet>
   )

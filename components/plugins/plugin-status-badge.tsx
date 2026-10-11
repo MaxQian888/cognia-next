@@ -43,7 +43,10 @@ export function PluginStatusPill({
   className,
 }: PluginStatusPillProps) {
   const t = useTranslations("plugins.card.status")
-  if (status === "error") {
+  // A failed activation is recorded on the lifecycle; `status` is written at
+  // discovery and only says "error" for legacy and mirrored rows. Either is
+  // an error to the reader. (`dirty` keeps its own lifecycle badge.)
+  if (status === "error" || lifecycle?.actual === "error") {
     return (
       <Badge variant="destructive" className={cn("text-xs", className)}>
         {t("error")}

@@ -51,4 +51,13 @@ describe("PluginGovernancePane", () => {
       container.querySelector('[data-testid="plugin-governance-pane"]')?.getAttribute("data-view")
     ).toBe("audit")
   })
+
+  // The pane is the scroll surface and the container its views query.
+  it("is the single scroll container and an anonymous @container", () => {
+    render(<PluginGovernancePane />)
+    expect(screen.getByTestId("plugin-governance-pane")).toHaveClass(
+      "@container",
+      "overflow-y-auto"
+    )
+  })
 })

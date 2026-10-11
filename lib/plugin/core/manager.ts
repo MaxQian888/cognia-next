@@ -4669,7 +4669,9 @@ export class PluginManager {
         await store.uninstallPlugin(pluginId, { skipFileRemoval: true, viaManager: false })
 
         // Remove plugin Dexie tables. Default: keep data (allows reinstall to resume).
-        // Pass purgeData: true from the settings "Delete plugin data" action.
+        // `purgeData: true` comes from the uninstall dialog's "also delete its
+        // data" choice (`uninstallPluginForHost`). Clearing data WITHOUT
+        // uninstalling is `clearPluginTables` (the Data tab's "Delete data").
         await removePluginTables(
           () => getDb() as unknown as import("dexie").default,
           pluginId,

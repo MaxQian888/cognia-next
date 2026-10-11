@@ -9,6 +9,7 @@
     "rateLimitsNote": "Rate limits and sandbox defaults are configured globally and visible per-plugin in the plugin detail.",
     "securityPosture": "Strict sandboxing",
     "securityPostureHint": "Deny network egress for plugins that didn't declare an allowlist, and prompt for every declared permission. Off (balanced) keeps the default: dangerous permissions still prompt; plugins without a declared allowlist keep unrestricted egress.",
+    "securityPostureLoading": "Loading your sandboxing setting…",
     "signatureRequired": "Require signed plugins",
     "signatureRequiredHint": "Refuse to load plugins without a verified publisher signature.",
     "trustedPublishersOnly": "Trusted publishers only",

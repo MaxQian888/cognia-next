@@ -4,12 +4,21 @@
 
 import { render, renderHook, screen, fireEvent } from "@testing-library/react"
 
+// The namespace is part of the rendered key so the tests can tell WHICH
+// vocabulary localized a value (status pill vs source badge vs sort labels).
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
+  useTranslations: (ns?: string) => {
+    const prefix = ns && ns !== "plugins.activeFilters" ? `${ns}.` : ""
+    return (key: string, vars?: Record<string, unknown>) =>
+      vars ? `${prefix}${key}:${JSON.stringify(vars)}` : `${prefix}${key}`
+  },
 }))
 
-import { PluginActiveFilters, useHasActivePluginFilters } from "./plugin-active-filters"
+import {
+  PluginActiveFilters,
+  segmentOwnedDimensions,
+  useHasActivePluginFilters,
+} from "./plugin-active-filters"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
 beforeEach(() => {
@@ -41,7 +50,7 @@ describe("PluginActiveFilters", () => {
     usePluginsStore.setState({ filters: { ...DEFAULT_PLUGIN_FILTERS, capability: "commands" } })
     render(<PluginActiveFilters />)
     expect(screen.getByTestId("plugin-active-filter-capability").textContent).toContain(
-      'chip.capability:{"value":"capability.commands"}'
+      'chip.capability:{"value":"plugins.categorySidebar.capability.commands"}'
     )
   })
 
@@ -70,7 +79,20 @@ describe("PluginActiveFilters", () => {
     expect(screen.getByTestId("plugin-active-filter-source")).toBeInTheDocument()
   })
 
-  it("hides status/hasUpdate/configurable chips when a librarySubFilter is active", () => {
+  // Suppression follows the segment the toolbar LIGHTS (derived from
+  // `filters`), never the stored `librarySubFilter`.
+  it("hides only the dimension the lit segment shows", () => {
+    usePluginsStore.setState({
+      filters: { ...DEFAULT_PLUGIN_FILTERS, status: "enabled" },
+      librarySubFilter: "enabled",
+    })
+    render(<PluginActiveFilters />)
+    expect(screen.queryByTestId("plugin-active-filter-status")).not.toBeInTheDocument()
+  })
+
+  it("shows the status chip when another dimension lights the segment", () => {
+    // configurable + status: the "Configurable" segment is lit, which says
+    // nothing about status — so status must be a chip.
     usePluginsStore.setState({
       filters: {
         ...DEFAULT_PLUGIN_FILTERS,
@@ -81,25 +103,72 @@ describe("PluginActiveFilters", () => {
       librarySubFilter: "enabled",
     })
     render(<PluginActiveFilters />)
-    expect(screen.queryByTestId("plugin-active-filter-status")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("plugin-active-filter-hasUpdate")).not.toBeInTheDocument()
+    expect(screen.getByTestId("plugin-active-filter-status")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-active-filter-hasUpdate")).toBeInTheDocument()
     expect(screen.queryByTestId("plugin-active-filter-configurable")).not.toBeInTheDocument()
   })
 
-  it("shows status/hasUpdate/configurable chips when librarySubFilter is 'all'", () => {
+  it("shows a sheet-set status with no segment of its own, whatever librarySubFilter says", () => {
+    usePluginsStore.setState({
+      filters: { ...DEFAULT_PLUGIN_FILTERS, status: "disabled" },
+      // Stale stored sub-filter: it used to hide this chip although no
+      // segment was lit.
+      librarySubFilter: "updates",
+    })
+    render(<PluginActiveFilters />)
+    expect(screen.getByTestId("plugin-active-filter-status").textContent).toContain(
+      'chip.status:{"value":"plugins.card.status.disabled"}'
+    )
+  })
+
+  it("localizes source, status and sort values, and describes the permission", () => {
     usePluginsStore.setState({
       filters: {
         ...DEFAULT_PLUGIN_FILTERS,
+        source: "builtin",
         status: "error",
         hasUpdate: true,
-        configurable: true,
+        sort: "updated",
+        permission: "clipboard:read",
       },
-      librarySubFilter: "all",
     })
     render(<PluginActiveFilters />)
-    expect(screen.getByTestId("plugin-active-filter-status")).toBeInTheDocument()
-    expect(screen.getByTestId("plugin-active-filter-hasUpdate")).toBeInTheDocument()
-    expect(screen.getByTestId("plugin-active-filter-configurable")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-active-filter-source").textContent).toContain(
+      "plugins.source.builtin"
+    )
+    expect(screen.getByTestId("plugin-active-filter-status").textContent).toContain(
+      "plugins.card.status.error"
+    )
+    expect(screen.getByTestId("plugin-active-filter-sort").textContent).toContain(
+      "plugins.filterSheet.sortMode.updated"
+    )
+    // The mock translator has no `has()`, so the description falls back to
+    // the guard's English sentence — anything but the raw id.
+    expect(screen.getByTestId("plugin-active-filter-permission").textContent).not.toContain(
+      '"value":"clipboard:read"'
+    )
+  })
+
+  it("keeps an unknown source or status as written", () => {
+    usePluginsStore.setState({
+      filters: { ...DEFAULT_PLUGIN_FILTERS, source: "weird", status: "installed" },
+    })
+    render(<PluginActiveFilters />)
+    expect(screen.getByTestId("plugin-active-filter-source").textContent).toContain(
+      'chip.source:{"value":"weird"}'
+    )
+    expect(screen.getByTestId("plugin-active-filter-status").textContent).toContain(
+      'chip.status:{"value":"installed"}'
+    )
+  })
+
+  it("renders a removable tag chip", () => {
+    usePluginsStore.setState({ filters: { ...DEFAULT_PLUGIN_FILTERS, tag: "productivity" } })
+    render(<PluginActiveFilters />)
+    const chip = screen.getByTestId("plugin-active-filter-tag")
+    expect(chip.textContent).toContain('chip.tag:{"value":"productivity"}')
+    fireEvent.click(chip.querySelector("button")!)
+    expect(usePluginsStore.getState().filters.tag).toBeNull()
   })
 
   it("shows a signedOnly chip when filters.signedOnly is true", () => {
@@ -176,6 +245,12 @@ describe("useHasActivePluginFilters", () => {
     expect(result.current).toBe(true)
   })
 
+  it("is true for a tag alone", () => {
+    usePluginsStore.setState({ filters: { ...DEFAULT_PLUGIN_FILTERS, tag: "x" } })
+    const { result } = renderHook(() => useHasActivePluginFilters())
+    expect(result.current).toBe(true)
+  })
+
   it("is false when the only non-default filters are sub-filter-owned and suppressed", () => {
     usePluginsStore.setState({
       filters: { ...DEFAULT_PLUGIN_FILTERS, status: "enabled" },
@@ -183,5 +258,23 @@ describe("useHasActivePluginFilters", () => {
     })
     const { result } = renderHook(() => useHasActivePluginFilters())
     expect(result.current).toBe(false)
+  })
+})
+
+describe("segmentOwnedDimensions", () => {
+  it("maps each lit segment to the one dimension it shows", () => {
+    expect(segmentOwnedDimensions({ ...DEFAULT_PLUGIN_FILTERS, status: "error" })).toEqual({
+      status: true,
+      hasUpdate: false,
+      configurable: false,
+    })
+    expect(
+      segmentOwnedDimensions({ ...DEFAULT_PLUGIN_FILTERS, status: "error", hasUpdate: true })
+    ).toEqual({ status: false, hasUpdate: true, configurable: false })
+    expect(segmentOwnedDimensions({ ...DEFAULT_PLUGIN_FILTERS, status: "disabled" })).toEqual({
+      status: false,
+      hasUpdate: false,
+      configurable: false,
+    })
   })
 })

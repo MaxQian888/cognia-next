@@ -40,7 +40,11 @@ jest.mock("@/lib/db/plugins", () => ({
 }))
 
 import { resetPermissionGuard, getPermissionGuard } from "@/lib/plugin/security/permission-guard"
-import { PluginPermissionReview } from "./plugin-permission-review"
+import {
+  collectListedPermissions,
+  PermissionIdText,
+  PluginPermissionReview,
+} from "./plugin-permission-review"
 import { usePluginsStore } from "@/stores/plugins"
 
 const targetPlugin: PluginRow = {
@@ -122,7 +126,7 @@ describe("PluginPermissionReview", () => {
   it("shows the localized description and labels the sensitive marker", () => {
     render(<PluginPermissionReview />)
     expect(screen.getByText("Read from the clipboard")).toBeInTheDocument()
-    const shellRow = screen.getByText("shell:execute").closest("tr") as HTMLElement
+    const shellRow = screen.getByText("shell:execute").closest("li") as HTMLElement
     expect(within(shellRow).getByRole("img", { name: "dangerousAria" })).toBeInTheDocument()
   })
 
@@ -141,16 +145,77 @@ describe("PluginPermissionReview", () => {
     expect(screen.getAllByText("colOptional")).not.toHaveLength(0)
   })
 
-  it("uses stacked permission rows below the small breakpoint", () => {
+  // The list sizes itself against its own container, never the viewport: the
+  // same rows render in a 300px detail pane on a wide screen, where a viewport
+  // `sm:` table squeezed the ids mid-word.
+  it("lays the rows out by container width, not by viewport breakpoints", () => {
     render(<PluginPermissionReview />)
-    const permissionRow = screen.getByText("clipboard:read").closest("tr")
-    expect(permissionRow?.className).toContain("grid")
-    expect(permissionRow?.className).toContain("sm:table-row")
+    const list = screen.getByRole("list", { name: "listTitle" })
+    const container = list.closest("[data-slot='permission-list']") as HTMLElement
+    expect(container.className).toContain("@container")
+    const permissionRow = screen.getByText("clipboard:read").closest("li") as HTMLElement
+    expect(permissionRow.className).toContain("grid")
+    expect(permissionRow.className).toContain("@xl:grid-cols-")
+    expect(permissionRow.className).not.toMatch(/(^|\s)(sm|md|lg):/)
+    // The wide-layout header shares the row's column template.
+    const header = container.querySelector("[data-slot='permission-list-header']") as HTMLElement
+    expect(header.className).toContain("@xl:grid")
+    const template = permissionRow.className.match(/@xl:grid-cols-\S+/)?.[0]
+    expect(template).toBeDefined()
+    expect(header.className).toContain(template as string)
+  })
+
+  it("keeps its own frame in the dialog and pads the rows inside it", () => {
+    render(<PluginPermissionReview />)
+    const permissionRow = screen.getByText("clipboard:read").closest("li") as HTMLElement
+    expect(permissionRow.className).toContain("px-3")
+  })
+
+  it("states each permission's grant status in words", () => {
+    getPermissionGuard().registerPlugin("p_review", ["clipboard:read"])
+    render(<PluginPermissionReview />)
+    const granted = within(screen.getByText("clipboard:read").closest("li") as HTMLElement)
+    expect(granted.getByText("statusGranted")).toBeInTheDocument()
+    expect(granted.getByRole("button", { name: "revoke" })).toBeInTheDocument()
+    const notGranted = within(screen.getByText("shell:execute").closest("li") as HTMLElement)
+    expect(notGranted.getByText("statusNotGranted")).toBeInTheDocument()
+    expect(notGranted.getByRole("button", { name: "grant" })).toBeInTheDocument()
+  })
+
+  it("ties each row's controls to the permission id and sizes them for touch", () => {
+    render(<PluginPermissionReview />)
+    const rowEl = screen.getByText("clipboard:read").closest("li") as HTMLElement
+    const row = within(rowEl)
+    const code = rowEl.querySelector("code") as HTMLElement
+    expect(code.id).not.toBe("")
+    const tier = row.getByRole("combobox", { name: "colTier" })
+    expect(tier.getAttribute("aria-describedby")?.split(" ")).toContain(code.id)
+    expect(tier.className).toContain("pointer-coarse:h-10")
+    const grant = row.getByRole("button", { name: "grant" })
+    expect(grant.getAttribute("aria-describedby")).toBe(code.id)
+    expect(grant.className).toContain("pointer-coarse:h-10")
+  })
+
+  it("highlights a dangerous permission with a destructive accent", () => {
+    render(<PluginPermissionReview />)
+    const shell = screen.getByText("shell:execute")
+    expect(shell.className).toContain("text-destructive")
+    expect(shell.closest("[data-dangerous]")?.className).toContain("border-destructive")
+    const safe = screen.getByText("clipboard:read")
+    expect(safe.className).not.toContain("text-destructive")
+    expect(safe.closest("[data-dangerous]")).toBeNull()
+  })
+
+  it("shows the empty state when the plugin declares and holds nothing", () => {
+    mockPlugin = { ...targetPlugin, manifest: { id: "p_review" } }
+    render(<PluginPermissionReview />)
+    expect(screen.getByText("empty")).toBeInTheDocument()
+    expect(screen.queryByRole("list", { name: "listTitle" })).not.toBeInTheDocument()
   })
 
   it("shows unsupported native Node permissions without allowing a grant", () => {
     render(<PluginPermissionReview />)
-    const networkRow = screen.getByText("network:fetch").closest("tr")
+    const networkRow = screen.getByText("network:fetch").closest("li")
     expect(networkRow).not.toBeNull()
     const row = within(networkRow as HTMLElement)
     expect(row.getByText("nodeNetworkUnavailable")).toBeInTheDocument()
@@ -161,10 +226,51 @@ describe("PluginPermissionReview", () => {
   it("does not present an unavailable Node permission as effectively granted", () => {
     getPermissionGuard().registerPlugin("p_review", ["network:fetch"])
     render(<PluginPermissionReview />)
-    const networkRow = screen.getByText("network:fetch").closest("tr")
+    const networkRow = screen.getByText("network:fetch").closest("li")
     expect(networkRow).not.toBeNull()
     const row = within(networkRow as HTMLElement)
-    expect(row.queryByLabelText("colGranted")).not.toBeInTheDocument()
+    expect(row.queryByText("statusGranted")).not.toBeInTheDocument()
+    expect(row.getByText("statusNotGranted")).toBeInTheDocument()
     expect(row.getByRole("button", { name: "revoke" })).toBeEnabled()
+  })
+})
+
+describe("collectListedPermissions", () => {
+  it("merges declared, optional and granted permissions into one sorted, de-duplicated list", () => {
+    expect(
+      collectListedPermissions(
+        {
+          permissions: ["shell:execute", "clipboard:read"],
+          optionalPermissions: ["network:fetch"],
+        },
+        ["clipboard:read", "agent:control"]
+      )
+    ).toEqual(["agent:control", "clipboard:read", "network:fetch", "shell:execute"])
+  })
+
+  it("lists the live grants when there is no manifest", () => {
+    expect(collectListedPermissions(undefined, ["clipboard:write"])).toEqual(["clipboard:write"])
+    expect(collectListedPermissions(undefined, [])).toEqual([])
+  })
+})
+
+describe("PermissionIdText", () => {
+  // `agent:control` must wrap as `agent:` / `control`, never `agent:con` / `trol`.
+  it("offers a break opportunity only after separators", () => {
+    const { container } = render(
+      <code>
+        <PermissionIdText perm="agent:control.read_all-x/y" />
+      </code>
+    )
+    const code = container.querySelector("code") as HTMLElement
+    expect(code.textContent).toBe("agent:control.read_all-x/y")
+    expect(code.querySelectorAll("wbr")).toHaveLength(5)
+    expect(code.innerHTML).toBe("agent:<wbr>control.<wbr>read_<wbr>all-<wbr>x/<wbr>y")
+  })
+
+  it("adds no break opportunity to an id without separators", () => {
+    const { container } = render(<PermissionIdText perm="admin" />)
+    expect(container.querySelectorAll("wbr")).toHaveLength(0)
+    expect(container.textContent).toBe("admin")
   })
 })

@@ -165,43 +165,54 @@ describe("PluginPanelToolbar", () => {
     canUseTauriInvokeMock.mockReturnValue(true)
   })
 
-  it("renders install dropdown trigger and update / sync buttons", () => {
+  it("renders one primary action, Check for updates, and an overflow for the registry sync", () => {
     render(<PluginPanelToolbar />)
-    expect(screen.getByText("install")).toBeInTheDocument()
-    expect(screen.getByText("checkUpdates")).toBeInTheDocument()
-    expect(screen.getByText("syncRegistry")).toBeInTheDocument()
-    // One primary + two equal-weight secondaries: the sync button shares the
-    // outline variant with checkUpdates rather than dropping to ghost.
-    const sync = screen.getAllByRole("button").find((b) => b.textContent?.includes("syncRegistry"))!
-    expect(sync).toHaveAttribute("data-variant", "outline")
+    expect(screen.getByTestId("plugin-install-trigger")).toHaveTextContent("install")
+    expect(screen.getByTestId("plugin-check-updates")).toHaveAttribute("data-variant", "outline")
+    // Sync is a rare, explained action in the overflow menu, not a third
+    // equal-weight button competing with Install.
+    expect(screen.getByTestId("plugin-toolbar-more")).toHaveAccessibleName("moreActions")
+    expect(screen.getByTestId("plugin-sync-registry")).toHaveTextContent("syncRegistryHint")
   })
 
   it("clicking checkUpdates invokes onCheckUpdates", () => {
     const onCheckUpdates = jest.fn()
     render(<PluginPanelToolbar onCheckUpdates={onCheckUpdates} />)
-    fireEvent.click(screen.getByText("checkUpdates"))
+    fireEvent.click(screen.getByTestId("plugin-check-updates"))
     expect(onCheckUpdates).toHaveBeenCalled()
   })
 
-  it("syncRegistry button is disabled when no handler is provided", () => {
+  it("syncRegistry item is disabled when no handler is provided", () => {
     render(<PluginPanelToolbar />)
-    const sync = screen.getAllByRole("button").find((b) => b.textContent?.includes("syncRegistry"))!
-    expect(sync).toBeDisabled()
+    expect(screen.getByTestId("plugin-sync-registry")).toBeDisabled()
   })
 
   it("syncRegistry calls handler when provided", async () => {
     const onSyncRegistry = jest.fn().mockResolvedValue(undefined)
     render(<PluginPanelToolbar onSyncRegistry={onSyncRegistry} />)
-    const sync = screen.getAllByRole("button").find((b) => b.textContent?.includes("syncRegistry"))!
+    const sync = screen.getByTestId("plugin-sync-registry")
     expect(sync).not.toBeDisabled()
     fireEvent.click(sync)
     await waitFor(() => expect(onSyncRegistry).toHaveBeenCalled())
   })
 
-  it("syncRegistry button is disabled while syncing prop is true", () => {
+  it("syncRegistry item is disabled and says so while syncing", () => {
     render(<PluginPanelToolbar onSyncRegistry={jest.fn()} syncing={true} />)
-    const sync = screen.getAllByRole("button").find((b) => b.textContent?.includes("syncRegistry"))!
+    const sync = screen.getByTestId("plugin-sync-registry")
     expect(sync).toBeDisabled()
+    expect(sync).toHaveTextContent("syncing")
+  })
+
+  it("compact layout folds Check for updates into the overflow and drops the CLI chip", () => {
+    const onCheckUpdates = jest.fn()
+    render(<PluginPanelToolbar layout="compact" onCheckUpdates={onCheckUpdates} />)
+    const items = screen.getAllByTestId("plugin-check-updates")
+    // Exactly one, and it is the menu item (no outline button on the bar).
+    expect(items).toHaveLength(1)
+    expect(items[0]).not.toHaveAttribute("data-variant")
+    fireEvent.click(items[0])
+    expect(onCheckUpdates).toHaveBeenCalled()
+    expect(screen.getByTestId("plugin-panel-toolbar")).toHaveAttribute("data-layout", "compact")
   })
 
   it("Cogpack menu item opens the cogpack picker", () => {
@@ -378,33 +389,33 @@ describe("PluginPanelToolbar", () => {
     expect(screen.getByText("groupManifest")).toBeInTheDocument()
   })
 
-  it("hides secondary action labels behind hidden lg:inline on narrow viewports", () => {
+  // The header measures itself (`@container/feature-header`); a viewport
+  // `lg:` rule showed the label while the header was too narrow for it.
+  it("shows the Check for updates label from the header's own width", () => {
     render(<PluginPanelToolbar onCheckUpdates={() => {}} onSyncRegistry={() => {}} />)
     const checkLabel = screen.getByText("checkUpdates")
-    const syncLabel = screen.getByText("syncRegistry")
     expect(checkLabel.className).toContain("hidden")
-    expect(checkLabel.className).toContain("lg:inline")
-    expect(syncLabel.className).toContain("hidden")
-    expect(syncLabel.className).toContain("lg:inline")
+    expect(checkLabel.className).toContain("@3xl/feature-header:inline")
   })
 })
 
-it("opens plugin conversion from the desktop toolbar", () => {
+it("opens plugin conversion from the Install menu", () => {
   canUseTauriInvokeMock.mockReturnValue(true)
   render(<PluginPanelToolbar />)
-  fireEvent.click(screen.getByRole("button", { name: "convertPlugin" }))
+  expect(screen.getByText("groupConvert")).toBeInTheDocument()
+  fireEvent.click(screen.getByTestId("plugin-install-convert"))
   expect(screen.getByLabelText("conversion-dialog")).toBeInTheDocument()
   fireEvent.click(screen.getByRole("button", { name: "close-conversion" }))
   expect(screen.queryByLabelText("conversion-dialog")).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "convertPlugin" }))
+  fireEvent.click(screen.getByTestId("plugin-install-convert"))
   expect(screen.getByLabelText("conversion-dialog")).toBeInTheDocument()
 })
 
 it("shows conversion disabled with the desktop requirement in web", () => {
   canUseTauriInvokeMock.mockReturnValue(false)
   render(<PluginPanelToolbar />)
-  const button = screen.getByRole("button", { name: "convertPlugin" })
-  expect(button).toBeDisabled()
-  expect(button).toHaveAttribute("title", "desktopOnlyHint")
+  const item = screen.getByTestId("plugin-install-convert")
+  expect(item).toBeDisabled()
+  expect(screen.getAllByText("desktopOnlyHint").length).toBeGreaterThan(0)
   expect(screen.queryByLabelText("conversion-dialog")).not.toBeInTheDocument()
 })

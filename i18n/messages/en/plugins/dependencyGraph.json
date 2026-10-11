@@ -1,11 +1,24 @@
 {
+  "allResolved": "All dependencies resolved",
+  "atVersion": "@ {version}",
+  "conflictLine": "{dependencyId} — {reason}",
   "conflictsTitle": "{count} conflicts",
   "cyclesTitle": "{count} dependency cycles",
   "graphLabel": "Dependency graph, ranked by install order",
+  "hideGraph": "Hide dependency graph",
   "loading": "Resolving dependencies…",
   "missing": "missing",
+  "missingCount": "{count} missing",
   "noDependencies": "This plugin declares no dependencies.",
   "root": "root",
+  "showAll": "Show all {count}",
+  "showGraph": "Show dependency graph",
+  "showLess": "Show fewer",
+  "source": {
+    "installed": "Installed",
+    "marketplace": "Marketplace",
+    "missing": "Missing"
+  },
   "title": "Dependency graph",
   "unresolved": "Unresolved",
   "warningsTitle": "{count} warnings"

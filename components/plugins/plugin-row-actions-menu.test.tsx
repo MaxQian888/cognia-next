@@ -45,7 +45,11 @@ const baseRow: PluginRow = {
   enabled: true,
   capabilities: ["tools"],
   path: "/plugins/test",
-  manifest: { id: "p1" },
+  manifest: {
+    id: "p1",
+    configSchema: { type: "object", properties: { apiKey: { type: "string" } } },
+    permissions: ["network:fetch"],
+  } as never,
   createdAt: 1,
   updatedAt: 1,
 }
@@ -196,6 +200,61 @@ describe("PluginRowActionsMenu", () => {
       expect(screen.getByLabelText("actionsMenuAria:Test Plugin")).toHaveClass(
         "pointer-coarse:size-9"
       )
+    })
+  })
+
+  describe("availability of Configure / Review permissions", () => {
+    async function openMenu(plugin: PluginRow) {
+      const user = userEvent.setup({ pointerEventsCheck: 0 })
+      render(<PluginRowActionsMenu plugin={plugin} {...callbacks()} />)
+      await user.click(screen.getByLabelText(`actionsMenuAria:${plugin.name}`))
+      await screen.findByText("openDetails")
+    }
+
+    it("hides Configure and Review permissions when the plugin has neither", async () => {
+      await openMenu({ ...baseRow, manifest: { id: "p1" } as never })
+      expect(screen.queryByText("configure")).not.toBeInTheDocument()
+      expect(screen.queryByText("reviewPermissions")).not.toBeInTheDocument()
+    })
+
+    it("hides Configure for a schema with no properties", async () => {
+      await openMenu({
+        ...baseRow,
+        manifest: { id: "p1", configSchema: { type: "object", properties: {} } } as never,
+      })
+      expect(screen.queryByText("configure")).not.toBeInTheDocument()
+    })
+
+    it("offers Configure for a Python plugin (host settings) without a schema", async () => {
+      await openMenu({ ...baseRow, type: "python", manifest: { id: "p1" } as never })
+      expect(screen.getByText("configure")).toBeInTheDocument()
+    })
+
+    it("offers Review permissions for optional-only permissions", async () => {
+      await openMenu({
+        ...baseRow,
+        manifest: { id: "p1", optionalPermissions: ["clipboard:read"] } as never,
+      })
+      expect(screen.getByText("reviewPermissions")).toBeInTheDocument()
+    })
+  })
+
+  describe("detail context", () => {
+    it("drops Open details and the enable toggle, and renders the extra items", async () => {
+      const user = userEvent.setup({ pointerEventsCheck: 0 })
+      render(
+        <PluginRowActionsMenu
+          plugin={baseRow}
+          {...callbacks()}
+          context="detail"
+          extraItems={<div role="menuitem">extra-item</div>}
+        />
+      )
+      await user.click(screen.getByLabelText("actionsMenuAria:Test Plugin"))
+      expect(await screen.findByText("extra-item")).toBeInTheDocument()
+      expect(screen.queryByText("openDetails")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("plugin-row-toggle-enabled")).not.toBeInTheDocument()
+      expect(screen.getByTestId("plugin-row-uninstall")).toBeInTheDocument()
     })
   })
 })

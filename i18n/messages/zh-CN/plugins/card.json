@@ -1,6 +1,7 @@
 {
   "actionsMenuAria": "{name} 的操作菜单",
   "capabilityChipAria": "{capability} 能力——共 {count} 项贡献",
+  "capabilityChipLabel": "{name} · {count}",
   "configure": "配置",
   "dangerousPermissionsAria": "{count} 项敏感权限",
   "disable": "停用",

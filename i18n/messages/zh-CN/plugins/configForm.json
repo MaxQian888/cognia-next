@@ -1,7 +1,9 @@
 {
   "arrayAdd": "添加条目",
+  "arrayItem": "第 {index} 项",
   "arrayPlaceholder": "每行一个值",
   "arrayRemove": "删除",
+  "arrayRemoveAria": "移除第 {index} 项",
   "cancel": "取消",
   "close": "关闭",
   "deprecated": "已弃用",
@@ -10,6 +12,7 @@
   "loading": "正在加载插件配置…",
   "loadingComponent": "正在加载插件的设置面板…",
   "noSchema": "此插件未声明 configSchema。下方为原始配置预览。",
+  "notFound": "此插件已不再安装，没有可配置的内容。",
   "oneOfVariant": "变体",
   "save": "保存",
   "saveFailed": "无法保存 {name} 的设置",
@@ -29,5 +32,6 @@
     "minLength": "至少 {min} 个字符。",
     "notNumber": "必须是数字。",
     "pattern": "必须匹配模式 {pattern}。"
-  }
+  },
+  "variantFallback": "方案 {index}"
 }

@@ -17,10 +17,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { usePluginDisplayName } from "@/hooks/plugins/use-plugin-display-name"
 
 // Mirrors the `UpdateInfo` shape returned by `PluginUpdater.checkForUpdates`
 // (`lib/plugin/lifecycle/updater.ts`). The fields are `currentVersion` /
@@ -69,9 +69,14 @@ export function __resetPluginUpdateClientForTests(client: UpdaterClient | null) 
 interface Props {
   open: boolean
   onClose: () => void
+  /**
+   * Scope the check to one plugin (the detail header's Update action). Omit
+   * or pass `null` to check every installed plugin (the toolbar).
+   */
+  pluginId?: string | null
 }
 
-export function PluginUpdateDialog({ open, onClose }: Props) {
+export function PluginUpdateDialog({ open, onClose, pluginId = null }: Props) {
   const t = useTranslations("plugins.update")
   const [updates, setUpdates] = useState<UpdateInfo[]>([])
   const [progress, setProgress] = useState<Record<string, number>>({})
@@ -84,7 +89,7 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
     void (async () => {
       setRefreshing(true)
       const client = await loadUpdaterClient()
-      const list = await client.checkForUpdates()
+      const list = await client.checkForUpdates(pluginId ?? undefined)
       setUpdates(list)
       unsubscribe = client.onProgress((p) =>
         setProgress((prev) => ({ ...prev, [p.pluginId]: p.progress }))
@@ -94,13 +99,13 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
     return () => {
       unsubscribe?.()
     }
-  }, [open])
+  }, [open, pluginId])
 
   const refresh = async () => {
     setRefreshing(true)
     try {
       const client = await loadUpdaterClient()
-      setUpdates(await client.checkForUpdates())
+      setUpdates(await client.checkForUpdates(pluginId ?? undefined))
     } finally {
       setRefreshing(false)
     }
@@ -136,8 +141,10 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
           chrome retracted, so a `vh` cap can still run under the toolbar. */}
       <DialogContent className="flex max-h-[85dvh] w-[95vw] max-w-2xl flex-col">
         <DialogHeader className="shrink-0">
-          <DialogTitle>{t("title")}</DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
+          <DialogTitle>{pluginId ? <ScopedTitle pluginId={pluginId} /> : t("title")}</DialogTitle>
+          <DialogDescription>
+            {pluginId ? t("descriptionSingle") : t("description")}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -156,18 +163,25 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
           </Button>
         </div>
 
-        <Card className="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
+        {/* A divided list between two hairlines, not a card inside the dialog:
+            the dialog is already the frame. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-y">
           <ScrollArea className="flex-1 min-h-0">
             {updates.length === 0 ? (
-              <p className="p-4 text-center text-sm text-muted-foreground">{t("upToDate")}</p>
+              <p className="p-4 text-center text-sm text-muted-foreground">
+                {pluginId ? t("upToDateSingle") : t("upToDate")}
+              </p>
             ) : (
               <ul className="divide-y">
                 {updates.map((info) => (
-                  <li key={info.pluginId} className="flex items-center gap-3 p-3">
+                  <li key={info.pluginId} className="flex items-center gap-3 px-1 py-3">
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{info.pluginId}</div>
+                      <UpdateName pluginId={info.pluginId} />
                       <div className="text-xs text-muted-foreground">
-                        v{info.currentVersion} → v{info.latestVersion}
+                        {t("versionChange", {
+                          from: info.currentVersion,
+                          to: info.latestVersion,
+                        })}
                       </div>
                       {busyId === info.pluginId && (
                         <Progress value={progress[info.pluginId] ?? 0} className="mt-2 h-1.5" />
@@ -187,7 +201,7 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
               </ul>
             )}
           </ScrollArea>
-        </Card>
+        </div>
 
         <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={onClose}>
@@ -203,4 +217,20 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
       </DialogContent>
     </Dialog>
   )
+}
+
+/** The plugin's own (localized) name; the id only when the runtime has no manifest for it. */
+function UpdateName({ pluginId }: { pluginId: string }) {
+  const name = usePluginDisplayName(pluginId)
+  return (
+    <div className="truncate text-sm font-medium" title={pluginId}>
+      {name}
+    </div>
+  )
+}
+
+function ScopedTitle({ pluginId }: { pluginId: string }) {
+  const t = useTranslations("plugins.update")
+  const name = usePluginDisplayName(pluginId)
+  return <>{t("titleSingle", { name })}</>
 }

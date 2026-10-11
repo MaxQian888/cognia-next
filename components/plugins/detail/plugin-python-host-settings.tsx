@@ -12,8 +12,14 @@
 // the explicit confirm dialog here (progress streams into the Logs tab), and
 // the outcome — including the reason a shared environment was downgraded to
 // an isolated one — is reported back into this card (ADR-0145).
+//
+// Save / Reset track a baseline the same way the config form below does:
+// Save is enabled only once something changed (and the input is valid), and
+// Reset restores the last saved values. Layout follows the component's own
+// width (`@container` + `@md:`), not the viewport: in a 320px pane on a wide
+// screen a viewport `sm:` grid squeezed two inputs side by side.
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, DownloadIcon, PackageIcon, ServerCogIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -86,6 +92,64 @@ function parseArgvText(text: string): string[] {
     .filter((line) => line.length > 0)
 }
 
+/** The editable fields, as typed. Compared field by field for dirty state. */
+export interface PythonHostForm {
+  interpreterPath: string
+  envText: string
+  callTimeoutMs: string
+  useVenv: boolean
+  idleShutdownMin: string
+  maxConcurrentCalls: string
+  maxOutboundHostCalls: string
+  installerKind: InstallerKind
+  installerPath: string
+  createArgsText: string
+  installArgsText: string
+  scopeChoice: ScopeChoice
+}
+
+const EMPTY_FORM: PythonHostForm = {
+  interpreterPath: "",
+  envText: "",
+  callTimeoutMs: "",
+  useVenv: true,
+  idleShutdownMin: "",
+  maxConcurrentCalls: "",
+  maxOutboundHostCalls: "",
+  installerKind: "auto",
+  installerPath: "",
+  createArgsText: "",
+  installArgsText: "",
+  scopeChoice: "default",
+}
+
+const optionalIntText = (value: number | undefined): string => (value != null ? String(value) : "")
+
+/** Persisted settings → the form's text fields. */
+export function settingsToForm(settings: PythonHostSettings | undefined): PythonHostForm {
+  return {
+    interpreterPath: settings?.interpreterPath ?? "",
+    envText: envToText(settings?.env),
+    callTimeoutMs: optionalIntText(settings?.callTimeoutMs),
+    useVenv: settings?.useVenv !== false,
+    idleShutdownMin: optionalIntText(settings?.idleShutdownMin),
+    maxConcurrentCalls: optionalIntText(settings?.maxConcurrentCalls),
+    maxOutboundHostCalls: optionalIntText(settings?.maxOutboundHostCalls),
+    installerKind: (settings?.installer?.kind ?? "auto") as InstallerKind,
+    installerPath: settings?.installer?.path ?? "",
+    createArgsText: (settings?.installer?.createArgs ?? []).join("\n"),
+    installArgsText: (settings?.installer?.installArgs ?? []).join("\n"),
+    scopeChoice: settings?.venvScope ?? "default",
+  }
+}
+
+export function formsEqual(a: PythonHostForm, b: PythonHostForm): boolean {
+  return (Object.keys(a) as (keyof PythonHostForm)[]).every((key) => a[key] === b[key])
+}
+
+/** How long the "Saved" confirmation stays up. */
+const SAVED_TICK_MS = 2000
+
 export function PluginPythonHostSettings({
   pluginId,
   pythonDependencies = [],
@@ -96,23 +160,14 @@ export function PluginPythonHostSettings({
 }) {
   const t = useTranslations("plugins.detail.pythonHost")
 
-  const [interpreterPath, setInterpreterPath] = useState("")
-  const [envText, setEnvText] = useState("")
-  const [callTimeoutMs, setCallTimeoutMs] = useState("")
-  const [useVenv, setUseVenv] = useState(true)
-  const [idleShutdownMin, setIdleShutdownMin] = useState("")
-  const [maxConcurrentCalls, setMaxConcurrentCalls] = useState("")
-  const [maxOutboundHostCalls, setMaxOutboundHostCalls] = useState("")
-  const [installerKind, setInstallerKind] = useState<InstallerKind>("auto")
-  const [installerPath, setInstallerPath] = useState("")
-  const [createArgsText, setCreateArgsText] = useState("")
-  const [installArgsText, setInstallArgsText] = useState("")
-  const [scopeChoice, setScopeChoice] = useState<ScopeChoice>("default")
-  /** The installer that was persisted when the card loaded, for the switch warning. */
-  const [savedInstallerKind, setSavedInstallerKind] = useState<InstallerKind>("auto")
+  const [form, setForm] = useState<PythonHostForm>(EMPTY_FORM)
+  /** What is persisted: the dirty baseline, the Reset target, the switch-warning reference. */
+  const [baseline, setBaseline] = useState<PythonHostForm>(EMPTY_FORM)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedTick, setSavedTick] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const savedTickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [installing, setInstalling] = useState(false)
   const [installError, setInstallError] = useState<string | null>(null)
   const [installOutcome, setInstallOutcome] = useState<PythonInstallOutcome | null>(null)
@@ -129,26 +184,9 @@ export function PluginPythonHostSettings({
       try {
         const settings = await getPythonHostSettings(pluginId)
         if (cancelled) return
-        setInterpreterPath(settings?.interpreterPath ?? "")
-        setEnvText(envToText(settings?.env))
-        setCallTimeoutMs(settings?.callTimeoutMs != null ? String(settings.callTimeoutMs) : "")
-        setUseVenv(settings?.useVenv !== false)
-        setIdleShutdownMin(
-          settings?.idleShutdownMin != null ? String(settings.idleShutdownMin) : ""
-        )
-        setMaxConcurrentCalls(
-          settings?.maxConcurrentCalls != null ? String(settings.maxConcurrentCalls) : ""
-        )
-        setMaxOutboundHostCalls(
-          settings?.maxOutboundHostCalls != null ? String(settings.maxOutboundHostCalls) : ""
-        )
-        const kind = (settings?.installer?.kind ?? "auto") as InstallerKind
-        setInstallerKind(kind)
-        setSavedInstallerKind(kind)
-        setInstallerPath(settings?.installer?.path ?? "")
-        setCreateArgsText((settings?.installer?.createArgs ?? []).join("\n"))
-        setInstallArgsText((settings?.installer?.installArgs ?? []).join("\n"))
-        setScopeChoice(settings?.venvScope ?? "default")
+        const loadedForm = settingsToForm(settings)
+        setForm(loadedForm)
+        setBaseline(loadedForm)
       } finally {
         if (!cancelled) setLoaded(true)
       }
@@ -179,6 +217,35 @@ export function PluginPythonHostSettings({
     }
   }, [pluginId])
 
+  // The "Saved" confirmation clears itself; never let that timer fire into an
+  // unmounted card (the pane switches tabs and plugins freely).
+  useEffect(
+    () => () => {
+      if (savedTickTimer.current !== null) clearTimeout(savedTickTimer.current)
+    },
+    []
+  )
+
+  const update = useCallback(<K extends keyof PythonHostForm>(key: K, value: PythonHostForm[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  const {
+    interpreterPath,
+    envText,
+    callTimeoutMs,
+    useVenv,
+    idleShutdownMin,
+    maxConcurrentCalls,
+    maxOutboundHostCalls,
+    installerKind,
+    installerPath,
+    createArgsText,
+    installArgsText,
+    scopeChoice,
+  } = form
+
+  const dirty = !formsEqual(form, baseline)
   const envValid = useMemo(() => parseEnvText(envText) !== null, [envText])
 
   // A custom installer that cannot create or install is refused by the host at
@@ -189,7 +256,7 @@ export function PluginPythonHostSettings({
     return installerPath.trim() !== "" && parseArgvText(installArgsText).length > 0
   }, [installerKind, installerPath, installArgsText])
 
-  const installerChanged = installerKind !== savedInstallerKind
+  const installerChanged = installerKind !== baseline.installerKind
 
   const buildSettings = useCallback((): PythonHostSettings | null => {
     const env = parseEnvText(envText)
@@ -238,15 +305,29 @@ export function PluginPythonHostSettings({
   const handleSave = async () => {
     const settings = buildSettings()
     if (settings === null || !customValid) return
+    const savedForm = form
     setSaving(true)
+    setSaveError(null)
     try {
       await setPythonHostSettings(pluginId, settings)
-      setSavedInstallerKind(installerKind)
+      setBaseline(savedForm)
       setSavedTick(true)
-      setTimeout(() => setSavedTick(false), 2000)
+      if (savedTickTimer.current !== null) clearTimeout(savedTickTimer.current)
+      savedTickTimer.current = setTimeout(() => {
+        savedTickTimer.current = null
+        setSavedTick(false)
+      }, SAVED_TICK_MS)
+    } catch (error) {
+      // The form stays dirty, so the user can retry or reset.
+      setSaveError(String(error))
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleReset = () => {
+    setForm(baseline)
+    setSaveError(null)
   }
 
   const handleInstallDeps = async () => {
@@ -282,7 +363,7 @@ export function PluginPythonHostSettings({
   }
 
   return (
-    <div className="space-y-3" data-testid="python-host-settings">
+    <div className="@container min-w-0 space-y-3" data-testid="python-host-settings">
       <div className="flex items-center gap-2">
         <ServerCogIcon className="size-4 text-muted-foreground" />
         <div>
@@ -291,23 +372,23 @@ export function PluginPythonHostSettings({
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5 sm:col-span-2">
+      <div className="grid gap-3 @md:grid-cols-2">
+        <div className="space-y-1.5 @md:col-span-2">
           <Label htmlFor={`py-interpreter-${pluginId}`}>{t("interpreterPath")}</Label>
           <Input
             id={`py-interpreter-${pluginId}`}
             value={interpreterPath}
-            onChange={(e) => setInterpreterPath(e.target.value)}
+            onChange={(e) => update("interpreterPath", e.target.value)}
             placeholder={t("interpreterPathPlaceholder")}
           />
         </div>
 
-        <div className="space-y-1.5 sm:col-span-2">
+        <div className="space-y-1.5 @md:col-span-2">
           <Label htmlFor={`py-env-${pluginId}`}>{t("env")}</Label>
           <Textarea
             id={`py-env-${pluginId}`}
             value={envText}
-            onChange={(e) => setEnvText(e.target.value)}
+            onChange={(e) => update("envText", e.target.value)}
             placeholder={
               /* i18n-exempt: KEY=VALUE is the literal env-file syntax */ "API_KEY=value"
             }
@@ -326,8 +407,8 @@ export function PluginPythonHostSettings({
             type="number"
             min={1000}
             value={callTimeoutMs}
-            onChange={(e) => setCallTimeoutMs(e.target.value)}
-            placeholder="120000"
+            onChange={(e) => update("callTimeoutMs", e.target.value)}
+            placeholder={/* i18n-exempt: numeric example (the default timeout) */ "120000"}
           />
         </div>
 
@@ -338,8 +419,8 @@ export function PluginPythonHostSettings({
             type="number"
             min={0}
             value={idleShutdownMin}
-            onChange={(e) => setIdleShutdownMin(e.target.value)}
-            placeholder="0"
+            onChange={(e) => update("idleShutdownMin", e.target.value)}
+            placeholder={/* i18n-exempt: numeric example */ "0"}
           />
         </div>
 
@@ -350,8 +431,8 @@ export function PluginPythonHostSettings({
             type="number"
             min={1}
             value={maxConcurrentCalls}
-            onChange={(e) => setMaxConcurrentCalls(e.target.value)}
-            placeholder="4"
+            onChange={(e) => update("maxConcurrentCalls", e.target.value)}
+            placeholder={/* i18n-exempt: numeric example */ "4"}
           />
         </div>
 
@@ -362,17 +443,17 @@ export function PluginPythonHostSettings({
             type="number"
             min={1}
             value={maxOutboundHostCalls}
-            onChange={(e) => setMaxOutboundHostCalls(e.target.value)}
-            placeholder="8"
+            onChange={(e) => update("maxOutboundHostCalls", e.target.value)}
+            placeholder={/* i18n-exempt: numeric example */ "8"}
           />
           <p className="text-xs text-muted-foreground">{t("maxOutboundHostCallsHint")}</p>
         </div>
 
-        <div className="flex items-center gap-2 pt-5">
+        <div className="flex items-center gap-2 @md:pt-5">
           <Switch
             id={`py-venv-${pluginId}`}
             checked={useVenv}
-            onCheckedChange={(checked) => setUseVenv(checked === true)}
+            onCheckedChange={(checked) => update("useVenv", checked === true)}
           />
           <Label htmlFor={`py-venv-${pluginId}`}>{t("useVenv")}</Label>
         </div>
@@ -389,7 +470,11 @@ export function PluginPythonHostSettings({
 
         {runtimeProbed && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span>{t("environment.interpreterVersion", { version: pythonVersion ?? "—" })}</span>
+            <span>
+              {t("environment.interpreterVersion", {
+                version: pythonVersion ?? t("environment.versionUnknown"),
+              })}
+            </span>
             {uvVersion ? (
               <span>{t("environment.uvPresent", { version: uvVersion })}</span>
             ) : (
@@ -398,6 +483,7 @@ export function PluginPythonHostSettings({
                 <Button
                   size="sm"
                   variant="outline"
+                  className="pointer-coarse:h-10"
                   onClick={handleInstallUv}
                   disabled={installingUv}
                 >
@@ -413,15 +499,16 @@ export function PluginPythonHostSettings({
           </p>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 @md:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor={`py-installer-${pluginId}`}>{t("environment.installer")}</Label>
             <Select
               value={installerKind}
-              onValueChange={(value) => setInstallerKind(value as InstallerKind)}
+              onValueChange={(value) => update("installerKind", value as InstallerKind)}
             >
               <SelectTrigger
                 id={`py-installer-${pluginId}`}
+                className="w-full pointer-coarse:h-10"
                 aria-label={t("environment.installer")}
                 aria-describedby={installerChanged ? `py-installer-switch-${pluginId}` : undefined}
               >
@@ -440,9 +527,13 @@ export function PluginPythonHostSettings({
             <Label htmlFor={`py-scope-${pluginId}`}>{t("environment.scope")}</Label>
             <Select
               value={scopeChoice}
-              onValueChange={(value) => setScopeChoice(value as ScopeChoice)}
+              onValueChange={(value) => update("scopeChoice", value as ScopeChoice)}
             >
-              <SelectTrigger id={`py-scope-${pluginId}`} aria-label={t("environment.scope")}>
+              <SelectTrigger
+                id={`py-scope-${pluginId}`}
+                className="w-full pointer-coarse:h-10"
+                aria-label={t("environment.scope")}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -455,14 +546,14 @@ export function PluginPythonHostSettings({
           </div>
 
           {installerKind !== "pip" && installerKind !== "auto" && (
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1.5 @md:col-span-2">
               <Label htmlFor={`py-installer-path-${pluginId}`}>
                 {t("environment.installerPath")}
               </Label>
               <Input
                 id={`py-installer-path-${pluginId}`}
                 value={installerPath}
-                onChange={(e) => setInstallerPath(e.target.value)}
+                onChange={(e) => update("installerPath", e.target.value)}
                 placeholder={t("environment.installerPathPlaceholder")}
               />
             </div>
@@ -470,12 +561,12 @@ export function PluginPythonHostSettings({
 
           {installerKind === "custom" && (
             <>
-              <div className="space-y-1.5 sm:col-span-2">
+              <div className="space-y-1.5 @md:col-span-2">
                 <Label htmlFor={`py-create-args-${pluginId}`}>{t("environment.createArgs")}</Label>
                 <Textarea
                   id={`py-create-args-${pluginId}`}
                   value={createArgsText}
-                  onChange={(e) => setCreateArgsText(e.target.value)}
+                  onChange={(e) => update("createArgsText", e.target.value)}
                   placeholder={
                     /* i18n-exempt: literal argv for `python -m venv`, plus the host's own substitution tokens */
                     "venv\n--python\n{python}\n{venv}"
@@ -484,14 +575,14 @@ export function PluginPythonHostSettings({
                 />
                 <p className="text-xs text-muted-foreground">{t("environment.createArgsHint")}</p>
               </div>
-              <div className="space-y-1.5 sm:col-span-2">
+              <div className="space-y-1.5 @md:col-span-2">
                 <Label htmlFor={`py-install-args-${pluginId}`}>
                   {t("environment.installArgs")}
                 </Label>
                 <Textarea
                   id={`py-install-args-${pluginId}`}
                   value={installArgsText}
-                  onChange={(e) => setInstallArgsText(e.target.value)}
+                  onChange={(e) => update("installArgsText", e.target.value)}
                   placeholder={
                     /* i18n-exempt: literal installer argv, plus the host's own substitution tokens */
                     "add\n--python\n{venvPython}\n{specs}"
@@ -509,7 +600,7 @@ export function PluginPythonHostSettings({
                     : t("environment.customIncomplete")}
                 </p>
               </div>
-              <p className="sm:col-span-2 text-xs text-muted-foreground">
+              <p className="@md:col-span-2 text-xs text-muted-foreground">
                 {t("environment.customIsolatedNote")}
               </p>
             </>
@@ -528,18 +619,37 @@ export function PluginPythonHostSettings({
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">{t("applyHint")}</p>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="min-w-0 text-xs text-muted-foreground">{t("applyHint")}</p>
+        <div className="ml-auto flex items-center gap-2">
           {savedTick && (
             <span className="text-xs text-muted-foreground" role="status">
               {t("saved")}
             </span>
           )}
-          <Button size="sm" onClick={handleSave} disabled={saving || !envValid || !customValid}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="pointer-coarse:h-10"
+            onClick={handleReset}
+            disabled={saving || !dirty}
+          >
+            {t("reset")}
+          </Button>
+          <Button
+            size="sm"
+            className="pointer-coarse:h-10"
+            onClick={handleSave}
+            disabled={saving || !dirty || !envValid || !customValid}
+          >
             {t("save")}
           </Button>
         </div>
+        {saveError && (
+          <p className="basis-full text-xs text-destructive" role="alert">
+            {t("saveError", { message: saveError })}
+          </p>
+        )}
       </div>
 
       {pythonDependencies.length > 0 && (
@@ -550,7 +660,12 @@ export function PluginPythonHostSettings({
           <p className="text-xs font-mono break-all">{pythonDependencies.join(", ")}</p>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button size="sm" variant="outline" disabled={installing}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="pointer-coarse:h-10"
+                disabled={installing}
+              >
                 <DownloadIcon className="size-3.5" />
                 {installing ? t("deps.installing") : t("deps.install")}
               </Button>
@@ -577,8 +692,9 @@ export function PluginPythonHostSettings({
           )}
           {installOutcome && (
             <div
-              className="rounded-md border bg-muted/40 p-2 space-y-1"
+              className="space-y-1 border-l-2 border-border pl-3"
               data-testid="py-install-outcome"
+              role="status"
             >
               <p className="text-xs">
                 {t("deps.outcome", {

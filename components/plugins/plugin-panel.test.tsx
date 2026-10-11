@@ -190,11 +190,42 @@ jest.mock("./devtools/plugin-devtools-pane", () => ({
 // is showing, so the sheet tests can tell "opened on the right plugin" apart
 // from "opened on the empty state".
 jest.mock("./detail/plugin-detail-pane", () => ({
-  PluginDetailPane: () => {
+  PluginDetailPane: ({
+    onClose,
+    onFilterApplied,
+    reserveCloseCorner,
+  }: {
+    onClose?: () => void
+    onFilterApplied?: () => void
+    reserveCloseCorner?: boolean
+  }) => {
     const { usePluginsStore: store } = jest.requireActual("@/stores/plugins")
     const id = store((s: { detailPluginId: string | null }) => s.detailPluginId)
-    return <div data-testid="plugin-detail-pane-stub">{id ?? "empty"}</div>
+    return (
+      <div
+        data-testid="plugin-detail-pane-stub"
+        data-reserve-close={reserveCloseCorner ? "true" : undefined}
+      >
+        {id ?? "empty"}
+        {onClose ? (
+          <button type="button" onClick={onClose}>
+            stub-close-detail
+          </button>
+        ) : null}
+        {onFilterApplied ? (
+          <button type="button" onClick={onFilterApplied}>
+            stub-filter-applied
+          </button>
+        ) : null}
+      </div>
+    )
   },
+}))
+
+let mockBreakpoint: "mobile" | "tablet" | "desktop" = "tablet"
+jest.mock("@/hooks/ui", () => ({
+  ...jest.requireActual("@/hooks/ui"),
+  useBreakpoint: () => mockBreakpoint,
 }))
 
 import { PluginPanel } from "./plugin-panel"
@@ -226,6 +257,7 @@ beforeEach(() => {
   getPluginMarketplaceMock.mockReturnValue({ checkForUpdates: jest.fn(async () => []) })
   useDeveloperModeMock.mockReset()
   useDeveloperModeMock.mockReturnValue(true)
+  mockBreakpoint = "tablet"
   usePluginsStore.setState({
     activeSection: "library",
     librarySubFilter: "all",
@@ -243,6 +275,13 @@ beforeEach(() => {
     rollbackTarget: null,
   })
 })
+
+/** The registry sync lives in the toolbar's overflow menu. */
+async function runSyncRegistry() {
+  const user = userEvent.setup({ pointerEventsCheck: 0 })
+  await user.click(screen.getByTestId("plugin-toolbar-more"))
+  await user.click(await screen.findByTestId("plugin-sync-registry"))
+}
 
 describe("PluginPanel (3-pane shell)", () => {
   it("mounts the FeaturePageShell with left nav, library center, and detail right", () => {
@@ -285,15 +324,39 @@ describe("PluginPanel (3-pane shell)", () => {
     expect(within(header).getByTestId("plugin-section-badge")).toHaveTextContent("governance")
   })
 
-  // Library / Discover / Governance are all 3-pane, so moving between them
-  // never changes the pane count and never throws away the split the user
-  // dragged. Governance's aggregate views are per-plugin, so the same
-  // detail pane is the right right-pane content for them.
-  it("keeps the detail pane mounted when activeSection=governance", () => {
-    usePluginsStore.setState({ activeSection: "governance" })
+  // The detail pane exists only while it has something to show: with
+  // nothing selected the list takes the whole width.
+  it("renders no detail pane while nothing is selected", () => {
+    render(<PluginPanel />)
+    expect(screen.getByTestId("shell-right")).toBeEmptyDOMElement()
+  })
+
+  // Governance's aggregate views are per-plugin rows, so the same detail pane
+  // follows a selection there.
+  it("shows the detail pane in Governance once a plugin is selected", () => {
+    usePluginsStore.setState({ activeSection: "governance", detailPluginId: "plugin_x" })
     render(<PluginPanel />)
     expect(screen.getByTestId("plugin-governance-pane")).toBeInTheDocument()
-    expect(screen.getByTestId("shell-right")).not.toBeEmptyDOMElement()
+    expect(screen.getByTestId("plugin-detail-pane-stub")).toHaveTextContent("plugin_x")
+  })
+
+  // Discover lists registry entries (its own sheet shows those); an installed
+  // plugin's detail beside them answered a question nobody asked there.
+  it("never shows the installed-plugin detail beside Discover", () => {
+    usePluginsStore.setState({ activeSection: "discover", detailPluginId: "plugin_x" })
+    render(<PluginPanel />)
+    expect(screen.getByTestId("shell-right")).toBeEmptyDOMElement()
+  })
+
+  it("keeps the facets in the nav rail rather than a second rail in the center", () => {
+    mockBreakpoint = "desktop"
+    render(<PluginPanel />)
+    expect(
+      within(screen.getByTestId("shell-left")).getByTestId("plugin-nav-capability-facets")
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId("shell-center")).queryByTestId("plugin-category-facets")
+    ).toBeNull()
   })
 
   it("renders the governance view picker in the header, not the left rail", () => {
@@ -311,7 +374,7 @@ describe("PluginPanel (3-pane shell)", () => {
   })
 
   it("uses the full workspace and hides plugin detail when activeSection=devtools", () => {
-    usePluginsStore.setState({ activeSection: "devtools" })
+    usePluginsStore.setState({ activeSection: "devtools", detailPluginId: "plugin_x" })
     render(<PluginPanel />)
 
     expect(screen.getByTestId("plugin-devtools-pane")).toBeInTheDocument()
@@ -425,7 +488,7 @@ describe("PluginPanel (3-pane shell)", () => {
     mockRows.push(vscodeRow)
 
     render(<PluginPanel />)
-    fireEvent.click(screen.getByLabelText("syncRegistryAria"))
+    await runSyncRegistry()
 
     await waitFor(() => expect(checkForUpdates).toHaveBeenCalled())
     const sentIds = checkForUpdates.mock.calls[0][0].map((p) => p.id)
@@ -440,7 +503,7 @@ describe("PluginPanel (3-pane shell)", () => {
     })
 
     render(<PluginPanel />)
-    fireEvent.click(screen.getByLabelText("syncRegistryAria"))
+    await runSyncRegistry()
 
     await waitFor(() => expect(jest.mocked(updatePlugin)).toHaveBeenCalled())
     expect(jest.mocked(updatePlugin)).toHaveBeenCalledWith("plugin_x", {
@@ -454,7 +517,7 @@ describe("PluginPanel (3-pane shell)", () => {
     getPluginMarketplaceMock.mockReturnValue({ checkForUpdates: jest.fn(async () => []) })
 
     render(<PluginPanel />)
-    fireEvent.click(screen.getByLabelText("syncRegistryAria"))
+    await runSyncRegistry()
 
     await waitFor(() => expect(toast.success).toHaveBeenCalled())
     expect(jest.mocked(updatePlugin)).not.toHaveBeenCalled()
@@ -470,12 +533,18 @@ describe("PluginPanel (3-pane shell)", () => {
     })
 
     render(<PluginPanel />)
-    fireEvent.click(screen.getByLabelText("syncRegistryAria"))
+    await runSyncRegistry()
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
     expect(jest.mocked(toast.error).mock.calls[0][0]).toContain("registry down")
     // The spinner has to clear even on the failure path.
-    expect(screen.getByLabelText("syncRegistryAria")).not.toBeDisabled()
+    await waitFor(() =>
+      expect(screen.getByTestId("plugin-toolbar-more").querySelector(".animate-spin")).toBeNull()
+    )
+    await userEvent
+      .setup({ pointerEventsCheck: 0 })
+      .click(screen.getByTestId("plugin-toolbar-more"))
+    expect(await screen.findByTestId("plugin-sync-registry")).not.toHaveAttribute("data-disabled")
   })
 
   it("cascade uninstall also drops the plugin's permissions and analytics rows", async () => {
@@ -511,6 +580,7 @@ describe("PluginPanel detail sheet (overlay tier)", () => {
   const sheet = () => screen.getByTestId("shell-right")
 
   it("controls the right pane's sheet instead of leaving it uncontrolled", () => {
+    usePluginsStore.setState({ detailPluginId: "plugin_x" })
     render(<PluginPanel />)
     expect(sheet()).toHaveAttribute("data-sheet-open", "false")
   })
@@ -547,8 +617,9 @@ describe("PluginPanel detail sheet (overlay tier)", () => {
     render(<PluginPanel />)
     await user.click(screen.getByTestId("plugin-library-row-plugin_x"))
     await user.click(screen.getByRole("button", { name: "stub-dismiss-right-sheet" }))
-    expect(sheet()).toHaveAttribute("data-sheet-open", "false")
     expect(usePluginsStore.getState().detailPluginId).toBeNull()
+    // Nothing selected, so no pane at all.
+    expect(sheet()).toBeEmptyDOMElement()
 
     await user.click(screen.getByTestId("plugin-library-row-plugin_x"))
     expect(sheet()).toHaveAttribute("data-sheet-open", "true")
@@ -560,11 +631,74 @@ describe("PluginPanel detail sheet (overlay tier)", () => {
     expect(sheet()).toHaveAttribute("data-sheet-open", "false")
   })
 
-  it("lets the pane's own trigger open the sheet with no selection", async () => {
+  it("lets the pane's own trigger reopen the sheet on a surviving selection", async () => {
     const user = userEvent.setup()
+    usePluginsStore.setState({ detailPluginId: "plugin_x" })
     render(<PluginPanel />)
     await user.click(screen.getByRole("button", { name: "stub-open-right-sheet" }))
     expect(sheet()).toHaveAttribute("data-sheet-open", "true")
+  })
+
+  // The sheet covers the list. When something in the detail changed the
+  // list's filters, the sheet steps aside so the result is visible.
+  it("dismisses the sheet when the detail applies a list filter", async () => {
+    const user = userEvent.setup()
+    render(<PluginPanel />)
+    await user.click(screen.getByTestId("plugin-library-row-plugin_x"))
+    await user.click(screen.getByRole("button", { name: "stub-filter-applied" }))
     expect(usePluginsStore.getState().detailPluginId).toBeNull()
+  })
+
+  // One close control: the sheet's own corner button, which the pane keeps
+  // clear instead of drawing a second one under it.
+  it("lets the sheet's corner button close it, with the pane keeping that corner clear", async () => {
+    const user = userEvent.setup()
+    render(<PluginPanel />)
+    await user.click(screen.getByTestId("plugin-library-row-plugin_x"))
+    expect(screen.queryByRole("button", { name: "stub-close-detail" })).toBeNull()
+    expect(screen.getByTestId("plugin-detail-pane-stub")).toHaveAttribute(
+      "data-reserve-close",
+      "true"
+    )
+  })
+})
+
+describe("PluginPanel inline detail (desktop tier)", () => {
+  beforeEach(() => {
+    mockBreakpoint = "desktop"
+  })
+
+  it("hands the inline pane a close button that clears the selection", async () => {
+    const user = userEvent.setup()
+    usePluginsStore.setState({ detailPluginId: "plugin_x" })
+    render(<PluginPanel />)
+    await user.click(screen.getByRole("button", { name: "stub-close-detail" }))
+    expect(usePluginsStore.getState().detailPluginId).toBeNull()
+    expect(screen.getByTestId("shell-right")).toBeEmptyDOMElement()
+  })
+
+  it("closes the inline pane on Escape", () => {
+    usePluginsStore.setState({ detailPluginId: "plugin_x" })
+    render(<PluginPanel />)
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(usePluginsStore.getState().detailPluginId).toBeNull()
+  })
+
+  it("leaves Escape to a text field that has focus", () => {
+    usePluginsStore.setState({ detailPluginId: "plugin_x" })
+    render(<PluginPanel />)
+    const input = screen.getAllByRole("searchbox")[0] ?? screen.getAllByRole("textbox")[0]
+    input.focus()
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(usePluginsStore.getState().detailPluginId).toBe("plugin_x")
+  })
+})
+
+describe("PluginPanel section deep links on the web build", () => {
+  it("does not select a desktop-only section from a URL off the desktop shell", () => {
+    mockSearchString = "section=agent-packages"
+    mockSearchCacheKey = ""
+    render(<PluginPanel />)
+    expect(usePluginsStore.getState().activeSection).toBe("library")
   })
 })

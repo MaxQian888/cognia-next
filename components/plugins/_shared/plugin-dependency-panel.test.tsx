@@ -28,14 +28,21 @@ const messages = {
       notFound: "not found",
       checking: "checking…",
       minVersion: "≥ {version}",
+      openDependencyAria: "Open {name}",
     },
   },
 }
 
-function renderPanel(manifest: Partial<PluginManifest>) {
+function renderPanel(
+  manifest: Partial<PluginManifest>,
+  onOpenDependency?: (pluginId: string) => void
+) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <PluginDependencyPanel manifest={manifest as PluginManifest} />
+      <PluginDependencyPanel
+        manifest={manifest as PluginManifest}
+        onOpenDependency={onOpenDependency}
+      />
     </NextIntlClientProvider>
   )
 }
@@ -82,5 +89,37 @@ describe("PluginDependencyPanel", () => {
     renderPanel({ pythonDependencies: ["requests>=2", "numpy"] })
     expect(screen.getByText("requests>=2")).toBeInTheDocument()
     expect(screen.getByText("numpy")).toBeInTheDocument()
+  })
+
+  it("renders dependencies as divided rows, not package cards", () => {
+    renderPanel({ dependencies: { "dep.installed": "^1.0.0" } })
+    const row = screen.getByTestId("dep-dep.installed")
+    expect(row.tagName).toBe("LI")
+    expect(row).toHaveTextContent("^1.0.0")
+    expect(row.className).not.toMatch(/rounded|border(?!-)/)
+  })
+
+  it("names an installed dependency by its display name, keeping the id beside it", async () => {
+    const { usePluginStore } = await import("@/stores/plugin-runtime/plugin-store")
+    usePluginStore.setState((state) => ({
+      ...state,
+      plugins: {
+        ...state.plugins,
+        "dep.installed": { manifest: { id: "dep.installed", name: "Office Kit", version: "1" } },
+      } as never,
+    }))
+    renderPanel({ dependencies: { "dep.installed": "^1.0.0" } })
+    const row = screen.getByTestId("dep-dep.installed")
+    expect(row).toHaveTextContent("Office Kit")
+    expect(row).toHaveTextContent("dep.installed")
+  })
+
+  it("opens an installed dependency only when the host asks for it", () => {
+    const onOpen = jest.fn()
+    renderPanel({ dependencies: { "dep.installed": "^1.0.0", "dep.absent": "^2.0.0" } }, onOpen)
+    screen.getByTestId("dep-dep.installed").querySelector("button")!.click()
+    expect(onOpen).toHaveBeenCalledWith("dep.installed")
+    // A missing dependency has no detail to open.
+    expect(screen.getAllByRole("button")).toHaveLength(1)
   })
 })

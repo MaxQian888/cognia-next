@@ -20,5 +20,6 @@
     "enabled": "Enabled",
     "errored": "Errored",
     "updates": "Updates available"
-  }
+  },
+  "navAria": "Plugin sections"
 }

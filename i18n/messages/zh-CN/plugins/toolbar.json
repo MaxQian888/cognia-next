@@ -35,5 +35,9 @@
   "syncRegistryAria": "刷新市场注册表并检查已安装插件的更新",
   "convertPlugin": "转换插件…",
   "fromCogpack": "齿轮包…",
-  "groupCogpack": "齿轮包"
+  "groupCogpack": "齿轮包",
+  "groupConvert": "从其他生态转换",
+  "moreActions": "更多插件操作",
+  "syncing": "正在同步注册表…",
+  "syncRegistryHint": "刷新插件市场目录，并标记有可用更新的已安装插件。"
 }

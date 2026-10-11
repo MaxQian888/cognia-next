@@ -14,7 +14,8 @@
  * claim the UI asks the user to take on faith.
  *
  * Rendered inside the plugin's Permissions tab (`plugin-detail-permissions.tsx`)
- * next to the permission grant/revoke table it conceptually belongs with.
+ * next to the permission grant/revoke list it conceptually belongs with, as a
+ * flat group (heading + divided list) like the rest of that tab.
  */
 
 import { useCallback } from "react"
@@ -23,6 +24,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { Button } from "@/components/ui/button"
 import { listApprovedBinaries, revokeBinaryApproval } from "@/lib/db/approved-binaries"
+import { PluginDetailGroup } from "./plugin-detail-group"
 
 export function PluginApprovedBinariesCard({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.approvedBinaries")
@@ -41,22 +43,28 @@ export function PluginApprovedBinariesCard({ pluginId }: { pluginId: string }) {
   // approvals, so hold the section back entirely until we know.
   if (rows === undefined) return null
 
+  // Flat: a hairline + small heading over a plain divided list. The
+  // Permissions tab owns the pane, so a bordered box here would nest a frame
+  // inside the tab for no grouping the heading does not already give.
   return (
-    <div className="space-y-1">
-      <h3 className="text-xs font-semibold">{t("title")}</h3>
-      <p className="text-[11px] text-muted-foreground">{t("description")}</p>
-      <div className="overflow-hidden rounded-control border">
+    <PluginDetailGroup title={t("title")} testId="plugin-approved-binaries">
+      <div className="@container min-w-0 space-y-1.5">
+        <p className="text-[11px] text-muted-foreground">{t("description")}</p>
         {rows.length === 0 ? (
-          <p className="p-3 text-xs text-muted-foreground">{t("empty")}</p>
+          <p className="text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
           <ul className="divide-y">
             {rows.map((row) => (
               <li
                 key={row.binaryPath}
-                className="flex items-center justify-between gap-3 p-2.5 text-xs"
+                className="flex items-start justify-between gap-3 py-2 text-xs"
               >
                 <div className="min-w-0 space-y-0.5">
-                  <code className="block truncate font-mono text-[11px]">{row.binaryPath}</code>
+                  {/* The full path, wrapped: truncating it hid the binary's
+                      own name, the part that tells two approvals apart. */}
+                  <code className="block font-mono text-[11px] [overflow-wrap:anywhere]">
+                    {row.binaryPath}
+                  </code>
                   <span className="block text-[10px] text-muted-foreground">
                     {t("approvedAt", {
                       date: format.dateTime(new Date(row.approvedAt), {
@@ -72,7 +80,7 @@ export function PluginApprovedBinariesCard({ pluginId }: { pluginId: string }) {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="shrink-0"
+                  className="shrink-0 pointer-coarse:h-10"
                   onClick={() => revoke(row.binaryPath)}
                   aria-label={t("revokeAria", { path: row.binaryPath })}
                 >
@@ -83,6 +91,6 @@ export function PluginApprovedBinariesCard({ pluginId }: { pluginId: string }) {
           </ul>
         )}
       </div>
-    </div>
+    </PluginDetailGroup>
   )
 }

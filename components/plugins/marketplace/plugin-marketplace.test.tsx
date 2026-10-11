@@ -86,6 +86,19 @@ jest.mock("@/lib/plugin/vscode-shim/openvsx-install-flow", () => ({
   })),
 }))
 
+// The pane's own install client goes through this export; the marketplace
+// hook keeps using its module-internal loader, so overriding it here only
+// delays the INSTALL client — which is the window the loading toast covers.
+let mockLoadInstallClient: (() => Promise<unknown>) | null = null
+jest.mock("@/hooks/plugins/use-plugin-marketplace", () => {
+  const actual = jest.requireActual("@/hooks/plugins/use-plugin-marketplace")
+  return {
+    ...actual,
+    loadPluginMarketplaceClient: () =>
+      mockLoadInstallClient ? mockLoadInstallClient() : actual.loadPluginMarketplaceClient(),
+  }
+})
+
 import { __resetPluginMarketplaceClientForTests } from "@/hooks/plugins"
 import type { MarketplacePreset } from "@/lib/plugin/package/github-marketplace"
 import { getOpenVsxClient } from "@/lib/plugin/vscode-shim/openvsx-client"
@@ -139,6 +152,7 @@ const ENTRIES = [
 ]
 
 beforeEach(() => {
+  mockLoadInstallClient = null
   mockVscodeAvailable = true
   // Both Discover axes live in the plugins store now, so reset them or a
   // previous case leaks its origin into the next one.
@@ -330,6 +344,25 @@ describe("PluginMarketplace", () => {
         expect.objectContaining({ action: expect.objectContaining({ label: "viewDetails" }) })
       )
     )
+  })
+
+  it("says the installer is still loading instead of ignoring the click", async () => {
+    // Never resolves: the click lands before the lazy client exists.
+    mockLoadInstallClient = () => new Promise(() => undefined)
+    render(<PluginMarketplace />)
+    await waitFor(() => expect(screen.getAllByText("Beta").length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByText("install")[0])
+    expect(mockToast.message).toHaveBeenCalledWith("installerLoading")
+  })
+
+  it("shows a featured plugin that is already installed as installed", async () => {
+    installedRows.push({ id: "alpha", name: "Alpha", manifest: {} } as never)
+    render(<PluginMarketplace />)
+    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
+    // Hero strip: no Install for alpha anywhere, Uninstall instead.
+    const hero = screen.getByText("title").closest("div")!.parentElement!
+    expect(within(hero).queryByText("install")).not.toBeInTheDocument()
+    expect(within(hero).getByRole("button", { name: "uninstall" })).toBeInTheDocument()
   })
 
   it("renders Load more when results exceed PAGE_SIZE and expands on click", async () => {

@@ -1,7 +1,9 @@
 {
   "arrayAdd": "Add item",
+  "arrayItem": "Item {index}",
   "arrayPlaceholder": "One value per line",
   "arrayRemove": "Remove",
+  "arrayRemoveAria": "Remove item {index}",
   "cancel": "Cancel",
   "close": "Close",
   "deprecated": "Deprecated",
@@ -10,6 +12,7 @@
   "loading": "Loading plugin configuration…",
   "loadingComponent": "Loading the plugin's settings panel…",
   "noSchema": "This plugin doesn't declare a configuration schema. Its raw config is shown below for reference.",
+  "notFound": "This plugin is no longer installed, so there is nothing to configure.",
   "oneOfVariant": "Variant",
   "save": "Save",
   "saveFailed": "Couldn't save settings for {name}",
@@ -29,5 +32,6 @@
     "minLength": "Must be at least {min} characters.",
     "notNumber": "Must be a number.",
     "pattern": "Must match pattern {pattern}."
-  }
+  },
+  "variantFallback": "Variant {index}"
 }

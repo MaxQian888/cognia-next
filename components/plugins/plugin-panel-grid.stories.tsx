@@ -6,8 +6,10 @@ import { resetStore } from "@/lib/storybook/seed-stores"
 import { samplePluginRows } from "@/lib/storybook/fixtures/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 
-// Grid of installed-plugin cards (the classic panel layout). Rows + totals come
-// from `usePlugins()`; selection and per-card actions live on the plugins store.
+// Grid of installed-plugin cards (the Library's card view). Rows come from
+// `usePlugins()`; selection and per-card actions live on the plugins store.
+// No Empty story: the empty and loading states belong to `PluginLibraryList`
+// (see its stories), which only mounts this grid once there are rows.
 
 const meta = {
   title: "Plugins/PluginPanelGrid",
@@ -32,12 +34,5 @@ export const Populated: Story = {
       await db.plugins.bulkPut(samplePluginRows())
     })
     return () => resetStore(usePluginsStore)
-  },
-}
-
-export const Empty: Story = {
-  beforeEach: async () => {
-    resetStore(usePluginsStore)
-    await seedDb(async () => {})
   },
 }

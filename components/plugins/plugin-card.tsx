@@ -1,18 +1,28 @@
 "use client"
 
-// Rich card replacing the table row in the InstalledTab. Surfaces version,
-// capability chips, permission count, status, signature status, and an
-// action menu (open / configure / enable-disable / uninstall). Mirrors the
-// shape of `components/skills/skill-card.tsx` so future shared treatments
-// (drag/drop, multi-select) port cleanly.
+// The Library's card view (`PluginPanelGrid`, reached from the list's
+// view toggle). Surfaces version, capability chips, permission count, status,
+// source, signature status, and an action menu (open / configure /
+// enable-disable / uninstall). Mirrors the shape of
+// `components/skills/skill-card.tsx` so future shared treatments (drag/drop,
+// multi-select) port cleanly.
+//
+// The whole card opens the detail pane, the same way a Library row does: the
+// name is the one real <button>, and its `after:inset-0` pseudo-element
+// stretches the hit area over the card. Everything else that is interactive
+// (checkbox, actions menu, chips, badges with hints) sits above it with
+// `relative z-10`. The card used to wrap the name AND its badges in one
+// <button> full of block <div>s, which is invalid HTML (a button may hold only
+// phrasing content) and made the badges part of the button's accessible name.
 
 import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { useLocalizedPluginText } from "@/hooks/plugins/use-localized-plugin-text"
 import { ShieldCheckIcon, AlertTriangleIcon, CircleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
+import { isPluginRowErrored } from "@/hooks/plugins/use-plugins"
+import { DANGEROUS_PERMISSIONS } from "@/lib/plugin/security/permission-guard"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
@@ -26,6 +36,9 @@ import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
 import { PluginVersionBadge } from "./_shared/plugin-version-badge"
 import { PluginAvatar } from "./plugin-avatar"
 import { PluginContributionChip } from "./_shared/plugin-contribution-chip"
+import { PluginSourceBadge } from "./plugin-source-badge"
+
+const DANGEROUS = new Set<string>(DANGEROUS_PERMISSIONS)
 
 interface Props {
   plugin: PluginRow
@@ -55,18 +68,16 @@ export const PluginCard = memo(function PluginCard({
   const t = useTranslations("plugins.card")
   const { name: displayName } = useLocalizedPluginText(plugin)
   const status = plugin.status
-  const errored = status === "error"
+  // The same predicate the "Errored" quick filter and its count use, so a
+  // card the filter shows as errored also looks errored.
+  const errored = isPluginRowErrored(plugin)
+  const errorMessage = plugin.error ?? plugin.lifecycle?.lastError
   const isLoading = status === "loading" || status === "enabling" || status === "updating"
-  const permissionCount = (plugin.manifest as { permissions?: string[] })?.permissions?.length ?? 0
-  const dangerousPermissions = (
-    (plugin.manifest as { permissions?: string[] })?.permissions ?? []
-  ).filter(
-    (p) =>
-      p === "shell:execute" ||
-      p === "process:spawn" ||
-      p === "python:execute" ||
-      p === "filesystem:write"
-  )
+  const permissions = (plugin.manifest as { permissions?: string[] })?.permissions ?? []
+  const permissionCount = permissions.length
+  // The guard's canonical list, not a hand-picked four: network egress, chat
+  // interception, secrets writes and the rest are just as sensitive.
+  const dangerousPermissions = permissions.filter((p) => DANGEROUS.has(p))
   const signatureState: SignatureState = (() => {
     const sig = (plugin.manifest as { signature?: { verified?: boolean; failed?: boolean } })
       ?.signature
@@ -95,9 +106,9 @@ export const PluginCard = memo(function PluginCard({
       data-errored={errored || undefined}
     >
       <div className="flex items-start gap-2">
-        {/* Padded label = a 36px hit area on a coarse pointer without
+        {/* Padded label = a 40px hit area on a coarse pointer without
             changing the card's painted layout. */}
-        <label className="-m-1.5 flex shrink-0 cursor-pointer p-1.5 pointer-coarse:-m-2.5 pointer-coarse:p-2.5">
+        <label className="relative z-10 -m-1.5 flex shrink-0 cursor-pointer p-1.5 pointer-coarse:-m-3 pointer-coarse:p-3">
           <Checkbox
             checked={selected}
             onCheckedChange={() => onToggleSelect(plugin.id)}
@@ -113,40 +124,43 @@ export const PluginCard = memo(function PluginCard({
           size={28}
           className="mt-0.5"
         />
-        <Button
-          variant="ghost"
-          className="flex-1 min-w-0 h-auto justify-start p-0 text-left font-normal hover:bg-transparent"
-          onClick={() => onOpen(plugin.id)}
-        >
-          <div className="block w-full min-w-0">
-            {/* flex-wrap lets the version / "update available" badges drop to
-             *  a second line in narrow grid columns instead of overflowing
-             *  the card; the name still truncates on its own line. */}
-            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-              <span className="font-medium truncate">{displayName}</span>
-              <PluginVersionBadge version={plugin.version} className="shrink-0" />
-              {updateAvailable && (
-                <Badge variant="secondary" className="text-xs shrink-0">
-                  {t("updateBadge")}
-                </Badge>
-              )}
-            </div>
-            <div className="text-xs text-muted-foreground truncate mt-0.5">{plugin.id}</div>
+        <div className="min-w-0 flex-1">
+          {/* flex-wrap lets the version / "update available" badges drop to
+           *  a second line in narrow grid columns instead of overflowing the
+           *  card; the name still truncates on its own line. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onOpen(plugin.id)}
+              className="min-w-0 truncate rounded-sm text-left font-medium after:absolute after:inset-0 after:rounded-[inherit] after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
+              data-testid={`plugin-card-open-${plugin.id}`}
+            >
+              {displayName}
+            </button>
+            <PluginVersionBadge version={plugin.version} className="shrink-0" />
+            {updateAvailable && (
+              <Badge variant="secondary" className="shrink-0 text-xs">
+                {t("updateBadge")}
+              </Badge>
+            )}
           </div>
-        </Button>
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">{plugin.id}</div>
+        </div>
 
-        <PluginRowActionsMenu
-          plugin={plugin}
-          onOpen={onOpen}
-          onConfigure={onConfigure}
-          onReviewPermissions={onReviewPermissions}
-          onToggleEnabled={onToggleEnabled}
-          onUninstall={onUninstall}
-          onRollback={onRollback}
-        />
+        <div className="relative z-10 shrink-0">
+          <PluginRowActionsMenu
+            plugin={plugin}
+            onOpen={onOpen}
+            onConfigure={onConfigure}
+            onReviewPermissions={onReviewPermissions}
+            onToggleEnabled={onToggleEnabled}
+            onUninstall={onUninstall}
+            onRollback={onRollback}
+          />
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="relative z-10 flex flex-wrap items-center gap-1">
         {/* Unified 3-chip cap matches the marketplace card so the same
          *  plugin renders consistently across "browse" and "installed"
          *  surfaces. The per-contribution preview is the shared
@@ -172,10 +186,10 @@ export const PluginCard = memo(function PluginCard({
        *  the pill drops below the metadata instead of spilling past the edge. */}
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-muted-foreground">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Badge variant="outline" className="text-xs">
-            {plugin.source}
-          </Badge>
-          <PluginSignatureBadge state={signatureState} compact />
+          {/* The source badge the row and detail header use: a label for
+              every source, the development marker, the shadowing note. */}
+          <PluginSourceBadge source={plugin.source} />
+          <PluginSignatureBadge state={signatureState} compact className="relative z-10" />
           <PluginSimulatedBadge pluginId={plugin.id} />
           {permissionCount > 0 && (
             <span className="flex items-center gap-1 whitespace-nowrap">
@@ -194,7 +208,9 @@ export const PluginCard = memo(function PluginCard({
           )}
         </div>
         <PluginStatusPill
-          status={status}
+          // A lifecycle error never reaches `row.status`; say "Error" here
+          // too, or the pill reads "Enabled" on a card tinted as failed.
+          status={errored ? "error" : status}
           enabled={plugin.enabled}
           loading={isLoading}
           lifecycle={plugin.lifecycle}
@@ -202,13 +218,13 @@ export const PluginCard = memo(function PluginCard({
         <PluginActivationProgress pluginId={plugin.id} pluginName={displayName} variant="card" />
       </div>
 
-      <PluginCompatibilityBadge manifest={plugin.manifest} />
-      <PluginRuntimeWarnings plugin={plugin} />
+      <PluginCompatibilityBadge manifest={plugin.manifest} className="relative z-10" />
+      <PluginRuntimeWarnings plugin={plugin} className="relative z-10" />
 
-      {errored && plugin.error && (
+      {errored && errorMessage && (
         <div className="flex items-start gap-1 text-xs text-destructive">
-          <CircleAlertIcon className="size-3 mt-0.5 shrink-0" />
-          <span className="line-clamp-2">{plugin.error}</span>
+          <CircleAlertIcon className="mt-0.5 size-3 shrink-0" />
+          <span className="line-clamp-2">{errorMessage}</span>
         </div>
       )}
     </Card>

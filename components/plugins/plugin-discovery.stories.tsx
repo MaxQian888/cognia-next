@@ -31,6 +31,8 @@ const meta = {
   component: PluginDiscovery,
   args: {
     onInstall: fn(),
+    onUninstall: fn(),
+    installedIds: new Set<string>(),
     market: { state: { kind: "ready", results: FEATURED }, featured: FEATURED, installingId: null },
   },
   parameters: { layout: "padded" },
@@ -50,6 +52,11 @@ export const Installing: Story = {
       installingId: "cognia-pdf",
     },
   },
+}
+
+// A featured plugin the user already has: Installed marker + Uninstall.
+export const OneInstalled: Story = {
+  args: { installedIds: new Set(["cognia-web-tools"]) },
 }
 
 // Nothing featured: the strip renders nothing and leaves the empty state to

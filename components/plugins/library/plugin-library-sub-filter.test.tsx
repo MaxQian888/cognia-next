@@ -9,16 +9,28 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// `row.status` is what the manager wrote at discovery ("installed"), not the
+// runtime state, so the fixture deliberately disagrees with `enabled` to pin
+// which field the counts read.
 const mockRows: PluginRow[] = [
-  makePlugin({ id: "a", status: "enabled", enabled: true }),
-  makePlugin({ id: "b", status: "enabled", enabled: true, manifest: { updateAvailable: true } }),
+  makePlugin({ id: "a", status: "installed", enabled: true }),
+  makePlugin({ id: "b", status: "installed", enabled: true, manifest: { updateAvailable: true } }),
   makePlugin({
     id: "c",
-    status: "disabled",
+    status: "enabled",
     enabled: false,
-    manifest: { configSchema: { type: "object" } },
+    manifest: { configSchema: { type: "object", properties: { apiKey: { type: "string" } } } },
   }),
-  makePlugin({ id: "d", status: "error", enabled: false, error: "boom" }),
+  // A schema with no properties exposes nothing — the filter drops it, so the
+  // count must too.
+  makePlugin({ id: "e", enabled: false, manifest: { configSchema: { type: "object" } } }),
+  makePlugin({
+    id: "d",
+    status: "installed",
+    enabled: false,
+    error: "boom",
+    lifecycle: { intent: "enabled", actual: "error", revision: 1, updatedAt: 0 },
+  }),
 ]
 
 jest.mock("@/hooks/plugins", () => ({
@@ -87,8 +99,9 @@ describe("useLibrarySubFilterSegments", () => {
   it("attaches the live count to every segment", () => {
     const { result } = renderHook(() => useLibrarySubFilterSegments())
     const counts = Object.fromEntries(result.current.items.map((s) => [s.value, s.count]))
-    // Fixture: 2 enabled, 1 with updateAvailable, 1 with configSchema, 1 errored.
-    expect(counts).toEqual({ all: 4, enabled: 2, updates: 1, configurable: 1, errored: 1 })
+    // Fixture: 2 with `enabled`, 1 with updateAvailable, 1 exposing config
+    // (the property-less schema does not count), 1 with a lifecycle error.
+    expect(counts).toEqual({ all: 5, enabled: 2, updates: 1, configurable: 1, errored: 1 })
   })
 
   // Counts are what let `visibleSegments` drop the dead filters, so a
