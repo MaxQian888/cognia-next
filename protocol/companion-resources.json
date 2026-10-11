@@ -303,6 +303,7 @@
         "device_grant": {},
         "endpoint": {},
         "host_state": {},
+        "local_auth_config": {},
         "local_reachability": {},
         "locked_computer_use": {},
         "mdns": {},
@@ -352,6 +353,7 @@
       "children": {
         "adapter": {
           "children": {
+            "instance": {},
             "policy": {}
           }
         },
@@ -1343,7 +1345,12 @@
         "space": {},
         "grant": {},
         "credential": {},
-        "audit": {}
+        "audit": {},
+        "collab": {
+          "children": {
+            "host": {}
+          }
+        }
       }
     },
     "files": {
