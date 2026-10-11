@@ -101,7 +101,18 @@
     "goPairing": "Pair a device",
     "goRelay": "Relay and tunnel",
     "goRemoteHosts": "Remote hosts",
-    "goDevices": "Device console"
+    "goDevices": "Device console",
+    "alwaysOn": "Always-on host",
+    "alwaysOnValue": {
+      "hosting": "Hosting",
+      "standing-by": "Standing by",
+      "off": "Off"
+    },
+    "alwaysOnHint": {
+      "hosting": "This computer stays awake and runs bots and scheduled tasks while you are away.",
+      "standing-by": "Host mode is on, but the host you are driving runs the work right now.",
+      "off": "Turn on always-on host mode in Desktop settings to keep work running while you are away."
+    }
   },
   "pairing": {
     "reachRelay": "Anywhere",

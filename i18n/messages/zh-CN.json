@@ -45523,6 +45523,17 @@
         "activeHost": "当前主机",
         "activeHostNone": "没有正在驱动的主机。",
         "activeHostSelf": "这台机器。",
+        "alwaysOn": "常驻 host",
+        "alwaysOnHint": {
+          "hosting": "这台电脑保持唤醒，在你离开时运行 bot 和定时任务。",
+          "off": "在桌面设置中开启常驻 host 模式，即可在你离开时继续运行任务。",
+          "standing-by": "常驻 host 模式已开启，但当前由你正在使用的 host 运行任务。"
+        },
+        "alwaysOnValue": {
+          "hosting": "正在托管",
+          "off": "已关闭",
+          "standing-by": "待命"
+        },
         "degradedHint": "请求仍能应答，但没有事件到达。在别处做的更改要等事件流重连后才会出现。",
         "devicePlanes": "{count, plural, =0 {没有已配对设备。} =1 {1 台已配对设备。} other {# 台已配对设备。}}",
         "eventPlaneDescription": "除请求应答之外，事件是否能到达对端。",
@@ -46917,6 +46928,21 @@
       "copyDebugSuccess": "已复制调试信息到剪贴板。",
       "dataDir": "数据目录",
       "family": "家族",
+      "hostMode": {
+        "closeLocked": "常驻 host 模式下，关闭按钮固定为最小化到托盘。",
+        "description": "让这台电脑在你离开时继续运行你的 bot、连接器和定时任务。",
+        "details": "阻止电脑休眠，登录时在后台启动 Cognia，并让关闭按钮最小化到托盘。从托盘选择退出仍会退出应用。",
+        "disabledToast": "常驻 host 模式已关闭。",
+        "enabledToast": "这台电脑现在是常驻 host。",
+        "failed": "无法更改常驻 host 模式：{error}",
+        "status": {
+          "hosting": "正在托管：这台电脑运行你的常驻任务。",
+          "off": "已关闭：bot 和定时任务仅在 Cognia 打开时运行。",
+          "standing-by": "待命：你正在使用另一台 host，期间由它运行任务。"
+        },
+        "title": "常驻 host 模式",
+        "toggle": "切换常驻 host 模式"
+      },
       "launchAtLogin": "登录时启动",
       "launchAtLoginHint": "登录电脑后自动启动 Cognia。",
       "launchAtLoginToggle": "切换登录时启动",

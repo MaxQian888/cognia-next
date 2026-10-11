@@ -23,12 +23,20 @@ jest.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ show, setFocus }),
 }))
 
-const invoke = jest.fn().mockResolvedValue(undefined)
+const invoke = jest.fn()
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
 }))
 
+import { __resetHostModeForTests } from "@/lib/tauri/host-mode"
 import { WindowShowInitializer } from "./window-show-initializer"
+
+/** Answer `host_mode_get` with `bootHidden`, every other command with `rest`. */
+function routeInvoke(bootHidden: boolean, rest: (cmd: string) => Promise<unknown>) {
+  invoke.mockImplementation((cmd: string) =>
+    cmd === "host_mode_get" ? Promise.resolve({ enabled: bootHidden, bootHidden }) : rest(cmd)
+  )
+}
 
 /**
  * Run queued requestAnimationFrame callbacks synchronously so the two-frame
@@ -66,7 +74,9 @@ beforeEach(() => {
   isTauriMock.mockReset()
   show.mockReset().mockResolvedValue(undefined)
   setFocus.mockReset().mockResolvedValue(undefined)
-  invoke.mockReset().mockResolvedValue(undefined)
+  invoke.mockReset()
+  routeInvoke(false, () => Promise.resolve(undefined))
+  __resetHostModeForTests()
   raf = flushRaf()
   raf.install()
 })
@@ -113,7 +123,29 @@ test("logs a warning when show() rejects with an Error", async () => {
       expect.objectContaining({ error: "boom" })
     )
   )
-  expect(invoke).not.toHaveBeenCalled()
+  expect(invoke).not.toHaveBeenCalledWith("webview_acknowledge_boot_reveal")
+})
+
+test("a hidden login launch in host mode never reveals the window", async () => {
+  isTauriMock.mockReturnValue(true)
+  routeInvoke(true, () => Promise.resolve(undefined))
+  render(<WindowShowInitializer />)
+  raf.drain()
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("host_mode_get"))
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(show).not.toHaveBeenCalled()
+  expect(setFocus).not.toHaveBeenCalled()
+})
+
+test("reveals the window when host mode cannot be read", async () => {
+  isTauriMock.mockReturnValue(true)
+  invoke.mockImplementation((cmd: string) =>
+    cmd === "host_mode_get" ? Promise.reject(new Error("no command")) : Promise.resolve(undefined)
+  )
+  render(<WindowShowInitializer />)
+  raf.drain()
+  await waitFor(() => expect(show).toHaveBeenCalledTimes(1))
 })
 
 test("warning falls back to String(err) for non-Error throws", async () => {
@@ -131,7 +163,7 @@ test("warning falls back to String(err) for non-Error throws", async () => {
 
 test("focuses the shown window when boot-reveal acknowledgement fails", async () => {
   isTauriMock.mockReturnValue(true)
-  invoke.mockRejectedValueOnce(new Error("ack failed"))
+  routeInvoke(false, () => Promise.reject(new Error("ack failed")))
   render(<WindowShowInitializer />)
   raf.drain()
 
@@ -144,7 +176,7 @@ test("focuses the shown window when boot-reveal acknowledgement fails", async ()
 
 test("stringifies a non-Error boot-reveal acknowledgement failure", async () => {
   isTauriMock.mockReturnValue(true)
-  invoke.mockRejectedValueOnce("ack string failure")
+  routeInvoke(false, () => Promise.reject("ack string failure"))
   render(<WindowShowInitializer />)
   raf.drain()
 

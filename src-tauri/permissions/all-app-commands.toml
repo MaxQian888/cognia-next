@@ -624,6 +624,8 @@ commands.allow = [
   "greet",
   "host_consent_pending",
   "host_consent_respond",
+  "host_mode_get",
+  "host_mode_set",
   "integration_ingress_ack",
   "integration_ingress_deadletter",
   "integration_ingress_deadletters",

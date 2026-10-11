@@ -12,10 +12,11 @@ connectors, so they keep working while your laptop sleeps.
 
 There are two ways to run one:
 
-| Machine                      | How                                           |
-| ---------------------------- | --------------------------------------------- |
-| Linux VPS, NAS, home server  | Docker Compose, `server` profile              |
-| Mac (for example a Mac mini) | The host archive, installed as a LaunchDaemon |
+| Machine                      | How                                                |
+| ---------------------------- | -------------------------------------------------- |
+| Linux VPS, NAS, home server  | Docker Compose, `server` profile                   |
+| Mac (for example a Mac mini) | The host archive, installed as a LaunchDaemon      |
+| A desktop you leave running  | The desktop app's **Always-on host mode** (below)  |
 
 Either way, phones and desktops pair over Cognia's encrypted relay, so the machine can
 sit behind a home router with no public domain and no open port.
@@ -77,6 +78,28 @@ service there reads its master key as a root-only systemd credential from
 For a Mac that should behave like a server, also set System Settings → Energy to
 start up automatically after a power failure and to prevent sleep while the display
 is off.
+
+## A desktop you leave running
+
+If the machine that should stay on already runs the Cognia desktop app, it can be the host
+itself: turn on **Settings → Desktop → Always-on host mode**. While the mode is on, the app:
+
+- holds a system wake assertion, so the computer does not idle-sleep (the display may still
+  turn off; `pmset -g assertions` lists it as "Cognia is the always-on host for this account");
+- registers launch at login and starts **hidden** when the OS launches it at login. Click the
+  tray icon (or the Dock icon on macOS) to open the window;
+- closes to the tray when you click the window's close button. The tray menu's **Quit** still
+  exits, and stops hosting until the app runs again.
+
+Turning the mode off releases the wake assertion and makes the next login launch open the
+window again. Launch at login and the close-button choice stay as they are; change them on
+the same page.
+
+The mode is a setting of this computer only and never syncs to your other devices.
+**Settings → Connectivity → Overview** shows whether the desktop is hosting, or standing by
+while it drives another host. Unlike the host archive, the desktop app needs someone to sign
+in to the computer after it restarts, so use the archive for a machine that must come back on
+its own after a power cut.
 
 ## Pair your phone and desktop
 

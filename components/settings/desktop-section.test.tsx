@@ -109,6 +109,20 @@ jest.mock("./selection-toolbar-settings", () => ({
   SelectionToolbarSettings: () => <div data-testid="selection-toolbar-settings" />,
 }))
 
+// Host mode has its own suites (`hooks/platform/use-hosting-state.test.ts`,
+// `lib/tauri/host-mode.test.ts`); here only the block's behaviour is pinned,
+// and a real hook would put `host_mode_get` into the shared `invoke` queue.
+type HostingStateValue = "hosting" | "standing-by" | "off" | "unsupported"
+let hosting = {
+  hostMode: { enabled: false, bootHidden: false },
+  loaded: true,
+  state: "off" as HostingStateValue,
+}
+const setHostModeEnabledMock = jest.fn()
+jest.mock("@/hooks/platform/use-hosting-state", () => ({
+  useHostingState: () => ({ ...hosting, setEnabled: setHostModeEnabledMock }),
+}))
+
 const saveSettingsMock = jest.fn().mockResolvedValue(undefined)
 let cookieImportEnabled = false
 let settingsLoaded = true
@@ -148,6 +162,75 @@ beforeEach(() => {
   cookieImportEnabled = false
   settingsLoaded = true
   saveSettingsMock.mockClear()
+  hosting = { hostMode: { enabled: false, bootHidden: false }, loaded: true, state: "off" }
+  setHostModeEnabledMock.mockImplementation(async (enabled: boolean) => {
+    hosting = {
+      hostMode: { enabled, bootHidden: false },
+      loaded: true,
+      state: enabled ? "hosting" : "off",
+    }
+    return hosting.hostMode
+  })
+})
+
+describe("always-on host mode", () => {
+  it("is off by default and says work runs only while the app is open", async () => {
+    render(<DesktopSection />)
+    const toggle = await screen.findByRole("switch", { name: "settings.desktop.hostMode.toggle" })
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    const status = screen.getByTestId("desktop-host-mode-status")
+    expect(status).toHaveAttribute("data-state", "off")
+    expect(status).toHaveTextContent("settings.desktop.hostMode.status.off")
+  })
+
+  it("turning it on shows launch at login on and the close button locked to the tray", async () => {
+    const { rerender } = render(<DesktopSection />)
+    const toggle = await screen.findByRole("switch", { name: "settings.desktop.hostMode.toggle" })
+    await waitFor(() => expect(screen.getAllByRole("radio")[0]).not.toBeDisabled())
+    fireEvent.click(toggle)
+    await waitFor(() => expect(setHostModeEnabledMock).toHaveBeenCalledWith(true))
+    await waitFor(() =>
+      expect(toastSuccessMock).toHaveBeenCalledWith("settings.desktop.hostMode.enabledToast")
+    )
+    rerender(<DesktopSection />)
+    expect(
+      screen.getByRole("switch", { name: "settings.desktop.launchAtLoginToggle" })
+    ).toHaveAttribute("aria-checked", "true")
+    const radios = screen.getAllByRole("radio")
+    for (const radio of radios) expect(radio).toBeDisabled()
+    expect(radios[1]).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByText("settings.desktop.hostMode.closeLocked")).toBeInTheDocument()
+    expect(screen.getByTestId("desktop-host-mode-status")).toHaveAttribute("data-state", "hosting")
+  })
+
+  it("says it is standing by while the desktop drives another host", async () => {
+    hosting = { hostMode: { enabled: true, bootHidden: false }, loaded: true, state: "standing-by" }
+    render(<DesktopSection />)
+    expect(await screen.findByTestId("desktop-host-mode-status")).toHaveTextContent(
+      "settings.desktop.hostMode.status.standing-by"
+    )
+  })
+
+  it("reports a failure and leaves the switch where it was", async () => {
+    setHostModeEnabledMock.mockRejectedValueOnce(new Error("disk full"))
+    render(<DesktopSection />)
+    fireEvent.click(await screen.findByRole("switch", { name: "settings.desktop.hostMode.toggle" }))
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith("settings.desktop.hostMode.failed")
+    )
+    expect(
+      screen.getByRole("switch", { name: "settings.desktop.hostMode.toggle" })
+    ).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("waits for the mode to load before it can be toggled", async () => {
+    hosting = { ...hosting, loaded: false }
+    render(<DesktopSection />)
+    expect(
+      await screen.findByRole("switch", { name: "settings.desktop.hostMode.toggle" })
+    ).toBeDisabled()
+    expect(screen.queryByTestId("desktop-host-mode-status")).not.toBeInTheDocument()
+  })
 })
 
 it("renders the three close-behavior options", async () => {

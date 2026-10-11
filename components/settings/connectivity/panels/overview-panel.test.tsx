@@ -11,6 +11,11 @@ const healthHandlers: Array<(h: unknown) => void> = []
 let health: { rpc: string; events: string } = { rpc: "ready", events: "ready" }
 
 jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: () => profile() }))
+// ADR-0224 A3. The predicate has its own suites; here only the row is pinned.
+let hosting: { loaded: boolean; state: string } = { loaded: true, state: "off" }
+jest.mock("@/hooks/platform/use-hosting-state", () => ({
+  useHostingState: () => ({ ...hosting, hostMode: { enabled: false, bootHidden: false } }),
+}))
 jest.mock("@/hooks/use-runtime-snapshot", () => ({
   useRuntimeSnapshot: () => ({ target, vaultState: "ready", connectionState: "connected" }),
 }))
@@ -53,6 +58,36 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values?.count !== undefined ? `${key}:${String(values.count)}` : key,
 }))
+
+describe("OverviewPanel always-on row", () => {
+  afterEach(() => {
+    hosting = { loaded: true, state: "off" }
+  })
+
+  it.each(["hosting", "standing-by", "off"])("says whether this desktop is %s", (state) => {
+    profile.mockReturnValue("desktop")
+    target = null
+    hosting = { loaded: true, state }
+    render(<OverviewPanel onNavigate={() => undefined} />)
+    const row = screen.getByTestId("overview-always-on")
+    expect(row).toHaveTextContent(`alwaysOnValue.${state}`)
+    expect(row).toHaveTextContent(`alwaysOnHint.${state}`)
+    expect(row.querySelector("[data-state]")).toHaveAttribute("data-state", state)
+  })
+
+  it("is absent before the mode loads, and on shells that cannot host", () => {
+    profile.mockReturnValue("desktop")
+    target = null
+    hosting = { loaded: false, state: "off" }
+    const { unmount } = render(<OverviewPanel onNavigate={() => undefined} />)
+    expect(screen.queryByTestId("overview-always-on")).toBeNull()
+    unmount()
+    profile.mockReturnValue("cloud-companion")
+    hosting = { loaded: true, state: "unsupported" }
+    render(<OverviewPanel onNavigate={() => undefined} />)
+    expect(screen.queryByTestId("overview-always-on")).toBeNull()
+  })
+})
 
 describe("OverviewPanel", () => {
   it("describes a Host shell: local link, no tier, its devices' event planes", () => {

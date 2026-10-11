@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
-import { CopyIcon, ExternalLinkIcon, LaptopIcon, PowerIcon } from "lucide-react"
+import { CopyIcon, ExternalLinkIcon, LaptopIcon, PowerIcon, ServerIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { isTauri } from "@/lib/tauri"
 import { isAutostartEnabled, setAutostart } from "@/lib/tauri/autostart"
@@ -18,6 +18,7 @@ import { getCloseBehavior, setCloseBehavior, type CloseBehavior } from "@/lib/ta
 import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { useHostingState } from "@/hooks/platform/use-hosting-state"
 import { TraySection } from "./tray-section"
 import { UsageDockCard } from "./usage-dock/usage-dock-card"
 import { TrayPanelSettings } from "./tray-panel/tray-panel-settings"
@@ -42,6 +43,8 @@ export function DesktopSection() {
     (state) => state.settings?.browserCookieImportEnabled ?? false
   )
   const saveSettings = useSettingsStore((state) => state.save)
+  const hosting = useHostingState()
+  const hostModeOn = hosting.hostMode.enabled
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -113,6 +116,24 @@ export function DesktopSection() {
       const errorText = err instanceof Error ? err.message : String(err)
       loggers.app.error("desktop.closeBehaviorFailed", err)
       toast.error(t("closeBehaviorFailed", { error: errorText }))
+    }
+  }
+
+  const handleHostMode = async (checked: boolean) => {
+    try {
+      await hosting.setEnabled(checked)
+      // Turning the mode on also registered launch at login and set the close
+      // button to the tray (`setHostMode`); show what it did.
+      if (checked) {
+        setAutostartState(true)
+        setCloseBehaviorState("tray")
+      }
+      loggers.app.info("desktop.hostMode", { enabled: checked })
+      toast.success(checked ? t("hostMode.enabledToast") : t("hostMode.disabledToast"))
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : String(err)
+      loggers.app.error("desktop.hostModeFailed", err)
+      toast.error(t("hostMode.failed", { error: errorText }))
     }
   }
 
@@ -192,6 +213,35 @@ export function DesktopSection() {
         <p className="text-xs text-muted-foreground">{t("subtitle")}</p>
       </div>
 
+      <section className="space-y-3 rounded-md border p-4" data-testid="desktop-host-mode">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <Label className="text-sm flex items-center gap-2">
+              <ServerIcon className="size-3.5" />
+              {t("hostMode.title")}
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("hostMode.description")}</p>
+            <p className="text-xs text-muted-foreground">{t("hostMode.details")}</p>
+          </div>
+          <Switch
+            checked={hostModeOn}
+            onCheckedChange={(c) => void handleHostMode(c)}
+            disabled={!hosting.loaded}
+            aria-label={t("hostMode.toggle")}
+            data-testid="desktop-host-mode-toggle"
+          />
+        </div>
+        {hosting.loaded && hosting.state !== "unsupported" && (
+          <p
+            className="border-t pt-3 text-xs text-muted-foreground"
+            data-testid="desktop-host-mode-status"
+            data-state={hosting.state}
+          >
+            {t(`hostMode.status.${hosting.state}`)}
+          </p>
+        )}
+      </section>
+
       <section className="space-y-3 rounded-md border p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
@@ -213,12 +263,15 @@ export function DesktopSection() {
         <div className="space-y-2 border-t pt-3">
           <div className="space-y-1">
             <Label className="text-sm">{t("closeBehavior")}</Label>
-            <p className="text-xs text-muted-foreground">{t("closeBehaviorHint")}</p>
+            <p className="text-xs text-muted-foreground">
+              {hostModeOn ? t("hostMode.closeLocked") : t("closeBehaviorHint")}
+            </p>
           </div>
           <RadioGroup
-            value={closeBehavior}
+            // Rust closes to the tray in host mode whatever is stored here.
+            value={hostModeOn ? "tray" : closeBehavior}
             onValueChange={(v) => void handleCloseBehavior(v as CloseBehavior)}
-            disabled={!loaded}
+            disabled={!loaded || hostModeOn}
             aria-label={t("closeBehavior")}
           >
             <Label className="flex cursor-pointer items-center gap-2 text-sm font-normal">

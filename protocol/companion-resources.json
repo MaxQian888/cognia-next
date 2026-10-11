@@ -87,6 +87,7 @@
       "children": {
         "close_behavior": {},
         "close_request": {},
+        "host_mode": {},
         "settings": {}
       }
     },

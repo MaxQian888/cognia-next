@@ -75,6 +75,15 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
 6. UI: a block in `components/settings/desktop-section.tsx` and a status row in the Connectivity overview. Keys in `i18n/messages/{en,zh-CN}/settings/desktop.json` and `connectivity.json`.
 7. Tests: `window_behavior.rs`, `cognia-power`, `desktop-section.test.tsx`. Run `tauri-smoke`.
 
+**A3 outcome (2026-10-11).**
+
+- **The flag lives in Rust, not in the prefs store.** A login launch has to decide to stay hidden and to hold the machine awake before any renderer exists, and nothing in Rust reads `cognia.store.json`. The mode is persisted in `host-mode.json` in the app config dir (the `shell-background.json` precedent). It is read in a `host_mode` boot step before `main_window`, and read and written by the renderer through `host_mode_get` / `host_mode_set` (`lib/tauri/host-mode.ts`). It is device-local by construction: not an `AppSettings` field, never synced. The commands are registered as client-owned `local-only` with written reasons; `known_commands.rs` was mirrored by hand because `companion-api:gen` still fails on HEAD.
+- **Wake.** `WakeReason::HostMode` at `System` level, set with `cognia_power::set_host_mode_hold(bool)`, a switch rather than a counted pair, so re-applying the flag never stacks a hold.
+- **Hidden login launch.** The autostart entry passes `--autostart` (declared in `tauri.conf.json` so the CLI plugin accepts it). Only `--autostart` with host mode on stays hidden; plain launch at login still opens the window. In that case Rust disarms the 8 s force-show and the renderer's `WindowShowInitializer` skips its reveal. A second instance started by the login entry no longer pops the window. The Dock icon brings a hidden window back (macOS `RunEvent::Reopen`).
+- **Close.** While the mode is on, the close handler applies `Tray` whatever is stored; turning the mode on also stores `tray` and registers launch at login. The tray's Quit is unchanged.
+- **Hosting predicate.** `lib/platform/hosting.ts` resolves `hosting | standing-by | off | unsupported` from host mode, the LOCAL `always-on` baseline and whether the shell drives a remote host; `hooks/platform/use-hosting-state.ts` subscribes to all three. It is consumed by the Desktop block and the Connectivity overview's **Always-on host** row. The bot console's `local` reach stays silent as designed (host mode does not change whether the runner runs); the device console's local row uses the predicate in A4.
+- **Not done here.** WKWebView may throttle timers in a hidden window. That was already the case for close-to-tray, and the system wake assertion also exempts the process from App Nap. Proving that bots and schedules fire with the window hidden for hours belongs to the A12 end-to-end run.
+
 ### A4 — Device console host state
 
 1. `DeviceRow` gains a host role (`always-on`, `headless`, `desktop`), populated from `featureManifest.hostIdentity` and `platform` in `buildRemoteHostRow` and from the local mode in `buildLocalRow` (`lib/devices/build-device-rows.ts`).

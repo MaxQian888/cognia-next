@@ -114,5 +114,20 @@
   "version": "版本",
   "webOnlyHintAfter": " 即可看到此页生效。",
   "webOnlyHintBefore": "仅在桌面版本中可用。运行 ",
-  "webOnlyHintCode": "pnpm tauri dev"
+  "webOnlyHintCode": "pnpm tauri dev",
+  "hostMode": {
+    "title": "常驻 host 模式",
+    "description": "让这台电脑在你离开时继续运行你的 bot、连接器和定时任务。",
+    "details": "阻止电脑休眠，登录时在后台启动 Cognia，并让关闭按钮最小化到托盘。从托盘选择退出仍会退出应用。",
+    "toggle": "切换常驻 host 模式",
+    "status": {
+      "hosting": "正在托管：这台电脑运行你的常驻任务。",
+      "standing-by": "待命：你正在使用另一台 host，期间由它运行任务。",
+      "off": "已关闭：bot 和定时任务仅在 Cognia 打开时运行。"
+    },
+    "closeLocked": "常驻 host 模式下，关闭按钮固定为最小化到托盘。",
+    "enabledToast": "这台电脑现在是常驻 host。",
+    "disabledToast": "常驻 host 模式已关闭。",
+    "failed": "无法更改常驻 host 模式：{error}"
+  }
 }

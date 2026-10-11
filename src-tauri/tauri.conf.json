@@ -131,6 +131,10 @@
           "name": "new-chat",
           "short": "n",
           "description": "Open a fresh chat after launch"
+        },
+        {
+          "name": "autostart",
+          "description": "Set by the launch-at-login entry; in always-on host mode the app starts hidden"
         }
       ]
     },

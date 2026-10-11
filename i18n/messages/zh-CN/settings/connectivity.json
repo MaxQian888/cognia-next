@@ -101,7 +101,18 @@
     "goPairing": "配对设备",
     "goRelay": "中继与隧道",
     "goRemoteHosts": "远程主机",
-    "goDevices": "设备控制台"
+    "goDevices": "设备控制台",
+    "alwaysOn": "常驻 host",
+    "alwaysOnValue": {
+      "hosting": "正在托管",
+      "standing-by": "待命",
+      "off": "已关闭"
+    },
+    "alwaysOnHint": {
+      "hosting": "这台电脑保持唤醒，在你离开时运行 bot 和定时任务。",
+      "standing-by": "常驻 host 模式已开启，但当前由你正在使用的 host 运行任务。",
+      "off": "在桌面设置中开启常驻 host 模式，即可在你离开时继续运行任务。"
+    }
   },
   "pairing": {
     "reachRelay": "任意网络",

@@ -72,7 +72,8 @@ pub(crate) fn menu_and_tray(app: &App) {
 /// Honor the user's window close-button preference. `Quit` exits the app
 /// (every window, overlays included); `Tray` hides the window so the app
 /// keeps living in the system tray; `Ask` intercepts the close and asks the
-/// frontend to show the exit-confirmation dialog. The tray menu's "Quit"
+/// frontend to show the exit-confirmation dialog. Always-on host mode
+/// (ADR-0224 A3) forces `Tray`. The tray menu's "Quit"
 /// always exits cleanly regardless, since it routes through
 /// PredefinedMenuItem.
 #[cfg(desktop)]
@@ -177,7 +178,7 @@ pub(crate) fn main_window(app: &App) {
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             let behavior = handle.state::<WindowBehavior>();
-            match behavior.close_behavior() {
+            match behavior.effective_close_behavior() {
                 // "Quit" means the app, not this one window. Tauri only exits
                 // when the LAST window closes, and the desktop pet, its popup,
                 // the fleet island and the other overlays are windows too, so

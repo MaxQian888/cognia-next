@@ -360,7 +360,10 @@ pub fn run() {
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             log::info!("second instance launched: args={args:?} cwd={cwd}");
-            if let Some(window) = app.get_webview_window("main") {
+            // A login entry firing while the app already runs is not the
+            // user asking for the window.
+            let at_login = window_behavior::launched_at_login(&args);
+            if let Some(window) = app.get_webview_window("main").filter(|_| !at_login) {
                 let _ = window.show();
                 let _ = window.unminimize();
                 let _ = window.set_focus();
@@ -428,7 +431,13 @@ pub fn run() {
                     })
                     .build(),
             )
-            .plugin(tauri_plugin_autostart::Builder::new().build())
+            // ADR-0224 A3: the login entry carries a marker so a host-mode
+            // login launch can stay hidden (`window_behavior::boot_hidden`).
+            .plugin(
+                tauri_plugin_autostart::Builder::new()
+                    .args([window_behavior::AUTOSTART_ARG])
+                    .build(),
+            )
             .plugin(tauri_plugin_cli::init());
     }
 
@@ -780,6 +789,8 @@ pub fn run() {
             window_behavior::set_close_behavior,
             window_behavior::get_close_behavior,
             window_behavior::resolve_close_request,
+            window_behavior::host_mode_get,
+            window_behavior::host_mode_set,
             webview_watchdog::webview_heartbeat,
             webview_watchdog::webview_acknowledge_boot_reveal,
             webview_watchdog::webview_take_recovery_notice,
@@ -1910,7 +1921,10 @@ pub fn run() {
         .setup(startup::run)
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(shutdown::handle_run_event);
+        .run(|app, event| {
+            window_behavior::handle_run_event(app, &event);
+            shutdown::handle_run_event(app, event);
+        });
 }
 
 #[cfg(test)]

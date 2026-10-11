@@ -7,8 +7,8 @@
 //!
 //! The assertion is reference counted, because independent subsystems hold it
 //! for overlapping reasons: an in-flight agent run, an attached execution
-//! worker, and a conversation whose power policy asks for the screen to stay
-//! lit. Releasing on the first one to finish would drop the machine mid-run for
+//! worker, a conversation whose power policy asks for the screen to stay
+//! lit, and the desktop's always-on host mode (ADR-0224). Releasing on the first one to finish would drop the machine mid-run for
 //! the others.
 //!
 //! Holders also disagree about how FAR the promise reaches — "don't sleep" and
@@ -55,6 +55,11 @@ pub enum WakeReason {
     /// the same coordinator that drives the browser `navigator.wakeLock` on
     /// every non-desktop shell.
     ScreenAwake(String),
+    /// The desktop is in always-on host mode (ADR-0224 A3): it is the machine
+    /// the account's bots, connectors and scheduled tasks run on, so it must
+    /// not idle-sleep while the user is away. One holder, set with
+    /// [`set_host_mode_hold`], never stacked.
+    HostMode,
 }
 
 impl WakeReason {
@@ -67,13 +72,18 @@ impl WakeReason {
             WakeReason::ScreenAwake(id) => {
                 format!("Cognia is keeping the screen on for a conversation ({id})")
             }
+            WakeReason::HostMode => {
+                "Cognia is the always-on host for this account".to_string()
+            }
         }
     }
 
     /// How far this holder's promise reaches.
     pub fn level(&self) -> WakeLevel {
         match self {
-            WakeReason::ActiveRun(_) | WakeReason::AttachedWorker(_) => WakeLevel::System,
+            WakeReason::ActiveRun(_) | WakeReason::AttachedWorker(_) | WakeReason::HostMode => {
+                WakeLevel::System
+            }
             WakeReason::ScreenAwake(_) => WakeLevel::Display,
         }
     }
@@ -229,6 +239,28 @@ pub fn set_screen_holds(holders: &[String]) {
                 .holders
                 .entry(WakeReason::ScreenAwake((*holder).to_string()))
                 .or_insert(1);
+        }
+    }
+    reconcile();
+}
+
+/// Hold or drop the always-on host mode's wake (ADR-0224 A3).
+///
+/// A switch, not a counted pair: the mode is one persisted flag, and the
+/// desktop re-applies it at boot and on every change. Pairs would stack a
+/// second hold each time the flag is re-sent and strand the machine awake
+/// after the user turned the mode off. Only the `HostMode` holder is touched.
+///
+/// Like [`set_screen_holds`], installing the platform assertion can spawn a
+/// process (Linux) or block on a thread (Windows), so callers on the UI thread
+/// go through an `async` command.
+pub fn set_host_mode_hold(on: bool) {
+    {
+        let mut state = STATE.lock();
+        if on {
+            state.holders.insert(WakeReason::HostMode, 1);
+        } else {
+            state.holders.remove(&WakeReason::HostMode);
         }
     }
     reconcile();
@@ -565,6 +597,46 @@ mod tests {
     }
 
     #[test]
+    fn the_host_mode_hold_is_a_switch_that_never_stacks() {
+        let _guard = ASSERTION_TEST_LOCK.lock();
+        drain();
+        // The desktop re-applies the persisted mode at boot and on every
+        // change; turning it off once must release it however often it was
+        // turned on.
+        set_host_mode_hold(true);
+        set_host_mode_hold(true);
+        assert_eq!(active_reasons(), vec![WakeReason::HostMode]);
+        assert_eq!(active_level(), Some(WakeLevel::System));
+        set_host_mode_hold(false);
+        assert!(active_reasons().is_empty());
+        set_host_mode_hold(false);
+        assert!(active_reasons().is_empty());
+    }
+
+    #[test]
+    fn the_host_mode_hold_leaves_runs_and_screen_holds_alone() {
+        let _guard = ASSERTION_TEST_LOCK.lock();
+        drain();
+        acquire(WakeReason::ActiveRun("run-host".into()));
+        set_screen_holds(&["s_host".into()]);
+        set_host_mode_hold(true);
+        // A conversation finishing must not drop the host's own hold.
+        set_screen_holds(&[]);
+        assert_eq!(
+            active_reasons(),
+            vec![WakeReason::ActiveRun("run-host".into()), WakeReason::HostMode]
+        );
+        // Leaving host mode must not drop the run's.
+        set_host_mode_hold(false);
+        assert_eq!(
+            active_reasons(),
+            vec![WakeReason::ActiveRun("run-host".into())]
+        );
+        release(&WakeReason::ActiveRun("run-host".into()));
+        assert!(active_reasons().is_empty());
+    }
+
+    #[test]
     fn reasons_describe_the_holder_for_the_os_ui() {
         // macOS lists the assertion name in `pmset -g assertions`; logind shows
         // the `--why` string. A generic label makes an unexplained awake machine
@@ -578,6 +650,7 @@ mod tests {
         assert!(WakeReason::ScreenAwake("s_zz".into())
             .describe()
             .contains("s_zz"));
+        assert!(WakeReason::HostMode.describe().contains("always-on host"));
         // The name follows the level that is actually installed, so an OS
         // listing never blames a run for a display hold it never asked for.
         let mut holders = HashMap::new();

@@ -1969,6 +1969,12 @@
     "host_feature_manifest": {
       "to": "host.feature_manifest.get"
     },
+    "host_mode_get": {
+      "to": "app.host_mode.get"
+    },
+    "host_mode_set": {
+      "to": "app.host_mode.set"
+    },
     "host_state_snapshot": {
       "to": "host.state.snapshot"
     },

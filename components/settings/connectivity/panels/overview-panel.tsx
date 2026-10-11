@@ -30,6 +30,7 @@ import { SITE_TONE_TEXT } from "@/components/sites/site-status"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useConnectionState } from "@/hooks/companion/use-connection-state"
+import { useHostingState } from "@/hooks/platform/use-hosting-state"
 import { useHostProfile } from "@/hooks/use-host-profile"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { eventPlaneState, type EventPlaneState } from "@/lib/companion/device-presence-registry"
@@ -95,6 +96,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
   const tTier = useTranslations("mobile.transportTier")
   const tHostState = useTranslations("settings.connectivity.remoteHosts.state")
   const profile = useHostProfile()
+  const hosting = useHostingState()
   const runtime = useRuntimeSnapshot()
   const connection = useConnectionState()
   const hosts = useRemoteHostStore((s) => s.hosts)
@@ -206,6 +208,29 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
             </Badge>
             <span className="text-xs text-muted-foreground">{t(`profile.${profile}`)}</span>
           </Row>
+          {profile === "desktop" && hosting.loaded && hosting.state !== "unsupported" ? (
+            // ADR-0224 A3: whether this desktop is the account's always-on
+            // host, which the static capability cannot say.
+            <Row label={t("alwaysOn")} testid="overview-always-on">
+              <span
+                className={cn(
+                  "flex items-center gap-1.5 text-sm",
+                  hosting.state === "hosting"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : hosting.state === "standing-by"
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-muted-foreground"
+                )}
+                data-state={hosting.state}
+              >
+                <CircleIcon className="size-2 fill-current" aria-hidden="true" />
+                {t(`alwaysOnValue.${hosting.state}`)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t(`alwaysOnHint.${hosting.state}`)}
+              </span>
+            </Row>
+          ) : null}
           <Row label={t("link")} testid="overview-link">
             {driving && drivenTone && activeHost ? (
               // The driven host's handshake state, in the registry's words and

@@ -99,6 +99,11 @@ pub(crate) const STEPS: &[Step] = &[
     },
     #[cfg(desktop)]
     Step {
+        name: "host_mode",
+        run: crate::window_behavior::init_host_mode,
+    },
+    #[cfg(desktop)]
+    Step {
         name: "main_window",
         run: shell::main_window,
     },
@@ -241,6 +246,7 @@ mod tests {
                 "deep_links",
                 "cli_matches",
                 "menu_and_tray",
+                "host_mode",
                 "main_window",
                 "a2ui_bridge",
                 "jobs_supervisor",

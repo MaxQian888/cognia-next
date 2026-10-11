@@ -114,5 +114,20 @@
   "version": "Version",
   "webOnlyHintAfter": " to see this tab in action.",
   "webOnlyHintBefore": "Available in the desktop build only. Run ",
-  "webOnlyHintCode": "pnpm tauri dev"
+  "webOnlyHintCode": "pnpm tauri dev",
+  "hostMode": {
+    "title": "Always-on host mode",
+    "description": "Make this computer the machine your bots, connectors and scheduled tasks run on while you are away.",
+    "details": "Keeps the computer from sleeping, starts Cognia hidden when you sign in, and makes the close button minimize to the tray. Quit from the tray still exits.",
+    "toggle": "Toggle always-on host mode",
+    "status": {
+      "hosting": "Hosting: this computer runs your always-on work.",
+      "standing-by": "Standing by: you are driving another host, which runs the work while you do.",
+      "off": "Off: bots and scheduled tasks run only while Cognia is open."
+    },
+    "closeLocked": "Always-on host mode keeps this on Minimize to tray.",
+    "enabledToast": "This computer is now an always-on host.",
+    "disabledToast": "Always-on host mode is off.",
+    "failed": "Could not change always-on host mode: {error}"
+  }
 }

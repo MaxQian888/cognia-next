@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 
 import { isTauri } from "@/lib/tauri"
+import { refreshHostMode } from "@/lib/tauri/host-mode"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.ui
@@ -20,6 +21,11 @@ const log = loggers.ui
  * A Rust-side grace timer (`lib.rs` setup) force-shows the window if this never
  * runs, so a renderer crash can't leave an alive-but-invisible process.
  *
+ * A login launch in always-on host mode (ADR-0224 A3) stays hidden: Rust
+ * reports it as `bootHidden` and has already disarmed the grace timer. The
+ * user brings the window back from the tray or the Dock. A failed read shows
+ * the window, since a hidden app nobody asked for is the worse mistake.
+ *
  * No-op (renders nothing) outside the Tauri desktop shell.
  */
 export function WindowShowInitializer() {
@@ -33,6 +39,8 @@ export function WindowShowInitializer() {
     const reveal = () => {
       void (async () => {
         try {
+          const hostMode = await refreshHostMode().catch(() => null)
+          if (cancelled || hostMode?.bootHidden) return
           const { getCurrentWindow } = await import("@tauri-apps/api/window")
           if (cancelled) return
           const win = getCurrentWindow()
