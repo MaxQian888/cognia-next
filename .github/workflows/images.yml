@@ -410,7 +410,8 @@ jobs:
             type=sha
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-      - uses: docker/build-push-action@v7
+      - id: build
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.cognia-server
@@ -420,3 +421,28 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache,mode=max
+
+      # ADR-0224 A10: a Compose host updates by digest, never by tag. The
+      # offline catalog signer needs the exact digest this run pushed
+      # (`pnpm update:catalog host-entries --target oci-amd64 --digest …`).
+      - name: Record the pushed digest
+        if: needs.vars.outputs.should_push == 'true'
+        env:
+          IMAGE: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::build-push-action reported no digest for $VARIANT"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/cognia-server-digest"
+          printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/cognia-server-digest/$VARIANT.txt"
+          echo "cognia-server ($VARIANT, amd64): \`$IMAGE@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the pushed digest
+        if: needs.vars.outputs.should_push == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: cognia-server-digest-${{ matrix.variant }}
+          path: ${{ runner.temp }}/cognia-server-digest/${{ matrix.variant }}.txt

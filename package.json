@@ -64,6 +64,8 @@
     "terminal-host:prepare:test": "node --test scripts/build/build-terminal-host-sidecar.test.mjs",
     "host:archive": "node scripts/build/package-host-archive.mjs",
     "host:archive:test": "node --test scripts/build/package-host-archive.test.mjs",
+    "update:catalog": "node scripts/release/update-catalog.mjs",
+    "update:catalog:test": "node --test scripts/release/update-catalog.test.mjs",
     "bootstrap-agent:build": "cargo build --locked -p cognia-bootstrap-agent --bin cognia-bootstrap --release",
     "bootstrap-agent:prepare": "node scripts/build/build-external-agent-launcher.mjs --bootstrap",
     "bootstrap-agent:prepare:dev": "cargo build --locked -p cognia-bootstrap-agent --bin cognia-bootstrap",

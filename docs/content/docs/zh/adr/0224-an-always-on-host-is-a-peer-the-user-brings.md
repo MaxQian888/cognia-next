@@ -77,6 +77,9 @@ description: "用户自带的机器（VPS、NAS、家里的 Mac mini）运行 he
 - 一个服务安装器同时服务 `cognia-server` 和 worker 守护进程。
 - 常驻 host 默认使用 `sqlite-v5` 存储。已有的快照账号在切换前导入，绝不重新初始化。
 - **更新：** host 跟随用户的发布通道，在空闲时自我更新，server 和 brain 一起替换，健康检查失败则回滚。自动更新默认开启，可以关闭。
+  - **一个发布单元，由 host 自己校验。** 签名的更新目录把一次 host 发布列为一条 `host-server` 条目（macOS 归档的 sha256，或 Compose 镜像的 digest），与同版本的一条 `host-brain` 条目配对；两者都写明命令契约。host 只接受配对完整的发布，因此不会安装只发布了一半的版本，这与运行时拒绝「只更新了一半的 host」是同一条规则。host 自己校验目录（`crates/cognia-update-catalog`，即 `lib/updates/catalog-verify.ts` 的 Rust 版本，两者固定在同一份测试夹具上）。产物不另行签名：它们的 digest 写在已签名的 targets 文档里。
+  - **Worker 只能扣住发布，不能推出发布。** host 还会询问更新 Worker 的 `/v1/rollout` 接口，该版本是否已对它所在的分桶放量，这让 `pause` 和 `abort` 成为紧急开关。只有当回答中的版本和 digest 与已校验的目录一致时才算数。
+  - **签名在离线环境完成。** `scripts/release/update-catalog.mjs` 生成各角色密钥、签署目录，并拒绝签署 host 会拒绝的发布。密钥从不进入 CI 或 Worker。
 - **版本保持完全一致（ADR-0175 不变）。** 不协商版本区间。不一致时以明确的「请更新 host / 请更新 App」状态呈现，并提供一键更新，而不是让调用被拒绝。
 
 ### 执行：默认每个任务一个容器

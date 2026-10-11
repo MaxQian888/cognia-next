@@ -13,10 +13,12 @@ declare const Response: typeof import("@cloudflare/workers-types").Response
 /**
  * Cognia update control plane.
  *
- * Two client-facing endpoints and one admin surface:
+ * Three client-facing endpoints and one admin surface:
  *
  *   GET  /v1/catalog?channel=…                       signed metadata bundle
  *   GET  /v1/tauri/:target/:arch/:currentVersion     Tauri updater manifest
+ *   GET  /v1/rollout/:kind/:assetId/:target/:arch/:currentVersion
+ *                                                    live rollout answer
  *   POST /v1/admin/…                                 stage / promote / pause /
  *                                                    abort / revoke / publish
  *
@@ -31,6 +33,13 @@ declare const Response: typeof import("@cloudflare/workers-types").Response
  * check without waiting for a re-signed catalog. Tauri still verifies minisign
  * on the package itself, so an aborted-but-served release could not have been
  * installed silently either way.
+ *
+ * The rollout endpoint is the same kill switch for everything else that
+ * installs itself, which today is the always-on host (ADR-0224 A10). A host
+ * installs only a release that is BOTH in the signed catalog (which pins the
+ * artifact) AND rolling here for its bucket, so this answer can hold a
+ * release back but never put one forward: it names a version and a digest,
+ * and a host that finds either missing from its verified catalog ignores it.
  */
 
 export interface Env {
@@ -56,6 +65,8 @@ interface ReleaseRow {
   pub_date: string
   url: string | null
   signature: string | null
+  /** Archive sha256 or image `sha256:` digest, for releases a host installs. */
+  digest: string | null
 }
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" }
@@ -121,6 +132,60 @@ function parseBucket(raw: string | null): number {
   return value
 }
 
+/**
+ * Kinds that need a pinned package before they can be staged, and what pins
+ * it. Finding a missing package at promote time means finding it out in
+ * front of users.
+ */
+export function stageProblem(body: {
+  kind: string
+  url?: string
+  signature?: string
+  digest?: string
+}): string | null {
+  if (body.kind === "desktop" && (!body.url || !body.signature)) {
+    return "a desktop release needs both url and signature"
+  }
+  if (body.kind === "host-server") {
+    if (!body.url) return "a host release needs its archive url or image repository"
+    if (!/^(sha256:)?[0-9a-f]{64}$/.test(body.digest ?? "")) {
+      return "a host release needs its archive sha256 or image sha256: digest"
+    }
+  }
+  return null
+}
+
+interface RollingQuery {
+  kind: string
+  assetId: string
+  target: string
+  arch: string
+  currentVersion: string
+  channel: string
+  bucket: number
+  /** Someone asked for this update: skips the percentage, not the state. */
+  manual?: boolean
+}
+
+/** The newest rolling release of one asset this caller may move to now. */
+async function bestRolling(env: Env, query: RollingQuery): Promise<ReleaseRow | null> {
+  const channels = visibleChannels(query.channel)
+  const placeholders = channels.map((_, i) => `?${i + 5}`).join(", ")
+  const { results } = await env.UPDATE_DB.prepare(
+    `SELECT * FROM releases
+      WHERE kind = ?1 AND state = 'rolling'
+        AND target = ?2 AND arch = ?3 AND asset_id = ?4
+        AND channel IN (${placeholders})`
+  )
+    .bind(query.kind, query.target, query.arch, query.assetId, ...channels)
+    .all<ReleaseRow>()
+  const eligible = (results ?? [])
+    .filter((row) => compareVersions(row.version, query.currentVersion) > 0)
+    .filter((row) => query.manual || inRollout(query.bucket, row.rollout))
+    .sort((a, b) => compareVersions(b.version, a.version))
+  return eligible[0] ?? null
+}
+
 // ── Client endpoints ───────────────────────────────────────────────────────
 
 async function handleCatalog(request: Request, env: Env): Promise<Response> {
@@ -158,22 +223,15 @@ async function handleTauri(
   channel: string,
   bucket: number
 ): Promise<Response> {
-  const channels = visibleChannels(channel)
-  const placeholders = channels.map((_, i) => `?${i + 4}`).join(", ")
-  const statement = env.UPDATE_DB.prepare(
-    `SELECT * FROM releases
-      WHERE kind = 'desktop' AND state = 'rolling'
-        AND target = ?1 AND arch = ?2 AND asset_id = ?3
-        AND channel IN (${placeholders})`
-  ).bind(target, arch, "app", ...channels)
-
-  const { results } = await statement.all<ReleaseRow>()
-  const eligible = (results ?? [])
-    .filter((row) => compareVersions(row.version, currentVersion) > 0)
-    .filter((row) => inRollout(bucket, row.rollout))
-    .sort((a, b) => compareVersions(b.version, a.version))
-
-  const best = eligible[0]
+  const best = await bestRolling(env, {
+    kind: "desktop",
+    assetId: "app",
+    target,
+    arch,
+    currentVersion,
+    channel,
+    bucket,
+  })
   // 204 is the Tauri updater's "you are current". Anything else makes the
   // desktop log an error on every check.
   if (!best || !best.url || !best.signature) return new Response(null, { status: 204 })
@@ -186,6 +244,26 @@ async function handleTauri(
       [`${target}-${arch}`]: { signature: best.signature, url: best.url },
     },
   })
+}
+
+/**
+ * The live rollout answer for an asset that installs itself. 204 means
+ * nothing is rolling for this caller now, which is also what an aborted,
+ * paused or revoked release answers.
+ */
+async function handleRollout(env: Env, query: RollingQuery): Promise<Response> {
+  const best = await bestRolling(env, query)
+  if (!best) return new Response(null, { status: 204 })
+  return json(
+    {
+      version: best.version,
+      channel: best.channel,
+      criticality: best.criticality,
+      rollout: best.rollout,
+      digest: best.digest,
+    },
+    { headers: { "cache-control": "no-store" } }
+  )
 }
 
 // ── Admin endpoints ────────────────────────────────────────────────────────
@@ -202,6 +280,7 @@ interface StageBody {
   pubDate?: string
   url?: string
   signature?: string
+  digest?: string
 }
 
 async function logEvent(
@@ -222,11 +301,8 @@ async function handleStage(request: Request, env: Env): Promise<Response> {
   if (!body?.assetId || !body.kind || !body.channel || !body.version) {
     return problem(400, "bad_request", "assetId, kind, channel and version are required")
   }
-  // A desktop release with no package is unpromotable, and finding that out at
-  // promote time means finding it out in front of users.
-  if (body.kind === "desktop" && (!body.url || !body.signature)) {
-    return problem(400, "incomplete_release", "a desktop release needs both url and signature")
-  }
+  const incomplete = stageProblem(body)
+  if (incomplete) return problem(400, "incomplete_release", incomplete)
 
   const target = body.target ?? ""
   const arch = body.arch ?? ""
@@ -236,14 +312,15 @@ async function handleStage(request: Request, env: Env): Promise<Response> {
   await env.UPDATE_DB.prepare(
     `INSERT INTO releases
       (id, asset_id, kind, channel, version, target, arch, state, rollout,
-       criticality, notes, pub_date, url, signature, created_at, updated_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'staged', 0, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
+       criticality, notes, pub_date, url, signature, digest, created_at, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'staged', 0, ?8, ?9, ?10, ?11, ?12, ?14, ?13, ?13)
      ON CONFLICT(asset_id, kind, channel, version, target, arch) DO UPDATE SET
        criticality = excluded.criticality,
        notes = excluded.notes,
        pub_date = excluded.pub_date,
        url = excluded.url,
        signature = excluded.signature,
+       digest = excluded.digest,
        updated_at = excluded.updated_at`
   )
     .bind(
@@ -259,7 +336,8 @@ async function handleStage(request: Request, env: Env): Promise<Response> {
       body.pubDate ?? new Date(now).toISOString(),
       body.url ?? null,
       body.signature ?? null,
-      now
+      now,
+      body.digest ?? null
     )
     .run()
 
@@ -401,6 +479,28 @@ export default {
         url.searchParams.get("channel") ?? "stable",
         parseBucket(url.searchParams.get("bucket"))
       )
+    }
+
+    // /v1/rollout/:kind/:assetId/:target/:arch/:currentVersion
+    if (segments[1] === "rollout" && segments.length === 7) {
+      if (request.method !== "GET") return problem(405, "method_not_allowed", "GET only")
+      const channel = url.searchParams.get("channel") ?? "stable"
+      if (!["stable", "beta", "canary"].includes(channel)) {
+        return problem(400, "bad_channel", "unknown channel")
+      }
+      const [kind, assetId, target, arch, currentVersion] = segments
+        .slice(2)
+        .map((s) => decodeURIComponent(s))
+      return handleRollout(env, {
+        kind,
+        assetId,
+        target,
+        arch,
+        currentVersion,
+        channel,
+        bucket: parseBucket(url.searchParams.get("bucket")),
+        manual: url.searchParams.get("manual") === "1",
+      })
     }
 
     // Release ids contain ':' separators, which arrive percent-encoded. Decode

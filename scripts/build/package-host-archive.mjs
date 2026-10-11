@@ -11,7 +11,7 @@
 //     brain/cli.mjs             the headless brain layout (`build-cli-binary --layout-only`)
 //     brain/node_modules/ …
 //     brain/sidecar/ …
-//     host-manifest.json        version, target, Node version, sha256 of every file
+//     host-manifest.json        version, target, Node version, command contract, sha256 of every file
 //     INSTALL.txt
 //
 // Linux hosts run the Compose `server` profile instead (ADR-0224), so only the
@@ -39,6 +39,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { repoContractIdentity, sha256File as sha256OfFile } from "../release/update-catalog.mjs"
 import { PLUGIN_NODE_VERSION, archiveFor, verifyArchive } from "./prepare-plugin-node.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -159,8 +160,12 @@ export function assembleHostArchive({
   return root
 }
 
-/** Record what the archive holds; written last and rewritten after signing. */
-export function writeHostManifest(root, { version, target }) {
+/**
+ * Record what the archive holds; written last and rewritten after signing.
+ * The command contract its server and brain serve is what the host updater
+ * checks a new release against before swapping (ADR-0224 A10).
+ */
+export function writeHostManifest(root, { version, target, contract = repoContractIdentity() }) {
   const layout = hostArchiveLayout(root)
   const files = Object.fromEntries(
     walkFiles(root)
@@ -169,7 +174,19 @@ export function writeHostManifest(root, { version, target }) {
   )
   writeFileSync(
     layout.manifest,
-    `${JSON.stringify({ format: 1, version, target, nodeVersion: PLUGIN_NODE_VERSION, files }, null, 2)}\n`
+    `${JSON.stringify(
+      {
+        format: 1,
+        version,
+        target,
+        nodeVersion: PLUGIN_NODE_VERSION,
+        contractVersion: contract.contractVersion,
+        catalogHash: contract.catalogHash,
+        files,
+      },
+      null,
+      2
+    )}\n`
   )
 }
 
@@ -365,6 +382,9 @@ async function main() {
     writeHostManifest(root, { version, target: options.target })
     const tarball = `${root}.tar.gz`
     run("tar", ["-czf", tarball, "-C", dirname(root), basename(root)])
+    // `shasum -a 256 -c` form, for the release page. The catalog pins the
+    // same digest (`pnpm update:catalog host-entries --archive`).
+    writeFileSync(`${tarball}.sha256`, `${sha256OfFile(tarball)}  ${basename(tarball)}\n`)
     console.log(
       `Host archive: ${tarball} (${(statSync(tarball).size / 1024 / 1024).toFixed(1)} MiB, ${mode} signature${options.notarize ? ", notarized" : ""})`
     )

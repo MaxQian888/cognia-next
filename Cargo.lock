@@ -3434,6 +3434,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-update-catalog"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "chrono",
+ "cognia-canonical-json",
+ "ed25519-dalek 3.0.0",
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "cognia-vector"
 version = "0.1.0"
 dependencies = [

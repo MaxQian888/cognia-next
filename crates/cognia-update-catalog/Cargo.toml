@@ -1,0 +1,29 @@
+# The signed update catalog, verified the way every Cognia client verifies it
+# (ADR-0224 A10): the Rust twin of `lib/updates/catalog-verify.ts`, plus the
+# rule that picks the release an always-on host may install. Pure: no I/O, no
+# clock, no HTTP. The host updater (`cognia-host-service`) fetches and acts.
+[package]
+name = "cognia-update-catalog"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Signed update catalog verification and host release selection."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_update_catalog"
+path = "src/lib.rs"
+
+[dependencies]
+base64.workspace = true
+chrono = { workspace = true, features = ["std"] }
+cognia-canonical-json = { path = "../cognia-canonical-json" }
+ed25519-dalek.workspace = true
+hex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

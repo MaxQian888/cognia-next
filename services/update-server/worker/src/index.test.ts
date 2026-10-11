@@ -8,6 +8,7 @@ import worker, {
   compareVersions,
   inRollout,
   ROLLOUT_STEPS,
+  stageProblem,
   visibleChannels,
   type Env,
 } from "./index"
@@ -21,7 +22,7 @@ const ADMIN = { authorization: "Bearer test-admin-secret" }
 
 async function migrate() {
   await db().exec(
-    "CREATE TABLE IF NOT EXISTS releases (id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, kind TEXT NOT NULL, channel TEXT NOT NULL, version TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', arch TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'staged', rollout INTEGER NOT NULL DEFAULT 0, criticality TEXT NOT NULL DEFAULT 'routine', notes TEXT, pub_date TEXT NOT NULL, url TEXT, signature TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
+    "CREATE TABLE IF NOT EXISTS releases (id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, kind TEXT NOT NULL, channel TEXT NOT NULL, version TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', arch TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'staged', rollout INTEGER NOT NULL DEFAULT 0, criticality TEXT NOT NULL DEFAULT 'routine', notes TEXT, pub_date TEXT NOT NULL, url TEXT, signature TEXT, digest TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
   )
   await db().exec(
     "CREATE UNIQUE INDEX IF NOT EXISTS releases_identity ON releases (asset_id, kind, channel, version, target, arch)"
@@ -60,6 +61,36 @@ async function stageDesktop(version: string, overrides: Record<string, unknown> 
   })
   const body = (await res.json()) as { id: string }
   return body.id
+}
+
+const HOST_DIGEST = `sha256:${"d".repeat(64)}`
+
+async function stageHost(version: string, overrides: Record<string, unknown> = {}) {
+  const res = await call("/v1/admin/releases", {
+    method: "POST",
+    headers: { ...ADMIN, "content-type": "application/json" },
+    body: JSON.stringify({
+      assetId: "host",
+      kind: "host-server",
+      channel: "stable",
+      version,
+      target: "oci-full",
+      arch: "amd64",
+      url: "ghcr.io/o/cognia-server",
+      digest: HOST_DIGEST,
+      pubDate: "2026-10-11T00:00:00Z",
+      ...overrides,
+    }),
+  })
+  return ((await res.json()) as { id: string }).id
+}
+
+async function promote(id: string, rollout: number) {
+  return call(`/v1/admin/releases/${encodeURIComponent(id)}/promote`, {
+    method: "POST",
+    headers: { ...ADMIN, "content-type": "application/json" },
+    body: JSON.stringify({ rollout }),
+  })
 }
 
 beforeEach(migrate)
@@ -173,6 +204,63 @@ describe("GET /v1/tauri", () => {
   })
 })
 
+describe("GET /v1/rollout", () => {
+  const HOST = "/v1/rollout/host-server/host/oci-full/amd64"
+
+  it("names the version and digest rolling for this host", async () => {
+    await promote(await stageHost("1.4.0"), 100)
+    const res = await call(`${HOST}/1.3.0`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get("cache-control")).toBe("no-store")
+    expect(await res.json()).toEqual({
+      version: "1.4.0",
+      channel: "stable",
+      criticality: "routine",
+      rollout: 100,
+      digest: HOST_DIGEST,
+    })
+  })
+
+  it("answers 204 for a current host, a staged release, and another platform", async () => {
+    const staged = await stageHost("1.5.0")
+    expect((await call(`${HOST}/1.3.0`)).status).toBe(204)
+    await promote(staged, 100)
+    expect((await call(`${HOST}/1.5.0`)).status).toBe(204)
+    expect((await call("/v1/rollout/host-server/host/darwin/arm64/1.3.0")).status).toBe(204)
+    // The desktop updater's rows are a different kind.
+    expect((await call("/v1/rollout/desktop/app/oci-full/amd64/1.3.0")).status).toBe(204)
+  })
+
+  it("holds a partial rollout to its cohort unless someone asked for the update", async () => {
+    await promote(await stageHost("1.4.0"), 1)
+    expect((await call(`${HOST}/1.3.0?bucket=50`)).status).toBe(200)
+    expect((await call(`${HOST}/1.3.0?bucket=5000`)).status).toBe(204)
+    expect((await call(`${HOST}/1.3.0?bucket=5000&manual=1`)).status).toBe(200)
+  })
+
+  it("is the kill switch: an aborted or paused release is held back, even on request", async () => {
+    const id = await stageHost("1.4.0")
+    await promote(id, 100)
+    await call(`/v1/admin/releases/${encodeURIComponent(id)}/pause`, {
+      method: "POST",
+      headers: ADMIN,
+    })
+    expect((await call(`${HOST}/1.3.0?manual=1`)).status).toBe(204)
+    await call(`/v1/admin/releases/${encodeURIComponent(id)}/abort`, {
+      method: "POST",
+      headers: ADMIN,
+    })
+    expect((await call(`${HOST}/1.3.0?manual=1`)).status).toBe(204)
+  })
+
+  it("keeps channels apart and rejects an unknown one", async () => {
+    await promote(await stageHost("1.5.0-beta.1", { channel: "beta" }), 100)
+    expect((await call(`${HOST}/1.4.0`)).status).toBe(204)
+    expect((await call(`${HOST}/1.4.0?channel=beta`)).status).toBe(200)
+    expect((await call(`${HOST}/1.4.0?channel=nightly`)).status).toBe(400)
+  })
+})
+
 describe("admin surface", () => {
   it("refuses an unauthenticated write", async () => {
     const res = await call("/v1/admin/releases", { method: "POST", body: "{}" })
@@ -192,6 +280,28 @@ describe("admin surface", () => {
     })
     expect(res.status).toBe(400)
     expect(((await res.json()) as { error: string }).error).toBe("incomplete_release")
+  })
+
+  it("refuses a host release whose package is not pinned", async () => {
+    expect(stageProblem({ kind: "host-server", digest: HOST_DIGEST })).toMatch(/archive url/)
+    expect(stageProblem({ kind: "host-server", url: "ghcr.io/o/x", digest: "latest" })).toMatch(
+      /sha256/
+    )
+    expect(
+      stageProblem({ kind: "host-server", url: "https://x/a.tar.gz", digest: "a".repeat(64) })
+    ).toBeNull()
+    expect(stageProblem({ kind: "plugin" })).toBeNull()
+    const res = await call("/v1/admin/releases", {
+      method: "POST",
+      headers: { ...ADMIN, "content-type": "application/json" },
+      body: JSON.stringify({
+        assetId: "host",
+        kind: "host-server",
+        channel: "stable",
+        version: "1.0.0",
+      }),
+    })
+    expect(res.status).toBe(400)
   })
 
   it("walks the rollout ladder and refuses a step backwards", async () => {

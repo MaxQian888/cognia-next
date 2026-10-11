@@ -15,6 +15,7 @@
     "cognia-companion-contract": "foundation",
     "cognia-power": "foundation",
     "cognia-host-service": "foundation",
+    "cognia-update-catalog": "foundation",
 
     "cognia-jobs": "platform",
     "cognia-sidecar": "platform",
@@ -81,6 +82,7 @@
     "cognia-secrets -> cognia-core",
     "cognia-companion-contract -> cognia-headless-contract",
     "cognia-companion-contract -> cognia-problem",
+    "cognia-update-catalog -> cognia-canonical-json",
     "cognia-ccswitch -> cognia-subscription",
     "cognia-mcp-server -> cognia-automation",
     "cognia-plugin-runtime -> cognia-terminal",

@@ -77,6 +77,9 @@ This fixes a present defect (two events in the same second collapse into one run
 - One service installer serves `cognia-server` and the worker daemon.
 - Always-on hosts store data in `sqlite-v5` by default. Existing snapshot accounts are imported before the switch, never reseeded.
 - **Updates:** the host follows the user's release channel and updates itself when idle, replacing server and brain together, and rolls back on a failed health check. Automatic updates are on by default and can be turned off.
+  - **One release unit, verified on the host.** The signed update catalog lists a host release as a `host-server` entry (the macOS archive's sha256, or the Compose image's digest) paired with a `host-brain` entry of the same version; both name the command contract. A host acts only on a matched pair, so a half-published release is never installed, the same rule that refuses a half-updated host at runtime. The host verifies the catalog itself (`crates/cognia-update-catalog`, the Rust twin of `lib/updates/catalog-verify.ts`, both pinned to one fixture). Artifacts carry no separate signature: their digests sit inside the signed targets document.
+  - **The Worker can hold a release back, never put one forward.** A host also asks the update Worker's `/v1/rollout` endpoint whether the release is rolling for its bucket, which makes `pause` and `abort` a kill switch. The answer only counts when its version and digest match the verified catalog.
+  - **Signing is offline.** `scripts/release/update-catalog.mjs` generates the role keys, signs the catalog, and refuses a release a host would refuse. The keys never reach CI or the Worker.
 - **Versions stay exact (ADR-0175 stands).** No version ranges are negotiated. A mismatch is surfaced as an explicit "update the host / update the app" state with a one-click update, instead of a refused call.
 
 ### Execution: a container per task by default

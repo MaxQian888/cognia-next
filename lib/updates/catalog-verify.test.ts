@@ -227,3 +227,36 @@ describe("verifySignedCatalog", () => {
     })
   })
 })
+
+describe("the offline signer's bundle", () => {
+  // Signed by scripts/release/update-catalog.mjs and also verified by
+  // crates/cognia-update-catalog: the three must agree on every byte signed.
+  const fixture = jest.requireActual<{
+    now: string
+    trustRoot: CatalogTrustState["root"]
+    bundle: SignedCatalog
+  }>("../../test-fixtures/updates/host-catalog.json")
+
+  it("verifies here exactly as the host verifies it", async () => {
+    const verified = await verifySignedCatalog(
+      fixture.bundle,
+      { root: fixture.trustRoot, seenVersions: { root: fixture.trustRoot.version } },
+      Date.parse(fixture.now)
+    )
+    expect(verified.targets.entries.map((entry) => `${entry.kind}@${entry.version}`)).toContain(
+      "host-server@1.4.0"
+    )
+  })
+
+  it("refuses the bundle once one host entry is altered", async () => {
+    const tampered = structuredClone(fixture.bundle)
+    ;(tampered.targets.signed.entries[0] as unknown as { sha256: string }).sha256 = "0".repeat(64)
+    await expect(
+      verifySignedCatalog(
+        tampered,
+        { root: fixture.trustRoot, seenVersions: {} },
+        Date.parse(fixture.now)
+      )
+    ).rejects.toMatchObject({ reason: "signature", role: "targets" })
+  })
+})

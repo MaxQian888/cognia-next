@@ -52,6 +52,9 @@ test("assembles the layout cognia-host-service expects, with a manifest of every
     const manifest = JSON.parse(readFileSync(layout.manifest, "utf8"))
     assert.equal(manifest.version, "1.2.3")
     assert.equal(manifest.target, "darwin-arm64")
+    // The contract its server and brain serve, from this tree.
+    assert.ok(Number.isInteger(manifest.contractVersion))
+    assert.match(manifest.catalogHash, /^[0-9a-f]{64}$/)
     assert.ok(manifest.files["bin/cognia-server"])
     assert.ok(manifest.files["brain/sidecar/claude-host.mjs"])
     assert.ok(!("host-manifest.json" in manifest.files))
