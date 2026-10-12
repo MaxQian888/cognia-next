@@ -73,7 +73,11 @@ export function routeGithubRequests(
   route: (path: string, url: string) => unknown
 ) {
   const prefix = `/repos/${repository}`
-  return async (_binding: unknown, url: string): Promise<GithubFixtureResponse> => {
+  return async (
+    _binding: unknown,
+    url: string,
+    _init?: { method?: string; headers?: Record<string, string> }
+  ): Promise<GithubFixtureResponse> => {
     const path = url.startsWith(prefix) ? url.slice(prefix.length) : url
     const result = await route(path, url)
     if (result === undefined) throw new Error(`Unexpected fixture URL ${url}`)

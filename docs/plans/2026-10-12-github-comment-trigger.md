@@ -2,7 +2,7 @@
 
 | 项目       | 内容                                                                                                                                                                                                                                                                                        |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 状态       | 修订版 r3：实现中（WP0–WP4 已合入）；尚未启用或批准上线                                                                                                                                                                                                                                     |
+| 状态       | 修订版 r3：实现中（WP0–WP5 已合入）；尚未启用或批准上线                                                                                                                                                                                                                                     |
 | 作者与日期 | Codex 初稿 2026-10-12；r2 源码核查与决策修订 2026-10-12；Asia/Shanghai                                                                                                                                                                                                                      |
 | 诉求       | 支持评论指令、权限校验、上下文收集、任务执行、结果回写与 Headless                                                                                                                                                                                                                           |
 | 范围       | 插件/共享包、Bot 运行时、Integration 事件投影、bot-run 工作区、外部 Agent、网关计量、多账号和部署                                                                                                                                                                                           |
@@ -291,7 +291,7 @@ type GithubTaskResultV1 = {
 
 身份与去重：
 
-- incoming 调用 `ctx.bots.enqueue` 时，`eventId = gh-cmd:<repositoryId>:<sourceKind>:<sourceId>:<sourceRevision>`，`resource = { kind: "github_thread", id: "<owner/repo>#<N>", scope: "<repositoryId>" }`。
+- incoming 调用 `ctx.bots.enqueue` 时，`eventId = gh-cmd:<repositoryId>:<sourceKind>:<sourceId>:<sourceRevision>`，`resource = { kind: "github_command", id: "<owner/repo>#<N>:<sourceKind>:<sourceId>", scope: "<repositoryId>" }`（r3：按指令来源，见修订记录）。
 - 同一来源版本重复只产生一个 delivery，由现有 `dedupKey` 唯一索引保证。
 - status 查询用 `listDeliveries({ resourceId, triggerId: "execute" })`。
 
@@ -683,7 +683,7 @@ GitHub 官方 API（2026-10-12 核查）：[用户权限](https://docs.github.co
 | 验收新增 A21–A26，A11/A12/A18 移到二期                 | 对应新增设计与范围调整                                                                                  |
 | 工作包重排为 WP0–WP8                                   | 平台修复（WP0–WP4）可并行，并且先于插件合入                                                             |
 
-**r3（2026-10-12，实现中）**：实现 WP0–WP3 时对计划的修正。
+**r3（2026-10-12，实现中）**：实现 WP0–WP5 时对计划的修正。
 
 | 变更                                                                                      | 原因                                                                                                                                                               |
 | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -691,3 +691,7 @@ GitHub 官方 API（2026-10-12 核查）：[用户权限](https://docs.github.co
 | `maxRunCostUsd`：网关路由为硬上限（剩余额度折算为 ticket token 上限），直连为调用间软上限 | 直连时 CLI 不经 Cognia，无法在调用中途截断                                                                                                                         |
 | 共享包零依赖，作者边界门禁新增一方打包套件清单                                            | 门禁原本会拒绝插件 import 新包；见 ADR-0156 修订                                                                                                                   |
 | §7.1 JSON 约定留在插件内                                                                  | 没有第二个使用方                                                                                                                                                   |
+| Bot 资源按“指令来源”划分（`<owner/repo>#<N>:<kind>:<id>`），不按线程                      | `cancelResource` 只能按资源取消；按线程会让编辑/删除一条评论连带取消同线程的其他指令。线程视图（status/cancel）用资源前缀过滤 `listDeliveries`                     |
+| 上下文脱敏由 Host 完成                                                                    | `ctx.agent.runExternalAgent` 已对整段提示词执行 `redactText` 并过 PII gate，插件只做控制字符清洗；插件不能 import `@cognia/redact`（作者边界）                     |
+| 控制回复（help/status/cancel/用法/未启用/过期）走独立 `reply` 触发器                      | 接收运行从不等待人工；人工发布模式下回复的审批不占用接收槽                                                                                                         |
+| 回写崩溃窗口由 Delivery 动作自身核对                                                      | `commentIssue`/`commentPr`/`replyToReviewComment` 带标记与 `since` 时先查已有副本；Host 重试也不会重复发帖                                                         |

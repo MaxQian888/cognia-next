@@ -79,6 +79,7 @@ describe("browser-builtin-registry", () => {
       "cognia-workspace-tools",
       "cognia-zenless-zone-zero-theme",
       "figma-external-service",
+      "github-comment-bot",
       "github-delivery",
       "github-devin-bot",
       "pagerduty",
@@ -156,6 +157,18 @@ describe("browser-builtin-registry", () => {
     })
     const exports = await loadExports("github-devin-bot")
     expect(exports.githubDevinBot).toEqual(expect.any(Function))
+    expect((exports.default as { activate: unknown }).activate).toEqual(expect.any(Function))
+  })
+
+  it("ships the Comment Bot handler, with the shared GitHub kit bundled in", async () => {
+    const entry = getBrowserBuiltinRegistryEntry("github-comment-bot")
+    expect(entry?.manifest.dependencies).toEqual({ "github-delivery": ">=3.0.0" })
+    expect(entry?.manifest.bots?.[0]).toMatchObject({
+      executor: "handler",
+      export: "githubCommentBot",
+    })
+    const exports = await loadExports("github-comment-bot")
+    expect(exports.githubCommentBot).toEqual(expect.any(Function))
     expect((exports.default as { activate: unknown }).activate).toEqual(expect.any(Function))
   })
 

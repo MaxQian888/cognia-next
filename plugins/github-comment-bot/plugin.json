@@ -1,0 +1,295 @@
+{
+  "id": "github-comment-bot",
+  "name": "GitHub Comment Bot",
+  "nameKey": "manifest.name",
+  "version": "1.0.0",
+  "icon": "assets/icon.png",
+  "type": "frontend",
+  "description": "Answer allowlisted collaborators' @-mention commands in GitHub issue and pull request comments with a read-only agent: questions, comment reviews, status, cancel and help.",
+  "descriptionKey": "manifest.description",
+  "author": "Cognia Official",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "main": "dist/index.js",
+  "dependencies": {
+    "github-delivery": ">=3.0.0"
+  },
+  "capabilities": ["bot"],
+  "permissions": [
+    "integrations:read",
+    "integrations:execute",
+    "agent:control",
+    "agent:dispatch-external",
+    "filesystem:read",
+    "filesystem:write",
+    "git:read",
+    "git:write"
+  ],
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "headless": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "browser": {
+      "availability": "degraded",
+      "reason": "Answering requires a paired Desktop or Headless host with an external agent and isolated-workspace support; this screen configures, monitors and approves."
+    },
+    "mobile": {
+      "availability": "degraded",
+      "reason": "Answering requires a paired Desktop or Headless host with an external agent and isolated-workspace support; this screen configures, monitors and approves."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "GitHub Comment Bot",
+        "manifest.description": "Answer allowlisted collaborators' @-mention commands in GitHub issue and pull request comments with a read-only agent: questions, comment reviews, status, cancel and help.",
+        "reply.help": "**Commands** (start a line with the mention; one command per comment):\n\n```\n{trigger} ask <question>     answer a question about this issue or pull request\n{trigger} review [focus]     review this pull request (comments only)\n{trigger} status [task]      show this thread's tasks\n{trigger} cancel [task]      cancel the latest or the named task\n{trigger} help               show this help\n```\n\nText after the mention without a command is treated as `ask`. Only allowlisted collaborators with write access can use these commands.",
+        "reply.usage.multiple_commands": "This comment contains more than one command. Put each command in its own comment.",
+        "reply.usage.reserved_verb": "`{verb}` is not something this Bot does.",
+        "reply.usage.unknown_verb": "`{verb}` is not a command.",
+        "reply.usage.too_large": "This command is longer than {maxKiB} KiB. Split it into smaller requests.",
+        "reply.usage.bad_task_ref": "A task is named by its 8-character reference, for example `0a1b2c3d`.",
+        "reply.usage.review_on_issue": "`review` works on pull requests. Use `ask` on an issue.",
+        "reply.notEnabled": "`{verb}` is not enabled yet. Use `ask` or `review`.",
+        "reply.expired": "This command is older than {hours} hours, so it was not run. Post it again to run it.",
+        "reply.cancelled": "Cancelled: {refs}.",
+        "reply.cancelNothing": "There was nothing to cancel in this thread.",
+        "reply.status.header": "**Tasks in this thread**",
+        "reply.status.none": "There are no tasks in this thread.",
+        "task.state.queued": "queued",
+        "task.state.running": "running",
+        "task.state.waiting": "waiting for approval",
+        "task.state.completed": "completed",
+        "task.state.failed": "failed",
+        "task.state.cancelled": "cancelled",
+        "tracking.running": "Task `{ref}`: working on it.",
+        "tracking.waiting": "Task `{ref}`: the answer is ready and waiting to be published.",
+        "tracking.completed": "Task `{ref}`: answered.",
+        "tracking.completedAt": "Task `{ref}`: answered — {url}",
+        "tracking.failed": "Task `{ref}`: failed. The details are on the Cognia host.",
+        "tracking.cancelled": "Task `{ref}`: cancelled.",
+        "tracking.blocked.pii_blocked": "Task `{ref}`: stopped — the request contained personal data that may not be sent to a model.",
+        "tracking.blocked.readonly_violation": "Task `{ref}`: stopped — the agent tried to change files, so nothing was published.",
+        "tracking.blocked.budget_exceeded": "Task `{ref}`: stopped — the cost limit for this task was reached.",
+        "tracking.blocked.recovery_required": "Task `{ref}`: stopped — the agent session was interrupted and needs a look on the Cognia host.",
+        "tracking.blocked.invalid_result": "Task `{ref}`: stopped — the agent's answer could not be used.",
+        "tracking.blocked.target_changed": "Task `{ref}`: stopped — the pull request changed; ask again for the new version.",
+        "tracking.blocked.context_unavailable": "Task `{ref}`: stopped — the pull request could not be read.",
+        "answer.incomplete": "_Part of the context did not fit, so this answer is based on a partial view; it is not a complete review._",
+        "answer.aliased": "_To change code, `fix` will be the command; it is not enabled yet._",
+        "answer.findingsOutsideDiff": "**Findings outside the changed lines**",
+        "approval.answer.title": "Publish this answer on GitHub?",
+        "approval.review.title": "Publish this comment review on GitHub?",
+        "approval.answer.message": "Check the exact text and where it will be posted. The agent ran read-only; nothing else is changed.",
+        "approval.reply.title": "Post this reply on GitHub?",
+        "approval.reply.message": "A fixed reply to a command in the thread.",
+        "approval.tracking.title": "Update the task's tracking comment on GitHub?",
+        "approval.tracking.message": "A fixed status line for the task; it contains no command text."
+      },
+      "zh-CN": {
+        "manifest.name": "GitHub 评论机器人",
+        "manifest.description": "在 GitHub Issue 与拉取请求评论中响应白名单协作者的 @ 指令，由只读智能体回答问题、发表评论式评审，并支持状态查询、取消与帮助。",
+        "reply.help": "**指令**（以提及开头另起一行；每条评论一个指令）：\n\n```\n{trigger} ask <问题>      回答关于此 Issue 或拉取请求的问题\n{trigger} review [重点]   评审此拉取请求（仅评论）\n{trigger} status [任务]   查看本线程的任务\n{trigger} cancel [任务]   取消最近一个或指定的任务\n{trigger} help            显示此帮助\n```\n\n提及之后没有指令的文字按 `ask` 处理。只有白名单中且有写权限的协作者可以使用这些指令。",
+        "reply.usage.multiple_commands": "这条评论包含多个指令。请每条评论只写一个指令。",
+        "reply.usage.reserved_verb": "`{verb}` 不是本机器人会做的事。",
+        "reply.usage.unknown_verb": "`{verb}` 不是指令。",
+        "reply.usage.too_large": "指令超过 {maxKiB} KiB，请拆成更小的请求。",
+        "reply.usage.bad_task_ref": "任务用 8 个字符的编号指定，例如 `0a1b2c3d`。",
+        "reply.usage.review_on_issue": "`review` 只用于拉取请求。在 Issue 上请使用 `ask`。",
+        "reply.notEnabled": "`{verb}` 尚未启用。请使用 `ask` 或 `review`。",
+        "reply.expired": "这条指令已超过 {hours} 小时，没有执行。如需执行请重新发布。",
+        "reply.cancelled": "已取消：{refs}。",
+        "reply.cancelNothing": "本线程没有可取消的任务。",
+        "reply.status.header": "**本线程的任务**",
+        "reply.status.none": "本线程没有任务。",
+        "task.state.queued": "排队中",
+        "task.state.running": "运行中",
+        "task.state.waiting": "等待审批",
+        "task.state.completed": "已完成",
+        "task.state.failed": "失败",
+        "task.state.cancelled": "已取消",
+        "tracking.running": "任务 `{ref}`：处理中。",
+        "tracking.waiting": "任务 `{ref}`：回答已就绪，等待发布。",
+        "tracking.completed": "任务 `{ref}`：已回答。",
+        "tracking.completedAt": "任务 `{ref}`：已回答 — {url}",
+        "tracking.failed": "任务 `{ref}`：失败。详情见 Cognia 主机。",
+        "tracking.cancelled": "任务 `{ref}`：已取消。",
+        "tracking.blocked.pii_blocked": "任务 `{ref}`：已停止 — 请求中含有不能发送给模型的个人信息。",
+        "tracking.blocked.readonly_violation": "任务 `{ref}`：已停止 — 智能体试图修改文件，因此没有发布任何内容。",
+        "tracking.blocked.budget_exceeded": "任务 `{ref}`：已停止 — 达到了本任务的费用上限。",
+        "tracking.blocked.recovery_required": "任务 `{ref}`：已停止 — 智能体会话中断，需要在 Cognia 主机上检查。",
+        "tracking.blocked.invalid_result": "任务 `{ref}`：已停止 — 智能体的回答无法使用。",
+        "tracking.blocked.target_changed": "任务 `{ref}`：已停止 — 拉取请求已变化，请针对新版本重新提问。",
+        "tracking.blocked.context_unavailable": "任务 `{ref}`：已停止 — 无法读取拉取请求。",
+        "answer.incomplete": "_部分上下文超出上限，此回答基于不完整的内容，不是完整评审。_",
+        "answer.aliased": "_修改代码将使用 `fix` 指令，目前尚未启用。_",
+        "answer.findingsOutsideDiff": "**改动行之外的发现**",
+        "approval.answer.title": "要在 GitHub 上发布这条回答吗？",
+        "approval.review.title": "要在 GitHub 上发布这条评论式评审吗？",
+        "approval.answer.message": "请核对确切文本和发布位置。智能体以只读方式运行，不会修改其他内容。",
+        "approval.reply.title": "要在 GitHub 上发布这条回复吗？",
+        "approval.reply.message": "对线程中指令的固定回复。",
+        "approval.tracking.title": "要更新该任务在 GitHub 上的跟踪评论吗？",
+        "approval.tracking.message": "任务的固定状态行，不含指令内容。"
+      }
+    }
+  },
+  "bots": [
+    {
+      "id": "comment-commands",
+      "name": "GitHub Comment Bot",
+      "version": "1.0.0",
+      "description": "Answer allowlisted collaborators' @-mention commands in issue and pull request comments: ask questions and get read-only reviews, with status, cancel and help.",
+      "executor": "handler",
+      "entry": "dist/index.js",
+      "export": "githubCommentBot",
+      "triggers": [
+        {
+          "id": "github",
+          "kind": "event",
+          "source": "integration",
+          "label": "GitHub comments",
+          "enabledByDefault": false,
+          "types": [
+            "issue_comment.created",
+            "issue_comment.edited",
+            "issue_comment.deleted",
+            "pull_request_review_comment.created",
+            "pull_request_review_comment.edited",
+            "pull_request_review_comment.deleted",
+            "pull_request_review.submitted"
+          ],
+          "concurrencyKey": "github-cmd-receive",
+          "conditions": {
+            "repositoryConfigKey": "repository"
+          }
+        },
+        {
+          "id": "poll",
+          "kind": "poll",
+          "label": "Poll comments",
+          "everyMs": 60000,
+          "everyMsConfigKey": "pollIntervalMs",
+          "cursor": "comments",
+          "enabledByDefault": false,
+          "concurrencyKey": "github-cmd-receive"
+        },
+        {
+          "id": "execute",
+          "kind": "manual",
+          "label": "Answer a queued command",
+          "concurrencyKey": "github-cmd:{{resource.scope}}",
+          "holdConcurrencyWhileWaiting": false
+        },
+        {
+          "id": "reply",
+          "kind": "manual",
+          "label": "Post a control reply",
+          "concurrencyKey": "github-cmd-reply:{{resource.id}}",
+          "holdConcurrencyWhileWaiting": false
+        }
+      ],
+      "requires": {
+        "credentials": [
+          {
+            "id": "github",
+            "label": "GitHub account",
+            "integration": "github"
+          }
+        ],
+        "integrationActions": [
+          "github.commentIssue",
+          "github.commentPr",
+          "github.replyToReviewComment",
+          "github.updateComment",
+          "github.reviewPr"
+        ]
+      },
+      "policy": {
+        "maxAuthority": "acceptEdits",
+        "maxAutonomy": "autopilot",
+        "maxConcurrentRuns": 3,
+        "maxRunDurationMs": 1800000,
+        "allowSelfTriggering": false
+      },
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "allowedAuthorIds"],
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository",
+            "description": "The repository whose comments this Bot answers, as owner/repo.",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          },
+          "trigger": {
+            "type": "string",
+            "title": "Trigger mention",
+            "description": "The mention that addresses the Bot, for example @my-bot. Leave empty on a GitHub App account to use the App's own name; a personal-token account must set it.",
+            "pattern": "^@[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+          },
+          "allowedAuthorIds": {
+            "type": "array",
+            "title": "Allowed authors (GitHub user ids)",
+            "description": "Numeric GitHub user ids that may command the Bot. Each must also have write access to the repository when the command is checked.",
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,19}$"
+            },
+            "minItems": 1
+          },
+          "publicationMode": {
+            "type": "string",
+            "title": "Publication mode",
+            "enum": ["automatic", "approval"],
+            "default": "automatic",
+            "description": "Automatic publishes answers under an explicit host policy grant; approval asks a person before every reply."
+          },
+          "agentPreset": {
+            "type": "string",
+            "title": "External agent",
+            "default": "claude-code",
+            "description": "The external agent preset that answers. Its model lane is the installation's route."
+          },
+          "model": {
+            "type": "string",
+            "title": "Agent model",
+            "description": "Only for an agent on its own login. Leave empty when the installation routes through a Cognia model."
+          },
+          "timeoutMinutes": {
+            "type": "integer",
+            "title": "Answer timeout (minutes)",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 15
+          },
+          "commandMaxAgeHours": {
+            "type": "integer",
+            "title": "Command validity (hours)",
+            "description": "A command older than this is not executed.",
+            "minimum": 1,
+            "maximum": 168,
+            "default": 24
+          },
+          "pollIntervalMs": {
+            "type": "integer",
+            "title": "Polling interval (ms)",
+            "description": "How often comments are polled when webhooks are not delivering.",
+            "minimum": 30000,
+            "maximum": 3600000,
+            "default": 60000
+          }
+        }
+      }
+    }
+  ]
+}
