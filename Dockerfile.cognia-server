@@ -292,10 +292,14 @@ RUN apt-get update \
 # before the first spawn. Created here, ahead of `VOLUME /data`, so a fresh
 # anonymous or empty named volume is seeded with them; a pre-populated volume
 # mounted from an older image still needs them created by hand.
+# `/workspaces` (+ `/default`) is where the T2 overlay mounts the workspaces
+# volumes shared with runners; created here for the same reason, otherwise
+# Docker makes a root-owned mount point and the server cannot create its task
+# execution root there.
 RUN groupadd --system --gid 10001 cognia \
     && useradd --system --uid 10001 --gid cognia --home-dir /data --shell /usr/sbin/nologin cognia \
-    && mkdir -p /data /data/workspaces /data/pi-home/.pi/agent \
-    && chown -R cognia:cognia /data
+    && mkdir -p /data /data/workspaces /data/pi-home/.pi/agent /workspaces/default \
+    && chown -R cognia:cognia /data /workspaces
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
 COPY --from=builder /work/target/release/cognia /usr/local/bin/cognia
