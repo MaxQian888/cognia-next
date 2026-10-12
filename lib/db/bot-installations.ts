@@ -16,6 +16,7 @@ import type { ItemOwner } from "@/types/placement/item-owner"
 import type {
   BotCredentialBinding,
   BotDefinitionSource,
+  BotExecutionRoute,
   BotInstallationRow,
   BotInstallationScope,
   BotInstallationStatus,
@@ -160,8 +161,8 @@ export async function installBot(input: InstallBotInput): Promise<BotInstallatio
 export type BotInstallationPatch = Partial<
   Omit<
     BotInstallationRow,
-    // `owner` has its own writer, `setBotInstallationOwner`.
-    "id" | "createdAt" | "updatedAt" | "workspaceId" | "projectId" | "owner"
+    // `owner` and `executionRoute` have their own writers.
+    "id" | "createdAt" | "updatedAt" | "workspaceId" | "projectId" | "owner" | "executionRoute"
   >
 > & {
   /** Re-evaluated against the merged row when bindings or status change. */
@@ -246,6 +247,30 @@ export async function setBotInstallationOwner(
     cancelLiveBotInstallation(id)
   }
   await syncSchedules(next)
+  return next
+}
+
+/**
+ * Set or clear the model lane of an installation's external agents. The one
+ * writer of `executionRoute`: a route decides whether model traffic passes the
+ * gateway's PII gate and how hard the cost ceiling is, so it is a deliberate
+ * user choice, never a side effect of an ordinary edit.
+ */
+export async function setBotInstallationExecutionRoute(
+  id: string,
+  route: BotExecutionRoute | undefined,
+  now = Date.now()
+): Promise<BotInstallationRow | undefined> {
+  const db = getDb()
+  const existing = await db.botInstallations.get(id)
+  if (!existing) return undefined
+  assertRunsHere("bot-installation", existing.owner)
+  if (route?.mode === "gateway" && (!route.providerId.trim() || !route.modelId.trim()))
+    throw new Error("A gateway route names a provider and a model")
+  const next: BotInstallationRow = { ...existing, updatedAt: now }
+  if (route) next.executionRoute = route
+  else delete next.executionRoute
+  await db.botInstallations.put(next)
   return next
 }
 

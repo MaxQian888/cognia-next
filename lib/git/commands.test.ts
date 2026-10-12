@@ -604,6 +604,18 @@ describe("when in Tauri", () => {
       remote: "origin",
       prune: true,
     })
+    await gitFetch("/r", "origin", false, "refs/pull/7/head", { token: "ghs_x" })
+    expect(callMock).toHaveBeenCalledWith("git_fetch", {
+      repoPath: "/r",
+      remote: "origin",
+      prune: false,
+      refspec: "refs/pull/7/head",
+      token: "ghs_x",
+    })
+    // A credential never fetches "everything".
+    await expect(gitFetch("/r", "origin", false, undefined, { token: "ghs_x" })).rejects.toThrow(
+      "names the ref"
+    )
     await gitPull("/r", { rebase: true })
     expect(callMock).toHaveBeenCalledWith("git_pull", {
       repoPath: "/r",

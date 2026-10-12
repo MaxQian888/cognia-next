@@ -16,6 +16,7 @@ import {
   bindBotCredential,
   botInstallMutation,
   installBotFromCatalog,
+  setBotExecutionRoute,
   setBotInstallationEnabled,
   uninstallBotInstallation,
   updateBotConfig,
@@ -304,6 +305,57 @@ describe("updateBotConfig", () => {
     expect(installed.status).toBe("needs_setup")
     const updated = await updateBotConfig(installed.id, { channel: "#alerts" })
     expect(updated.status).toBe("needs_setup")
+  })
+})
+
+describe("setBotExecutionRoute", () => {
+  async function installed() {
+    register(definition())
+    return installBot({
+      definitionId: "acme:digest",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+      now: NOW,
+    })
+  }
+
+  it("stores a route, ends the runs started under the old one, and clears the setup error", async () => {
+    const row = await installed()
+    await getDb().botInstallations.update(row.id, {
+      status: "needs_setup",
+      monitor: { lastError: "Choose a Cognia model" },
+    })
+    cancelLiveBotInstallation.mockClear()
+    const updated = await setBotExecutionRoute(row.id, {
+      mode: "gateway",
+      providerId: "openai",
+      modelId: "gpt-5",
+    })
+    expect(updated.executionRoute).toEqual({
+      mode: "gateway",
+      providerId: "openai",
+      modelId: "gpt-5",
+    })
+    expect(updated.monitor?.lastError).toBeNull()
+    expect(cancelLiveBotInstallation).toHaveBeenCalledWith(row.id)
+  })
+
+  it("clears a route with null", async () => {
+    const row = await installed()
+    await setBotExecutionRoute(row.id, { mode: "native" })
+    const cleared = await setBotExecutionRoute(row.id, null)
+    expect(cleared).not.toHaveProperty("executionRoute")
+  })
+
+  it("refuses a malformed route and a missing installation", async () => {
+    const row = await installed()
+    await expect(
+      setBotExecutionRoute(row.id, { mode: "gateway", providerId: "", modelId: "x" } as never)
+    ).rejects.toThrow()
+    await expect(setBotExecutionRoute("boti_missing", { mode: "native" })).rejects.toBeInstanceOf(
+      BotControlTargetMissingError
+    )
   })
 })
 

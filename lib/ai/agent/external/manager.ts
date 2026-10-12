@@ -630,11 +630,20 @@ export class ExternalAgentManager {
     try {
       const { prepareExternalAgentGatewayRoute } = await import("@/lib/gateway/mint-session-ticket")
       ;({ gatewayRevokeRouteTicket } = await import("@/lib/tauri/gateway"))
+      const ceiling = options?.gatewayTicketBudget
       lease = await prepareExternalAgentGatewayRoute({
         ...binding,
         sessionId: taskId,
         ingressProtocol: traits.ingress,
         originDeviceId,
+        ...(ceiling && (ceiling.maxTokens !== undefined || ceiling.maxRequests !== undefined)
+          ? {
+              budget: {
+                ...(ceiling.maxTokens !== undefined ? { maxTokens: ceiling.maxTokens } : {}),
+                ...(ceiling.maxRequests !== undefined ? { maxRequests: ceiling.maxRequests } : {}),
+              },
+            }
+          : {}),
         signal: options?.signal,
       })
     } catch (error) {

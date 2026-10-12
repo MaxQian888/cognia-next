@@ -20,7 +20,7 @@
  */
 
 import { transport } from "@/lib/tauri"
-import type { GatewayModelMetadata } from "@/types/gateway"
+import type { GatewayModelMetadata, GatewayTaskBudget } from "@/types/gateway"
 
 /** Renewal cadence; the server-side TTL is four of these. */
 export const HOST_TASK_LEASE_RENEW_MS = 30_000
@@ -33,6 +33,11 @@ export interface HostTaskLeaseInput {
   ingressProtocol: "openai-chat" | "openai-responses" | "anthropic"
   /** The paired device the turn runs for; part of the lease scope. */
   originDeviceId?: string | null
+  /**
+   * Optional consumption ceiling on the task's ticket (a Bot run's remaining
+   * token allowance under its cost cap). Absent means unmetered.
+   */
+  budget?: GatewayTaskBudget
   signal?: AbortSignal
 }
 
@@ -138,6 +143,7 @@ export async function acquireHostTaskLease(input: HostTaskLeaseInput): Promise<H
       model: input.modelId,
       ingressProtocol: input.ingressProtocol,
       originDeviceId: input.originDeviceId ?? null,
+      ...(input.budget ? { budget: input.budget } : {}),
     },
   })
   const control = {

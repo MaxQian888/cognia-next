@@ -28,9 +28,11 @@ import {
   bindBotCredential,
   installBotFromCatalog,
   resolveBotLifecycleWriteAvailability,
+  setBotExecutionRoute,
   setBotInstallationEnabled,
   uninstallBotInstallation,
   updateBotConfig,
+  type BotExecutionRouteInput,
   type InstallBotFromCatalogInput,
 } from "@/lib/bot/control-writes"
 import {
@@ -86,6 +88,8 @@ export interface BotLifecycleActions {
     config: Record<string, unknown>,
     policyGrant?: BotPolicyGrantInput
   ) => Promise<boolean>
+  /** Choose the model lane of the installation's external agents; `null` clears it. */
+  saveRoute: (installationId: string, route: BotExecutionRouteInput | null) => Promise<boolean>
   bindCredential: (
     installationId: string,
     slotId: string,
@@ -222,6 +226,21 @@ export function useBotLifecycleActions(): BotLifecycleActions {
     [report, t, withPending]
   )
 
+  const saveRoute = useCallback(
+    async (installationId: string, route: BotExecutionRouteInput | null) =>
+      withPending(`route:${installationId}`, async () => {
+        try {
+          await setBotExecutionRoute(installationId, route)
+          toast.success(t("lifecycle.routeSaved"))
+          return true
+        } catch (error) {
+          report(error)
+          return false
+        }
+      }),
+    [report, t, withPending]
+  )
+
   const uninstall = useCallback(
     async (installationId: string) =>
       withPending(`uninstall:${installationId}`, async () => {
@@ -238,7 +257,7 @@ export function useBotLifecycleActions(): BotLifecycleActions {
   )
 
   return useMemo(
-    () => ({ pending, install, saveConfig, bindCredential, setEnabled, uninstall }),
-    [pending, install, saveConfig, bindCredential, setEnabled, uninstall]
+    () => ({ pending, install, saveConfig, saveRoute, bindCredential, setEnabled, uninstall }),
+    [pending, install, saveConfig, saveRoute, bindCredential, setEnabled, uninstall]
   )
 }

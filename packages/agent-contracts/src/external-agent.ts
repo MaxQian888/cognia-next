@@ -2629,6 +2629,16 @@ export interface ExternalAgentResult {
 export interface ExternalAgentExecutionOptions {
   /** Task-specific Cognia model binding. Omit to inherit the configured binding. */
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /**
+   * Ceiling on the gateway ticket a Cognia-model task runs under (a Bot run's
+   * remaining token allowance under its cost cap). Only meaningful with a
+   * `cogniaModel` binding; ignored on the native lane. It can only narrow:
+   * a task without it is unmetered, as before.
+   */
+  gatewayTicketBudget?: {
+    maxTokens?: number
+    maxRequests?: number
+  }
   /** Reuse an existing external agent session */
   sessionId?: string
   /**

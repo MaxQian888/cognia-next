@@ -11,6 +11,7 @@ import {
   listBotInstallations,
   readBotTriggerState,
   resolveInstallationStatus,
+  setBotInstallationExecutionRoute,
   setBotInstallationOwner,
   uninstallBot,
   unboundCredentialSlots,
@@ -192,6 +193,50 @@ describe("botInstallations", () => {
     const row = await installBot(input())
     await uninstallBot(row.id)
     expect(await getBotInstallation(row.id)).toBeUndefined()
+  })
+})
+
+describe("setBotInstallationExecutionRoute", () => {
+  beforeEach(async () => {
+    __resetDbForTesting()
+    await getDb().botInstallations.clear()
+  }, 15_000)
+
+  it("sets, replaces and clears the model lane through its own writer", async () => {
+    const row = await installBot(input())
+    const routed = await setBotInstallationExecutionRoute(row.id, {
+      mode: "gateway",
+      providerId: "openai",
+      modelId: "gpt-5",
+    })
+    expect(routed?.executionRoute).toEqual({
+      mode: "gateway",
+      providerId: "openai",
+      modelId: "gpt-5",
+    })
+    expect(
+      (await setBotInstallationExecutionRoute(row.id, { mode: "native" }))?.executionRoute
+    ).toEqual({ mode: "native" })
+    const cleared = await setBotInstallationExecutionRoute(row.id, undefined)
+    expect(cleared).not.toHaveProperty("executionRoute")
+  })
+
+  it("refuses a gateway route that names no model", async () => {
+    const row = await installBot(input())
+    await expect(
+      setBotInstallationExecutionRoute(row.id, {
+        mode: "gateway",
+        providerId: "openai",
+        modelId: " ",
+      })
+    ).rejects.toThrow("names a provider and a model")
+  })
+
+  it("leaves the route alone on an ordinary edit", async () => {
+    const row = await installBot(input())
+    await setBotInstallationExecutionRoute(row.id, { mode: "native" })
+    const edited = await updateBotInstallation(row.id, { config: { a: 1 } })
+    expect(edited?.executionRoute).toEqual({ mode: "native" })
   })
 })
 

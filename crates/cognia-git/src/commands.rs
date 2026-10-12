@@ -341,7 +341,22 @@ pub async fn git_fetch(
     remote: Option<String>,
     prune: bool,
     refspec: Option<String>,
+    token: Option<repo::SecretToken>,
 ) -> Result<(), GitError> {
+    if let Some(token) = token {
+        // A credentialed fetch names exactly what it wants; there is no
+        // "fetch everything with this token".
+        let target = remote::FetchTarget::parse(refspec.as_deref().ok_or_else(|| {
+            GitError::InvalidArgument("a credentialed fetch names a ref".into())
+        })?)?;
+        return remote::fetch_authenticated(
+            &repo_path,
+            remote.as_deref().unwrap_or("origin"),
+            &target,
+            &token,
+        )
+        .await;
+    }
     match refspec {
         Some(revision) => {
             remote::fetch_revision(&repo_path, remote.as_deref().unwrap_or("origin"), &revision)

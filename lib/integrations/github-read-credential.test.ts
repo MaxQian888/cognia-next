@@ -2,6 +2,7 @@ import { GITHUB_DOT_COM, parseGithubHost, type GithubHost } from "@/lib/github/h
 import type { IntegrationAccount } from "@/types/plugin/plugin-integration"
 import {
   githubReadAccountsFor,
+  resolveGithubAccountGitAccess,
   resolveGithubReadToken,
   type GithubReadCredentialDeps,
 } from "./github-read-credential"
@@ -132,5 +133,37 @@ describe("resolveGithubReadToken", () => {
 
   it("is null with no connected account", async () => {
     expect(await resolveGithubReadToken("acme/app", GITHUB_DOT_COM, deps([], {}))).toBeNull()
+  })
+})
+
+describe("resolveGithubAccountGitAccess", () => {
+  it("returns the named account's own deployment and token", async () => {
+    const ghes = account({ id: "ghes", authSessionId: "s-ghes" })
+    await expect(
+      resolveGithubAccountGitAccess(ghes, deps([], { "s-ghes": GHES }, { ghes: "ghe_token" }))
+    ).resolves.toEqual({ host: GHES, token: "ghe_token" })
+  })
+
+  it("never guesses github.com for an account whose deployment is unknown", async () => {
+    const lost = account({ id: "lost", authSessionId: "s-lost" })
+    await expect(
+      resolveGithubAccountGitAccess(lost, deps([], {}, { lost: "token" }))
+    ).rejects.toThrow("deployment is unknown")
+  })
+
+  it("refuses a disabled, revoked, tokenless or non-GitHub account", async () => {
+    const hosts = { "s-acc": GITHUB_DOT_COM }
+    await expect(
+      resolveGithubAccountGitAccess(account({ enabled: false }), deps([], hosts, { acc: "t" }))
+    ).rejects.toThrow("disabled")
+    await expect(
+      resolveGithubAccountGitAccess(account({ health: "revoked" }), deps([], hosts, { acc: "t" }))
+    ).rejects.toThrow("revoked")
+    await expect(resolveGithubAccountGitAccess(account({}), deps([], hosts, {}))).rejects.toThrow(
+      "no usable credential"
+    )
+    await expect(
+      resolveGithubAccountGitAccess(account({ providerId: "gitlab-pat" }), deps([], hosts))
+    ).rejects.toThrow("not a GitHub account")
   })
 })

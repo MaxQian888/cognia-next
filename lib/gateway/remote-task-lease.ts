@@ -1,3 +1,4 @@
+import type { GatewayTaskBudget } from "@/types/gateway"
 import {
   getActiveRemoteEndpoint,
   getActiveRemoteTransport,
@@ -70,6 +71,7 @@ export async function acquireRemoteTaskLease(input: {
   provider: Provider
   model: string
   ingressProtocol: string
+  budget?: GatewayTaskBudget
   assertCurrent: () => void
   signal?: AbortSignal
   subscribeAuthority?: (listener: () => void) => () => void
@@ -118,6 +120,7 @@ export async function acquireRemoteTaskLease(input: {
         provider: input.provider,
         model: input.model,
         ingressProtocol: input.ingressProtocol,
+        ...(input.budget ? { budget: input.budget } : {}),
       },
     })
     const control = {

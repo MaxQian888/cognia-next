@@ -3137,6 +3137,19 @@ paths:
                         - openai-chat
                         - openai-responses
                         - anthropic
+                    budget:
+                      type: object
+                      properties:
+                        maxTokens:
+                          type: integer
+                          minimum: 1
+                        maxRequests:
+                          type: integer
+                          minimum: 1
+                        maxRequestsPerMin:
+                          type: integer
+                          minimum: 1
+                      additionalProperties: false
                   additionalProperties: false
               additionalProperties: false
       responses:
@@ -10165,6 +10178,60 @@ paths:
                     - operationId
                     - operation
                     - installationId
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    operationId:
+                      type: string
+                      format: uuid
+                    operation:
+                      type: string
+                      const: execution_route
+                    installationId:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+                    route:
+                      description: How the installation's external agents reach a model; null restores the default.
+                      oneOf:
+                        - type: object
+                          properties:
+                            mode:
+                              type: string
+                              const: gateway
+                            providerId:
+                              type: string
+                              minLength: 1
+                              maxLength: 256
+                            modelId:
+                              type: string
+                              minLength: 1
+                              maxLength: 256
+                            accountId:
+                              type:
+                                - string
+                                - "null"
+                              minLength: 1
+                              maxLength: 256
+                          required:
+                            - mode
+                            - providerId
+                            - modelId
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            mode:
+                              type: string
+                              const: native
+                          required:
+                            - mode
+                          additionalProperties: false
+                        - type: "null"
+                  required:
+                    - operationId
+                    - operation
+                    - installationId
+                    - route
                   additionalProperties: false
       responses:
         "200":

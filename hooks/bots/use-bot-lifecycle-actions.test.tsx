@@ -14,6 +14,7 @@ const setBotInstallationEnabled = jest.fn(async (_id: string, _enabled: boolean)
   status: "enabled",
 }))
 const uninstallBotInstallation = jest.fn(async (_id: string) => undefined)
+const setBotExecutionRoute = jest.fn(async (_id: string, _route: unknown) => ({}))
 
 let availability = { state: "available", reason: "local-host" }
 
@@ -42,6 +43,7 @@ jest.mock("@/lib/bot/control-writes", () => {
     setBotInstallationEnabled: (id: string, enabled: boolean) =>
       setBotInstallationEnabled(id, enabled),
     uninstallBotInstallation: (id: string) => uninstallBotInstallation(id),
+    setBotExecutionRoute: (id: string, route: unknown) => setBotExecutionRoute(id, route),
     resolveBotLifecycleWriteAvailability: () => availability,
   }
 })
@@ -186,6 +188,22 @@ describe("useBotLifecycleActions", () => {
     expect(error).toHaveBeenCalledWith("That change cannot be made from here", {
       description: "This browser cannot run Bots. Pair a Host or use the desktop app.",
     })
+  })
+
+  it("saves a model route through its own write and reports it", async () => {
+    setBotExecutionRoute.mockClear()
+    const { result } = renderHook(() => useBotLifecycleActions())
+    let saved = false
+    await act(async () => {
+      saved = await result.current.saveRoute("boti_1", { mode: "native" })
+    })
+    expect(saved).toBe(true)
+    expect(setBotExecutionRoute).toHaveBeenCalledWith("boti_1", { mode: "native" })
+    setBotExecutionRoute.mockRejectedValueOnce(new Error("refused"))
+    await act(async () => {
+      saved = await result.current.saveRoute("boti_1", null)
+    })
+    expect(saved).toBe(false)
   })
 
   it("passes an explicit authority grant with the same configuration save", async () => {

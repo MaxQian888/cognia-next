@@ -616,14 +616,18 @@ export async function gitFetch(
   repoPath: string,
   remote?: string,
   prune = false,
-  refspec?: string
+  refspec?: string,
+  options: { token?: string } = {}
 ): Promise<void> {
   if (!hasGitBridge()) return
+  if (options.token && !refspec) throw new Error("A credentialed fetch names the ref it wants")
   await transport.call("git_fetch", {
     repoPath,
     remote: remote ?? null,
     prune,
     ...(refspec ? { refspec } : {}),
+    // Exact commit, `refs/pull/N/head` or a branch; host-validated.
+    ...(options.token ? { token: options.token } : {}),
   })
 }
 
@@ -784,6 +788,13 @@ export interface GitCloneGuards {
   maxSizeMb?: number
   /** Wall-clock budget. Default 120. */
   timeoutSecs?: number
+  /**
+   * One-shot credential for this clone only. The host sends it to git as an
+   * `extraheader` keyed on the clone URL's host, with the user's global and
+   * system Git config dropped, and skips the shared (public) object cache.
+   * Never stored in the checkout, its remote, or any log.
+   */
+  token?: string
 }
 
 /**

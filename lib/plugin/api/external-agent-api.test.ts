@@ -53,6 +53,39 @@ jest.mock("@/lib/db/bot-run-steps", () => ({
   completeBotRunStep: jest.fn(async (run, name, value) => {
     if (!mockSteps.has(`${run}:${name}`)) mockSteps.set(`${run}:${name}`, value)
   }),
+  listBotRunSteps: jest.fn(async (run: string) =>
+    [...mockSteps.entries()]
+      .filter(([key]) => key.startsWith(`${run}:`))
+      .map(([key, output]) => ({
+        name: key.slice(run.length + 1),
+        status: "completed",
+        output,
+      }))
+  ),
+}))
+const mockGatewayCapable = { value: false }
+jest.mock("@/lib/ai/agent/external/config/gateway-task", () => ({
+  cogniaGatewaySupport: () =>
+    mockGatewayCapable.value
+      ? { supported: true, runtime: "codex" }
+      : { supported: false, reason: "unsupported-runtime" },
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => ({
+      settings: {
+        customProviders: [],
+        providerSettings: {
+          openai: {
+            providerId: "openai",
+            discoveredModels: [
+              { id: "gpt-routed", pricing: { promptPer1M: 2, completionPer1M: 10 } },
+            ],
+          },
+        },
+      },
+    }),
+  },
 }))
 jest.mock("@/lib/ai/agent/external/manager", () => ({ getExternalAgentManager: () => mockManager }))
 jest.mock("@/lib/ai/agent/external/config/presets", () => ({
@@ -91,6 +124,7 @@ const options = { runId: "run", workspace, model: "swe-2-medium" }
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockGatewayCapable.value = false
   mockSteps.clear()
   mockAgents.clear()
   mockStoreAgents.clear()
@@ -1065,5 +1099,115 @@ describe("non-Bot admission (ADR-0216 decision 3)", () => {
     await expect(runPluginExternalAgent("plugin", "bot-other", "go")).rejects.toThrow(
       "no configured agent or preset"
     )
+  })
+})
+
+describe("execution route and cost ceiling", () => {
+  const routed = { mode: "gateway", providerId: "openai", modelId: "gpt-routed" } as const
+
+  function installation(executionRoute?: unknown) {
+    jest.mocked(assertOwnedBotWorkspace).mockResolvedValue({
+      binding: {
+        installation: {
+          id: "installation",
+          monitor: { lastSuccessAt: 1 },
+          ...(executionRoute ? { executionRoute } : {}),
+        },
+      },
+    } as never)
+  }
+
+  function succeed(usage = { promptTokens: 1_000, completionTokens: 1_000, totalTokens: 2_000 }) {
+    mockManager.execute.mockResolvedValue({
+      success: true,
+      sessionId: "cognia-gateway:task-1",
+      finalResponse: "done",
+      messages: [],
+      steps: [],
+      toolCalls: [],
+      duration: 1,
+      tokenUsage: usage,
+    })
+  }
+
+  it("refuses a gateway-capable agent until the user picks a route", async () => {
+    mockGatewayCapable.value = true
+    installation()
+    await expect(
+      runPluginExternalAgent("plugin", "codex", "test", { ...options, model: "gpt-routed" })
+    ).rejects.toThrow("Choose a Cognia model")
+    expect(updateBotInstallation).toHaveBeenCalledWith(
+      "installation",
+      expect.objectContaining({ status: "needs_setup" })
+    )
+    expect(mockManager.execute).not.toHaveBeenCalled()
+  })
+
+  it("runs a routed installation through the gateway without a native session", async () => {
+    mockGatewayCapable.value = true
+    installation(routed)
+    succeed()
+    const result = await runPluginExternalAgent("plugin", "codex", "test", {
+      runId: "run",
+      workspace,
+    })
+    expect(mockManager.createSession).not.toHaveBeenCalled()
+    expect(mockManager.setSessionModel).not.toHaveBeenCalled()
+    const execution = mockManager.execute.mock.calls[0][2] as ExternalAgentExecutionOptions
+    expect(execution.cogniaModel).toEqual({ providerId: "openai", modelId: "gpt-routed" })
+    expect(execution.sessionId).toBeUndefined()
+    // Uncapped: no ticket ceiling.
+    expect(execution.gatewayTicketBudget).toBeUndefined()
+    expect(result).toMatchObject({ status: "completed", model: "gpt-routed" })
+    // 1k in at $2/M + 1k out at $10/M.
+    expect(result.costUsd).toBeCloseTo(0.012)
+    // The task's session is recorded, so a later invocation can continue it.
+    expect(mockSteps.has("run:__host:external-agent:session:cognia-gateway:task-1")).toBe(true)
+  })
+
+  it("never lets a plugin move a routed installation onto another model", async () => {
+    mockGatewayCapable.value = true
+    installation(routed)
+    await expect(
+      runPluginExternalAgent("plugin", "codex", "test", { ...options, model: "gpt-other" })
+    ).rejects.toThrow("runs on gpt-routed")
+    expect(mockManager.execute).not.toHaveBeenCalled()
+  })
+
+  it("turns the remaining cost allowance into the gateway ticket's token ceiling", async () => {
+    mockGatewayCapable.value = true
+    installation(routed)
+    jest
+      .mocked(resolveOwnedBotAuthority)
+      .mockResolvedValue({ grant: {}, effectivePolicy: { maxRunCostUsd: 1 } } as never)
+    mockSteps.set("run:__host:cost:earlier", { costUsd: 0.5, source: "pricing" })
+    succeed()
+    await runPluginExternalAgent("plugin", "codex", "test", { runId: "run", workspace })
+    const execution = mockManager.execute.mock.calls[0][2] as ExternalAgentExecutionOptions
+    // $0.50 left at the $10/M top rate.
+    expect(execution.gatewayTicketBudget).toEqual({ maxTokens: 50_000 })
+  })
+
+  it("refuses an invocation once the run has spent its ceiling", async () => {
+    installation({ mode: "native" })
+    jest
+      .mocked(resolveOwnedBotAuthority)
+      .mockResolvedValue({ grant: {}, effectivePolicy: { maxRunCostUsd: 1 } } as never)
+    mockSteps.set("run:__host:cost:earlier", { costUsd: 1.2, source: "provider" })
+    await expect(runPluginExternalAgent("plugin", "devin", "test", options)).rejects.toMatchObject({
+      code: "budget_exceeded",
+    })
+    expect(mockManager.execute).not.toHaveBeenCalled()
+  })
+
+  it("refuses a cost ceiling it cannot price instead of treating the model as free", async () => {
+    installation({ mode: "native" })
+    jest
+      .mocked(resolveOwnedBotAuthority)
+      .mockResolvedValue({ grant: {}, effectivePolicy: { maxRunCostUsd: 1 } } as never)
+    await expect(runPluginExternalAgent("plugin", "devin", "test", options)).rejects.toThrow(
+      "No price is known"
+    )
+    expect(mockManager.execute).not.toHaveBeenCalled()
   })
 })

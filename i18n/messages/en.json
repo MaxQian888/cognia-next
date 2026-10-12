@@ -5577,6 +5577,7 @@
       "installed": "{name} installed",
       "notInstallable": "That Bot cannot be installed while its handler is missing.",
       "placeholder": "Runs on {host}. To change it here, take it back from {host}'s device page first.",
+      "routeSaved": "Model route saved",
       "status": {
         "disabled": "Bot disabled",
         "enabled": "Bot enabled",
@@ -5676,6 +5677,21 @@
         "body": "This installation pinned {pinned} and the plugin now ships {available}. The Bot keeps running on the version that exists, so nothing has stopped.",
         "title": "Running a different version"
       }
+    },
+    "route": {
+      "description": "How this Bot's external agents reach a model.",
+      "gateway": "A Cognia model",
+      "gatewayHint": "Every model call goes through Cognia's gateway: each request is checked for sensitive data, and the run's cost ceiling is a hard limit.",
+      "model": "Model",
+      "native": "The agent's own sign-in",
+      "nativeHint": "The agent uses its own provider login, for agents that cannot run on a Cognia model.",
+      "nativeWarning": "Cognia cannot check this agent's model traffic for sensitive data, and the cost ceiling is only checked between calls, so one call can go over it.",
+      "needsSetup": "Needs setup: {reason}",
+      "save": "Save route",
+      "selectModel": "Choose a model",
+      "title": "Model route",
+      "unset": "Not chosen",
+      "unsetHint": "An agent that can run on a Cognia model will not start until you choose one."
     },
     "row": {
       "armedOfTotal": "{armed}/{total}",

@@ -653,6 +653,17 @@ async function createBotInstallation(
     // Interactive on the host (ADR-0224 A6), like every write a move makes.
     adminLease: context.adminLease,
   })
+  // The model lane is the user's own choice, so it moves with the Bot; it is
+  // a separate operation because the install shape is the catalog's.
+  if (installation.executionRoute) {
+    await context.transport.call("bot_installation_mutate", {
+      operation: "execution_route",
+      operationId: crypto.randomUUID(),
+      installationId: `boti_${context.operationId}`,
+      route: installation.executionRoute,
+      adminLease: context.adminLease,
+    })
+  }
 }
 
 async function createConnectorInstance(

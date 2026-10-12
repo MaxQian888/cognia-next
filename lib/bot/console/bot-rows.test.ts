@@ -211,6 +211,17 @@ describe("buildBotRow credentials and policy", () => {
     })
   })
 
+  it("carries the installation's model route, and omits it when none is chosen", () => {
+    const routed = installation({ executionRoute: { mode: "native" } })
+    expect(
+      buildBotRow({ installation: routed, resolved: resolved(routed) }).executionRoute
+    ).toEqual({ mode: "native" })
+    const plain = installation()
+    expect(buildBotRow({ installation: plain, resolved: resolved(plain) })).not.toHaveProperty(
+      "executionRoute"
+    )
+  })
+
   it("marks a placeholder for an installation a paired host runs, and nothing else (ADR-0224)", () => {
     const owner = {
       kind: "remote-host" as const,

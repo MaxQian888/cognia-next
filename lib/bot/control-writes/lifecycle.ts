@@ -29,6 +29,7 @@ import {
   buildBotInstallationRow,
   getBotInstallation,
   persistBotInstallation,
+  setBotInstallationExecutionRoute,
   uninstallBot,
   updateBotInstallation,
   type InstallBotInput,
@@ -78,6 +79,24 @@ export const botPolicyGrantSchema = z
   })
   .strict()
 export type BotPolicyGrantInput = z.infer<typeof botPolicyGrantSchema>
+
+const routeId = z.string().trim().min(1).max(256)
+/**
+ * How the installation's external agents reach a model. `null` clears it back
+ * to the default (a gateway-capable agent then needs one chosen).
+ */
+export const botExecutionRouteSchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      mode: z.literal("gateway"),
+      providerId: routeId,
+      modelId: routeId,
+      accountId: routeId.nullable().optional(),
+    })
+    .strict(),
+  z.object({ mode: z.literal("native") }).strict(),
+])
+export type BotExecutionRouteInput = z.infer<typeof botExecutionRouteSchema>
 
 export class BotLifecycleUnavailableError extends Error {
   readonly code = "bot_lifecycle_unavailable"
@@ -262,6 +281,38 @@ export async function updateBotConfigLocally(
 }
 
 /**
+ * Choose the model lane of an installation's external agents.
+ *
+ * Its own operation, not part of `config`: the route decides whether model
+ * traffic passes the gateway's PII gate and how hard the cost ceiling is, and
+ * a plugin-shaped config blob is exactly what the plugin itself can influence.
+ * A changed route ends the runs that started under the old one, and clears
+ * the setup error the missing route left behind.
+ */
+export async function setBotExecutionRouteLocally(
+  installationId: string,
+  route: BotExecutionRouteInput | null
+): Promise<BotInstallationRow> {
+  assertAvailable()
+  const installation = await getBotInstallation(installationId)
+  if (!installation) throw new BotControlTargetMissingError("installation", installationId)
+  if (installation.syncedFromHost)
+    throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
+  const parsed = route === null ? undefined : botExecutionRouteSchema.parse(route)
+  const updated = await setBotInstallationExecutionRoute(installationId, parsed)
+  if (!updated) throw new BotControlTargetMissingError("installation", installationId)
+  const { cancelLiveBotInstallation } = await import("@/lib/bot/runtime/run")
+  cancelLiveBotInstallation(installationId)
+  if (updated.monitor?.lastError) {
+    const cleared = await updateBotInstallation(installationId, {
+      monitor: { ...updated.monitor, lastError: null },
+    })
+    if (cleared) return cleared
+  }
+  return updated
+}
+
+/**
  * Bind one credential slot, or clear it with `null`.
  *
  * Only an integration account or a connector adapter, never an auth session on
@@ -437,6 +488,19 @@ export async function updateBotConfig(
     installationId,
     config,
     ...(policyGrant ? { policyGrant: botPolicyGrantSchema.parse(policyGrant) } : {}),
+  })
+}
+export async function setBotExecutionRoute(
+  installationId: string,
+  route: BotExecutionRouteInput | null
+): Promise<BotInstallationRow> {
+  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
+    return setBotExecutionRouteLocally(installationId, route)
+  return relayLifecycle({
+    operation: "execution_route",
+    operationId: crypto.randomUUID(),
+    installationId,
+    route: route === null ? null : botExecutionRouteSchema.parse(route),
   })
 }
 export async function bindBotCredential(

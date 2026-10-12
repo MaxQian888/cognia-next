@@ -767,7 +767,8 @@ pub(super) async fn dispatch(
             let remote: Option<String> = optional(&args, "remote")?;
             let prune: bool = optional(&args, "prune")?.unwrap_or(false);
             let refspec: Option<String> = optional(&args, "refspec")?;
-            crate::git::commands::git_fetch(repo_path, remote, prune, refspec)
+            let token: Option<crate::git::repo::SecretToken> = optional(&args, "token")?;
+            crate::git::commands::git_fetch(repo_path, remote, prune, refspec, token)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))

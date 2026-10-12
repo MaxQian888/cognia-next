@@ -23,7 +23,9 @@ import {
   updateBotConfigLocally,
   bindBotCredentialLocally,
   setBotInstallationEnabledLocally,
+  setBotExecutionRouteLocally,
   uninstallBotInstallationLocally,
+  botExecutionRouteSchema,
   botPolicyGrantSchema,
 } from "./lifecycle"
 
@@ -86,6 +88,14 @@ export const botLifecycleMutationSchema = z.discriminatedUnion("operation", [
     })
     .strict(),
   z.object({ ...common, operation: z.literal("uninstall"), installationId: id }).strict(),
+  z
+    .object({
+      ...common,
+      operation: z.literal("execution_route"),
+      installationId: id,
+      route: botExecutionRouteSchema.nullable(),
+    })
+    .strict(),
 ])
 export type BotLifecycleMutation = z.infer<typeof botLifecycleMutationSchema>
 
@@ -219,6 +229,10 @@ export async function mutateBotInstallationOnHost(raw: unknown) {
     await uninstallBotInstallationLocally(input.installationId)
     return projectBotInstallationRow(installation)
   }
+  if (input.operation === "execution_route")
+    return projectBotInstallationRow(
+      await setBotExecutionRouteLocally(input.installationId, input.route)
+    )
   const resolved = await resolveInstalledBot(installation)
   if (!resolved) throw new Error("Bot installation definition is missing")
   if (input.operation === "config") {

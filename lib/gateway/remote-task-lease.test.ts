@@ -71,6 +71,16 @@ it("delegates one provider and binds spawn authorization to the exact live Host"
   await lease.revoke()
   expect(() => assertRemoteGatewayTask(env, target)).toThrow("missing")
 })
+it("forwards a task ceiling to the Host only when one is set", async () => {
+  const lease = await acquireRemoteTaskLease({ ...input(), budget: { maxTokens: 7_000 } })
+  expect(call.mock.calls[0][1].request.budget).toEqual({ maxTokens: 7_000 })
+  await lease.revoke()
+  const plain = await acquireRemoteTaskLease(input())
+  expect(
+    call.mock.calls.filter(([name]) => name.endsWith("prepare"))[1][1].request
+  ).not.toHaveProperty("budget")
+  await plain.revoke()
+})
 it("reserves a task while prepare is pending", async () => {
   let resolve!: (value: ReturnType<typeof response>) => void
   call.mockImplementationOnce(

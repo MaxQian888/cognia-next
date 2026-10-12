@@ -348,8 +348,27 @@ describe("createOnHost", () => {
       })
     )
     expect(call.mock.calls[0]![1]).not.toHaveProperty("policyGrant")
+    // No route chosen: nothing beyond the install.
+    expect(call).toHaveBeenCalledTimes(1)
     await expect(createOnHost(loadedBot({}, false), context(call))).rejects.toThrow(
       /bot_definition_missing/
+    )
+  })
+
+  it("moves the user's model route with the Bot, onto the installation it created", async () => {
+    const call = fakeTransport()
+    await createOnHost(
+      loadedBot({ executionRoute: { mode: "gateway", providerId: "openai", modelId: "gpt-5" } }),
+      context(call)
+    )
+    expect(call).toHaveBeenLastCalledWith(
+      "bot_installation_mutate",
+      expect.objectContaining({
+        operation: "execution_route",
+        installationId: `boti_${OP}`,
+        route: { mode: "gateway", providerId: "openai", modelId: "gpt-5" },
+        adminLease: "lease",
+      })
     )
   })
 })

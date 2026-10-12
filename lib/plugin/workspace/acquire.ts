@@ -105,9 +105,17 @@ export interface AcquireDeps {
   remotesOf?: (root: string) => Promise<readonly { name: string; url: string }[]>
   /** Refresh a cached checkout from its remote. */
   fetchAll?: (root: string) => Promise<void>
-  fetchRef?: (root: string, ref: string) => Promise<void>
+  /** Fetch one ref; `token` makes it a one-shot credentialed fetch. */
+  fetchRef?: (root: string, ref: string, options?: { token?: string }) => Promise<void>
   /** Move a cached checkout onto `ref`. */
   checkoutRef?: (root: string, ref: string) => Promise<void>
+  /**
+   * Git host and one-shot token of a Bot run's bound integration account.
+   * Defaults to resolving it from the account's own deployment.
+   */
+  gitAccess?: (
+    account: import("@/types/plugin/plugin-integration").IntegrationAccount
+  ) => Promise<{ host: { id: string; webBaseUrl: string }; token: string }>
 }
 
 /**
@@ -402,7 +410,7 @@ export function defaultAcquireDeps(
     remotesOf: async (root) =>
       (await gitRemotes(root)).map(({ name, fetchUrl }) => ({ name, url: fetchUrl })),
     fetchAll: (root) => gitFetch(root),
-    fetchRef: (root, ref) => gitFetch(root, "origin", false, ref),
+    fetchRef: (root, ref, options) => gitFetch(root, "origin", false, ref, options),
     checkoutRef: (root, ref) => gitCheckoutBranch(root, ref),
   }
 }

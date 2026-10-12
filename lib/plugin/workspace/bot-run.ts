@@ -139,7 +139,11 @@ export async function acquireBotWorkspace(
   const runtimeStateRoot = await deps.repoCacheDir(["bot-runs", `${id}-state`])
   const repository = binding.repository
   if (!repository) throw new Error("Bot integration repository scope is missing")
-  const url = `https://github.com/${repository}.git`
+  // Clone through the account the installation is bound to, on that account's
+  // own deployment (github.com or a GitHub Enterprise server), never through
+  // whatever Git credential this machine happens to hold.
+  const access = await (deps.gitAccess ?? defaultBotGitAccess)(binding.account)
+  const url = `${access.host.webBaseUrl}/${repository}.git`
   const cachedHead =
     allocation && deps.headOf ? await deps.headOf(destination).catch(() => null) : null
   const remotes = cachedHead && deps.remotesOf ? await deps.remotesOf(destination) : []
@@ -147,16 +151,22 @@ export async function acquireBotWorkspace(
   if (allocation && !reusable) await deps.removeRepoCache(segments)
   const root = reusable
     ? destination
-    : await deps.clone(url, destination, { allowedHosts: ["github.com"] })
+    : await deps.clone(url, destination, { allowedHosts: [access.host.id], token: access.token })
   if (!root) throw new Error("This host has no Git workspace transport")
   if (!deps.checkoutRef || !deps.headOf)
     throw new Error("This host cannot resolve isolated checkout revisions")
-  // Fork PR objects may exist only behind refs/pull in the configured repository.
-  if (/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(spec.ref)) {
+  // An exact commit, or a pull request's head: fork PR objects may exist only
+  // behind refs/pull in the configured repository. Both are fetched with the
+  // bound account; a branch came with the clone.
+  const exact = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(spec.ref)
+  const pull = /^refs\/pull\/[1-9][0-9]*\/head$/.exec(spec.ref)
+  let checkout = spec.ref
+  if (exact || pull) {
     if (!deps.fetchRef) throw new Error("This host cannot fetch an exact isolated revision")
-    await deps.fetchRef(root, spec.ref)
+    await deps.fetchRef(root, spec.ref, { token: access.token })
+    if (pull) checkout = spec.ref.replace(/^refs\/pull\//, "refs/remotes/origin/pull/")
   }
-  await deps.checkoutRef(root, spec.ref)
+  await deps.checkoutRef(root, checkout)
   const headRef = await deps.headOf(root)
   if (!headRef) throw new Error("Checkout did not resolve a commit")
   if (
@@ -174,7 +184,7 @@ export async function acquireBotWorkspace(
     runtimeStateRoot,
     ephemeral: true,
     headRef,
-    remote: { host: "github.com", owner, repo, url, ref: spec.ref },
+    remote: { host: access.host.id, owner, repo, url, ref: spec.ref },
   }
   await completeBotRunStep(spec.runId, WORKSPACE_STEP, {
     pluginId,
@@ -182,6 +192,14 @@ export async function acquireBotWorkspace(
     handle,
   } satisfies OwnedWorkspace)
   return handle
+}
+
+async function defaultBotGitAccess(
+  account: import("@/types/plugin/plugin-integration").IntegrationAccount
+): Promise<{ host: { id: string; webBaseUrl: string }; token: string }> {
+  const { resolveGithubAccountGitAccess } =
+    await import("@/lib/integrations/github-read-credential")
+  return resolveGithubAccountGitAccess(account)
 }
 
 export async function digestBotArtifact(value: unknown): Promise<string> {

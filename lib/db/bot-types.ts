@@ -70,6 +70,20 @@ export interface BotDefinitionRow {
   updatedAt: number
 }
 
+/**
+ * The model lane of a Bot installation's external agents.
+ *
+ * - `gateway`: every model call goes through the local Cognia gateway on the
+ *   named provider/model. The gateway's per-request PII gate applies, and a
+ *   `maxRunCostUsd` ceiling becomes a hard token ceiling on the task ticket.
+ * - `native`: the agent CLI uses its own provider login. Chosen explicitly by
+ *   the user; there is no gateway PII gate on its model traffic and a cost
+ *   ceiling is enforced only between invocations (a soft cap).
+ */
+export type BotExecutionRoute =
+  | { mode: "gateway"; providerId: string; modelId: string; accountId?: string | null }
+  | { mode: "native" }
+
 export type BotScopeKind = "account" | "workspace" | "project"
 
 export interface BotInstallationScope {
@@ -176,6 +190,16 @@ export interface BotInstallationRow {
    * request, so it can only ever narrow what is already allowed.
    */
   policyGrant?: PluginBotPolicyV1
+  /**
+   * How this installation's external agents reach a model. Host-owned: the
+   * plugin can neither choose nor change it, and `updateBotInstallation`
+   * refuses it so only `setBotInstallationExecutionRoute` writes it.
+   *
+   * Absent means the default: a preset that can run through the Cognia
+   * gateway must be given a `gateway` route before it runs (the run reports
+   * `needs_setup`), and a preset that cannot (Devin) runs natively.
+   */
+  executionRoute?: BotExecutionRoute
   /**
    * Which machine runs it (ADR-0224). Replaces the `placementRef` string that
    * nothing ever read. `remote-host` marks a disabled placeholder for an

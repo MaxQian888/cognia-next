@@ -1188,6 +1188,24 @@
                   "string",
                   "null"
                 ]
+              },
+              "budget": {
+                "type": "object",
+                "properties": {
+                  "maxTokens": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "maxRequests": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "maxRequestsPerMin": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -1382,6 +1400,24 @@
                   "openai-responses",
                   "anthropic"
                 ]
+              },
+              "budget": {
+                "type": "object",
+                "properties": {
+                  "maxTokens": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "maxRequests": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "maxRequestsPerMin": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -5021,6 +5057,85 @@
               "operationId",
               "operation",
               "installationId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "operation": {
+                "type": "string",
+                "const": "execution_route"
+              },
+              "installationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "route": {
+                "description": "How the installation's external agents reach a model; null restores the default.",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "gateway"
+                      },
+                      "providerId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "accountId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "providerId",
+                      "modelId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "native"
+                      }
+                    },
+                    "required": [
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "operationId",
+              "operation",
+              "installationId",
+              "route"
             ],
             "additionalProperties": false
           }
@@ -32739,7 +32854,12 @@
           },
           "refspec": {
             "type": "string",
-            "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
+            "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64}|refs/pull/[1-9][0-9]*/head|(?:refs/heads/)?[A-Za-z0-9][A-Za-z0-9._/-]*)$"
+          },
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "description": "One-shot credential for this fetch only (a Bot run's bound integration account). Requires an explicit refspec."
           }
         },
         "additionalProperties": false
@@ -79202,5 +79322,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "38a16b6b4151e698e345ee57b2731a84fbc64f907fb553d75fe6f3d7c19600c5"
+  "catalogHash": "6e966da52c1b64014201c8042ea518d661f2267363016ce4414b05bee924123c"
 }

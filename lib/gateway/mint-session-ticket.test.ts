@@ -334,6 +334,13 @@ describe("required external agent gateway leases", () => {
     expect(pushMock.mock.calls[0][0].providers[0].id).toBe("anthropic")
   })
 
+  it("carries a task ceiling onto the desktop ticket only when one is asked for", async () => {
+    await prepareExternalAgentGatewayRoute({ ...input, budget: { maxTokens: 12_000 } })
+    expect(mintMock.mock.calls[0][0]).toMatchObject({ budget: { maxTokens: 12_000 } })
+    await prepareExternalAgentGatewayRoute({ ...input, sessionId: "task-b" })
+    expect(mintMock.mock.calls[1][0]).not.toHaveProperty("budget")
+  })
+
   it("returns an explicit null owner for a host without local account ownership", async () => {
     accountState.unlockedAccountId = null
     statusMock.mockResolvedValue({ running: true, boundPort: 8317, accountRequired: false })

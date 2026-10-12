@@ -15,6 +15,15 @@ import { assertNoLeakingPii } from "./plugin-pii-gate"
 import { DEFAULT_EXTERNAL_AGENT_RETRY_CONFIG } from "@/types/agent/external-agent"
 import { updateBotInstallation } from "@/lib/db/bot-installations"
 import { resolveOwnedBotAuthority } from "@/lib/bot/policy/run-authority"
+import {
+  BotRunBudgetExceededError,
+  BotRunPricingUnknownError,
+  currentPricingSettings,
+  priceBotInvocation,
+  recordBotInvocationCost,
+  remainingBotRunBudgetUsd,
+  tokenAllowanceForUsd,
+} from "@/lib/bot/runtime/run-cost"
 
 export type PluginBotExternalAgentPermissionMode = "acceptEdits" | "bypassPermissions"
 export type PluginExternalAgentOptions = Omit<ExternalAgentExecutionOptions, "permissionMode"> & {
@@ -32,6 +41,11 @@ export interface PluginExternalAgentResult extends ExternalAgentResult {
   status: "completed" | "failed" | "cancelled" | "recovery_required"
   text: string
   usage?: ExternalAgentResult["tokenUsage"]
+  /**
+   * What this invocation cost in USD, recorded in the run's cost ledger.
+   * `null` when it could not be priced; absent outside Bot runs.
+   */
+  costUsd?: number | null
 }
 
 const SESSION_STEP = "__host:external-agent"
@@ -232,7 +246,7 @@ async function dispatchPluginExternalAgent(
   const step = invocationId === "default" ? SESSION_STEP : `${SESSION_STEP}:${invocationId}`
   if (!workspace || workspace.runId !== runId)
     throw new Error("Bot agent execution requires its owned workspace")
-  await assertOwnedBotWorkspace(pluginId, workspace)
+  const ownedWorkspace = await assertOwnedBotWorkspace(pluginId, workspace)
   const needsSetup = async (message: string): Promise<never> => {
     const owned = await assertOwnedBotWorkspace(pluginId, workspace)
     await updateBotInstallation(owned.binding.installation.id, {
@@ -265,14 +279,34 @@ async function dispatchPluginExternalAgent(
   await requireModeAuthority()
   if (!workspace.runtimeStateRoot)
     throw new Error("Bot execution requires an isolated runtime state directory")
-  if (!options.model) throw new Error("Bot agent execution requires an explicit model")
+  // The model lane is the installation's, chosen by the user on the Host; the
+  // plugin can name a model but never the route its traffic takes.
+  const route = ownedWorkspace.binding.installation.executionRoute
+  const presetConfig = createAgentFromPreset(presetOrAgentId)
+  const { cogniaGatewaySupport } = await import("@/lib/ai/agent/external/config/gateway-task")
+  const gatewayCapable = presetConfig ? cogniaGatewaySupport(presetConfig).supported : false
+  let gatewayRoute: Extract<NonNullable<typeof route>, { mode: "gateway" }> | undefined
+  if (route?.mode === "gateway") {
+    if (!gatewayCapable)
+      return needsSetup(
+        "This external agent cannot run through the Cognia gateway; choose the agent's own provider login for this Bot"
+      )
+    if (options.model && options.model !== route.modelId)
+      return needsSetup(
+        `This Bot installation runs on ${route.modelId} through the Cognia gateway, not ${options.model}`
+      )
+    gatewayRoute = route
+  } else if (!route && gatewayCapable) {
+    return needsSetup(
+      "Choose a Cognia model for this Bot installation, or explicitly allow the agent's own provider login"
+    )
+  }
+  const model = gatewayRoute?.modelId ?? options.model
+  if (!model) throw new Error("Bot agent execution requires an explicit model")
   const timeout = Math.min(options.timeoutMs ?? options.timeout ?? 30 * 60_000, 30 * 60_000)
   if (!Number.isFinite(timeout) || timeout <= 0)
     throw new Error("Execution timeout must be positive")
-  if (
-    presetOrAgentId === "devin" &&
-    !["swe-2-medium", "swe-2-high", "swe-2-max"].includes(options.model)
-  )
+  if (presetOrAgentId === "devin" && !["swe-2-medium", "swe-2-high", "swe-2-max"].includes(model))
     return needsSetup("Unsupported Devin SWE-2 model")
   const { getLiveBotRunSignal } = await import("@/lib/bot/runtime/run")
   const hostSignal = getLiveBotRunSignal(runId)
@@ -283,9 +317,19 @@ async function dispatchPluginExternalAgent(
   if (signal?.aborted) throw new Error("Bot run was cancelled")
   const promptHash = await digestBotArtifact({
     prompt,
-    model: options.model,
+    model,
     workspace: workspace.id,
     presetOrAgentId,
+    // Only when routed, so a native run's identity is what it always was.
+    ...(gatewayRoute
+      ? {
+          route: {
+            providerId: gatewayRoute.providerId,
+            modelId: gatewayRoute.modelId,
+            accountId: gatewayRoute.accountId ?? null,
+          },
+        }
+      : {}),
   })
   const completed = await getBotRunStep(runId, `${step}:result`)
   const checkpoint = (await getBotRunStep(runId, step))?.output as AgentCheckpoint | undefined
@@ -293,7 +337,7 @@ async function dispatchPluginExternalAgent(
     checkpoint &&
     (checkpoint.pluginId !== pluginId ||
       checkpoint.promptHash !== promptHash ||
-      checkpoint.model !== options.model ||
+      checkpoint.model !== model ||
       (checkpoint.permissionMode ?? "acceptEdits") !== permissionMode ||
       (options.sessionId && checkpoint.sessionId !== options.sessionId))
   )
@@ -336,7 +380,7 @@ async function dispatchPluginExternalAgent(
     !checkpoint &&
     (!priorSession ||
       priorSession.pluginId !== pluginId ||
-      priorSession.model !== options.model ||
+      priorSession.model !== model ||
       (priorSession.permissionMode ?? "acceptEdits") !== permissionMode ||
       !(await getBotRunStep(runId, `${priorSession.step}:result`)))
   )
@@ -375,33 +419,40 @@ async function dispatchPluginExternalAgent(
     // The host grant governs unattended commands; both modes keep the same
     // native process confinement and brokered publication boundary.
     permissionMode,
-    metadata: { selectedModel: options.model },
+    metadata: { selectedModel: model },
     mcpServers: [],
   }
-  let sessionId = checkpoint?.sessionId ?? priorSession?.sessionId
-  if (sessionId) {
-    if (!manager.getSession(agentId, sessionId))
-      await manager.resumeSession(agentId, sessionId, sessionOptions).catch(failSessionSetup)
-  } else {
-    sessionId = (await manager.createSession(agentId, sessionOptions).catch(failSessionSetup)).id
+  // A gateway task opens its own session inside `execute` (a native session
+  // cannot be moved onto the gateway), so only a native run pre-creates one.
+  // A routed run continues an earlier gateway task by its public id, or starts
+  // a new one: "" until `execute` names it.
+  let sessionId = checkpoint?.sessionId || priorSession?.sessionId || ""
+  if (!gatewayRoute) {
+    if (sessionId) {
+      if (!manager.getSession(agentId, sessionId))
+        await manager.resumeSession(agentId, sessionId, sessionOptions).catch(failSessionSetup)
+    } else {
+      sessionId = (await manager.createSession(agentId, sessionOptions).catch(failSessionSetup)).id
+    }
   }
   await completeBotRunStep(runId, step, {
     pluginId,
     agentId,
     sessionId,
-    model: options.model,
+    model,
     promptHash,
     permissionMode,
   } satisfies AgentCheckpoint)
-  await completeBotRunStep(runId, `${SESSION_STEP}:session:${sessionId}`, {
-    pluginId,
-    agentId,
-    sessionId,
-    model: options.model,
-    promptHash,
-    permissionMode,
-    step,
-  })
+  if (sessionId)
+    await completeBotRunStep(runId, `${SESSION_STEP}:session:${sessionId}`, {
+      pluginId,
+      agentId,
+      sessionId,
+      model,
+      promptHash,
+      permissionMode,
+      step,
+    })
   // Persisted before prompt dispatch. Never silently resubmit an uncertain turn after a process crash.
   const dispatched = await getBotRunStep(runId, `${step}:dispatched`)
   if (dispatched) {
@@ -409,7 +460,7 @@ async function dispatchPluginExternalAgent(
       success: false,
       agentId,
       sessionId,
-      model: options.model,
+      model,
       status: "recovery_required",
       text: "",
       finalResponse: "",
@@ -421,29 +472,52 @@ async function dispatchPluginExternalAgent(
         "A previous external turn has an uncertain outcome; inspect its recorded session before retrying.",
     }
   }
-  const advertised = manager.getSessionModels(agentId, sessionId)
-  if (
-    advertised.status === "unsupported" ||
-    (advertised.status === "ok" &&
-      Array.isArray(advertised.data.availableModels) &&
-      !advertised.data.availableModels.some((model) => model.modelId === options.model))
-  )
-    return needsSetup(`External agent does not offer the requested model: ${options.model}`)
-  await manager.setSessionModel(agentId, sessionId, options.model)
-  const models = manager.getSessionModels(agentId, sessionId)
-  if (
-    models.status === "unsupported" ||
-    (models.status === "ok" && models.data.currentModelId !== options.model)
-  )
-    return needsSetup("External agent did not confirm the requested model")
-  if (models.status === "error") throw models.error
+  if (!gatewayRoute) {
+    // The gateway pins the task to one model and hands the mode to the task
+    // session it opens; the native lane has to be told and asked back.
+    const advertised = manager.getSessionModels(agentId, sessionId)
+    if (
+      advertised.status === "unsupported" ||
+      (advertised.status === "ok" &&
+        Array.isArray(advertised.data.availableModels) &&
+        !advertised.data.availableModels.some((entry) => entry.modelId === model))
+    )
+      return needsSetup(`External agent does not offer the requested model: ${model}`)
+    await manager.setSessionModel(agentId, sessionId, model)
+    const models = manager.getSessionModels(agentId, sessionId)
+    if (
+      models.status === "unsupported" ||
+      (models.status === "ok" && models.data.currentModelId !== model)
+    )
+      return needsSetup("External agent did not confirm the requested model")
+    if (models.status === "error") throw models.error
+  }
   await requireModeAuthority()
-  await manager.setSessionMode(agentId, sessionId, permissionMode)
-  if (
-    permissionMode === "bypassPermissions" &&
-    manager.getSession(agentId, sessionId)?.permissionMode !== permissionMode
-  )
-    return needsSetup("External agent did not confirm the requested unattended permission mode")
+  if (!gatewayRoute) {
+    await manager.setSessionMode(agentId, sessionId, permissionMode)
+    if (
+      permissionMode === "bypassPermissions" &&
+      manager.getSession(agentId, sessionId)?.permissionMode !== permissionMode
+    )
+      return needsSetup("External agent did not confirm the requested unattended permission mode")
+  }
+  // The cost ceiling: refuse once spent, and on the gateway lane turn what is
+  // left into the task ticket's token ceiling, so this one call cannot overrun.
+  const { effectivePolicy } = await resolveOwnedBotAuthority(pluginId, runId)
+  const maxRunCostUsd = effectivePolicy.maxRunCostUsd
+  const costModel = gatewayRoute
+    ? { providerId: gatewayRoute.providerId, modelId: gatewayRoute.modelId }
+    : { modelId: model }
+  const pricingOptions = await currentPricingSettings()
+  const remainingUsd = await remainingBotRunBudgetUsd(runId, maxRunCostUsd)
+  let gatewayTicketBudget: { maxTokens: number } | undefined
+  if (remainingUsd !== undefined) {
+    const allowance = tokenAllowanceForUsd(remainingUsd, costModel, pricingOptions)
+    if (allowance === undefined) return needsSetup(new BotRunPricingUnknownError(model).message)
+    if (allowance <= 0)
+      throw new BotRunBudgetExceededError(maxRunCostUsd! - remainingUsd, maxRunCostUsd!)
+    if (gatewayRoute) gatewayTicketBudget = { maxTokens: allowance }
+  }
   await assertOwnedBotWorkspace(pluginId, workspace)
   if (signal?.aborted) throw new Error("Bot run was cancelled")
   const { createBotStepApi, botApprovalInterruptId } = await import("@/lib/bot/runtime/step")
@@ -464,7 +538,14 @@ async function dispatchPluginExternalAgent(
     >["request"]
   ) => {
     const requestId = request.requestId || request.id
-    const approvalStep = `external-command-${await digestBotArtifact({ agentId, sessionId, requestId })}`
+    // A gateway task's session is opened inside `execute`, so its id first
+    // arrives on its own events; the native lane always answers on the run's.
+    const answerSessionId = gatewayRoute ? request.sessionId || sessionId : sessionId
+    const approvalStep = `external-command-${await digestBotArtifact({
+      agentId,
+      sessionId: answerSessionId,
+      requestId,
+    })}`
     let granted = false
     try {
       if (permissionMode === "bypassPermissions") {
@@ -472,7 +553,10 @@ async function dispatchPluginExternalAgent(
         throw new Error("Unattended external agent unexpectedly requested a command approval")
       }
       await assertOwnedBotWorkspace(pluginId, workspace)
-      if (decisionSignal.aborted || (request.sessionId && request.sessionId !== sessionId))
+      if (
+        decisionSignal.aborted ||
+        (request.sessionId && sessionId && request.sessionId !== sessionId)
+      )
         throw new Error("External command no longer belongs to an active Bot session")
       const decision = await approvalSteps.waitForApproval(approvalStep, {
         title: request.title || `Run ${request.toolInfo.name}`,
@@ -481,7 +565,7 @@ async function dispatchPluginExternalAgent(
         // Publication approval remains the separate durable seven-day wait.
         timeoutMs: 240_000,
         detail: {
-          model: options.model,
+          model,
           externalAgent: {
             agentId,
             sessionId,
@@ -510,7 +594,7 @@ async function dispatchPluginExternalAgent(
       (option) => option.kind === (granted ? "allow_once" : "reject_once")
     )?.optionId
     await manager
-      .respondToPermission(agentId, sessionId, {
+      .respondToPermission(agentId, answerSessionId, {
         requestId,
         granted,
         scope: "once",
@@ -523,9 +607,19 @@ async function dispatchPluginExternalAgent(
   let result: ExternalAgentResult
   try {
     result = await manager.execute(agentId, prompt, {
-      sessionId,
-      model: options.model,
-      cogniaModel: null,
+      ...(sessionId ? { sessionId } : {}),
+      model,
+      // The installation's route, never the plugin's: null keeps the agent on
+      // its own provider login, a binding puts every model call through the
+      // gateway's PII gate under the ticket ceiling.
+      cogniaModel: gatewayRoute
+        ? {
+            providerId: gatewayRoute.providerId,
+            modelId: gatewayRoute.modelId,
+            ...(gatewayRoute.accountId !== undefined ? { accountId: gatewayRoute.accountId } : {}),
+          }
+        : null,
+      ...(gatewayTicketBudget ? { gatewayTicketBudget } : {}),
       workingDirectory: workspace.root,
       timeout,
       signal,
@@ -557,7 +651,7 @@ async function dispatchPluginExternalAgent(
         }
       : {}),
     agentId,
-    model: options.model,
+    model,
     status: signal?.aborted
       ? "cancelled"
       : result.success && !unexpectedPermissionRequest
@@ -566,6 +660,23 @@ async function dispatchPluginExternalAgent(
     text: result.finalResponse,
     usage: result.tokenUsage,
   }
+  // Charged before the result is recorded, so a crash between the two re-runs
+  // nothing and charges nothing twice (the cost step is per invocation).
+  const cost = priceBotInvocation(result.tokenUsage, costModel, pricingOptions)
+  await recordBotInvocationCost(runId, step, cost)
+  response.costUsd = cost.costUsd
+  // A routed task's session exists only once `execute` opened it; record it so
+  // a later invocation can continue the same gateway task.
+  if (gatewayRoute && result.sessionId && result.sessionId !== sessionId)
+    await completeBotRunStep(runId, `${SESSION_STEP}:session:${result.sessionId}`, {
+      pluginId,
+      agentId,
+      sessionId: result.sessionId,
+      model,
+      promptHash,
+      permissionMode,
+      step,
+    })
   await completeBotRunStep(runId, `${step}:result`, response)
   return response
 }

@@ -123,6 +123,54 @@ pub struct CloneGuards {
     /// authenticates. The cache would answer those from disk and say yes to a
     /// remote that is gone.
     pub use_mirror: Option<bool>,
+    /// A one-shot credential for this clone only (a Bot run's bound
+    /// integration account). Sent as an `extraheader` keyed on the clone
+    /// URL's own host, with the global and system Git config dropped, so the
+    /// machine's ambient credential helper can never answer in its place. A
+    /// credentialed clone always goes to the network: the shared mirror is
+    /// public-only.
+    pub token: Option<SecretToken>,
+}
+
+/// A credential that never prints. Deserialize-only: it arrives from the host
+/// for one Git process and is never written back out.
+#[derive(Clone, serde::Deserialize)]
+#[serde(transparent)]
+pub struct SecretToken(String);
+
+impl SecretToken {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for SecretToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretToken(<redacted>)")
+    }
+}
+
+/// The environment a credentialed Git network call runs under, keyed on the
+/// remote's own origin. `None` when the remote is not an https URL a header
+/// could be keyed on, which callers must refuse rather than fall back to the
+/// ambient credentials.
+pub(crate) fn credentialed_env(
+    remote_url: &str,
+    token: &SecretToken,
+) -> Result<Vec<(String, String)>> {
+    let origin = cognia_git_mirror::credential::origin_of(remote_url).ok_or_else(|| {
+        GitError::InvalidArgument("a credentialed Git call needs an https remote".into())
+    })?;
+    let credential = cognia_git_mirror::credential::GitCredential::from_token(token.expose())
+        .ok_or_else(|| GitError::InvalidArgument("empty Git credential".into()))?;
+    Ok(cognia_git_mirror::credential::auth_env(
+        &origin,
+        &credential,
+    ))
 }
 
 /// Full history by default. See [`CloneGuards::depth`].
@@ -333,11 +381,16 @@ async fn clone_repo_guarded_inner(
             .max(1),
     );
 
-    let use_mirror = guards.use_mirror.unwrap_or(CLONE_DEFAULT_USE_MIRROR);
+    let credential_env = match &guards.token {
+        Some(token) => credentialed_env(remote_url.trim(), token)?,
+        None => Vec::new(),
+    };
+    let use_mirror =
+        guards.token.is_none() && guards.use_mirror.unwrap_or(CLONE_DEFAULT_USE_MIRROR);
     if !use_mirror || !clone_from_mirror(depth, remote_url.trim(), &destination_path, budget).await
     {
         let args = guarded_clone_args(depth, remote_url.trim(), &destination_path);
-        match exec::run_within(parent, args, budget).await? {
+        match exec::run_within_env(parent, args, budget, &credential_env).await? {
             exec::Budgeted::Completed => {}
             exec::Budgeted::TimedOut => {
                 // A half-written checkout is worse than none: the next call
@@ -486,6 +539,43 @@ pub async fn ignore_add(repo_path: &str, pattern: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_clone_token_never_prints_and_arrives_as_a_plain_string() {
+        let guards: super::CloneGuards = serde_json::from_value(serde_json::json!({
+            "allowedHosts": ["ghe.example.com"],
+            "token": "ghs_secret_value"
+        }))
+        .unwrap();
+        assert_eq!(guards.token.as_ref().unwrap().expose(), "ghs_secret_value");
+        let printed = format!("{guards:?}");
+        assert!(!printed.contains("ghs_secret_value"), "{printed}");
+        assert!(printed.contains("<redacted>"));
+    }
+
+    #[test]
+    fn a_credentialed_call_keys_its_header_on_the_remote_and_drops_ambient_config() {
+        let token = super::SecretToken::new("ghs_secret_value");
+        let env = super::credentialed_env("https://ghe.example.com/acme/app.git", &token).unwrap();
+        let get = |key: &str| {
+            env.iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(get("GIT_CONFIG_GLOBAL"), "/dev/null");
+        assert_eq!(get("GIT_CONFIG_NOSYSTEM"), "1");
+        assert!(env
+            .iter()
+            .any(|(_, v)| v == "http.https://ghe.example.com/.extraheader"));
+        // The token is never put where argv, a URL or a log line would show it.
+        assert!(env.iter().all(|(_, v)| !v.contains("ghs_secret_value")));
+        assert!(super::credentialed_env("git@github.com:acme/app.git", &token).is_err());
+        assert!(
+            super::credentialed_env("https://github.com/a/b", &super::SecretToken::new(""))
+                .is_err()
+        );
+    }
+
     #[test]
     fn clone_url_floor_rejects_everything_that_is_not_a_plain_https_allowlisted_url() {
         let none: Vec<String> = Vec::new();

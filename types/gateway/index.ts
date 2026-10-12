@@ -481,6 +481,15 @@ export interface GatewayMintRouteTicketRequest {
   budget?: Pick<GatewayTicketBudget, "maxTokens" | "maxRequests" | "maxRequestsPerMin">
 }
 
+/**
+ * The ceilings a caller may set on a task lease. Spend counters are the
+ * gateway's own and always start at zero.
+ */
+export type GatewayTaskBudget = Pick<
+  GatewayTicketBudget,
+  "maxTokens" | "maxRequests" | "maxRequestsPerMin"
+>
+
 /** Mint response: the secret appears ONCE and must never be persisted. */
 export interface GatewayMintedRouteTicket {
   ticket: GatewayRouteTicket

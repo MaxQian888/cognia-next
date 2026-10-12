@@ -34,6 +34,7 @@ import {
   InboxIcon,
   KeyRoundIcon,
   ShieldIcon,
+  RouteIcon,
   SlidersHorizontalIcon,
   ZapIcon,
 } from "lucide-react"
@@ -54,6 +55,7 @@ import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
 import { BotHero } from "./bot-hero"
 import { BotConfigSection } from "./sections/config-section"
+import { BotRouteSection } from "./sections/route-section"
 import { BotCredentialsSection } from "./sections/credentials-section"
 import { BotDeliveriesSection } from "./sections/deliveries-section"
 import { BotPolicySection } from "./sections/policy-section"
@@ -249,6 +251,15 @@ export function BotDetail({
             description={t("config.description")}
           >
             <BotConfigSection row={row} />
+          </ConsoleSection>
+
+          <ConsoleSection
+            id="route"
+            title={t("route.title")}
+            icon={RouteIcon}
+            description={t("route.description")}
+          >
+            <BotRouteSection row={row} />
           </ConsoleSection>
 
           {/* Full width: the cockpit is a list beside a detail pane, and half a

@@ -64,6 +64,14 @@ describe("acquireHostTaskLease", () => {
     await lease.revoke()
   })
 
+  it("forwards a task ceiling only when one is set", async () => {
+    mockCall.mockResolvedValueOnce(prepared())
+    const lease = await acquireHostTaskLease({ ...input, budget: { maxTokens: 9_000 } })
+    expect(mockCall.mock.calls[0][1]).toMatchObject({ request: { budget: { maxTokens: 9_000 } } })
+    mockCall.mockResolvedValue(true)
+    await lease.revoke()
+  })
+
   it("renews on a heartbeat and revokes exactly once with the same scope", async () => {
     mockCall.mockResolvedValueOnce(prepared())
     const lease = await acquireHostTaskLease({ ...input, originDeviceId: undefined })

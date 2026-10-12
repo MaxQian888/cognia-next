@@ -91,6 +91,121 @@ pub async fn fetch_revision(repo_path: &str, remote: &str, revision: &str) -> Re
     .await
 }
 
+/// What a credentialed fetch may ask for. Each maps to one refspec that never
+/// rewrites a local branch: an exact commit, a pull request's head (which a
+/// fork PR's commits may only be reachable through), or a branch into its
+/// remote-tracking ref.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchTarget {
+    Revision(String),
+    PullHead(u64),
+    Branch(String),
+}
+
+impl FetchTarget {
+    pub fn parse(value: &str) -> Result<Self> {
+        let value = value.trim();
+        if matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Ok(Self::Revision(value.to_ascii_lowercase()));
+        }
+        if let Some(digits) = value
+            .strip_prefix("refs/pull/")
+            .and_then(|rest| rest.strip_suffix("/head"))
+        {
+            // Canonical decimal only: `042` and `+42` name the same PR as `42`
+            // to a parser, but not to git.
+            if !digits.starts_with('0') && digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                if let Ok(number) = digits.parse::<u64>() {
+                    return Ok(Self::PullHead(number));
+                }
+            }
+            return Err(GitError::InvalidArgument("invalid pull request ref".into()));
+        }
+        // Any other namespace (`refs/pull/N/merge`, `refs/tags/…`, `refs/remotes/…`)
+        // is not something a credentialed fetch is for.
+        if value.starts_with("refs/") && !value.starts_with("refs/heads/") {
+            return Err(GitError::InvalidArgument("invalid fetch ref".into()));
+        }
+        let branch = value.strip_prefix("refs/heads/").unwrap_or(value);
+        let valid = !branch.is_empty()
+            && branch.len() <= 255
+            && branch.as_bytes()[0].is_ascii_alphanumeric()
+            && branch
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._/-".contains(&byte))
+            && !branch.contains("..")
+            && !branch.contains("//")
+            && !branch.ends_with('/')
+            && !branch.ends_with(".lock");
+        if !valid {
+            return Err(GitError::InvalidArgument("invalid fetch ref".into()));
+        }
+        Ok(Self::Branch(branch.to_string()))
+    }
+
+    /// The refspec and the local ref the fetched commit lands on.
+    pub fn refspec(&self, remote: &str) -> (String, Option<String>) {
+        match self {
+            Self::Revision(sha) => (sha.clone(), None),
+            Self::PullHead(number) => {
+                let local = format!("refs/remotes/{remote}/pull/{number}/head");
+                (format!("+refs/pull/{number}/head:{local}"), Some(local))
+            }
+            Self::Branch(branch) => {
+                let local = format!("refs/remotes/{remote}/{branch}");
+                (format!("+refs/heads/{branch}:{local}"), Some(local))
+            }
+        }
+    }
+}
+
+/// How long a credentialed fetch may run before it is killed.
+const AUTHENTICATED_FETCH_BUDGET: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Fetch one target from a named https remote with a one-shot credential.
+///
+/// The token reaches this git process only, as an `extraheader` keyed on the
+/// remote's own origin (see `repo::credentialed_env`); the user's global and
+/// system Git config are dropped for the call, so neither their credential
+/// helper nor an `insteadOf` rewrite can stand in for the bound account.
+pub async fn fetch_authenticated(
+    repo_path: &str,
+    remote: &str,
+    target: &FetchTarget,
+    token: &super::repo::SecretToken,
+) -> Result<()> {
+    if remote.is_empty()
+        || remote.starts_with('-')
+        || !remote
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        return Err(GitError::InvalidArgument(
+            "credentialed fetch requires a named remote".into(),
+        ));
+    }
+    let url = exec::capture(&cwd(repo_path), ["remote", "get-url", "--", remote]).await?;
+    let env = super::repo::credentialed_env(url.trim(), token)?;
+    let (refspec, _) = target.refspec(remote);
+    let args = vec![
+        "fetch".to_string(),
+        "--no-tags".to_string(),
+        "--".to_string(),
+        remote.to_string(),
+        refspec,
+    ];
+    match exec::run_within_env(&cwd(repo_path), args, AUTHENTICATED_FETCH_BUDGET, &env).await? {
+        exec::Budgeted::Completed => Ok(()),
+        exec::Budgeted::TimedOut => Err(GitError::CommandFailed(
+            format!(
+                "fetch timed out after {}s",
+                AUTHENTICATED_FETCH_BUDGET.as_secs()
+            )
+            .into(),
+        )),
+    }
+}
+
 /// `git pull [--rebase] [remote] [branch]`.
 pub async fn pull(
     repo_path: &str,
@@ -209,6 +324,92 @@ mod tests {
     use git2::Signature;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn fetch_targets_are_exactly_a_commit_a_pull_head_or_a_branch() {
+        let sha = "a".repeat(40);
+        assert_eq!(
+            FetchTarget::parse(&sha.to_uppercase()).unwrap(),
+            FetchTarget::Revision(sha.clone())
+        );
+        assert_eq!(
+            FetchTarget::parse("refs/pull/42/head").unwrap(),
+            FetchTarget::PullHead(42)
+        );
+        assert_eq!(
+            FetchTarget::parse("refs/heads/feature/x").unwrap(),
+            FetchTarget::Branch("feature/x".into())
+        );
+        assert_eq!(
+            FetchTarget::parse("main").unwrap(),
+            FetchTarget::Branch("main".into())
+        );
+        for bad in [
+            "",
+            "-upload-pack=evil",
+            "refs/pull/0/head",
+            "refs/pull/042/head",
+            "refs/pull/x/head",
+            "refs/pull/1/merge",
+            "a..b",
+            "a//b",
+            "branch/",
+            "x.lock",
+            "+refs/heads/main:refs/heads/main",
+        ] {
+            assert!(FetchTarget::parse(bad).is_err(), "{bad} must be refused");
+        }
+    }
+
+    #[test]
+    fn fetch_refspecs_never_rewrite_a_local_branch() {
+        assert_eq!(
+            FetchTarget::PullHead(7).refspec("origin"),
+            (
+                "+refs/pull/7/head:refs/remotes/origin/pull/7/head".into(),
+                Some("refs/remotes/origin/pull/7/head".into())
+            )
+        );
+        assert_eq!(
+            FetchTarget::Branch("dev".into()).refspec("origin").0,
+            "+refs/heads/dev:refs/remotes/origin/dev"
+        );
+        let sha = "b".repeat(64);
+        assert_eq!(
+            FetchTarget::Revision(sha.clone()).refspec("origin"),
+            (sha, None)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_credentialed_fetch_refuses_a_remote_it_cannot_key_a_header_on() {
+        let tmp = TempDir::new().unwrap();
+        Repository::init(tmp.path()).unwrap();
+        let path = tmp.path().to_string_lossy().into_owned();
+        exec::run(
+            tmp.path(),
+            ["remote", "add", "origin", "git@github.com:owner/repo.git"],
+        )
+        .await
+        .unwrap();
+        let error = fetch_authenticated(
+            &path,
+            "origin",
+            &FetchTarget::Branch("main".into()),
+            &crate::repo::SecretToken::new("ghs_test"),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("https remote"), "{error}");
+        assert!(fetch_authenticated(
+            &path,
+            "-x",
+            &FetchTarget::Branch("main".into()),
+            &crate::repo::SecretToken::new("ghs_test"),
+        )
+        .await
+        .is_err());
+    }
 
     #[test]
     fn lists_remote_with_redacted_url() {

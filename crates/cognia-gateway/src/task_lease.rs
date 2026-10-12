@@ -17,6 +17,10 @@ pub struct TaskLeaseRequest {
     pub provider: ProviderSnapshot,
     pub model: String,
     pub ingress_protocol: String,
+    /// Optional consumption ceiling for the task (a Bot run's remaining
+    /// token allowance). Only the `max_*` members are honoured.
+    #[serde(default)]
+    pub budget: Option<TicketBudget>,
     #[serde(skip)]
     pub upstream_client: Option<reqwest::Client>,
     #[serde(skip)]
@@ -112,6 +116,7 @@ fn task_mint_request(
     provider: ProviderSnapshot,
     model: String,
     ingress_protocol: &str,
+    budget: Option<TicketBudget>,
 ) -> MintRequest {
     MintRequest {
         provider_overrides: vec![provider],
@@ -148,7 +153,13 @@ fn task_mint_request(
             TicketOperation::Models,
             TicketOperation::CountTokens,
         ]),
-        budget: None,
+        // Counters always start at zero: a caller names ceilings, never spend.
+        budget: budget.map(|budget| TicketBudget {
+            max_tokens: budget.max_tokens,
+            max_requests: budget.max_requests,
+            max_requests_per_min: budget.max_requests_per_min,
+            ..TicketBudget::default()
+        }),
     }
 }
 
@@ -212,6 +223,7 @@ impl GatewayState {
                     input.provider,
                     model,
                     &input.ingress_protocol,
+                    input.budget,
                 ),
                 Some(&empty_snapshot()),
                 chrono::Utc::now().timestamp_millis(),
@@ -352,6 +364,9 @@ pub struct HostTaskLeaseRequest {
     /// so one device can neither renew nor reuse another device's task.
     #[serde(default)]
     pub origin_device_id: Option<String>,
+    /// Optional consumption ceiling for the task, as on [`TaskLeaseRequest`].
+    #[serde(default)]
+    pub budget: Option<TicketBudget>,
 }
 
 #[derive(Serialize)]
@@ -467,6 +482,7 @@ impl GatewayState {
                     provider,
                     input.model,
                     &input.ingress_protocol,
+                    input.budget,
                 ),
                 Some(&empty_snapshot()),
                 chrono::Utc::now().timestamp_millis(),
@@ -929,6 +945,46 @@ mod tests {
         }))
         .unwrap()
     }
+    #[test]
+    fn host_task_lease_carries_a_requested_ceiling_with_zeroed_spend() {
+        let state = host_state("https://api.example.com/v1");
+        let generation = state.status().account_generation;
+        let request: HostTaskLeaseRequest = serde_json::from_value(serde_json::json!({
+            "taskId": "task-budget", "providerId": "host-openai", "model": "model-a",
+            "ingressProtocol": "openai-chat",
+            "budget": {"maxTokens": 5000, "spentTokens": 4999, "maxRequests": 7}
+        }))
+        .unwrap();
+        let lease = state
+            .mint_host_task_lease(generation, request, None)
+            .unwrap();
+        let ticket = state
+            .list_route_tickets()
+            .into_iter()
+            .find(|ticket| ticket.ticket_id == lease.ticket_id)
+            .unwrap();
+        let budget = ticket.budget.expect("ceiling recorded");
+        assert_eq!(budget.max_tokens, Some(5000));
+        assert_eq!(budget.max_requests, Some(7));
+        // A caller cannot pre-load spend; the registry owns the counters.
+        assert_eq!(budget.spent_tokens, 0);
+    }
+
+    #[test]
+    fn host_task_lease_without_a_ceiling_stays_unmetered() {
+        let state = host_state("https://api.example.com/v1");
+        let generation = state.status().account_generation;
+        let lease = state
+            .mint_host_task_lease(generation, host_request("task-free", None), None)
+            .unwrap();
+        let ticket = state
+            .list_route_tickets()
+            .into_iter()
+            .find(|ticket| ticket.ticket_id == lease.ticket_id)
+            .unwrap();
+        assert!(ticket.budget.is_none());
+    }
+
     #[test]
     fn host_task_lease_copies_one_host_provider_into_a_private_scoped_ticket() {
         let state = host_state("https://api.example.com/v1");

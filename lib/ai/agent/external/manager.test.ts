@@ -3563,6 +3563,19 @@ describe("Cognia gateway task lifecycle", () => {
     return { manager, children, restorePlane }
   }
 
+  it("hands a requested ticket ceiling to the gateway lease and only then", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      await manager.execute("managed", "task", { gatewayTicketBudget: { maxTokens: 50_000 } })
+      expect(mockGatewayMint.mock.calls[0][0]).toMatchObject({ budget: { maxTokens: 50_000 } })
+      await manager.execute("managed", "again")
+      expect(mockGatewayMint.mock.calls[1][0]).not.toHaveProperty("budget")
+    } finally {
+      restorePlane()
+    }
+  })
+
   it("uses the captured remote lease revoker after task completion", async () => {
     const { manager, restorePlane } = prepare()
     const revoke = jest.fn().mockResolvedValue(undefined)

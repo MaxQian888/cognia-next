@@ -434,3 +434,33 @@ it("accepts a relayed mutation that still carries its approval token", async () 
     mutateBotInstallationOnHost({ ...input, operationId: "x", unexpected: true })
   ).rejects.toThrow()
 })
+
+it("sets and clears an installation's model route through the host mutation", async () => {
+  const installed = await mutateBotInstallationOnHost(input)
+  await mutateBotInstallationOnHost({
+    operation: "execution_route",
+    operationId,
+    installationId: installed.id,
+    route: { mode: "gateway", providerId: "openai", modelId: "gpt-5" },
+  })
+  expect((await getDb().botInstallations.get(installed.id))?.executionRoute).toEqual({
+    mode: "gateway",
+    providerId: "openai",
+    modelId: "gpt-5",
+  })
+  await mutateBotInstallationOnHost({
+    operation: "execution_route",
+    operationId,
+    installationId: installed.id,
+    route: null,
+  })
+  expect((await getDb().botInstallations.get(installed.id))?.executionRoute).toBeUndefined()
+  await expect(
+    mutateBotInstallationOnHost({
+      operation: "execution_route",
+      operationId,
+      installationId: installed.id,
+      route: { mode: "gateway", providerId: "openai" },
+    })
+  ).rejects.toThrow()
+})

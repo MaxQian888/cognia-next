@@ -119,9 +119,10 @@ export {
   BotNotInstallableError,
   bindBotCredential,
   installBotFromCatalog,
+  setBotExecutionRoute,
   setBotInstallationEnabled,
   uninstallBotInstallation,
   updateBotConfig,
 } from "./lifecycle"
-export type { InstallBotFromCatalogInput } from "./lifecycle"
+export type { BotExecutionRouteInput, InstallBotFromCatalogInput } from "./lifecycle"
 export { canWriteBotLifecycle, resolveBotLifecycleWriteAvailability } from "./route"

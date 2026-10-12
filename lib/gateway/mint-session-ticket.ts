@@ -16,6 +16,7 @@
  * validates.
  */
 
+import type { GatewayTaskBudget } from "@/types/gateway"
 import { getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import { captureRemoteGatewayTarget, acquireRemoteTaskLease } from "./remote-task-lease"
 import { getAllProviders } from "@cognia/provider-types/provider"
@@ -168,6 +169,11 @@ export interface ExternalAgentGatewayRouteInput {
    * it, so another device can neither renew nor reuse the task's route.
    */
   originDeviceId?: string | null
+  /**
+   * Optional consumption ceiling on the task's ticket (a Bot run's remaining
+   * token allowance under its cost cap). Absent means unmetered.
+   */
+  budget?: GatewayTaskBudget
   signal?: AbortSignal
 }
 
@@ -189,6 +195,7 @@ async function prepareHostGatewayRoute(input: ExternalAgentGatewayRouteInput) {
     modelId: input.modelId,
     ingressProtocol: input.ingressProtocol ?? "openai-chat",
     originDeviceId: input.originDeviceId ?? null,
+    ...(input.budget ? { budget: input.budget } : {}),
     signal: input.signal,
   })
   return {
@@ -477,6 +484,7 @@ export async function prepareExternalAgentGatewayRoute(
         },
         model: input.modelId,
         ingressProtocol: input.ingressProtocol ?? "openai-chat",
+        ...(input.budget ? { budget: input.budget } : {}),
         assertCurrent,
         signal: input.signal,
         onDisposed: releaseAuthority,
@@ -534,6 +542,7 @@ export async function prepareExternalAgentGatewayRoute(
           "models",
           "count-tokens",
         ],
+        ...(input.budget ? { budget: input.budget } : {}),
       },
       { required: true }
     )

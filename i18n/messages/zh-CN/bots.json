@@ -110,6 +110,7 @@
     "installed": "已安装 {name}",
     "notInstallable": "处理函数缺失期间无法安装这个 Bot。",
     "placeholder": "在 {host} 上运行。要在本设备修改，请先在 {host} 的设备页面将其收回。",
+    "routeSaved": "模型路由已保存",
     "status": {
       "disabled": "Bot 已停用",
       "enabled": "Bot 已启用",
@@ -199,6 +200,21 @@
       "body": "这条安装记录钉的是 {pinned}，而插件现在提供的是 {available}。Bot 会继续以现存的版本运行，没有中断。",
       "title": "运行的是另一个版本"
     }
+  },
+  "route": {
+    "description": "这个 Bot 的外部 Agent 通过什么方式访问模型。",
+    "gateway": "Cognia 模型",
+    "gatewayHint": "所有模型调用都经过 Cognia 网关：每个请求都会检查敏感数据，运行的费用上限是硬性限制。",
+    "model": "模型",
+    "native": "Agent 自己的登录",
+    "nativeHint": "Agent 使用自己的服务商登录，用于无法运行在 Cognia 模型上的 Agent。",
+    "nativeWarning": "Cognia 无法检查这个 Agent 的模型流量中的敏感数据；费用上限只在两次调用之间检查，单次调用可能超出。",
+    "needsSetup": "需要设置：{reason}",
+    "save": "保存路由",
+    "selectModel": "选择模型",
+    "title": "模型路由",
+    "unset": "未选择",
+    "unsetHint": "能运行在 Cognia 模型上的 Agent，在你选择模型之前不会启动。"
   },
   "row": {
     "armedOfTotal": "{armed}/{total}",

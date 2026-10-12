@@ -182,8 +182,31 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
+    run_within_env(cwd, args, budget, &[]).await
+}
+
+/// [`run_within`] with extra environment layered over the standard base.
+///
+/// The one-shot credential path uses it: `cognia_git_mirror::credential::
+/// auth_env` hands the token to this single process as an `extraheader` in
+/// `GIT_CONFIG_*`, never in argv, a URL or a config file, and drops the
+/// global/system config so an ambient credential helper cannot answer instead.
+pub async fn run_within_env<I, S>(
+    cwd: &Path,
+    args: I,
+    budget: Duration,
+    envs: &[(String, String)],
+) -> Result<Budgeted, GitError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
     let _perf = cognia_instrument::guard("git.exec");
-    let mut child = base_command(cwd)
+    let mut command = base_command(cwd);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    let mut child = command
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

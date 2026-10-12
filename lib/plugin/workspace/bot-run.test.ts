@@ -88,6 +88,10 @@ beforeEach(() => {
     clone: jest.fn(async (_url, dir) => dir),
     checkoutRef: jest.fn(),
     headOf: jest.fn(async () => "base"),
+    gitAccess: jest.fn(async () => ({
+      host: { id: "github.com", webBaseUrl: "https://github.com" },
+      token: "ghs_bound",
+    })),
   }
   jest.mocked(resolveBotIntegrationBinding).mockResolvedValue({
     repository: "org/repo",
@@ -533,9 +537,10 @@ it("fetches a fork PR immutable SHA from the bound repository before checkout", 
   })
   deps.headOf = jest.fn(async () => sha)
   const handle = await acquireBotWorkspace("plugin", { ...spec, ref: sha }, deps)
-  expect(deps.fetchRef).toHaveBeenCalledWith(handle.root, sha)
+  expect(deps.fetchRef).toHaveBeenCalledWith(handle.root, sha, { token: "ghs_bound" })
   expect(deps.clone).toHaveBeenCalledWith("https://github.com/org/repo.git", handle.root, {
     allowedHosts: ["github.com"],
+    token: "ghs_bound",
   })
   expect(handle.headRef).toBe(sha)
   mockSteps.clear()
@@ -572,4 +577,57 @@ it("stops publication if host policy is downgraded after preparing the artifact"
     .mockRejectedValueOnce(new Error("grant narrowed"))
   await expect(publishBotWorkspace("plugin", handle, input)).rejects.toThrow("grant narrowed")
   expect(authenticatedIntegrationRequest).not.toHaveBeenCalled()
+})
+
+describe("bound-account checkout", () => {
+  it("clones and fetches with the bound account, never the machine's credentials", async () => {
+    await acquireBotWorkspace("plugin", spec, deps)
+    expect(deps.gitAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ pluginId: "github-delivery", id: "account" })
+    )
+    expect(jest.mocked(deps.clone).mock.calls[0][2]).toEqual({
+      allowedHosts: ["github.com"],
+      token: "ghs_bound",
+    })
+  })
+
+  it("clones a GitHub Enterprise account's repository from that server", async () => {
+    deps.gitAccess = jest.fn(async () => ({
+      host: { id: "ghe.example.com", webBaseUrl: "https://ghe.example.com" },
+      token: "ghe_token",
+    }))
+    const handle = await acquireBotWorkspace("plugin", spec, deps)
+    expect(deps.clone).toHaveBeenCalledWith("https://ghe.example.com/org/repo.git", handle.root, {
+      allowedHosts: ["ghe.example.com"],
+      token: "ghe_token",
+    })
+    expect(handle.remote).toMatchObject({ host: "ghe.example.com" })
+  })
+
+  it("fetches a pull request head with the bound account and checks out what it fetched", async () => {
+    deps.fetchRef = jest.fn()
+    await acquireBotWorkspace("plugin", { ...spec, ref: "refs/pull/42/head" }, deps)
+    expect(deps.fetchRef).toHaveBeenCalledWith(expect.any(String), "refs/pull/42/head", {
+      token: "ghs_bound",
+    })
+    expect(deps.checkoutRef).toHaveBeenCalledWith(
+      expect.any(String),
+      "refs/remotes/origin/pull/42/head"
+    )
+  })
+
+  it("does not fetch a branch separately: it came with the clone", async () => {
+    deps.fetchRef = jest.fn()
+    await acquireBotWorkspace("plugin", spec, deps)
+    expect(deps.fetchRef).not.toHaveBeenCalled()
+    expect(deps.checkoutRef).toHaveBeenCalledWith(expect.any(String), "base")
+  })
+
+  it("refuses to acquire when the bound account cannot supply access", async () => {
+    deps.gitAccess = jest.fn(async () => {
+      throw new Error("The bound GitHub account has no usable credential")
+    })
+    await expect(acquireBotWorkspace("plugin", spec, deps)).rejects.toThrow("no usable credential")
+    expect(deps.clone).not.toHaveBeenCalled()
+  })
 })

@@ -96,6 +96,28 @@ export async function githubReadAccountsFor(
 }
 
 /**
+ * Git access for ONE named account: the deployment it belongs to and a token
+ * that deployment issued. A Bot run uses this to clone through the account its
+ * installation is bound to, never through whichever credential the machine
+ * happens to hold. Throws when the account's host or token cannot be resolved:
+ * guessing either is how a token reaches the wrong server.
+ */
+export async function resolveGithubAccountGitAccess(
+  account: IntegrationAccount,
+  deps: Pick<GithubReadCredentialDeps, "hostForSession" | "resolveToken"> = DEFAULT_DEPS
+): Promise<{ host: GithubHost; token: string }> {
+  if (!GITHUB_PROVIDER_IDS.has(account.providerId))
+    throw new Error("The bound account is not a GitHub account")
+  if (!account.enabled || account.health === "revoked")
+    throw new Error("The bound GitHub account is disabled or revoked")
+  const host = await deps.hostForSession(account.authSessionId)
+  if (!host) throw new Error("The bound GitHub account's deployment is unknown")
+  const token = await deps.resolveToken(account, host)
+  if (!token) throw new Error("The bound GitHub account has no usable credential")
+  return { host, token }
+}
+
+/**
  * A token for reading `repoFullName` on `host` from a connected account, or
  * null when no connected account can supply one. Never throws.
  */
