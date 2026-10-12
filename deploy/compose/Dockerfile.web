@@ -77,6 +77,20 @@ COPY tsconfig.json ./
 COPY browser-extension ./browser-extension
 COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
 RUN pnpm install --frozen-lockfile --offline
+# The sidecar is its own pnpm workspace, and the only place `@cognia/*` are
+# linked from: prebuild's build-sidecar-linked-packages resolves them there.
+# Hide the root workspace for this install so sidecar/pnpm-workspace.yaml owns
+# its build approvals, as Dockerfile.cognia-server does.
+COPY sidecar/package.json sidecar/pnpm-lock.yaml sidecar/pnpm-workspace.yaml ./sidecar/
+RUN --mount=type=cache,id=cognia-pnpm-store,target=/root/.local/share/pnpm/store \
+    if [ -n "${NPM_CONFIG_REGISTRY}" ]; then \
+      registry="${NPM_CONFIG_REGISTRY%/}"; \
+      sed -i "s#https://registry.npmjs.org/#${registry}/#g" sidecar/pnpm-lock.yaml; \
+      pnpm config set registry "${registry}"; \
+    fi \
+    && mv pnpm-workspace.yaml pnpm-workspace.root.yaml \
+    && pnpm --dir sidecar install --frozen-lockfile --fetch-retries=5 --fetch-timeout=300000 --network-concurrency=16 \
+    && mv pnpm-workspace.root.yaml pnpm-workspace.yaml
 # Sources last. prebuild still runs the complete asset and sidecar pipeline.
 COPY . .
 RUN NODE_OPTIONS=--max-old-space-size=8192 pnpm build
