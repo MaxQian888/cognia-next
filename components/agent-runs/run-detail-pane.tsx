@@ -118,9 +118,8 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
   const format = useFormatter()
   const now = useNow({ updateInterval: 60_000 })
   const t = useTranslations("agentRuns")
-  const { run, detail, interrupts, journalAvailable, isLoading, botResult } = useExecutionRunDetail(
-    row.runId
-  )
+  const { run, detail, interrupts, journalAvailable, isLoading, botResult, botCost } =
+    useExecutionRunDetail(row.runId)
   const [outcome, setOutcome] = useState<RunControlOutcome | null>(null)
   const [steerText, setSteerText] = useState("")
   const controlRow = run?.latestSnapshot
@@ -422,6 +421,32 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
             />
           )}
           {row.error && <InspectRow label={t("detail.error")} value={row.error} />}
+          {/* A Bot run's ledger: what it spent, and how many calls could not
+              be priced (those are left out of the figure, not counted as 0). */}
+          {botCost && (
+            <InspectRow
+              label={t("detail.modelCost")}
+              value={
+                <span className="flex flex-col gap-0.5" data-testid="run-bot-cost">
+                  <span>
+                    {t("detail.modelCostValue", {
+                      amount: format.number(botCost.spentUsd, {
+                        style: "currency",
+                        currency: "USD",
+                        maximumFractionDigits: 4,
+                      }),
+                      count: botCost.invocations,
+                    })}
+                  </span>
+                  {botCost.unpricedInvocations > 0 && (
+                    <span className="text-amber-700 dark:text-amber-400">
+                      {t("detail.modelCostUnpriced", { count: botCost.unpricedInvocations })}
+                    </span>
+                  )}
+                </span>
+              }
+            />
+          )}
           {/* Only for a run a chat handed over. `RunImOrigin` renders nothing
               otherwise, so the row is gated on the same lookup rather than on
               a guess about the run kind. */}

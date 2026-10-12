@@ -46,6 +46,18 @@ export interface TaskResultV1 {
   taskRef: string
   reasonCode?: string
   answerUrl?: string
+  /** The command this run answered: shown on the run's detail page. */
+  source?: {
+    repository: string
+    thread: number
+    kind: CommandSourceV1["sourceKind"]
+    id: string
+    url?: string
+  }
+  /** The exact commit the answer was produced against. */
+  commitSha?: string
+  /** What the context budget left out (items per kind) or cut. */
+  context?: { omitted: Record<string, number>; truncatedItems: number; bytes: number }
   /** False when the context was cut, so a review is not a complete one. */
   complete?: boolean
   workspaceDirty?: boolean
@@ -85,9 +97,25 @@ export async function executeCommand(
   const identity = await readIdentity(reader)
   const trigger = resolveTrigger(config, identity)
   const t = ctx.i18n.t
+  // Filled in as the run learns them, so every outcome carries what it knew.
+  const facts: Partial<TaskResultV1> = {
+    source: {
+      repository: source.repository,
+      thread: source.threadNumber,
+      kind: source.sourceKind,
+      id: source.sourceId,
+      ...(source.sourceUrl ? { url: source.sourceUrl } : {}),
+    },
+  }
   const finish = (status: TaskStatus, summary: string, extra: Partial<TaskResultV1> = {}) => ({
     summary,
-    output: { schemaVersion: 1, status, taskRef: ref, ...extra } satisfies TaskResultV1,
+    output: {
+      schemaVersion: 1,
+      status,
+      taskRef: ref,
+      ...facts,
+      ...extra,
+    } satisfies TaskResultV1,
   })
   const track = (phase: Parameters<typeof updateTracking>[3]["phase"], step: string) =>
     updateTracking(ctx, run, config, {
@@ -156,8 +184,14 @@ export async function executeCommand(
     const collected: CollectedContext = await run.step.run("collect-context", () =>
       collectContext(reader, source, now)
     )
+    facts.context = {
+      omitted: collected.selection.omitted,
+      truncatedItems: collected.selection.truncatedItems,
+      bytes: collected.selection.bytes,
+    }
     if (!collected.checkout.sha)
       return blocked("context_unavailable", "The pull request head could not be read")
+    facts.commitSha = collected.checkout.sha
     const workspace = await run.step.run("acquire-workspace", () =>
       ctx.workspace.acquire({
         kind: "bot-run",

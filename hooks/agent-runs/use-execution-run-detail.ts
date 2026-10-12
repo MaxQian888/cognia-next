@@ -41,12 +41,14 @@ import {
 import { projectRunDetail, type RunDetailProjection } from "@/lib/execution/run-detail-model"
 import type { ExecutionRun, ExecutionRunInterrupt } from "@/types/execution/run"
 import type { BotHandlerResultV1 } from "@/types/bot/run"
+import type { BotRunCostSummary } from "@/lib/bot/runtime/run-cost"
 
 export interface ExecutionRunDetailState {
   run?: ExecutionRun
   detail: RunDetailProjection
   interrupts: ExecutionRunInterrupt[]
   botResult?: BotHandlerResultV1
+  botCost?: BotRunCostSummary
   journalAvailable: boolean
   isLoading: boolean
 }
@@ -141,6 +143,7 @@ export function useExecutionRunDetail(runId: string | undefined): ExecutionRunDe
     detail: projectRunDetail(run?.latestSnapshot, events),
     interrupts: sources.interrupts,
     ...(sources.botResult ? { botResult: sources.botResult } : {}),
+    ...(sources.botCost ? { botCost: sources.botCost } : {}),
     journalAvailable: remote || !run || run.currentRevision === 0 || events.length > 0,
     isLoading: false,
   }

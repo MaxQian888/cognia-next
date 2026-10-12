@@ -44,6 +44,14 @@ export const githubCommentBotDef = {
       enabledByDefault: false,
       concurrencyKey: "github-cmd-receive",
     },
+    // First of the manual triggers: the console's Run button defaults to it,
+    // and it is the only one a person has a reason to press.
+    {
+      id: "check",
+      kind: "manual",
+      label: "Check setup",
+      concurrencyKey: "github-cmd-check",
+    },
     {
       id: "execute",
       kind: "manual",
@@ -52,12 +60,6 @@ export const githubCommentBotDef = {
       // does not hold the slot.
       concurrencyKey: "github-cmd:{{resource.scope}}",
       holdConcurrencyWhileWaiting: false,
-    },
-    {
-      id: "check",
-      kind: "manual",
-      label: "Check setup",
-      concurrencyKey: "github-cmd-check",
     },
     {
       id: "reply",

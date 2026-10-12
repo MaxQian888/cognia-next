@@ -155,6 +155,8 @@ export function routeFake(github: FakeGithub) {
   })
 }
 
+const QUEUED_TRIGGERS = new Set(["execute", "reply"])
+
 export function fixture(
   options: {
     triggerId?: string
@@ -163,6 +165,8 @@ export function fixture(
     type?: string
     config?: Record<string, unknown>
     now?: number
+    /** Defaults to how the host marks it: queued work is the Bot's own, everything else is not. */
+    selfProduced?: boolean
   } = {}
 ) {
   const github = fakeGithub()
@@ -356,7 +360,11 @@ export function fixture(
       occurredAt: NOW,
       receivedAt: NOW,
       payload: options.payload ?? {},
-      provenance: { selfProduced: false, depth: 0 },
+      provenance: QUEUED_TRIGGERS.has(options.triggerId ?? "execute")
+        ? (options.selfProduced ?? true)
+          ? { selfProduced: true, depth: 1, producedByInstallationId: "install" }
+          : { selfProduced: false, depth: 0 }
+        : { selfProduced: options.selfProduced ?? false, depth: 0 },
     } as BotRunContextV1["event"],
     step: {
       run: step.run as BotRunContextV1["step"]["run"],

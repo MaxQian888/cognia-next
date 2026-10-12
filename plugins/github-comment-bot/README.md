@@ -27,6 +27,15 @@ Build with `pnpm --dir plugins/github-comment-bot build`, or create an archive w
 - choose the installation's model route: a Cognia model (through the gateway, with its per-request PII check and a hard cost ceiling) or the agent's own login;
 - arm the `github` trigger when webhooks reach this host, and the `poll` trigger either way (polling is the fallback and the safety net).
 
+Then run the **Check setup** trigger. It runs every readiness check, including a real checkout through the bound account, and reports stable codes:
+
+- blocking: `repository_missing`, `allowlist_empty`, `trigger_required`, `trigger_conflict`, `no_ingress`, `permission_probe_failed`, `private_clone_unavailable`;
+- warnings: `publication_grant_missing`, `pii_boundary_unverified`, `executor_unavailable`.
+
+Every receive repeats the cheap checks. A blocking problem ends the run as `needs_setup` and shows on the installation. The `execute` and `reply` triggers only run work the Bot queued itself; pressing Run on them does nothing.
+
+User documentation: `docs/content/docs/{en,zh}/plugins/github-comment-bot.mdx`.
+
 ## Safety
 
 - **Who:** an author must be on the allowlist **and** have write access according to GitHub, checked by user id when the command arrives, when the answer starts, and again before anything is published. A refusal is logged locally and never announced.

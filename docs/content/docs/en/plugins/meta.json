@@ -2,6 +2,7 @@
   "title": "Plugins",
   "pages": [
     "desktop-handlers",
+    "github-comment-bot",
     "ocr",
     "plugin-signing",
     "web-clone"

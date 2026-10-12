@@ -15,7 +15,10 @@ jest.mock("@/components/source-control/diff-viewer", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useFormatter: () => ({ relativeTime: () => "5 minutes ago" }),
+  useFormatter: () => ({
+    relativeTime: () => "5 minutes ago",
+    number: (value: number) => `$${value}`,
+  }),
   useNow: () => new Date(),
   useTranslations: (namespace?: string) => (key: string, values?: Record<string, unknown>) => {
     const full = namespace === "agentRuns.status" ? `status.${key}` : key
@@ -271,6 +274,22 @@ describe("RunDetailPane", () => {
     expect(screen.getByText(/pnpm test/)).toBeInTheDocument()
     expect(screen.queryByText("detail.noArtifacts")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "actions.approve" })).not.toBeInTheDocument()
+  })
+
+  it("shows a Bot run's model cost and says how many calls could not be priced", () => {
+    detailState = {
+      ...detailState,
+      botCost: { spentUsd: 0.25, unpricedInvocations: 1, invocations: 3 },
+    }
+    render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    const cost = screen.getByTestId("run-bot-cost")
+    expect(cost).toHaveTextContent('detail.modelCostValue:{"amount":"$0.25","count":3}')
+    expect(cost).toHaveTextContent('detail.modelCostUnpriced:{"count":1}')
+  })
+
+  it("omits the cost row for a run with no cost ledger", () => {
+    render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    expect(screen.queryByTestId("run-bot-cost")).not.toBeInTheDocument()
   })
 
   it("renders scalar Bot results without assuming a patch schema", async () => {

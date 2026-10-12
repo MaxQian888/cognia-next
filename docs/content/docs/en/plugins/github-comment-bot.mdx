@@ -1,0 +1,88 @@
+---
+title: "GitHub Comment Bot"
+description: "Let allowlisted collaborators @-mention Cognia in issue and pull request comments to ask questions or get a read-only review, on a desktop or headless host."
+---
+
+# GitHub Comment Bot
+
+The built-in `github-comment-bot` plugin (`plugins/github-comment-bot/`) is a Bot: an installation of it watches one repository's comments and answers `@`-mention commands from people you allow. It runs on a Cognia **Host**, either the desktop app or a headless host. Paired web and mobile clients configure and approve its work, but never run a second copy.
+
+It adds no infrastructure of its own. GitHub access, webhooks and signed writes come from **GitHub Delivery**. Queueing, leases, approvals and restart recovery come from the Bot control plane ([ADR-0174](../adr/0174-the-bot-control-plane)). Checkouts come from bot-run workspaces, and the answer from the external agent runtime. Parsing and context helpers live in the shared `@cognia/github-bot-kit` package that `github-devin-bot` also uses.
+
+## Commands
+
+Start a line with the trigger mention. Only one command per comment is accepted.
+
+| Command                         | What happens                                                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `@bot ask <question>`           | A read-only agent answers from the repository and the thread.                                                       |
+| `@bot review [focus]`           | A read-only comment review of the pull request, pinned to its exact head commit. It never approves or requests changes. |
+| `@bot status [task]`            | The thread's tasks and their state. No model call.                                                                  |
+| `@bot cancel [task]`            | Cancels the latest (or the named) task in the thread, including a pending publication decision.                     |
+| `@bot help` or the bare mention | Usage.                                                                                                              |
+| `fix`, `retry`                  | Not enabled yet; answered with a fixed reply.                                                                       |
+
+Free text after the mention counts as an `ask`. A mention inside code, a quote, an HTML comment or the middle of a sentence is not a command. Reserved verbs (`merge`, `approve`, `release`, `exec`, `deploy`) are refused.
+
+Editing a command replaces its earlier version. Deleting it cancels its work. A command older than **Command validity** (24 hours by default) gets an "expired" reply instead of an answer. Polling and redelivered webhooks can bring back old comments, and this is what stops them from running.
+
+## Setup
+
+1. Install and enable **GitHub Delivery**, and connect a GitHub account. A **GitHub App** account is recommended: the Bot then answers as `<app>[bot]` and defaults its trigger to `@<app-slug>`.
+2. Install **GitHub Comment Bot** from the Bots page and bind its `github` credential slot to that account.
+3. In the installation's settings:
+   - **Repository**: `owner/repo`. There is no default.
+   - **Allowed authors**: the numeric GitHub user ids that may command the Bot. Nobody can, until at least one is listed.
+   - **Trigger mention**: leave it empty on an App account. A personal-token account must set it, because that account's login belongs to a person.
+   - **Publication mode**: `automatic` (default) or `approval`; see [Publishing](#publishing).
+   - **External agent**, **Answer timeout**, **Command validity**, **Polling interval**.
+4. Choose the installation's **model route** in its Route section. **A Cognia model** sends model traffic through the gateway, which applies a per-request sensitive-data check and makes the cost ceiling a hard limit. **The agent's own login** is an explicit trade-off: only the host's prompt redaction applies, and the cost ceiling is checked only between calls.
+5. Arm the triggers. Arm **GitHub comments** when webhooks reach this host. Arm **Poll comments** in every case: it is the fallback when there is no public webhook, and a five-minute safety net when there is.
+6. Run **Check setup** (the first manual trigger) and read its result.
+
+## Readiness
+
+Every run of the Bot repeats the cheap checks. **Check setup** runs everything, including a real checkout through the bound account. A blocking problem ends the run as **needs setup** and is shown on the installation. A warning keeps the Bot running in a narrower shape.
+
+| Code                        | Kind     | Meaning                                                                                                 |
+| --------------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `repository_missing`        | blocking | No repository is configured.                                                                            |
+| `allowlist_empty`           | blocking | No author may command the Bot.                                                                          |
+| `trigger_required`          | blocking | A personal-token account has no trigger set.                                                            |
+| `trigger_conflict`          | blocking | Another installation on this host already answers the same trigger in the same repository.             |
+| `no_ingress`                | blocking | Neither the webhook trigger nor the poll trigger is armed.                                              |
+| `permission_probe_failed`   | blocking | The bound account cannot read the repository, or its health check failed.                              |
+| `private_clone_unavailable` | blocking | A checkout through the bound account failed.                                                            |
+| `publication_grant_missing` | warning  | Automatic publication has no autopilot grant, so every reply waits for a person.                       |
+| `pii_boundary_unverified`   | warning  | The route is the agent's own login, so model requests skip the gateway's per-request check.             |
+| `executor_unavailable`      | warning  | No model route is chosen yet.                                                                           |
+
+Only one host should answer a repository. The Bot refuses a second installation on the same host. Two separate hosts cannot see each other, so give each repository exactly one host. To move a repository between hosts: disarm the old host's triggers, let its in-flight tasks finish or cancel them, install on the new host, and only then point the webhook at it.
+
+## Publishing
+
+Answers, replies, tracking comments and reviews are written through GitHub Delivery's brokered actions. The exact content is approved first:
+
+- **automatic**: the host's policy decides. A Bot policy with an autopilot grant and no required write approval publishes without asking; otherwise the run waits for a person.
+- **approval**: a person approves every reply. Pending approvals reach paired clients the same way every Bot approval does.
+
+Every comment the Bot writes carries an invisible marker. The Bot never answers itself, and a write retried after a lost response finds its earlier copy instead of posting twice.
+
+## Safety
+
+- **Who**: an author must be on the allowlist **and** have write access according to GitHub. Both are checked by user id when the command arrives, when the answer starts, and again before publishing. A refusal is logged locally and never announced in the thread.
+- **What runs**: the agent works in an isolated, disposable checkout at the exact revision. When it finishes, the checkout is diffed; any change blocks publication (`readonly_violation`).
+- **What is sent**: context is bounded (2 MiB read, 256 KiB / 24k tokens selected) and stripped of control sequences. The host redacts it before any agent sees it.
+- **What it costs**: each installation's `maxConcurrentRuns` and `maxRunCostUsd` are enforced at runtime. A run's model spend is shown on its detail page; calls with no known price are counted separately, never as zero.
+
+## Following a task
+
+Each command is a Bot run. It appears in the installation's Runs section and on `/agent-runs`, where the detail shows:
+
+- the source comment and task reference;
+- the commit it answered;
+- what context was left out;
+- the outcome and the published URL;
+- the model cost.
+
+In the thread, `@bot status` lists the same tasks.

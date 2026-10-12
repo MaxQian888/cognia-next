@@ -100,6 +100,17 @@ it("routes execute and reply runs, and stops when cancelled", async () => {
   await expect(handleCommandRun(c.context, c.run, c.now)).rejects.toThrow()
 })
 
+it("answers a hand-started execute or reply run without touching GitHub", async () => {
+  for (const triggerId of ["execute", "reply"]) {
+    const f = fixture({ triggerId, selfProduced: false })
+    await expect(handleCommandRun(f.context, f.run, f.now)).resolves.toMatchObject({
+      output: { status: "not_queued", triggerId },
+    })
+    expect(f.writes()).toEqual([])
+    expect(f.mocks.agent).not.toHaveBeenCalled()
+  }
+})
+
 it("checks setup end to end and records blocking problems in the monitor", async () => {
   const ready = fixture({ triggerId: "check" })
   await expect(handleCommandRun(ready.context, ready.run, ready.now)).resolves.toMatchObject({

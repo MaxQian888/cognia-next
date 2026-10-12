@@ -159,11 +159,18 @@ describe("useExecutionRunDetail", () => {
       events: [],
       interrupts: [approval],
       botResult: { status: "completed", output: { review: "review" } },
+      botCost: { spentUsd: 0.5, unpricedInvocations: 0, invocations: 2 },
     })
     const { result } = renderHook(() => useExecutionRunDetail("run-1"))
     await waitFor(() => expect(result.current.interrupts).toEqual([approval]))
     expect(mockRead).toHaveBeenCalledWith("execution_run_detail", { runId: "run-1" })
     expect(result.current.botResult).toEqual({ status: "completed", output: { review: "review" } })
+    // The host's cost ledger reaches a paired device the same way.
+    expect(result.current.botCost).toEqual({
+      spentUsd: 0.5,
+      unpricedInvocations: 0,
+      invocations: 2,
+    })
     expect(result.current.journalAvailable).toBe(true)
   })
 

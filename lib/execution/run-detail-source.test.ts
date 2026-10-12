@@ -2,6 +2,7 @@
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { completeBotRunStep } from "@/lib/db/bot-run-steps"
+import { recordBotInvocationCost } from "@/lib/bot/runtime/run-cost"
 import { readExecutionRunDetailSources } from "./run-detail-source"
 
 beforeEach(async () => {
@@ -82,4 +83,34 @@ it("returns no unrelated records for a missing run and rejects malformed IDs", a
     interrupts: [],
   })
   await expect(readExecutionRunDetailSources("")).rejects.toThrow("runId")
+})
+it("summarizes a Bot run's model spend from its cost ledger, and omits it when nothing was called", async () => {
+  await getDb().executionRuns.put({
+    id: "bot",
+    kind: "bot",
+    sourceId: "install",
+    title: "Bot",
+    status: "running",
+    currentRevision: 0,
+    startedAt: 1,
+    updatedAt: 1,
+  })
+  expect((await readExecutionRunDetailSources("bot")).botCost).toBeUndefined()
+  await recordBotInvocationCost("bot", "answer", {
+    costUsd: 0.25,
+    source: "pricing",
+    inputTokens: 1000,
+    outputTokens: 200,
+  })
+  await recordBotInvocationCost("bot", "review", {
+    costUsd: null,
+    source: "unknown",
+    inputTokens: 10,
+    outputTokens: 2,
+  })
+  expect((await readExecutionRunDetailSources("bot")).botCost).toEqual({
+    spentUsd: 0.25,
+    unpricedInvocations: 1,
+    invocations: 2,
+  })
 })

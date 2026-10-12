@@ -49,6 +49,10 @@ it("answers a question: tracking comment, read-only agent run, exact approval, t
       status: "completed",
       answerUrl: expect.stringMatching(/^https:\/\/github\.com\//),
       complete: true,
+      // What the run detail shows: the command, the commit and the context budget.
+      source: { repository: REPOSITORY, kind: "issue_comment", id: "11" },
+      commitSha: "c".repeat(40),
+      context: { omitted: {}, truncatedItems: 0, bytes: expect.any(Number) },
     },
   })
   expect(actions(f)).toEqual(["commentIssue", "updateComment", "commentIssue", "updateComment"])

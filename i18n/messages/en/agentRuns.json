@@ -83,7 +83,10 @@
     "sensitive": "Sensitive",
     "started": "Started",
     "status": "Status",
-    "waitingReason": "Waiting on"
+    "waitingReason": "Waiting on",
+    "modelCost": "Model cost",
+    "modelCostValue": "{amount} over {count, plural, one {# model call} other {# model calls}}",
+    "modelCostUnpriced": "{count, plural, one {# call has} other {# calls have}} no known price and {count, plural, one {is} other {are}} not counted"
   },
   "empty": "No runs yet.",
   "emptyFiltered": "No runs match these filters.",

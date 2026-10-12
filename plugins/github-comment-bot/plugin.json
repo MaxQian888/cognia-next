@@ -183,17 +183,17 @@
           "concurrencyKey": "github-cmd-receive"
         },
         {
+          "id": "check",
+          "kind": "manual",
+          "label": "Check setup",
+          "concurrencyKey": "github-cmd-check"
+        },
+        {
           "id": "execute",
           "kind": "manual",
           "label": "Answer a queued command",
           "concurrencyKey": "github-cmd:{{resource.scope}}",
           "holdConcurrencyWhileWaiting": false
-        },
-        {
-          "id": "check",
-          "kind": "manual",
-          "label": "Check setup",
-          "concurrencyKey": "github-cmd-check"
         },
         {
           "id": "reply",

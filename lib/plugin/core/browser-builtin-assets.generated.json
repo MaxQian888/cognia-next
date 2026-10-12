@@ -9006,17 +9006,17 @@
                 "concurrencyKey": "github-cmd-receive"
               },
               {
+                "id": "check",
+                "kind": "manual",
+                "label": "Check setup",
+                "concurrencyKey": "github-cmd-check"
+              },
+              {
                 "id": "execute",
                 "kind": "manual",
                 "label": "Answer a queued command",
                 "concurrencyKey": "github-cmd:{{resource.scope}}",
                 "holdConcurrencyWhileWaiting": false
-              },
-              {
-                "id": "check",
-                "kind": "manual",
-                "label": "Check setup",
-                "concurrencyKey": "github-cmd-check"
               },
               {
                 "id": "reply",
@@ -9131,14 +9131,14 @@
       "path": "builtin://github-comment-bot",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/github-comment-bot/4f7e3de7e9f1c56406e5cc34adddc6533b09711444d0d5fd2196e91441da0d33.cjs",
-        "sha256": "4f7e3de7e9f1c56406e5cc34adddc6533b09711444d0d5fd2196e91441da0d33",
+        "url": "/_cognia/builtin-plugins/github-comment-bot/c81f95e574d6d0ed282a06b8c13a82b9462c7111a39b93849213c68e6686417d.cjs",
+        "sha256": "c81f95e574d6d0ed282a06b8c13a82b9462c7111a39b93849213c68e6686417d",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/github-comment-bot/resources/",
         "entryHashes": {
-          "dist/index.js": "4f7e3de7e9f1c56406e5cc34adddc6533b09711444d0d5fd2196e91441da0d33"
+          "dist/index.js": "c81f95e574d6d0ed282a06b8c13a82b9462c7111a39b93849213c68e6686417d"
         }
       }
     },

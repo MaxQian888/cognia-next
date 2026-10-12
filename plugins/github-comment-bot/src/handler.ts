@@ -140,6 +140,22 @@ export async function checkSetup(
   }
 }
 
+/**
+ * `execute` and `reply` carry work the Bot queued for itself (the host marks
+ * that provenance; a plugin cannot). A person pressing Run on either has
+ * nothing to answer, so the run says so instead of failing on an empty payload.
+ */
+function handStarted(triggerId: string) {
+  return {
+    summary: "Nothing queued: this trigger only runs work the Bot queued from a comment",
+    output: {
+      status: "not_queued",
+      triggerId,
+      hint: "Run Check setup to test this installation.",
+    },
+  }
+}
+
 export async function handleCommandRun(
   ctx: PluginContext,
   run: BotRunContextV1,
@@ -150,8 +166,10 @@ export async function handleCommandRun(
     const config = parseConfig(run.config)
     switch (run.event.triggerId) {
       case "execute":
+        if (!run.event.provenance.selfProduced) return handStarted(run.event.triggerId)
         return await executeCommand(ctx, run, config, now)
       case "reply":
+        if (!run.event.provenance.selfProduced) return handStarted(run.event.triggerId)
         return await replyToCommand(ctx, run, config, now)
       case "check":
         return await checkSetup(ctx, run, config, now)

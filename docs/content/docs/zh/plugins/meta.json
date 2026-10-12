@@ -2,6 +2,7 @@
   "title": "插件",
   "pages": [
     "desktop-handlers",
+    "github-comment-bot",
     "ocr",
     "plugin-signing",
     "web-clone"
