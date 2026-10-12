@@ -111,6 +111,8 @@ COPY packages/plugin-sdk/contract ./packages/plugin-sdk/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
 COPY protocol ./protocol
 COPY scripts/plugin/node-plugin-host.mjs ./scripts/plugin/node-plugin-host.mjs
+# cognia-github-runner embeds the runner definition it installs.
+COPY deploy/github-runner/cognia-runner.yml deploy/github-runner/bootstrap.mjs deploy/github-runner/package.json deploy/github-runner/package-lock.json deploy/github-runner/action.yml ./deploy/github-runner/
 # container-exec + k8s-exec (R13): the headless image ships both flavors of
 # the container backend, so COGNIA_EXEC_BACKEND=container works at T2
 # (Docker socket proxy) and =kubernetes at T3 (runner Pods, in-cluster).
@@ -153,6 +155,8 @@ COPY packages/plugin-sdk/contract ./packages/plugin-sdk/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
 COPY protocol ./protocol
 COPY scripts/plugin/node-plugin-host.mjs ./scripts/plugin/node-plugin-host.mjs
+# cognia-github-runner embeds the runner definition it installs.
+COPY deploy/github-runner/cognia-runner.yml deploy/github-runner/bootstrap.mjs deploy/github-runner/package.json deploy/github-runner/package-lock.json deploy/github-runner/action.yml ./deploy/github-runner/
 RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec,otel-export
 RUN cargo check --release --locked -p cognia-cli --bin cognia
 
