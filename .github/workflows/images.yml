@@ -378,16 +378,17 @@ jobs:
           push: false
           cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
 
+  # Both variants in ONE job. They share every Rust and brain stage (slim is
+  # full minus the agent CLIs), and BuildKit builds a shared stage once per
+  # builder: full first, then slim reuses all of it from the local cache. Two
+  # matrix jobs compiled the whole Rust graph twice on two runners and raced
+  # on the one registry cache ref.
   cognia-server-image:
-    name: cognia-server (${{ matrix.variant }})
+    name: cognia-server (full + slim)
     needs: vars
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [slim, full]
     steps:
       - uses: actions/checkout@v7
 
@@ -399,50 +400,85 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: meta
+      - id: meta-full
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server
           flavor: |
-            suffix=-${{ matrix.variant }},onlatest=true
+            suffix=-full,onlatest=true
           tags: |
             type=semver,pattern={{version}}
             type=sha
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-      - id: build
+      - id: meta-slim
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server
+          flavor: |
+            suffix=-slim,onlatest=true
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Full is the superset, so its mode=max export holds every stage slim
+      # needs too; slim exports nothing, or it would overwrite the ref with a
+      # subset. `ignore-error` keeps a registry hiccup from failing a good build.
+      - id: build-full
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.cognia-server
-          target: runtime-${{ matrix.variant }}
+          target: runtime-full
           push: ${{ needs.vars.outputs.should_push == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-full.outputs.tags }}
+          labels: ${{ steps.meta-full.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache,mode=max
+          cache-to: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache,mode=max,ignore-error=true
+
+      - id: build-slim
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.cognia-server
+          target: runtime-slim
+          push: ${{ needs.vars.outputs.should_push == 'true' }}
+          tags: ${{ steps.meta-slim.outputs.tags }}
+          labels: ${{ steps.meta-slim.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
 
       # ADR-0224 A10: a Compose host updates by digest, never by tag. The
       # offline catalog signer needs the exact digest this run pushed
       # (`pnpm update:catalog host-entries --target oci-amd64 --digest …`).
-      - name: Record the pushed digest
+      - name: Record the pushed digests
         if: needs.vars.outputs.should_push == 'true'
         env:
           IMAGE: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server
-          DIGEST: ${{ steps.build.outputs.digest }}
-          VARIANT: ${{ matrix.variant }}
+          FULL_DIGEST: ${{ steps.build-full.outputs.digest }}
+          SLIM_DIGEST: ${{ steps.build-slim.outputs.digest }}
         run: |
-          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::build-push-action reported no digest for $VARIANT"
-            exit 1
-          fi
           mkdir -p "$RUNNER_TEMP/cognia-server-digest"
-          printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/cognia-server-digest/$VARIANT.txt"
-          echo "cognia-server ($VARIANT, amd64): \`$IMAGE@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+          for variant in full slim; do
+            if [ "$variant" = full ]; then digest="$FULL_DIGEST"; else digest="$SLIM_DIGEST"; fi
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::build-push-action reported no digest for $variant"
+              exit 1
+            fi
+            printf '%s\n' "$digest" > "$RUNNER_TEMP/cognia-server-digest/$variant.txt"
+            echo "cognia-server ($variant, amd64): \`$IMAGE@$digest\`" >> "$GITHUB_STEP_SUMMARY"
+          done
 
-      - name: Upload the pushed digest
+      - name: Upload the full digest
         if: needs.vars.outputs.should_push == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: cognia-server-digest-${{ matrix.variant }}
-          path: ${{ runner.temp }}/cognia-server-digest/${{ matrix.variant }}.txt
+          name: cognia-server-digest-full
+          path: ${{ runner.temp }}/cognia-server-digest/full.txt
+
+      - name: Upload the slim digest
+        if: needs.vars.outputs.should_push == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: cognia-server-digest-slim
+          path: ${{ runner.temp }}/cognia-server-digest/slim.txt

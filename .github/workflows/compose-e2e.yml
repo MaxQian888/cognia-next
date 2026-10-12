@@ -207,13 +207,17 @@ jobs:
           docker build -t cognia-signaling:ci services/signaling-server
           docker build -t cognia-share:ci services/share-server
 
+      # Reads the cache images.yml exports (public, so no login), which holds
+      # every stage of the full image: an unchanged Cargo.lock skips the
+      # dependency compile, the bulk of a cold build.
       - name: Build cognia-server (runtime-full, registry cache)
-        working-directory: deploy/compose
-        env:
-          SIGNALING_IMAGE: cognia-signaling:ci
-          SHARE_IMAGE: cognia-share:ci
-          COGNIA_SERVER_IMAGE: cognia-server:ci-full
-        run: docker compose --profile server build cognia-server
+        run: |
+          # GHCR paths are lowercase; the owner name is not.
+          docker buildx build --load \
+            --file Dockerfile.cognia-server --target runtime-full \
+            --tag cognia-server:ci-full \
+            --cache-from "type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cognia-server:buildcache" \
+            .
 
       - name: Build same-origin Web/Caddy image
         working-directory: deploy/compose
