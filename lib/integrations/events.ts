@@ -3,12 +3,24 @@ import type {
   IntegrationInboxProjectionDef,
   IntegrationSubscription,
 } from "@/types/plugin/plugin-integration"
+import { createDiagnostic } from "@cognia/diagnostics"
 import {
   appendIntegrationAudit,
+  claimIntegrationEventProjection,
   getIntegrationAccount,
   insertIntegrationEvent,
+  listDueIntegrationEventProjections,
   listIntegrationSubscriptions,
+  recordIntegrationEventProjection,
 } from "@/lib/db/integrations"
+import {
+  INTEGRATION_PROJECTION_STEPS,
+  type IntegrationEventProjectionV1,
+  type IntegrationEventRow,
+  type IntegrationProjectionStep,
+  type IntegrationProjectionStepState,
+} from "@/lib/db/integration-types"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 import { getDb } from "@/lib/db/schema"
 import { createSession, updateSession } from "@/lib/db/sessions"
 import { listMessages, persistMessages } from "@/lib/db/messages"
@@ -22,13 +34,15 @@ export interface PublishIntegrationEventResult {
   inserted: boolean
   workflowDispatches: number
   inboxProjections: number
-  /**
-   * Bot deliveries enqueued for this event. Zero when no Bot matched, and also
-   * zero when the Bot plane could not be reached at all, which is deliberate:
-   * routing a Bot is best-effort and must never fail the publish that the
-   * workflow triggers and inbox projections depend on.
-   */
+  /** Bot deliveries enqueued for this event by this pass. */
   botDeliveries: number
+  /**
+   * True when the event was already stored but had unfinished projections,
+   * and this call (a redelivery) finished some of them.
+   */
+  resumed?: boolean
+  /** Projection steps still unfinished after this pass; recovery retries them. */
+  pendingSteps?: IntegrationProjectionStep[]
 }
 
 function subscriptionMatches(
@@ -147,97 +161,268 @@ export async function publishIntegrationEvent(
   if (!account || account.integrationId !== event.integrationId) {
     throw new Error(`Integration account "${event.accountId}" does not belong to this integration`)
   }
-  const inserted = await insertIntegrationEvent(event)
-  if (!inserted.inserted) {
+  const stored = await insertIntegrationEvent(event)
+  if (stored.inserted) {
+    return { inserted: true, ...(await projectStoredEvent(stored.row, { retry: false })) }
+  }
+  // A redelivery of an event whose projections never finished (the process
+  // died, or a consumer threw) resumes them instead of being dropped as a
+  // duplicate. A finished, deadlettered or legacy row is a plain duplicate.
+  const claimed = await claimIntegrationEventProjection(stored.row.id)
+  if (!claimed) {
     return { inserted: false, workflowDispatches: 0, inboxProjections: 0, botDeliveries: 0 }
   }
+  return {
+    inserted: false,
+    resumed: true,
+    ...(await projectStoredEvent(claimed, { retry: true })),
+  }
+}
 
-  await reconcileGithubLifecycle(event)
+type ProjectionCounts = Omit<PublishIntegrationEventResult, "inserted" | "resumed">
 
+function projectionErrorCode(error: unknown): string {
+  if (error instanceof Error && error.name && error.name !== "Error") return error.name
+  return "projection_failed"
+}
+
+function reportProjectionFailure(
+  row: IntegrationEventRow,
+  step: IntegrationProjectionStep,
+  error: unknown
+): void {
+  dispatchDiagnostic(
+    createDiagnostic("serverError", {
+      source: "connector",
+      message: error instanceof Error ? error.message : String(error),
+      meta: {
+        extra: {
+          stage: "integration-event-projection",
+          step,
+          pluginId: row.pluginId,
+          integrationId: row.integrationId,
+          eventId: row.id,
+          eventType: row.eventType,
+        },
+      },
+    }),
+    { kind: "background" }
+  )
+}
+
+/**
+ * Run every unfinished projection of a claimed, stored event and record the
+ * outcome on the row. Each step runs in its own try: one consumer failing
+ * neither stops the others nor is forgotten. Every step is idempotent per
+ * event, so re-running one that may have half-completed is safe.
+ */
+async function projectStoredEvent(
+  row: IntegrationEventRow,
+  options: { retry: boolean }
+): Promise<ProjectionCounts> {
+  const event = publicEnvelope(row)
+  const pluginId = row.pluginId
+  const steps: IntegrationEventProjectionV1["steps"] = {
+    ...(row.projection?.steps ?? allPendingSteps()),
+  }
+  let workflowDispatches = 0
+  let inboxProjections = 0
+  let botDeliveries = 0
+
+  /** A body returns its own state only when it finished but is still owed work. */
+  async function run(
+    step: IntegrationProjectionStep,
+    body: () => Promise<IntegrationProjectionStepState | void>
+  ): Promise<void> {
+    if (steps[step].status === "complete") return
+    try {
+      steps[step] = (await body()) ?? { status: "complete" }
+    } catch (error) {
+      steps[step] = { ...steps[step], status: "pending", errorCode: projectionErrorCode(error) }
+      reportProjectionFailure(row, step, error)
+    }
+  }
+
+  await run("lifecycle", () => reconcileGithubLifecycle(event))
+
+  const registered = getRegisteredIntegration(pluginId, event.integrationId)
   const subscriptions = (await listIntegrationSubscriptions(pluginId, event.accountId)).filter(
     (subscription) => subscriptionMatches(subscription, event)
   )
-  const subscriptionIds = subscriptions.map((subscription) => subscription.id).sort()
-  const payload = {
-    ...event,
-    subscriptionId: subscriptionIds[0],
-    subscriptionIds,
-  }
-  const matches = findMatchingWorkflows("trigger.integration.event", {
-    pluginId,
-    integrationId: event.integrationId,
-    accountId: event.accountId,
-    eventType: event.eventType,
-    resourceKind: event.resource?.kind,
-    resourceId: event.resource?.id,
-  })
-  // Keyed on the delivery, the same identity the event row is deduplicated on
-  // above, so a redelivered event never starts a second run and two events in
-  // the same second never share one (ADR-0224 A9).
-  const occurrenceKey = `${pluginId}:${event.integrationId}:${event.accountId}:${event.deliveryId}`
-  await Promise.all(
-    matches.map(async (match) => {
-      await dispatchTrigger({
-        workflowId: match.workflowId,
-        kind: "trigger.integration.event",
-        triggerId: match.nodeId,
-        payload,
-        originAt: Date.now(),
-        occurrenceKey,
-      })
+
+  await run("workflow", async () => {
+    const subscriptionIds = subscriptions.map((subscription) => subscription.id).sort()
+    const payload = {
+      ...event,
+      subscriptionId: subscriptionIds[0],
+      subscriptionIds,
+    }
+    const matches = findMatchingWorkflows("trigger.integration.event", {
+      pluginId,
+      integrationId: event.integrationId,
+      accountId: event.accountId,
+      eventType: event.eventType,
+      resourceKind: event.resource?.kind,
+      resourceId: event.resource?.id,
     })
-  )
-  const workflowDispatches = matches.length
+    // Keyed on the delivery, the same identity the event row is deduplicated
+    // on, so a redelivered or recovered event never starts a second run and
+    // two events in the same second never share one (ADR-0224 A9).
+    const occurrenceKey = `${pluginId}:${event.integrationId}:${event.accountId}:${event.deliveryId}`
+    await Promise.all(
+      matches.map(async (match) => {
+        await dispatchTrigger({
+          workflowId: match.workflowId,
+          kind: "trigger.integration.event",
+          triggerId: match.nodeId,
+          payload,
+          originAt: Date.now(),
+          occurrenceKey,
+        })
+      })
+    )
+    workflowDispatches = matches.length
+  })
 
-  // Bots are a third consumer alongside workflow triggers and inbox
-  // projections, and the weakest of the three: best-effort, because a Bot that
-  // cannot be routed must not take the other two down with it.
-  let botDeliveries = 0
-  try {
+  await run("bots", async () => {
     const { dispatchIntegrationEventToBots } = await import("@/lib/bot/sources/integration-event")
-    botDeliveries = (await dispatchIntegrationEventToBots(event)).enqueued.length
-  } catch {
-    botDeliveries = 0
-  }
+    const previous = steps.bots.retryInstallationIds
+    const result = await dispatchIntegrationEventToBots(event, {
+      ...(previous ? { installationIds: previous } : {}),
+      ...(options.retry ? { installedBefore: epochMs(event.receivedAt) } : {}),
+    })
+    botDeliveries = result.enqueued.length
+    // An installation whose plugin has not registered its definition or
+    // handler yet is owed this event; it is not a zero-match success.
+    if (result.retryable.length > 0) {
+      return {
+        status: "pending",
+        errorCode: "bot_not_ready",
+        retryInstallationIds: result.retryable,
+      }
+    }
+  })
 
-  // The issue board is the fourth consumer, also best-effort: a GitHub issue
-  // event schedules a refresh of that repository's mirror / import bindings,
-  // so a webhook shows up on the board without waiting for the 15-minute poll.
-  try {
+  await run("issues", async () => {
+    // The issue board: a GitHub issue event schedules a refresh of that
+    // repository's mirror / import bindings, so a webhook shows up on the
+    // board without waiting for the 15-minute poll.
     const { GithubEventIssueRefresher, getGithubEventIssueRefresher } =
       await import("@/lib/issues/github-event-refresh")
     if (GithubEventIssueRefresher.relevant(event)) {
       await getGithubEventIssueRefresher().handle(event)
     }
-  } catch {
-    // Never fail the event for workflows and the inbox over a board refresh.
-  }
+  })
 
-  let inboxProjections = 0
-  for (const subscription of subscriptions) {
-    if (subscription.inboxProjectionId) {
-      const projection = registered.definition.inboxProjections?.find(
+  await run("inbox", async () => {
+    for (const subscription of subscriptions) {
+      if (!subscription.inboxProjectionId) continue
+      const projection = registered?.definition.inboxProjections?.find(
         (candidate) => candidate.id === subscription.inboxProjectionId
       )
       if (projection && (await projectEventToInbox(event, subscription, projection))) {
         inboxProjections += 1
       }
     }
-  }
+  })
+
+  const recorded = await recordIntegrationEventProjection(row.id, steps)
+  const pendingSteps = INTEGRATION_PROJECTION_STEPS.filter(
+    (step) => steps[step].status !== "complete"
+  )
 
   await appendIntegrationAudit({
     pluginId,
     integrationId: event.integrationId,
     accountId: event.accountId,
     kind: `event.${event.eventType}`,
-    outcome: "succeeded",
+    outcome: pendingSteps.length === 0 ? "succeeded" : "failed",
     detail: {
       eventId: event.id,
       deliveryId: event.deliveryId,
       workflowDispatches,
       inboxProjections,
       botDeliveries,
+      ...(pendingSteps.length > 0
+        ? {
+            pendingSteps,
+            projectionState: recorded?.projectionState,
+            errorCodes: Object.fromEntries(
+              pendingSteps.map((step) => [step, steps[step].errorCode ?? "pending"])
+            ),
+          }
+        : {}),
+      ...(options.retry ? { retry: true } : {}),
     },
   })
-  return { inserted: true, workflowDispatches, inboxProjections, botDeliveries }
+  return {
+    workflowDispatches,
+    inboxProjections,
+    botDeliveries,
+    ...(pendingSteps.length > 0 ? { pendingSteps } : {}),
+  }
+}
+
+/** The envelope without host-local projection bookkeeping. */
+function publicEnvelope(row: IntegrationEventRow): IntegrationEventEnvelope {
+  const {
+    projection: _projection,
+    projectionState: _state,
+    projectionDueAt: _due,
+    projectionAttempts: _attempts,
+    ...envelope
+  } = row
+  return envelope
+}
+
+function epochMs(value: string): number {
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : Date.now()
+}
+
+let recovering: Promise<number> | undefined
+
+/**
+ * Re-run the unfinished projections of every due event (startup and a
+ * periodic sweep). A pass already in flight is joined, not doubled; the
+ * per-event claim keeps two hosts sharing a database from projecting the
+ * same event at once.
+ */
+export function recoverIntegrationEventProjections(
+  options: { now?: number; limit?: number } = {}
+): Promise<number> {
+  recovering ??= (async () => {
+    try {
+      const now = options.now ?? Date.now()
+      const due = await listDueIntegrationEventProjections(now, options.limit ?? 100)
+      let projected = 0
+      for (const candidate of due) {
+        const claimed = await claimIntegrationEventProjection(candidate.id, now)
+        if (!claimed) continue
+        const registered = getRegisteredIntegration(claimed.pluginId, claimed.integrationId)
+        if (!registered) {
+          // The provider plugin is not loaded (yet). Charge the attempt so a
+          // plugin that never comes back ends in the deadletter, not a loop.
+          await recordIntegrationEventProjection(
+            claimed.id,
+            claimed.projection?.steps ?? allPendingSteps(),
+            now
+          )
+          continue
+        }
+        await projectStoredEvent(claimed, { retry: true })
+        projected += 1
+      }
+      return projected
+    } finally {
+      recovering = undefined
+    }
+  })()
+  return recovering
+}
+
+function allPendingSteps(): IntegrationEventProjectionV1["steps"] {
+  return Object.fromEntries(
+    INTEGRATION_PROJECTION_STEPS.map((step) => [step, { status: "pending" }])
+  ) as IntegrationEventProjectionV1["steps"]
 }

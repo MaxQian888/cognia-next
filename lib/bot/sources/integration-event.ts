@@ -7,9 +7,11 @@
  * projects that record onto the source-neutral envelope and hands it to the
  * router.
  *
- * Deliberately best-effort. An integration event has other consumers (workflow
- * triggers, inbox projections) and a Bot that cannot be routed must not take
- * them down with it.
+ * One projection step among several. `publishIntegrationEvent` runs it in its
+ * own try and records whether it finished, so a Bot that cannot be routed
+ * neither takes the other consumers down nor is silently dropped: the event
+ * row stays pending and recovery re-runs this step (enqueueing is deduplicated
+ * per installation and event).
  */
 
 import { buildBotEventEnvelope } from "@/lib/bot/events/envelope"
@@ -30,8 +32,21 @@ function epochMs(value: string, fallback: number): number {
  * two teams sharing a Cognia install and two teams reading each other's pull
  * requests.
  */
+export interface DispatchIntegrationEventToBotsOptions {
+  /** Re-route to these installations only (a retry of the unready ones). */
+  installationIds?: readonly string[]
+  /**
+   * A retry passes the epoch-ms instant the event was first projected, so an
+   * old event never reaches an installation created in between. The first
+   * pass omits it: the installations present then are, by definition, the
+   * ones that existed when it arrived.
+   */
+  installedBefore?: number
+}
+
 export async function dispatchIntegrationEventToBots(
-  event: IntegrationEventEnvelope
+  event: IntegrationEventEnvelope,
+  options: DispatchIntegrationEventToBotsOptions = {}
 ): Promise<DispatchBotEventResult> {
   const now = Date.now()
   const envelope = buildBotEventEnvelope({
@@ -82,6 +97,8 @@ export async function dispatchIntegrationEventToBots(
       type: event.eventType,
       integrationAccountId: event.accountId,
     },
+    ...(options.installationIds ? { installationIds: options.installationIds } : {}),
+    ...(options.installedBefore !== undefined ? { installedBefore: options.installedBefore } : {}),
     now,
   })
 }

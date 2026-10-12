@@ -207,13 +207,15 @@ export async function getIntegrationIngressDeadletter(
   )
 }
 
+/** Backstop for a missed wake: a nacked delivery waiting in `retry_wait`, or a
+ * wake raised while the webview was reloading. */
+export const INGRESS_DRAIN_INTERVAL_MS = 30_000
+
 /**
  * Install the ingress runtime: the wake subscription first, then the catch-up
- * pass.
+ * pass, then a periodic drain.
  *
- * Order and error handling are both load-bearing, because `integration:
- * delivery-available` is the *only* thing that drains the spool — there is no
- * polling timer to paper over a missed wake:
+ * Order and error handling are both load-bearing:
  *
  *  - Subscribing after the initial drain left a window where an accepted
  *    delivery raised its wake signal into a subscription that did not exist
@@ -226,32 +228,34 @@ export async function getIntegrationIngressDeadletter(
  *    `startIntegrationRuntime` caught it into a no-op dispose — leaving
  *    Integration ingress dead for the life of the process on the one host that
  *    has no UI to notice.
+ *  - The wake alone is not enough: a nacked delivery sits in the spool's
+ *    `retry_wait` with nothing to wake it once its backoff passes, so a
+ *    periodic drain picks it up.
  *
  * The catch-up failure is still reported; it just no longer decides whether
- * ingress runs at all. A live subscription drains the whole backlog on the
- * next delivery.
+ * ingress runs at all.
  */
 export async function installIntegrationIngressRuntime(): Promise<() => void> {
   if (!supportsIntegrationExecution()) return () => undefined
-  const unsubscribe = transport.subscribe("integration:delivery-available", () => {
+  const drain = (deliveryId: string) => {
     void drainIntegrationIngress().catch((error) =>
-      reportIngressFailure(
-        {
-          routeId: "runtime",
-          deliveryId: "subscription",
-        },
-        "route",
-        error
-      )
+      reportIngressFailure({ routeId: "runtime", deliveryId }, "route", error)
     )
-  })
+  }
+  const unsubscribe = transport.subscribe("integration:delivery-available", () =>
+    drain("subscription")
+  )
   try {
     await syncIntegrationIngressRoutes()
     await drainIntegrationIngress()
   } catch (error) {
     reportIngressFailure({ routeId: "runtime", deliveryId: "startup" }, "startup", error)
   }
-  return unsubscribe
+  const timer = globalThis.setInterval(() => drain("interval"), INGRESS_DRAIN_INTERVAL_MS)
+  return () => {
+    globalThis.clearInterval(timer)
+    unsubscribe()
+  }
 }
 
 export async function deleteIntegrationSubscription(

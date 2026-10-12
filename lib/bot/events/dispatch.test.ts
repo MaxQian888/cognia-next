@@ -150,7 +150,36 @@ describe("dispatchBotEvent", () => {
 
     const result = await dispatchBotEvent({ envelope: envelope(), query: QUERY, now: NOW })
     expect(result.unresolved).toEqual([installation.id])
+    // Its plugin may still register (a cold start): the caller retries it.
+    expect(result.retryable).toEqual([installation.id])
     expect(result.enqueued).toEqual([])
+  })
+
+  it("routes a retry only to the named installations", async () => {
+    const first = await install("a", def({ id: "a" }))
+    const second = await install("b", def({ id: "b" }))
+
+    const result = await dispatchBotEvent({
+      envelope: envelope(),
+      query: QUERY,
+      installationIds: [second.id],
+      now: NOW,
+    })
+    expect(result.enqueued.map((row) => row.installationId)).toEqual([second.id])
+    expect(result.unresolved).not.toContain(first.id)
+  })
+
+  it("skips installations created after the event when the caller bounds it", async () => {
+    await install("a", def({ id: "a" }), { now: NOW + 1 })
+
+    const result = await dispatchBotEvent({
+      envelope: envelope(),
+      query: QUERY,
+      installedBefore: NOW,
+      now: NOW,
+    })
+    expect(result.enqueued).toEqual([])
+    expect(result.unresolved).toEqual([])
   })
 
   it("reports a loop-guard refusal", async () => {

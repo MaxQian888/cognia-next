@@ -8,6 +8,7 @@ const installIntegrationIngressRuntime = jest.fn()
 const disposeGithubAuth = jest.fn()
 const registerGithubIntegrationAuthProviders: jest.Mock = jest.fn(() => disposeGithubAuth)
 const reconcileGithubAppDeliveries = jest.fn()
+const recoverIntegrationEventProjections = jest.fn()
 
 jest.mock("./action-runner", () => ({
   drainIntegrationActionJobs: (...args: unknown[]) => drainIntegrationActionJobs(...args),
@@ -26,6 +27,10 @@ jest.mock("./github-auth", () => ({
 jest.mock("./github-delivery-recovery", () => ({
   reconcileGithubAppDeliveries: (...args: unknown[]) => reconcileGithubAppDeliveries(...args),
 }))
+jest.mock("./events", () => ({
+  recoverIntegrationEventProjections: (...args: unknown[]) =>
+    recoverIntegrationEventProjections(...args),
+}))
 jest.mock("@/lib/diagnostics/bus", () => ({
   dispatchDiagnostic: jest.fn(),
 }))
@@ -40,6 +45,7 @@ describe("Integration runtime", () => {
     registerGithubIntegrationAuthProviders.mockClear()
     reconcileGithubAppDeliveries.mockReset().mockResolvedValue(undefined)
     installIntegrationIngressRuntime.mockReset().mockResolvedValue(disposeIngress)
+    recoverIntegrationEventProjections.mockReset().mockResolvedValue(0)
     jest.mocked(dispatchDiagnostic).mockReset()
   })
 
@@ -66,6 +72,30 @@ describe("Integration runtime", () => {
     expect(pruneIntegrationRetention).toHaveBeenCalledTimes(1)
     expect(disposeIngress).toHaveBeenCalledTimes(1)
     expect(disposeGithubAuth).toHaveBeenCalledTimes(1)
+  })
+
+  it("recovers unfinished event projections at startup and on every sweep", async () => {
+    const dispose = await startIntegrationRuntime()
+    expect(recoverIntegrationEventProjections).toHaveBeenCalledTimes(1)
+    // After ingress, so the owning plugins have registered first.
+    expect(installIntegrationIngressRuntime.mock.invocationCallOrder[0]).toBeLessThan(
+      recoverIntegrationEventProjections.mock.invocationCallOrder[0]
+    )
+
+    recoverIntegrationEventProjections.mockRejectedValueOnce(new Error("db closed"))
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(recoverIntegrationEventProjections).toHaveBeenCalledTimes(2)
+    expect(dispatchDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "db closed",
+        meta: { extra: { stage: "projection-recovery" } },
+      }),
+      { kind: "background" }
+    )
+
+    dispose()
+    await jest.advanceTimersByTimeAsync(5 * 30_000)
+    expect(recoverIntegrationEventProjections).toHaveBeenCalledTimes(2)
   })
 
   it("reports recurring job failures without leaving an unhandled rejection", async () => {

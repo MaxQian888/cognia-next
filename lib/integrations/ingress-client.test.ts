@@ -4,6 +4,7 @@ import { publishIntegrationEvent } from "./events"
 import {
   drainIntegrationIngress,
   getIntegrationIngressDeadletter,
+  INGRESS_DRAIN_INTERVAL_MS,
   installIntegrationIngressRuntime,
   listIntegrationIngressDeadletters,
   requeueIntegrationIngressDeadletter,
@@ -259,9 +260,9 @@ it("subscribes to the delivery wake signal before the catch-up drain", async () 
     "integration:delivery-available",
     expect.any(Function)
   )
-  // The spool has no polling timer: a delivery accepted between the drain and
-  // the subscribe used to raise its wake signal into a subscription that did
-  // not exist yet, and then sat until some later delivery drained it.
+  // A delivery accepted between the drain and the subscribe used to raise its
+  // wake signal into a subscription that did not exist yet, and then sat until
+  // some later delivery drained it.
   const pollCall = mockedCall.mock.calls.findIndex(
     ([command]) => command === "integration_ingress_poll"
   )
@@ -294,6 +295,30 @@ it("keeps the wake subscription live when the catch-up pass fails", async () => 
   // Not a no-op dispose: a failed catch-up used to reject out of the installer,
   // and the caller's `.catch` swallowed it into `() => undefined`, so ingress
   // was dead for the life of the process.
-  expect(dispose).toBe(unsubscribe)
   expect(mockedSubscribe).toHaveBeenCalledTimes(1)
+  dispose()
+  expect(unsubscribe).toHaveBeenCalledTimes(1)
+})
+
+it("drains on an interval so a nacked delivery is not stranded without a wake", async () => {
+  jest.useFakeTimers()
+  try {
+    mockedCall.mockImplementation(async (command) => {
+      if (command === "integration_ingress_poll") return [] as never
+      return undefined as never
+    })
+    const dispose = await installIntegrationIngressRuntime()
+    const polls = () =>
+      mockedCall.mock.calls.filter(([command]) => command === "integration_ingress_poll").length
+    const afterStartup = polls()
+
+    await jest.advanceTimersByTimeAsync(INGRESS_DRAIN_INTERVAL_MS)
+    expect(polls()).toBe(afterStartup + 1)
+
+    dispose()
+    await jest.advanceTimersByTimeAsync(INGRESS_DRAIN_INTERVAL_MS * 3)
+    expect(polls()).toBe(afterStartup + 1)
+  } finally {
+    jest.useRealTimers()
+  }
 })

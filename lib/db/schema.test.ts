@@ -1561,6 +1561,37 @@ describe("getDb", () => {
     expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
   })
 
+  it("v239 indexes unfinished integration event projections by due time", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(239)
+    expect(db.integrationEvents.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["[projectionState+projectionDueAt]", "[accountId+deliveryId]"])
+    )
+    const base = {
+      schemaVersion: 1 as const,
+      pluginId: "p",
+      integrationId: "i",
+      accountId: "a",
+      eventType: "x",
+      occurredAt: "2026-10-12T00:00:00.000Z",
+      receivedAt: "2026-10-12T00:00:00.000Z",
+      payload: {},
+    }
+    await db.integrationEvents.bulkPut([
+      { ...base, id: "due", deliveryId: "d1", projectionState: "pending", projectionDueAt: 5 },
+      { ...base, id: "later", deliveryId: "d2", projectionState: "pending", projectionDueAt: 50 },
+      { ...base, id: "legacy", deliveryId: "d3" },
+    ])
+    // A legacy row carries no state, so the recovery range read never sees it.
+    expect(
+      await db.integrationEvents
+        .where("[projectionState+projectionDueAt]")
+        .between(["pending", 0], ["pending", 10], true, true)
+        .primaryKeys()
+    ).toEqual(["due"])
+  })
+
   it("v238 journals always-on work moved to a paired host", async () => {
     const db = getDb()
     await db.open()

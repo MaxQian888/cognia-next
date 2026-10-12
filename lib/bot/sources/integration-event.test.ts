@@ -132,3 +132,29 @@ describe("dispatchIntegrationEventToBots", () => {
     expect(row.envelope.provenance).toEqual({ selfProduced: false, depth: 0 })
   })
 })
+
+describe("dispatchIntegrationEventToBots retries", () => {
+  it("re-routes only to the named installations", async () => {
+    await install("acct_a", "boti_1")
+    await install("acct_a", "boti_2")
+    const result = await dispatchIntegrationEventToBots(event(), { installationIds: ["boti_2"] })
+    expect(result.enqueued.map((row) => row.envelope.installationId)).toEqual(["boti_2"])
+  })
+
+  it("never hands a retried event to an installation created after it was projected", async () => {
+    await install("acct_a")
+    const result = await dispatchIntegrationEventToBots(event(), {
+      installedBefore: Date.parse(NOW),
+    })
+    expect(result.enqueued).toEqual([])
+  })
+
+  it("reports an installation whose plugin has not registered yet as retryable", async () => {
+    await install("acct_a")
+    __resetBotsForTesting()
+    const result = await dispatchIntegrationEventToBots(event())
+    expect(result.enqueued).toEqual([])
+    expect(result.unresolved).toEqual(["boti_1"])
+    expect(result.retryable).toEqual(["boti_1"])
+  })
+})

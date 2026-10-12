@@ -3,9 +3,15 @@
 import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { createIntegrationAccount, createIntegrationSubscription } from "@/lib/db/integrations"
+import {
+  createIntegrationAccount,
+  createIntegrationSubscription,
+  insertIntegrationEvent,
+  pruneIntegrationRetention,
+} from "@/lib/db/integrations"
 import { __resetIntegrationRegistryForTesting, registerIntegrationDefinitions } from "./registry"
-import { publishIntegrationEvent } from "./events"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
+import { publishIntegrationEvent, recoverIntegrationEventProjections } from "./events"
 
 const findMatchingWorkflows = jest.fn()
 const dispatchTrigger = jest.fn()
@@ -16,6 +22,7 @@ jest.mock("@/lib/workflow/runtime/trigger-subscriptions", () => ({
 jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
   dispatchTrigger: (...args: unknown[]) => dispatchTrigger(...args),
 }))
+jest.mock("@/lib/diagnostics/bus", () => ({ dispatchDiagnostic: jest.fn() }))
 const refreshIssues = jest.fn()
 jest.mock("@/lib/issues/github-event-refresh", () => ({
   GithubEventIssueRefresher: {
@@ -412,6 +419,137 @@ describe("Integration event publication", () => {
         payload: {},
       })
       expect(refreshIssues).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("projection recovery", () => {
+    function issueEvent(accountId: string, id: string) {
+      return {
+        schemaVersion: 1 as const,
+        id,
+        pluginId: "example-delivery",
+        integrationId: "example",
+        accountId,
+        deliveryId: `delivery-${id}`,
+        eventType: "issue.updated",
+        resource: { kind: "issue", id: "EX-1" },
+        occurredAt: "2026-07-28T00:00:00.000Z",
+        receivedAt: "2026-07-28T00:00:01.000Z",
+        payload: {
+          issue: { id: "EX-1", title: "Recover me" },
+          comment: { body: `body ${id}` },
+        },
+      }
+    }
+
+    const FAR_FUTURE = Date.now() + 24 * 60 * 60 * 1000
+
+    it("settles a fully projected event and treats a redelivery as a duplicate", async () => {
+      const { account } = await setup()
+      await publishIntegrationEvent("example-delivery", issueEvent(account.id, "ok"))
+      const row = await getDb().integrationEvents.get("ok")
+      expect(row).toMatchObject({ projectionState: "complete", projectionAttempts: 0 })
+      expect(row?.projectionDueAt).toBeUndefined()
+    })
+
+    it("records a throwing consumer instead of losing the event, then finishes it", async () => {
+      const { account } = await setup()
+      dispatchTrigger.mockRejectedValueOnce(new Error("workflow store closed"))
+
+      await expect(
+        publishIntegrationEvent("example-delivery", issueEvent(account.id, "wf-fail"))
+      ).resolves.toMatchObject({
+        inserted: true,
+        inboxProjections: 1,
+        pendingSteps: ["workflow"],
+      })
+      // Reported, not swallowed: the old best-effort path dropped this silently.
+      expect(dispatchDiagnostic).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "workflow store closed",
+          meta: expect.objectContaining({
+            extra: expect.objectContaining({ step: "workflow", eventId: "wf-fail" }),
+          }),
+        }),
+        { kind: "background" }
+      )
+      const pending = await getDb().integrationEvents.get("wf-fail")
+      expect(pending).toMatchObject({ projectionState: "pending", projectionAttempts: 1 })
+      expect(pending?.projection?.steps.workflow).toMatchObject({ status: "pending" })
+      expect(pending?.projection?.steps.inbox).toEqual({ status: "complete" })
+
+      // A redelivery before the backoff passes does not race the recovery.
+      await expect(
+        publishIntegrationEvent("example-delivery", issueEvent(account.id, "wf-fail"))
+      ).resolves.toEqual({
+        inserted: false,
+        workflowDispatches: 0,
+        inboxProjections: 0,
+        botDeliveries: 0,
+      })
+
+      await expect(recoverIntegrationEventProjections({ now: FAR_FUTURE })).resolves.toBe(1)
+      expect(dispatchTrigger).toHaveBeenCalledTimes(2)
+      expect(await getDb().integrationEvents.get("wf-fail")).toMatchObject({
+        projectionState: "complete",
+      })
+      // The inbox step had already finished: recovery did not post it twice.
+      expect(await getDb().messages.count()).toBe(1)
+    })
+
+    it("resumes an event whose process died before recording the outcome", async () => {
+      const { account } = await setup()
+      // Exactly what a crash right after the insert leaves behind.
+      await insertIntegrationEvent(issueEvent(account.id, "crash"), 0)
+
+      await expect(recoverIntegrationEventProjections({ now: FAR_FUTURE })).resolves.toBe(1)
+      expect(dispatchTrigger).toHaveBeenCalledTimes(1)
+      expect(await getDb().messages.count()).toBe(1)
+      expect(await getDb().integrationEvents.get("crash")).toMatchObject({
+        projectionState: "complete",
+      })
+    })
+
+    it("resumes on a redelivery once the lease of a dead pass has expired", async () => {
+      const { account } = await setup()
+      await insertIntegrationEvent(issueEvent(account.id, "redeliver"), 0)
+      await expect(
+        publishIntegrationEvent("example-delivery", issueEvent(account.id, "redeliver"))
+      ).resolves.toMatchObject({ inserted: false, resumed: true, workflowDispatches: 1 })
+    })
+
+    it("deadletters an event whose consumer keeps failing", async () => {
+      const { account } = await setup()
+      dispatchTrigger.mockRejectedValue(new Error("permanently broken"))
+      await publishIntegrationEvent("example-delivery", issueEvent(account.id, "dead"))
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        await recoverIntegrationEventProjections({ now: FAR_FUTURE * (attempt + 2) })
+      }
+      const row = await getDb().integrationEvents.get("dead")
+      expect(row).toMatchObject({ projectionState: "deadletter", projectionAttempts: 5 })
+      // A deadlettered row is not picked up again.
+      await expect(recoverIntegrationEventProjections({ now: FAR_FUTURE * 10 })).resolves.toBe(0)
+    })
+
+    it("never prunes an event whose projections are unfinished", async () => {
+      const { account } = await setup()
+      dispatchTrigger.mockRejectedValueOnce(new Error("later"))
+      await publishIntegrationEvent("example-delivery", issueEvent(account.id, "keep"))
+      await publishIntegrationEvent("example-delivery", issueEvent(account.id, "drop"))
+      const later = Date.parse("2026-07-28T00:00:01.000Z") + 31 * 24 * 60 * 60 * 1000
+      await expect(pruneIntegrationRetention(later)).resolves.toMatchObject({ events: 1 })
+      expect(await getDb().integrationEvents.get("keep")).toBeDefined()
+      expect(await getDb().integrationEvents.get("drop")).toBeUndefined()
+    })
+
+    it("never re-projects a legacy row written before tracking existed", async () => {
+      const { account } = await setup()
+      await getDb().integrationEvents.add(issueEvent(account.id, "legacy"))
+      await expect(
+        publishIntegrationEvent("example-delivery", issueEvent(account.id, "legacy"))
+      ).resolves.toMatchObject({ inserted: false, workflowDispatches: 0 })
+      await expect(recoverIntegrationEventProjections({ now: FAR_FUTURE })).resolves.toBe(0)
+      expect(dispatchTrigger).not.toHaveBeenCalled()
     })
   })
 })

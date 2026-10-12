@@ -1,6 +1,6 @@
 {
-  "latestVersion": 238,
-  "schemaSha256": "34ac8c207dc0cf7476f8a4c97ade7e097bdd97ce6cc41ecf8794634efab4ffa6",
+  "latestVersion": 239,
+  "schemaSha256": "f3a6a8e78c662dd012f5c32eb1a31df2275211da2978a25a8b7d4b5ec9444bd0",
   "staticTableCount": 383,
   "companionSyncTableCount": 56,
   "companionSyncTables": [

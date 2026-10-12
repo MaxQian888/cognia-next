@@ -5,13 +5,20 @@ import { drainIntegrationActionJobs } from "./action-runner"
 import { installIntegrationIngressRuntime } from "./ingress-client"
 import { registerGithubIntegrationAuthProviders } from "./github-auth"
 import { reconcileGithubAppDeliveries } from "./github-delivery-recovery"
+import { recoverIntegrationEventProjections } from "./events"
 
 const ACTION_DRAIN_INTERVAL_MS = 30_000
 const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000
 const GITHUB_RECONCILIATION_INTERVAL_MS = 15 * 60 * 1000
+const PROJECTION_RECOVERY_INTERVAL_MS = 30_000
 
 function reportRecurringFailure(
-  stage: "action-drain" | "retention-prune" | "github-delivery-reconciliation" | "ingress-install",
+  stage:
+    | "action-drain"
+    | "retention-prune"
+    | "github-delivery-reconciliation"
+    | "ingress-install"
+    | "projection-recovery",
   error: unknown
 ): void {
   dispatchDiagnostic(
@@ -37,6 +44,12 @@ export async function startIntegrationRuntime(): Promise<() => void> {
     reportRecurringFailure("ingress-install", error)
     return () => undefined
   })
+  // After ingress is installed, so the plugins that own the events have had
+  // their chance to register; an event whose projections a crash or a throwing
+  // consumer left unfinished is picked up here rather than lost.
+  await recoverIntegrationEventProjections().catch((error) =>
+    reportRecurringFailure("projection-recovery", error)
+  )
   const drainTimer = globalThis.setInterval(() => {
     void drainIntegrationActionJobs().catch((error) =>
       reportRecurringFailure("action-drain", error)
@@ -53,7 +66,14 @@ export async function startIntegrationRuntime(): Promise<() => void> {
     )
   }, GITHUB_RECONCILIATION_INTERVAL_MS)
 
+  const projectionRecoveryTimer = globalThis.setInterval(() => {
+    void recoverIntegrationEventProjections().catch((error) =>
+      reportRecurringFailure("projection-recovery", error)
+    )
+  }, PROJECTION_RECOVERY_INTERVAL_MS)
+
   return () => {
+    globalThis.clearInterval(projectionRecoveryTimer)
     globalThis.clearInterval(drainTimer)
     globalThis.clearInterval(retentionTimer)
     globalThis.clearInterval(githubReconciliationTimer)

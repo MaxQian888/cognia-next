@@ -1,3 +1,4 @@
+import { INTEGRATION_PROJECTION_STEPS } from "./integration-types"
 import type {
   IntegrationAccountRow,
   IntegrationActionJobRow,
@@ -40,6 +41,32 @@ describe("integration database row aliases", () => {
     expectType<IntegrationEventRow>()
     expectType<IntegrationActionJobRow>()
     expectType<IntegrationAuditRow>()
+  })
+
+  it("lists every projection step once, in run order", () => {
+    expect(INTEGRATION_PROJECTION_STEPS).toEqual([
+      "lifecycle",
+      "workflow",
+      "bots",
+      "issues",
+      "inbox",
+    ])
+    const row = {
+      schemaVersion: 1,
+      id: "event-1",
+      pluginId: "plugin",
+      integrationId: "issues",
+      accountId: "account-1",
+      deliveryId: "delivery-1",
+      eventType: "issue.created",
+      occurredAt: "2026-07-28T00:00:00.000Z",
+      receivedAt: "2026-07-28T00:00:00.000Z",
+      payload: {},
+      projectionState: "pending",
+      projectionDueAt: 0,
+      projectionAttempts: 0,
+    } satisfies IntegrationEventRow
+    expect(row.projectionState).toBe("pending")
   })
 })
 

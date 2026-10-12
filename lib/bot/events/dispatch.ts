@@ -33,6 +33,18 @@ export interface DispatchBotEventInput {
   /** Narrow the candidate installations. Absent means every enabled one. */
   scope?: { workspaceId?: string; projectId?: string }
   organizationPolicy?: PluginBotPolicyV1
+  /**
+   * Re-route to these installations only. A projection retry passes the ones
+   * that were not ready on the first pass, so the ones that already received
+   * the event are not walked again.
+   */
+  installationIds?: readonly string[]
+  /**
+   * Skip installations created after this epoch-ms instant. A retried or
+   * replayed event reaches the Bots that existed when it arrived, never one
+   * installed since: an installation only receives work from its own start.
+   */
+  installedBefore?: number
   now?: number
 }
 
@@ -41,6 +53,12 @@ export interface DispatchBotEventResult {
   rejected: RejectedBotDelivery[]
   /** Installations whose definition or handler could not be resolved. */
   unresolved: string[]
+  /**
+   * The subset of `unresolved` that may still become runnable here: the
+   * plugin has not registered the definition or its handler yet. An
+   * installation that is disabled or owned by another host is not retryable.
+   */
+  retryable: string[]
 }
 
 /**
@@ -102,13 +120,27 @@ export async function dispatchBotEvent(
 
   const bindings: BotTriggerBinding[] = []
   const unresolved: string[] = []
+  const retryable: string[] = []
+  const only = input.installationIds ? new Set(input.installationIds) : undefined
 
   for (const installation of installations) {
+    if (only && !only.has(installation.id)) continue
+    if (input.installedBefore !== undefined && installation.createdAt > input.installedBefore) {
+      continue
+    }
     const resolved = await resolveInstalledBot(installation, {
       organizationPolicy: input.organizationPolicy,
     })
-    if (!resolved || !isRunnableBot(resolved)) {
+    if (!resolved) {
       unresolved.push(installation.id)
+      retryable.push(installation.id)
+      continue
+    }
+    if (!isRunnableBot(resolved)) {
+      unresolved.push(installation.id)
+      if (resolved.problems.some((problem) => problem.kind === "handler_missing")) {
+        retryable.push(installation.id)
+      }
       continue
     }
     bindings.push(...bindingsForInstalledBot(resolved))
@@ -132,7 +164,7 @@ export async function dispatchBotEvent(
     )
   }
 
-  return { enqueued, rejected: routed.rejected, unresolved }
+  return { enqueued, rejected: routed.rejected, unresolved, retryable }
 }
 
 /**

@@ -8,7 +8,13 @@ import type {
   IntegrationSubscription,
   IntegrationSubscriptionInput,
 } from "@/types/plugin/plugin-integration"
+import Dexie from "dexie"
 import { getDb } from "./schema"
+import {
+  INTEGRATION_PROJECTION_STEPS,
+  type IntegrationEventProjectionV1,
+  type IntegrationEventRow,
+} from "./integration-types"
 import {
   listServiceConnections,
   putServiceConnection,
@@ -332,16 +338,121 @@ export async function removeIntegrationSubscription(
   if (row?.pluginId === pluginId) await getDb().integrationSubscriptions.delete(subscriptionId)
 }
 
+/** How long a claimed projection is held before recovery may take it over. */
+export const INTEGRATION_PROJECTION_LEASE_MS = 2 * 60 * 1000
+/** Attempts before an event's unfinished projections are deadlettered. */
+export const INTEGRATION_PROJECTION_MAX_ATTEMPTS = 5
+const INTEGRATION_PROJECTION_BASE_BACKOFF_MS = 30_000
+
+function pendingProjection(): IntegrationEventProjectionV1 {
+  return {
+    version: 1,
+    steps: Object.fromEntries(
+      INTEGRATION_PROJECTION_STEPS.map((step) => [step, { status: "pending" }])
+    ) as IntegrationEventProjectionV1["steps"],
+  }
+}
+
+export type InsertIntegrationEventResult =
+  { inserted: true; row: IntegrationEventRow } | { inserted: false; row: IntegrationEventRow }
+
+/**
+ * Store an event once per `[accountId+deliveryId]`.
+ *
+ * A new row is written already claimed: pending, with its due time one lease
+ * ahead, so the caller projects it now and recovery only takes it over if the
+ * caller dies before recording the outcome.
+ */
 export async function insertIntegrationEvent(
-  event: IntegrationEventEnvelope
-): Promise<{ inserted: boolean }> {
-  const existing = await getDb()
-    .integrationEvents.where("[accountId+deliveryId]")
-    .equals([event.accountId, event.deliveryId])
-    .first()
-  if (existing) return { inserted: false }
-  await getDb().integrationEvents.add(event)
-  return { inserted: true }
+  event: IntegrationEventEnvelope,
+  now = Date.now()
+): Promise<InsertIntegrationEventResult> {
+  const db = getDb()
+  return db.transaction("rw", db.integrationEvents, async () => {
+    const existing = await db.integrationEvents
+      .where("[accountId+deliveryId]")
+      .equals([event.accountId, event.deliveryId])
+      .first()
+    if (existing) return { inserted: false as const, row: existing }
+    const row: IntegrationEventRow = {
+      ...event,
+      projection: pendingProjection(),
+      projectionState: "pending",
+      projectionDueAt: now + INTEGRATION_PROJECTION_LEASE_MS,
+      projectionAttempts: 0,
+    }
+    await db.integrationEvents.add(row)
+    return { inserted: true as const, row }
+  })
+}
+
+/**
+ * Take the projection lease on a stored event, or `undefined` when it is
+ * finished, deadlettered, legacy, or still leased by another pass. The check
+ * and the lease write share one transaction, so two recoverers (or a
+ * redelivery racing recovery) never project the same event at once.
+ */
+export async function claimIntegrationEventProjection(
+  eventId: string,
+  now = Date.now()
+): Promise<IntegrationEventRow | undefined> {
+  const db = getDb()
+  return db.transaction("rw", db.integrationEvents, async () => {
+    const row = await db.integrationEvents.get(eventId)
+    if (!row || row.projectionState !== "pending") return undefined
+    if ((row.projectionDueAt ?? 0) > now) return undefined
+    const claimed = { ...row, projectionDueAt: now + INTEGRATION_PROJECTION_LEASE_MS }
+    await db.integrationEvents.put(claimed)
+    return claimed
+  })
+}
+
+/**
+ * Record one projection pass. All steps complete settles the row; otherwise
+ * the attempt is charged and the row comes due again on an exponential
+ * backoff, until the attempts run out and it is deadlettered.
+ */
+export async function recordIntegrationEventProjection(
+  eventId: string,
+  steps: IntegrationEventProjectionV1["steps"],
+  now = Date.now()
+): Promise<IntegrationEventRow | undefined> {
+  const db = getDb()
+  return db.transaction("rw", db.integrationEvents, async () => {
+    const row = await db.integrationEvents.get(eventId)
+    if (!row) return undefined
+    const complete = INTEGRATION_PROJECTION_STEPS.every((step) => steps[step].status === "complete")
+    const attempts = (row.projectionAttempts ?? 0) + (complete ? 0 : 1)
+    const next: IntegrationEventRow = {
+      ...row,
+      projection: { version: 1, steps },
+      projectionAttempts: attempts,
+    }
+    if (complete) {
+      next.projectionState = "complete"
+      delete next.projectionDueAt
+    } else if (attempts >= INTEGRATION_PROJECTION_MAX_ATTEMPTS) {
+      next.projectionState = "deadletter"
+      delete next.projectionDueAt
+    } else {
+      next.projectionState = "pending"
+      next.projectionDueAt = now + INTEGRATION_PROJECTION_BASE_BACKOFF_MS * 2 ** (attempts - 1)
+    }
+    await db.integrationEvents.put(next)
+    return next
+  })
+}
+
+/** Pending events whose due time has passed, oldest due first. */
+export async function listDueIntegrationEventProjections(
+  now = Date.now(),
+  limit = 100
+): Promise<IntegrationEventRow[]> {
+  return getDb()
+    .integrationEvents.where("[projectionState+projectionDueAt]")
+    .between(["pending", Dexie.minKey], ["pending", now], true, true)
+    .limit(limit)
+    .toArray()
 }
 
 export type NewIntegrationActionJob = Omit<IntegrationActionJob, "id" | "createdAt" | "updatedAt">
@@ -427,7 +538,13 @@ export async function pruneIntegrationRetention(now = Date.now()): Promise<{
 }> {
   const eventCutoff = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString()
   const auditCutoff = new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString()
-  const events = await getDb().integrationEvents.where("receivedAt").below(eventCutoff).delete()
+  // An event with an unfinished projection is still owed to a consumer; age
+  // alone never drops it before recovery settles or deadletters it.
+  const events = await getDb()
+    .integrationEvents.where("receivedAt")
+    .below(eventCutoff)
+    .filter((row) => row.projectionState !== "pending")
+    .delete()
   const audit = await getDb().integrationAudit.where("createdAt").below(auditCutoff).delete()
   return { events, audit }
 }
