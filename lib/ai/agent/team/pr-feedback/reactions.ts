@@ -29,7 +29,7 @@ import {
   computeNextRetryAt,
   type NudgeRecord,
 } from "@/lib/ai/agent/team/gates/nudge-guard"
-import { sanitizeControlChars } from "@/lib/github/pr-observe/sanitize"
+import { sanitizeControlChars } from "@cognia/github-bot-kit"
 import {
   collectUnresolvedComments,
   hasUnresolvedNonBotComments,

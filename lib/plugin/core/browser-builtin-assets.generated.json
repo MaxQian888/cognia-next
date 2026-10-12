@@ -10783,14 +10783,14 @@
       "path": "builtin://github-devin-bot",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/github-devin-bot/0577646476a37f9c7197b0790d8562e24577dd12880e64db9a6dde15586197ca.cjs",
-        "sha256": "0577646476a37f9c7197b0790d8562e24577dd12880e64db9a6dde15586197ca",
+        "url": "/_cognia/builtin-plugins/github-devin-bot/77c8becc02814ca8e8d79eb646077909c6124d4eb0cda221aa6773debfe6e7a2.cjs",
+        "sha256": "77c8becc02814ca8e8d79eb646077909c6124d4eb0cda221aa6773debfe6e7a2",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/github-devin-bot/resources/",
         "entryHashes": {
-          "dist/index.js": "0577646476a37f9c7197b0790d8562e24577dd12880e64db9a6dde15586197ca"
+          "dist/index.js": "77c8becc02814ca8e8d79eb646077909c6124d4eb0cda221aa6773debfe6e7a2"
         }
       }
     },

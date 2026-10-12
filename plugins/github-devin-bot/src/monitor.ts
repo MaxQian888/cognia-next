@@ -5,14 +5,12 @@ import {
   currentCiExecutions,
   GithubRequestError,
   githubReader,
-  parseWork,
   resourceId,
-  workId,
   type Item,
-  type Work,
   type WorkflowRun,
   type CheckRun,
-} from "./github"
+} from "@cognia/github-bot-kit"
+import { GITHUB_SLOT, parseWork, workId, type Work } from "./github"
 
 interface MonitorCursor {
   version: 1
@@ -51,7 +49,7 @@ async function recoverPublication(
   const saved = await ctx.storage.get<Published>(key)
   if (saved) return saved
   if (!item.body?.includes("<!-- cognia-github-devin:") || !publications.length) return
-  const api = githubReader(ctx, run.runId, config.repository)
+  const api = githubReader(ctx, { runId: run.runId, slotId: GITHUB_SLOT }, config.repository)
   const pr = item.head ? item : item.pull_request ? await api.item(item.number, "pr") : undefined
   if (!pr?.head || pr.head.repo?.full_name.toLowerCase() !== config.repository.toLowerCase()) return
   const matches = publications.flatMap((publication) => {
@@ -131,7 +129,7 @@ async function reconcileItem(
   backfill: boolean,
   publications: Publications
 ) {
-  const api = githubReader(ctx, run.runId, config.repository)
+  const api = githubReader(ctx, { runId: run.runId, slotId: GITHUB_SLOT }, config.repository)
   if (item.state !== "open") {
     await ctx.bots.cancelResource(run.runId, {
       resourceId: resourceId(config.repository, item.number),
@@ -286,7 +284,7 @@ export async function monitor(
       output: { cursor: JSON.stringify(cursor) },
     }
   }
-  const api = githubReader(ctx, run.runId, config.repository, now)
+  const api = githubReader(ctx, { runId: run.runId, slotId: GITHUB_SLOT }, config.repository, now)
   const scanAt = now()
   try {
     const items = await run.step.run("read-changes", async () => {

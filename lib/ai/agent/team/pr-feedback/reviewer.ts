@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod"
-import { sanitizeControlChars } from "@/lib/github/pr-observe/sanitize"
+import { sanitizeControlChars } from "@cognia/github-bot-kit"
 import type { PrObservation } from "@/lib/github/pr-observe/types"
 import type { TeammatePrBinding } from "./binding"
 import { REVIEW_MAX_NUDGE, type NudgeIntent } from "./reactions"

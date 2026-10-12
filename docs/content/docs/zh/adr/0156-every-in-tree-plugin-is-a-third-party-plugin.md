@@ -39,3 +39,15 @@ description: "52 个一方插件只依赖 @cognia/plugin-sdk 编译。将 SDK �
 - 迁移途中顺带修好四个潜伏缺陷，因为迁移逼着人去问「受支持的调用到底是哪个」：生产环境下 `ctx.sessions` 恒返回 `null`；`defineMessageRenderer` 无法产出自己的 part；`web-tools` 还在 mock 一个它早已不读的 settings store；某个插件测试的 `@/lib/platform/detect` mock 越过插件影响到宿主 keyring。
 - 对第三方开放的面明显变大。这是有意为之——它现在被写下来、被测试、被版本化，而此前同样的触达只对一方代码开放、对其他人完全不开放——但每一个子路径从此都是兼容性承诺。
 - `ctx.chat.appendMessagePart` 沿用该 chat API 现有惯例：在文档里写明需要 `session:write`，而不在运行时强制；该 API 上另外三个写方法同样如此。给 chat API 加守卫是另一件事。
+
+## 修订 — 2026-10-12（一方构建期打包套件）
+
+两个一方 GitHub Bot（`github-devin-bot`、`github-comment-bot`）与宿主的 PR 观察器需要同一批 GitHub 构件：绑定作用域的读取器、CI 选取、评审线程分组、提及指令解析、输出标记。经 SDK 再导出，会让这些 Bot 专用的辅助函数变成公开的兼容性承诺；在各插件里各抄一份，又会制造出本 ADR 要消除的重复；运行时“库插件”也不合适，因为这些函数必须在调用方自己的 run 与凭据绑定内执行。
+
+因此 `scripts/plugin/check-author-imports.mjs` 增加一个显式清单 `FIRST_PARTY_BUNDLED_KITS`：**仓内**插件可以 import 清单里的包，因为 esbuild 会把它内联进该插件自己的 bundle，加载器从不共享它，运行时它不是宿主代码。目前清单只有 `@cognia/github-bot-kit`。这个例外成立需要三个条件，门禁逐条检查：
+
+- **套件本身受作者边界约束。** `checkBundledKits` 用与插件相同的规则检查每个套件的源码，所以打包了套件的插件仍然只通过 SDK 接触宿主。`@cognia/github-bot-kit` 不 import 任何东西，连 SDK 的类型也不 import：它自己声明所需的那一小部分 `ctx.integrations`。
+- **套件之间互不放行**，所以套件链不能成为绕过边界的路径。
+- **作者根目录没有例外。** 模板与参考插件仍然只依赖 SDK 编译，因为它们示范的是第三方能写出什么，而套件并不发布。
+
+套件必须保持无状态。需要共享的状态、或一个插件借给另一个插件的资源，属于另一个“库插件”问题，须另立 ADR。

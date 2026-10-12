@@ -1265,6 +1265,8 @@ importers:
         specifier: 'catalog:'
         version: 4.6.5
 
+  packages/github-bot-kit: {}
+
   packages/latex:
     dependencies:
       katex:

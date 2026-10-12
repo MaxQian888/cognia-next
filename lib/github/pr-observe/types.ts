@@ -10,6 +10,8 @@
  * `derive-status.ts`) — never stored as a fact.
  */
 
+import type { ReviewThread, ReviewThreadComment } from "@cognia/github-bot-kit"
+
 /** Aggregate CI state, normalized across check-runs + commit statuses. */
 export type CiSummary = "unknown" | "pending" | "passing" | "failing"
 
@@ -40,29 +42,12 @@ export interface PrCheckObservation {
   providerId?: string
 }
 
-/** One normalized review comment inside a thread. */
-export interface PrReviewCommentObservation {
-  id: string
-  author: string
-  body: string
-  isBot: boolean
-}
-
 /**
- * A normalized review thread. NOTE: GitHub's REST API does not expose
- * thread-resolution state (that is GraphQL-only), so `resolved` is best-effort
- * and defaults to false over REST. The reaction reducer treats an unresolved,
- * non-bot comment as actionable, so REST over-reports rather than drops
- * feedback — the safe direction.
+ * Review threads come from the shared GitHub Bot kit, which groups them for
+ * this observer and for the GitHub Bot plugins alike.
  */
-export interface PrReviewThreadObservation {
-  id: string
-  path: string
-  line: number
-  resolved: boolean
-  isBot: boolean
-  comments: PrReviewCommentObservation[]
-}
+export type PrReviewCommentObservation = ReviewThreadComment
+export type PrReviewThreadObservation = ReviewThread
 
 /** PR metadata facts. */
 export interface PrMetaObservation {

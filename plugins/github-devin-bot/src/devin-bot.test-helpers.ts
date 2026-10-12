@@ -4,8 +4,10 @@
  * imported by the plugin entry.
  */
 import type { BotRunContextV1, PluginContext } from "@cognia/plugin-sdk"
+import type { Item } from "@cognia/github-bot-kit"
+import { memoizedStep, memoryStorage } from "@cognia/github-bot-kit/testing"
 import { parseConfig } from "./config"
-import type { Item, Work } from "./github"
+import type { Work } from "./github"
 import manifestJson from "../plugin.json"
 
 /** A placeholder repository; the plugin itself ships no default. */
@@ -38,8 +40,10 @@ export const pr: Item = {
 }
 
 export function fixture(mode: Work["mode"] = "implement") {
-  const memory = new Map<string, unknown>()
-  const memo = new Map<string, unknown>()
+  const storage = memoryStorage()
+  const memory = storage.data
+  const step = memoizedStep()
+  const memo = step.memo
   const item = mode === "implement" ? { ...issue } : structuredClone(pr)
   const work: Work = {
     repository: DEFAULT_REPOSITORY,
@@ -151,12 +155,7 @@ export function fixture(mode: Work["mode"] = "implement") {
   }
   const context = {
     pluginId: "github-devin-bot",
-    storage: {
-      get: async (key: string) => memory.get(key),
-      set: async (key: string, value: unknown) => {
-        memory.set(key, value)
-      },
-    },
+    storage: { get: storage.get, set: storage.set },
     bots: {
       enqueue: mocks.enqueue,
       cancelResource: mocks.cancelResource,
@@ -187,12 +186,7 @@ export function fixture(mode: Work["mode"] = "implement") {
       provenance: { selfProduced: false, depth: 0 },
     },
     step: {
-      run: async (name, fn) => {
-        if (memo.has(name)) return memo.get(name) as never
-        const result = await fn()
-        memo.set(name, structuredClone(result))
-        return result
-      },
+      run: step.run as BotRunContextV1["step"]["run"],
       waitForApproval: mocks.approval as never,
       waitForEvent: jest.fn(),
     },

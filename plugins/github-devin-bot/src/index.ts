@@ -8,6 +8,7 @@ import {
 import manifestJson from "../plugin.json"
 import { configSchema, parseConfig } from "./config"
 import { executeWork } from "./execute"
+import { GITHUB_SLOT } from "./github"
 import { monitor } from "./monitor"
 
 export const githubDevinBotDef = {
@@ -74,7 +75,7 @@ export const githubDevinBotDef = {
     },
   ],
   requires: {
-    credentials: [{ id: "github", label: "GitHub account", integration: "github" }],
+    credentials: [{ id: GITHUB_SLOT, label: "GitHub account", integration: "github" }],
     integrationActions: ["github.openPr", "github.reviewPr"],
   },
   policy: {

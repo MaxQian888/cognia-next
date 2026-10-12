@@ -6,7 +6,9 @@ import { dirname, join } from "node:path"
 
 import {
   checkAuthorImports,
+  checkBundledKits,
   checkPluginGovernance,
+  FIRST_PARTY_BUNDLED_KITS,
   findForbiddenAuthorImports,
   findUnsharedFrameworkImports,
   isHostIntegrationTest,
@@ -187,4 +189,59 @@ test("flags host framework modules a bundled plugin cannot use, but not their ty
     `),
     ["next-intl", "next/navigation", "dexie-react-hooks", "@tauri-apps/plugin-fs"]
   )
+})
+
+test("first-party bundled kits are admitted for in-tree plugins only, never for author roots", () => {
+  const source = `
+    import { githubReader } from "@cognia/github-bot-kit"
+    import { memoryStorage } from "@cognia/github-bot-kit/testing"
+    import { secret } from "@cognia/agent-contracts"
+  `
+  // Author roots (templates, reference plugins) see the published SDK only.
+  assert.deepEqual(findForbiddenAuthorImports(source), [
+    "@cognia/github-bot-kit",
+    "@cognia/github-bot-kit/testing",
+    "@cognia/agent-contracts",
+  ])
+  // In-tree plugins may bundle a listed kit, and nothing else beyond the SDK.
+  assert.deepEqual(findForbiddenAuthorImports(source, Object.keys(FIRST_PARTY_BUNDLED_KITS)), [
+    "@cognia/agent-contracts",
+  ])
+  // A prefix match is not a kit: `-evil` is a different package.
+  assert.deepEqual(
+    findForbiddenAuthorImports(`import x from "@cognia/github-bot-kit-evil"`, [
+      "@cognia/github-bot-kit",
+    ]),
+    ["@cognia/github-bot-kit-evil"]
+  )
+})
+
+test("a bundled kit's own sources are held to the author boundary", () => {
+  const repo = mkdtempSync(join(tmpdir(), "author-kits-"))
+  const write = (path, text) => {
+    mkdirSync(dirname(join(repo, path)), { recursive: true })
+    writeFileSync(join(repo, path), text)
+  }
+  try {
+    write("packages/kit/src/index.ts", `import type { PluginContext } from "@cognia/plugin-sdk"`)
+    assert.deepEqual(checkBundledKits(repo, { "@cognia/kit": "packages/kit/src" }), [])
+    // A host import would ride into every plugin bundling the kit.
+    write("packages/kit/src/leak.ts", `import { getDb } from "@/lib/db"`)
+    // Kits do not admit each other, so they cannot chain into a back door.
+    write("packages/kit/src/chain.ts", `import x from "@cognia/other-kit"`)
+    assert.deepEqual(
+      checkBundledKits(repo, { "@cognia/kit": "packages/kit/src", "@cognia/other-kit": "nope" }),
+      [
+        "packages/kit/src/chain.ts imports @cognia/other-kit",
+        "packages/kit/src/leak.ts imports @/lib/db",
+        "@cognia/other-kit: source root nope does not exist",
+      ]
+    )
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test("every listed bundled kit in this checkout is clean", () => {
+  assert.deepEqual(checkBundledKits(process.cwd()), [])
 })

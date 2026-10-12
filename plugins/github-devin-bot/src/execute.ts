@@ -5,12 +5,10 @@ import {
   currentCiFailures,
   GithubRequestError,
   githubReader,
-  parseWork,
-  workId,
   type WorkflowRun,
   type CheckRun,
-  type Work,
-} from "./github"
+} from "@cognia/github-bot-kit"
+import { GITHUB_SLOT, parseWork, workId, type Work } from "./github"
 
 /** Branches the Bot publishes; one namespace per product, never a vendor's. */
 export const PUBLICATION_BRANCH_PREFIX = "cognia/github-devin/"
@@ -84,7 +82,7 @@ export function parseReport(text: string, mode: Work["mode"] = "review"): AgentR
 
 export async function executeWork(ctx: PluginContext, run: BotRunContextV1, config: Config) {
   const work = parseWork(run.event.payload, config.repository)
-  const api = githubReader(ctx, run.runId, config.repository)
+  const api = githubReader(ctx, { runId: run.runId, slotId: GITHUB_SLOT }, config.repository)
   const initial = await run.step.run("prepare", async () => {
     const item = await api.item(work.number, work.kind)
     if (item.state !== "open" || item.draft) return { skip: "Item is closed or draft" } as const
@@ -179,7 +177,7 @@ export async function executeWork(ctx: PluginContext, run: BotRunContextV1, conf
       repository: config.repository,
       ref: initial.targetSha,
       targetRef: initial.targetRef,
-      credentialSlot: "github",
+      credentialSlot: GITHUB_SLOT,
     })
   )
   const captureBlockedArtifact = async () => {
@@ -468,7 +466,7 @@ export async function executeWork(ctx: PluginContext, run: BotRunContextV1, conf
       // `accountId` as required even with `binding`; empty is the only value
       // the broker accepts alongside one.
       accountId: "",
-      binding: { runId: run.runId, slotId: "github" },
+      binding: { runId: run.runId, slotId: GITHUB_SLOT },
       approval: { interruptId: decision.approvalId! },
       actionId: publication.actionId,
       input: publication.input,

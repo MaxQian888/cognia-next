@@ -1,128 +1,10 @@
-import type { PluginContext } from "@cognia/plugin-sdk"
-
-export interface Item {
-  number: number
-  title: string
-  body: string | null
-  state: string
-  created_at: string
-  updated_at: string
-  html_url?: string
-  draft?: boolean
-  user?: { id: number; login: string }
-  pull_request?: { url: string }
-  head?: { sha: string; ref: string; repo: { full_name: string } | null }
-  base?: { sha: string; ref: string; repo: { full_name: string } }
-}
-
-export interface WorkflowRun {
-  id: number
-  workflow_id?: number
-  name?: string
-  head_sha: string
-  status: string
-  conclusion: string | null
-  run_attempt?: number
-  created_at?: string
-  updated_at?: string
-  html_url?: string
-  pull_requests?: Array<{ number: number }>
-}
-
-export interface CheckRun {
-  id: number
-  name: string
-  app?: { id: number }
-  head_sha: string
-  status: string
-  conclusion: string | null
-  details_url?: string
-  output?: { title?: string; summary?: string; text?: string }
-}
-
-export class GithubRequestError extends Error {
-  constructor(
-    public status: number,
-    public retryAt?: number
-  ) {
-    super(
-      `GitHub request failed (${status})${retryAt ? `; retry after ${new Date(retryAt).toISOString()}` : ""}`
-    )
-    this.name = "GithubRequestError"
-  }
-}
-
 /**
- * Reads only; the host owns authentication, repository scope, and HTTP origin checks.
- *
- * Paths are relative to the API root: the host resolves them against the bound
- * account's own deployment, so the same bot reads github.com and GitHub
- * Enterprise repositories (ADR-0176).
+ * The Devin Bot's own work model. GitHub reading, CI selection and resource
+ * ids come from `@cognia/github-bot-kit`, shared with the other GitHub Bots.
  */
-export function githubReader(
-  ctx: PluginContext,
-  runId: string,
-  repository: string,
-  now = Date.now
-) {
-  const prefix = `/repos/${repository}`
-  async function read<T>(url: string, etag?: string) {
-    const response = await ctx.integrations.authenticatedRequest<T>(
-      { runId, slotId: "github" },
-      url,
-      {
-        method: "GET",
-        headers: {
-          Accept: "application/vnd.github+json",
-          ...(etag ? { "If-None-Match": etag } : {}),
-        },
-      }
-    )
-    const headers = Object.fromEntries(
-      Object.entries(response.headers).map(([key, value]) => [key.toLowerCase(), value])
-    )
-    if (response.status !== 304 && (response.status < 200 || response.status >= 300)) {
-      const delay = Number(headers["retry-after"])
-      const reset = Number(headers["x-ratelimit-reset"])
-      const retryAt =
-        response.status === 429 || response.status === 403
-          ? delay > 0
-            ? now() + delay * 1000
-            : reset > 0
-              ? reset * 1000
-              : now() + 60_000
-          : undefined
-      throw new GithubRequestError(response.status, retryAt)
-    }
-    return { ...response, headers }
-  }
-  async function request<T>(path: string, etag?: string) {
-    if (path && !path.startsWith("/")) throw new Error("Expected a repository-relative GitHub path")
-    return read<T>(`${prefix}${path}`, etag)
-  }
-  async function pages<T>(path: string, field?: string): Promise<T[]> {
-    const items: T[] = []
-    for (let page = 1; ; page++) {
-      const separator = path.includes("?") ? "&" : "?"
-      const response = await request<T[] | Record<string, T[]>>(
-        `${path}${separator}per_page=100&page=${page}`
-      )
-      const data = field ? (response.data as Record<string, T[]>)[field] : response.data
-      if (!Array.isArray(data)) throw new Error(`Invalid GitHub collection: ${path}`)
-      items.push(...data)
-      // Link is authoritative; a full last page can legitimately have exactly 100 items.
-      if (!/rel="next"/.test(response.headers.link ?? "")) break
-    }
-    return items
-  }
-  return {
-    request,
-    pages,
-    viewer: async () => (await read<{ id: number; login: string }>("/user")).data,
-    item: async (number: number, kind: "issue" | "pr") =>
-      (await request<Item>(`/${kind === "pr" ? "pulls" : "issues"}/${number}`)).data,
-  }
-}
+
+/** The integration slot every GitHub read and write of this Bot binds to. */
+export const GITHUB_SLOT = "github"
 
 export interface Work {
   repository: string
@@ -137,42 +19,6 @@ export interface Work {
 export function workId(work: Work): string {
   // CI deliveries share one repair identity for a commit, even when several jobs fail.
   return `${work.repository.toLowerCase()}/${work.kind}/${work.number}/${work.mode}/${work.revision}`
-}
-
-export const resourceId = (repository: string, number: number) =>
-  `${repository.toLowerCase()}#${number}`
-export const failedConclusion = (value: string | null) =>
-  ["failure", "timed_out", "action_required", "startup_failure"].includes(value ?? "")
-
-/** A newer execution supersedes every older state for the same check/workflow. */
-export function currentCiExecutions(workflows: WorkflowRun[], checks: CheckRun[], sha: string) {
-  const latestWorkflows = new Map<string | number, WorkflowRun>()
-  for (const run of workflows
-    .filter((run) => run.head_sha === sha)
-    .sort((a, b) => b.id - a.id || (b.run_attempt ?? 1) - (a.run_attempt ?? 1))) {
-    const key = run.workflow_id ?? run.name ?? run.id
-    if (!latestWorkflows.has(key)) latestWorkflows.set(key, run)
-  }
-  const latestChecks = new Map<string, CheckRun>()
-  for (const check of checks
-    .filter((check) => check.head_sha === sha)
-    .sort((a, b) => b.id - a.id)) {
-    const key = `${check.app?.id ?? "unknown"}:${check.name}`
-    if (!latestChecks.has(key)) latestChecks.set(key, check)
-  }
-  return { workflows: [...latestWorkflows.values()], checks: [...latestChecks.values()] }
-}
-
-export function currentCiFailures(workflows: WorkflowRun[], checks: CheckRun[], sha: string) {
-  const latest = currentCiExecutions(workflows, checks, sha)
-  return {
-    workflows: latest.workflows.filter(
-      (run) => run.status === "completed" && failedConclusion(run.conclusion)
-    ),
-    checks: latest.checks.filter(
-      (check) => check.status === "completed" && failedConclusion(check.conclusion)
-    ),
-  }
 }
 
 export function parseWork(value: unknown, repository: string): Work {

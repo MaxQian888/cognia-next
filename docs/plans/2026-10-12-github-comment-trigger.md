@@ -2,7 +2,7 @@
 
 | 项目       | 内容                                                                                                                                                                                                                                                                                        |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 状态       | 技术评审草案（修订版 r2）；尚未实现、启用或批准上线                                                                                                                                                                                                                                         |
+| 状态       | 修订版 r3：实现中（WP0–WP3 已合入）；尚未启用或批准上线                                                                                                                                                                                                                                     |
 | 作者与日期 | Codex 初稿 2026-10-12；r2 源码核查与决策修订 2026-10-12；Asia/Shanghai                                                                                                                                                                                                                      |
 | 诉求       | 支持评论指令、权限校验、上下文收集、任务执行、结果回写与 Headless                                                                                                                                                                                                                           |
 | 范围       | 插件/共享包、Bot 运行时、Integration 事件投影、bot-run 工作区、外部 Agent、网关计量、多账号和部署                                                                                                                                                                                           |
@@ -61,16 +61,16 @@
 | Headless brain 注册 Integration 与 Bot 运行时，启动时回收过期租约                                 | [Integration](../../lib/headless/runtimes/integration-runtime.ts)、[Bot](../../lib/headless/runtimes/bots.ts)                              | 复用                                               |
 | 线程分组、评论/CI 文本清洗                                                                        | [pr-observe fetch](../../lib/github/pr-observe/fetch.ts)（`groupReviewThreads`）、[sanitize](../../lib/github/pr-observe/sanitize.ts)      | 移入共享包，`lib/` 改为从包导入，避免两份实现      |
 
-| 缺口 | 核查结论                                                                                                                                                                                                                              | 处理                                                     |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| B1   | `publishIntegrationEvent` 落库后，lifecycle、Workflow、Inbox、Bot 投影任一失败，重投都在“已存在”处提前返回（`events.ts` 约 151 行）；Bot 的 catch 无日志，审计无法区分“无匹配”与“抛错”；ingress drain 只在唤醒/启动时运行，无周期补扫 | §8.1 通用修复，前置 PR                                   |
-| B2   | `maxConcurrentRuns`、`maxRunCostUsd` 被折叠并在 UI 展示，但运行时不读取；`requireApprovalForWrites` 不在 broker，只在 policy 审批模式生效                                                                                             | §7.5 实现两项强制                                        |
-| B3   | bot-run 写死 `https://github.com/<repo>.git`、clone/fetch 不带绑定凭据（用环境 git 凭据）、全新 clone 不检出所请求 ref、不能 fetch `refs/pull/N/head`                                                                                 | §7.3                                                     |
-| B4   | 共享辅助代码只存在于 devin-bot 源码中；插件无法 `require` 其他插件的代码                                                                                                                                                              | §3.2 构建期共享包                                        |
-| B5   | 沙箱 `LaunchScope` 总把 cwd 设为可写                                                                                                                                                                                                  | 首批不改，用运行后 diff 检查（§7.4）；沙箱只读为后续加固 |
-| B6   | 网关已逐请求扫描，但只阻断不脱敏；仓库/评论中常见邮箱、作者名                                                                                                                                                                         | §6 上下文先脱敏 + 阻断处理；待验证 Agent 只能经网关出网  |
-| B7   | GitHub 事件对 Bot 而言永远 `selfProduced:false`；App 账号未保存 slug/bot 身份；PAT 账号的回写与触发者是同一人                                                                                                                         | §4.3 自身输出过滤                                        |
-| B8   | Desktop/Headless 的 integration router 都只绑 127.0.0.1，`/integration` 未公开，需用户自配 public base URL 或隧道                                                                                                                     | §3.3 轮询兜底                                            |
+| 缺口 | 核查结论                                                                                                                                                                                                                              | 处理                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| B1   | `publishIntegrationEvent` 落库后，lifecycle、Workflow、Inbox、Bot 投影任一失败，重投都在“已存在”处提前返回（`events.ts` 约 151 行）；Bot 的 catch 无日志，审计无法区分“无匹配”与“抛错”；ingress drain 只在唤醒/启动时运行，无周期补扫 | §8.1 通用修复，前置 PR                                                               |
+| B2   | `maxConcurrentRuns`、`maxRunCostUsd` 被折叠并在 UI 展示，但运行时不读取；`requireApprovalForWrites` 不在 broker，只在 policy 审批模式生效                                                                                             | §7.5 实现两项强制                                                                    |
+| B3   | bot-run 写死 `https://github.com/<repo>.git`、clone/fetch 不带绑定凭据（用环境 git 凭据）、全新 clone 不检出所请求 ref、不能 fetch `refs/pull/N/head`                                                                                 | §7.3                                                                                 |
+| B4   | 共享辅助代码只存在于 devin-bot 源码中；插件无法 `require` 其他插件的代码                                                                                                                                                              | §3.2 构建期共享包                                                                    |
+| B5   | 沙箱 `LaunchScope` 总把 cwd 设为可写                                                                                                                                                                                                  | 首批不改，用运行后 diff 检查（§7.4）；沙箱只读为后续加固                             |
+| B6   | 网关已逐请求扫描，但只阻断不脱敏；仓库/评论中常见邮箱、作者名。**r3 实现时发现：Bot 运行原本完全绕过网关**（`cogniaModel: null`），现已改为默认经网关、可显式选直连                                                                   | §6 上下文先脱敏 + 阻断处理；安装须选择执行路由（网关模型或直连），未选则 needs_setup |
+| B7   | GitHub 事件对 Bot 而言永远 `selfProduced:false`；App 账号未保存 slug/bot 身份；PAT 账号的回写与触发者是同一人                                                                                                                         | §4.3 自身输出过滤                                                                    |
+| B8   | Desktop/Headless 的 integration router 都只绑 127.0.0.1，`/integration` 未公开，需用户自配 public base URL 或隧道                                                                                                                     | §3.3 轮询兜底                                                                        |
 
 不再列为缺口（初稿误判或已不适用）：
 
@@ -121,10 +121,12 @@ flowchart LR
 
 插件只能 `require` 宿主共享模块（[shared-modules](../../lib/plugin/core/shared-modules.ts)），仓库目前没有“库插件”。要共享的辅助函数必须在**调用方自己的 run 与凭据绑定**里执行（`resolveBotIntegrationBinding` 会校验 run 归属），运行时 RPC 不适用。因此采用构建期共享：
 
-- 零 `@/` 依赖，只依赖 `@cognia/plugin-sdk` 类型；无状态纯函数，由各插件 esbuild 打包内联。产物各一份是无害的：ADR-0195 拒绝打包 SDK 是因为 SDK 带有状态注册表，本包没有。
+- 零依赖（r3：连 `@cognia/plugin-sdk` 类型也不引入，自行声明所需的 `ctx.integrations` 切片）；无状态纯函数，由各插件 esbuild 打包内联（`sideEffects: false` 保证按需摇树）。产物各一份是无害的：ADR-0195 拒绝打包 SDK 是因为 SDK 带有状态注册表，本包没有。
+- 插件作者边界门禁（ADR-0156）只放行 SDK 与 plugin-ui；r3 增加 `FIRST_PARTY_BUNDLED_KITS` 清单，仅对仓内插件放行，套件本身受同一边界检查，模板与参考插件不放行（ADR-0156 修订）。
 - 内容：`githubReader`（ETag、分页、限流，从 devin-bot 迁出）、配置解析辅助、Markdown 感知的指令解析器（新）、输出标记渲染/识别（新）、线程分组与文本清洗（从 `lib/github/pr-observe` 迁出，`lib/` 改为从包导入）、上下文预算器（新）、测试夹具（从 `devin-bot.test-helpers.ts` 迁出，放 `testing` 子路径）。
 - devin-bot 同步改为从包导入，行为不变，现有测试须继续通过。
-- 待验证：插件 `build.mjs` 能解析 `@cognia/github-bot-kit`（必要时加 esbuild alias）；`pnpm build:packages` 与 `plugin:packages:verify` 接受。
+- 已验证（r3）：插件 `build.mjs` 经根 tsconfig paths 解析 `@cognia/github-bot-kit`，无需 alias；本包无构建产物，不进 `build:packages`。
+- §7.1 的 JSON 约定只有评论机器人使用，放在该插件内而非共享包（没有第二个使用方）。
 - “运行时库插件”（提供方持有状态或资源、调用方借用能力）另立 ADR，不阻塞本方案（§18）。
 
 ### 3.3 接入：webhook 优先，轮询兜底
@@ -680,3 +682,12 @@ GitHub 官方 API（2026-10-12 核查）：[用户权限](https://docs.github.co
 | 新增迟到指令时效                                       | 轮询与 App 重投会带回数小时前的指令                                                                     |
 | 验收新增 A21–A26，A11/A12/A18 移到二期                 | 对应新增设计与范围调整                                                                                  |
 | 工作包重排为 WP0–WP8                                   | 平台修复（WP0–WP4）可并行，并且先于插件合入                                                             |
+
+**r3（2026-10-12，实现中）**：实现 WP0–WP3 时对计划的修正。
+
+| 变更                                                                                      | 原因                                                                                                                                                               |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Bot 运行默认经网关，安装可显式选直连（`executionRoute`）                                  | 核查发现 Bot 的外部 Agent 以 `cogniaModel: null` 直连 provider，B6 的“网关逐请求扫描”和 B2 的硬性成本上限对 Bot 原本都不成立；未选路由的可经网关预设报 needs_setup |
+| `maxRunCostUsd`：网关路由为硬上限（剩余额度折算为 ticket token 上限），直连为调用间软上限 | 直连时 CLI 不经 Cognia，无法在调用中途截断                                                                                                                         |
+| 共享包零依赖，作者边界门禁新增一方打包套件清单                                            | 门禁原本会拒绝插件 import 新包；见 ADR-0156 修订                                                                                                                   |
+| §7.1 JSON 约定留在插件内                                                                  | 没有第二个使用方                                                                                                                                                   |

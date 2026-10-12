@@ -60,6 +60,7 @@
     "packages/agent-trace/src/**/*.{ts,tsx}",
     "packages/primitives/src/**/*.{ts,tsx}",
     "packages/time/src/**/*.{ts,tsx}",
+    "packages/github-bot-kit/src/**/*.{ts,tsx}",
     "packages/latex/src/**/*.{ts,tsx}",
     "packages/mermaid/src/**/*.{ts,tsx}",
     "packages/plugin-sdk/src/**/*.{ts,tsx}",

@@ -33,11 +33,34 @@ const AUTHOR_ROOTS = [
  */
 export const AUTHOR_PACKAGES = ["@cognia/plugin-sdk", "@cognia/plugin-ui"]
 
-function isHostOnlyCogniaPackage(specifier) {
+/**
+ * First-party build-time kits an IN-TREE plugin may import, keyed by package
+ * name with the source root each is held to.
+ *
+ * A kit is not a host module: esbuild inlines it into every plugin that
+ * imports it (the loader never shares it), it is stateless, and its own
+ * sources are held to this same boundary (`checkBundledKits`), so a plugin
+ * bundling one still reaches the host only through the public SDK. What it
+ * buys is one copy of code several first-party plugins would otherwise each
+ * carry (the GitHub reader, command parsing, thread grouping).
+ *
+ * Not admitted for {@link AUTHOR_ROOTS}: the templates and reference plugins
+ * show what a third party can build, and these packages are not published.
+ */
+export const FIRST_PARTY_BUNDLED_KITS = {
+  "@cognia/github-bot-kit": "packages/github-bot-kit/src",
+}
+
+function isAllowedKit(specifier, kits) {
+  return kits.some((kit) => specifier === kit || specifier.startsWith(`${kit}/`))
+}
+
+function isHostOnlyCogniaPackage(specifier, kits = []) {
   if (!specifier.startsWith("@cognia/")) return false
   // The loader shares exactly the plugin-ui root. Deep imports can resolve
   // during author builds but fail when the evaluated bundle calls require().
   if (specifier.startsWith("@cognia/plugin-ui/")) return true
+  if (isAllowedKit(specifier, kits)) return false
   return !AUTHOR_PACKAGES.some(
     (allowed) => specifier === allowed || specifier.startsWith(`${allowed}/`)
   )
@@ -57,7 +80,7 @@ export function stripComments(source) {
     .replace(/(^|[^:])\/\/[^\n]*/g, (line, lead) => lead + " ".repeat(line.length - lead.length))
 }
 
-export function findForbiddenAuthorImports(source) {
+export function findForbiddenAuthorImports(source, kits = []) {
   const matches = []
   source = stripComments(source)
   /**
@@ -81,7 +104,7 @@ export function findForbiddenAuthorImports(source) {
       specifier.startsWith("@/plugins") ||
       specifier === "@cognia/plugin-sdk/host" ||
       specifier.startsWith("@cognia/plugin-sdk/host/") ||
-      isHostOnlyCogniaPackage(specifier)
+      isHostOnlyCogniaPackage(specifier, kits)
     ) {
       matches.push(specifier)
     }
@@ -199,14 +222,14 @@ function sourceFiles(root, pluginRoot = root, skip = new Set()) {
   return files
 }
 
-export function checkAuthorImports(repoRoot = process.cwd(), roots = AUTHOR_ROOTS) {
+export function checkAuthorImports(repoRoot = process.cwd(), roots = AUTHOR_ROOTS, kits = []) {
   const violations = []
   const skip = new Set(UPSTREAM_SNAPSHOT_DIRS.map((dir) => resolve(repoRoot, dir)))
   for (const root of roots.map((path) => resolve(repoRoot, path))) {
     for (const file of sourceFiles(root, root, skip)) {
       const source = readFileSync(file, "utf8")
       if (isHostIntegrationTest(file, source)) continue
-      for (const specifier of findForbiddenAuthorImports(source)) {
+      for (const specifier of findForbiddenAuthorImports(source, kits)) {
         violations.push(`${relative(repoRoot, file)} imports ${specifier}`)
       }
       if (!isTestFile(file)) {
@@ -229,6 +252,23 @@ export function checkAuthorImports(repoRoot = process.cwd(), roots = AUTHOR_ROOT
  * has been cleaned but is still listed fails the gate too, so the record can
  * never quietly overstate how much is left.
  */
+/**
+ * A bundled kit's own sources, held to the author boundary (and admitting no
+ * other kit, so kits cannot chain into a back door). A kit that imported a
+ * host module would carry it into every plugin that bundles the kit.
+ */
+export function checkBundledKits(repoRoot = process.cwd(), kits = FIRST_PARTY_BUNDLED_KITS) {
+  const violations = []
+  for (const [name, root] of Object.entries(kits)) {
+    if (!existsSync(resolve(repoRoot, root))) {
+      violations.push(`${name}: source root ${root} does not exist`)
+      continue
+    }
+    violations.push(...checkAuthorImports(repoRoot, [root]))
+  }
+  return violations
+}
+
 export const PLUGIN_GOVERNANCE_ROOT = "plugins"
 export const PLUGIN_GOVERNANCE_BASELINE = "scripts/plugin/author-import-baseline.json"
 
@@ -258,11 +298,12 @@ export function readGovernanceBaseline(repoRoot = process.cwd()) {
 export function checkPluginGovernance(repoRoot = process.cwd()) {
   const baseline = new Set(readGovernanceBaseline(repoRoot))
   const dirs = pluginDirs(repoRoot)
+  const kits = Object.keys(FIRST_PARTY_BUNDLED_KITS)
   const violations = []
   const stale = []
   const migrated = []
   for (const dir of dirs) {
-    const found = checkAuthorImports(repoRoot, [`${PLUGIN_GOVERNANCE_ROOT}/${dir}`])
+    const found = checkAuthorImports(repoRoot, [`${PLUGIN_GOVERNANCE_ROOT}/${dir}`], kits)
     if (baseline.has(dir)) {
       if (found.length === 0) stale.push(dir)
       continue
@@ -275,8 +316,9 @@ export function checkPluginGovernance(repoRoot = process.cwd()) {
 }
 
 export function writeGovernanceBaseline(repoRoot = process.cwd()) {
+  const kits = Object.keys(FIRST_PARTY_BUNDLED_KITS)
   const dirty = pluginDirs(repoRoot).filter(
-    (dir) => checkAuthorImports(repoRoot, [`${PLUGIN_GOVERNANCE_ROOT}/${dir}`]).length > 0
+    (dir) => checkAuthorImports(repoRoot, [`${PLUGIN_GOVERNANCE_ROOT}/${dir}`], kits).length > 0
   )
   const path = resolve(repoRoot, PLUGIN_GOVERNANCE_BASELINE)
   writeFileSync(
@@ -313,6 +355,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
       const failures = []
       const templateViolations = checkAuthorImports()
       if (templateViolations.length > 0) failures.push(...templateViolations)
+      failures.push(...checkBundledKits())
 
       const governance = checkPluginGovernance()
       failures.push(...governance.violations)

@@ -16,6 +16,8 @@
  * `getOctokitForRepo(...)` instance through the team-runtime seam.
  */
 
+import { groupReviewThreads, isBotUser, type ReviewCommentData } from "@cognia/github-bot-kit"
+
 import type {
   CiSummary,
   ObserveRef,
@@ -28,7 +30,6 @@ import type {
   PrObservation,
   PrObserveEtags,
   PrReviewObservation,
-  PrReviewThreadObservation,
   PrState,
   ReviewDecision,
 } from "./types"
@@ -147,12 +148,6 @@ function arrayOf<T>(data: unknown): T[] {
 }
 
 // ── shared helpers ──────────────────────────────────────────────────────────
-
-function isBotUser(user?: { login?: string; type?: string } | null): boolean {
-  if (!user) return false
-  if (user.type === "Bot") return true
-  return typeof user.login === "string" && user.login.endsWith("[bot]")
-}
 
 function lastLines(text: string, n: number): string {
   if (!text) return ""
@@ -373,70 +368,6 @@ export function deriveReviewDecision(reviews: ReviewData[]): ReviewDecision {
   if (states.includes("CHANGES_REQUESTED")) return "changes_requested"
   if (states.includes("APPROVED")) return "approved"
   return "none"
-}
-
-interface ReviewCommentData {
-  id?: number
-  body?: string
-  path?: string
-  line?: number | null
-  original_line?: number | null
-  in_reply_to_id?: number | null
-  user?: { login?: string; type?: string }
-}
-
-/**
- * Group review comments into threads keyed by their root comment. GitHub REST
- * has no thread-resolution flag (GraphQL-only), so `resolved` stays false — the
- * reaction reducer treats unresolved non-bot comments as actionable, so this
- * over-reports rather than drops feedback.
- */
-export function groupReviewThreads(comments: ReviewCommentData[]): PrReviewThreadObservation[] {
-  const byId = new Map<number, ReviewCommentData>()
-  for (const c of comments) if (c.id != null) byId.set(c.id, c)
-
-  const rootOf = (c: ReviewCommentData): ReviewCommentData => {
-    let cur = c
-    const seen = new Set<number>()
-    while (
-      cur.in_reply_to_id != null &&
-      byId.has(cur.in_reply_to_id) &&
-      !seen.has(cur.in_reply_to_id)
-    ) {
-      seen.add(cur.in_reply_to_id)
-      cur = byId.get(cur.in_reply_to_id) as ReviewCommentData
-    }
-    return cur
-  }
-
-  const threads = new Map<number, PrReviewThreadObservation>()
-  const order: number[] = []
-  for (const c of comments) {
-    if (c.id == null) continue
-    const root = rootOf(c)
-    const rootId = root.id ?? c.id
-    if (!threads.has(rootId)) {
-      threads.set(rootId, {
-        id: String(rootId),
-        path: root.path ?? "",
-        line: root.line ?? root.original_line ?? 0,
-        resolved: false,
-        isBot: true,
-        comments: [],
-      })
-      order.push(rootId)
-    }
-    const thread = threads.get(rootId) as PrReviewThreadObservation
-    const bot = isBotUser(c.user)
-    thread.comments.push({
-      id: String(c.id),
-      author: c.user?.login ?? "",
-      body: c.body ?? "",
-      isBot: bot,
-    })
-    if (!bot) thread.isBot = false
-  }
-  return order.map((id) => threads.get(id) as PrReviewThreadObservation)
 }
 
 // ── semantic diff ────────────────────────────────────────────────────────────

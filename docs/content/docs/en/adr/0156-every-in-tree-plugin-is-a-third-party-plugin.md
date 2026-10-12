@@ -102,3 +102,35 @@ which is exactly why it kept host-private imports alive. It moved to
   documenting its `session:write` requirement rather than enforcing it; the
   other three write methods on that API are the same. Guarding the chat API is
   separate work.
+
+## Amendment — 2026-10-12 (first-party bundled kits)
+
+Two first-party GitHub Bots (`github-devin-bot`, `github-comment-bot`) and the
+host's PR observer need the same GitHub building blocks: the binding-scoped
+reader, CI selection, review-thread grouping, mention parsing, output markers.
+Re-exporting them through the SDK would make Bot-specific helpers a public
+compatibility commitment. Copying them into each plugin would create the
+duplication this ADR set out to remove. A runtime "library plugin" does not
+fit either: these helpers must run inside the caller's own run and credential
+binding.
+
+So `scripts/plugin/check-author-imports.mjs` gains one listed exception,
+`FIRST_PARTY_BUNDLED_KITS`: a package an **in-tree** plugin may import because
+esbuild inlines it into that plugin's bundle. The loader never shares it, so it
+is not host code at runtime. Today the list holds only `@cognia/github-bot-kit`.
+The exception holds under three conditions, and the gate enforces each:
+
+- **The kit itself is on the author boundary.** `checkBundledKits` holds each
+  kit's sources to the same rules as a plugin, so a plugin that bundles a kit
+  still reaches the host only through the SDK. `@cognia/github-bot-kit`
+  imports nothing at all, not even the SDK's types: it declares the slice of
+  `ctx.integrations` it uses.
+- **Kits do not admit each other**, so a chain of kits cannot become a way
+  around the boundary.
+- **Author roots get no exception.** The templates and reference plugins still
+  compile against the SDK alone, because they demonstrate what a third party
+  can build, and kits are not published.
+
+A kit must stay stateless. State that has to be shared, or a resource one
+plugin lends another, is the separate "library plugin" question and needs its
+own ADR.
