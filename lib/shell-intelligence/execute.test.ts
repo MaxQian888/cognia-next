@@ -1,4 +1,5 @@
 import {
+  callWithHostApproval,
   DEFAULT_TIMEOUT_MS,
   MAX_OUTPUT_BYTES,
   MAX_TIMEOUT_MS,
@@ -59,6 +60,10 @@ describe("runShellLine", () => {
         shell: false,
       })
     )
+  })
+
+  it("defaults to terminal_exec's own 120s budget, not the old 30s shell.rs one", () => {
+    expect(DEFAULT_TIMEOUT_MS).toBe(120_000)
   })
 
   it("applies the default timeout and clamps an oversized one", async () => {
@@ -233,5 +238,54 @@ describe("runShellLine", () => {
 
     expect(out).toMatchObject({ ok: true, stdout: "hi" })
     expect(issueLease).toHaveBeenCalledWith(["terminal_exec"])
+  })
+})
+
+describe("callWithHostApproval", () => {
+  const lease = { token: "lease-1", operations: ["op"], expiresAt: Date.now() + 60_000 }
+
+  it("returns the first answer without asking for a lease", async () => {
+    const call = jest.fn().mockResolvedValue("done")
+    const issueLease = jest.fn()
+    await expect(callWithHostApproval("op", call, issueLease)).resolves.toEqual({
+      ok: true,
+      value: "done",
+    })
+    expect(call).toHaveBeenCalledWith()
+    expect(issueLease).not.toHaveBeenCalled()
+  })
+
+  it("reports an ordinary failure without asking for a lease", async () => {
+    const issueLease = jest.fn()
+    const out = await callWithHostApproval(
+      "op",
+      jest.fn().mockRejectedValue(new Error("boom")),
+      issueLease
+    )
+    expect(out).toMatchObject({ ok: false, reason: "failed", detail: "boom" })
+    expect(issueLease).not.toHaveBeenCalled()
+  })
+
+  it("retries once with a lease for the named operation after an approval refusal", async () => {
+    const call = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("interactive_approval_required"))
+      .mockResolvedValueOnce("done")
+    const issueLease = jest.fn().mockResolvedValue(lease)
+    await expect(callWithHostApproval("op", call, issueLease)).resolves.toEqual({
+      ok: true,
+      value: "done",
+    })
+    expect(issueLease).toHaveBeenCalledWith(["op"])
+    expect(call).toHaveBeenLastCalledWith("lease-1")
+  })
+
+  it("names a pending host consent apart from a failure", async () => {
+    const out = await callWithHostApproval(
+      "op",
+      jest.fn().mockRejectedValue(new Error("interactive_approval_required")),
+      jest.fn().mockRejectedValue(new Error("REMOTE_CONSENT_REQUIRED (code AB12)"))
+    )
+    expect(out).toMatchObject({ ok: false, reason: "consent-required" })
   })
 })

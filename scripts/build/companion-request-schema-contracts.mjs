@@ -390,6 +390,17 @@ const schemas = {
     cwd: z.string().min(1),
     label: z.string().optional(),
   }),
+  // A chat composer's `!` line. `program` + `args` are the argv the caller
+  // built from its configured shell; `command` is the line as typed, shown in
+  // the Job Center. Same session-id charset the Rust owner check enforces.
+  background_job_spawn_session: z.object({
+    sessionId: z.string().regex(/^[A-Za-z0-9._:-]{1,160}$/),
+    command: z.string().min(1),
+    program: z.string().min(1),
+    args: stringArray,
+    cwd: z.string().min(1),
+    label: z.string().optional(),
+  }),
   background_monitor_register_scheduled: z.object({
     taskId: z.string().min(1),
     condition: monitorCondition,

@@ -169,3 +169,34 @@ export function isVideoJobBlock(value: unknown): value is VideoJobBlock {
   const block = value as { kind?: unknown; jobId?: unknown }
   return block.kind === "video-job" && typeof block.jobId === "string" && block.jobId.length > 0
 }
+
+/**
+ * A `!` line running as a supervised job (`lib/shell-intelligence/shell-job.ts`).
+ * Rendered by `ShellJobView` from the live run, never from fields written per
+ * chunk; the run rewrites this message into the result (or a "moved to the
+ * background" note) when it is done with it. `sessionId` names the
+ * conversation the job is filed under, so a reload can find it again.
+ */
+export interface ShellJobBlock {
+  kind: "shell-job"
+  jobId: string
+  sessionId: string
+  /** The line as typed, without the `!`. */
+  command: string
+  cwd: string
+}
+
+/** Narrowing guard for the `!` job block. */
+export function isShellJobBlock(value: unknown): value is ShellJobBlock {
+  if (!value || typeof value !== "object") return false
+  const block = value as Partial<Record<keyof ShellJobBlock, unknown>>
+  return (
+    block.kind === "shell-job" &&
+    typeof block.jobId === "string" &&
+    block.jobId.length > 0 &&
+    typeof block.sessionId === "string" &&
+    block.sessionId.length > 0 &&
+    typeof block.command === "string" &&
+    typeof block.cwd === "string"
+  )
+}

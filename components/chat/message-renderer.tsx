@@ -62,11 +62,13 @@ import {
 import { DiagnosticsCard } from "@/components/chat/message-parts/diagnostics-card"
 import { SlashCommandResultChip } from "@/components/chat/message-parts/slash-command-result-chip"
 import { VideoJobView } from "@/components/chat/video-generation/video-job-view"
+import { ShellJobView } from "@/components/chat/shell-job/shell-job-view"
 import { toolNameOf } from "@/components/chat/message-parts/mcp-tool-card"
 import { VIDEO_GENERATE_TOOL_NAME } from "@/lib/claude/media-builtin-tools"
 import {
   DIAGNOSTICS_PART_TYPE,
   isSystemMessageBlock,
+  isShellJobBlock,
   isSlashCommandResultBlock,
   isVideoJobBlock,
   type SystemMessageBlock,
@@ -2049,6 +2051,9 @@ function renderPart(
     }
     if (isVideoJobBlock(data)) {
       return <VideoJobView key={key} jobId={data.jobId} />
+    }
+    if (isShellJobBlock(data)) {
+      return <ShellJobView key={key} block={data} />
     }
     if (isSystemMessageBlock(data)) {
       return <DiagnosticsCard key={key} block={data as SystemMessageBlock} />

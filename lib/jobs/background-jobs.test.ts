@@ -2,6 +2,7 @@ import { transport } from "@/lib/tauri"
 import {
   bridgeJobOwner,
   cancelBackgroundMonitor,
+  chatShellJobOwner,
   killBackgroundJob,
   listBackgroundJobs,
   listBackgroundMonitors,
@@ -10,6 +11,7 @@ import {
   registerScheduledBackgroundMonitor,
   spawnBridgeBackgroundJob,
   spawnScheduledBackgroundJob,
+  spawnSessionBackgroundJob,
   waitBackgroundJobOutput,
 } from "./background-jobs"
 
@@ -148,4 +150,46 @@ describe("External Bridge jobs", () => {
       waitMs: 5000,
     })
   })
+})
+
+it("spawns a session job with explicit argv and files it under the chat-shell owner", async () => {
+  invoke.mockResolvedValue({ id: "job-9" })
+
+  await spawnSessionBackgroundJob({
+    sessionId: "sess-1",
+    command: "pnpm build",
+    program: "/bin/zsh",
+    args: ["-lc", "pnpm build"],
+    cwd: "/work",
+    label: "Chat command",
+  })
+  expect(invoke).toHaveBeenLastCalledWith("background_job_spawn_session", {
+    sessionId: "sess-1",
+    command: "pnpm build",
+    program: "/bin/zsh",
+    args: ["-lc", "pnpm build"],
+    cwd: "/work",
+    label: "Chat command",
+  })
+  expect(chatShellJobOwner("sess-1")).toEqual({
+    kind: "session",
+    sessionId: "chat-shell:sess-1",
+  })
+})
+
+it("sends an admin lease only when one was issued", async () => {
+  invoke.mockResolvedValue({ id: "job-9" })
+
+  await spawnSessionBackgroundJob({
+    sessionId: "sess-1",
+    command: "ls",
+    program: "/bin/sh",
+    args: ["-lc", "ls"],
+    cwd: "/work",
+    adminLease: "lease-1",
+  })
+  expect(invoke).toHaveBeenLastCalledWith(
+    "background_job_spawn_session",
+    expect.objectContaining({ adminLease: "lease-1" })
+  )
 })

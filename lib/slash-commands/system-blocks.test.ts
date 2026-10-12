@@ -1,6 +1,7 @@
 import {
   DIAGNOSTICS_PART_TYPE,
   isSystemMessageBlock,
+  isShellJobBlock,
   isSlashCommandResultBlock,
   isVideoJobBlock,
 } from "./system-blocks"
@@ -58,5 +59,31 @@ describe("isVideoJobBlock", () => {
 
   it("is not mistaken for a diagnostics card", () => {
     expect(isSystemMessageBlock({ kind: "video-job", jobId: "vjob_1" })).toBe(false)
+  })
+})
+
+describe("isShellJobBlock", () => {
+  const block = {
+    kind: "shell-job",
+    jobId: "job-1",
+    sessionId: "sess-1",
+    command: "pnpm build",
+    cwd: "/work",
+  }
+
+  it("accepts a block naming a job and its conversation", () => {
+    expect(isShellJobBlock(block)).toBe(true)
+  })
+
+  it("rejects a block missing the job, the session or the line", () => {
+    expect(isShellJobBlock({ ...block, jobId: "" })).toBe(false)
+    expect(isShellJobBlock({ ...block, sessionId: undefined })).toBe(false)
+    expect(isShellJobBlock({ ...block, command: 1 })).toBe(false)
+    expect(isShellJobBlock({ ...block, kind: "video-job" })).toBe(false)
+    expect(isShellJobBlock(null)).toBe(false)
+  })
+
+  it("is not mistaken for a diagnostics card", () => {
+    expect(isSystemMessageBlock(block)).toBe(false)
   })
 })

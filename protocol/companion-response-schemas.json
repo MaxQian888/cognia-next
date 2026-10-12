@@ -12043,6 +12043,9 @@
     "background_job_spawn_scheduled": {
       "$ref": "#/$defs/BackgroundJobRecord"
     },
+    "background_job_spawn_session": {
+      "$ref": "#/$defs/BackgroundJobRecord"
+    },
     "background_monitor_cancel": {
       "$ref": "#/$defs/BackgroundMonitorRecord"
     },

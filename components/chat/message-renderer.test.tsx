@@ -2464,6 +2464,38 @@ describe("a /video job block", () => {
   })
 })
 
+jest.mock("@/components/chat/shell-job/shell-job-view", () => ({
+  ShellJobView: ({ block }: { block: { jobId: string; command: string } }) =>
+    ReactForMocks.createElement(
+      "div",
+      { "data-testid": "shell-job-view" },
+      `${block.jobId} ${block.command}`
+    ),
+}))
+
+describe("a ! shell job block", () => {
+  it("renders the job's live card from the diagnostics part", () => {
+    const message = {
+      id: "sys-shell-job-1",
+      role: "system",
+      parts: [
+        {
+          type: "data-diagnostics",
+          data: {
+            kind: "shell-job",
+            jobId: "job-1",
+            sessionId: "sess-1",
+            command: "pnpm build",
+            cwd: "/work",
+          },
+        },
+      ],
+    } as never
+    render(<MessageRenderer message={message} />)
+    expect(screen.getByTestId("shell-job-view")).toHaveTextContent("job-1 pnpm build")
+  })
+})
+
 describe("finished-turn fold", () => {
   const tool = (id: string, state = "output-available") =>
     ({

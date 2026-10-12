@@ -18,6 +18,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "background_job_read",
     "background_job_kill",
     "background_job_spawn_scheduled",
+    "background_job_spawn_session",
     "background_monitor_list",
     "background_monitor_cancel",
     "background_monitor_register_scheduled",
@@ -602,6 +603,20 @@ pub(super) async fn dispatch(
             let cwd: std::path::PathBuf = required(&args, "cwd")?;
             let label: Option<String> = optional(&args, "label")?;
             crate::jobs::background_job_spawn_scheduled(task_id, command, cwd, label)
+                .await
+                .map_err(RpcError::internal)
+        }
+        // A chat composer's `!` line on a paired client. The argv arrives
+        // already built from the caller's configured shell; the session id
+        // only names the (prefixed) owner the job is filed under.
+        "background_job_spawn_session" => {
+            let session_id: String = required(&args, "sessionId")?;
+            let command: String = required(&args, "command")?;
+            let program: String = required(&args, "program")?;
+            let argv: Vec<String> = optional(&args, "args")?.unwrap_or_default();
+            let cwd: std::path::PathBuf = required(&args, "cwd")?;
+            let label: Option<String> = optional(&args, "label")?;
+            crate::jobs::background_job_spawn_session(session_id, command, program, argv, cwd, label)
                 .await
                 .map_err(RpcError::internal)
         }

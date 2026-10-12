@@ -3590,6 +3590,186 @@
       "outputTyped": true
     },
     {
+      "name": "background_job_spawn_session",
+      "category": "automation",
+      "resource": "background-jobs",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "process.spawn",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "background_job_spawn_session (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,160}$"
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "program": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "command",
+          "program",
+          "args",
+          "cwd"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "lib/jobs/background-jobs.ts BackgroundJobRecord",
+        "required": [
+          "id",
+          "command",
+          "cwd",
+          "owner",
+          "status",
+          "startedAtMs",
+          "totalOutputBytes",
+          "droppedOutputBytes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "owner": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "sessionId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "session"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "taskId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "scheduledTask"
+                    ]
+                  },
+                  "taskId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "app"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "exited",
+              "killed",
+              "interrupted",
+              "failed"
+            ]
+          },
+          "exitCode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pid": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "startedAtMs": {
+            "type": "integer"
+          },
+          "endedAtMs": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "totalOutputBytes": {
+            "type": "integer"
+          },
+          "droppedOutputBytes": {
+            "type": "integer"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "background_monitor_cancel",
       "category": "automation",
       "resource": "background-monitors",
@@ -79022,5 +79202,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "e3e98c4f2976a774cc6770256b142642a1d0f1716fe882e59bf38ef87fc2590d"
+  "catalogHash": "38a16b6b4151e698e345ee57b2731a84fbc64f907fb553d75fe6f3d7c19600c5"
 }

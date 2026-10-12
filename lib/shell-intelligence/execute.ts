@@ -12,9 +12,14 @@
  * renderer, the paired browser and the Capacitor shell all reach, and the shell
  * comes from {@link buildShellInvocation} instead of from a `cfg!` in Rust.
  *
- * `terminal_exec` caps neither its output nor its default runtime the way
- * `shell_exec` did, so both caps are re-applied here rather than silently
- * dropped — a chatty command must not be able to blow up a chat transcript.
+ * `terminal_exec` does not cap its output the way `shell_exec` did, so the cap
+ * is re-applied here rather than silently dropped — a chatty command must not
+ * be able to blow up a chat transcript.
+ *
+ * This capture path is now the FALLBACK. The composer runs a `!` line as a
+ * supervised background job (`./shell-job.ts`), which streams, survives past
+ * any timeout and can be moved to the background; it lands here only when the
+ * Host has no job command to offer.
  */
 
 import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
@@ -28,8 +33,12 @@ import type { ResolvedShell, ShellAvailability } from "./types"
 
 /** Matches `shell.rs`'s cap, which this path replaces. */
 export const MAX_OUTPUT_BYTES = 64 * 1024
-/** Matches `shell.rs`'s default and ceiling. */
-export const DEFAULT_TIMEOUT_MS = 30_000
+/**
+ * `terminal_exec`'s own default (`crates/cognia-terminal/src/exec.rs`). The
+ * 30s this used to be came from `shell.rs` and killed every build or test run
+ * that reached this fallback halfway through.
+ */
+export const DEFAULT_TIMEOUT_MS = 120_000
 export const MAX_TIMEOUT_MS = 5 * 60_000
 
 export interface ShellRunResult {
@@ -116,6 +125,44 @@ function isConsentRefusal(error: unknown): boolean {
   )
 }
 
+export type HostApprovalOutcome<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "consent-required" | "failed"; detail: string; error: unknown }
+
+/**
+ * Make one Host call, and when the Host refuses for want of interactive
+ * approval, request the short-lived step-up lease for `operation` and retry
+ * once with it.
+ *
+ * Only call this from an explicit user action (Enter on a `!` line): asking
+ * the Host for a lease is itself a prompt a person must answer there. A
+ * pending consent request stays distinct from a command failure.
+ */
+export async function callWithHostApproval<T>(
+  operation: string,
+  call: (adminLease?: string) => Promise<T>,
+  issueLease: typeof issueHostAdminLease = issueHostAdminLease
+): Promise<HostApprovalOutcome<T>> {
+  try {
+    return { ok: true, value: await call() }
+  } catch (err) {
+    if (!isConsentRefusal(err)) {
+      return { ok: false, reason: "failed", detail: errorDetail(err), error: err }
+    }
+  }
+  try {
+    const lease = await issueLease([operation])
+    return { ok: true, value: await call(lease.token) }
+  } catch (approvalError) {
+    return {
+      ok: false,
+      reason: isConsentRefusal(approvalError) ? "consent-required" : "failed",
+      detail: errorDetail(approvalError),
+      error: approvalError,
+    }
+  }
+}
+
 /**
  * Run one shell line and capture its output.
  *
@@ -157,27 +204,15 @@ export async function runShellLine(input: RunShellLineInput): Promise<ShellRunOu
     // would run the user's line under the host's `sh`, not their shell.
     shell: false,
   }
-  let result: RemoteExecResult
-  try {
-    result = await exec(request)
-  } catch (err) {
-    const detail = errorDetail(err)
-    if (!isConsentRefusal(err)) return { ok: false, reason: "failed", detail }
-
-    // Enter is an explicit user action, so it is the correct place to request
-    // the Host's short-lived step-up lease. The Host still controls approval;
-    // a pending consent request remains distinct from command failure.
-    try {
-      const lease = await (input.issueLease ?? issueHostAdminLease)(["terminal_exec"])
-      result = await exec({ ...request, adminLease: lease.token })
-    } catch (approvalError) {
-      const approvalDetail = errorDetail(approvalError)
-      if (isConsentRefusal(approvalError)) {
-        return { ok: false, reason: "consent-required", detail: approvalDetail }
-      }
-      return { ok: false, reason: "failed", detail: approvalDetail }
-    }
-  }
+  // Enter is an explicit user action, so it is the correct place to request
+  // the Host's short-lived step-up lease should the first attempt be refused.
+  const outcome = await callWithHostApproval<RemoteExecResult>(
+    "terminal_exec",
+    (adminLease) => exec(adminLease ? { ...request, adminLease } : request),
+    input.issueLease
+  )
+  if (!outcome.ok) return { ok: false, reason: outcome.reason, detail: outcome.detail }
+  const result = outcome.value
 
   const stdout = truncateToBytes(result.stdout ?? "", MAX_OUTPUT_BYTES)
   const stderr = truncateToBytes(result.stderr ?? "", MAX_OUTPUT_BYTES)

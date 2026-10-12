@@ -128,6 +128,35 @@ export function bridgeJobOwner(clientId: string): BackgroundJobOwner {
 }
 
 /**
+ * Start a chat composer's `!` line as a supervised job. `program` + `args` are
+ * the argv built from the user's configured shell; `command` is the line as
+ * typed, for display. The host files the job under
+ * {@link chatShellJobOwner}, never under the bare session the agent owns.
+ * `adminLease` is the step-up lease a paired client presents after the host
+ * refused for want of interactive approval.
+ */
+export function spawnSessionBackgroundJob(input: {
+  sessionId: string
+  command: string
+  program: string
+  args: string[]
+  cwd: string
+  label?: string
+  adminLease?: string
+}): Promise<BackgroundJobRecord> {
+  const { adminLease, ...request } = input
+  return transport.call<BackgroundJobRecord>(
+    "background_job_spawn_session",
+    adminLease ? { ...request, adminLease } : request
+  )
+}
+
+/** The owner a chat session's `!` jobs are filed under (mirrors the Rust command). */
+export function chatShellJobOwner(sessionId: string): BackgroundJobOwner {
+  return { kind: "session", sessionId: `chat-shell:${sessionId}` }
+}
+
+/**
  * Long-poll a job's output from `fromOffset`: resolves as soon as new bytes
  * land or the job settles, or after `waitMs` (the host caps it at 30s).
  */

@@ -651,6 +651,7 @@ pub fn run() {
             jobs::background_job_kill,
             jobs::background_job_spawn_scheduled,
             jobs::background_job_spawn_bridge,
+            jobs::background_job_spawn_session,
             jobs::background_job_wait,
             jobs::background_monitor_list,
             jobs::background_monitor_cancel,

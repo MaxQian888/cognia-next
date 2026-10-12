@@ -185,6 +185,9 @@
     "background_job_spawn_bridge": {
       "to": "background.job.spawn_bridge"
     },
+    "background_job_spawn_session": {
+      "to": "background.job.spawn_session"
+    },
     "background_job_wait": {
       "to": "background.job.wait"
     },

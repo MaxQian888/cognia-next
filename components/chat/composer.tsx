@@ -263,6 +263,10 @@ import { formatShellResult } from "@/lib/shell/exec"
 import { useShellContext, useShellIntelligence } from "@/hooks/chat/use-shell-intelligence"
 import { applyShellCompletion } from "@/lib/shell-intelligence/apply"
 import { runShellLine } from "@/lib/shell-intelligence/execute"
+import { startShellJob } from "@/lib/shell-intelligence/shell-job"
+import { buildShellJobCardMessage, startShellJobRun } from "@/lib/shell-intelligence/shell-job-run"
+import { shellJobTranscript } from "@/lib/chat/shell-job-transcript"
+import { useShellJobCopy } from "./shell-job/use-shell-job-copy"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
 import { terminalAvailable } from "@/lib/terminal/pick-transport"
 import { detectInteractiveCommand } from "@/lib/claude/permissions/interactive-command"
@@ -3727,6 +3731,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       : undefined
   const tCommands = useTranslations("chat.composer.commands")
   const tShell = useTranslations("chat.composer.shell")
+  const shellJobCopy = useShellJobCopy()
   // The shell the `!` line will run under, and whether it can run at all. The
   // completion panel resolves the identical verdict in `ComposerInner`; both go
   // through `useShellContext` so a line can never be completed for one shell
@@ -3935,7 +3940,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // safe only because `executeShell` threw "desktop app only" underneath it;
       // `runShellLine` runs anywhere a Host is, so an `isTauri()` gate would
       // send `!ssh host` from a paired browser down the capture path to block
-      // for the full 30s timeout.
+      // until the capture timeout.
       //
       // …and gated on a Host being reachable as well, because `terminalAvailable()`
       // alone is NOT the predicate `useShellContext` answers with. It reports
@@ -3969,6 +3974,67 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         }
         return true
       }
+      const reportRefusal = (refusal: { reason: string; detail: string }) => {
+        loggers.chat.error("shell command failed", refusal.detail, {
+          cmd,
+          cwd,
+          reason: refusal.reason,
+          shell: shell.shell.path,
+        })
+        if (refusal.reason === "no-host") {
+          pushSystemMessage(tShell("noHost", { cmd }))
+        } else if (refusal.reason === "consent-required") {
+          // The host wants a human to approve remote execution. Telling the user
+          // that names an action; the generic "failed" sentence names none.
+          pushSystemMessage(tShell("consentRequired", { cmd }))
+        } else if (refusal.reason === "shell-unavailable") {
+          pushSystemMessage(tShell("shellUnavailable", { cmd, shell: shell.shell.path }))
+        } else if (refusal.reason === "unsupported-shell") {
+          pushSystemMessage(tShell("unsupportedShell", { cmd, shell: shell.shell.path }))
+        } else {
+          pushSystemMessage(tShell("failed", { cmd, error: refusal.detail }))
+        }
+      }
+
+      // As a supervised job owned by this conversation: output streams into a
+      // live card, nothing kills it at a timeout, and it can be moved to the
+      // Job Center or stopped. See `lib/shell-intelligence/shell-job.ts`.
+      // Needs a conversation to own the job; the home composer has none yet.
+      const sessionId = session?.id
+      if (sessionId) {
+        const started = await startShellJob({
+          sessionId,
+          line: cmd,
+          cwd,
+          shell: shell.shell,
+          availability: shell.availability,
+          label: tShell("job.label"),
+        })
+        if (started.ok) {
+          const block = {
+            kind: "shell-job" as const,
+            jobId: started.job.id,
+            sessionId,
+            command: cmd,
+            cwd,
+          }
+          // The card goes in before the run starts: every later write from
+          // the run rewrites this row, and a fast `ls` must not settle first.
+          try {
+            await shellJobTranscript.upsert(sessionId, buildShellJobCardMessage(block))
+          } catch (err) {
+            loggers.chat.error("posting a shell job card failed", err, { jobId: block.jobId })
+          }
+          startShellJobRun(block, { transcript: shellJobTranscript, copy: shellJobCopy })
+          return true
+        }
+        // A Host without the job command still runs the line, the old way.
+        if (started.reason !== "job-unavailable") {
+          reportRefusal(started)
+          return true
+        }
+      }
+
       pushSystemMessage(tShell("runningHint", { cmd, cwd }))
       // Through the routed `terminal_exec`, under the user's configured shell —
       // so a `!` line works from a paired browser or phone, and `fish` users
@@ -3983,28 +4049,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         pushSystemMessage(formatShellResult(cmd, outcome))
         return true
       }
-      loggers.chat.error("shell command failed", outcome.detail, {
-        cmd,
-        cwd,
-        reason: outcome.reason,
-        shell: shell.shell.path,
-      })
-      if (outcome.reason === "no-host") {
-        pushSystemMessage(tShell("noHost", { cmd }))
-      } else if (outcome.reason === "consent-required") {
-        // The host wants a human to approve remote execution. Telling the user
-        // that names an action; the generic "failed" sentence names none.
-        pushSystemMessage(tShell("consentRequired", { cmd }))
-      } else if (outcome.reason === "shell-unavailable") {
-        pushSystemMessage(tShell("shellUnavailable", { cmd, shell: shell.shell.path }))
-      } else if (outcome.reason === "unsupported-shell") {
-        pushSystemMessage(tShell("unsupportedShell", { cmd, shell: shell.shell.path }))
-      } else {
-        pushSystemMessage(tShell("failed", { cmd, error: outcome.detail }))
-      }
+      reportRefusal(outcome)
       return true
     },
-    [cwd, pushSystemMessage, tShell, session, shell.shell, shell.availability]
+    [cwd, pushSystemMessage, tShell, shellJobCopy, session, shell.shell, shell.availability]
   )
 
   const handleMemorySubmit = useCallback(

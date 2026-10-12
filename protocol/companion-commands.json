@@ -1141,6 +1141,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "background_job_spawn_session",
+      "resource": "background.job",
+      "verb": "spawn_session",
+      "arm": "background_job_spawn_session",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "process.spawn",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "background_job_wait",
       "resource": "background.job",
       "verb": "wait",

@@ -63,6 +63,7 @@ commands.allow = [
   "background_job_read",
   "background_job_spawn_bridge",
   "background_job_spawn_scheduled",
+  "background_job_spawn_session",
   "background_job_wait",
   "background_monitor_cancel",
   "background_monitor_list",
