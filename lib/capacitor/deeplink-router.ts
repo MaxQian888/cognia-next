@@ -2,6 +2,7 @@
 
 import type { DeeplinkRoute } from "./deeplink"
 import { loggers } from "@cognia/logging"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
 
 const log = loggers.shell
 
@@ -20,7 +21,7 @@ const log = loggers.shell
  */
 
 export interface DeeplinkNavigators {
-  /** Navigate to a chat session (`/inbox/c/<id>`). */
+  /** Navigate to a chat session (`/?session=<id>`). */
   pushSession(sessionId: string): void
   /** Navigate to the share-target page with the captured text/url. */
   openShareTarget(opts: { text?: string; url?: string }): void
@@ -87,7 +88,7 @@ export interface NextRouterShape {
 export function makeRouterNavigators(router: NextRouterShape): DeeplinkNavigators {
   return {
     pushSession: (sessionId) => {
-      router.push(`/inbox/c?key=${encodeURIComponent(sessionId)}`)
+      router.push(`/${buildSessionHref(sessionId)}`)
     },
     openShareTarget: ({ text, url }) => {
       const search = new URLSearchParams()

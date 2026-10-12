@@ -137,6 +137,15 @@ jest.mock("@/lib/db/agent-tasks", () => ({
   getAgentTask: (id: string) => getAgentTaskMock(id),
   listAgentTaskAttempts: (id: string) => listAgentTaskAttemptsMock(id),
 }))
+// Plugin links are answered only when the addressed plugin has a handler, and
+// provider callbacks only while that provider's login is in progress.
+jest.mock("@/lib/plugin/uri/route-deep-link", () => ({
+  hasPluginDeepLinkHandler: async (raw: string) => raw.startsWith("cognia://plugin/acme/"),
+}))
+jest.mock("@cognia/provider-core/providers/oauth", () => ({
+  ...jest.requireActual("@cognia/provider-core/providers/oauth"),
+  getOAuthState: () => ({ providerId: "openrouter" }),
+}))
 const findActiveSessionForConversation = jest.fn()
 jest.mock("@/lib/connectors/session-bindings", () => ({
   findActiveSessionForConversation: (...args: unknown[]) =>
@@ -472,6 +481,32 @@ describe("useTauriEvents", () => {
 
     it("unknown deep link surfaces a localized toast", async () => {
       await fireDeepLinks(["cognia://nope"])
+      expect(toastMessage).toHaveBeenCalledWith("deepLinkUnknown", {
+        description: "cognia://nope",
+      })
+    })
+
+    it.each([
+      "cognia://plugin/acme/auth/callback?code=c",
+      "cognia://connector/oauth/lark?code=c&state=s",
+      "cognia://provider/oauth/openrouter?code=c&state=s",
+      "cognia://docs-provider/oauth/google-drive?code=c&state=s",
+    ])("does not toast unknown for the separately handled link %s", async (raw) => {
+      await fireDeepLinks([raw])
+      await flushPromises()
+      expect(toastMessage).not.toHaveBeenCalled()
+      expect(routerPush).not.toHaveBeenCalled()
+      expect(setActiveSession).not.toHaveBeenCalled()
+    })
+
+    it("continues dispatching sessions and unknown links in a mixed batch", async () => {
+      await fireDeepLinks([
+        "cognia://connector/oauth/lark?code=c&state=s",
+        "cognia://session/s-9",
+        "cognia://nope",
+      ])
+      expect(setActiveSession).toHaveBeenCalledWith("s-9")
+      expect(toastMessage).toHaveBeenCalledTimes(1)
       expect(toastMessage).toHaveBeenCalledWith("deepLinkUnknown", {
         description: "cognia://nope",
       })

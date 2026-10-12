@@ -7,7 +7,7 @@ jest.mock("@/lib/plugin/core/manager", () => ({
   },
 }))
 
-import { routePluginDeepLink } from "./route-deep-link"
+import { hasPluginDeepLinkHandler, routePluginDeepLink } from "./route-deep-link"
 import { __resetUriHandlersForTesting, registerUriHandler } from "./uri-handler-registry"
 import type { ParsedDeepLink } from "./parse-deep-link"
 
@@ -37,4 +37,23 @@ it("still dispatches when the manager is not up, and reports links nobody handle
   managerAvailable = true
   await expect(routePluginDeepLink("https://example.com")).resolves.toBe(false)
   expect(handleActivationEvent).not.toHaveBeenCalled()
+})
+
+it("says whether a plugin link has a handler, without dispatching it", async () => {
+  const seen: string[] = []
+  registerUriHandler("acme", (uri) => void seen.push(uri.path))
+  await expect(hasPluginDeepLinkHandler("cognia://plugin/acme/cb")).resolves.toBe(true)
+  await expect(hasPluginDeepLinkHandler("cognia://plugin/ghost/cb")).resolves.toBe(false)
+  await expect(hasPluginDeepLinkHandler("cognia://chat")).resolves.toBe(false)
+  expect(seen).toEqual([])
+  expect(handleActivationEvent).toHaveBeenCalledWith("onUri:ghost")
+})
+
+it("shares one activation between concurrent lookups of the same plugin", async () => {
+  registerUriHandler("acme", () => {})
+  await Promise.all([
+    routePluginDeepLink("cognia://plugin/acme/a"),
+    hasPluginDeepLinkHandler("cognia://plugin/acme/a"),
+  ])
+  expect(handleActivationEvent).toHaveBeenCalledTimes(1)
 })

@@ -3,6 +3,7 @@
  */
 import { dispatchRoute, makeRouterNavigators } from "./deeplink-router"
 import type { DeeplinkNavigators } from "./deeplink-router"
+import { parseCogniaDeeplink } from "@/lib/navigation/cognia-deeplink"
 
 function makeNavigators(): DeeplinkNavigators & {
   pushSession: jest.Mock
@@ -163,11 +164,23 @@ describe("dispatchRoute", () => {
 })
 
 describe("makeRouterNavigators", () => {
-  it("URL-encodes session ids when pushing", () => {
+  it("opens the chat workspace with a URL-encoded session id", () => {
     const push = jest.fn()
     const navs = makeRouterNavigators({ push })
     navs.pushSession("a/b")
-    expect(push).toHaveBeenCalledWith("/inbox/c?key=a%2Fb")
+    expect(push).toHaveBeenCalledWith("/?session=a%2Fb")
+  })
+
+  it.each([
+    ["cognia://session/sess-1", "/?session=sess-1"],
+    ["cognia://chat/sess-1", "/?session=sess-1"],
+    ["cognia://session?id=a%2Fb%20%26c", "/?session=a%2Fb+%26c"],
+    ["cognia://session/sess-1?view=files&path=%2Fworkspace%2Fa.ts", "/?session=sess-1"],
+  ])("dispatches %s directly to the chat workspace", (raw, destination) => {
+    const push = jest.fn()
+    dispatchRoute(parseCogniaDeeplink(raw), makeRouterNavigators({ push }))
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenCalledWith(destination)
   })
 
   it("builds /share-target?text=&url= with encoded params", () => {

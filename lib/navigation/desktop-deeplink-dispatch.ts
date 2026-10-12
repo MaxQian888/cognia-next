@@ -12,7 +12,12 @@
  * Parsing stays in `cognia-deeplink.ts`, which the mobile shell shares; this
  * module is only the desktop's answer to each parsed route.
  */
+import { getOAuthState, parseNativeOAuthDeepLink } from "@cognia/provider-core/providers/oauth"
+
+import { DOCS_OAUTH_PATH_RE } from "@/lib/docs-providers/oauth-deep-link"
 import { publishLogtoDeepLinkCallback } from "@/lib/logto/deep-link-callback"
+import { parseDeepLink } from "@/lib/plugin/uri/parse-deep-link"
+import { hasPluginDeepLinkHandler } from "@/lib/plugin/uri/route-deep-link"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
@@ -171,7 +176,26 @@ export async function dispatchDesktopDeeplink(
       // router (`lib/capacitor/deeplink-router.ts`).
       return
     case "unknown":
+      if (isOAuthCallbackAnsweredElsewhere(route.raw)) return
+      // PluginDeepLinkRouter can only deliver to a plugin that registered a
+      // handler; a link to any other plugin would vanish without a word.
+      if (parseDeepLink(route.raw) && (await hasPluginDeepLinkHandler(route.raw))) return
       deps.onUnknown(route.raw)
       return
   }
+}
+
+/** `ConnectorDeepLinkRouter`'s connector OAuth callback (`components/connectors/`). */
+const CONNECTOR_OAUTH_PATH_RE = /^cognia:\/\/connector\/oauth\/[^?#/]+/
+
+/**
+ * Whether an OAuth callback reaches a listener that reports its outcome, so
+ * the shell must not also call it unknown. ConnectorDeepLinkRouter is always
+ * mounted and answers every connector and docs-provider callback;
+ * OAuthLoginButton only listens while its provider's login is in progress.
+ */
+function isOAuthCallbackAnsweredElsewhere(raw: string): boolean {
+  if (CONNECTOR_OAUTH_PATH_RE.test(raw) || DOCS_OAUTH_PATH_RE.test(raw)) return true
+  const providerCallback = parseNativeOAuthDeepLink(raw)
+  return providerCallback !== null && getOAuthState()?.providerId === providerCallback.providerId
 }

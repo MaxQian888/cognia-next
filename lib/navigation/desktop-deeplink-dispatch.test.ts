@@ -33,6 +33,17 @@ jest.mock("@/lib/db/agent-tasks", () => ({
   getAgentTask: (id: string) => getAgentTask(id),
   listAgentTaskAttempts: (id: string) => listAgentTaskAttempts(id),
 }))
+const hasPluginDeepLinkHandler = jest.fn(async (raw: string) =>
+  /^(?:web\+)?cognia:\/\/plugin\/acme\//.test(raw)
+)
+jest.mock("@/lib/plugin/uri/route-deep-link", () => ({
+  hasPluginDeepLinkHandler: (raw: string) => hasPluginDeepLinkHandler(raw),
+}))
+let pendingOAuthProvider: string | null = null
+jest.mock("@cognia/provider-core/providers/oauth", () => ({
+  ...jest.requireActual("@cognia/provider-core/providers/oauth"),
+  getOAuthState: () => (pendingOAuthProvider ? { providerId: pendingOAuthProvider } : null),
+}))
 
 import { parseCogniaDeeplink } from "./cognia-deeplink"
 import {
@@ -54,6 +65,7 @@ async function dispatch(raw: string, handlers: DesktopDeeplinkDeps = deps()) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  pendingOAuthProvider = null
 })
 
 describe("dispatchDesktopDeeplink", () => {
@@ -223,6 +235,50 @@ describe("dispatchDesktopDeeplink", () => {
     await dispatch("cognia://oauth/claude?code=c", handlers)
     expect(handlers.navigate).not.toHaveBeenCalled()
     expect(handlers.onUnknown).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    "cognia://plugin/acme/auth/callback?code=c",
+    "web+cognia://plugin/acme/auth/callback?code=c",
+    "cognia://connector/oauth/lark?code=c&state=s",
+    "cognia://provider/oauth/openrouter?code=c&state=s",
+    "cognia://docs-provider/oauth/google-drive?code=c&state=s",
+  ])("defers %s to its dedicated listener", async (raw) => {
+    pendingOAuthProvider = "openrouter"
+    const handlers = await dispatch(raw)
+    expect(handlers.onUnknown).not.toHaveBeenCalled()
+    expect(handlers.navigate).not.toHaveBeenCalled()
+    expect(setActiveSession).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    "cognia://plugin",
+    "cognia://connector/nope",
+    "cognia://connector/oauth/",
+    "cognia://provider/oauth/",
+    "cognia://docs-provider/nope",
+    "https://plugin/acme/auth/callback",
+    "::not-a-url::",
+  ])("still reports unclaimed or malformed links: %s", async (raw) => {
+    const handlers = await dispatch(raw)
+    expect(handlers.onUnknown).toHaveBeenCalledWith(raw)
+  })
+
+  it("reports a plugin link nobody handles, and a provider callback with no login in progress", async () => {
+    const plugin = await dispatch("cognia://plugin/uninstalled/auth/callback?code=c")
+    expect(hasPluginDeepLinkHandler).toHaveBeenCalledWith(
+      "cognia://plugin/uninstalled/auth/callback?code=c"
+    )
+    expect(plugin.onUnknown).toHaveBeenCalledWith(
+      "cognia://plugin/uninstalled/auth/callback?code=c"
+    )
+
+    const late = await dispatch("cognia://provider/oauth/openrouter?code=c")
+    expect(late.onUnknown).toHaveBeenCalledWith("cognia://provider/oauth/openrouter?code=c")
+
+    pendingOAuthProvider = "anthropic"
+    const other = await dispatch("cognia://provider/oauth/openrouter?code=c")
+    expect(other.onUnknown).toHaveBeenCalledWith("cognia://provider/oauth/openrouter?code=c")
   })
 
   it("hands an unknown link back to the caller", async () => {
