@@ -93,7 +93,10 @@ RUN --mount=type=cache,id=cognia-pnpm-store,target=/root/.local/share/pnpm/store
     && mv pnpm-workspace.root.yaml pnpm-workspace.yaml
 # Sources last. prebuild still runs the complete asset and sidecar pipeline.
 COPY . .
-RUN NODE_OPTIONS=--max-old-space-size=8192 pnpm build
+# The `build` script sets its own 16 GB V8 heap (cross-env), so an outer
+# NODE_OPTIONS would be overridden. Peak RSS is ~17 GB: on a 16 GB host the
+# build needs swap (images.yml grows the runner's before this job builds).
+RUN pnpm build
 
 FROM caddy:2.10
 COPY deploy/compose/Caddyfile /etc/caddy/Caddyfile

@@ -168,6 +168,21 @@ jobs:
             echo "::notice::${{ matrix.file }} not present — skipping ${{ matrix.name }}"
           fi
 
+      # The web export peaks at ~17 GB RSS (webpack holds the compilation
+      # through page finalization), past the 16 GB runner; without more swap
+      # the build dies with ENOMEM after every page has rendered. /mnt is the
+      # runner's large scratch disk.
+      - name: Grow swap for the web export
+        if: steps.ctx.outputs.present == 'true' && matrix.name == 'cognia-web'
+        run: |
+          sudo swapoff -a
+          sudo rm -f /mnt/swapfile
+          sudo fallocate -l 24G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
       - uses: docker/setup-buildx-action@v4
         if: steps.ctx.outputs.present == 'true'
 
