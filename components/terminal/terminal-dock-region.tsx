@@ -46,12 +46,21 @@
  * re-parent the containing block for every `absolute` descendant of the rail and
  * the routed page. So the right dock maximizes to `width: 100%` of the row
  * instead. Same user-visible result, no blast radius.
+ *
+ * ## One dock, two slots
+ *
+ * Under the shell's `TerminalDockSurfaceProvider` the region does not render
+ * `<TerminalDock/>` itself: it claims the shared dock for its inner surface
+ * (`terminal-dock-surface.tsx`), so moving between the edges re-parents one
+ * live terminal instead of disposing it on one side and cold-starting it on
+ * the other. Rendered without the provider, it draws the dock inline.
  */
 
 import { useCallback, useEffect, useState } from "react"
 
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { TerminalDock } from "@/components/terminal/terminal-dock"
+import { useTerminalDockSurface } from "@/components/terminal/terminal-dock-surface"
 import { bootReattachTerminals } from "@/lib/terminal/boot-reattach"
 import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { useElementAxisSize } from "@/hooks/use-element-axis-size"
@@ -112,6 +121,15 @@ export function TerminalDockRegion({ slot }: TerminalDockRegionProps) {
   // content, then unmounts: xterm, its PTY attachment and the dock's own
   // subscriptions must not stay live behind a zero-size box.
   const contentMounted = open || animating
+  const resizeBasisPx = basisPx > 0 ? basisPx : undefined
+  const [surface, setSurface] = useState<HTMLDivElement | null>(null)
+  const attachSurface = useCallback((element: HTMLDivElement | null) => setSurface(element), [])
+  const shared = useTerminalDockSurface(slot, {
+    element: surface,
+    mounted: contentMounted,
+    owns,
+    resizeBasisPx,
+  })
 
   // Maximizing takes the bottom dock out of the flow instead of squeezing the
   // page to nothing — a chat re-laid-out at zero height loses its scroll
@@ -147,12 +165,13 @@ export function TerminalDockRegion({ slot }: TerminalDockRegionProps) {
           the terminal is clipped rather than resized while the outer box moves.
           See the note above on the SIGWINCH storm this avoids. */}
       <div
+        ref={attachSurface}
         data-testid="terminal-dock-surface"
         className={right ? "h-full" : "w-full"}
         style={right ? { width: fullSize } : { height: fullSize }}
       >
-        {contentMounted ? (
-          <TerminalDock keepVisible resizeBasisPx={basisPx > 0 ? basisPx : undefined} />
+        {contentMounted && !shared ? (
+          <TerminalDock keepVisible resizeBasisPx={resizeBasisPx} />
         ) : null}
       </div>
     </div>

@@ -51,6 +51,7 @@ import { ZoomShortcuts } from "@/components/desktop/zoom-shortcuts"
 import { VscodeExtensionHostBar } from "@/components/extensions/vscode-extension-host-bar"
 import { TerminalDockMoveProvider } from "@/components/terminal/terminal-dock-move-provider"
 import { TerminalDockRegion } from "@/components/terminal/terminal-dock-region"
+import { TerminalDockSurfaceProvider } from "@/components/terminal/terminal-dock-surface"
 import { TerminalToggleShortcut } from "@/components/terminal/terminal-toggle-shortcut"
 import { useWorkbenchActivityShortcuts } from "@/hooks/context-workbench/use-workbench-activity-shortcuts"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
@@ -245,26 +246,31 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
           edge drop zones it paints during a drag are `fixed`, so the row's
           child order (which the rail-placement tests pin) is unchanged. */}
           <TerminalDockMoveProvider>
-            <div className="flex flex-1 overflow-hidden">
-              {sidebarSide === "left" ? guildRail : null}
-              <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-                <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
-                  {children}
+            {/* Renders the one terminal dock both slots share, through a portal
+            that leaves no DOM here (`terminal-dock-surface.tsx`). Inside the
+            move provider because the dock's grip is a drag source of it. */}
+            <TerminalDockSurfaceProvider>
+              <div className="flex flex-1 overflow-hidden">
+                {sidebarSide === "left" ? guildRail : null}
+                <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+                  <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
+                    {children}
+                  </div>
+                  <TerminalDockRegion slot="bottom" />
                 </div>
-                <TerminalDockRegion slot="bottom" />
-              </div>
-              {/* Right-docked terminal. Sits inboard of the extension host bar and
+                {/* Right-docked terminal. Sits inboard of the extension host bar and
               the rail so those stay pinned to the window edge. */}
-              <TerminalDockRegion slot="right" />
-              {/*
-               * VS Code extension host bar — hosts webviews + terminals from
-               * any activated extension. Returns `null` until an extension
-               * registers a surface, so the layout is unchanged in the
-               * default case. Phase A4 of the LSP reuse work.
-               */}
-              <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
-              {sidebarSide === "right" ? guildRail : null}
-            </div>
+                <TerminalDockRegion slot="right" />
+                {/*
+                 * VS Code extension host bar — hosts webviews + terminals from
+                 * any activated extension. Returns `null` until an extension
+                 * registers a surface, so the layout is unchanged in the
+                 * default case. Phase A4 of the LSP reuse work.
+                 */}
+                <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
+                {sidebarSide === "right" ? guildRail : null}
+              </div>
+            </TerminalDockSurfaceProvider>
           </TerminalDockMoveProvider>
           {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
           <FindBar />

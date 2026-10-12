@@ -4,6 +4,7 @@ import {
   Activity,
   Component,
   createContext,
+  memo,
   useCallback,
   useContext,
   useMemo,
@@ -100,7 +101,7 @@ import {
   useContextWorkbenchStore,
   type ContextWorkbenchLayout,
 } from "@/stores/context-workbench/context-workbench-store"
-import { useElementWidth } from "@/hooks/use-element-width"
+import { useElementWidthFits } from "@/hooks/use-element-width-fits"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { workbenchRailLayoutOf } from "@/components/shell/use-workbench-rail-layout"
 import { isWorkbenchActivityHidden, workbenchRailIndex } from "@/lib/shell/workbench-rail"
@@ -249,9 +250,29 @@ export interface ContextWorkbenchProps {
    *
    * The body is unmounted, not hidden: the embedded browser holds a
    * process-wide webview lease released only on unmount, so a rail that kept its
-   * panels alive would lock every other surface out of the webview.
+   * panels alive would lock every other surface out of the webview. A host that
+   * also passes `concealed` keeps the body mounted and hidden instead — see
+   * there for how the lease is still released.
    */
   railOnly?: boolean
+  /**
+   * The host has taken this workbench off screen but keeps it mounted, so
+   * bringing it back is a reveal rather than a rebuild: the chat dock while it
+   * is collapsed, and its session surface while an artifact tab is in front.
+   *
+   * Panels stay mounted with their effects live — a project editor keeps its
+   * watcher, git state and Monaco models — and are told they are not
+   * `active`. Only panels flagged `exclusiveSurface` are parked behind
+   * `<Activity mode="hidden">`, which runs their cleanup and so gives back the
+   * process-wide native surface they hold. A concealed host does not register
+   * itself as the active context host either: it is not what the user sees, and
+   * registering stamps a host active.
+   *
+   * The host is responsible for actually hiding it (an `inert` or `hidden`
+   * ancestor, which also parks every native pane through
+   * `useRegionVisibility`). With `railOnly`, the body is kept but hidden here.
+   */
+  concealed?: boolean
   /**
    * Where to render the header row instead of drawing it above the panel body.
    * The chat dock passes the title bar's end outlet
@@ -652,7 +673,16 @@ function SortableActivityButton({
   )
 }
 
-export function ContextWorkbench({
+/**
+ * Memoised: the workbench re-renders every visited panel body it hosts, and its
+ * hosts re-render for reasons that change nothing here — the chat dock on every
+ * layout write of its shell, a session surface on each live-query read. Hosts
+ * that want the skip pass stable props (the chat dock does); the rest behave as
+ * before.
+ */
+export const ContextWorkbench = memo(ContextWorkbenchView)
+
+function ContextWorkbenchView({
   workbenchInstanceId,
   resource,
   panels = [],
@@ -663,6 +693,7 @@ export function ContextWorkbench({
   onCollapse,
   onEnsureVisible,
   railOnly = false,
+  concealed = false,
   headerOutlet = null,
   attentionActivity,
   onModeWidthHint,
@@ -799,18 +830,20 @@ export function ContextWorkbench({
   }, [bodyHidden, onCollapse, onEnsureVisible])
   useEffect(
     () =>
-      setActiveContextForHost(scopeKey, resource, {
-        ensureVisible: () => ensureVisibleRef.current?.(),
-        // Only hosts that own a container advertise a collapse; the rest let
-        // `setActiveWorkbenchMode` fall through to the per-scope mode.
-        collapse: onCollapse ? () => collapseRef.current?.() : undefined,
-        isVisible: () => !bodyHiddenRef.current,
-        visiblePanelIds: () => visiblePanelIdsRef.current,
-      }),
+      concealed
+        ? undefined
+        : setActiveContextForHost(scopeKey, resource, {
+            ensureVisible: () => ensureVisibleRef.current?.(),
+            // Only hosts that own a container advertise a collapse; the rest let
+            // `setActiveWorkbenchMode` fall through to the per-scope mode.
+            collapse: onCollapse ? () => collapseRef.current?.() : undefined,
+            isVisible: () => !bodyHiddenRef.current,
+            visiblePanelIds: () => visiblePanelIdsRef.current,
+          }),
     // `onCollapse` by identity only decides whether the capability exists at
     // all — the call itself goes through the ref, so an inline arrow does not
     // churn the registration.
-    [resource, scopeKey, Boolean(onCollapse)] // eslint-disable-line react-hooks/exhaustive-deps
+    [resource, scopeKey, Boolean(onCollapse), concealed] // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   // Visibility is read through a ref, so a flip has to be announced explicitly.
@@ -1022,18 +1055,18 @@ export function ContextWorkbench({
   // speaks for the host's real pixels and exists precisely because `layout.mode`
   // can lie for `manageOwnWidth={false}` hosts. Mode states the intent; the
   // measurement below decides whether there is room to honour it.
-  const bodyWidth = useElementWidth(bodyRef)
+  // Only the threshold is stored: a stored width re-rendered this workbench
+  // and every visited panel on each frame of a dock drag or open/close.
+  const splitFitsWidth = useElementWidthFits(bodyRef, CONTEXT_WORKBENCH_SPLIT_MIN_WIDTH)
   const splitEligible = placement !== "mobile-sheet" && isSplitEligibleMode(layout.mode)
   const splitPanel = splitEligible
     ? resolvedPanels.find(
         (panel) => panel.id === layout.splitPanelId && panel.id !== layout.activePanelId
       )
     : undefined
-  // `useElementWidth` returns 0 until the ref is attached, and its own docs ask
-  // callers to read that as "not yet measured". Treating it as eligible keeps the
-  // first paint from showing one pane and snapping to two; the hook measures in
-  // a layout effect, so the correction lands before the browser paints.
-  const splitFitsWidth = bodyWidth === 0 || bodyWidth >= CONTEXT_WORKBENCH_SPLIT_MIN_WIDTH
+  // An unmeasured body reads as fitting, which keeps the first paint from
+  // showing one pane and snapping to two; the hook measures in a layout
+  // effect, so the correction lands before the browser paints.
   const splitActive = Boolean(splitPanel) && splitFitsWidth
   const secondaryPanelId = splitActive && splitPanel ? splitPanel.id : null
   // Not manually memoised: the React Compiler cannot preserve a memo whose deps
@@ -1082,8 +1115,12 @@ export function ContextWorkbench({
   // — the command palette and the activity shortcuts both need it, and native
   // panels are declared inline by each host rather than in a registry they could
   // read. Keyed on the panel ids: activity and label are fixed per id, so a
-  // re-publish is only warranted when the set itself changes.
+  // re-publish is only warranted when the set itself changes — or when the
+  // host comes out of concealment: a concealed host is not registered, its
+  // publish was dropped, and the registration it makes on reveal (the effect
+  // above, which runs first) starts from an empty list.
   useEffect(() => {
+    if (concealed) return
     publishActiveContextPanels(
       scopeKey,
       resolvedPanels.map((panel) => ({
@@ -1098,7 +1135,7 @@ export function ContextWorkbench({
     // `resolvedPanels` is derived from `resolvedPanelKey`; depending on the
     // array itself would republish on every render that re-memoises it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedPanelKey, scopeKey])
+  }, [resolvedPanelKey, scopeKey, concealed])
 
   const invokePanelLifecycle = useCallback(
     (panel: ContextPanelDefinition, phase: "first" | "restore") => {
@@ -2242,8 +2279,10 @@ export function ContextWorkbench({
           </TooltipProvider>
         ) : null}
 
-        {!bodyHidden ? (
-          <div className="flex min-w-0 flex-1 flex-col" inert={false}>
+        {/* A concealed rail-only host keeps the body, hidden, so re-opening
+            reveals it instead of rebuilding every panel. */}
+        {!bodyHidden || (railOnly && concealed) ? (
+          <div className="flex min-w-0 flex-1 flex-col" hidden={bodyHidden} inert={bodyHidden}>
             <PluginExtensionSlot
               point="sidebar.right.top"
               className="shrink-0 border-b p-2"
@@ -2331,14 +2370,14 @@ export function ContextWorkbench({
                     <Renderer
                       workbenchInstanceId={workbenchInstanceId}
                       resource={resource}
-                      active={active}
+                      active={active && !concealed}
                     />
                   </ChatScopeProvider>
                 ) : (
                   <Renderer
                     workbenchInstanceId={workbenchInstanceId}
                     resource={resource}
-                    active={active}
+                    active={active && !concealed}
                   />
                 )
                 const guardedContent = panel.pluginId ? (
@@ -2432,7 +2471,13 @@ export function ContextWorkbench({
                     </div>
                   ) : null
                 ) : (
-                  <Activity key={panel.id} mode={active ? "visible" : "hidden"}>
+                  <Activity
+                    key={panel.id}
+                    // A concealed host parks only what holds a process-wide
+                    // native surface; everything else stays live for a cheap
+                    // reveal (see `concealed`).
+                    mode={active && !(concealed && panel.exclusiveSurface) ? "visible" : "hidden"}
+                  >
                     <div className="absolute inset-x-0" style={lane}>
                       {content}
                     </div>

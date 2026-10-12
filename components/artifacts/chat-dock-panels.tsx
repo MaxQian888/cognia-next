@@ -52,7 +52,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import type { UIMessage } from "ai"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Textarea } from "@/components/ui/textarea"
@@ -63,6 +62,7 @@ import {
   type PanelInputs,
 } from "@/hooks/context-workbench/use-panel-inputs"
 import { SIDECHAT_PANEL_ID } from "@/lib/tasks/spawn-task-core"
+import { selectVisibleMessages, useChatStore, useSessionMessages } from "@/stores/chat"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
@@ -537,6 +537,9 @@ export function useArtifactSurfacePanels({
         // survives a tab switch. Without this the page — and the process-wide
         // embedded-webview lease behind it — was torn down every time.
         scope: "session",
+        // Holds the process-wide embedded-webview lease: a dock kept warm
+        // while collapsed parks this one panel so the lease is given back.
+        exclusiveSurface: true,
         preferredMode: "wide",
         renderer: renderers.browser,
       },
@@ -622,8 +625,6 @@ export interface SessionSurfacePanelsInput {
   activeSessionId: string | null
   session: Session | null
   sessionProject: Project | undefined
-  sessionMessages: UIMessage[]
-  messageCount: number
   workspaceLayout: ChatDockWorkspaceLayout
   workspaceAvailable: boolean
   unresolvedCommentCount: number
@@ -643,9 +644,14 @@ export interface SessionSurfacePanelsInput {
   newTab?: boolean
 }
 
+/**
+ * No message list here on purpose. The panels that read the transcript
+ * subscribe to it themselves (`useSessionMessages`): carried through these
+ * inputs it had to be subscribed by the dock's surface, which re-rendered the
+ * whole workbench — every visited panel body — on each streamed token.
+ */
 interface SessionPanelInputs extends DockPanelInputs {
   session: Session | null
-  sessionMessages: UIMessage[]
 }
 
 function SessionSidechatRenderer({ inputs }: Inputs<SessionPanelInputs>) {
@@ -655,10 +661,15 @@ function SessionSidechatRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   // stands now rather than a snapshot from when the panel opened — and read
   // from the store rather than subscribed, so a streamed token in the main
   // thread does not even re-render the aside.
-  const getResourceContext = useCallback(
-    () => buildAsideContext(inputs.getState().sessionMessages),
-    [inputs]
-  )
+  const getResourceContext = useCallback(() => {
+    const sessionId = inputs.getState().activeSessionId
+    const slice = sessionId ? useChatStore.getState().sessions[sessionId] : undefined
+    // The thread as the user sees it: an edit or regenerate leaves its
+    // superseded siblings in the store, and the aside must not quote those.
+    return buildAsideContext(
+      slice ? selectVisibleMessages(slice.messages, slice.activeBranchByGroup) : []
+    )
+  }, [inputs])
   return activeSessionId ? (
     <ResourceWorkbenchChatPanel
       getResourceContext={getResourceContext}
@@ -703,13 +714,15 @@ function SessionCommentsRenderer({ inputs }: Inputs<SessionPanelInputs>) {
 }
 
 function SessionSourcesRenderer({ inputs }: Inputs<SessionPanelInputs>) {
-  const sessionMessages = usePanelInput(inputs, (input) => input.sessionMessages)
+  const sessionMessages = useSessionMessages(
+    usePanelInput(inputs, (input) => input.activeSessionId)
+  )
   return <SessionSourcesPanel messages={sessionMessages} />
 }
 
 function SessionNewTabRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
-  const sessionMessages = usePanelInput(inputs, (input) => input.sessionMessages)
+  const sessionMessages = useSessionMessages(activeSessionId)
   // A tool opens in place of the New Tab page, the way a link replaces a
   // browser's start page — with the width its panel asks for.
   const openPanel = useCallback(
@@ -765,7 +778,7 @@ function SessionPlanRenderer({ inputs }: Inputs<SessionPanelInputs>) {
 
 function SessionUsageRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   const session = usePanelInput(inputs, (input) => input.session)
-  const sessionMessages = usePanelInput(inputs, (input) => input.sessionMessages)
+  const sessionMessages = useSessionMessages(session?.id ?? null)
   return session ? <SessionUsagePanel session={session} messages={sessionMessages} /> : null
 }
 
@@ -790,7 +803,6 @@ export function useSessionSurfacePanels({
   activeSessionId,
   session,
   sessionProject,
-  sessionMessages,
   workspaceLayout,
   workspaceAvailable,
   unresolvedCommentCount,
@@ -814,7 +826,6 @@ export function useSessionSurfacePanels({
     activeSessionId,
     session,
     sessionProject,
-    sessionMessages,
     workspaceLayout,
     workspaceAvailable,
     scopeKey,
@@ -924,6 +935,9 @@ export function useSessionSurfacePanels({
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
         scope: "session",
+        // Holds the process-wide embedded-webview lease: a dock kept warm
+        // while collapsed parks this one panel so the lease is given back.
+        exclusiveSurface: true,
         preferredMode: "wide",
         renderer: renderers.browser,
       },

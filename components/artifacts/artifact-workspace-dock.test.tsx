@@ -79,7 +79,7 @@ jest.mock("@/components/ui/resizable", () => {
         {/* Mid-drag layout reports at the widths the release-snap tests need.
             The real divider produces a stream of these; one is enough to leave
             the dock at a given width when the pointer comes up. */}
-        {[10, 25, 35.5, 42].map((percent) => (
+        {[10, 38, 42, 46.5, 52].map((percent) => (
           <button
             key={percent}
             type="button"
@@ -183,7 +183,7 @@ const mockDockMounts = jest.fn()
 let mockDockEffects = 0
 const mockDockEffectsLive = () => mockDockEffects
 jest.mock("./artifact-dock", () => ({
-  ArtifactDock: ({ railOnly }: { railOnly?: boolean }) => {
+  ArtifactDock: ({ railOnly, concealed }: { railOnly?: boolean; concealed?: boolean }) => {
     // Whether the dock's header would project into the title bar.
     const { useTitleBarProjectionScope } = jest.requireActual<
       typeof import("@/components/shell/title-bar-outlets")
@@ -200,6 +200,7 @@ jest.mock("./artifact-dock", () => ({
       <div
         data-testid="dock"
         data-rail-only={railOnly ? "true" : undefined}
+        data-concealed={concealed ? "true" : undefined}
         data-projection={useTitleBarProjectionScope() ? "on" : "off"}
         data-pro-ide-region=""
       >
@@ -241,8 +242,9 @@ import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import {
+  ARTIFACT_DOCK_BOUNDS,
   CHAT_MIN_PX,
-  WORKSPACE_DOCK_BOUNDS,
+  DOCK_MODE_WIDTH_PERCENT,
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
 import { requestBrowserUrl } from "@/lib/browser/open-url-request"
@@ -339,11 +341,14 @@ describe("ArtifactWorkspaceDock", () => {
 
       act(() => jest.advanceTimersByTime(400))
 
-      // Once retracted the body must actually go: a zero-width dock used to keep
-      // Monaco, the chat pane and the embedded browser alive — and the browser
-      // holds a process-wide webview lease released only on unmount. The shell
-      // itself stays so the activity rail can keep drawing.
+      // Once retracted the body leaves the screen, but not the tree: it is
+      // concealed (the workbench keeps it hidden behind the rail, and parks the
+      // embedded browser so its process-wide webview lease is given back). The
+      // shell itself stays so the activity rail can keep drawing.
       expect(screen.getByTestId("dock")).toHaveAttribute("data-rail-only", "true")
+      expect(screen.getByTestId("dock")).toHaveAttribute("data-concealed", "true")
+      // The rail stays on screen and usable, so the wrapper is not inert.
+      expect(screen.getByTestId("artifact-dock-wrapper")).not.toHaveAttribute("inert")
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
       expect(screen.getByTestId("dock")).not.toHaveAttribute("data-rail-only")
@@ -352,26 +357,36 @@ describe("ArtifactWorkspaceDock", () => {
     }
   })
 
-  it("unmounts the dock entirely when the persistent rail is switched off", async () => {
+  it("conceals a collapsed dock, then unmounts it once the park window passes", async () => {
     jest.useFakeTimers()
     try {
       useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
       render(
-        <ArtifactWorkspaceDock>
-          <div data-testid="chat" />
-        </ArtifactWorkspaceDock>
+        <TitleBarProjectionScope enabled>
+          <ArtifactWorkspaceDock>
+            <div data-testid="chat" />
+          </ArtifactWorkspaceDock>
+        </TitleBarProjectionScope>
       )
-      expect(screen.getByTestId("dock")).toBeInTheDocument()
+      expect(screen.getByTestId("dock")).toHaveAttribute("data-projection", "on")
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+      // Still itself through the collapse animation: the old view snapshot
+      // needs real content.
+      expect(screen.getByTestId("dock")).not.toHaveAttribute("data-concealed")
+
       act(() => jest.advanceTimersByTime(400))
 
-      // No rail to keep on screen: once retracted the body is parked behind
-      // `<Activity mode="hidden">` — off screen, every effect torn down (the
-      // browser's webview lease, the editor opener), kept for a cheap reveal.
-      expect(screen.getByTestId("dock")).not.toBeVisible()
-      expect(screen.getByTestId("dock")).not.toHaveAttribute("data-rail-only")
+      // No rail to keep on screen: once retracted the body is concealed — kept
+      // mounted and live, but out of reach (an inert ancestor parks every
+      // native pane inside it) and no longer projecting its header into the
+      // title bar over a dock nobody can see.
+      const wrapper = screen.getByTestId("artifact-dock-wrapper")
+      expect(screen.getByTestId("dock")).toHaveAttribute("data-concealed", "true")
+      expect(screen.getByTestId("dock")).toHaveAttribute("data-projection", "off")
+      expect(wrapper).toHaveAttribute("inert")
+      expect(wrapper).toHaveAttribute("aria-hidden", "true")
       expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "0%")
 
       // …and after the park window nothing survives behind a zero-width dock.
@@ -382,7 +397,7 @@ describe("ArtifactWorkspaceDock", () => {
     }
   })
 
-  it("re-opens a parked dock as a reveal, not a remount", async () => {
+  it("keeps a collapsed dock's body live, and re-opens it as a reveal", async () => {
     jest.useFakeTimers()
     try {
       useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
@@ -397,14 +412,75 @@ describe("ArtifactWorkspaceDock", () => {
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
       act(() => jest.advanceTimersByTime(400))
-      // Parked: the effects are down even though the body is still in the tree.
-      expect(mockDockEffectsLive()).toBe(0)
+      // Concealed, not parked behind a hidden Activity: hiding one ran every
+      // effect's cleanup and revealing it ran them all again, which re-did the
+      // Workspace's git loads, watcher and TypeScript walk on every expand.
+      expect(mockDockEffectsLive()).toBe(1)
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
       expect(screen.getByTestId("dock")).toBeVisible()
+      expect(screen.getByTestId("dock")).not.toHaveAttribute("data-concealed")
+      expect(screen.getByTestId("artifact-dock-wrapper")).not.toHaveAttribute("inert")
       expect(mockDockEffectsLive()).toBe(1)
       // The same instance came back — tabs, trees and documents with it.
       expect(mockDockMounts).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("opens a cold dock first and starts its body once the slide is over", async () => {
+    jest.useFakeTimers()
+    try {
+      useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      // Pre-rendering behind a hidden Activity: nothing of it is on screen and
+      // none of its effects have started, so the open animation does not wait
+      // for the whole workbench to mount. The surface it is about to become is
+      // drawn in its place.
+      expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute(
+        "data-size",
+        "45%"
+      )
+      expect(screen.getByTestId("artifact-dock-warming")).toBeInTheDocument()
+      expect(mockDockEffectsLive()).toBe(0)
+
+      act(() => jest.advanceTimersByTime(400))
+
+      expect(screen.getByTestId("dock")).toBeVisible()
+      expect(mockDockEffectsLive()).toBe(1)
+      expect(screen.queryByTestId("artifact-dock-warming")).not.toBeInTheDocument()
+      expect(mockDockMounts).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("drops a warming body again if the dock is shut before it finished opening", async () => {
+    jest.useFakeTimers()
+    try {
+      useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never })
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+
+      expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("artifact-dock-warming")).not.toBeInTheDocument()
+      act(() => jest.advanceTimersByTime(400))
+      expect(mockDockEffectsLive()).toBe(0)
     } finally {
       jest.useRealTimers()
     }
@@ -584,7 +660,7 @@ describe("ArtifactWorkspaceDock", () => {
     // The reveal used to have to close the Artifact Sheet to make room for the
     // Workspace one; now it just opens the one Sheet on the workspace panel.
     await waitFor(() => expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true))
-    expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
+    expect(useArtifactDockLayoutStore.getState().workspaceSurfaceActive).toBe(true)
   })
 
   it("mobile: a reveal keeps the target it is pointing at", async () => {
@@ -622,7 +698,6 @@ describe("ArtifactWorkspaceDock", () => {
 
   it("auto-expands the dock when a new artifact becomes active", () => {
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
-    act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
     const { rerender } = render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
@@ -667,7 +742,7 @@ describe("ArtifactWorkspaceDock", () => {
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
     // The width the drag passed through is not persisted as a real width — it
     // is the collapse itself.
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(34)
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(ARTIFACT_DOCK_BOUNDS.default)
 
     act(() => useArtifactDockLayoutStore.getState().toggleDock())
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
@@ -696,11 +771,11 @@ describe("ArtifactWorkspaceDock", () => {
         </ArtifactWorkspaceDock>
       )
 
-      // 35.5% sits 1.5% from the compact profile's narrow preset (34%), which on
-      // a 1280px group is 19px — inside the 24px magnet.
-      dragTo(35.5)
+      // 46.5% sits 1.5% from the narrow preset (45%), which on a 1280px group
+      // is 19px — inside the 24px magnet.
+      dragTo(46.5)
 
-      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(34)
+      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.narrow)
       offsetWidth.mockRestore()
     })
 
@@ -735,9 +810,9 @@ describe("ArtifactWorkspaceDock", () => {
       )
       const requestsBefore = useArtifactDockLayoutStore.getState().dockSizeRequest
 
-      dragTo(35.5)
+      dragTo(46.5)
 
-      // The magnet pulled 35.5% onto the 34% preset, and that move is animated.
+      // The magnet pulled 46.5% onto the 45% preset, and that move is animated.
       expect(useArtifactDockLayoutStore.getState().dockSizeRequest).toBe(requestsBefore + 1)
       offsetWidth.mockRestore()
     })
@@ -745,7 +820,7 @@ describe("ArtifactWorkspaceDock", () => {
     it("reopens to the remembered width when the drag starts from the rail", () => {
       const offsetWidth = withGroupWidth(1280)
       act(() => {
-        useArtifactDockLayoutStore.getState().setDockSize(45)
+        useArtifactDockLayoutStore.getState().setDockSize(52)
         useArtifactDockLayoutStore.getState().setDockCollapsed(true)
       })
       render(
@@ -755,12 +830,13 @@ describe("ArtifactWorkspaceDock", () => {
       )
       expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
 
-      // Barely clearing the floor still means "put it back", not "settle here".
-      dragTo(25)
+      // Barely clearing the 480px floor (37.5% of 1280px) still means "put it
+      // back", not "settle here".
+      dragTo(38)
 
       const state = useArtifactDockLayoutStore.getState()
       expect(state.dockCollapsed).toBe(false)
-      expect(state.dockSize).toBe(45)
+      expect(state.dockSize).toBe(52)
       offsetWidth.mockRestore()
     })
 
@@ -780,15 +856,14 @@ describe("ArtifactWorkspaceDock", () => {
     })
   })
 
-  it("persists a workspace-profile drag below the artifact floor", () => {
-    // jsdom reports every width as 0, and the workspace floor is only a
-    // percentage once the group's width is known.
+  it("persists a drag down to the pixel floor on a wide screen", () => {
+    // jsdom reports every width as 0, and the floor is only a percentage once
+    // the group's width is known.
     const offsetWidth = jest
       .spyOn(HTMLElement.prototype, "offsetWidth", "get")
       .mockReturnValue(2560)
     act(() => {
       useArtifactDockLayoutStore.getState().setDockCollapsed(false)
-      useArtifactDockLayoutStore.getState().setDockProfile("workspace")
     })
     render(
       <ArtifactWorkspaceDock>
@@ -796,12 +871,11 @@ describe("ArtifactWorkspaceDock", () => {
       </ArtifactWorkspaceDock>
     )
 
-    // The workspace profile's real floor is an absolute 480px, which on a wide
-    // screen is well under the artifact profile's 24%. The old guard rejected
-    // anything below 24% outright, so dragging the workspace dock to its own
-    // minimum never persisted — and the next collapse/expand restored the stale
-    // wider value.
-    // 480px of 2560px ≈ 18.75%, so 19% is a legitimate width in this profile.
+    // The real floor is an absolute 480px, which on a wide screen is well under
+    // any percentage floor. An old guard rejected anything below 24% outright,
+    // so dragging the dock to its own minimum never persisted — and the next
+    // collapse/expand restored the stale wider value.
+    // 480px of 2560px ≈ 18.75%, so 19% is a legitimate width.
     act(() => screen.getByTestId("resize-dock-narrow").click())
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(19)
     offsetWidth.mockRestore()
@@ -822,7 +896,7 @@ describe("ArtifactWorkspaceDock", () => {
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(before)
   })
 
-  it("double-clicking the divider restores the profile's preset width, animated", () => {
+  it("double-clicking the divider restores the default width, animated", () => {
     act(() => {
       useArtifactDockLayoutStore.getState().setDockCollapsed(false)
       useArtifactDockLayoutStore.getState().setDockSize(48)
@@ -841,9 +915,9 @@ describe("ArtifactWorkspaceDock", () => {
     })
 
     const state = useArtifactDockLayoutStore.getState()
-    // Compact profile preset (ARTIFACT_DOCK_BOUNDS.default); routed through
-    // the request token so it animates like the narrow/wide buttons.
-    expect(state.dockSize).toBe(34)
+    // The default (the narrow preset); routed through the request token so it
+    // animates like the narrow/wide buttons.
+    expect(state.dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.narrow)
     expect(state.dockSizeRequest).toBe(before + 1)
   })
 
@@ -912,7 +986,7 @@ describe("ArtifactWorkspaceDock", () => {
 
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
     const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
-    expect(dockPanel).toHaveAttribute("data-size", "34%")
+    expect(dockPanel).toHaveAttribute("data-size", "45%")
     // Replaying a live flex transition would reflow the chat on every frame.
     // An engine without View Transitions takes the correct final layout once.
     expect(dockPanel.style.transitionProperty).toBe("")
@@ -1009,7 +1083,7 @@ describe("ArtifactWorkspaceDock", () => {
       const panel = screen.getByTestId("resizable-panel-artifact-dock")
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
-      expect(panel).toHaveAttribute("data-size", "34%")
+      expect(panel).toHaveAttribute("data-size", "45%")
       expect(startViewTransition).toHaveBeenCalledTimes(1)
       transitions[0]?.finish()
       await waitFor(() => expect(panel.style.viewTransitionName).toBe(""))
@@ -1114,7 +1188,7 @@ describe("ArtifactWorkspaceDock", () => {
       expect(body.style.width).toBe("")
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
-      expect(dockPanel).toHaveAttribute("data-size", "34%")
+      expect(dockPanel).toHaveAttribute("data-size", "45%")
       expect(startViewTransition).toHaveBeenCalledTimes(1)
       expect(dockPanel.style.transitionProperty).toBe("")
       expect(body.style.width).toBe("")
@@ -1174,42 +1248,27 @@ describe("ArtifactWorkspaceDock", () => {
     expect(handle.className).not.toContain("opacity-0")
   })
 
-  it("widens the dock bounds and reclaims chat width in workspace mode", () => {
+  it("gives every tab the Workspace's bounds, so a tab switch cannot move the divider", () => {
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
       </ArtifactWorkspaceDock>
     )
 
-    // Artifact mode (default): 24–50% dock, 50% chat floor.
-    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-min", "24%")
-    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-max", "50%")
-    expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "50%")
-
-    // Workspace mode: absolute pixel floor, wider cap, chat floor drops to 35%.
-    act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
-    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-min", "480px")
-    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-max", "65%")
+    // One set: an absolute pixel floor, the wide cap, a 35% chat floor. These
+    // used to switch with the active panel, which is what made the dock jump
+    // when the user moved between the preview and the Workspace.
+    const dock = screen.getByTestId("resizable-panel-artifact-dock")
+    expect(dock).toHaveAttribute("data-min", "480px")
+    expect(dock).toHaveAttribute("data-max", "65%")
     expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "35%")
-  })
 
-  it("lets a width request outrank a sizing profile that has not caught up", () => {
-    render(
-      <ArtifactWorkspaceDock>
-        <div data-testid="chat" />
-      </ArtifactWorkspaceDock>
-    )
-
-    // `dockProfile` is written by `useDockPanelSync` in an effect that runs
-    // *after* the activation which asked for the width, so a workspace panel
-    // requests 65% while the profile still reads `compact` (50% cap, 50% chat
-    // floor). Clamping there left the workspace panel at the artifact width and
-    // landed the clamp as a second, untransitioned layout pass.
-    act(() => useArtifactDockLayoutStore.getState().requestDockSize(65))
-
-    expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("compact")
-    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-max", "65%")
-    expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "35%")
+    act(() => useArtifactDockLayoutStore.getState().setWorkspaceSurfaceActive(true))
+    expect(dock).toHaveAttribute("data-min", "480px")
+    expect(dock).toHaveAttribute("data-max", "65%")
+    act(() => useArtifactDockLayoutStore.getState().setWorkspaceSurfaceActive(false))
+    expect(dock).toHaveAttribute("data-min", "480px")
+    expect(dock).toHaveAttribute("data-max", "65%")
   })
 
   it("keeps one snapshot transition alive when layout echoes the settled width back", () => {
@@ -1267,7 +1326,7 @@ describe("ArtifactWorkspaceDock", () => {
     )
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
     const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
-    expect(dockPanel).toHaveAttribute("data-size", "34%")
+    expect(dockPanel).toHaveAttribute("data-size", "45%")
 
     act(() => useArtifactDockLayoutStore.getState().requestDockSize(50))
 
@@ -1285,10 +1344,10 @@ describe("ArtifactWorkspaceDock", () => {
 
     // `setDockSize` is what a drag calls on every tick — it must not re-drive
     // the panel, or the dock would fight the pointer mid-drag.
-    act(() => useArtifactDockLayoutStore.getState().setDockSize(45))
+    act(() => useArtifactDockLayoutStore.getState().setDockSize(52))
 
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(45)
-    expect(dockPanel).toHaveAttribute("data-size", "34%")
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(52)
+    expect(dockPanel).toHaveAttribute("data-size", "45%")
   })
 
   it("does not force-expand a dismissed dock — only flags it unread", () => {
@@ -1426,18 +1485,18 @@ describe("chat floor cap", () => {
     expect(dockCapForChatFloor(Number.NaN)).toBe(100)
   })
 
-  it("leaves a roomy group to the profile bounds", () => {
-    // 420 of 1920 is 21.9%, so the cap sits above the workspace profile's own
-    // 65% and the existing bounds keep deciding.
-    expect(dockCapForChatFloor(1920)).toBeGreaterThan(WORKSPACE_DOCK_BOUNDS.max)
+  it("leaves a roomy group to the dock's own bounds", () => {
+    // 420 of 1920 is 21.9%, so the cap sits above the dock's own 65% and the
+    // existing bounds keep deciding.
+    expect(dockCapForChatFloor(1920)).toBeGreaterThan(ARTIFACT_DOCK_BOUNDS.max)
   })
 
   it("caps the dock once the conversation would fall under the floor", () => {
     // 1280px window with a 30% right-docked terminal leaves a ~900px group.
-    // The workspace profile would take 65% of it and leave 315px of
-    // conversation; the cap holds the chat column at CHAT_MIN_PX instead.
+    // The dock's 65% cap would leave 315px of conversation; the cap holds the
+    // chat column at CHAT_MIN_PX instead.
     const cap = dockCapForChatFloor(900)
-    expect(cap).toBeLessThan(WORKSPACE_DOCK_BOUNDS.max)
+    expect(cap).toBeLessThan(ARTIFACT_DOCK_BOUNDS.max)
     expect((900 * (100 - cap)) / 100).toBeCloseTo(CHAT_MIN_PX, 5)
   })
 
@@ -1476,7 +1535,7 @@ describe("dock motion tokens", () => {
     // The UA sizes a snapshot `inline-size: 100%; block-size: auto`, so the box
     // keeps the snapshot's aspect ratio and shrinks with the animating group —
     // `object-fit: cover` scaled every icon and glyph with the motion instead of
-    // cropping. Pin the geometry-preserving rules and the UA crossfade blend.
+    // cropping. Pin the geometry-preserving rules.
     const globalStyles = readFileSync(join(__dirname, "../../app/globals.css"), "utf8")
     const start = globalStyles.indexOf("::view-transition-old(cognia-dock-chat)")
     const end = globalStyles.indexOf("html.reduce-motion::view-transition-group(cognia-dock-chat)")
@@ -1484,7 +1543,45 @@ describe("dock motion tokens", () => {
     expect(snapshotRules).toContain("block-size:100%")
     expect(snapshotRules).toContain("object-fit:none")
     expect(snapshotRules).not.toContain("object-fit:cover")
-    expect(snapshotRules).not.toContain("mix-blend-mode:normal")
+  })
+
+  it("draws only the larger snapshot of each edge-panel pair, fully opaque", () => {
+    // A growing group (the dock opening out of zero, the chat while the dock
+    // closes, the workspace while the sidebar collapses) is only covered past
+    // the old image's edge by the new one. Under the UA crossfade that image
+    // was still ramping up from transparent, and the page background — black
+    // under a dark theme — showed through for most of the gesture. Both
+    // opaque, the old content ghosted through the new one's transparent areas.
+    const globalStyles = readFileSync(join(__dirname, "../../app/globals.css"), "utf8")
+    const marker = globalStyles.indexOf("/* No crossfade on the edge-panel snapshots")
+    expect(marker).toBeGreaterThan(-1)
+    const firstRuleEnd = globalStyles.indexOf("}", marker) + 1
+    // Whitespace-free: the formatter wraps the longer selectors.
+    const base = globalStyles.slice(marker, firstRuleEnd).replaceAll(/\s/g, "")
+    const selection = globalStyles
+      .slice(firstRuleEnd, globalStyles.indexOf("}", firstRuleEnd) + 1)
+      .replaceAll(/\s/g, "")
+    for (const name of [
+      "cognia-dock-chat",
+      "cognia-dock-panel",
+      "cognia-shell-sidebar",
+      "cognia-shell-workspace",
+      "cognia-terminal-content",
+      "cognia-terminal-bottom",
+      "cognia-terminal-right",
+    ]) {
+      expect(base).toContain(`::view-transition-old(${name})`)
+      expect(base).toContain(`::view-transition-new(${name})`)
+      // A grown capture hides its old image; a shrunk one hides its new image.
+      expect(selection).toContain(
+        `html[data-shell-view-transition-grow~="${name}"]::view-transition-old(${name})`
+      )
+      expect(selection).toContain(
+        `html[data-shell-view-transition-shrink~="${name}"]::view-transition-new(${name})`
+      )
+    }
+    expect(base).toContain("animation:none;mix-blend-mode:normal;")
+    expect(selection).toContain("{opacity:0;}")
   })
 })
 
@@ -1524,7 +1621,7 @@ describe("ArtifactWorkspaceDock — narrow row budget (ADR-0214 D5)", () => {
     renderDock()
     expect(jest.mocked(useChatRowBudget).mock.calls.at(-1)?.[0]).toMatchObject({
       dockOpen: true,
-      dockFloor: { minPx: 0, minPercent: 24 },
+      dockFloor: { minPx: ARTIFACT_DOCK_BOUNDS.minPx, minPercent: 0 },
       chatMinPx: CHAT_MIN_PX,
     })
   })
@@ -1536,8 +1633,8 @@ describe("ArtifactWorkspaceDock — narrow row budget (ADR-0214 D5)", () => {
 
     const overlay = screen.getByRole("dialog", { name: "Side panel" })
     expect(overlay).toHaveAttribute("aria-modal", "true")
-    // 34% of the 800px row, over the artifact floor and under the chat strip.
-    expect(overlay).toHaveStyle({ width: "272px" })
+    // 45% of the 800px row is 360px, under the 480px floor, so the floor wins.
+    expect(overlay).toHaveStyle({ width: "480px" })
     expect(overlay).toContainElement(screen.getByTestId("dock"))
     expect(screen.getByTestId("artifact-dock-scrim")).toBeInTheDocument()
     expect(screen.getByTestId("artifact-workspace-dock")).toHaveAttribute("data-dock-overlay")
@@ -1697,16 +1794,17 @@ describe("ArtifactWorkspaceDock — the chat-floor cap is the window's, not the 
   it("still keeps a width the user drags to below the cap", () => {
     act(() => {
       useArtifactDockLayoutStore.getState().setDockCollapsed(false)
-      useArtifactDockLayoutStore.getState().setDockSize(50)
+      useArtifactDockLayoutStore.getState().setDockSize(62)
     })
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
       </ArtifactWorkspaceDock>
     )
-    groupWidth = 420 / 0.58
-    fireEvent.click(screen.getByTestId("resize-dock-to-35.5"))
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(35.5)
+    // A 1000px group: the 480px floor is 48%, the chat floor caps at 58%.
+    groupWidth = 1000
+    fireEvent.click(screen.getByTestId("resize-dock-to-52"))
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(52)
   })
 })
 

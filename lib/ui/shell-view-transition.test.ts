@@ -1,7 +1,12 @@
 /** @jest-environment jsdom */
 
 import { isProIdePanePinnedWithin } from "@/lib/codeserver/pane-manager"
-import { runShellViewTransition } from "./shell-view-transition"
+import {
+  SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE,
+  SHELL_VIEW_TRANSITION_SHRINK_ATTRIBUTE,
+  classifyCaptures,
+  runShellViewTransition,
+} from "./shell-view-transition"
 
 jest.mock("@/lib/codeserver/pane-manager", () => ({
   isProIdePanePinnedWithin: jest.fn(() => false),
@@ -279,5 +284,115 @@ describe("edge-panel transition hold", () => {
     const cancel = runShellViewTransition({ captures: [], apply: jest.fn() })
     cancel()
     expect(held()).toBe(false)
+  })
+})
+
+describe("grow / shrink marks", () => {
+  // Which of each old/new snapshot pair is drawn is decided in CSS from these
+  // two root lists: a capture that grew shows its new image, one that shrank
+  // its old one — the larger of the pair, which always covers its group.
+  function sized(width: number, height = 100) {
+    const element = document.createElement("div")
+    document.body.appendChild(element)
+    const box = { width, height }
+    element.getBoundingClientRect = () => ({ ...box }) as DOMRect
+    return { element, box }
+  }
+
+  afterEach(() => {
+    document.body.replaceChildren()
+    document.documentElement.removeAttribute(SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE)
+    document.documentElement.removeAttribute(SHELL_VIEW_TRANSITION_SHRINK_ATTRIBUTE)
+  })
+
+  it("classifies each capture by the area it had before the gesture", () => {
+    const grows = sized(300)
+    const shrinks = sized(500)
+    const same = sized(200)
+    const before = [300 * 100, 500 * 100, 200 * 100, null]
+    grows.box.width = 400
+    shrinks.box.width = 100
+
+    expect(
+      classifyCaptures(
+        [
+          { element: grows.element, name: "a" },
+          { element: shrinks.element, name: "b" },
+          { element: same.element, name: "c" },
+          { element: null, name: "unmeasured" },
+        ],
+        before
+      )
+    ).toEqual({ grow: ["a", "c"], shrink: ["b"] })
+  })
+
+  it("marks the root after the commit lands, before the new snapshot", async () => {
+    let update: (() => Promise<void> | void) | undefined
+    let resolveFinished = () => {}
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: jest.fn((cb: () => Promise<void> | void) => {
+        update = cb
+        return {
+          ready: Promise.resolve(),
+          finished: new Promise<void>((resolve) => {
+            resolveFinished = resolve
+          }),
+          skipTransition: jest.fn(),
+        }
+      }),
+    })
+    const panel = sized(0)
+    const chat = sized(1000)
+
+    runShellViewTransition({
+      captures: [
+        { element: panel.element, name: "cognia-dock-panel" },
+        { element: chat.element, name: "cognia-dock-chat" },
+      ],
+      // The layout the gesture commits: the dock opens, the chat gives way.
+      apply: () => {
+        panel.box.width = 400
+        chat.box.width = 600
+      },
+    })
+    await update?.()
+
+    const root = document.documentElement
+    expect(root.getAttribute(SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE)).toBe("cognia-dock-panel")
+    expect(root.getAttribute(SHELL_VIEW_TRANSITION_SHRINK_ATTRIBUTE)).toBe("cognia-dock-chat")
+
+    resolveFinished()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(root.hasAttribute(SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE)).toBe(false)
+    expect(root.hasAttribute(SHELL_VIEW_TRANSITION_SHRINK_ATTRIBUTE)).toBe(false)
+  })
+
+  it("leaves no marks behind when the gesture settled before they were taken", async () => {
+    let update: (() => Promise<void> | void) | undefined
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: jest.fn((cb: () => Promise<void> | void) => {
+        update = cb
+        return {
+          ready: Promise.resolve(),
+          finished: new Promise<void>(() => {}),
+          skipTransition: jest.fn(),
+        }
+      }),
+    })
+    const panel = sized(0)
+    const cancel = runShellViewTransition({
+      captures: [{ element: panel.element, name: "cognia-dock-panel" }],
+      apply: () => {
+        panel.box.width = 400
+      },
+    })
+    const pending = update?.()
+    cancel()
+    await pending
+
+    expect(document.documentElement.hasAttribute(SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE)).toBe(false)
   })
 })

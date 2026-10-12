@@ -9,7 +9,7 @@ import {
   DOCK_SIZE_PERSIST_FLOOR,
   ARTIFACT_DOCK_PERSIST_DEBOUNCE_MS,
   DOCK_MODE_WIDTH_PERCENT,
-  WORKSPACE_DOCK_BOUNDS,
+  WORKSPACE_SURFACE_PANEL_IDS,
   useArtifactDockLayoutStore,
 } from "./artifact-dock-layout-store"
 import {
@@ -34,24 +34,13 @@ describe("useArtifactDockLayoutStore", () => {
   })
 
   describe("width presets", () => {
-    it("maps the workbench modes onto real dock widths, per profile", () => {
-      expect(DOCK_MODE_WIDTH_PERCENT.compact.narrow).toBe(ARTIFACT_DOCK_BOUNDS.default)
-      expect(DOCK_MODE_WIDTH_PERCENT.compact.wide).toBe(ARTIFACT_DOCK_BOUNDS.max)
-      expect(DOCK_MODE_WIDTH_PERCENT.compact.wide).toBeGreaterThan(
-        DOCK_MODE_WIDTH_PERCENT.compact.narrow
-      )
-    })
-
-    it("lets the workspace profile reach its own cap, not the artifact one", () => {
-      // A single shared table capped "wide" at 50% even in workspace mode,
-      // where the panel allows 65% — the button silently under-delivered.
-      expect(DOCK_MODE_WIDTH_PERCENT.workspace.wide).toBe(WORKSPACE_DOCK_BOUNDS.max)
-      expect(DOCK_MODE_WIDTH_PERCENT.workspace.wide).toBeGreaterThan(
-        DOCK_MODE_WIDTH_PERCENT.compact.wide
-      )
-      expect(DOCK_MODE_WIDTH_PERCENT.workspace.narrow).toBeGreaterThan(
-        DOCK_MODE_WIDTH_PERCENT.compact.narrow
-      )
+    it("maps the workbench modes onto one set of dock widths, whichever tab is showing", () => {
+      // There is no per-panel profile any more: the default is the Workspace
+      // tab's width and "wide" reaches the one cap.
+      expect(DOCK_MODE_WIDTH_PERCENT.narrow).toBe(ARTIFACT_DOCK_BOUNDS.default)
+      expect(DOCK_MODE_WIDTH_PERCENT.wide).toBe(ARTIFACT_DOCK_BOUNDS.max)
+      expect(DOCK_MODE_WIDTH_PERCENT.wide).toBeGreaterThan(DOCK_MODE_WIDTH_PERCENT.narrow)
+      expect(ARTIFACT_DOCK_BOUNDS).toEqual({ minPx: 480, max: 65, default: 45 })
     })
 
     it("bumps the request token only on an explicit width request", () => {
@@ -63,8 +52,8 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.dockSize).toBe(45)
       expect(result.current.dockSizeRequest).toBe(initialToken)
 
-      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.compact.wide))
-      expect(result.current.dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.compact.wide)
+      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.wide))
+      expect(result.current.dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.wide)
       expect(result.current.dockSizeRequest).toBe(initialToken + 1)
     })
 
@@ -74,22 +63,22 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.dockSize).toBe(DOCK_SIZE_PERSIST_FLOOR)
 
       act(() => result.current.requestDockSize(999))
-      expect(result.current.dockSize).toBe(WORKSPACE_DOCK_BOUNDS.max)
+      expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.max)
     })
 
-    it("keeps a workspace width below the artifact floor", () => {
+    it("keeps a width below any percentage floor", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
-      // The workspace profile's real minimum is an absolute 480px, which is
-      // under 24% on a wide screen. Clamping the *stored* value at the artifact
-      // floor rounded that back up, so the dock sprang wider on the next
-      // collapse/expand. Per-profile bounds are the ResizablePanel's job.
+      // The real minimum is an absolute 480px, which is under 24% on a wide
+      // screen. Clamping the *stored* value at a percentage floor rounded that
+      // back up, so the dock sprang wider on the next collapse/expand. The real
+      // bounds are the ResizablePanel's job.
       act(() => result.current.setDockSize(19))
       expect(result.current.dockSize).toBe(19)
     })
 
     it("never restores the runtime request token from disk", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
-      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.compact.wide))
+      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.wide))
       expect(readPersisted()?.state.dockSizeRequest).toBeUndefined()
     })
   })
@@ -100,7 +89,7 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.default)
       expect(result.current.dockCollapsed).toBe(true)
       expect(result.current.mobileSheetOpen).toBe(false)
-      expect(result.current.dockProfile).toBe("compact")
+      expect(result.current.workspaceSurfaceActive).toBe(false)
       expect(result.current.revealIntent).toBeNull()
       expect(result.current.workspaceRevealRequest).toBeNull()
       expect(result.current.workspaceContext).toBeNull()
@@ -122,12 +111,10 @@ describe("useArtifactDockLayoutStore", () => {
         result.current.setDockSize(1)
       })
       expect(result.current.dockSize).toBe(DOCK_SIZE_PERSIST_FLOOR)
-      // Upper bound spans both modes so a wide workspace size survives; the
-      // per-mode artifact cap (50%) is enforced at render by the ResizablePanel.
       act(() => {
         result.current.setDockSize(99)
       })
-      expect(result.current.dockSize).toBe(WORKSPACE_DOCK_BOUNDS.max)
+      expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.max)
     })
 
     it("falls back to default on non-finite input", () => {
@@ -156,15 +143,17 @@ describe("useArtifactDockLayoutStore", () => {
   })
 
   describe("collapse", () => {
-    it("toggleDock flips the collapsed flag without touching the profile", () => {
+    it("toggleDock flips the collapsed flag without touching the surface or width", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
-      act(() => result.current.setDockProfile("workspace"))
+      act(() => result.current.setWorkspaceSurfaceActive(true))
+      act(() => result.current.setDockSize(52))
       act(() => result.current.toggleDock())
       expect(result.current.dockCollapsed).toBe(false)
-      expect(result.current.dockProfile).toBe("workspace")
+      expect(result.current.workspaceSurfaceActive).toBe(true)
       act(() => result.current.toggleDock())
       expect(result.current.dockCollapsed).toBe(true)
-      expect(result.current.dockProfile).toBe("workspace")
+      expect(result.current.workspaceSurfaceActive).toBe(true)
+      expect(result.current.dockSize).toBe(52)
     })
 
     it("setDockCollapsed accepts explicit values", () => {
@@ -409,7 +398,7 @@ describe("useArtifactDockLayoutStore", () => {
 
       expect(result.current.revealIntent).toEqual({ panelId: "workspace", mode: "wide" })
       expect(result.current.dockCollapsed).toBe(false)
-      expect(result.current.dockProfile).toBe("workspace")
+      expect(result.current.workspaceSurfaceActive).toBe(true)
       // The earlier file reveal targeted another root; left queued it would
       // re-root the editor on its next render.
       expect(result.current.workspaceRevealRequest).toBeNull()
@@ -423,66 +412,53 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.workspaceContext).toBeNull()
     })
 
-    it("leaving the workspace profile drops a stale workspace reveal", () => {
+    it("leaving the Workspace surface drops a stale workspace reveal", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => result.current.revealWorkspaceReview({ sessionId: "session-1", rootPath: "/repo" }))
       expect(result.current.workspaceContext).not.toBeNull()
+      // The workbench consumed the reveal and is showing the Workspace.
+      act(() => result.current.consumeRevealIntent("workspace"))
 
-      // Re-entering the profile it already owns must NOT wipe the target.
-      act(() => result.current.setDockProfile("workspace"))
+      // Re-entering the surface it is already on must NOT wipe the target.
+      act(() => result.current.setWorkspaceSurfaceActive(true))
       expect(result.current.workspaceContext).not.toBeNull()
 
-      act(() => result.current.setDockProfile("compact"))
+      act(() => result.current.setWorkspaceSurfaceActive(false))
       expect(result.current.workspaceRevealRequest).toBeNull()
       expect(result.current.workspaceContext).toBeNull()
     })
 
-    it("animates the dock back under the compact cap when leaving the workspace", () => {
+    it("keeps a reveal into the Workspace that has not been consumed yet", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
-      act(() => result.current.setDockProfile("workspace"))
-      act(() => result.current.setDockSize(WORKSPACE_DOCK_BOUNDS.max))
-      const requestsBefore = result.current.dockSizeRequest
-
-      act(() => result.current.setDockProfile("compact"))
-
-      // Compact caps lower than workspace does, and the ResizablePanel enforces
-      // the new maxSize on its next layout — so without this the dock snapped
-      // in with no transition. Going through the request token makes it animate
-      // like every other programmatic width change.
-      expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.max)
-      expect(result.current.dockSizeRequest).toBe(requestsBefore + 1)
+      act(() =>
+        result.current.revealWorkspaceFile({ sessionId: "s", rootPath: "/repo", relPath: "a.ts" })
+      )
+      // A surface swap mounts a workbench whose last panel was something else,
+      // and its sync runs one effect ahead of the reveal it is about to take.
+      act(() => result.current.setWorkspaceSurfaceActive(false))
+      expect(result.current.workspaceContext).toMatchObject({ kind: "file", relPath: "a.ts" })
+      expect(result.current.workspaceRevealRequest).not.toBeNull()
     })
 
-    it("leaves a width already inside the compact cap alone", () => {
+    it("names the Workspace surface by the same panel ids the dock catalogue uses", () => {
+      expect([...WORKSPACE_SURFACE_PANEL_IDS].sort()).toEqual(["project-overview", "workspace"])
+    })
+
+    it("never moves the dock's width when the surface changes", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
-      act(() => result.current.setDockProfile("workspace"))
-      act(() => result.current.setDockSize(40))
+      act(() => result.current.setWorkspaceSurfaceActive(true))
+      act(() => result.current.setDockSize(ARTIFACT_DOCK_BOUNDS.max))
       const requestsBefore = result.current.dockSizeRequest
 
-      act(() => result.current.setDockProfile("compact"))
+      act(() => result.current.setWorkspaceSurfaceActive(false))
 
-      expect(result.current.dockSize).toBe(40)
+      // Leaving the Workspace used to clamp the dock under a narrower
+      // profile's cap, so the divider jumped on every tab switch.
+      expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.max)
       expect(result.current.dockSizeRequest).toBe(requestsBefore)
     })
 
-    it("migrates a v1 snapshot onto the compact profile", async () => {
-      window.localStorage.setItem(
-        PERSIST_NAME,
-        JSON.stringify({
-          state: { dockSize: 41, dockCollapsed: false, listRailOpen: true, layoutVersion: 3 },
-          version: 1,
-        })
-      )
-
-      await act(async () => {
-        await useArtifactDockLayoutStore.persist.rehydrate()
-      })
-
-      expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("compact")
-      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(41)
-    })
-
-    it("persists the sizing profile but never the runtime reveal request", () => {
+    it("persists the width but never the runtime surface flag or reveal request", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => {
         result.current.revealWorkspaceFile({
@@ -494,7 +470,7 @@ describe("useArtifactDockLayoutStore", () => {
         })
       })
 
-      expect(result.current.dockProfile).toBe("workspace")
+      expect(result.current.workspaceSurfaceActive).toBe(true)
       expect(result.current.dockCollapsed).toBe(false)
       expect(result.current.mobileSheetOpen).toBe(true)
       expect(result.current.workspaceRevealRequest).toMatchObject({
@@ -505,23 +481,43 @@ describe("useArtifactDockLayoutStore", () => {
         line: 12,
         column: 4,
       })
-      expect(readPersisted()?.state.dockProfile).toBe("workspace")
+      expect(readPersisted()?.state).not.toHaveProperty("workspaceSurfaceActive")
+      expect(readPersisted()?.state).not.toHaveProperty("dockProfile")
       expect(readPersisted()?.state).not.toHaveProperty("workspaceRevealRequest")
       expect(readPersisted()?.state).not.toHaveProperty("workspaceContext")
     })
 
     it.each([
-      ["workspace", "workspace"],
-      ["browser", "compact"],
-      ["artifact", "compact"],
-    ])("migrates a v2 dockMode %s onto the %s profile", async (dockMode, dockProfile) => {
-      // Only the *sizing* meaning of the old three-value mode survives:
-      // `workspace` was the one value that changed the dock's min/max bounds.
+      ["v1 list-rail layout", 1, { dockSize: 41, listRailOpen: true }],
+      ["v2 dockMode", 2, { dockSize: 38, dockMode: "workspace" }],
+      ["v3 compact profile", 3, { dockSize: 34, dockProfile: "compact" }],
+    ])(
+      "lifts a %s width left by the old compact profile to the Workspace default",
+      async (_label, version, state) => {
+        window.localStorage.setItem(
+          PERSIST_NAME,
+          JSON.stringify({ state: { dockCollapsed: false, layoutVersion: 2, ...state }, version })
+        )
+
+        await act(async () => {
+          await useArtifactDockLayoutStore.persist.rehydrate()
+        })
+
+        const restored = useArtifactDockLayoutStore.getState()
+        expect(restored.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.default)
+        expect(restored.dockCollapsed).toBe(false)
+        expect(restored).not.toHaveProperty("dockMode")
+        expect(restored).not.toHaveProperty("listRailOpen")
+        expect(restored).not.toHaveProperty("dockProfile")
+      }
+    )
+
+    it("keeps a pre-v4 width the user had dragged wider than the default", async () => {
       window.localStorage.setItem(
         PERSIST_NAME,
         JSON.stringify({
-          state: { dockSize: 38, dockCollapsed: false, dockMode, layoutVersion: 2 },
-          version: 2,
+          state: { dockSize: 58, dockCollapsed: true, dockProfile: "workspace", layoutVersion: 1 },
+          version: 3,
         })
       )
 
@@ -529,9 +525,7 @@ describe("useArtifactDockLayoutStore", () => {
         await useArtifactDockLayoutStore.persist.rehydrate()
       })
 
-      expect(useArtifactDockLayoutStore.getState().dockProfile).toBe(dockProfile)
-      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(38)
-      expect(useArtifactDockLayoutStore.getState()).not.toHaveProperty("dockMode")
+      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(58)
     })
 
     it("queues review reveals and lets the consumer clear only the matching request", () => {
@@ -587,14 +581,13 @@ describe("useArtifactDockLayoutStore", () => {
         PERSIST_NAME,
         JSON.stringify({
           state: {
-            dockSize: 40,
+            dockSize: 50,
             dockCollapsed: false,
-            dockProfile: "workspace",
             layoutVersion: 1,
             mobileSnapPoint: CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0],
             mobileSheetOpen: true,
           },
-          version: 3,
+          version: 4,
         })
       )
 
@@ -604,7 +597,7 @@ describe("useArtifactDockLayoutStore", () => {
 
       const state = useArtifactDockLayoutStore.getState()
       expect(state.dockCollapsed).toBe(false)
-      expect(state.dockSize).toBe(40)
+      expect(state.dockSize).toBe(50)
       expect(state.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0])
       expect(state.mobileSheetOpen).toBe(false)
     })
@@ -647,12 +640,12 @@ describe("useArtifactDockLayoutStore", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => {
         result.current.setDockSize(48)
-        result.current.setDockProfile("workspace")
+        result.current.setWorkspaceSurfaceActive(true)
         result.current.setDockCollapsed(false)
       })
       act(() => result.current.clearSessionScopedReveals())
       expect(result.current.dockSize).toBe(48)
-      expect(result.current.dockProfile).toBe("workspace")
+      expect(result.current.workspaceSurfaceActive).toBe(true)
       expect(result.current.dockCollapsed).toBe(false)
     })
 
@@ -717,14 +710,14 @@ describe("useArtifactDockLayoutStore", () => {
       act(() => {
         result.current.setDockSize(48)
         result.current.setDockCollapsed(false)
-        result.current.setDockProfile("workspace")
+        result.current.setWorkspaceSurfaceActive(true)
         result.current.setMobileSheetOpen(true)
       })
       act(() => result.current.resetLayout())
       expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.default)
       expect(result.current.dockCollapsed).toBe(true)
       expect(result.current.mobileSheetOpen).toBe(false)
-      expect(result.current.dockProfile).toBe("compact")
+      expect(result.current.workspaceSurfaceActive).toBe(false)
       expect(result.current.revealIntent).toBeNull()
       expect(result.current.workspaceRevealRequest).toBeNull()
       expect(result.current.workspaceContext).toBeNull()

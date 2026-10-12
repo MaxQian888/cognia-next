@@ -2587,8 +2587,8 @@ html[data-micro-label="mono-upper"] [data-micro-label] {
    every frame and popped back to 1:1 when the live layout returned. Filling the
    group and drawing the snapshot at its natural size (`object-fit: none`) is
    what actually pins the geometry; the anchors below decide which edge stays.
-   The UA's `plus-lighter` crossfade is kept on purpose: a `normal` blend of two
-   opacity ramps dips to 75% coverage mid-motion, which read as a flash. */
+   The images do not crossfade at all — see the opaque-snapshot rule after the
+   terminal block, which covers every edge-panel pair. */
 ::view-transition-group(cognia-dock-chat),
 ::view-transition-group(cognia-dock-divider),
 ::view-transition-group(cognia-dock-panel) {
@@ -2831,6 +2831,142 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-terminal-outlet-en
 html[data-shell-view-transition]
   :is(#conversation-sidebar, [data-shell-edge-panel], [data-title-bar-outlet]) {
   transition: none !important;
+}
+
+/* No crossfade on the edge-panel snapshots: of each old/new pair, only the
+   larger image is drawn, fully opaque. Every pair above is anchored to the
+   edge that does not move and its group's size runs between the two
+   snapshots' sizes, so the larger image always covers the whole group — the
+   new one for a group that grows, the old one for a group that shrinks.
+   `lib/ui/shell-view-transition.ts` measures each capture after the commit
+   and lists it in `data-shell-view-transition-grow` / `-shrink` before the
+   new snapshot is taken.
+
+   Under the UA crossfade a growing group (the workspace while the sidebar
+   collapses, the chat while the dock closes, the dock opening out of zero)
+   was covered past the old image's edge only by a new image still ramping up
+   from transparent, so the page background — black under a dark theme —
+   showed through for most of the gesture. Drawing both images opaque instead
+   closed that hole but ghosted: these snapshots are transparent wherever the
+   element paints no background, so the old content showed through the new.
+   A capture in neither list keeps both, new over old: never a hole. */
+::view-transition-old(cognia-dock-chat),
+::view-transition-new(cognia-dock-chat),
+::view-transition-old(cognia-dock-panel),
+::view-transition-new(cognia-dock-panel),
+::view-transition-old(cognia-dock-outlet-center),
+::view-transition-new(cognia-dock-outlet-center),
+::view-transition-old(cognia-dock-outlet-end),
+::view-transition-new(cognia-dock-outlet-end),
+::view-transition-old(cognia-shell-sidebar),
+::view-transition-new(cognia-shell-sidebar),
+::view-transition-old(cognia-shell-rail),
+::view-transition-new(cognia-shell-rail),
+::view-transition-old(cognia-shell-workspace),
+::view-transition-new(cognia-shell-workspace),
+::view-transition-old(cognia-shell-outlet-start),
+::view-transition-new(cognia-shell-outlet-start),
+::view-transition-old(cognia-shell-outlet-center),
+::view-transition-new(cognia-shell-outlet-center),
+::view-transition-old(cognia-shell-outlet-end),
+::view-transition-new(cognia-shell-outlet-end),
+::view-transition-old(cognia-terminal-content),
+::view-transition-new(cognia-terminal-content),
+::view-transition-old(cognia-terminal-bottom),
+::view-transition-new(cognia-terminal-bottom),
+::view-transition-old(cognia-terminal-right),
+::view-transition-new(cognia-terminal-right),
+::view-transition-old(cognia-terminal-outlet-center),
+::view-transition-new(cognia-terminal-outlet-center),
+::view-transition-old(cognia-terminal-outlet-end),
+::view-transition-new(cognia-terminal-outlet-end) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html[data-shell-view-transition-grow~="cognia-dock-chat"]::view-transition-old(cognia-dock-chat),
+html[data-shell-view-transition-grow~="cognia-dock-panel"]::view-transition-old(cognia-dock-panel),
+html[data-shell-view-transition-grow~="cognia-dock-outlet-center"]::view-transition-old(
+    cognia-dock-outlet-center
+  ),
+html[data-shell-view-transition-grow~="cognia-dock-outlet-end"]::view-transition-old(
+    cognia-dock-outlet-end
+  ),
+html[data-shell-view-transition-grow~="cognia-shell-sidebar"]::view-transition-old(
+    cognia-shell-sidebar
+  ),
+html[data-shell-view-transition-grow~="cognia-shell-rail"]::view-transition-old(cognia-shell-rail),
+html[data-shell-view-transition-grow~="cognia-shell-workspace"]::view-transition-old(
+    cognia-shell-workspace
+  ),
+html[data-shell-view-transition-grow~="cognia-shell-outlet-start"]::view-transition-old(
+    cognia-shell-outlet-start
+  ),
+html[data-shell-view-transition-grow~="cognia-shell-outlet-center"]::view-transition-old(
+    cognia-shell-outlet-center
+  ),
+html[data-shell-view-transition-grow~="cognia-shell-outlet-end"]::view-transition-old(
+    cognia-shell-outlet-end
+  ),
+html[data-shell-view-transition-grow~="cognia-terminal-content"]::view-transition-old(
+    cognia-terminal-content
+  ),
+html[data-shell-view-transition-grow~="cognia-terminal-bottom"]::view-transition-old(
+    cognia-terminal-bottom
+  ),
+html[data-shell-view-transition-grow~="cognia-terminal-right"]::view-transition-old(
+    cognia-terminal-right
+  ),
+html[data-shell-view-transition-grow~="cognia-terminal-outlet-center"]::view-transition-old(
+    cognia-terminal-outlet-center
+  ),
+html[data-shell-view-transition-grow~="cognia-terminal-outlet-end"]::view-transition-old(
+    cognia-terminal-outlet-end
+  ),
+html[data-shell-view-transition-shrink~="cognia-dock-chat"]::view-transition-new(cognia-dock-chat),
+html[data-shell-view-transition-shrink~="cognia-dock-panel"]::view-transition-new(
+    cognia-dock-panel
+  ),
+html[data-shell-view-transition-shrink~="cognia-dock-outlet-center"]::view-transition-new(
+    cognia-dock-outlet-center
+  ),
+html[data-shell-view-transition-shrink~="cognia-dock-outlet-end"]::view-transition-new(
+    cognia-dock-outlet-end
+  ),
+html[data-shell-view-transition-shrink~="cognia-shell-sidebar"]::view-transition-new(
+    cognia-shell-sidebar
+  ),
+html[data-shell-view-transition-shrink~="cognia-shell-rail"]::view-transition-new(
+    cognia-shell-rail
+  ),
+html[data-shell-view-transition-shrink~="cognia-shell-workspace"]::view-transition-new(
+    cognia-shell-workspace
+  ),
+html[data-shell-view-transition-shrink~="cognia-shell-outlet-start"]::view-transition-new(
+    cognia-shell-outlet-start
+  ),
+html[data-shell-view-transition-shrink~="cognia-shell-outlet-center"]::view-transition-new(
+    cognia-shell-outlet-center
+  ),
+html[data-shell-view-transition-shrink~="cognia-shell-outlet-end"]::view-transition-new(
+    cognia-shell-outlet-end
+  ),
+html[data-shell-view-transition-shrink~="cognia-terminal-content"]::view-transition-new(
+    cognia-terminal-content
+  ),
+html[data-shell-view-transition-shrink~="cognia-terminal-bottom"]::view-transition-new(
+    cognia-terminal-bottom
+  ),
+html[data-shell-view-transition-shrink~="cognia-terminal-right"]::view-transition-new(
+    cognia-terminal-right
+  ),
+html[data-shell-view-transition-shrink~="cognia-terminal-outlet-center"]::view-transition-new(
+    cognia-terminal-outlet-center
+  ),
+html[data-shell-view-transition-shrink~="cognia-terminal-outlet-end"]::view-transition-new(
+    cognia-terminal-outlet-end
+  ) {
+  opacity: 0;
 }
 
 /* Monaco editor flex-shrink fix (microsoft/monaco-editor#3393, #1482).

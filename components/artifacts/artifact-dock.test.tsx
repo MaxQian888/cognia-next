@@ -178,17 +178,25 @@ jest.mock("./artifact-list", () => ({
 // real store — the session surface's metadata panel reads a message count off it.
 let mockActiveSessionId: string | null = "sess-1"
 let mockSessionMessages: unknown[] = []
+function mockChatState() {
+  return {
+    activeSessionId: mockActiveSessionId,
+    sessions: { "sess-1": { messages: mockSessionMessages } } as Record<
+      string,
+      { messages: unknown[] }
+    >,
+  }
+}
 jest.mock("@/stores/chat", () => ({
-  useChatStore: (
-    selector: (s: {
-      activeSessionId: string | null
-      sessions: Record<string, { messages: unknown[] }>
-    }) => unknown
-  ) =>
-    selector({
-      activeSessionId: mockActiveSessionId,
-      sessions: { "sess-1": { messages: mockSessionMessages } },
-    }),
+  useChatStore: Object.assign(
+    (selector: (s: ReturnType<typeof mockChatState>) => unknown) => selector(mockChatState()),
+    { getState: () => mockChatState() }
+  ),
+  // The panels that read the transcript subscribe to it themselves.
+  useSessionMessages: (sessionId: string | null) =>
+    (sessionId ? mockChatState().sessions[sessionId]?.messages : undefined) ?? [],
+  // No branches in these fixtures: every message is the visible one.
+  selectVisibleMessages: (messages: unknown[]) => messages,
 }))
 
 // The conversation record behind the metadata panel. Absent by default; tests
@@ -971,7 +979,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     activateArtifact()
     act(() => {
       useArtifactDockLayoutStore.getState().setDockCollapsed(false)
-      useArtifactDockLayoutStore.getState().requestDockSize(DOCK_MODE_WIDTH_PERCENT.compact.wide)
+      useArtifactDockLayoutStore.getState().requestDockSize(DOCK_MODE_WIDTH_PERCENT.wide)
     })
     render(<ArtifactDock />)
 
@@ -981,8 +989,8 @@ describe("ArtifactDock — converged workbench shell", () => {
     )
 
     // Activating a panel with no `preferredMode` writes `layout.mode = "narrow"`,
-    // but the dock's width is a high-water mark that never narrows on its own —
-    // so the old highlight claimed "narrow" over a 50%-wide dock.
+    // but the dock's width never moves with a panel — so a highlight read off
+    // the mode would claim "narrow" over a wide dock.
     fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.artifactMode" }))
 
     expect(screen.getByRole("button", { name: "contextWorkbench.actions.wide" })).toHaveAttribute(
@@ -1030,20 +1038,20 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(useArtifactDockLayoutStore.getState().revealIntent).toBeNull()
   })
 
-  it("follows the active panel with the sizing profile, in one direction only", () => {
+  it("tells the store when the Workspace surface is showing, in one direction only", () => {
     render(<ArtifactDock />)
 
     openFromNewTab("workspace")
-    expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
+    expect(useArtifactDockLayoutStore.getState().workspaceSurfaceActive).toBe(true)
 
     openFromNewTab("artifacts")
-    expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("compact")
+    expect(useArtifactDockLayoutStore.getState().workspaceSurfaceActive).toBe(false)
 
     // The predecessor wrote the mode from panel lifecycle hooks AND read it
     // back to order the panels, so re-entering a visited panel could bounce the
     // dock out of the surface asked for. Re-entry must simply work.
     fireEvent.click(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" }))
-    expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
+    expect(useArtifactDockLayoutStore.getState().workspaceSurfaceActive).toBe(true)
     expect(activePanelId("session:sess-1")).toBe("workspace")
   })
 
@@ -1054,27 +1062,10 @@ describe("ArtifactDock — converged workbench shell", () => {
     // The dock is mounted with manageOwnWidth={false}, so without this wiring
     // these two buttons would render but do nothing.
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.wide" }))
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
-      DOCK_MODE_WIDTH_PERCENT.compact.wide
-    )
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.wide)
 
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.narrow" }))
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
-      DOCK_MODE_WIDTH_PERCENT.compact.narrow
-    )
-  })
-
-  it("lets wide reach the workspace cap once the workspace panel is showing", () => {
-    render(<ArtifactDock />)
-    openFromNewTab("workspace")
-
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.wide" }))
-
-    // A single shared preset table capped this at the artifact bound (50%)
-    // even though the workspace panel allows 65%.
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
-      DOCK_MODE_WIDTH_PERCENT.workspace.wide
-    )
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.narrow)
   })
 
   it("drives the dock width from the session surface too", () => {
@@ -1082,55 +1073,50 @@ describe("ArtifactDock — converged workbench shell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.wide" }))
 
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
-      DOCK_MODE_WIDTH_PERCENT.compact.wide
-    )
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.wide)
   })
 
-  it("widens the dock for a panel that asked for it, at that panel's own cap", () => {
+  it("keeps one width across every tab switch, whichever panel asked for more", () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockSize(DOCK_MODE_WIDTH_PERCENT.narrow))
     render(<ArtifactDock />)
+    const requestsBefore = useArtifactDockLayoutStore.getState().dockSizeRequest
 
-    openFromNewTab("workspace")
-
-    // The cap has to come from the *arriving* panel: `dockProfile` is only
-    // flipped by an effect after `activePanelId` changes, so reading it here
-    // would look up compact.wide (50%) instead of workspace.wide (65%).
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
-      DOCK_MODE_WIDTH_PERCENT.workspace.wide
-    )
+    // The workspace and the browser both prefer "wide"; the artifact list and
+    // the side chat do not. None of them may move the divider: the dock used
+    // to widen for the first two and clamp back for the rest, reflowing the
+    // conversation on every switch.
+    for (const panelId of ["workspace", "artifacts", "browser", "session-sidechat"]) {
+      openFromNewTab(panelId)
+      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.narrow)
+    }
+    expect(useArtifactDockLayoutStore.getState().dockSizeRequest).toBe(requestsBefore)
   })
 
-  it("carries the width through a reveal published from outside the workbench", () => {
+  it("does not resize the dock for a reveal published from outside the workbench", () => {
     activateArtifact()
     seedPageTab()
+    act(() => useArtifactDockLayoutStore.getState().setDockSize(DOCK_MODE_WIDTH_PERCENT.narrow))
     act(() => useArtifactDockLayoutStore.getState().openBrowser())
     render(<ArtifactDock />)
 
     // External reveals (the chat header's browser button, the Edit/Write review
-    // bridge, save-to-project) reach the workbench through the intent path
-    // rather than a click, so they need the same width wiring.
+    // bridge, save-to-project) still bring their panel forward — at the width
+    // the dock already has.
     expect(activePanelId("session:sess-1")).toBe("browser")
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
-      DOCK_MODE_WIDTH_PERCENT.compact.wide
-    )
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.narrow)
   })
 
-  it("never narrows the dock on its own, but the header's own button still does", () => {
+  it("never resizes the dock for a panel, but the header's own buttons do", () => {
     activateArtifact()
     render(<ArtifactDock />)
-    act(() => useArtifactDockLayoutStore.getState().setDockSize(45))
+    act(() => useArtifactDockLayoutStore.getState().setDockSize(52))
 
-    // High-water mark: a panel preference may widen, never narrow — otherwise
-    // moving between panels would keep yanking back a width the user dragged
-    // to, and the dock would feel like it was fighting the pointer.
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.comments" }))
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(45)
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(52)
 
-    // Naming no panel means an explicit user request, which applies either way.
+    // Naming no panel means an explicit user request, which applies.
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.narrow" }))
-    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
-      DOCK_MODE_WIDTH_PERCENT.compact.narrow
-    )
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.narrow)
   })
 
   it("offers a jump back to the message an artifact came out of", () => {

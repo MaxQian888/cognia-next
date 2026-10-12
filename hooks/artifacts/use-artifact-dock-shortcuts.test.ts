@@ -116,7 +116,7 @@ describe("useArtifactDockShortcuts", () => {
     // for a standalone Workspace Sheet that no longer exists. It closed the
     // panel while raising `mobileSheetOpen`, which the narrow dock reconciles
     // straight back into re-opening — so the Sheet could never be dismissed.
-    act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
+    act(() => useArtifactDockLayoutStore.getState().setWorkspaceSurfaceActive(true))
     act(() => useArtifactStore.getState().openPanel("artifact"))
     mount()
 
@@ -128,7 +128,7 @@ describe("useArtifactDockShortcuts", () => {
 
   it("on tablet: Cmd+J opens the one Sheet rather than the desktop dock", () => {
     useBreakpointMock.mockReturnValue("tablet")
-    act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
+    act(() => useArtifactDockLayoutStore.getState().setWorkspaceSurfaceActive(true))
     mount()
 
     act(() => pressMod(document.body, "j"))

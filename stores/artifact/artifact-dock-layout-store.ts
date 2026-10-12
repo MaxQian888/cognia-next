@@ -2,8 +2,8 @@
  * Artifact Dock Layout Store — persisted shell sizing for the docked artifacts
  * panel that lives alongside the chat workspace (Codex / Claude-artifacts style).
  *
- * Owns the dock *shell*: width (percent), collapsed flag, the sizing profile,
- * a runtime-only mobile-sheet open flag, and the one-shot reveal intents that
+ * Owns the dock *shell*: width (percent), collapsed flag, a runtime-only
+ * mobile-sheet open flag, and the one-shot reveal intents that
  * outside surfaces use to ask for a panel. It deliberately owns no panel
  * selection — that is `contextWorkbenchStore.activePanelId` alone.
  * `<ArtifactWorkspaceDock />` calls `setDockSize` on every drag tick;
@@ -24,14 +24,6 @@ import {
 } from "@/types/context-workbench"
 import { SIDECHAT_PANEL_ID } from "@/lib/tasks/spawn-task-core"
 import type { ReviewScopeChoice } from "@/types/review"
-
-/**
- * The dock's *sizing* profile. Derived from whichever workbench panel is
- * active (the workspace panel needs far more room than a preview) — it is NOT
- * a router. Panel selection belongs to `contextWorkbenchStore.activePanelId`
- * alone; this used to be a second, writable `dockMode` that fought it.
- */
-export type DockProfile = "compact" | "workspace"
 
 /**
  * A one-shot request to bring a specific workbench panel forward, published by
@@ -86,37 +78,42 @@ export type WorkspaceDockContext =
   | Omit<WorkspaceRevealReviewRequest, "id">
   | WorkspaceRootContext
 
+/**
+ * The dock's one set of width bounds, whichever tab it is showing.
+ *
+ * These used to come in two profiles — a compact one for previews (24%–50%,
+ * 34% by default) and a wider one for the Workspace tab (480px–65%) — picked
+ * from the active panel. Every tab switch between the two then moved the
+ * divider: activating the Workspace pushed the dock out to its preset, leaving
+ * it clamped the dock back under the compact cap, and the chat column reflowed
+ * under the user twice per round trip. The dock is a place, not a per-tab
+ * size, so it now keeps whatever width it has and every tab gets the
+ * Workspace's room — the most demanding surface it hosts (file tree + Monaco +
+ * git diff).
+ *
+ * The floor is an absolute pixel width: a percentage alone leaves the
+ * Workspace unusable on small laptops (24% of 1280px ≈ 307px). The px unit is
+ * native to react-resizable-panels.
+ */
 export const ARTIFACT_DOCK_BOUNDS = {
-  min: 24,
-  max: 50,
-  default: 34,
-} as const
-
-// Workspace mode needs more horizontal room than a simple artifact preview
-// (file tree + Monaco + git diff), so it gets a wider cap and an absolute
-// pixel floor — a percentage floor alone leaves it unusable on small laptops
-// (24% of 1280px ≈ 307px). The px unit is native to react-resizable-panels.
-export const WORKSPACE_DOCK_BOUNDS = {
-  minPx: "480px",
+  minPx: 480,
   max: 65,
+  default: 45,
 } as const
 
-/** Chat (left) panel minimum, widened dock in workspace mode reclaims from it. */
-export const CHAT_MIN_PERCENT = {
-  default: 50,
-  workspace: 35,
-} as const
+/** Chat (left) panel minimum, as a share of the dock's panel group. */
+export const CHAT_MIN_PERCENT = 35
 
 /**
  * Absolute floor for the conversation column, in px.
  *
- * The percentages above are shares of the `ResizablePanelGroup`, and that group
+ * The percentage above is a share of the `ResizablePanelGroup`, and that group
  * is *not* the window: a right-docked terminal (`TerminalDockRegion slot="right"`,
  * an outboard flex sibling at the shell row with its own `panelWidthPct`) has
  * already taken its cut before the dock sees a single pixel, and with
  * `sidebarSide: "right"` two icon columns are outside it too. On a 1280px screen
- * with a 30% terminal, the workspace profile's 35% share is ~314px of
- * conversation — a column that cannot hold a message.
+ * with a 30% terminal, a 35% share is ~314px of conversation — a column that
+ * cannot hold a message.
  *
  * Nothing coordinates those widths with each other, and a shared budget across
  * three independently-owned surfaces would be a large change for a rare layout.
@@ -129,19 +126,23 @@ export const CHAT_MIN_PX = 420
  * Width presets the workbench header's narrow/wide buttons map onto. The dock
  * lives inside the outer ResizablePanel and is mounted with
  * `manageOwnWidth={false}`, so the workbench cannot size itself — without this
- * mapping those two buttons render but do nothing.
- *
- * Keyed by profile: a single table made "wide" cap out at the artifact bound
- * (50%) even in workspace mode, which allows 65% — so the button silently
- * under-delivered exactly where the extra room mattered most.
+ * mapping those two buttons render but do nothing. Narrow is the default
+ * width; wide is the cap.
  */
-export const DOCK_MODE_WIDTH_PERCENT: Record<
-  DockProfile,
-  Record<Exclude<ContextPanelMode, "focus">, number>
-> = {
-  compact: { narrow: ARTIFACT_DOCK_BOUNDS.default, wide: ARTIFACT_DOCK_BOUNDS.max },
-  workspace: { narrow: 45, wide: WORKSPACE_DOCK_BOUNDS.max },
+export const DOCK_MODE_WIDTH_PERCENT: Record<Exclude<ContextPanelMode, "focus">, number> = {
+  narrow: ARTIFACT_DOCK_BOUNDS.default,
+  wide: ARTIFACT_DOCK_BOUNDS.max,
 }
+
+/**
+ * The panels that make up the Workspace surface. Ids only — the panels
+ * themselves live in `components/artifacts/chat-dock-panels.tsx`, which
+ * imports this store and so cannot be imported back.
+ */
+export const WORKSPACE_SURFACE_PANEL_IDS: ReadonlySet<string> = new Set([
+  "workspace",
+  "project-overview",
+])
 
 export const ARTIFACT_DOCK_PERSIST_DEBOUNCE_MS = 150
 
@@ -150,8 +151,14 @@ export interface ArtifactDockLayoutState {
   dockSize: number
   /** When true the dock is hidden (collapsedSize 0). Default: hidden until an artifact opens. */
   dockCollapsed: boolean
-  /** Persisted sizing profile, derived by the mounted workbench from its active panel. */
-  dockProfile: DockProfile
+  /**
+   * Runtime-only: whether the dock is showing the Workspace surface (the
+   * workspace or project-overview panel). Written by the mounted workbench
+   * from its active panel, and seeded by the workspace reveals so the reveal
+   * survives the frame before the workbench catches up. Leaving the surface
+   * drops the workspace reveal it was routing to. It has no bearing on width.
+   */
+  workspaceSurfaceActive: boolean
   /** Runtime-only one-shot panel request published from outside the workbench. */
   revealIntent: DockRevealIntent | null
   /**
@@ -251,11 +258,14 @@ export interface ArtifactDockLayoutState {
    */
   notifyNewArtifact: () => void
   /**
-   * Record which sizing profile the active panel wants. Leaving `workspace`
-   * also drops any pending workspace reveal — the user navigated away from the
-   * surface that reveal was routing to.
+   * Record whether the active panel is the Workspace surface. Leaving it drops
+   * any pending workspace reveal — the user navigated away from the surface
+   * that reveal was routing to — unless a reveal into the Workspace is still
+   * waiting to be consumed (a surface swap can mount a workbench whose last
+   * panel was something else, one effect ahead of the reveal it is about to
+   * take).
    */
-  setDockProfile: (profile: DockProfile) => void
+  setWorkspaceSurfaceActive: (active: boolean) => void
   /** Ask the mounted workbench to bring `panelId` forward. Consumed once. */
   requestReveal: (intent: DockRevealIntent) => void
   /** Clear a consumed intent, but only if it is still the one that was published. */
@@ -327,24 +337,26 @@ export interface ArtifactDockLayoutState {
 interface PersistedArtifactDockLayoutState {
   dockSize: number
   dockCollapsed: boolean
-  dockProfile: DockProfile
   layoutVersion: number
   mobileSnapPoint: number | string | null
 }
 
-/** v2 shape, still on disk for anyone who ran a build before the convergence. */
+/**
+ * Older shapes still on disk: v1/v2 stored a writable `dockMode` (plus a list
+ * rail flag), v3 a per-panel sizing `dockProfile`. None of them survives.
+ */
 interface LegacyPersistedArtifactDockLayoutState {
   dockSize?: number
   dockCollapsed?: boolean
   listRailOpen?: boolean
   dockMode?: "artifact" | "workspace" | "browser"
+  dockProfile?: "compact" | "workspace"
   layoutVersion?: number
 }
 
 const DEFAULTS = {
   dockSize: ARTIFACT_DOCK_BOUNDS.default,
   dockCollapsed: true,
-  dockProfile: "compact" as DockProfile,
   layoutVersion: 0,
   mobileSnapPoint: CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP as number | string | null,
 }
@@ -377,31 +389,27 @@ function nextRevealId(): string {
 let pendingFlush: ReturnType<typeof setTimeout> | null = null
 
 /**
- * Absolute floor for a *stored* width, well below either profile's real
- * minimum.
+ * Absolute floor for a *stored* width, well below the dock's real minimum.
  *
- * The per-profile bounds are enforced at render time by the `ResizablePanel`
- * itself, so this only has to stop a corrupt or absurd value from being kept.
- * It used to be the artifact floor (24%), which is not permissive at all for
- * the workspace profile: that one's real minimum is an absolute `480px`, ≈18.75%
- * on a 2560px screen — so dragging the workspace dock to its own minimum was
- * silently rounded back up to 24%, and the width sprang wider on the next
+ * The real bounds are enforced at render time by the `ResizablePanel` itself,
+ * so this only has to stop a corrupt or absurd value from being kept. It must
+ * stay permissive: the real minimum is an absolute `480px`, ≈18.75% on a
+ * 2560px screen, and a percentage floor above that silently rounds a drag to
+ * the minimum back up — the width then springs wider on the next
  * collapse/expand.
  */
 export const DOCK_SIZE_PERSIST_FLOOR = 10
 
 function clampDockSize(value: number): number {
   if (!Number.isFinite(value)) return ARTIFACT_DOCK_BOUNDS.default
-  // Permissive window spanning both profiles; keeping the stored percent under
-  // `workspace.max` lets a wide workspace size survive a reload without being
-  // clamped down to the artifact cap.
-  return Math.max(DOCK_SIZE_PERSIST_FLOOR, Math.min(WORKSPACE_DOCK_BOUNDS.max, value))
+  return Math.max(DOCK_SIZE_PERSIST_FLOOR, Math.min(ARTIFACT_DOCK_BOUNDS.max, value))
 }
 
 export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
   persist(
     (set, get) => ({
       ...DEFAULTS,
+      workspaceSurfaceActive: false,
       mobileSheetOpen: false,
       userDismissed: false,
       unreadArtifact: false,
@@ -483,30 +491,19 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
                 mobileSheetOpen: true,
               }
         ),
-      setDockProfile: (dockProfile) =>
+      setWorkspaceSurfaceActive: (active) =>
         set((state) => {
-          if (state.dockProfile === dockProfile) return state
-          if (dockProfile === "workspace") return { dockProfile }
-          // Left the workspace surface — the reveal that routed us there no
-          // longer has a target, so drop it instead of letting it re-fire the
-          // next time workspace mounts.
-          const left = {
-            dockProfile,
+          if (state.workspaceSurfaceActive === active) return state
+          if (active) return { workspaceSurfaceActive: true }
+          const pendingWorkspaceReveal =
+            state.revealIntent !== null &&
+            WORKSPACE_SURFACE_PANEL_IDS.has(state.revealIntent.panelId)
+          if (pendingWorkspaceReveal) return state
+          return {
+            workspaceSurfaceActive: false,
             workspaceRevealRequest: null,
             workspaceContext: null,
           }
-          // Compact caps the dock lower than workspace does (50% vs 65%). The
-          // ResizablePanel enforces the new `maxSize` on its next layout, so
-          // without this the dock snaps in with no transition. Routing the
-          // clamp through the request token animates it like every other
-          // programmatic width change.
-          return state.dockSize > ARTIFACT_DOCK_BOUNDS.max
-            ? {
-                ...left,
-                dockSize: ARTIFACT_DOCK_BOUNDS.max,
-                dockSizeRequest: state.dockSizeRequest + 1,
-              }
-            : left
         }),
       requestReveal: (revealIntent) => set({ revealIntent, unreadArtifact: false }),
       consumeRevealIntent: (panelId) =>
@@ -536,10 +533,10 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       revealWorkspaceFile: (request) =>
         set({
           revealIntent: { panelId: "workspace", mode: "wide" },
-          // Seed the profile so the dock is already sized for the workspace on
-          // the very first frame; the mounted workbench re-derives the same
-          // value from its active panel once it settles.
-          dockProfile: "workspace",
+          // Seed the surface flag so the workbench's own sync (which still
+          // sees the outgoing panel for a frame) cannot drop this reveal; it
+          // re-derives the same value from its active panel once it settles.
+          workspaceSurfaceActive: true,
           dockCollapsed: false,
           userDismissed: false,
           unreadArtifact: false,
@@ -558,10 +555,10 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       revealWorkspaceReview: (request) =>
         set({
           revealIntent: { panelId: "workspace", mode: "wide" },
-          // Seed the profile so the dock is already sized for the workspace on
-          // the very first frame; the mounted workbench re-derives the same
-          // value from its active panel once it settles.
-          dockProfile: "workspace",
+          // Seed the surface flag so the workbench's own sync (which still
+          // sees the outgoing panel for a frame) cannot drop this reveal; it
+          // re-derives the same value from its active panel once it settles.
+          workspaceSurfaceActive: true,
           dockCollapsed: false,
           userDismissed: false,
           unreadArtifact: false,
@@ -580,7 +577,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       revealWorkspaceRoot: (request) =>
         set({
           revealIntent: { panelId: "workspace", mode: "wide" },
-          dockProfile: "workspace",
+          workspaceSurfaceActive: true,
           dockCollapsed: false,
           userDismissed: false,
           unreadArtifact: false,
@@ -625,6 +622,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           ...DEFAULTS,
           layoutVersion: state.layoutVersion + 1,
           dockSizeRequest: 0,
+          workspaceSurfaceActive: false,
           mobileSheetOpen: false,
           userDismissed: false,
           unreadArtifact: false,
@@ -636,42 +634,51 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
     {
       name: "cognia-artifact-dock-layout",
       storage: persistLocalStorage(),
-      version: 3,
+      version: 4,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- subset persistence
       partialize: (state): any => ({
         dockSize: state.dockSize,
         dockCollapsed: state.dockCollapsed,
-        dockProfile: state.dockProfile,
         layoutVersion: state.layoutVersion,
         mobileSnapPoint: state.mobileSnapPoint,
       }),
       migrate: (persisted: unknown, version) => {
         const state = (persisted ?? {}) as LegacyPersistedArtifactDockLayoutState &
           Partial<PersistedArtifactDockLayoutState>
-        if (version >= 3) return state as Partial<PersistedArtifactDockLayoutState>
-        // v1/v2 stored a writable three-value `dockMode` that also acted as a
-        // router. Only its sizing meaning survives: `workspace` was the one
-        // value that changed the dock's min/max bounds.
-        const { dockMode, listRailOpen: _listRailOpen, ...rest } = state
-        return {
-          ...rest,
-          dockProfile: dockMode === "workspace" ? "workspace" : "compact",
-        } as Partial<PersistedArtifactDockLayoutState>
+        if (version >= 4) return state as Partial<PersistedArtifactDockLayoutState>
+        // Before v4 the width followed a per-panel profile, and a compact one
+        // held it at 24%–50% (34% by default), so a stored width under the
+        // single default is that profile's leftover rather than a choice made
+        // for the dock as it is now. Lift it once to the Workspace-sized
+        // default; anything wider was the user's own drag and is kept.
+        const {
+          dockMode: _dockMode,
+          listRailOpen: _listRailOpen,
+          dockProfile: _dockProfile,
+          ...rest
+        } = state
+        const dockSize =
+          typeof rest.dockSize === "number" && rest.dockSize >= ARTIFACT_DOCK_BOUNDS.default
+            ? rest.dockSize
+            : ARTIFACT_DOCK_BOUNDS.default
+        return { ...rest, dockSize } as Partial<PersistedArtifactDockLayoutState>
       },
       merge: (persisted: unknown, current: ArtifactDockLayoutState) => {
         const p = (persisted ?? {}) as Partial<PersistedArtifactDockLayoutState>
         return {
           ...current,
-          ...p,
+          dockCollapsed: p.dockCollapsed ?? current.dockCollapsed,
+          layoutVersion: p.layoutVersion ?? current.layoutVersion,
           dockSize: clampDockSize(p.dockSize ?? current.dockSize),
-          dockProfile: p.dockProfile === "workspace" ? "workspace" : "compact",
           // Added after v3 shipped, so it is absent from every layout already on
           // disk — `normalizeSnapPoint` supplies the default rather than a
           // `version` bump, which would have thrown away the dock width too.
           mobileSnapPoint: normalizeSnapPoint(p.mobileSnapPoint),
           // mobileSheetOpen / userDismissed / unreadArtifact / dockSizeRequest /
-          // revealIntent are runtime-only — never restore them from disk.
+          // revealIntent / workspaceSurfaceActive are runtime-only — never
+          // restore them from disk.
           dockSizeRequest: 0,
+          workspaceSurfaceActive: false,
           mobileSheetOpen: false,
           userDismissed: false,
           unreadArtifact: false,

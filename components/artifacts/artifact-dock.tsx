@@ -13,24 +13,24 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  TitleBarProjectionScope,
+  useTitleBarProjectionScope,
+} from "@/components/shell/title-bar-outlets"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { isRunnableArtifactType } from "@/lib/artifacts/constants"
 import { useChatStore } from "@/stores/chat"
 import { useSessionStore } from "@/stores/chat/session-store"
 import {
   DOCK_MODE_WIDTH_PERCENT,
+  WORKSPACE_SURFACE_PANEL_IDS,
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
 import type { ArtifactPanelMode } from "./artifact-panel-content"
 import { ArtifactTabStrip, useOpenArtifactTabs } from "./artifact-tab-strip"
 import { DockTabStrip } from "./dock-tab-strip"
 import { DOCK_SESSION_PANEL_META } from "./dock-panel-meta"
-import {
-  PROJECT_OVERVIEW_PANEL_ID,
-  WORKSPACE_PANEL_ID,
-  useArtifactSurfacePanels,
-  useSessionSurfacePanels,
-} from "./chat-dock-panels"
+import { useArtifactSurfacePanels, useSessionSurfacePanels } from "./chat-dock-panels"
 import {
   ContextWorkbench,
   ContextWorkbenchMobileDrawer,
@@ -50,7 +50,10 @@ import { useProjectStore } from "@/stores/project/project-store"
 import type { UIMessage } from "ai"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
-import { SessionOverviewContext } from "@/components/context-workbench/session-overview-panel"
+import {
+  SessionOverviewContext,
+  type SessionOverviewContextValue,
+} from "@/components/context-workbench/session-overview-panel"
 import { getSession } from "@/lib/db/sessions"
 import { countPendingSessionRunLearningProposals } from "@/lib/db/run-retrospectives"
 import { useSessionResourceChanges } from "@/hooks/chat/use-session-resource-changes"
@@ -70,67 +73,95 @@ const ARTIFACT_ATTENTION_ACTIVITY = "preview-run"
 const SESSION_ATTENTION_ACTIVITY = "review"
 
 /**
- * Memoised because the host re-renders on every divider drag tick (it stores
- * the live width per tick). The dock's only prop is a boolean, so a tick has
- * nothing new to tell it — re-rendering the whole workbench shell sixty times a
- * second while the pointer moves was pure jank in the very gesture that needs
- * the smoothest frames.
+ * Memoised because the host re-renders on layout writes (a drag, the chat row's
+ * measurements) that have nothing new to tell the dock — its props are two
+ * booleans.
+ *
+ * Two surfaces back the one workbench shell: an artifact's, while an artifact
+ * tab is in front, and the conversation's own (the Workspace, the browser, the
+ * side chat…) otherwise. They are different components, so swapping one for
+ * the other used to unmount the session surface whenever an artifact tab came
+ * forward — every artifact → Workspace switch rebuilt the project editor from
+ * nothing: tree listing, git loads, file watcher, Monaco models. Once it has
+ * been shown, the session surface now stays mounted behind the artifact one,
+ * hidden and `concealed` (effects live, the embedded browser parked), so
+ * coming back to it is a reveal.
  */
-export const ArtifactDock = memo(function ArtifactDock({ railOnly }: { railOnly?: boolean }) {
+export const ArtifactDock = memo(function ArtifactDock({
+  railOnly,
+  concealed = false,
+}: {
+  railOnly?: boolean
+  /** The dock is collapsed but kept mounted (`ContextWorkbench`'s `concealed`). */
+  concealed?: boolean
+}) {
   const activeArtifactId = useActiveArtifactId()
-  // The only branch in the dock: which resource backs the one workbench shell.
-  // The browser used to force a surface swap because it is session-scoped; it
-  // is now a panel on both surfaces, so opening it keeps your artifact context.
-  return activeArtifactId ? (
-    <ArtifactContextWorkbench artifactId={activeArtifactId} railOnly={railOnly} />
-  ) : (
-    <SessionContextWorkbench railOnly={railOnly} />
+  // An id can outlive its artifact (evicted by the persist cap, or cleared in
+  // another tab); the session surface is the dock's shell then.
+  const artifactInFront = useArtifactStore((state) =>
+    Boolean(activeArtifactId && state.artifacts[activeArtifactId])
+  )
+  const [sessionSurfaceBuilt, setSessionSurfaceBuilt] = useState(!artifactInFront)
+  if (!artifactInFront && !sessionSurfaceBuilt) setSessionSurfaceBuilt(true)
+  const projection = useTitleBarProjectionScope()
+  return (
+    <>
+      {sessionSurfaceBuilt ? (
+        <div
+          data-testid="dock-session-surface"
+          className="h-full"
+          hidden={artifactInFront}
+          inert={artifactInFront || undefined}
+        >
+          {/* Behind an artifact, its header must not project into the title
+              bar beside the artifact surface's. */}
+          <TitleBarProjectionScope enabled={projection && !artifactInFront}>
+            <SessionContextWorkbench
+              railOnly={railOnly}
+              concealed={concealed || artifactInFront}
+              inBackground={artifactInFront}
+            />
+          </TitleBarProjectionScope>
+        </div>
+      ) : null}
+      {artifactInFront && activeArtifactId ? (
+        <ArtifactContextWorkbench
+          artifactId={activeArtifactId}
+          railOnly={railOnly}
+          concealed={concealed}
+        />
+      ) : null}
+    </>
   )
 })
 
 /**
  * The dock is mounted with `manageOwnWidth={false}` — its width belongs to the
  * outer ResizablePanel — so the workbench header's narrow/wide buttons have to
- * resize the dock instead of the workbench, or they do nothing at all. The
- * preset table is keyed by profile so "wide" reaches the workspace cap (65%)
- * rather than the artifact one (50%).
+ * resize the dock instead of the workbench, or they do nothing at all.
  *
- * Two callers, two contracts (see `onModeWidthHint`): a panel activation names
- * its panel and is applied as a high-water mark; the header buttons name none
- * and apply unconditionally.
+ * Two callers, two contracts (see `onModeWidthHint`): the header buttons name
+ * no panel and are applied; a panel activation names its panel and is
+ * ignored. Switching tabs used to widen the dock to the arriving panel's
+ * preset (and, on the way back, clamp it to a narrower profile's cap), so the
+ * divider moved and the conversation reflowed on every tab switch. The dock
+ * keeps one width for every tab — sized for the Workspace — and only the user
+ * changes it: the narrow/wide buttons, the divider, a double-click on it.
  */
 function useDockWidthHint() {
   const requestDockSize = useArtifactDockLayoutStore((state) => state.requestDockSize)
-  const dockProfile = useArtifactDockLayoutStore((state) => state.dockProfile)
   return useCallback(
     (mode: ContextPanelMode, panelId?: string) => {
       // Focus is a full-screen takeover; it owns no dock width.
-      if (mode === "focus") return
-      // Derive the profile from the panel that is arriving rather than reading
-      // `dockProfile`. That field is written by `useDockPanelSync` in an effect
-      // that runs *after* `activePanelId` changes, so during the activation
-      // itself it still holds the outgoing panel's profile — activating the
-      // workspace would look up `compact.wide` (50%) instead of
-      // `workspace.wide` (65%), silently under-delivering exactly where the
-      // extra room matters most. Only the header buttons, which name no panel,
-      // fall back to the settled profile.
-      const profile = panelId
-        ? panelId === WORKSPACE_PANEL_ID || panelId === PROJECT_OVERVIEW_PANEL_ID
-          ? "workspace"
-          : "compact"
-        : dockProfile
-      const target = DOCK_MODE_WIDTH_PERCENT[profile][mode]
-      // High-water mark: a panel's `preferredMode` may widen the dock, never
-      // narrow it. Otherwise moving from the workspace back to the preview
-      // would yank a width the user had dragged to back down to the preset,
-      // and the dock would feel like it was fighting the pointer. Narrowing
-      // stays available through the header's narrow button and the divider.
-      if (panelId && target <= useArtifactDockLayoutStore.getState().dockSize) return
-      requestDockSize(target)
+      if (mode === "focus" || panelId) return
+      requestDockSize(DOCK_MODE_WIDTH_PERCENT[mode])
     },
-    [dockProfile, requestDockSize]
+    [requestDockSize]
   )
 }
+
+/** Midpoint between the presets: every width above it reads as "wide". */
+const WIDE_THRESHOLD_PERCENT = (DOCK_MODE_WIDTH_PERCENT.narrow + DOCK_MODE_WIDTH_PERCENT.wide) / 2
 
 /**
  * Which width preset the dock is *actually* sitting at, for the workbench
@@ -138,38 +169,44 @@ function useDockWidthHint() {
  *
  * The dock's width lives in `dockSize`, not in `layout.mode`: mounted with
  * `manageOwnWidth={false}`, the workbench never applies its own width, so that
- * field only ever coloured two buttons. Because a panel activation writes the
- * mode while `useDockWidthHint` applies it as a high-water mark, the two drifted
- * apart the moment a `preferredMode: "wide"` panel handed back to a narrow one —
- * the button said narrow over a 65%-wide dock. Deriving it from the width means
- * the highlight cannot lie, and dragging the divider updates it for free.
+ * field only ever coloured two buttons. Deriving it from the width means the
+ * highlight cannot lie, and dragging the divider updates it for free.
+ *
+ * Selected as the derived mode, not as `dockSize`: a drag writes `dockSize` on
+ * every pointer tick, and subscribing to the number re-rendered the whole
+ * workbench — every panel prop rebuilt — sixty times a second while the
+ * divider moved, for a value that changes once per drag at most.
  */
 function useResolvedDockMode(): ContextPanelMode {
-  const dockSize = useArtifactDockLayoutStore((state) => state.dockSize)
-  const dockProfile = useArtifactDockLayoutStore((state) => state.dockProfile)
-  const presets = DOCK_MODE_WIDTH_PERCENT[dockProfile]
-  // Midpoint rather than an exact match: the user can drag anywhere between the
-  // two presets, and every width above the halfway mark reads as "wide".
-  return dockSize >= (presets.narrow + presets.wide) / 2 ? "wide" : "narrow"
+  return useArtifactDockLayoutStore((state) =>
+    state.dockSize >= WIDE_THRESHOLD_PERCENT ? "wide" : "narrow"
+  )
 }
 
 /**
- * Keep the dock's sizing profile in step with whichever panel is showing, and
- * consume any one-shot reveal intent this surface can satisfy.
+ * Tell the layout store whether the Workspace surface is showing, and consume
+ * any one-shot reveal intent this surface can satisfy.
  *
- * This is the ONLY writer of `dockProfile`, and it is strictly one-directional:
- * panel → profile. The predecessor (`dockMode`) was written by panel lifecycle
- * hooks *and* read back to order the panel list, so a fresh scope could
- * activate an unrelated panel, have it write the mode, and bounce the dock out
- * of the surface the user asked for.
+ * This is the ONLY writer of `workspaceSurfaceActive` besides the workspace
+ * reveals that seed it, and it is strictly one-directional: panel → flag. The
+ * flag carries no width — leaving the Workspace only drops the reveal that was
+ * routing there.
  */
 function useDockPanelSync(
   scopeKey: string,
   panelIds: string[],
   activePanelId: string | null | undefined,
-  onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
+  onWidthHint: (mode: ContextPanelMode, panelId?: string) => void,
+  /**
+   * False for a surface kept mounted behind the one in front. It must neither
+   * report its panel as the one showing nor take a reveal meant for whatever
+   * is on screen.
+   */
+  enabled = true
 ) {
-  const setDockProfile = useArtifactDockLayoutStore((state) => state.setDockProfile)
+  const setWorkspaceSurfaceActive = useArtifactDockLayoutStore(
+    (state) => state.setWorkspaceSurfaceActive
+  )
   const revealIntent = useArtifactDockLayoutStore((state) => state.revealIntent)
   const consumeRevealIntent = useArtifactDockLayoutStore((state) => state.consumeRevealIntent)
   const dockCollapsed = useArtifactDockLayoutStore((state) => state.dockCollapsed)
@@ -178,13 +215,9 @@ function useDockPanelSync(
   const isFocus = useContextWorkbenchStore((state) => state.layouts[scopeKey]?.mode === "focus")
 
   useEffect(() => {
-    if (!activePanelId) return
-    setDockProfile(
-      activePanelId === WORKSPACE_PANEL_ID || activePanelId === PROJECT_OVERVIEW_PANEL_ID
-        ? "workspace"
-        : "compact"
-    )
-  }, [activePanelId, setDockProfile])
+    if (!enabled || !activePanelId) return
+    setWorkspaceSurfaceActive(WORKSPACE_SURFACE_PANEL_IDS.has(activePanelId))
+  }, [activePanelId, enabled, setWorkspaceSurfaceActive])
 
   // Focus is a full-screen takeover that outlives the dock it was opened from.
   // The workbench's own collapse button drops it on the way out, but the three
@@ -194,11 +227,11 @@ function useDockPanelSync(
   // persisted, so re-opening came back `fixed inset-0 z-50` over the whole app.
   // This seam is the only one that can see both facts, so the rule lives here.
   useEffect(() => {
-    if (!dockCollapsed || !isFocus) return
+    if (!enabled || !dockCollapsed || !isFocus) return
     setMode(scopeKey, "narrow")
-  }, [dockCollapsed, isFocus, scopeKey, setMode])
+  }, [dockCollapsed, enabled, isFocus, scopeKey, setMode])
 
-  const owns = revealIntent ? panelIds.includes(revealIntent.panelId) : false
+  const owns = enabled && revealIntent ? panelIds.includes(revealIntent.panelId) : false
   useEffect(() => {
     if (!revealIntent || !owns) return
     navigatePanel(scopeKey, revealIntent.panelId, revealIntent.mode)
@@ -214,8 +247,23 @@ function useDockPanelSync(
 
 /** Stable identity so the sync effects don't re-run on every render. */
 const EMPTY_PANEL_IDS: string[] = []
-const EMPTY_SESSION_MESSAGES: UIMessage[] = []
 const SOURCE_COUNT_LABELS = { document: "", file: "" }
+
+/**
+ * Source counts per message list. A store selector re-runs on every chat-store
+ * write — other sessions streaming included — so the walk is cached on the
+ * list's identity and only redone when this conversation's messages change.
+ */
+const sourceCountByMessages = new WeakMap<readonly UIMessage[], number>()
+
+function countSessionSources(messages: readonly UIMessage[] | undefined): number {
+  if (!messages || messages.length === 0) return 0
+  const cached = sourceCountByMessages.get(messages)
+  if (cached !== undefined) return cached
+  const count = collectSessionSources(messages as UIMessage[], SOURCE_COUNT_LABELS).length
+  sourceCountByMessages.set(messages, count)
+  return count
+}
 
 /**
  * Set by the Sheet host (`<ArtifactPanel />`). `panelMode` is the host's own
@@ -232,10 +280,12 @@ export function ArtifactContextWorkbench({
   artifactId,
   mobile,
   railOnly,
+  concealed,
 }: {
   artifactId: string
   mobile?: SheetHost
   railOnly?: boolean
+  concealed?: boolean
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
   // The phone Sheet keeps the artifact strip; the desktop dock draws its one
@@ -410,6 +460,21 @@ export function ArtifactContextWorkbench({
     [artifact, artifactId, textSelection, workspaceAvailable]
   )
 
+  // Stable props, so the memoised workbench skips renders of this surface that
+  // change nothing it draws.
+  const collapseDock = useCallback(() => setDockCollapsed(true), [setDockCollapsed])
+  const ensureDockVisible = useCallback(() => setDockCollapsed(false), [setDockCollapsed])
+  const tabStrip = useMemo(
+    () => (
+      <DockTabStrip
+        sessionId={activeSessionId}
+        sessionScopeKey={sessionScopeKey}
+        onWidthHint={dockWidthHint}
+      />
+    ),
+    [activeSessionId, dockWidthHint, sessionScopeKey]
+  )
+
   // The id outlived its artifact (evicted by the persist cap, or cleared in
   // another tab). Fall through to the session workbench so the dock keeps a
   // single shell.
@@ -440,22 +505,17 @@ export function ArtifactContextWorkbench({
       resource={resource}
       panels={panels}
       sessionScopeKey={sessionScopeKey}
-      onCollapse={() => setDockCollapsed(true)}
-      onEnsureVisible={() => setDockCollapsed(false)}
+      onCollapse={collapseDock}
+      onEnsureVisible={ensureDockVisible}
       railOnly={railOnly}
+      concealed={concealed}
       attentionActivity={unreadArtifact ? ARTIFACT_ATTENTION_ACTIVITY : undefined}
       onModeWidthHint={dockWidthHint}
       resolvedMode={resolvedDockMode}
       onResetLayout={resetDockLayout}
       tabStrip="external"
       resourcePanelSwitcher
-      headerLeading={
-        <DockTabStrip
-          sessionId={activeSessionId}
-          sessionScopeKey={sessionScopeKey}
-          onWidthHint={dockWidthHint}
-        />
-      }
+      headerLeading={tabStrip}
       placement="chat-dock"
       manageOwnWidth={false}
       className="w-full"
@@ -472,9 +532,15 @@ export function ArtifactContextWorkbench({
 export function SessionContextWorkbench({
   mobile,
   railOnly,
+  concealed,
+  inBackground = false,
 }: {
   mobile?: SheetHost
   railOnly?: boolean
+  /** Kept mounted off screen (`ContextWorkbench`'s `concealed`). */
+  concealed?: boolean
+  /** Kept mounted behind the artifact surface, which is the one in front. */
+  inBackground?: boolean
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
   const showSingleArtifactTab = useContextWorkbenchStore(
@@ -496,11 +562,6 @@ export function SessionContextWorkbench({
   )
   const messageCount = useChatStore((state) =>
     activeSessionId ? (state.sessions[activeSessionId]?.messages.length ?? 0) : 0
-  )
-  const sessionMessages = useChatStore((state) =>
-    activeSessionId
-      ? (state.sessions[activeSessionId]?.messages ?? EMPTY_SESSION_MESSAGES)
-      : EMPTY_SESSION_MESSAGES
   )
   const unresolvedCommentCount = useContextCommentBadge("session", activeSessionId)
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
@@ -530,11 +591,12 @@ export function SessionContextWorkbench({
     0
   )
   // The rail badges read the same walks as the session summary card, so the
-  // numbers on the card and on the rail never disagree. Labels are irrelevant
-  // to a count.
-  const sourceCount = useMemo(
-    () => collectSessionSources(sessionMessages, SOURCE_COUNT_LABELS).length,
-    [sessionMessages]
+  // numbers on the card and on the rail never disagree. Selected as the count,
+  // not as the message list: this component renders the whole workbench, and
+  // subscribing it to the transcript re-rendered every panel body on each
+  // streamed token for a number that changes a few times per conversation.
+  const sourceCount = useChatStore((state) =>
+    activeSessionId ? countSessionSources(state.sessions[activeSessionId]?.messages) : 0
   )
   const uncommittedChangeCount = useSessionResourceChanges(activeSessionId).totals.files
 
@@ -542,8 +604,6 @@ export function SessionContextWorkbench({
     activeSessionId,
     session,
     sessionProject,
-    sessionMessages,
-    messageCount,
     workspaceLayout,
     workspaceAvailable,
     unresolvedCommentCount,
@@ -558,7 +618,8 @@ export function SessionContextWorkbench({
     scopeKey,
     panels.map((panel) => panel.id),
     activePanelId,
-    dockWidthHint
+    dockWidthHint,
+    !inBackground
   )
 
   // Memoised for the same reason as the artifact surface's: the host
@@ -573,22 +634,34 @@ export function SessionContextWorkbench({
     [activeSessionId, workspaceAvailable]
   )
 
+  const overview = useMemo<SessionOverviewContextValue | null>(
+    () =>
+      session
+        ? {
+            session,
+            messageCount,
+            onNavigate: (panelId) => {
+              useContextWorkbenchStore.getState().navigatePanel(scopeKey, panelId, "wide")
+            },
+          }
+        : null,
+    [messageCount, scopeKey, session]
+  )
+  const collapseDock = useCallback(() => setDockCollapsed(true), [setDockCollapsed])
+  const ensureDockVisible = useCallback(() => setDockCollapsed(false), [setDockCollapsed])
+  const tabStrip = useMemo(
+    () => (
+      <DockTabStrip
+        sessionId={activeSessionId}
+        sessionScopeKey={scopeKey}
+        onWidthHint={dockWidthHint}
+      />
+    ),
+    [activeSessionId, dockWidthHint, scopeKey]
+  )
+
   return (
-    <SessionOverviewContext.Provider
-      value={
-        session
-          ? {
-              session,
-              messages: sessionMessages,
-              messageCount,
-              onNavigate: (panelId) => {
-                useContextWorkbenchStore.getState().navigatePanel(scopeKey, panelId, "wide")
-                dockWidthHint("wide", panelId)
-              },
-            }
-          : null
-      }
-    >
+    <SessionOverviewContext.Provider value={overview}>
       {mobile ? (
         <ContextWorkbenchMobileDrawer
           open={mobile.open}
@@ -611,16 +684,11 @@ export function SessionContextWorkbench({
           resource={resource}
           panels={panels}
           tabStrip="external"
-          headerLeading={
-            <DockTabStrip
-              sessionId={activeSessionId}
-              sessionScopeKey={scopeKey}
-              onWidthHint={dockWidthHint}
-            />
-          }
-          onCollapse={() => setDockCollapsed(true)}
-          onEnsureVisible={() => setDockCollapsed(false)}
+          headerLeading={tabStrip}
+          onCollapse={collapseDock}
+          onEnsureVisible={ensureDockVisible}
           railOnly={railOnly}
+          concealed={concealed}
           attentionActivity={unreadArtifact ? SESSION_ATTENTION_ACTIVITY : undefined}
           onModeWidthHint={dockWidthHint}
           resolvedMode={resolvedDockMode}

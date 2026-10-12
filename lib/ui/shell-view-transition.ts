@@ -65,6 +65,62 @@ export interface ShellViewTransitionOptions {
 export const SHELL_VIEW_TRANSITION_ATTRIBUTE = "data-shell-view-transition"
 
 /**
+ * The root attributes `app/globals.css` reads to pick, per capture, the one
+ * snapshot that is drawn: each lists the `view-transition-name`s whose element
+ * grew (or shrank) in this gesture.
+ *
+ * Every edge-panel snapshot is anchored to the edge that does not move, and its
+ * group's size runs between the old and the new snapshot's — so the *larger*
+ * of the two always covers the whole group. Drawing only that one is what
+ * keeps the motion clean:
+ *
+ * - A crossfade left a strip of a growing group covered only by the incoming
+ *   image while it was still ramping up from transparent. The page behind
+ *   showed through — black under a dark theme — for most of the gesture.
+ * - Drawing both images opaque fixed the strip but not the ghosting: these
+ *   snapshots are transparent wherever the element paints no background (the
+ *   chat paints none), so the old content showed through the new at full
+ *   strength until the gesture ended.
+ *
+ * A capture in neither list (its size could not be read) keeps both images,
+ * new over old: never a hole, at worst a ghost.
+ */
+export const SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE = "data-shell-view-transition-grow"
+export const SHELL_VIEW_TRANSITION_SHRINK_ATTRIBUTE = "data-shell-view-transition-shrink"
+
+function captureArea(element: HTMLElement | null | undefined): number | null {
+  if (!element || !element.isConnected) return null
+  const rect = element.getBoundingClientRect()
+  return rect.width * rect.height
+}
+
+/**
+ * Sort every capture into grew / shrank by comparing its area before the
+ * gesture with its area now. Equal reads as grown: the two snapshots are the
+ * same size then, and the new one is the truth.
+ */
+export function classifyCaptures(
+  captures: readonly ShellTransitionCapture[],
+  before: readonly (number | null)[]
+): { grow: string[]; shrink: string[] } {
+  const grow: string[] = []
+  const shrink: string[] = []
+  captures.forEach((capture, index) => {
+    const previous = before[index]
+    const next = captureArea(capture.element)
+    if (previous === null || previous === undefined || next === null) return
+    if (next >= previous) grow.push(capture.name)
+    else shrink.push(capture.name)
+  })
+  return { grow, shrink }
+}
+
+/** Lets every pending React commit land: they flush in microtasks. */
+function afterPendingCommits(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/**
  * Gestures in flight. A second gesture started mid-flight makes the browser
  * skip the first, whose cleanup then lands while the second is still running —
  * a plain set/remove would drop the hold out from under it.
@@ -120,8 +176,11 @@ export function runShellViewTransition({
     if (capture.element) capture.element.style.viewTransitionName = capture.name
   })
   holdEdgeTransitions(root)
+  const sizesBefore = captures.map((capture) => captureArea(capture.element))
   const reset = () => {
     releaseEdgeTransitions(root)
+    root.removeAttribute(SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE)
+    root.removeAttribute(SHELL_VIEW_TRANSITION_SHRINK_ATTRIBUTE)
     root.style.viewTransitionName = previousRootName
     captures.forEach((capture, index) => {
       if (capture.element) capture.element.style.viewTransitionName = previousNames[index]
@@ -135,17 +194,29 @@ export function runShellViewTransition({
     apply()
   }
 
+  let active = true
   let transition: ViewTransition
   try {
-    transition = startViewTransition(applyOnce)
+    // The new snapshot is taken once this resolves, so the grow/shrink marks
+    // are in place for it. The store writes `apply` makes commit through React
+    // in a microtask; waiting one task lets them all land before measuring.
+    transition = startViewTransition(async () => {
+      applyOnce()
+      await afterPendingCommits()
+      // Settled meanwhile (skipped): the cleanup already ran, leave no marks.
+      if (!active) return
+      const { grow, shrink } = classifyCaptures(captures, sizesBefore)
+      root.setAttribute(SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE, grow.join(" "))
+      root.setAttribute(SHELL_VIEW_TRANSITION_SHRINK_ATTRIBUTE, shrink.join(" "))
+    })
   } catch {
+    active = false
     reset()
     applyOnce()
     onDone?.()
     return () => {}
   }
 
-  let active = true
   const finish = () => {
     if (!active) return
     active = false

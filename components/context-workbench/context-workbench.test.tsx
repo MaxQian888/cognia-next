@@ -2944,3 +2944,186 @@ describe("ContextWorkbench — host revealRequest", () => {
     expect(onEnsureVisible).not.toHaveBeenCalled()
   })
 })
+
+describe("ContextWorkbench — concealed hosts", () => {
+  // A host that takes the workbench off screen but keeps it mounted (the chat
+  // dock while collapsed, its session surface behind an artifact tab) must get
+  // a cheap reveal: panels keep their effects. Only a panel holding a
+  // process-wide native surface is parked, so the surface is given back.
+  const effects = { review: 0, browser: 0 }
+  const mounts = { review: 0 }
+  const activeSeen: boolean[] = []
+
+  function ReviewPanel({ active }: { active: boolean }) {
+    useState(() => {
+      mounts.review += 1
+      return null
+    })
+    activeSeen.push(active)
+    useEffect(() => {
+      effects.review += 1
+      return () => {
+        effects.review -= 1
+      }
+    }, [])
+    return <div>review-panel</div>
+  }
+
+  function BrowserPanel() {
+    useEffect(() => {
+      effects.browser += 1
+      return () => {
+        effects.browser -= 1
+      }
+    }, [])
+    return <div>browser-panel</div>
+  }
+
+  const PANELS: ContextPanelDefinition[] = [
+    {
+      id: "review",
+      activity: "review",
+      labelKey: "contextWorkbench.panels.review",
+      order: 1,
+      appliesTo: () => true,
+      renderer: ReviewPanel,
+      retention: "stateful",
+    },
+    {
+      id: "browser",
+      activity: "preview-run",
+      labelKey: "contextWorkbench.panels.ai",
+      order: 2,
+      appliesTo: () => true,
+      renderer: BrowserPanel,
+      retention: "stateful",
+      exclusiveSurface: true,
+    },
+  ]
+
+  function Host({ concealed, railOnly = false }: { concealed: boolean; railOnly?: boolean }) {
+    return (
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS}
+          manageOwnWidth={false}
+          onCollapse={() => undefined}
+          railOnly={railOnly}
+          concealed={concealed}
+        />
+      </NextIntlClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
+    useSettingsStore.setState({ settings: {} as never })
+    mockResourceSession = null
+    effects.review = 0
+    effects.browser = 0
+    mounts.review = 0
+    activeSeen.length = 0
+  })
+
+  function visit(panelId: string) {
+    act(() => useContextWorkbenchStore.getState().navigatePanel("window-a::canvas:doc-1", panelId))
+  }
+
+  it("keeps panels live while concealed, parking only an exclusive surface", () => {
+    const { rerender } = render(<Host concealed={false} />)
+    visit("browser")
+    visit("review")
+    expect(effects).toEqual({ review: 1, browser: 0 })
+    visit("browser")
+    expect(effects).toEqual({ review: 0, browser: 1 })
+
+    rerender(<Host concealed />)
+    // The browser is the panel in front, and it is still parked: concealed, it
+    // must give its native surface back.
+    expect(effects.browser).toBe(0)
+
+    visit("review")
+    rerender(<Host concealed={false} />)
+    rerender(<Host concealed />)
+    // The review panel in front stays live through the conceal — no cleanup to
+    // re-run on the way back — and is told it is not on screen.
+    expect(effects.review).toBe(1)
+    expect(activeSeen.at(-1)).toBe(false)
+
+    rerender(<Host concealed={false} />)
+    expect(effects.review).toBe(1)
+    expect(activeSeen.at(-1)).toBe(true)
+    expect(mounts.review).toBe(1)
+  })
+
+  it("does not claim the active host while concealed", () => {
+    const { rerender } = render(<Host concealed />)
+    // Nothing is registered, so an outside reveal has nothing to route to.
+    expect(revealActiveWorkbenchPanel("review")).toBe(false)
+
+    rerender(<Host concealed={false} />)
+    expect(revealActiveWorkbenchPanel("review")).toBe(true)
+  })
+
+  it("keeps a concealed rail-only body mounted but hidden", () => {
+    const { rerender } = render(<Host concealed={false} />)
+    visit("review")
+    expect(effects.review).toBe(1)
+
+    rerender(<Host concealed railOnly />)
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    // Mounted (effects up) yet not on screen.
+    expect(effects.review).toBe(1)
+    expect(screen.queryByText("review-panel")).not.toBeVisible()
+
+    // Without `concealed`, rail-only still drops the body for real.
+    rerender(<Host concealed={false} railOnly />)
+    expect(effects.review).toBe(0)
+    expect(screen.queryByText("review-panel")).not.toBeInTheDocument()
+  })
+})
+
+describe("ContextWorkbench — memoised", () => {
+  it("does not re-render its panels when a host re-renders with the same props", () => {
+    let renders = 0
+    function Counted() {
+      renders += 1
+      return <div>counted</div>
+    }
+    const panels: ContextPanelDefinition[] = [
+      {
+        id: "counted",
+        activity: "review",
+        labelKey: "contextWorkbench.panels.review",
+        appliesTo: () => true,
+        renderer: Counted,
+      },
+    ]
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
+    useSettingsStore.setState({ settings: {} as never })
+    const onCollapse = () => undefined
+
+    function Host({ tick }: { tick: number }) {
+      return (
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <span data-tick={tick} />
+          <ContextWorkbench
+            workbenchInstanceId="window-a"
+            resource={resource}
+            panels={panels}
+            manageOwnWidth={false}
+            onCollapse={onCollapse}
+          />
+        </NextIntlClientProvider>
+      )
+    }
+
+    const { rerender } = render(<Host tick={0} />)
+    const settled = renders
+    rerender(<Host tick={1} />)
+    rerender(<Host tick={2} />)
+    expect(renders).toBe(settled)
+  })
+})

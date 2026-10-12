@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useCharacter } from "@/lib/data-hooks/context"
 import { useSessionNeedsYou } from "@/hooks/chat/use-session-needs-you"
-import { useSessionErrorMessage, useSessionStatus } from "@/stores/chat"
+import { useSessionErrorMessage, useSessionMessages, useSessionStatus } from "@/stores/chat"
 import { ContextMetadataPanel } from "./context-metadata-panel"
 import { SessionCapabilitiesSection } from "./session-capabilities-section"
 import { SessionOpenItems } from "./session-open-items"
@@ -29,13 +29,24 @@ export interface SessionOverviewPanelProps {
   onNavigate: (panelId: string) => void
 }
 
+/**
+ * What the dock hands the overview through context. The transcript is not part
+ * of it: the host subscribes to the session's messages itself, so the dock
+ * that provides this value does not re-render — with every panel under it —
+ * on each streamed token.
+ */
+export type SessionOverviewContextValue = Omit<SessionOverviewPanelProps, "messages">
+
 // The Workbench treats renderer functions as component types. Keep this host
 // stable while its provider updates, preserving open controls during live queries.
-export const SessionOverviewContext = createContext<SessionOverviewPanelProps | null>(null)
+export const SessionOverviewContext = createContext<SessionOverviewContextValue | null>(null)
 
 export function SessionOverviewPanelHost() {
   const props = useContext(SessionOverviewContext)
-  return props ? <SessionOverviewPanel key={props.session.id} {...props} /> : null
+  const messages = useSessionMessages(props?.session.id ?? null)
+  return props ? (
+    <SessionOverviewPanel key={props.session.id} {...props} messages={messages} />
+  ) : null
 }
 
 /**

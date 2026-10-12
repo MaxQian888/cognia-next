@@ -58,7 +58,7 @@ import {
   CHAT_MIN_PERCENT,
   CHAT_MIN_PX,
   DOCK_MODE_WIDTH_PERCENT,
-  WORKSPACE_DOCK_BOUNDS,
+  DOCK_SIZE_PERSIST_FLOOR,
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
 import { useArtifactDockShortcuts } from "@/hooks/artifacts/use-artifact-dock-shortcuts"
@@ -167,17 +167,17 @@ function publishDockColumnTarget(panel: HTMLElement): void {
  * The narrowest width the dock is allowed to settle at, as a percent of the
  * group — the same bound the `ResizablePanel` enforces at render time.
  *
- * The workspace profile's floor is an absolute `480px` (a percentage floor
- * leaves the file tree + Monaco + diff unusable on a small laptop), so it only
- * becomes a percentage once the group's width is known. Falls back to the
- * artifact floor when it isn't — jsdom reports every width as 0, and so does
- * the very first layout callback.
+ * The floor is an absolute `480px` (a percentage floor leaves the file tree +
+ * Monaco + diff unusable on a small laptop), so it only becomes a percentage
+ * once the group's width is known. Until then — jsdom reports every width as
+ * 0, and so does the very first layout callback — it falls back to the store's
+ * persistence floor, which still rejects the 0% a collapse (or an unmeasured
+ * group) reports instead of recording it as the width to come back to.
  */
-function dockFloorPercent(panel: HTMLElement | null, workspaceProfile: boolean): number {
-  if (!workspaceProfile) return ARTIFACT_DOCK_BOUNDS.min
+function dockFloorPercent(panel: HTMLElement | null): number {
   const groupWidth = panel?.parentElement?.offsetWidth ?? 0
-  if (groupWidth <= 0) return ARTIFACT_DOCK_BOUNDS.min
-  return (Number.parseFloat(WORKSPACE_DOCK_BOUNDS.minPx) / groupWidth) * 100
+  if (groupWidth <= 0) return DOCK_SIZE_PERSIST_FLOOR
+  return (ARTIFACT_DOCK_BOUNDS.minPx / groupWidth) * 100
 }
 
 /**
@@ -201,11 +201,13 @@ export function dockCapForChatFloor(groupWidthPx: number): number {
 }
 
 /** The dock's floor in the row budget's terms (`lib/shell/chat-row-budget.ts`). */
-export function dockFloorForProfile(workspaceProfile: boolean): ChatRowDockFloor {
-  return workspaceProfile
-    ? { minPx: Number.parseFloat(WORKSPACE_DOCK_BOUNDS.minPx), minPercent: 0 }
-    : { minPx: 0, minPercent: ARTIFACT_DOCK_BOUNDS.min }
+export const DOCK_ROW_FLOOR: ChatRowDockFloor = {
+  minPx: ARTIFACT_DOCK_BOUNDS.minPx,
+  minPercent: 0,
 }
+
+/** `ResizablePanel` takes px bounds as strings. */
+const DOCK_MIN_SIZE = `${ARTIFACT_DOCK_BOUNDS.minPx}px`
 
 /**
  * Below this a cap change is noise: the group's width converts to a percent
@@ -266,78 +268,91 @@ function useDockAttentionSignal({
 }
 
 /**
- * How long a collapsed dock's body stays parked behind `<Activity>` before it
- * is unmounted for real. Re-opening within it is a reveal, not a rebuild: the
- * project editor keeps its tabs, tree and documents, the side chat its
- * transcript, and nothing re-reads the disk. Long enough to cover the
- * ⌘J-to-peek-and-back rhythm; short enough that an abandoned dock does not hold
- * its DOM for the rest of the session.
+ * How long a collapsed dock's body stays mounted (concealed) before it is
+ * unmounted for real. Re-opening within it is a reveal, not a rebuild: the
+ * project editor keeps its tabs, tree, documents, git state and watcher, the
+ * side chat its transcript, and nothing re-reads the disk. Long enough to cover
+ * the ⌘J-to-peek-and-back rhythm; short enough that an abandoned dock does not
+ * hold its DOM and subscriptions for the rest of the session.
  */
 export const DOCK_BODY_PARK_MS = 5 * 60_000
 
 /**
- * Where a collapsed dock's body is in its retreat:
+ * Where a collapsed dock's body is in its retreat, and an opening one in its
+ * return:
  *
  * - `shown` — on screen, and for exactly one collapse animation after it closes;
- * - `parked` — behind `<Activity mode="hidden">`: DOM and React state kept,
- *   every effect torn down;
- * - `gone` — unmounted.
+ * - `concealed` — collapsed but still mounted and live: the wrapper is `inert`
+ *   (which parks every native pane — Pro IDE, the embedded webview — off
+ *   screen through `useRegionVisibility`), the header stops projecting into
+ *   the title bar, and the workbench parks only the panels that hold a
+ *   process-wide native surface (`exclusiveSurface`, the embedded browser's
+ *   webview lease). Everything else keeps its effects;
+ * - `gone` — unmounted;
+ * - `warming` — opening from `gone`: the body pre-renders behind
+ *   `<Activity mode="hidden">` while the dock slides open, then reveals.
  *
- * A collapsed dock used to stay fully mounted at zero width — Monaco, the
- * resource chat pane and the embedded browser all still running behind a panel
- * nobody could see. The browser pane is the sharpest case: it holds a
- * *process-wide* embedded-webview lease, so an invisible dock could lock every
- * other surface out of the webview. The fix was to unmount the body once the
- * collapse finished — which made every re-open a cold mount: the project
- * editor re-listed its tree, re-read its open files and rebuilt its editors
- * while the dock was trying to animate open.
+ * Why `concealed` and not `<Activity mode="hidden">`, which the collapsed body
+ * used to be parked behind: hiding an Activity runs every effect's cleanup and
+ * revealing it runs them all again — so each re-open of the Workspace re-ran
+ * its git loads (twice), restarted the native recursive file watcher, re-walked
+ * the TypeScript project for Monaco, reset the file tree to its root and
+ * re-claimed the Pro IDE pane, all inside the frames of the open animation.
+ * That was the lag on every expand. Only the browser's webview lease ever
+ * needed tearing down, and the workbench now does that for its panel alone.
  *
- * Parking keeps the first fix without the second cost. `<Activity>` hidden runs
- * every effect's cleanup — the browser releases its lease, the project editor
- * unregisters its opener (so a reveal still routes through the dock and opens
- * it), the title-bar projection stands down — while the state and DOM survive
- * for a cheap reveal. It is the state the workbench already parks inactive
- * panels in. Only after {@link DOCK_BODY_PARK_MS} does the body go.
+ * The first collapse delay is not cosmetic. `animateDockResize` captures the
+ * open and collapsed layouts as compositor snapshots; concealing the body on
+ * the same frame would capture an empty panel instead of letting it move
+ * cleanly into the edge.
  *
- * The first delay is not cosmetic. `animateDockResize` captures the open and
- * collapsed layouts as compositor snapshots; hiding the body on the same frame
- * would capture an empty panel instead of letting it move cleanly into the
- * edge.
+ * `warming` is the cold path's answer to the same lag. A body that has to be
+ * built from nothing (first open, or past the park window) used to mount in
+ * the commit that started the open animation, so the slide waited for the
+ * whole workbench to render. Behind a hidden Activity React renders it at
+ * background priority without blocking, and its effects only start once the
+ * dock has finished opening.
  *
  * A dock that mounts already collapsed starts `gone`: app launch must not build
  * a body nobody has asked to see.
  *
- * **With a persistent rail** the shell never parks or goes — the workbench has
- * to keep drawing its activity rail — and `shown` alone decides `railOnly`,
- * which drops the panel body inside the workbench instead. The lease invariant
- * holds there too: rail-only unmounts every panel.
+ * **With a persistent rail** the shell never goes — the workbench has to keep
+ * drawing its activity rail — and never warms, which would hide the rail;
+ * `shown` decides `railOnly`, and a concealed body stays mounted (hidden)
+ * inside the workbench instead of being dropped.
  */
-type DockBodyPhase = "shown" | "parked" | "gone"
+type DockBodyPhase = "shown" | "concealed" | "gone" | "warming"
 
 function useDockBodyPhase(
   dockCollapsed: boolean,
   panelElementRef: { current: HTMLElement | null }
 ): DockBodyPhase {
-  // Only the timers move it forward. Expanding resets it *during render* —
-  // React's sanctioned "adjust state when a prop changes" pattern, and what
+  // Timers move it along; a toggle adjusts it *during render* — React's
+  // sanctioned "adjust state when a prop changes" pattern, and what
   // `react-hooks/set-state-in-effect` steers you to: re-opening is immediate
   // and must not wait a second render pass to put the body back.
   const [phase, setPhase] = useState<DockBodyPhase>(dockCollapsed ? "gone" : "shown")
-  if (!dockCollapsed && phase !== "shown") setPhase("shown")
+  if (!dockCollapsed && phase === "concealed") setPhase("shown")
+  if (!dockCollapsed && phase === "gone") setPhase("warming")
+  if (dockCollapsed && phase === "warming") setPhase("gone")
 
   useEffect(() => {
-    if (!dockCollapsed || phase === "gone") return
     const element = panelElementRef.current
+    const animationMs =
+      DOCK_RESIZE_DURATION_MS *
+        (element
+          ? Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
+          : 1) +
+      DOCK_RESIZE_CLEANUP_SLACK_MS
+    if (!dockCollapsed) {
+      if (phase !== "warming") return
+      const timer = window.setTimeout(() => setPhase("shown"), animationMs)
+      return () => window.clearTimeout(timer)
+    }
+    if (phase === "gone") return
     const timer =
       phase === "shown"
-        ? window.setTimeout(
-            () => setPhase("parked"),
-            DOCK_RESIZE_DURATION_MS *
-              (element
-                ? Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
-                : 1) +
-              DOCK_RESIZE_CLEANUP_SLACK_MS
-          )
+        ? window.setTimeout(() => setPhase("concealed"), animationMs)
         : window.setTimeout(() => setPhase("gone"), DOCK_BODY_PARK_MS)
     return () => window.clearTimeout(timer)
   }, [dockCollapsed, panelElementRef, phase])
@@ -454,7 +469,6 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   )
   const dockSize = useArtifactDockLayoutStore((s) => s.dockSize)
   const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
-  const dockProfile = useArtifactDockLayoutStore((s) => s.dockProfile)
   const layoutVersion = useArtifactDockLayoutStore((s) => s.layoutVersion)
   const dockSizeRequest = useArtifactDockLayoutStore((s) => s.dockSizeRequest)
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
@@ -475,16 +489,15 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const bindRoot = useCallback((element: HTMLDivElement | null) => {
     setRow(element?.parentElement ?? null)
   }, [])
-  const dockFloor = dockFloorForProfile(dockProfile === "workspace")
   const budget = useChatRowBudget({
     row,
     dockOpen: !dockCollapsed,
-    dockFloor,
+    dockFloor: DOCK_ROW_FLOOR,
     chatMinPx: CHAT_MIN_PX,
   })
   /** The dock floats over the chat; only ever true while it is open. */
   const overlayOpen = budget?.overlay ?? false
-  const overlayWidthPx = budget ? dockOverlayWidthPx(budget.groupPx, dockSize, dockFloor) : 0
+  const overlayWidthPx = budget ? dockOverlayWidthPx(budget.groupPx, dockSize, DOCK_ROW_FLOOR) : 0
   /**
    * Read by the effects and the layout callback below, which must not treat
    * the column the overlay shut as the user's collapse. A layout effect so it
@@ -529,23 +542,26 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     dockSizeRef.current = dockSize
   }, [dockSize])
   /**
-   * Where the panel *body* is in its retreat (see `useDockBodyPhase`). It leaves
-   * the screen one animation after a collapse, so the old snapshot contains real
-   * content instead of an empty box.
+   * Where the panel *body* is in its retreat or return (see `useDockBodyPhase`).
+   * It leaves the screen one animation after a collapse, so the old snapshot
+   * contains real content instead of an empty box.
    *
-   * Three consumers read this one clock: whether `<ArtifactDock />` renders at
-   * all, whether it is parked behind `<Activity>` (only when the rail is not
-   * persistent), and — with a persistent rail — `railOnly`, which drops the body
-   * inside the workbench. Deriving any of them from the raw `dockCollapsed`
-   * would flip it before the transition captured the outgoing panel and make the
-   * body blink away.
+   * Every consumer below reads this one clock: whether `<ArtifactDock />`
+   * renders at all, whether it pre-renders behind `<Activity>`, whether it is
+   * concealed, and — with a persistent rail — `railOnly`. Deriving any of them
+   * from the raw `dockCollapsed` would flip it before the transition captured
+   * the outgoing panel and make the body blink away.
    */
   const dockBodyPhase = useDockBodyPhase(dockCollapsed, dockPanelElementRef)
-  const dockBodyMounted = dockBodyPhase === "shown"
-  /** Rendered at all — on screen, rail-only, or parked behind `<Activity>`. */
+  /** The body is what the dock shows (a persistent rail never pre-renders). */
+  const dockBodyOnScreen =
+    dockBodyPhase === "shown" || (railPersistent && dockBodyPhase === "warming")
+  /** Rendered at all — on screen, warming, rail-only, or concealed. */
   const dockContentMounted = railPersistent || dockBodyPhase !== "gone"
-  /** Parked: kept for a cheap reveal, every effect torn down. Never with a rail. */
-  const dockBodyParked = !railPersistent && dockBodyPhase === "parked"
+  /** Pre-rendering behind a hidden `<Activity>` while the dock slides open. */
+  const dockBodyWarming = !railPersistent && dockBodyPhase === "warming"
+  /** Collapsed but kept live for a cheap reveal. */
+  const dockBodyConcealed = dockBodyPhase === "concealed"
   /**
    * What the panel shrinks to. `0%` is the pre-minibar behaviour; with the rail
    * persistent it is the rail's own width, so the collapsed dock still shows a
@@ -585,10 +601,9 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     const element = dockPanelElementRef.current
     const groupWidthPx = element?.parentElement?.offsetWidth ?? 0
     const wasCollapsed = dragStartCollapsedRef.current
-    const presets = DOCK_MODE_WIDTH_PERCENT[dockProfile]
     const snapped = snapPanelSize(latestDockPercentRef.current, {
-      presets: [presets.narrow, presets.wide],
-      floor: dockFloorPercent(element, workspaceProfile),
+      presets: [DOCK_MODE_WIDTH_PERCENT.narrow, DOCK_MODE_WIDTH_PERCENT.wide],
+      floor: dockFloorPercent(element),
       // Opening out of the rail returns to the width the dock was left at,
       // which is exactly what `dockSize` still holds — a collapse never
       // overwrites it.
@@ -718,40 +733,17 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   // Auto-expanding on a fresh artifact lives in `useDockAttentionSignal` on the
   // shared layer, so the mobile Sheet gets the identical rule.
 
-  const workspaceProfile = dockProfile === "workspace"
   /**
-   * The cap the panel is actually given: the profile's own cap, or the width
-   * something just asked for — whichever is wider.
-   *
-   * `dockProfile` is written by `useDockPanelSync` in an effect that runs after
-   * the activation which requested the width, so on the frame a workspace panel
-   * asks for 65% the profile still reads `compact`, whose cap is 50%.
-   * `react-resizable-panels` clamped the request to that stale cap and echoed
-   * the clamped value back through `onLayoutChanged` — so the workspace panel
-   * settled at the artifact width, and the clamp landed as a second,
-   * untransitioned layout pass immediately after the first.
-   *
-   * Widening it costs nothing: `clampDockSize` already holds every stored width
-   * under the workspace cap, so this can never exceed 65%. Leaving the workspace
-   * profile still animates the dock back down — `setDockProfile` routes that
-   * clamp through the request token.
+   * The cap the panel is actually given: the dock's own cap, or the width the
+   * conversation's floor leaves — whichever is narrower. The chat floor is a
+   * physical limit, so it wins — including over a `dockSize` restored from a
+   * session on a wider window, which is the case that arrives already too big
+   * rather than being dragged there.
    */
-  const effectiveDockMax = Math.min(
-    Math.max(workspaceProfile ? WORKSPACE_DOCK_BOUNDS.max : ARTIFACT_DOCK_BOUNDS.max, dockSize),
-    // A physical limit, so it wins over the widening above — including over a
-    // `dockSize` restored from a session on a wider window, which is the case
-    // that arrives already too big rather than being dragged there.
-    chatFloorCap
-  )
+  const effectiveDockMax = Math.min(ARTIFACT_DOCK_BOUNDS.max, chatFloorCap)
   // The chat floor has to yield by the same amount, or it re-imposes the clamp
   // from the other side of the group.
-  const chatMinSize = `${Math.min(
-    workspaceProfile ? CHAT_MIN_PERCENT.workspace : CHAT_MIN_PERCENT.default,
-    100 - effectiveDockMax
-  )}%`
-  const dockMinSize = workspaceProfile
-    ? WORKSPACE_DOCK_BOUNDS.minPx
-    : `${ARTIFACT_DOCK_BOUNDS.min}%`
+  const chatMinSize = `${Math.min(CHAT_MIN_PERCENT, 100 - effectiveDockMax)}%`
   const dockMaxSize = `${effectiveDockMax}%`
 
   return (
@@ -801,12 +793,10 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
             setDockCollapsed(true)
             return
           }
-          // Reject only the collapse itself, not a legitimately narrow drag.
-          // This used to gate on the *artifact* floor (24%) regardless of
-          // profile, while the workspace profile's real floor is 480px — on a
-          // 2560px screen that is ~18.75%, so dragging the workspace dock down
-          // to its own minimum silently failed to persist and the next
-          // collapse/expand snapped it back to the stale wider value.
+          // Reject only the collapse itself, not a legitimately narrow drag:
+          // the floor is 480px, ~18.75% of a 2560px screen, and a percentage
+          // gate above that made a drag to the minimum silently fail to
+          // persist, so the next collapse/expand snapped back to a stale width.
           //
           // Nor a dock that is merely sitting on the chat-floor cap below the
           // width it was given: the window narrowed under it, and that width is
@@ -818,10 +808,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
               cap + CAP_EPSILON_PERCENT < dockSizeRef.current &&
               Math.abs(dock - cap) < CAP_EPSILON_PERCENT
           )
-          if (
-            !heldByCap &&
-            dock >= dockFloorPercent(dockPanelElementRef.current, workspaceProfile)
-          ) {
+          if (!heldByCap && dock >= dockFloorPercent(dockPanelElementRef.current)) {
             setDockSize(dock)
           }
         }}
@@ -855,12 +842,12 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
             dragStartCollapsedRef.current = dockCollapsed
           }}
           onPointerUp={handleResizeRelease}
-          // Editor-splitter convention: double-click restores the current
-          // profile's preset width. Routed through the request token so the
-          // change animates like the narrow/wide buttons instead of snapping.
+          // Editor-splitter convention: double-click restores the default
+          // width. Routed through the request token so the change animates
+          // like the narrow/wide buttons instead of snapping.
           onDoubleClick={() => {
             if (dockCollapsed) return
-            requestDockSize(DOCK_MODE_WIDTH_PERCENT[dockProfile].narrow)
+            requestDockSize(DOCK_MODE_WIDTH_PERCENT.narrow)
           }}
         />
 
@@ -869,7 +856,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           panelRef={dockPanelRef}
           elementRef={dockPanelElementRef}
           defaultSize={dockCollapsed || overlayOpen ? panelCollapsedSize : `${dockSize}%`}
-          minSize={dockMinSize}
+          minSize={DOCK_MIN_SIZE}
           maxSize={dockMaxSize}
           collapsible
           collapsedSize={panelCollapsedSize}
@@ -891,6 +878,14 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
             <div
               ref={overlayElementRef}
               data-testid="artifact-dock-wrapper"
+              data-concealed={dockBodyConcealed || undefined}
+              // A concealed body is out of reach: nothing in it takes focus or
+              // reads to assistive tech, and the native panes inside park
+              // themselves on the inert ancestor (`useRegionVisibility`). Not
+              // with a persistent rail, which stays on screen and interactive;
+              // the workbench hides the body behind it on its own.
+              inert={(dockBodyConcealed && !railPersistent) || undefined}
+              aria-hidden={(dockBodyConcealed && !railPersistent) || undefined}
               role={overlayOpen ? "dialog" : undefined}
               aria-modal={overlayOpen || undefined}
               aria-label={overlayOpen ? t("overlayLabel") : undefined}
@@ -902,14 +897,32 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
               )}
               style={overlayOpen ? { width: overlayWidthPx } : undefined}
             >
-              <TitleBarProjectionScope enabled={projectionScope && !overlayOpen}>
+              {/* A concealed header must not stay projected into the title bar
+                  over a dock nobody can see. */}
+              <TitleBarProjectionScope
+                enabled={projectionScope && !overlayOpen && !dockBodyConcealed}
+              >
                 {dockContentMounted ? (
-                  // One `<Activity>` in every shape, so parking and revealing
+                  // One `<Activity>` in every shape, so warming and revealing
                   // flip its mode rather than changing the tree — a changed
-                  // parent would remount the very body parking exists to keep.
-                  <Activity mode={dockBodyParked ? "hidden" : "visible"}>
-                    <ArtifactDock railOnly={railPersistent && !dockBodyMounted} />
+                  // parent would remount the very body it pre-rendered.
+                  <Activity mode={dockBodyWarming ? "hidden" : "visible"}>
+                    <ArtifactDock
+                      railOnly={railPersistent && !dockBodyOnScreen}
+                      concealed={dockBodyConcealed}
+                    />
                   </Activity>
+                ) : null}
+                {dockBodyWarming ? (
+                  // The workbench's own surface, drawn while its body
+                  // pre-renders, so the dock slides open as the panel it is
+                  // about to be rather than as a hole onto the page behind.
+                  <div
+                    aria-hidden
+                    data-testid="artifact-dock-warming"
+                    data-bg-target="sidebar"
+                    className="h-full border-l bg-card/40"
+                  />
                 ) : null}
               </TitleBarProjectionScope>
             </div>

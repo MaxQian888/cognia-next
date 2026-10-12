@@ -69,7 +69,7 @@ describe("revealArtifactInWorkspace", () => {
       title: "t",
       content: "console.log(1)",
     })
-    useArtifactDockLayoutStore.getState().setDockProfile("workspace")
+    useArtifactDockLayoutStore.getState().setWorkspaceSurfaceActive(true)
 
     revealArtifactInWorkspace(artifact.id)
 

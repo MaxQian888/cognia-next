@@ -264,6 +264,15 @@ export interface ContextPanelDefinition {
    * without it this degrades to `"resource"`.
    */
   scope?: "resource" | "session"
+  /**
+   * The panel holds a process-wide native surface that only one mounted pane
+   * may own — the embedded browser's webview lease. A host that keeps its
+   * workbench mounted while off screen (`ContextWorkbench`'s `concealed`)
+   * parks this panel behind `<Activity mode="hidden">` meanwhile, so the
+   * surface is given back instead of staying claimed by something invisible.
+   * Every other panel stays live there.
+   */
+  exclusiveSurface?: boolean
   requiresChatScope?: boolean
   getBadge?: (resource: ContextResource) => number | undefined
   renderer: ComponentType<ContextPanelRenderProps>

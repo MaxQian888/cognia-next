@@ -3,8 +3,10 @@
  */
 
 import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
+import type { UIMessage } from "ai"
 import type { ComponentType } from "react"
+import { makeSessionSlice, useChatStore } from "@/stores/chat"
 import {
   PROJECT_OVERVIEW_PANEL_ID,
   WORKSPACE_PANEL_ID,
@@ -362,6 +364,20 @@ function artifactInput(
   }
 }
 
+/**
+ * The conversation's transcript, in the real chat store: the panels that read
+ * it subscribe there themselves rather than through the catalogue's inputs.
+ */
+function seedTranscript(messages: UIMessage[]) {
+  useChatStore.setState((state) => ({
+    sessions: { ...state.sessions, s1: { ...makeSessionSlice(), messages } },
+  }))
+}
+
+beforeEach(() => {
+  seedTranscript([{ id: "m1", role: "user", parts: [] }])
+})
+
 function sessionInput(
   overrides: Partial<SessionSurfacePanelsInput> = {}
 ): SessionSurfacePanelsInput {
@@ -369,8 +385,6 @@ function sessionInput(
     activeSessionId: "s1",
     session,
     sessionProject: project,
-    sessionMessages: [{ id: "m1", role: "user", parts: [] }],
-    messageCount: 1,
     workspaceLayout: "desktop",
     workspaceAvailable: true,
     unresolvedCommentCount: 5,
@@ -914,6 +928,37 @@ describe("useSessionSurfacePanels", () => {
     expect(screen.getByTestId("chat-panel")).toHaveAttribute("data-multi", "yes")
   })
 
+  it("feeds the sidechat the visible branch only, never a superseded sibling", () => {
+    useChatStore.setState({
+      sessions: {
+        s1: {
+          ...makeSessionSlice(),
+          messages: [
+            { id: "u1", role: "user", parts: [{ type: "text", text: "question" }] },
+            {
+              id: "a-old",
+              role: "assistant",
+              parts: [{ type: "text", text: "superseded answer" }],
+              metadata: { branchGroupId: "g1", branchIndex: 0 },
+            },
+            {
+              id: "a-new",
+              role: "assistant",
+              parts: [{ type: "text", text: "current answer" }],
+              metadata: { branchGroupId: "g1", branchIndex: 1 },
+            },
+          ],
+          activeBranchByGroup: { g1: "a-new" },
+        },
+      },
+    } as never)
+    const panels = collect(useSessionSurfacePanels, sessionInput())
+    renderPanel(panelById(panels, "session-sidechat"), SESSION_RESOURCE)
+    const context = screen.getByTestId("chat-panel").getAttribute("data-context") ?? ""
+    expect(context).toContain("current answer")
+    expect(context).not.toContain("superseded answer")
+  })
+
   it("shows a placeholder instead of a sidechat when no conversation is open", () => {
     const panels = collect(
       useSessionSurfacePanels,
@@ -1075,10 +1120,6 @@ describe("panel lifetime", () => {
       <Harness
         input={sessionInput({
           session: { ...session, updatedAt: 1700000009000 } as unknown as Session,
-          sessionMessages: [
-            { id: "m1", role: "user", parts: [] },
-            { id: "m2", role: "assistant", parts: [] },
-          ],
           unresolvedCommentCount: 9,
         })}
       />
@@ -1125,15 +1166,15 @@ describe("panel lifetime", () => {
   it("keeps the sidechat mounted while the main thread streams, and reads it at send time", () => {
     const { rerender } = render(<SessionHost input={sessionInput()} panelId="session-sidechat" />)
     const node = screen.getByTestId("chat-panel")
+    act(() =>
+      seedTranscript([
+        { id: "m1", role: "user", parts: [] },
+        { id: "m2", role: "assistant", parts: [{ type: "text", text: "streamed" }] },
+      ])
+    )
     rerender(
       <SessionHost
-        input={sessionInput({
-          session: { ...session } as unknown as Session,
-          sessionMessages: [
-            { id: "m1", role: "user", parts: [] },
-            { id: "m2", role: "assistant", parts: [{ type: "text", text: "streamed" }] },
-          ] as never,
-        })}
+        input={sessionInput({ session: { ...session } as unknown as Session })}
         panelId="session-sidechat"
       />
     )
