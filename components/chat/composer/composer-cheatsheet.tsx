@@ -12,6 +12,9 @@
 // a user can read it instead of discovering it.
 
 import { useTranslations } from "next-intl"
+import { composerSendKeys } from "@/lib/chat/composer-send-keys"
+import { usesAppleModifierGlyphs } from "@/lib/platform/os"
+import { useSettingsStore } from "@/stores/settings"
 import {
   Dialog,
   DialogContent,
@@ -21,14 +24,30 @@ import {
 } from "@/components/ui/dialog"
 
 /** Keyboard rows: an i18n key plus the literal keycaps it documents. */
-const SHORTCUT_ROWS: ReadonlyArray<{ key: string; combo: readonly string[] }> = [
-  { key: "send", combo: ["⏎"] },
-  { key: "newline", combo: ["⇧", "⏎"] },
-  { key: "permissionMode", combo: ["⇧", "⇥"] },
-  { key: "history", combo: ["↑", "↓"] },
-  { key: "complete", combo: ["⇥"] },
-  { key: "dismiss", combo: ["Esc"] },
-]
+type ShortcutRow = { key: string; combo: readonly string[] }
+
+/**
+ * The rows as they apply to THIS user: send/newline follow the "Send on Enter"
+ * setting (the key handler does), and history recall is listed only while it
+ * is switched on. A static list told a user who had turned Enter-to-send off
+ * to press the key that now inserts a line break.
+ */
+export function shortcutRows(options: {
+  sendOnEnter: boolean
+  historyRecall: boolean
+  appleGlyphs: boolean
+}): ShortcutRow[] {
+  const keys = composerSendKeys(options)
+  return [
+    { key: "send", combo: keys.send },
+    { key: "newline", combo: keys.newline },
+    { key: "permissionMode", combo: ["⇧", "⇥"] },
+    ...(options.historyRecall ? [{ key: "history", combo: ["↑", "↓"] }] : []),
+    { key: "complete", combo: ["⇥"] },
+    { key: "dismiss", combo: ["Esc"] },
+    { key: "stop", combo: ["Esc"] },
+  ]
+}
 
 const PREFIX_ROWS: ReadonlyArray<{ key: string; prefix: string }> = [
   { key: "slash", prefix: "/" },
@@ -44,6 +63,11 @@ export interface ComposerCheatsheetProps {
 
 export function ComposerCheatsheet({ open, onOpenChange }: ComposerCheatsheetProps) {
   const t = useTranslations("chat.composer.helperHints")
+  const sendOnEnter = useSettingsStore((s) => s.settings?.composerBehavior?.sendOnEnter !== false)
+  const historyRecall = useSettingsStore(
+    (s) => s.settings?.composerBehavior?.inputHistoryRecall !== false
+  )
+  const rows = shortcutRows({ sendOnEnter, historyRecall, appleGlyphs: usesAppleModifierGlyphs() })
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -56,7 +80,7 @@ export function ComposerCheatsheet({ open, onOpenChange }: ComposerCheatsheetPro
         <section>
           <h3 className="mb-2 text-xs font-medium text-muted-foreground">{t("keysTitle")}</h3>
           <dl className="grid grid-cols-[7rem_1fr] items-center gap-x-3 gap-y-2 text-sm">
-            {SHORTCUT_ROWS.map((row) => (
+            {rows.map((row) => (
               <RowPair key={row.key} label={t(`keys.${row.key}`)}>
                 {row.combo.map((cap) => (
                   <Keycap key={cap}>{cap}</Keycap>

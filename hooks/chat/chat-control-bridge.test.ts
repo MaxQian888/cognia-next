@@ -46,6 +46,17 @@ describe("chat control bridge", () => {
     expect(respond).toHaveBeenCalledWith(approval, "allow_always")
   })
 
+  it("passes a deny's reason through to the runtime", async () => {
+    const respond = jest.fn(async () => undefined)
+    registerChatApprovalBridge(respond)
+    await expect(answerChatApproval(approval, "deny", { message: "back it up" })).resolves.toBe(
+      true
+    )
+    expect(routeChatApprovalDecision).toHaveBeenCalledWith(approval, "deny", respond, {
+      message: "back it up",
+    })
+  })
+
   it("lets a failed delivery reject so the ask stays pending", async () => {
     registerChatApprovalBridge(async () => {
       throw new Error("sidecar unavailable")

@@ -14,7 +14,7 @@ import type { CogniaDiagnostic } from "@cognia/diagnostics"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import { contextSelectionIdentity } from "@/lib/chat/mentions/selection-identity"
 import type { ContextRef } from "@/lib/chat/mentions/types"
-import type { PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
+import type { CarriedPromptPreamble, PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
@@ -254,6 +254,12 @@ export interface SessionChatSlice {
    */
   citedRefs: ContextRef[]
   contextSelections: ContextSelectionRef[]
+  /**
+   * Context envelopes carried over from a message put back into the composer
+   * (`lib/chat/composer-restore.ts`): the referenced material and web results
+   * it was sent with, re-applied verbatim on the next send and cleared by it.
+   */
+  carriedPreambles: CarriedPromptPreamble[]
   pendingCommandOverrides: PendingCommandOverrides | null
   bookmarkedIds: string[]
   webSearchOnForNextSend: boolean
@@ -289,6 +295,7 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
     referencedWorkflowElements: [],
     citedRefs: [],
     contextSelections: [],
+    carriedPreambles: [],
     pendingCommandOverrides: null,
     bookmarkedIds: [],
     webSearchOnForNextSend: false,
@@ -325,6 +332,7 @@ type ProjectedField =
   | "referencedWorkflowElements"
   | "citedRefs"
   | "contextSelections"
+  | "carriedPreambles"
   | "pendingCommandOverrides"
   | "bookmarkedIds"
   | "webSearchOnForNextSend"
@@ -348,6 +356,7 @@ function projectSlice(slice: SessionChatSlice): Pick<ChatState, ProjectedField> 
     referencedWorkflowElements: slice.referencedWorkflowElements,
     citedRefs: slice.citedRefs,
     contextSelections: slice.contextSelections,
+    carriedPreambles: slice.carriedPreambles,
     pendingCommandOverrides: slice.pendingCommandOverrides,
     bookmarkedIds: slice.bookmarkedIds,
     webSearchOnForNextSend: slice.webSearchOnForNextSend,
@@ -471,6 +480,7 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
       referencedWorkflowElements: state.referencedWorkflowElements,
       citedRefs: state.citedRefs,
       contextSelections: state.contextSelections,
+      carriedPreambles: state.carriedPreambles,
       pendingCommandOverrides: state.pendingCommandOverrides,
       bookmarkedIds: state.bookmarkedIds,
       webSearchOnForNextSend: state.webSearchOnForNextSend,
@@ -587,6 +597,7 @@ function projectionAsSlice(state: ChatState): Partial<SessionChatSlice> {
     referencedWorkflowElements: state.referencedWorkflowElements,
     citedRefs: state.citedRefs,
     contextSelections: state.contextSelections,
+    carriedPreambles: state.carriedPreambles,
     pendingCommandOverrides: state.pendingCommandOverrides,
     bookmarkedIds: state.bookmarkedIds,
     webSearchOnForNextSend: state.webSearchOnForNextSend,
@@ -668,6 +679,8 @@ interface ChatState {
    * edit target — see `promoteContextSelection`.
    */
   contextSelections: ContextSelectionRef[]
+  /** See {@link SessionChatSlice.carriedPreambles}. */
+  carriedPreambles: CarriedPromptPreamble[]
   /** Frontmatter overrides from a recently-picked custom command; cleared on send. */
   pendingCommandOverrides: PendingCommandOverrides | null
   /**
@@ -899,6 +912,10 @@ interface ChatState {
    */
   promoteContextSelection: (index: number, sessionId?: string | null) => void
   clearContextSelections: (sessionId?: string | null) => void
+  /** Add envelopes carried over from a put-back message (see `carriedPreambles`). */
+  addCarriedPreambles: (preambles: CarriedPromptPreamble[], sessionId?: string | null) => void
+  removeCarriedPreamble: (index: number, sessionId?: string | null) => void
+  clearCarriedPreambles: (sessionId?: string | null) => void
   setPendingCommandOverrides: (
     overrides: PendingCommandOverrides | null,
     sessionId?: string | null
@@ -941,6 +958,7 @@ export const useChatStore = create<ChatState>((set) => ({
   referencedWorkflowElements: [],
   citedRefs: [],
   contextSelections: [],
+  carriedPreambles: [],
   pendingCommandOverrides: null,
   bookmarkedIds: [],
   webSearchOnForNextSend: false,
@@ -1375,6 +1393,32 @@ export const useChatStore = create<ChatState>((set) => ({
         ? s
         : patchComposerState(s, sessionId, { contextSelections: [] })
     ),
+  addCarriedPreambles: (preambles, sessionId) =>
+    set((s) => {
+      if (preambles.length === 0) return s
+      const current = composerSlice(s, sessionId).carriedPreambles
+      // The same envelope put back twice is one envelope.
+      const fresh = preambles.filter(
+        (incoming) => !current.some((held) => held.preamble === incoming.preamble)
+      )
+      return fresh.length === 0
+        ? s
+        : patchComposerState(s, sessionId, { carriedPreambles: [...current, ...fresh] })
+    }),
+  removeCarriedPreamble: (index, sessionId) =>
+    set((s) =>
+      patchComposerState(s, sessionId, {
+        carriedPreambles: composerSlice(s, sessionId).carriedPreambles.filter(
+          (_, i) => i !== index
+        ),
+      })
+    ),
+  clearCarriedPreambles: (sessionId) =>
+    set((s) =>
+      composerSlice(s, sessionId).carriedPreambles.length === 0
+        ? s
+        : patchComposerState(s, sessionId, { carriedPreambles: [] })
+    ),
   removeReferencedPath: (absolute, sessionId) =>
     set((s) =>
       patchComposerState(s, sessionId, {
@@ -1582,6 +1626,7 @@ export const useChatStore = create<ChatState>((set) => ({
       referencedWorkflowElements: [],
       citedRefs: [],
       contextSelections: [],
+      carriedPreambles: [],
       pendingCommandOverrides: null,
       bookmarkedIds: [],
       webSearchOnForNextSend: false,
@@ -1799,6 +1844,13 @@ export function selectComposerContextSelections(
 ): ContextSelectionRef[] {
   return composerReadSlice(state, sessionId).contextSelections
 }
+/** Envelopes carried over from a put-back message for `sessionId`'s next send. */
+export function selectComposerCarriedPreambles(
+  state: ChatState,
+  sessionId: string | null | undefined
+): CarriedPromptPreamble[] {
+  return composerReadSlice(state, sessionId).carriedPreambles
+}
 /** Per-send web-search toggle for `sessionId`'s conversation. */
 export function selectComposerWebSearchOn(
   state: ChatState,
@@ -1846,6 +1898,12 @@ export function useComposerContextSelections(
   sessionId: string | null | undefined
 ): ContextSelectionRef[] {
   return useChatStore((s) => selectComposerContextSelections(s, sessionId))
+}
+/** Carried-over context envelopes for this composer's conversation. */
+export function useComposerCarriedPreambles(
+  sessionId: string | null | undefined
+): CarriedPromptPreamble[] {
+  return useChatStore((s) => selectComposerCarriedPreambles(s, sessionId))
 }
 /** Per-send web-search toggle for this composer's conversation. */
 export function useComposerWebSearchOn(sessionId: string | null | undefined): boolean {

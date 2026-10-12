@@ -52,6 +52,7 @@ import {
   liveSessionIds,
   markPendingSteersFailed,
   mergeSteerWebSearchIntoLastSend,
+  putBackPendingSteers,
   sessionExternalLane,
   sessionStatusOf,
   setSessionExternalLane,
@@ -59,6 +60,7 @@ import {
   steerArmed,
 } from "./steer-runtime"
 import { supersedePendingApprovals } from "./approval-supersede"
+import { denialMessageForModel, denialReasonOf } from "@/lib/chat/approval-routing"
 import { invalidateJudgeContext } from "@/lib/claude/permissions/command-judge"
 import {
   drainSessionPeerMessages,
@@ -222,6 +224,7 @@ import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
 import { runStandaloneTurn } from "@/lib/ai/chat/standalone-engine"
 import type {
   ApprovalDecision,
+  ApprovalResponseOptions,
   ClaudeEvent,
   PendingApproval,
   SendContent,
@@ -746,6 +749,7 @@ export function useClaudeChat() {
   const tVideo = useTranslations("chat.composer.attachments.video")
   const tAttachments = useTranslations("chat.composer.attachments")
   const tCollab = useTranslations("chatCollaboration")
+  const tSteer = useTranslations("chat.steer")
   /**
    * Name what a turn's recipient was not handed, and why, so nothing attached
    * goes missing in silence. A Squad's goal is one string, so it gets the
@@ -965,6 +969,12 @@ export function useClaudeChat() {
   // `interruptSession` instead).
   const standaloneAbortRef = useRef<Map<string, AbortController>>(new Map())
   const externalGatewayAbortRef = useRef<Map<string, AbortController>>(new Map())
+  // Sessions whose running turn belongs to a paired Host (HostState). That
+  // turn's end never reaches `handleEvent` here — the Host's projection just
+  // flips the session's status — so the steer queue such a turn leaves behind
+  // is drained by watching that status (the effect below), with the same rule
+  // a local settle applies.
+  const hostStateTurnsRef = useRef<Set<string>>(new Set())
   const externalTurnSettlementsRef = useRef<Map<string, Promise<void>>>(new Map())
   const externalToolHostsRef = useRef(
     new Map<
@@ -2803,6 +2813,7 @@ export function useClaudeChat() {
           })
           if (queued) {
             callOptions?.backgroundDelivery?.onAccepted()
+            hostStateTurnsRef.current.add(sessionId)
             // The outbox transaction completed before this optimistic write.
             // Runtime dispatch, transcript persistence and authoritative title
             // updates now belong to HostStateService on every attached surface.
@@ -5746,6 +5757,23 @@ export function useClaudeChat() {
   // for a reachable session, dispatch its next iteration silently — the same
   // skipUserAppend path as every later continuation, so the send never trips
   // the fresh-user-message preempt above.
+  // A HostState turn settles by projection, not by a local `session_ended`:
+  // once its session leaves the busy states, apply the settle's steer rule —
+  // a clean end (or an armed "Interrupt & send") replays the queue, an errored
+  // end keeps it and says so on the bubbles.
+  useEffect(() => {
+    const settleHostStateTurns = () => {
+      for (const sessionId of [...hostStateTurnsRef.current]) {
+        const status = sessionStatusOf(sessionId)
+        if (status === "streaming" || status === "awaiting_approval") continue
+        hostStateTurnsRef.current.delete(sessionId)
+        if (status === "error" && !steerArmed.has(sessionId)) markPendingSteersFailed(sessionId)
+        else drainSteerVia(sessionId, sendRef)
+      }
+    }
+    return useChatStore.subscribe(settleHostStateTurns)
+  }, [])
+
   useEffect(() => {
     const unsub = getLoopRuntime().onKickoff((loop) => {
       if (!isSessionOpen(loop.sessionId)) return
@@ -5756,6 +5784,51 @@ export function useClaudeChat() {
     })
     return unsub
   }, [])
+
+  // The one runtime dispatch that cuts a running turn short. Stop, Esc and
+  // "Interrupt & send" all end the same turn on the same runtime, so they must
+  // reach it the same way: a lane missing here is a turn one of them cannot
+  // stop. Every branch makes the runtime emit its own `session_ended`, which
+  // is what settles the turn (and, for an armed steer, replays the queue).
+  const abortRunningTurn = useCallback(
+    async (sessionId: string, hostStateAbortQueued: boolean): Promise<void> => {
+      // Standalone (BYOK) turns are cancelled by aborting the renderer
+      // streamText loop; the engine then emits its own `session_ended`. The
+      // sidecar path interrupts the host instead. The follow-up
+      // `session_ended` remains idempotent with the optimistic local seal.
+      const standaloneController = standaloneAbortRef.current.get(sessionId)
+      const gatewayController = externalGatewayAbortRef.current.get(sessionId)
+      if (hostStateAbortQueued) {
+        // Durable HostState action owns the interrupt; the runner retries it
+        // with the same action id after reconnect.
+      } else if (gatewayController) {
+        gatewayController.abort()
+      } else if (
+        sessionExternalLane(sessionId) &&
+        externalSessionLinkForSession(sessionId)?.agentId === sessionExternalLane(sessionId)
+      ) {
+        const link = externalSessionLinkForSession(sessionId)!
+        const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+        if (link.host) {
+          const { createRemoteSessionOperationsClient } =
+            await import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
+          await createRemoteSessionOperationsClient({
+            stamp: link.host,
+            chatSessionId: sessionId,
+            externalSessionId: link.sessionId,
+          }).cancel(link.agentId, link.sessionId)
+        } else await getExternalAgentManager().cancel(link.agentId, link.sessionId)
+      } else if (standaloneController) {
+        standaloneController.abort()
+        standaloneAbortRef.current.delete(sessionId)
+      } else {
+        const handle = getExecutionHandle(sessionId)
+        if (handle) await handle.interrupt()
+        else await interruptSession(sessionId)
+      }
+    },
+    [getExecutionHandle]
+  )
 
   const stop = useCallback(
     async (targetSessionId?: string) => {
@@ -5779,10 +5852,26 @@ export function useClaudeChat() {
           )
         return
       }
-      // Plain stop discards any queued steer — the user is taking over, not
-      // steering — and disarms the drain so the settle doesn't replay it.
+      // Plain stop does not replay the queued follow-ups — the user is taking
+      // over, not steering — so the drain is disarmed. But they are the user's
+      // own words, typed for this conversation: they go back into the composer
+      // with everything they carried (files, citations, reply, context), never
+      // silently dropped with the run. Esc is the same Stop.
+      const queuedSteers = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
       useChatStore.getState().clearSteerQueue(sessionId)
       steerArmed.delete(sessionId)
+      hostStateTurnsRef.current.delete(sessionId)
+      if (queuedSteers.length > 0) {
+        void putBackPendingSteers(
+          sessionId,
+          queuedSteers.map((entry) => entry.id),
+          queuedSteers
+        )
+          .then((count) => {
+            if (count > 0) toast.info(tSteer("restoredOnStop", { count }))
+          })
+          .catch((error) => console.error("steer put-back on stop failed", error))
+      }
 
       // Seal the renderer state before waiting for the IPC acknowledgement.
       // `claude_interrupt` is best-effort transport control; if its promise is
@@ -5818,46 +5907,13 @@ export function useClaudeChat() {
       ])
 
       try {
-        // Standalone (BYOK) turns are cancelled by aborting the renderer
-        // streamText loop; the engine then emits its own `session_ended`. The
-        // sidecar path interrupts the host instead. The follow-up
-        // `session_ended` remains idempotent with the optimistic local seal.
-        const standaloneController = standaloneAbortRef.current.get(sessionId)
-        const gatewayController = externalGatewayAbortRef.current.get(sessionId)
-        if (hostStateAbortQueued) {
-          // Durable HostState action owns the interrupt; the runner retries it
-          // with the same action id after reconnect.
-        } else if (gatewayController) {
-          gatewayController.abort()
-        } else if (
-          sessionExternalLane(sessionId) &&
-          externalSessionLinkForSession(sessionId)?.agentId === sessionExternalLane(sessionId)
-        ) {
-          const link = externalSessionLinkForSession(sessionId)!
-          const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-          if (link.host) {
-            const { createRemoteSessionOperationsClient } =
-              await import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
-            await createRemoteSessionOperationsClient({
-              stamp: link.host,
-              chatSessionId: sessionId,
-              externalSessionId: link.sessionId,
-            }).cancel(link.agentId, link.sessionId)
-          } else await getExternalAgentManager().cancel(link.agentId, link.sessionId)
-        } else if (standaloneController) {
-          standaloneController.abort()
-          standaloneAbortRef.current.delete(sessionId)
-        } else {
-          const handle = getExecutionHandle(sessionId)
-          if (handle) await handle.interrupt()
-          else await interruptSession(sessionId)
-        }
+        await abortRunningTurn(sessionId, hostStateAbortQueued)
       } catch (err) {
         console.error("interrupt failed", err)
       }
       await finishRun
     },
-    [store, registry, getExecutionHandle]
+    [store, registry, abortRunningTurn, tSteer]
   )
 
   // "Interrupt & steer now": cut the running turn short so its settle replays
@@ -5872,12 +5928,7 @@ export function useClaudeChat() {
       if (queued.length === 0) return
       steerArmed.add(sessionId)
       try {
-        const gatewayController = externalGatewayAbortRef.current.get(sessionId)
-        if (gatewayController) {
-          gatewayController.abort()
-          return
-        }
-        if (fusionChatTurnActive(sessionId)) {
+        if (!externalGatewayAbortRef.current.has(sessionId) && fusionChatTurnActive(sessionId)) {
           // A verified run has no live input: stop it, and its settle replays
           // the queue.
           await stopFusionChatTurn(sessionId, useSettingsStore.getState().settings, {
@@ -5885,16 +5936,31 @@ export function useClaudeChat() {
           })
           return
         }
-        const handle = getExecutionHandle(sessionId)
-        if (handle) await handle.interrupt()
-        else await interruptSession(sessionId)
+        // The same dispatch Stop uses, so a BYOK, external-agent or
+        // paired-host turn is really cut short. A sidecar-only interrupt
+        // reached none of those: the turn ran on, and the "now" message
+        // waited for it to finish.
+        const hostStateAbortQueued = Boolean(
+          await enqueueHostStateIntentIfAvailable({
+            sessionId,
+            action: { kind: "turn.abort" },
+          })
+        )
+        if (hostStateAbortQueued) hostStateTurnsRef.current.add(sessionId)
+        await abortRunningTurn(sessionId, hostStateAbortQueued)
         await cancelRouterFusionTurn(sessionId)
       } catch (err) {
         console.error("interrupt(steer) failed", err)
         steerArmed.delete(sessionId)
+        store
+          .getState()
+          .setSessionDiagnostic(
+            sessionId,
+            toDiagnostic(err, { source: "chat", meta: { sessionId } })
+          )
       }
     },
-    [getExecutionHandle]
+    [store, abortRunningTurn]
   )
 
   // Replay a session's queued steer NOW, without a turn boundary. Used by the
@@ -5908,12 +5974,25 @@ export function useClaudeChat() {
   }, [])
 
   const respondToApproval = useCallback(
-    async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
+    async (
+      approval: PendingApproval,
+      decision: ApprovalDecision,
+      options?: ApprovalResponseOptions
+    ): Promise<void> => {
       if (approval.suppressAlwaysAllowRule && decision === "allow_always") decision = "allow"
       const authorized = await authorizeSharedSessionApproval(approval, decision)
       if (authorized === null) return
       decision =
         approval.suppressAlwaysAllowRule && authorized === "allow_always" ? "allow" : authorized
+      // A deny's reason ("not that — back it up instead"). Runtimes whose
+      // refusal carries text get it as the denied call's result; the rest get
+      // it as a follow-up to the same turn, right behind the refusal, so the
+      // one answer still redirects the work on every lane.
+      const denialReason = denialReasonOf(decision, options)
+      const followDenialWithReason = () => {
+        if (!denialReason) return
+        void sendRef.current?.(denialReason, undefined, { sessionId: approval.sessionId })
+      }
       {
         const { RENDERER_TOOL_HOST_APPROVAL_PREFIX } =
           await import("@/lib/ai/agent/external/session/renderer-tool-host")
@@ -5924,6 +6003,7 @@ export function useClaudeChat() {
           resolveApproval(approval.sessionId, approval.requestId, { decision })
           await recordChatToolApprovalDecision(approval, decision)
           store.getState().clearApproval(approval.requestId, approval.sessionId)
+          followDenialWithReason()
           return
         }
       }
@@ -5944,6 +6024,7 @@ export function useClaudeChat() {
             decision: decision === "deny" ? "deny" : "allow",
           })
           store.getState().clearApproval(approval.requestId, approval.sessionId)
+          followDenialWithReason()
           return
         }
       }
@@ -5973,6 +6054,7 @@ export function useClaudeChat() {
             decision: decision === "deny" ? "deny" : "allow",
           })
           store.getState().clearApproval(approval.requestId, approval.sessionId)
+          followDenialWithReason()
           return
         }
       }
@@ -6048,6 +6130,8 @@ export function useClaudeChat() {
             return
           }
           store.getState().clearApproval(approval.requestId, approval.sessionId)
+          // ACP's permission answer has no text field: the reason follows.
+          followDenialWithReason()
           return
         }
       }
@@ -6107,6 +6191,9 @@ export function useClaudeChat() {
         })
         if (queued) {
           store.getState().clearApproval(approval.requestId, approval.sessionId)
+          // The HostState answer is a fixed wire shape every paired Host
+          // validates; the reason travels as the follow-up steer it is.
+          followDenialWithReason()
           return
         }
       } catch (error) {
@@ -6123,8 +6210,13 @@ export function useClaudeChat() {
         return
       }
       const handle = getExecutionHandle(approval.sessionId)
+      const denialMessage = denialReason ? denialMessageForModel(denialReason) : undefined
       if (handle) {
-        await handle.resolvePermission(approval.requestId, decision)
+        await handle.resolvePermission(
+          approval.requestId,
+          decision,
+          ...(denialMessage ? ([{ message: denialMessage }] as const) : ([] as const))
+        )
         // `approveTool` journals the matching `permission-resolved`; this
         // branch never reaches it. Without the record the run's canonical log
         // (and the live Fleet / island rows folded from it) kept the ask open
@@ -6140,7 +6232,8 @@ export function useClaudeChat() {
         await approveTool(
           approval.sessionId,
           approval.requestId,
-          decision === "allow_always" ? "allow" : decision
+          decision === "allow_always" ? "allow" : decision,
+          ...(denialMessage ? ([denialMessage] as const) : ([] as const))
         )
       }
       // The receipt asserts the backend received the decision, so it is written

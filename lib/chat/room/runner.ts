@@ -95,6 +95,7 @@ import {
   stripPromptPreambleFromParts,
   type PromptPreambleSummary,
 } from "@/lib/chat/prompt-preamble"
+import { denialMessageForModel, denialReasonOf } from "@/lib/chat/approval-routing"
 import {
   attachRunMetadataToLastAssistant,
   buildCompletedRunMetadata,
@@ -102,6 +103,7 @@ import {
 } from "@/lib/chat/message-run-metadata"
 import type {
   ApprovalDecision,
+  ApprovalResponseOptions,
   ChatSession,
   Character,
   ClaudeEvent,
@@ -960,15 +962,24 @@ export class RoomRunner {
     )
   }
 
-  /** Approve or deny a tool call on a member sub-session. */
-  async respondToApproval(approval: PendingApproval, decision: ApprovalDecision): Promise<void> {
+  /**
+   * Approve or deny a tool call on a member sub-session. A deny's reason rides
+   * the refusal itself, so the member reads it as the denied call's result.
+   */
+  async respondToApproval(
+    approval: PendingApproval,
+    decision: ApprovalDecision,
+    options?: ApprovalResponseOptions
+  ): Promise<void> {
     if (decision === "allow_always") {
       await this.sinks.settings.toggleAlwaysAllow(approval.toolName, true)
     }
+    const reason = denialReasonOf(decision, options)
     await this.deps.ipc.approveTool(
       approval.sessionId,
       approval.requestId,
-      decision === "allow_always" ? "allow" : decision
+      decision === "allow_always" ? "allow" : decision,
+      ...(reason ? ([denialMessageForModel(reason)] as const) : ([] as const))
     )
     await this.deps.ai.recordChatToolApprovalDecision(approval, decision)
     this.sinks.approvals.clear(approval.requestId)

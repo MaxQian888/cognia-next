@@ -200,6 +200,82 @@ describe("<PendingDecisionSurface /> — tool approval", () => {
     expect(onRespond).toHaveBeenCalledWith("deny")
   })
 
+  it("denies with the reason the user typed, in one answer", async () => {
+    const user = userEvent.setup()
+    const onRespond = jest.fn()
+    render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval }}
+        onApprovalRespond={onRespond}
+        confirmAllow={jest.fn()}
+      />
+    )
+    await user.click(screen.getByTestId("decision-deny-with-reason"))
+    const field = screen.getByTestId("decision-deny-reason")
+    expect(field).toHaveFocus()
+    // Nothing typed: nothing to send, so the explained deny is not offered yet.
+    expect(screen.getByTestId("decision-deny-reason-submit")).toBeDisabled()
+    await user.type(field, "  Back it up to /tmp instead  ")
+    await user.click(screen.getByTestId("decision-deny-reason-submit"))
+    expect(onRespond).toHaveBeenCalledTimes(1)
+    expect(onRespond).toHaveBeenCalledWith("deny", { message: "Back it up to /tmp instead" })
+  })
+
+  it("submits the reason with Enter and keeps Shift+Enter for a new line", async () => {
+    const user = userEvent.setup()
+    const onRespond = jest.fn()
+    render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval }}
+        onApprovalRespond={onRespond}
+      />
+    )
+    await user.click(screen.getByTestId("decision-deny-with-reason"))
+    const field = screen.getByTestId("decision-deny-reason")
+    await user.type(field, "first{Shift>}{Enter}{/Shift}second")
+    expect(onRespond).not.toHaveBeenCalled()
+    await user.type(field, "{Enter}")
+    expect(onRespond).toHaveBeenCalledWith("deny", { message: "first\nsecond" })
+  })
+
+  it("folds the reason away on Escape or Cancel without answering", async () => {
+    const user = userEvent.setup()
+    const onRespond = jest.fn()
+    render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval }}
+        onApprovalRespond={onRespond}
+      />
+    )
+    await user.click(screen.getByTestId("decision-deny-with-reason"))
+    await user.type(screen.getByTestId("decision-deny-reason"), "nope{Escape}")
+    expect(screen.queryByTestId("decision-deny-reason")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("decision-deny-with-reason"))
+    await user.click(screen.getByTestId("decision-deny-reason-cancel"))
+    expect(screen.queryByTestId("decision-deny-reason-form")).not.toBeInTheDocument()
+    expect(onRespond).not.toHaveBeenCalled()
+  })
+
+  it("offers no reason box to an observer or on a terminal decision", () => {
+    const { rerender } = render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval }}
+        mode="observe"
+        onApprovalRespond={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("decision-deny-with-reason")).not.toBeInTheDocument()
+    rerender(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval }}
+        status="interrupted"
+        onApprovalRespond={jest.fn()}
+        onDismiss={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("decision-deny-with-reason")).not.toBeInTheDocument()
+  })
+
   it("does not answer when the gate refuses", async () => {
     const user = userEvent.setup()
     const onRespond = jest.fn()

@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { splitPath } from "@/components/source-control/status-decoration"
 import { useTurnChanges } from "@/hooks/chat/use-turn-changes"
+import { turnPatchRunId } from "@/lib/chat/restore-point"
 import type { CodeAdoptionTurnRow } from "@/lib/code-adoption/types"
 import { getSession } from "@/lib/db/sessions"
 import { getTaskPatchSet, undoTaskWorkspace } from "@/lib/task-workspace/client"
@@ -54,12 +55,8 @@ export interface TurnChangesCardProps {
   messageId: string
 }
 
-/** The Task Workspace run whose patch is this turn's diff, when there is one. */
-export function turnPatchRunId(row: CodeAdoptionTurnRow): string | null {
-  return row.measurement === "taskWorkspace" && row.taskWorkspaceRunId
-    ? row.taskWorkspaceRunId
-    : null
-}
+// The one definition of "this turn's patch", shared with the restore planner.
+export { turnPatchRunId }
 
 type PatchRead = { runId: string; patch: PatchSet | null }
 

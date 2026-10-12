@@ -267,6 +267,28 @@ jest.mock("@/components/chat/message-im-actions", () => ({
     }),
 }))
 
+const restoreDialogProps: Array<{
+  sessionId: string
+  messageId: string
+  busy?: boolean
+  onEdit?: () => void
+  onBranch?: () => void
+  onTruncate?: () => void
+  checkpoint?: { eligible: boolean }
+}> = []
+jest.mock("@/components/chat/restore-point-dialog", () => ({
+  RestorePointDialog: (props: (typeof restoreDialogProps)[number] & { open: boolean }) => {
+    restoreDialogProps.push(props)
+    return props.open
+      ? ReactForMocks.createElement("div", {
+          "data-testid": "restore-point-dialog",
+          "data-msg": props.messageId,
+          "data-session": props.sessionId,
+        })
+      : null
+  },
+}))
+
 jest.mock("@/components/chat/branch-dialog", () => ({
   BranchDialog: ({ open, messageId }: { open: boolean; messageId: string }) =>
     open
@@ -1614,6 +1636,45 @@ describe("memo comparator", () => {
     await checkpointActionProps.at(-1)!.rewindFiles("cp1", false)
     expect(second).toHaveBeenCalledWith("sess-1", "cp1", false)
     expect(first).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── restore point ─────────────────────────────────────────────────────────────
+
+describe("restore to here", () => {
+  it("opens one restore map on the user's turn, wired to the row's own actions", () => {
+    useChatStore.setState({ activeSessionId: "sess-1" })
+    restoreDialogProps.length = 0
+    render(
+      <MessageRenderer
+        message={userMsg("rp1")}
+        messageDisplay={resolveMessageDisplayOptions({ preset: "inspector" })}
+        onEditResend={jest.fn()}
+        onRewindFiles={jest.fn() as never}
+      />
+    )
+    expect(screen.queryByTestId("restore-point-dialog")).toBeNull()
+    fireEvent.click(screen.getByLabelText("restorePointLabel"))
+    const dialog = screen.getByTestId("restore-point-dialog")
+    expect(dialog).toHaveAttribute("data-msg", "rp1")
+    expect(dialog).toHaveAttribute("data-session", "sess-1")
+    const props = restoreDialogProps.at(-1)!
+    expect(props.onEdit).toEqual(expect.any(Function))
+    expect(props.checkpoint).toEqual(expect.objectContaining({ eligible: true }))
+    // Its branch choice opens the row's existing branch dialog.
+    act(() => props.onBranch?.())
+    expect(screen.getByTestId("branch-dialog")).toHaveAttribute("data-msg", "rp1")
+  })
+
+  it("is not offered on a reply", () => {
+    useChatStore.setState({ activeSessionId: "sess-1" })
+    render(
+      <MessageRenderer
+        message={assistantMsg("rp2")}
+        messageDisplay={resolveMessageDisplayOptions({ preset: "inspector" })}
+      />
+    )
+    expect(screen.queryByLabelText("restorePointLabel")).toBeNull()
   })
 })
 

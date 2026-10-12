@@ -435,6 +435,13 @@
       "permissionDenied": "需要相机或照片访问权限才能添加照片。",
       "unsupported": "此设备不支持拍照。"
     },
+    "carriedContext": {
+      "generic": "此前附带的上下文",
+      "hint": "将随下一条消息原样再次发送，与第一次附带时一致",
+      "label": "已带回",
+      "references": "{count} 项引用",
+      "remove": "移除带回的上下文"
+    },
     "commandHint": {
       "needsArgs": "请补充必填参数"
     },
@@ -568,7 +575,8 @@
         "history": "调取输入历史",
         "newline": "插入新行",
         "permissionMode": "切换权限模式",
-        "send": "发送消息"
+        "send": "发送消息",
+        "stop": "停止正在生成的回复（排队的追加消息会放回输入框）"
       },
       "keysTitle": "键盘",
       "prefixes": {
@@ -578,7 +586,7 @@
         "slash": "运行斜杠命令"
       },
       "prefixesTitle": "前缀",
-      "send": "⏎ 发送 · ⇧⏎ 换行",
+      "send": "{send} 发送 · {newline} 换行",
       "tryPrefix": "试试"
     },
     "launchDiff": {
@@ -794,6 +802,9 @@
     "presets": {
       "applied": "已套用预设「{name}」。",
       "needsSession": "请先开始一个对话再套用预设。"
+    },
+    "putBack": {
+      "missing": "无法恢复 {names}，请重新添加。"
     },
     "references": {
       "removeAria": "移除引用 {path}"
@@ -2027,6 +2038,7 @@
     "rerunTemplateTooltip": "换个参数重跑",
     "resendLabel": "重新发送",
     "resendTooltip": "重新发送这条消息",
+    "restorePointLabel": "恢复到这里…",
     "saveAsMemoryDone": "已把“{title}”存为待审记忆草稿。",
     "saveAsMemoryEmpty": "这条回复里没有可保存的内容。",
     "saveAsMemoryFailed": "保存失败：{reason}",
@@ -2404,6 +2416,47 @@
     "label": "被引用的消息",
     "you": "你"
   },
+  "restorePoint": {
+    "busy": "回复仍在进行中。请先停止，才能修改对话或文件。",
+    "cancel": "取消",
+    "conversation": {
+      "branch": "从这里分支",
+      "branchAction": "分支",
+      "branchDetail": "把截至这条消息的对话复制到新对话，当前对话不变。",
+      "edit": "编辑这条消息",
+      "editAction": "编辑",
+      "editDetail": "改写并重新发送。原消息及其回复会保留为可切换回去的分支。",
+      "heading": "对话",
+      "truncate": "删除这条消息及之后的全部内容",
+      "truncateAction": "删除",
+      "truncateDetail": "从当前对话中永久移除，不会改动文件。"
+    },
+    "description": "选择要恢复到这条消息之前的内容。对话和文件分别恢复。",
+    "files": {
+      "alreadyUndone": "这条消息之后的文件改动已全部撤销。",
+      "blocked": {
+        "irreversible": "这条消息之后改动了 {files} 个文件，但其中至少一处改动已无法撤销，因此不会撤销任何内容。请改用各轮次改动卡片上的撤销。",
+        "untracked": "这条消息之后改动了 {files} 个文件，但至少有一轮没有记录为可撤销的补丁，因此不会撤销任何内容。"
+      },
+      "checkpoint": "Agent SDK 文件检查点",
+      "checkpointAction": "预览回退",
+      "checkpointDetail": "回退 SDK 自这条消息以来跟踪的文件，不改动对话。",
+      "checkpointOff": "文件检查点未开启。在 设置 > 智能体运行时 中开启 SDK 对齐和文件检查点后，新的轮次才会记录。",
+      "checkpointSdkOnly": "只有在 Claude Agent SDK 上运行的轮次才会记录文件检查点。",
+      "confirmBody": "这条消息之后的 {turns} 条回复改动了 {files} 个文件。将从最新开始逐一撤销；若某个文件之后又被编辑过，会停止并报告，而不会覆盖。",
+      "confirmTitle": "撤销这条消息之后的文件改动？",
+      "conflict": "已撤销 {undone} 轮后停止：有 {count} 个文件之后又被编辑过，继续会覆盖它们。",
+      "failed": "无法恢复文件：{error}",
+      "heading": "文件",
+      "loading": "正在检查哪些文件改动可以撤销…",
+      "none": "这条消息之后没有记录到文件改动。",
+      "notReverted": "已撤销 {undone} 轮后停止：有一处改动已不再处于应用状态。",
+      "restored": "文件已恢复：撤销了 {turns} 轮。",
+      "undoAction": "撤销文件改动",
+      "undoable": "这条消息之后的 {turns} 条回复改动了 {files} 个文件。"
+    },
+    "title": "恢复到这条消息之前"
+  },
   "runPanel": {
     "ariaDiscardQueue": "丢弃排队的消息",
     "ariaEditQueued": "修改这条排队的消息",
@@ -2674,7 +2727,8 @@
     "positionHint": "发送顺序中的位置 —— 可在运行面板里调整",
     "putBack": "放回输入框",
     "queued": "排队中",
-    "queuedHint": "会在当前回合结束后发送"
+    "queuedHint": "会在当前回合结束后发送",
+    "restoredOnStop": "{count, plural, =1 {已停止。排队的追加消息已放回输入框。} other {已停止。# 条排队的追加消息已放回输入框。}}"
   },
   "subagentPart": {
     "abort": "停止子代理",
@@ -2729,6 +2783,11 @@
     "askedBySubagent": "由子代理 {subagent} 请求（运行 {runId}）",
     "cancelRun": "取消运行",
     "deny": "拒绝",
+    "denyReasonCancel": "取消",
+    "denyReasonLabel": "告诉代理原因，或改为怎么做",
+    "denyReasonPlaceholder": "例如：不要删除，先备份。",
+    "denyReasonSubmit": "拒绝并发送",
+    "denyWithReason": "拒绝并说明原因…",
     "dismiss": "关闭",
     "inputLabel": "输入",
     "noInputDetails": "代理未提供此次调用的参数，仅给出了名称。",

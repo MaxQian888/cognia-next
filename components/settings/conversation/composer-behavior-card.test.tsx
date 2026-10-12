@@ -27,6 +27,18 @@ describe("ComposerBehaviorCard", () => {
     expect(screen.getByLabelText("persistDrafts.label")).toBeChecked()
   })
 
+  it("describes what Enter does under the CURRENT send setting", () => {
+    render(<ComposerBehaviorCard />)
+    expect(screen.getByText("sendOnEnter.hint")).toBeInTheDocument()
+  })
+
+  it("switches the send hint once Enter no longer sends", () => {
+    mockSettings = { composerBehavior: { sendOnEnter: false } }
+    render(<ComposerBehaviorCard />)
+    expect(screen.getByText("sendOnEnter.hintOff")).toBeInTheDocument()
+    expect(screen.queryByText("sendOnEnter.hint")).not.toBeInTheDocument()
+  })
+
   it("keeps the compact composer opt-in and persists the selection", async () => {
     const user = userEvent.setup()
     render(<ComposerBehaviorCard />)

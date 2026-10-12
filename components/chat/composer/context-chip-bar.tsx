@@ -33,6 +33,7 @@ import { formatBytesCompact } from "@/lib/observability/format-utils"
 import { cn } from "@/lib/utils"
 import { ReferenceChips } from "../reference-chips"
 import { ReplyToChip } from "./reply-to-chip"
+import { CarriedContextChips } from "./carried-context-chip"
 import { RoomTargetChip } from "./room-target-picker"
 import { ArtifactSelectionChips } from "./artifact-selection-chips"
 import { WorkflowRefChips } from "./workflow-ref-chips"
@@ -104,6 +105,7 @@ export function ContextChipBar(props: ContextChipBarProps) {
             />
           ) : null}
           <ReplyToChip bare />
+          <CarriedContextChips />
           <RoomTargetChip bare />
           <ReferenceChips bare />
           <WorkflowRefChips bare />

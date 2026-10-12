@@ -24,7 +24,7 @@
       "label": "使用滑杆选择思考等级"
     },
     "inputHistory": {
-      "hint": "在空输入框中按上/下方向键调出历史消息。",
+      "hint": "在空输入框中按上/下方向键调出历史消息：先是本对话的，再是其他对话的。",
       "label": "调出输入历史"
     },
     "linkChips": {
@@ -44,6 +44,7 @@
     },
     "sendOnEnter": {
       "hint": "按 Enter 发送；用 Shift+Enter 换行。",
+      "hintOff": "按 Enter 换行；按 {modifier}+Enter 发送。",
       "label": "按 Enter 发送"
     },
     "title": "输入框行为"

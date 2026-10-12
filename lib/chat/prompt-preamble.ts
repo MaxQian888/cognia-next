@@ -247,6 +247,49 @@ export interface PromptPreambleSummary {
   references: PromptPreambleReference[]
 }
 
+/**
+ * An envelope carried over from a message the user put back into the composer
+ * (`lib/chat/composer-restore.ts`). Its staged chips are gone — they were
+ * consumed by the send that wrote it — so the envelope is the only remaining
+ * copy of what the message referenced, and it is re-sent verbatim, the way an
+ * edit-and-resend reuses it (`carryPromptPreamble`).
+ */
+export interface CarriedPromptPreamble {
+  /** The envelope exactly as it was sent (tags and framing included). */
+  preamble: string
+  /** What it referenced, for the composer chip; absent on legacy rows. */
+  summary?: PromptPreambleSummary
+}
+
+/** Carried envelopes as sections of the next turn's envelope, in order. */
+export function carriedPreambleSections(
+  carried: readonly CarriedPromptPreamble[]
+): PromptPreambleSection[] {
+  return carried.map((entry) => ({
+    kind: "references",
+    text: promptPreambleInnerText(entry.preamble),
+  }))
+}
+
+/**
+ * The summary of a turn that re-sends carried envelopes: its own sections and
+ * references, then each carried one's. A carried envelope without a summary
+ * still counts as references, which is what the bubble then says.
+ */
+export function mergeCarriedPreambleSummary(
+  own: PromptPreambleSummary | null,
+  carried: readonly CarriedPromptPreamble[]
+): PromptPreambleSummary | null {
+  if (carried.length === 0) return own
+  const sections = new Set<PromptPreambleSectionKind>(own?.sections ?? [])
+  const references = [...(own?.references ?? [])]
+  for (const entry of carried) {
+    for (const kind of entry.summary?.sections ?? ["references" as const]) sections.add(kind)
+    references.push(...(entry.summary?.references ?? []))
+  }
+  return { sections: SECTION_ORDER.filter((kind) => sections.has(kind)), references }
+}
+
 function referenceTitle(selection: ContextSelectionRef): string {
   switch (selection.kind) {
     case "file":

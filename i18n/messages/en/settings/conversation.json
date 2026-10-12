@@ -24,7 +24,7 @@
       "label": "Use a slider for thinking levels"
     },
     "inputHistory": {
-      "hint": "Press Up / Down in an empty composer to recall previous messages.",
+      "hint": "Press Up / Down in an empty composer to recall previous messages: this conversation's first, then your other conversations'.",
       "label": "Recall input history"
     },
     "linkChips": {
@@ -44,6 +44,7 @@
     },
     "sendOnEnter": {
       "hint": "Press Enter to send; use Shift+Enter for a new line.",
+      "hintOff": "Enter inserts a new line; press {modifier}+Enter to send.",
       "label": "Send on Enter"
     },
     "title": "Composer behavior"

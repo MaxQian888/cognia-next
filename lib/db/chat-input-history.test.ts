@@ -3,6 +3,7 @@ import "fake-indexeddb/auto"
 import {
   recordInput,
   listInputHistory,
+  listRecentInputHistory,
   clearInputHistory,
   MAX_HISTORY_PER_SESSION,
 } from "./chat-input-history"
@@ -39,6 +40,11 @@ describe("chat-input-history", () => {
     expect(await listInputHistory("s1")).toEqual(["same", "other", "same"])
   })
 
+  it("dedupes a duplicate sent twice at once", async () => {
+    await Promise.all([recordInput("s1", "same"), recordInput("s1", "same")])
+    expect(await listInputHistory("s1")).toEqual(["same"])
+  })
+
   it("keeps history isolated per session", async () => {
     await recordInput("s1", "a")
     await recordInput("s2", "b")
@@ -64,5 +70,15 @@ describe("chat-input-history", () => {
 
   it("returns empty for a blank session id", async () => {
     expect(await listInputHistory("")).toEqual([])
+  })
+
+  it("lists recent lines across conversations, optionally without one of them", async () => {
+    await recordInput("s1", "a")
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    await recordInput("s2", "b")
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    await recordInput("s1", "c")
+    expect(await listRecentInputHistory()).toEqual(["c", "b", "a"])
+    expect(await listRecentInputHistory(undefined, { excludeSessionId: "s1" })).toEqual(["b"])
   })
 })

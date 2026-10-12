@@ -7530,6 +7530,13 @@
         "permissionDenied": "Camera or photo access is required to attach a photo.",
         "unsupported": "Photo capture isn't available on this device."
       },
+      "carriedContext": {
+        "generic": "Earlier context",
+        "hint": "Sent again with your next message, exactly as it was attached the first time",
+        "label": "Carried over",
+        "references": "{count, plural, =1 {1 reference} other {# references}}",
+        "remove": "Remove carried-over context"
+      },
       "commandHint": {
         "needsArgs": "Add the required arguments"
       },
@@ -7663,7 +7670,8 @@
           "history": "Recall input history",
           "newline": "Insert a new line",
           "permissionMode": "Change permission mode",
-          "send": "Send the message"
+          "send": "Send the message",
+          "stop": "Stop the running reply (queued follow-ups go back into the box)"
         },
         "keysTitle": "Keyboard",
         "prefixes": {
@@ -7673,7 +7681,7 @@
           "slash": "Run a slash command"
         },
         "prefixesTitle": "Prefixes",
-        "send": "⏎ Send · ⇧⏎ New line",
+        "send": "{send} Send · {newline} New line",
         "tryPrefix": "Try"
       },
       "launchDiff": {
@@ -7889,6 +7897,9 @@
       "presets": {
         "applied": "Applied preset \"{name}\".",
         "needsSession": "Start a chat first to apply a preset."
+      },
+      "putBack": {
+        "missing": "{count, plural, =1 {Could not bring back {names}. Attach it again.} other {Could not bring back {names}. Attach them again.}}"
       },
       "references": {
         "removeAria": "Remove reference to {path}"
@@ -9134,6 +9145,7 @@
       "rerunTemplateTooltip": "Re-run with different values",
       "resendLabel": "Resend",
       "resendTooltip": "Resend this message",
+      "restorePointLabel": "Restore to here…",
       "saveAsIssueDone": "Filed {identifier} in the tracker.",
       "saveAsIssueEmpty": "There is nothing readable in this reply to file.",
       "saveAsIssueFailed": "Could not file it: {reason}",
@@ -9508,6 +9520,47 @@
       "label": "Quoted message",
       "you": "You"
     },
+    "restorePoint": {
+      "busy": "A reply is still running. Stop it first to change the conversation or its files.",
+      "cancel": "Cancel",
+      "conversation": {
+        "branch": "Branch from here",
+        "branchAction": "Branch",
+        "branchDetail": "Copy the conversation up to this message into a new one. This one is not changed.",
+        "edit": "Edit this message",
+        "editAction": "Edit",
+        "editDetail": "Rewrite and resend it. The original and its replies stay as a branch you can switch back to.",
+        "heading": "Conversation",
+        "truncate": "Delete this message and everything after",
+        "truncateAction": "Delete",
+        "truncateDetail": "Removes them from this conversation for good. Files are not changed."
+      },
+      "description": "Choose what to take back to before this message. Conversation and files are restored separately.",
+      "files": {
+        "alreadyUndone": "The file changes made after this message have already been undone.",
+        "blocked": {
+          "irreversible": "{files, plural, =1 {1 file was} other {# files were}} changed after this message, but at least one of those changes can no longer be reverted, so nothing will be undone. Use Undo on each turn's change card instead.",
+          "untracked": "{files, plural, =1 {1 file was} other {# files were}} changed after this message, but at least one turn was not recorded as a revertible patch, so nothing will be undone."
+        },
+        "checkpoint": "Agent SDK file checkpoint",
+        "checkpointAction": "Preview rewind",
+        "checkpointDetail": "Rewinds the files the SDK tracked since this message. The conversation is not changed.",
+        "checkpointOff": "File checkpoints are off. Turn on SDK parity and file checkpoints in Settings > Agent runtime to record them for new turns.",
+        "checkpointSdkOnly": "Only turns that ran on the Claude Agent SDK record file checkpoints.",
+        "confirmBody": "{turns, plural, =1 {The 1 reply} other {The # replies}} after this message changed {files, plural, =1 {1 file} other {# files}}. Each change is reverted, newest first. A change you edited since then stops the restore and is reported instead of overwritten.",
+        "confirmTitle": "Undo file changes made after this message?",
+        "conflict": "Undid {undone} {undone, plural, =1 {turn} other {turns}}, then stopped: {count, plural, =1 {1 file was} other {# files were}} edited since and would be overwritten.",
+        "failed": "Could not restore the files: {error}",
+        "heading": "Files",
+        "loading": "Checking which file changes can be undone…",
+        "none": "No file changes were recorded after this message.",
+        "notReverted": "Undid {undone} {undone, plural, =1 {turn} other {turns}}, then stopped: a change was no longer applied.",
+        "restored": "Files restored: undid {turns, plural, =1 {1 turn} other {# turns}}.",
+        "undoAction": "Undo file changes",
+        "undoable": "{files, plural, =1 {1 file} other {# files}} changed in {turns, plural, =1 {1 reply} other {# replies}} after this message."
+      },
+      "title": "Restore to before this message"
+    },
     "runPanel": {
       "ariaDiscardQueue": "Discard queued messages",
       "ariaEditQueued": "Edit this queued message",
@@ -9856,7 +9909,8 @@
       "positionHint": "Position in the send order — reorder it in the run panel",
       "putBack": "Put back",
       "queued": "Queued",
-      "queuedHint": "Will be sent when the current turn finishes"
+      "queuedHint": "Will be sent when the current turn finishes",
+      "restoredOnStop": "{count, plural, =1 {Stopped. Your queued follow-up is back in the message box.} other {Stopped. Your # queued follow-ups are back in the message box.}}"
     },
     "subagentPart": {
       "abort": "Stop sub-agent",
@@ -9911,6 +9965,11 @@
       "askedBySubagent": "Asked by {subagent} (run {runId})",
       "cancelRun": "Cancel run",
       "deny": "Deny",
+      "denyReasonCancel": "Cancel",
+      "denyReasonLabel": "Tell the agent why, or what to do instead",
+      "denyReasonPlaceholder": "e.g. Don't delete it. Back it up first.",
+      "denyReasonSubmit": "Deny and send",
+      "denyWithReason": "Deny with a reason…",
       "dismiss": "Dismiss",
       "inputLabel": "Input",
       "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
@@ -26540,6 +26599,7 @@
       "readAloud": "Read aloud",
       "regenerate": "Regenerate reply",
       "resend": "Resend",
+      "restorePoint": "Restore to here…",
       "select": "Select messages",
       "selectText": "Select text",
       "share": "Share…",
@@ -46627,7 +46687,7 @@
           "label": "Use a slider for thinking levels"
         },
         "inputHistory": {
-          "hint": "Press Up / Down in an empty composer to recall previous messages.",
+          "hint": "Press Up / Down in an empty composer to recall previous messages: this conversation's first, then your other conversations'.",
           "label": "Recall input history"
         },
         "linkChips": {
@@ -46647,6 +46707,7 @@
         },
         "sendOnEnter": {
           "hint": "Press Enter to send; use Shift+Enter for a new line.",
+          "hintOff": "Enter inserts a new line; press {modifier}+Enter to send.",
           "label": "Send on Enter"
         },
         "title": "Composer behavior"

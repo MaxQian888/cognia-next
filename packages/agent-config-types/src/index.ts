@@ -1253,6 +1253,16 @@ export type SendContent = string | SendContentBlock[]
 
 export type ApprovalDecision = "allow" | "allow_always" | "deny"
 
+/** What else a person said with an approval answer. */
+export interface ApprovalResponseOptions {
+  /**
+   * Deny only: why, or what to do instead ("don't delete it, back it up"). It
+   * reaches the model with the refusal so one answer can both stop the call
+   * and redirect the work. Ignored on allow.
+   */
+  message?: string
+}
+
 // ---- Inbound (sidecar → Tauri → UI) --------------------------------------
 
 export interface ReadyEvent {

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select"
 import { formatLinkRules, parseLinkRules, type LinkDisplayStyle } from "@/lib/chat/link-display"
 import { cn } from "@/lib/utils"
+import { usesAppleModifierGlyphs } from "@/lib/platform/os"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DEFAULT_COMPOSER_SKIN } from "@/lib/chat/composer-skin"
 import { DEFAULT_EFFORT_SELECTOR_MODE } from "@/components/chat/composer/effort-selector-view"
@@ -117,7 +118,13 @@ export function ComposerBehaviorCard() {
       <ToggleRow
         id="composer-send-on-enter"
         label={t("sendOnEnter.label")}
-        hint={t("sendOnEnter.hint")}
+        // Describes the CURRENT behaviour: with the switch off, Enter is a
+        // newline and the modifier chord sends.
+        hint={
+          sendOnEnter
+            ? t("sendOnEnter.hint")
+            : t("sendOnEnter.hintOff", { modifier: usesAppleModifierGlyphs() ? "⌘" : "Ctrl" })
+        }
         checked={sendOnEnter}
         onChange={(next) => update({ sendOnEnter: next })}
       />

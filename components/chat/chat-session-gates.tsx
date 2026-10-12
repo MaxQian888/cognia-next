@@ -1,7 +1,11 @@
 "use client"
 
 import { useCallback } from "react"
-import type { ApprovalDecision, PendingApproval } from "@cognia/agent-config-types"
+import type {
+  ApprovalDecision,
+  ApprovalResponseOptions,
+  PendingApproval,
+} from "@cognia/agent-config-types"
 import { useChatStore, useSessionPendingApprovals } from "@/stores/chat"
 import {
   useExternalElicitationStore,
@@ -17,15 +21,19 @@ export function ChatSessionGates({
   respondToApproval,
 }: {
   sessionId: string
-  respondToApproval: (approval: PendingApproval, decision: ApprovalDecision) => Promise<void>
+  respondToApproval: (
+    approval: PendingApproval,
+    decision: ApprovalDecision,
+    options?: ApprovalResponseOptions
+  ) => Promise<void>
 }) {
   const approvals = useSessionPendingApprovals(sessionId)
   const approval = approvals.find((a) => a.status !== "interrupted") ?? approvals[0] ?? null
   const pending = useSessionPendingElicitation(sessionId)
   const respond = useCallback(
-    async (decision: ApprovalDecision) => {
+    async (decision: ApprovalDecision, options?: ApprovalResponseOptions) => {
       if (!approval) return
-      await routeChatApprovalDecision(approval, decision, respondToApproval)
+      await routeChatApprovalDecision(approval, decision, respondToApproval, options)
     },
     [approval, respondToApproval]
   )

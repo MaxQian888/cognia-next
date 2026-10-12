@@ -15,11 +15,15 @@ import { ShieldAlertIcon } from "lucide-react"
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { PendingDecisionSurface } from "@/components/chat/decisions/pending-decision-surface"
-import type { ApprovalDecision, PendingApproval } from "@cognia/agent-config-types"
+import type {
+  ApprovalDecision,
+  ApprovalResponseOptions,
+  PendingApproval,
+} from "@cognia/agent-config-types"
 
 interface Props {
   approval: PendingApproval | null
-  onRespond: (decision: ApprovalDecision) => void | Promise<void>
+  onRespond: (decision: ApprovalDecision, options?: ApprovalResponseOptions) => void | Promise<void>
   /** Dismiss an `interrupted` approval (the waiter is gone — there is nothing
    * to answer). Required to clear the honest-notice card. */
   onDismiss?: () => void

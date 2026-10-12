@@ -20,22 +20,38 @@ import {
 } from "@/lib/ai/agent/execution/feature-flags"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 interface CheckpointActionProps {
   checkpointId: string
   enabled: boolean
   rewindFiles: (checkpointId: string, dryRun: boolean) => Promise<RewindFilesResult>
+  /**
+   * Render a labelled button instead of the icon — the restore dialog lists
+   * this beside its other options, where an unlabelled glyph says nothing.
+   */
+  triggerLabel?: string
 }
 
-export function CheckpointAction({ checkpointId, enabled, rewindFiles }: CheckpointActionProps) {
-  const t = useTranslations("chat.checkpoint")
-  const checkpointCapability = useSyncExternalStore(
+/** Whether SDK file checkpoints are switched on (the parity master and its child flag). */
+export function useSdkCheckpointCapability(): boolean {
+  return useSyncExternalStore(
     subscribeToAgentExecutionFlags,
     () =>
       isAgentExecutionFlagEnabled("claudeSdkParityV1") &&
       isAgentExecutionFlagEnabled("claudeSdkCheckpoint"),
     () => false
   )
+}
+
+export function CheckpointAction({
+  checkpointId,
+  enabled,
+  rewindFiles,
+  triggerLabel,
+}: CheckpointActionProps) {
+  const t = useTranslations("chat.checkpoint")
+  const checkpointCapability = useSdkCheckpointCapability()
   const [preview, setPreview] = useState<RewindFilesResult | null>(null)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -73,17 +89,30 @@ export function CheckpointAction({ checkpointId, enabled, rewindFiles }: Checkpo
 
   return (
     <>
-      <Checkpoint className="[&_[data-slot=separator-root]]:hidden">
-        <CheckpointTrigger
-          aria-label={t("action")}
+      {triggerLabel ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
           disabled={loading}
           onClick={() => void prepare()}
-          size="icon-sm"
-          tooltip={t("action")}
+          data-testid="checkpoint-action-button"
         >
-          <CheckpointIcon className="size-3.5" />
-        </CheckpointTrigger>
-      </Checkpoint>
+          {triggerLabel}
+        </Button>
+      ) : (
+        <Checkpoint className="[&_[data-slot=separator-root]]:hidden">
+          <CheckpointTrigger
+            aria-label={t("action")}
+            disabled={loading}
+            onClick={() => void prepare()}
+            size="icon-sm"
+            tooltip={t("action")}
+          >
+            <CheckpointIcon className="size-3.5" />
+          </CheckpointTrigger>
+        </Checkpoint>
+      )}
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

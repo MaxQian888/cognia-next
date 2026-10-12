@@ -228,3 +228,26 @@ describe("selectText", () => {
     expect(ids({ hasSession: false, canSelectText: true })).not.toContain("selectText")
   })
 })
+
+describe("restorePoint", () => {
+  const command = (over: Partial<Parameters<typeof resolveMessageActionCommands>[0]> = {}) =>
+    resolveMessageActionCommands({
+      role: "user",
+      hasContent: true,
+      hasSession: true,
+      ...over,
+    }).find((c) => c.id === "restorePoint")
+
+  it("is offered on the user's own turn in a conversation", () => {
+    expect(command()).toEqual({ id: "restorePoint", disabled: undefined })
+  })
+
+  it("is absent on a reply or outside a conversation", () => {
+    expect(command({ role: "assistant" })).toBeUndefined()
+    expect(command({ hasSession: false })).toBeUndefined()
+  })
+
+  it("is disabled while the conversation is mid-turn", () => {
+    expect(command({ streaming: true })?.disabled).toBe(true)
+  })
+})

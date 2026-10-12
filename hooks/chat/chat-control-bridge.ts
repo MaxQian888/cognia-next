@@ -12,7 +12,11 @@
  * only forwards.
  */
 
-import type { ApprovalDecision, PendingApproval } from "@cognia/agent-config-types"
+import type {
+  ApprovalDecision,
+  ApprovalResponseOptions,
+  PendingApproval,
+} from "@cognia/agent-config-types"
 
 import { routeChatApprovalDecision, type ChatApprovalResponder } from "@/lib/chat/approval-routing"
 
@@ -44,11 +48,14 @@ export function registerChatStopBridge(stop: ChatStopBridge): () => void {
  */
 export async function answerChatApproval(
   approval: PendingApproval,
-  decision: ApprovalDecision
+  decision: ApprovalDecision,
+  options?: ApprovalResponseOptions
 ): Promise<boolean> {
   const direct = approvalBridge
   if (!direct) return false
-  await routeChatApprovalDecision(approval, decision, direct)
+  await (options
+    ? routeChatApprovalDecision(approval, decision, direct, options)
+    : routeChatApprovalDecision(approval, decision, direct))
   return true
 }
 

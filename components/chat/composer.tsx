@@ -42,6 +42,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import {
   selectComposerCitedRefs,
   selectComposerContextSelections,
+  selectComposerCarriedPreambles,
   selectComposerPermissionMode,
   selectComposerReplyTo,
   selectComposerWebSearchOn,
@@ -60,7 +61,17 @@ import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-
 import { refreshSelectionFreshness } from "@/lib/chat/mentions/selection-freshness"
 import { citationsForSelections } from "@/lib/chat/mentions/selection-citations"
 import { mergeContextRefs } from "@/lib/chat/mentions/merge-refs"
-import { composeTurnText, summarizeSelectionForPreamble } from "@/lib/chat/prompt-preamble"
+import {
+  carriedPreambleSections,
+  composeTurnText,
+  mergeCarriedPreambleSummary,
+  summarizeSelectionForPreamble,
+} from "@/lib/chat/prompt-preamble"
+import {
+  COMPOSER_APPEND_EVENT,
+  composerAppendHasContent,
+  type ComposerAppendDetail,
+} from "@/lib/chat/composer-append"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { formatReviewReceiptsForLLM } from "@/lib/artifacts/format-review-receipt"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -813,6 +824,14 @@ function ComposerInner(props: InnerProps) {
     tAttach,
     acceptMotion: !props.session?.platformBinding,
   })
+  // Files handed back from outside (a put-back follow-up) pass the same
+  // size/count/type gate as a drop or a paste.
+  const addStagedFiles = useCallback(
+    (files: File[]) => {
+      void acceptFiles(files)
+    },
+    [acceptFiles]
+  )
   // Per-command failures from the last multi-command submit. Surfaced as
   // failed-state pills on the command queue bar; cleared when the user edits.
   const [commandErrors, setCommandErrors] = useState<CommandError[]>([])
@@ -3408,7 +3427,11 @@ function ComposerInner(props: InnerProps) {
           bridges={
             <>
               <VoiceTranscriptionBridge disabled={props.disabled} textInput={textInput} />
-              <ComposerAppendBridge sessionId={props.session?.id} textInput={textInput} />
+              <ComposerAppendBridge
+                sessionId={props.session?.id}
+                textInput={textInput}
+                addFiles={addStagedFiles}
+              />
             </>
           }
           contextRow={
@@ -3613,58 +3636,66 @@ const VoiceTranscriptionBridge = memo(function VoiceTranscriptionBridge({
   return <VoiceControls disabled={disabled} onTranscription={onTranscription} />
 })
 
-/** Window-event name a chat-message card dispatches to append text to the composer. */
-export const COMPOSER_APPEND_EVENT = "cognia:composer-append"
-
-/** Detail of a {@link COMPOSER_APPEND_EVENT}. */
-export interface ComposerAppendDetail {
-  text?: string
-  /**
-   * Which composer should take the text. More than one composer is mounted at
-   * once — split view has two, and a workbench sidechat adds another — so an
-   * un-addressed event would land in all of them. Omit only when the intent
-   * really is "whichever composer is focused"; `undefined` is treated as
-   * addressed to the active session.
-   */
-  sessionId?: string
-}
-
-/** Append text to one composer's draft. See {@link ComposerAppendDetail}. */
-export function dispatchComposerAppend(detail: ComposerAppendDetail): void {
-  window.dispatchEvent(new CustomEvent(COMPOSER_APPEND_EVENT, { detail }))
-}
+export {
+  COMPOSER_APPEND_EVENT,
+  dispatchComposerAppend,
+  type ComposerAppendDetail,
+} from "@/lib/chat/composer-append"
 
 /**
  * Lets components outside the PromptInput controller context (e.g. the OCR
- * result card in the message list, or a sidechat handing a conclusion back)
- * append text to the composer by dispatching `COMPOSER_APPEND_EVENT`.
+ * result card in the message list, a sidechat handing a conclusion back, or a
+ * stopped turn putting its queued follow-ups back) stage material in the
+ * composer by dispatching `COMPOSER_APPEND_EVENT`. Text is appended; files are
+ * staged as attachments; citations, reply target and carried envelopes go to
+ * this conversation's composer state, where the send path reads them.
  */
 const ComposerAppendBridge = memo(function ComposerAppendBridge({
   sessionId,
   textInput,
+  addFiles,
 }: {
   sessionId?: string
   /** The composer's stable text handle — see `VoiceTranscriptionBridge`. */
   textInput: TextInputContext
+  /** Stage files the way a drop or paste does. */
+  addFiles: (files: File[]) => void
 }) {
+  const t = useTranslations("chat.composer.putBack")
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   useEffect(() => {
     const onAppend = (e: Event) => {
       const detail = (e as CustomEvent<ComposerAppendDetail>).detail
-      const text = detail?.text
-      if (!text || !text.trim()) return
+      if (!composerAppendHasContent(detail)) return
       // Addressed events go to exactly one composer. An un-addressed event is
       // legacy shorthand for "the active session", which keeps the single-pane
       // callers working without making every composer echo it.
-      const target = detail?.sessionId ?? activeSessionId
+      const target = detail.sessionId ?? activeSessionId
       if (target && sessionId && target !== sessionId) return
-      const cur = textInput.value
-      const sep = cur && !cur.endsWith(" ") ? " " : ""
-      textInput.setInput(`${cur}${sep}${text}`)
+      detail.claimed = true
+      const text = detail.text
+      if (text && text.trim()) {
+        const cur = textInput.value
+        const sep = cur && !cur.endsWith(" ") ? " " : ""
+        textInput.setInput(`${cur}${sep}${text}`)
+      }
+      if (detail.files?.length) addFiles([...detail.files])
+      const chat = useChatStore.getState()
+      const slice = sessionId ?? null
+      for (const ref of detail.citations ?? []) chat.addCitedRef(ref, slice)
+      if (detail.carried?.length) chat.addCarriedPreambles([...detail.carried], slice)
+      // A reply the user already picked here wins over the one coming back.
+      if (detail.replyTo && !selectComposerReplyTo(chat, slice))
+        chat.setReplyTo(detail.replyTo, slice)
+      if (detail.missing?.length) {
+        toast.warning(
+          t("missing", { count: detail.missing.length, names: detail.missing.join(", ") })
+        )
+      }
     }
     window.addEventListener(COMPOSER_APPEND_EVENT, onAppend)
     return () => window.removeEventListener(COMPOSER_APPEND_EVENT, onAppend)
-  }, [textInput, activeSessionId, sessionId])
+  }, [textInput, activeSessionId, sessionId, addFiles, t])
   return null
 })
 
@@ -4313,14 +4344,30 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       const sentReceipts = session?.id
         ? useArtifactStore.getState().peekReviewReceipts(session.id)
         : []
+      // Envelopes carried over from a put-back message: what it referenced
+      // when it was first sent, re-sent verbatim beside this turn's own.
+      const carriedPreambles = selectComposerCarriedPreambles(
+        useChatStore.getState(),
+        session?.id ?? null
+      )
       const turn = composeTurnText(text, [
         {
           kind: "reviewReceipts",
           text: sentReceipts.length > 0 ? formatReviewReceiptsForLLM(sentReceipts) : "",
         },
         { kind: "references", text: referencesSection },
+        ...carriedPreambleSections(carriedPreambles),
         { kind: "webSearch", text: webSearchSection },
       ])
+      const preambleSummary = turn.preamble
+        ? mergeCarriedPreambleSummary(
+            {
+              sections: turn.sections,
+              references: contextSelections.map(summarizeSelectionForPreamble),
+            },
+            carriedPreambles
+          )
+        : null
       const augmented = turn.text
 
       const linkContext = await buildLinkContextBlocks(text)
@@ -4383,14 +4430,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         ...(webSearchContext ? { webSearchContext } : {}),
         ...(replyTo ? { replyTo } : {}),
         ...(targetMemberIds.length > 0 ? { targetMemberIds } : {}),
-        ...(turn.preamble
-          ? {
-              promptPreamble: {
-                sections: turn.sections,
-                references: contextSelections.map(summarizeSelectionForPreamble),
-              },
-            }
-          : {}),
+        ...(preambleSummary ? { promptPreamble: preambleSummary } : {}),
         ...(citations.length > 0 ? { citations } : {}),
         ...(route ? { route } : {}),
       }
@@ -4412,6 +4452,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       if (session?.kind === "team" && session.teamId) clearComposerTyping(session.id)
       clearReferencedPaths(session?.id ?? null)
       clearContextSelections(session?.id ?? null)
+      useChatStore.getState().clearCarriedPreambles(session?.id ?? null)
       // Same lifetime as the chips they describe: the citations rode exactly
       // this message. Cleared AFTER `onSend` so the controller has already read
       // them into `metadata.mentions`.

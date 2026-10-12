@@ -677,6 +677,7 @@ interface ChatStateLike {
   clearLastSend: jest.Mock
   enqueueSteer: jest.Mock
   clearSteerQueue: jest.Mock
+  removeSteerEntry: jest.Mock
 }
 
 const sliceWrite = (id: string, patch: Partial<SliceLike>) => {
@@ -786,6 +787,14 @@ const chatState: ChatStateLike = {
   }),
   enqueueSteer: jest.fn(),
   clearSteerQueue: jest.fn(),
+  removeSteerEntry: jest.fn((id: string, entryId: string) => {
+    const slice = chatState.otherSlices[id]
+    if (slice?.steerQueue) {
+      slice.steerQueue = slice.steerQueue.filter(
+        (entry) => (entry as { id?: string }).id !== entryId
+      )
+    }
+  }),
 }
 
 const subscribers: Array<(s: ChatStateLike) => void> = []
@@ -4431,6 +4440,65 @@ describe("useClaudeChat — actions", () => {
     await expect(stopChatTurn("sess-bg")).resolves.toBe(false)
   })
 
+  it("hands a deny's reason to the model with the refusal on the sidecar lane", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.respondToApproval(
+        { sessionId: "sess-1", requestId: "r-1", toolName: "Bash", input: {} } as never,
+        "deny",
+        { message: "don't delete it, back it up" }
+      )
+    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "r-1",
+      "deny",
+      "The user denied this tool call. Their reason, or what to do instead: don't delete it, back it up"
+    )
+    // The refusal carried the reason: nothing is sent after it.
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("never attaches a reason to an allow", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.respondToApproval(
+        { sessionId: "sess-1", requestId: "r-1", toolName: "Bash", input: {} } as never,
+        "allow",
+        { message: "ignored" }
+      )
+    })
+    expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
+  })
+
+  it("follows a HostState deny with its reason, since that answer carries no text", async () => {
+    enqueueHostStateIntentMock.mockResolvedValue({ id: "action-1", status: "pending" })
+    chatState.status = "streaming"
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.respondToApproval(
+        { sessionId: "sess-1", requestId: "r-1", toolName: "Bash", input: {} } as never,
+        "deny",
+        { message: "back it up instead" }
+      )
+      await flush()
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: { kind: "approval.respond", requestId: "r-1", decision: "deny" },
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess-1",
+        action: expect.objectContaining({ text: "back it up instead" }),
+      })
+    )
+    expect(approveToolMock).not.toHaveBeenCalled()
+  })
+
   it("stop() durably queues an attached HostState abort instead of direct interrupt", async () => {
     enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "abort-action", status: "pending" })
     const { result } = renderHook(() => useClaudeChat())
@@ -7630,6 +7698,177 @@ describe("useClaudeChat — Router + Fusion dispatch (ADR-0188)", () => {
     })
     expect(interruptSessionMock).toHaveBeenCalledWith("steer-sess")
     expect(cancelRouterFusionTurnMock).toHaveBeenCalledWith("steer-sess")
+  })
+
+  it("interrupt-and-steer aborts a BYOK turn, the same way Stop does", async () => {
+    standaloneFlag.value = true
+    let captured: { signal: AbortSignal } | null = null
+    runStandaloneTurnMock.mockImplementation(async (args?: unknown) => {
+      captured = args as { signal: AbortSignal }
+      await new Promise(() => {})
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      void result.current.send("hello")
+    })
+    chatState.activeSessionId = "elsewhere"
+    try {
+      chatState.otherSlices["sess-1"] = {
+        ...makeSlice(),
+        status: "streaming",
+        steerQueue: [{ id: "q1", text: "next" }],
+      }
+      await act(async () => {
+        await result.current.interruptAndSteer("sess-1")
+      })
+      expect(captured).not.toBeNull()
+      expect(captured!.signal.aborted).toBe(true)
+      // A sidecar interrupt reaches no BYOK turn: it must not be the only lever.
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+    } finally {
+      chatState.activeSessionId = "sess-1"
+    }
+  })
+
+  it("interrupt-and-steer aborts a paired-host turn and drains once the host settles it", async () => {
+    enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "abort-action", status: "pending" })
+    chatState.otherSlices["steer-sess"] = {
+      ...makeSlice(),
+      status: "streaming",
+      steerQueue: [{ id: "q1", text: "next" }],
+    }
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.interruptAndSteer("steer-sess")
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "steer-sess",
+      action: { kind: "turn.abort" },
+    })
+    expect(interruptSessionMock).not.toHaveBeenCalled()
+    expect(chatState.clearSteerQueue).not.toHaveBeenCalled()
+    // The host's projection, not a local `session_ended`, ends the turn.
+    chatState.otherSlices["steer-sess"]!.status = "idle"
+    await act(async () => {
+      for (const sub of [...subscribers]) sub(chatState)
+      await flush()
+    })
+    expect(chatState.clearSteerQueue).toHaveBeenCalledWith("steer-sess")
+  })
+
+  it("drains a follow-up queued behind a paired-host turn when that turn ends cleanly", async () => {
+    enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "action-1", status: "pending" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("host-owned")
+    })
+    chatState.activeSessionId = "elsewhere"
+    try {
+      chatState.otherSlices["sess-1"] = {
+        ...makeSlice(),
+        status: "streaming",
+        steerQueue: [{ id: "q1", text: "next" }],
+      }
+      await act(async () => {
+        for (const sub of [...subscribers]) sub(chatState)
+      })
+      expect(chatState.clearSteerQueue).not.toHaveBeenCalled()
+      chatState.otherSlices["sess-1"]!.status = "idle"
+      await act(async () => {
+        for (const sub of [...subscribers]) sub(chatState)
+        await flush()
+      })
+      expect(chatState.clearSteerQueue).toHaveBeenCalledWith("sess-1")
+    } finally {
+      chatState.activeSessionId = "sess-1"
+    }
+  })
+
+  it("keeps a paired-host turn's queue and marks it undelivered when the turn fails", async () => {
+    enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "action-1", status: "pending" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("host-owned")
+    })
+    chatState.activeSessionId = "elsewhere"
+    try {
+      chatState.otherSlices["sess-1"] = {
+        ...makeSlice(),
+        status: "error",
+        steerQueue: [{ id: "q1", text: "next" }],
+        messages: [
+          {
+            id: "steer-1",
+            role: "user",
+            parts: [{ type: "text", text: "next" }],
+            metadata: { steer: { entryId: "q1", state: "queued" } },
+          },
+        ],
+      }
+      await act(async () => {
+        for (const sub of [...subscribers]) sub(chatState)
+        await flush()
+      })
+      expect(chatState.clearSteerQueue).not.toHaveBeenCalled()
+      const marked = chatState.otherSlices["sess-1"]?.messages as Array<{
+        metadata?: { steer?: { state: string } }
+      }>
+      expect(marked[0]?.metadata?.steer?.state).toBe("failed")
+    } finally {
+      chatState.activeSessionId = "sess-1"
+    }
+  })
+
+  it("Stop puts queued follow-ups back into the composer instead of dropping them", async () => {
+    const taken: Array<Record<string, unknown>> = []
+    const composer = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail
+      taken.push(detail)
+      detail.claimed = true
+    }
+    window.addEventListener("cognia:composer-append", composer)
+    try {
+      chatState.otherSlices["steer-sess"] = {
+        ...makeSlice(),
+        status: "streaming",
+        steerQueue: [
+          { id: "q1", text: "first" },
+          { id: "q2", text: "second" },
+        ],
+        messages: [
+          {
+            id: "steer-1",
+            role: "user",
+            parts: [{ type: "text", text: "first" }],
+            metadata: { steer: { entryId: "q1", state: "queued" } },
+          },
+          {
+            id: "steer-2",
+            role: "user",
+            parts: [{ type: "text", text: "second" }],
+            metadata: { steer: { entryId: "q2", state: "queued" } },
+          },
+        ],
+      }
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.stop("steer-sess")
+        await flush()
+      })
+      // Not replayed: Stop still means "the user is taking over".
+      expect(chatState.clearSteerQueue).toHaveBeenCalledWith("steer-sess")
+      expect(taken).toHaveLength(1)
+      expect(taken[0]).toMatchObject({ sessionId: "steer-sess", text: "first\n\nsecond" })
+      expect(chatState.otherSlices["steer-sess"]?.messages).toEqual([])
+      expect(toastInfo).toHaveBeenCalled()
+    } finally {
+      window.removeEventListener("cognia:composer-append", composer)
+    }
   })
 
   it("stops granting model calls when the durable lease is lost", async () => {

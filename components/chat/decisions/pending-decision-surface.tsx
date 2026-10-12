@@ -32,6 +32,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { ToolDecisionContent } from "./tool-decision-content"
 import {
@@ -40,7 +41,11 @@ import {
   isElicitationComplete,
   type ElicitationValues,
 } from "./elicitation-form"
-import type { ApprovalDecision, PendingApproval } from "@cognia/agent-config-types"
+import type {
+  ApprovalDecision,
+  ApprovalResponseOptions,
+  PendingApproval,
+} from "@cognia/agent-config-types"
 import type { AcpElicitationRequest, AcpElicitationResponse } from "@/types/agent/external-agent"
 
 /** Mirrors `HostStateDecisionKind` — kept structural so this file stays UI-only. */
@@ -66,7 +71,14 @@ export interface PendingDecisionSurfaceProps {
    * arguments are the part carrying file contents, commands and credentials.
    */
   mode?: "control" | "observe"
-  onApprovalRespond?: (decision: ApprovalDecision) => void | Promise<void>
+  /**
+   * `options.message` is set only on a deny the user explained ("not that —
+   * back it up instead"); the runtime hands it to the model with the refusal.
+   */
+  onApprovalRespond?: (
+    decision: ApprovalDecision,
+    options?: ApprovalResponseOptions
+  ) => void | Promise<void>
   onElicitationRespond?: (response: AcpElicitationResponse) => void | Promise<void>
   /** Clear a terminal decision. Required for the honest-notice card. */
   onDismiss?: () => void
@@ -132,19 +144,26 @@ function ApprovalDecisionBody({
   mode: "control" | "observe"
   actionable: boolean
   responding: boolean
-  onRespond?: (decision: ApprovalDecision) => void | Promise<void>
+  onRespond?: (
+    decision: ApprovalDecision,
+    options?: ApprovalResponseOptions
+  ) => void | Promise<void>
   onDismiss?: () => void
   onCancelRun?: (runId: string) => void
   confirmAllow?: (run: () => Promise<void>) => Promise<void>
 }) {
   const t = useTranslations("chat.toolApproval")
 
-  const respond = async (decision: ApprovalDecision) => {
+  const respond = async (decision: ApprovalDecision, options?: ApprovalResponseOptions) => {
     if (!onRespond) return
     // Deny is never wrapped: refusing is the safe direction, and putting a
     // biometric prompt in front of it would make the cautious answer the
     // expensive one.
-    if (decision === "deny" || !confirmAllow) {
+    if (decision === "deny") {
+      await (options ? onRespond(decision, options) : onRespond(decision))
+      return
+    }
+    if (!confirmAllow) {
       await onRespond(decision)
       return
     }
@@ -163,16 +182,121 @@ function ApprovalDecisionBody({
           </Button>
         </div>
       ) : actionable ? (
-        <ApprovalActions
-          approval={approval}
-          responding={responding}
-          onAllowOnce={() => void respond("allow")}
-          onAllowAlways={() => void respond("allow_always")}
-          onDeny={() => void respond("deny")}
-          onCancelRun={onCancelRun}
-        />
+        <>
+          <ApprovalActions
+            approval={approval}
+            responding={responding}
+            onAllowOnce={() => void respond("allow")}
+            onAllowAlways={() => void respond("allow_always")}
+            onDeny={() => void respond("deny")}
+            onCancelRun={onCancelRun}
+          />
+          <DenyWithReason
+            key={approval.requestId}
+            responding={responding}
+            onDeny={(message) => void respond("deny", { message })}
+          />
+        </>
       ) : null}
     </>
+  )
+}
+
+/**
+ * "Deny, and here is what to do instead" as one answer.
+ *
+ * Plain Deny stays a single click — the reason is optional, never a toll on the
+ * safe direction. Opening this adds a short note; submitting denies the call
+ * and hands the note to the model with the refusal, so "don't delete it, back
+ * it up" no longer takes a deny followed by a separate message. Keyed by the
+ * request so a half-written note never carries over to the next ask.
+ */
+function DenyWithReason({
+  responding,
+  onDeny,
+}: {
+  responding: boolean
+  onDeny: (message: string) => void
+}) {
+  const t = useTranslations("chat.toolApproval")
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState("")
+  const trimmed = reason.trim()
+
+  if (!open) {
+    return (
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          disabled={responding}
+          onClick={() => setOpen(true)}
+          data-testid="decision-deny-with-reason"
+          className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground"
+        >
+          {t("denyWithReason")}
+        </Button>
+      </div>
+    )
+  }
+
+  const submit = () => {
+    if (!trimmed || responding) return
+    onDeny(trimmed)
+  }
+
+  return (
+    <div className="space-y-2" data-testid="decision-deny-reason-form">
+      <label className="block text-xs text-muted-foreground" htmlFor="decision-deny-reason">
+        {t("denyReasonLabel")}
+      </label>
+      <Textarea
+        id="decision-deny-reason"
+        autoFocus
+        rows={2}
+        value={reason}
+        disabled={responding}
+        placeholder={t("denyReasonPlaceholder")}
+        onChange={(event) => setReason(event.target.value)}
+        onKeyDown={(event) => {
+          // Enter answers, Shift+Enter is a newline, Escape folds the note
+          // back without answering — the decision is still open.
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault()
+            submit()
+          } else if (event.key === "Escape") {
+            event.preventDefault()
+            event.stopPropagation()
+            setOpen(false)
+          }
+        }}
+        className="min-h-16 resize-none text-sm"
+        data-testid="decision-deny-reason"
+      />
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setOpen(false)}
+          data-testid="decision-deny-reason-cancel"
+        >
+          {t("denyReasonCancel")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!trimmed || responding}
+          onClick={submit}
+          data-testid="decision-deny-reason-submit"
+          className="text-destructive hover:text-destructive"
+        >
+          {t("denyReasonSubmit")}
+        </Button>
+      </div>
+    </div>
   )
 }
 

@@ -40,6 +40,7 @@ import { onClaudeMessage } from "@/lib/claude/ipc"
 import { makeUserMessage } from "@/lib/claude/adapter"
 import type {
   ApprovalDecision,
+  ApprovalResponseOptions,
   PendingApproval,
   SendContent,
   SendOptions,
@@ -53,7 +54,7 @@ import {
 import type { RoomRunner } from "@/lib/chat/room/runner"
 import { withMetadata } from "@/lib/chat/room/runner"
 import { sendRoomTurn, stopRoomTurn } from "@/lib/companion/room-send-client"
-import { maybeDrainSteer, steerArmed } from "./steer-runtime"
+import { maybeDrainSteer, putBackPendingSteers, steerArmed } from "./steer-runtime"
 import { useChatStore } from "@/stores/chat"
 import { isCompanionShell } from "@/lib/chat/room/shell"
 import { isTauri } from "@/lib/tauri"
@@ -95,6 +96,7 @@ type TeamSendFn = (content: SendContent, opts?: TeamSendOptions) => Promise<void
 export function useTeamChat() {
   const tInlineErr = useTranslations("chat.inlineError")
   const tAttachments = useTranslations("chat.composer.attachments")
+  const tSteer = useTranslations("chat.steer")
   const companion = isCompanionShell()
   const engine = useMemo<{ runner: RoomRunner; projector: CompanionRoomProjector | null }>(
     () =>
@@ -253,16 +255,34 @@ export function useTeamChat() {
     async (targetSessionId?: string) => {
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
+      // Stop does not replay queued follow-ups, but it does not drop them
+      // either: they go back into the composer with everything they carried.
+      const queuedSteers = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
+      const putBack = () => {
+        if (queuedSteers.length === 0) return
+        void putBackPendingSteers(
+          sessionId,
+          queuedSteers.map((entry) => entry.id),
+          queuedSteers
+        )
+          .then((count) => {
+            if (count > 0) toast.info(tSteer("restoredOnStop", { count }))
+          })
+          .catch((error) => console.error("steer put-back on stop failed", error))
+      }
       if (engine.projector) {
         useChatStore.getState().clearSteerQueue(sessionId)
         steerArmed.delete(sessionId)
         useChatStore.getState().setSessionStatus(sessionId, "idle")
+        putBack()
         await stopRoomTurn(sessionId).catch((err) => console.error("room_stop failed", err))
         return
       }
-      await engine.runner.stop(sessionId)
+      const stopping = engine.runner.stop(sessionId)
+      putBack()
+      await stopping
     },
-    [engine]
+    [engine, tSteer]
   )
 
   /**
@@ -392,8 +412,12 @@ export function useTeamChat() {
 
   /** Approve or deny a tool call. Routes to the member sub-session. */
   const respondToApproval = useCallback(
-    async (approval: PendingApproval, decision: ApprovalDecision) => {
-      await engine.runner.respondToApproval(approval, decision)
+    async (
+      approval: PendingApproval,
+      decision: ApprovalDecision,
+      options?: ApprovalResponseOptions
+    ) => {
+      await engine.runner.respondToApproval(approval, decision, options)
     },
     [engine]
   )

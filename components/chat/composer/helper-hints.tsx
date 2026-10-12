@@ -7,6 +7,9 @@ import { useTranslations } from "next-intl"
 import { KeyboardIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useChatStore, useSessionHasMessages } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
+import { composerSendKeys, formatKeyCombo } from "@/lib/chat/composer-send-keys"
+import { usesAppleModifierGlyphs } from "@/lib/platform/os"
 
 export interface HelperHintsProps {
   /**
@@ -24,6 +27,10 @@ export function HelperHints({ onOpenCheatsheet }: HelperHintsProps) {
   const t = useTranslations("chat.composer.helperHints")
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const hasMessages = useSessionHasMessages(activeSessionId)
+  // The same keys the composer's handler acts on, per the "Send on Enter"
+  // setting — not the default's.
+  const sendOnEnter = useSettingsStore((s) => s.settings?.composerBehavior?.sendOnEnter !== false)
+  const keys = composerSendKeys({ sendOnEnter, appleGlyphs: usesAppleModifierGlyphs() })
 
   // Onboarding, not chrome. This used to render on every desktop turn — the
   // same three sentences under the composer, hundreds of times a day, for a
@@ -39,7 +46,9 @@ export function HelperHints({ onOpenCheatsheet }: HelperHintsProps) {
     // ≥@lg (a medium-width sidebar still uses the stacked composer and
     // shouldn't burn another row on hint chips).
     <div className="mt-1.5 hidden sm:@lg/composer:flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70">
-      <Hint>{t("send")}</Hint>
+      <Hint>
+        {t("send", { send: formatKeyCombo(keys.send), newline: formatKeyCombo(keys.newline) })}
+      </Hint>
       <Hint>{t("dropImages")}</Hint>
       <Hint>
         {t("tryPrefix")} <code className="font-mono">/</code> <code className="font-mono">@</code>{" "}

@@ -9,7 +9,12 @@ jest.mock("next-intl", () => ({
 
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { ComposerCheatsheet } from "./composer-cheatsheet"
+import { ComposerCheatsheet, shortcutRows } from "./composer-cheatsheet"
+import { useSettingsStore } from "@/stores/settings"
+
+afterEach(() => {
+  useSettingsStore.setState({ settings: null } as never)
+})
 
 describe("ComposerCheatsheet", () => {
   it("renders nothing while closed, so it costs no layout", () => {
@@ -27,6 +32,7 @@ describe("ComposerCheatsheet", () => {
       "keys.history",
       "keys.complete",
       "keys.dismiss",
+      "keys.stop",
     ]) {
       expect(sheet).toHaveTextContent(key)
     }
@@ -57,5 +63,32 @@ describe("ComposerCheatsheet", () => {
     render(<ComposerCheatsheet open onOpenChange={onOpenChange} />)
     await user.keyboard("{Escape}")
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("documents the send keys the user's setting actually uses", () => {
+    useSettingsStore.setState({
+      settings: { composerBehavior: { sendOnEnter: false, inputHistoryRecall: false } },
+    } as never)
+    render(<ComposerCheatsheet open onOpenChange={jest.fn()} />)
+    const sheet = screen.getByTestId("composer-cheatsheet")
+    // History recall is off, so it is not offered as a shortcut.
+    expect(sheet).not.toHaveTextContent("keys.history")
+    const caps = screen.getAllByText((_, el) => el?.tagName === "KBD").map((el) => el.textContent)
+    expect(caps).not.toContain("⇧⏎")
+    expect(caps.some((cap) => cap === "⌘" || cap === "Ctrl")).toBe(true)
+  })
+})
+
+describe("shortcutRows", () => {
+  it("follows Send on Enter and the history switch", () => {
+    const on = shortcutRows({ sendOnEnter: true, historyRecall: true, appleGlyphs: true })
+    expect(on.find((row) => row.key === "send")?.combo).toEqual(["⏎"])
+    expect(on.find((row) => row.key === "newline")?.combo).toEqual(["⇧", "⏎"])
+    expect(on.some((row) => row.key === "history")).toBe(true)
+
+    const off = shortcutRows({ sendOnEnter: false, historyRecall: false, appleGlyphs: false })
+    expect(off.find((row) => row.key === "send")?.combo).toEqual(["Ctrl", "⏎"])
+    expect(off.find((row) => row.key === "newline")?.combo).toEqual(["⏎"])
+    expect(off.some((row) => row.key === "history")).toBe(false)
   })
 })

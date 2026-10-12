@@ -98,11 +98,17 @@ describe("useInputHistory", () => {
     expect(v).toBe("b") // newest, not continuing from "a"
   })
 
-  it("does not double-prepend a consecutive duplicate record", () => {
+  it("does not double-prepend a consecutive duplicate record", async () => {
     const { result } = renderHook(() => useInputHistory("s1"))
     act(() => result.current.record("dup"))
     act(() => result.current.record("dup"))
     expect(result.current.size).toBe(1)
+    // `record` persists without being awaited. Let the write land here, or it
+    // reaches the table after the next test's `beforeEach` cleared it — and
+    // that test, which recalls across every conversation, would find it.
+    await waitFor(async () =>
+      expect(await getDb().chatInputHistory.where("sessionId").equals("s1").count()).toBe(1)
+    )
   })
 
   it("ignores empty records and stays empty for a null session", async () => {
@@ -110,6 +116,8 @@ describe("useInputHistory", () => {
     await waitFor(() => expect(result.current.size).toBe(0))
     act(() => result.current.record("   "))
     expect(result.current.size).toBe(0)
+    expect(result.current.crossSessionEntries).toEqual([])
+    expect(await getDb().chatInputHistory.count()).toBe(0)
     let v: string | null = "x"
     act(() => {
       v = result.current.recall("up", { value: "", caretAtStart: true })
@@ -129,5 +137,47 @@ describe("useInputHistory", () => {
       const { listInputHistory } = await import("@/lib/db/chat-input-history")
       expect(await listInputHistory("s1")).toContain("hello")
     })
+  })
+
+  it("walks on into other conversations' lines once this one's run out", async () => {
+    await seed("s1", ["mine-old", "mine-new"])
+    await seed("s2", ["theirs-old", "mine-new", "theirs-new"])
+    const { result } = renderHook(() => useInputHistory("s1"))
+    await waitFor(() => expect(result.current.crossSessionEntries.length).toBeGreaterThan(0))
+    // A line this conversation already has is not offered twice.
+    expect(result.current.crossSessionEntries).toEqual(["theirs-new", "theirs-old"])
+
+    const seen: Array<string | null> = []
+    act(() => {
+      seen.push(result.current.recall("up", { value: "", caretAtStart: true }))
+    })
+    for (let i = 0; i < 4; i += 1) {
+      act(() => {
+        seen.push(result.current.recall("up", { value: "", caretAtStart: true }))
+      })
+    }
+    expect(seen).toEqual(["mine-new", "mine-old", "theirs-new", "theirs-old", "theirs-old"])
+  })
+
+  it("keeps a first message sent before its conversation existed", async () => {
+    const { result, rerender } = renderHook(({ id }) => useInputHistory(id), {
+      initialProps: { id: null as string | null },
+    })
+    act(() => result.current.record("kick off the migration"))
+    await waitFor(async () => {
+      const { listInputHistory, HOME_COMPOSER_HISTORY_KEY } =
+        await import("@/lib/db/chat-input-history")
+      expect(await listInputHistory(HOME_COMPOSER_HISTORY_KEY)).toEqual(["kick off the migration"])
+    })
+    // The send just created the conversation: its composer can still recall it.
+    rerender({ id: "s-new" })
+    await waitFor(() =>
+      expect(result.current.crossSessionEntries).toContain("kick off the migration")
+    )
+    let v: string | null = null
+    act(() => {
+      v = result.current.recall("up", { value: "", caretAtStart: true })
+    })
+    expect(v).toBe("kick off the migration")
   })
 })

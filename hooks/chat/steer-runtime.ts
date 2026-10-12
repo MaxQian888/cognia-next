@@ -21,11 +21,27 @@
  */
 
 import { useChatStore, type ChatStatus, type SteerEntry } from "@/stores/chat"
-import { buildSteerPayload, steerMetaOf, type SteerState } from "@/lib/claude/steer"
+import {
+  buildSteerPayload,
+  steerMetaOf,
+  stripSteerPrefix,
+  type SteerState,
+} from "@/lib/claude/steer"
 import { persistMessages } from "@/lib/db/messages"
 import type { MessageReplyTo, SendContent, SendOptions } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
-import { promptPreambleOfParts, type PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
+import {
+  promptPreambleOfParts,
+  stripPromptPreamble,
+  type PromptPreambleSummary,
+} from "@/lib/chat/prompt-preamble"
+import {
+  composerRestoreFromMessage,
+  isEmptyComposerRestore,
+  mergeComposerRestores,
+  type ComposerRestorePayload,
+} from "@/lib/chat/composer-restore"
+import { dispatchComposerAppend } from "@/lib/chat/composer-append"
 import { mergeContextRefs } from "@/lib/chat/mentions/merge-refs"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type { ContextRef } from "@/lib/chat/mentions/types"
@@ -290,6 +306,112 @@ export function discardPendingSteer(sessionId: string, entryId: string): void {
   void persistMessages(sessionId, next).catch((err) =>
     console.error("steer discard persist failed", err)
   )
+}
+
+/** The composer-restore payload of one queued follow-up, from whatever survives of it. */
+async function restorePayloadOf(
+  sessionId: string,
+  entryId: string,
+  bubble: UIMessage | undefined,
+  entry: SteerEntry | undefined
+): Promise<ComposerRestorePayload | null> {
+  if (bubble) return composerRestoreFromMessage(sessionId, bubble, { replyTo: entry?.replyTo })
+  if (!entry) return null
+  // No bubble (it was never appended, or the transcript was rewritten under
+  // it): the in-memory entry still holds the words and the originals.
+  const files = (entry.attachmentManifest ?? []).flatMap((item) =>
+    item.original
+      ? [new File([item.original], item.filename, { type: item.mediaType || item.original.type })]
+      : []
+  )
+  const missing = (entry.attachmentManifest ?? [])
+    .filter((item) => !item.original)
+    .map((item) => item.filename)
+  return {
+    text: stripSteerPrefix(stripPromptPreamble(entry.text)).trim(),
+    files,
+    citations: entry.citations ?? [],
+    ...(entry.replyTo ? { replyTo: entry.replyTo } : {}),
+    carried: [],
+    missing,
+  }
+}
+
+/**
+ * Put undelivered follow-ups back into this conversation's composer — the
+ * words, the screenshots and files, the citations, the reply target and the
+ * context envelope — and drop their bubbles, in one transcript write. Returns
+ * how many went back.
+ *
+ * `entries` are the queue entries being returned (already removed from the
+ * queue by a Stop, or still in it); their order is the send order. Bubbles of
+ * ids without an entry — a follow-up from before a reload — are restored from
+ * the bubble alone.
+ *
+ * When no composer is mounted for the conversation nothing is discarded: the
+ * bubbles stay, read "Not delivered", and keep their own Put back.
+ */
+export async function putBackPendingSteers(
+  sessionId: string,
+  entryIds: readonly string[],
+  entries: readonly SteerEntry[] = []
+): Promise<number> {
+  if (entryIds.length === 0) return 0
+  const byId = new Map(entries.map((entry) => [entry.id, entry]))
+  const bubbles = new Map<string, UIMessage>()
+  for (const message of useChatStore.getState().sessions[sessionId]?.messages ?? []) {
+    const id = steerMetaOf(message.metadata)?.entryId
+    if (id) bubbles.set(id, message)
+  }
+  const payloads: ComposerRestorePayload[] = []
+  const restored: string[] = []
+  for (const entryId of entryIds) {
+    const payload = await restorePayloadOf(
+      sessionId,
+      entryId,
+      bubbles.get(entryId),
+      byId.get(entryId)
+    )
+    if (!payload) continue
+    payloads.push(payload)
+    restored.push(entryId)
+  }
+  if (restored.length === 0) return 0
+  const merged = mergeComposerRestores(payloads)
+  if (!isEmptyComposerRestore(merged)) {
+    const claimed = dispatchComposerAppend({
+      sessionId,
+      text: merged.text,
+      files: merged.files,
+      citations: merged.citations,
+      ...(merged.replyTo ? { replyTo: merged.replyTo } : {}),
+      carried: merged.carried,
+      missing: merged.missing,
+    })
+    if (!claimed) {
+      // Nobody to hand them to: keep them where the user can still find them.
+      for (const entryId of restored) {
+        if (byId.has(entryId)) setSteerMessageState(sessionId, entryId, "failed")
+      }
+      return 0
+    }
+  }
+  const drop = new Set(restored)
+  const store = useChatStore.getState()
+  for (const entryId of restored) store.removeSteerEntry(sessionId, entryId)
+  const messages = store.sessions[sessionId]?.messages
+  if (messages) {
+    const next = messages.filter(
+      (message) => !drop.has(steerMetaOf(message.metadata)?.entryId ?? "")
+    )
+    if (next.length !== messages.length) {
+      store.replaceSessionMessages(sessionId, next)
+      void persistMessages(sessionId, next).catch((err) =>
+        console.error("steer put-back persist failed", err)
+      )
+    }
+  }
+  return restored.length
 }
 
 /**

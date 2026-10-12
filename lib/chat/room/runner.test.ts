@@ -1193,6 +1193,21 @@ describe("tool approvals", () => {
     await w.runner.respondToApproval(approval, "deny")
     expect(w.calls.approve[1]).toEqual([SUB_A, "req-1", "deny"])
   })
+
+  it("hands a deny's reason to the member with the refusal", async () => {
+    const w = createWorld()
+    const approval = { sessionId: SUB_A, requestId: "req-1", toolName: "Bash" } as never
+    await w.runner.respondToApproval(approval, "deny", { message: "back it up first" })
+    expect(w.calls.approve[0]).toEqual([
+      SUB_A,
+      "req-1",
+      "deny",
+      "The user denied this tool call. Their reason, or what to do instead: back it up first",
+    ])
+    // A reason is never sent with an allow.
+    await w.runner.respondToApproval(approval, "allow", { message: "ignored" })
+    expect(w.calls.approve[1]).toEqual([SUB_A, "req-1", "allow"])
+  })
 })
 
 describe("helpers", () => {

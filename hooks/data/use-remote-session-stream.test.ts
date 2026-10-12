@@ -331,6 +331,48 @@ describe("useRemoteSessionStream", () => {
     expect(result.current.pendingApproval).toBeNull()
   })
 
+  it("hands a deny's reason to the model: with the refusal directly, as a steer over HostState", async () => {
+    const permission = (requestId: string) =>
+      ({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId,
+        toolUseID: `tu-${requestId}`,
+        toolName: "write",
+        input: {},
+      }) as unknown as ClaudeEvent
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+
+    act(() => streamHandler?.(permission("req-direct")))
+    await waitFor(() => expect(result.current.pendingApproval?.requestId).toBe("req-direct"))
+    await act(async () => {
+      await result.current.respond("deny", { message: "back it up" })
+    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "req-direct",
+      "deny",
+      "The user denied this tool call. Their reason, or what to do instead: back it up"
+    )
+
+    enqueueHostStateIntentMock.mockResolvedValue({ id: "queued", status: "pending" })
+    act(() => streamHandler?.(permission("req-host")))
+    await waitFor(() => expect(result.current.pendingApproval?.requestId).toBe("req-host"))
+    await act(async () => {
+      await result.current.respond("deny", { message: "back it up" })
+    })
+    // The HostState answer keeps its fixed shape; the reason follows it.
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: { kind: "approval.respond", requestId: "req-host", decision: "deny" },
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: { kind: "turn.steer", text: "back it up" },
+    })
+  })
+
   it("send forwards to sendPrompt with the session's resolved options; interrupt forwards to interruptSession", async () => {
     const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
     await waitFor(() => expect(streamHandler).toBeTruthy())

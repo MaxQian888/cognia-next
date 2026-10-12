@@ -49,6 +49,24 @@ jest.mock("@/components/chat/truncate-from-dialog", () => ({
   TruncateFromDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="truncate-from-dialog" /> : null,
 }))
+jest.mock("@/components/chat/restore-point-dialog", () => ({
+  RestorePointDialog: ({
+    open,
+    sessionId,
+    messageId,
+    onTruncate,
+  }: {
+    open: boolean
+    sessionId: string
+    messageId: string
+    onTruncate?: () => void
+  }) =>
+    open ? (
+      <div data-testid="restore-point-dialog" data-session={sessionId} data-message={messageId}>
+        <button type="button" data-testid="restore-point-truncate" onClick={onTruncate} />
+      </div>
+    ) : null,
+}))
 
 // Importing the composer for the append-event constant would drag in the whole
 // composer module (stores, Dexie, etc.); stub it to just the string (mirrors
@@ -155,6 +173,7 @@ const messages = {
       readAloud: "Read aloud",
       stopReading: "Stop reading",
       truncate: "Delete from here",
+      restorePoint: "Restore to here…",
       select: "Select messages",
       selectText: "Select text",
     },
@@ -319,6 +338,33 @@ describe("MessageActionSheet", () => {
     expect(dialog).toHaveAttribute("data-message", "m1")
     fireEvent.click(screen.getByTestId("message-action-truncate"))
     expect(screen.getByTestId("truncate-from-dialog")).toBeInTheDocument()
+  })
+
+  it("opens the restore map on the user's own message and routes its choices", () => {
+    const msg = {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "do the thing" }],
+      metadata: { sessionId: "s9" },
+    } as UIMessage
+    renderSheet(msg, jest.fn())
+    fireEvent.click(screen.getByTestId("message-action-restore-point"))
+    const dialog = screen.getByTestId("restore-point-dialog")
+    expect(dialog).toHaveAttribute("data-session", "s9")
+    expect(dialog).toHaveAttribute("data-message", "u1")
+    fireEvent.click(screen.getByTestId("restore-point-truncate"))
+    expect(screen.getByTestId("truncate-from-dialog")).toBeInTheDocument()
+  })
+
+  it("offers no restore map on a reply", () => {
+    const msg = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "done" }],
+      metadata: { sessionId: "s9" },
+    } as UIMessage
+    renderSheet(msg, jest.fn())
+    expect(screen.queryByTestId("message-action-restore-point")).not.toBeInTheDocument()
   })
 
   it("blocks the Branch row while the TARGET session is mid-turn", () => {

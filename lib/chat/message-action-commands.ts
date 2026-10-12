@@ -12,6 +12,7 @@ export type MessageActionCommandId =
   | "readAloud"
   | "branch"
   | "truncate"
+  | "restorePoint"
   | "bringBack"
   | "rerunTemplate"
   | "saveAsMemory"
@@ -102,6 +103,12 @@ export function resolveMessageActionCommands(
       { id: "branch", disabled: context.streaming },
       { id: "truncate", disabled: context.streaming, destructive: true }
     )
+  }
+  // One door to every way back to before the user's own turn — conversation
+  // and files — with what each covers. Mid-turn it would rewrite what is still
+  // being written, like the commands it gathers.
+  if (context.role === "user" && context.hasSession) {
+    commands.push({ id: "restorePoint", disabled: context.streaming })
   }
   if (context.role === "user" && context.canEdit) {
     // Both replay the same `onEditResend` path: "edit" opens the draft first,

@@ -32,12 +32,14 @@ import { applySdkEvent } from "@/lib/claude/adapter"
 import { approveTool, interruptSession, sendPrompt } from "@/lib/claude/ipc"
 import type {
   ApprovalDecision,
+  ApprovalResponseOptions,
   ClaudeEvent,
   PendingApproval,
   SDKEventEnvelope,
 } from "@cognia/agent-config-types"
 import { listMessages } from "@/lib/db/messages"
 import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
+import { denialMessageForModel, denialReasonOf } from "@/lib/chat/approval-routing"
 import {
   uploadSessionAttachment,
   type AttachmentUploadProgress,
@@ -132,8 +134,13 @@ export interface RemoteSessionStream {
   ) => Promise<void>
   /** Interrupt the in-flight turn. */
   interrupt: () => Promise<void>
-  /** Resolve the pending approval (allow / allow_always / deny). */
-  respond: (decision: ApprovalDecision) => Promise<void>
+  /**
+   * Resolve the pending approval (allow / allow_always / deny). A deny's
+   * `options.message` reaches the model too: with the refusal on the direct
+   * path, as a follow-up steer on a HostState Host (whose answer has a fixed
+   * wire shape).
+   */
+  respond: (decision: ApprovalDecision, options?: ApprovalResponseOptions) => Promise<void>
   /**
    * Release a completed live turn after the transcript controller has adopted
    * the host revision that contains it. Active turns are never discarded.
@@ -541,9 +548,10 @@ export function useRemoteSessionStream(
   }, [sessionId, setStatusBoth, t])
 
   const respond = useCallback(
-    async (decision: ApprovalDecision) => {
+    async (decision: ApprovalDecision, options?: ApprovalResponseOptions) => {
       const approval = pendingApproval
       if (!approval) return
+      const reason = denialReasonOf(decision, options)
       try {
         const queued = await enqueueHostStateIntentIfAvailable({
           sessionId: approval.sessionId,
@@ -555,12 +563,19 @@ export function useRemoteSessionStream(
         })
         if (queued) {
           setPendingApproval(null)
+          if (reason) {
+            await enqueueHostStateIntentIfAvailable({
+              sessionId: approval.sessionId,
+              action: { kind: "turn.steer", text: reason },
+            })
+          }
           return
         }
         await approveTool(
           approval.sessionId,
           approval.requestId,
-          decision === "allow_always" ? "allow" : decision
+          decision === "allow_always" ? "allow" : decision,
+          ...(reason ? ([denialMessageForModel(reason)] as const) : ([] as const))
         )
         setPendingApproval(null)
       } catch (err) {

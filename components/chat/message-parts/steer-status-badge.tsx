@@ -32,8 +32,11 @@ import { cn } from "@/lib/utils"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { HOVER_REVEAL_CONTROL_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { resolveSteerDisplayState, steerMetaOf, stripSteerPrefix } from "@/lib/claude/steer"
-import { discardPendingSteer, editPendingSteer } from "@/hooks/chat/steer-runtime"
-import { dispatchComposerAppend } from "@/components/chat/composer"
+import {
+  discardPendingSteer,
+  editPendingSteer,
+  putBackPendingSteers,
+} from "@/hooks/chat/steer-runtime"
 import { useSessionStatus, useSessionSteerQueue } from "@/stores/chat"
 import { isChatTurnQueued } from "@/lib/execution/chat-lease"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
@@ -177,17 +180,14 @@ export function SteerStatusBadge({
           <>
             {/* Put it back in the composer rather than re-sending silently: the
                 run this was meant to steer is over, so the user should decide
-                whether it still applies before it costs another turn. */}
+                whether it still applies before it costs another turn. All of
+                it goes back — files, citations, reply, context — rebuilt from
+                the persisted bubble, so this works after a reload too. */}
             <button
               type="button"
               onClick={() => {
-                dispatchComposerAppend({
-                  text: stripSteerPrefix(
-                    extractPlainText(stripPromptPreambleFromParts(message.parts))
-                  ),
-                  sessionId,
-                })
-                discardPendingSteer(sessionId, meta.entryId)
+                const entry = steerQueue.find((queued) => queued.id === meta.entryId)
+                void putBackPendingSteers(sessionId, [meta.entryId], entry ? [entry] : [])
               }}
               aria-label={t("ariaPutBack")}
               className="flex items-center gap-0.5 underline-offset-2 hover:underline"

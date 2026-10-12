@@ -27,6 +27,7 @@ import {
   SendHorizontalIcon,
   Share2Icon,
   ScissorsIcon,
+  HistoryIcon,
   SquareIcon,
   TextSelectIcon,
   Trash2Icon,
@@ -80,6 +81,7 @@ import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import type { MessageMotion } from "@/types/appearance"
 import { QuoteCardDialog } from "@/components/share/quote-card-dialog"
 import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
+import { RestorePointDialog } from "@/components/chat/restore-point-dialog"
 import { runMetadataOf } from "@/lib/chat/message-run-metadata"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 import { MessageTextSelectionSheet } from "./message-text-selection-sheet"
@@ -134,6 +136,7 @@ export function MessageActionSheet({
   const open = message !== null
   const [cardOpen, setCardOpen] = useState(false)
   const [truncateOpen, setTruncateOpen] = useState(false)
+  const [restoreOpen, setRestoreOpen] = useState(false)
   const [nowFallback] = useState(() => new Date())
   // Android hardware / browser back closes the sheet instead of navigating.
   useBackDismiss(open, () => onOpenChange(false))
@@ -531,6 +534,15 @@ export function MessageActionSheet({
               testid="message-action-branch"
             />
           )}
+          {commandById.has("restorePoint") && branchSessionId && message && (
+            <Row
+              icon={<HistoryIcon className="size-4" />}
+              label={t("restorePoint")}
+              onClick={() => setRestoreOpen(true)}
+              disabled={busy || commandById.get("restorePoint")?.disabled}
+              testid="message-action-restore-point"
+            />
+          )}
           {commandById.get("truncate")?.destructive && branchSessionId && message && (
             <Row
               icon={<ScissorsIcon className="size-4 text-destructive" />}
@@ -653,6 +665,18 @@ export function MessageActionSheet({
           messageId={message.id}
           open
           onOpenChange={setTruncateOpen}
+        />
+      )}
+      {restoreOpen && message && branchSessionId && (
+        <RestorePointDialog
+          sessionId={branchSessionId}
+          messageId={message.id}
+          open
+          onOpenChange={setRestoreOpen}
+          busy={branchSessionStreaming}
+          {...(onEditResend && text ? { onEdit: () => setEditText(text) } : {})}
+          onBranch={onBranch}
+          onTruncate={() => setTruncateOpen(true)}
         />
       )}
     </>

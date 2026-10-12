@@ -29,11 +29,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { PendingDecisionSurface } from "@/components/chat/decisions/pending-decision-surface"
 import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
-import type { ApprovalDecision, PendingApproval } from "@cognia/agent-config-types"
+import type {
+  ApprovalDecision,
+  ApprovalResponseOptions,
+  PendingApproval,
+} from "@cognia/agent-config-types"
 
 export interface ApprovalCardProps {
   approval: PendingApproval
-  onRespond: (decision: ApprovalDecision) => Promise<void>
+  onRespond: (decision: ApprovalDecision, options?: ApprovalResponseOptions) => Promise<void>
   /**
    * An observer sees that a decision exists but cannot answer it, and its
    * arguments stay redacted. Defaults to `control` so an older caller that has

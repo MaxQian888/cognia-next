@@ -82,6 +82,7 @@ import {
 } from "@/components/chat/message-parts/tool-activity-group"
 import { TurnProcessFold } from "@/components/chat/message-parts/turn-process-fold"
 import { TurnChangesCard } from "@/components/chat/turn-changes-card"
+import { RestorePointDialog } from "@/components/chat/restore-point-dialog"
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 import {
@@ -135,6 +136,7 @@ import {
   LinkIcon,
   CornerUpLeftIcon,
   GitBranchIcon,
+  HistoryIcon,
   ScissorsIcon,
   ImageIcon,
   PencilIcon,
@@ -350,6 +352,7 @@ function MessageRendererInner({
   const [richCopied, setRichCopied] = useState(false)
   const [branchOpen, setBranchOpen] = useState(false)
   const [truncateOpen, setTruncateOpen] = useState(false)
+  const [restoreOpen, setRestoreOpen] = useState(false)
   const [cardOpen, setCardOpen] = useState(false)
   // Stable "now" for messages that carry no createdAt (impure Date read kept
   // out of render via a lazy state initializer).
@@ -1373,6 +1376,16 @@ function MessageRendererInner({
                           {t("branchLabel")}
                         </DropdownMenuItem>
                       )}
+                      {hasActionCommand("restorePoint") && branchSessionId && (
+                        <DropdownMenuItem
+                          disabled={actionCommand("restorePoint")?.disabled}
+                          onSelect={() => setRestoreOpen(true)}
+                          data-testid="message-restore-point"
+                        >
+                          <HistoryIcon className="size-4" />
+                          {t("restorePointLabel")}
+                        </DropdownMenuItem>
+                      )}
                       {hasActionCommand("truncate") && branchSessionId && (
                         <DropdownMenuItem
                           disabled={actionCommand("truncate")?.disabled}
@@ -1592,6 +1605,18 @@ function MessageRendererInner({
                   </MessageAction>
                 )}
 
+                {hasActionCommand("restorePoint") && branchSessionId && (
+                  <MessageAction
+                    tooltip={t("restorePointLabel")}
+                    label={t("restorePointLabel")}
+                    onClick={() => setRestoreOpen(true)}
+                    disabled={actionCommand("restorePoint")?.disabled}
+                    data-testid="message-restore-point-action"
+                  >
+                    <HistoryIcon className="size-3.5" />
+                  </MessageAction>
+                )}
+
                 {/* Hand a conclusion back up.
                 Two shapes of the same gesture, so they share one action and one
                 mechanism: a sidechat hands back to the MAIN conversation, a
@@ -1698,6 +1723,29 @@ function MessageRendererInner({
             messageId={message.id}
             open
             onOpenChange={setTruncateOpen}
+          />
+        )}
+
+        {/* Mounted only while open, like the delete dialog above. */}
+        {restoreOpen && branchSessionId && (
+          <RestorePointDialog
+            sessionId={branchSessionId}
+            messageId={message.id}
+            open
+            onOpenChange={setRestoreOpen}
+            busy={sessionBusy}
+            {...(onEditResend ? { onEdit: startEdit } : {})}
+            onBranch={() => setBranchOpen(true)}
+            onTruncate={() => setTruncateOpen(true)}
+            {...(onRewindFiles
+              ? {
+                  checkpoint: {
+                    eligible: checkpointEnabled,
+                    rewindFiles: (checkpointId: string, dryRun: boolean) =>
+                      onRewindFiles(branchSessionId, checkpointId, dryRun),
+                  },
+                }
+              : {})}
           />
         )}
 

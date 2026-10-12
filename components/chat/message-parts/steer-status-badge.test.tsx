@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { UIMessage } from "ai"
 
 // Identity i18n so assertions read as the key names.
@@ -9,12 +9,17 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-// The composer module pulls in the whole chat stack (Dexie, stores); only the
-// append bridge matters here.
-const dispatchComposerAppendMock = jest.fn()
-jest.mock("@/components/chat/composer", () => ({
+// Only the append bridge matters here; a mounted composer claims the event.
+const dispatchComposerAppendMock = jest.fn((_detail: unknown) => true)
+jest.mock("@/lib/chat/composer-append", () => ({
   __esModule: true,
   dispatchComposerAppend: (detail: unknown) => dispatchComposerAppendMock(detail),
+}))
+
+// Attachment originals live in the session asset store (Dexie).
+const getSessionAssetMock = jest.fn()
+jest.mock("@/lib/db/session-assets", () => ({
+  getSessionAsset: (...args: unknown[]) => getSessionAssetMock(...args),
 }))
 
 const persistMessagesMock = jest.fn(() => Promise.resolve())
@@ -51,6 +56,7 @@ function seed(slice: Partial<SessionChatSlice>) {
 beforeEach(() => {
   useChatStore.setState({ activeSessionId: null, sessions: {} })
   dispatchComposerAppendMock.mockClear()
+  getSessionAssetMock.mockReset()
   persistMessagesMock.mockClear()
 })
 
@@ -223,18 +229,75 @@ describe("SteerStatusBadge", () => {
     expect(useChatStore.getState().sessions[SID]?.steerQueue).toEqual([])
   })
 
-  it("puts an undelivered steer back in its own composer instead of resending it", () => {
+  it("puts an undelivered steer back in its own composer instead of resending it", async () => {
     const msg = steerMessage("e1", "failed")
     seed({ status: "idle", messages: [msg] })
     render(<SteerStatusBadge message={msg} sessionId={SID} />)
     fireEvent.click(screen.getByTestId("steer-put-back"))
     // Addressed to this session so a split pane's composer is untouched, and
     // never auto-sent — the run it was meant to steer is over.
-    expect(dispatchComposerAppendMock).toHaveBeenCalledWith({
-      text: "use TypeScript",
-      sessionId: SID,
-    })
+    await waitFor(() =>
+      expect(dispatchComposerAppendMock).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "use TypeScript", sessionId: SID })
+      )
+    )
     expect(useChatStore.getState().sessions[SID]?.messages).toEqual([])
+  })
+
+  it("puts back the files, citations and reply a follow-up carried, not just its words", async () => {
+    getSessionAssetMock.mockResolvedValue({
+      blob: new Blob(["%PDF"], { type: "application/pdf" }),
+      filename: "spec.pdf",
+      mediaType: "application/pdf",
+    })
+    const reply = { messageId: "m0", preview: "earlier answer" }
+    const msg = {
+      id: "m-e1",
+      role: "user",
+      parts: [
+        {
+          type: "file",
+          filename: "spec.pdf",
+          extractedContent: {
+            attachmentId: "a1",
+            contentHash: "b".repeat(64),
+            status: "ready",
+            processor: { id: "t", version: "1" },
+            segments: [],
+          },
+        },
+        { type: "file", url: "data:image/png;base64,iVBORw0KGgo=", mediaType: "image/png" },
+        { type: "text", text: "compare these" },
+      ],
+      metadata: {
+        steer: { entryId: "e1", state: "failed" },
+        mentions: [{ kind: "entity", id: "memory:m1", label: "Deploy notes" }],
+        replyTo: reply,
+      },
+    } as unknown as UIMessage
+    seed({ status: "idle", messages: [msg] })
+    render(<SteerStatusBadge message={msg} sessionId={SID} />)
+    fireEvent.click(screen.getByTestId("steer-put-back"))
+    await waitFor(() => expect(dispatchComposerAppendMock).toHaveBeenCalled())
+    const detail = dispatchComposerAppendMock.mock.calls[0]![0] as {
+      files: File[]
+      citations: unknown[]
+      replyTo: unknown
+    }
+    expect(detail.files.map((file) => file.name)).toEqual(["spec.pdf", "attachment-2.png"])
+    expect(detail.citations).toEqual([{ kind: "entity", id: "memory:m1", label: "Deploy notes" }])
+    expect(detail.replyTo).toEqual(reply)
+    expect(getSessionAssetMock).toHaveBeenCalledWith(SID, "a1")
+  })
+
+  it("keeps the bubble when no composer is there to take it", async () => {
+    dispatchComposerAppendMock.mockReturnValueOnce(false)
+    const msg = steerMessage("e1", "failed")
+    seed({ status: "idle", messages: [msg] })
+    render(<SteerStatusBadge message={msg} sessionId={SID} />)
+    fireEvent.click(screen.getByTestId("steer-put-back"))
+    await waitFor(() => expect(dispatchComposerAppendMock).toHaveBeenCalled())
+    expect(useChatStore.getState().sessions[SID]?.messages).toHaveLength(1)
   })
 
   it("discards an undelivered steer outright", () => {
@@ -261,13 +324,15 @@ describe("SteerStatusBadge", () => {
     expect(useChatStore.getState().sessions[SID]?.steerQueue[0]?.text).toBe("use Go")
   })
 
-  it("strips the model-facing framing when putting a legacy steer back", () => {
+  it("strips the model-facing framing when putting a legacy steer back", async () => {
     const msg = steerMessage("e1", "failed", "By the way (steering): use TypeScript")
     seed({ status: "idle", messages: [msg] })
     render(<SteerStatusBadge message={msg} sessionId={SID} />)
     fireEvent.click(screen.getByTestId("steer-put-back"))
-    expect(dispatchComposerAppendMock).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "use TypeScript" })
+    await waitFor(() =>
+      expect(dispatchComposerAppendMock).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "use TypeScript" })
+      )
     )
   })
 })
