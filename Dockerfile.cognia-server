@@ -31,7 +31,12 @@
 # ── Rust: cargo-chef base ────────────────────────────────────────────────────
 # Base tracks the `rust-toolchain.toml` pin (1.99); matching the base avoids
 # downloading a second channel at build time.
-FROM rust:1.99.0-bookworm AS chef
+# Debian trixie, not bookworm: PaddleOCR (the app's default `ocr-paddle`
+# feature) links ONNX Runtime's prebuilt static library, which needs glibc
+# 2.38+ and GCC 13's libstdc++. Bookworm's glibc 2.36 left the final link with
+# undefined `__isoc23_strtoll` and `_M_replace_cold`. Every stage that runs a
+# binary from here (brain-builder, the runtimes) is trixie too.
+FROM rust:1.99.0-trixie AS chef
 # The official image already contains this exact compiler. Override the
 # workspace component list for image builds so cargo does not try to download
 # development components while preparing an otherwise compile-only image.
@@ -163,7 +168,7 @@ RUN cargo check --release --locked -p cognia-cli --bin cognia
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
 # Full (non-slim) image: node-gyp needs python3/make/g++ for the sidecar's
 # native optional deps (node-pty, better-sqlite3).
-FROM node:26-bookworm AS brain-builder
+FROM node:26-trixie AS brain-builder
 ARG COREPACK_VERSION=0.35.0
 ARG PNPM_VERSION=11.18.0
 ARG NPM_CONFIG_REGISTRY
@@ -260,7 +265,7 @@ FROM node:26.3.1-bookworm-slim AS plugin-node-runtime
 RUN node --version
 
 # ── Runtime: slim (sidecar-only execution plane) ────────────────────────────
-FROM node:26-bookworm-slim AS runtime-slim
+FROM node:26-trixie-slim AS runtime-slim
 # The binary dynamically links the Tauri desktop stack (see the chef-stage
 # note) — ship the runtime .so set alongside the headless essentials.
 # bubblewrap is not optional: cognia-external-agent-launcher (shipped in the
@@ -271,9 +276,9 @@ FROM node:26-bookworm-slim AS runtime-slim
 # already tuned to let bwrap create user namespaces; only the binary was absent.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates libssl3 curl git bubblewrap \
-       libgtk-3-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
-       libsoup-3.0-0 libayatana-appindicator3-1 librsvg2-2 libpipewire-0.3-0 libgbm1 \
+       ca-certificates libssl3t64 curl git bubblewrap \
+       libgtk-3-0t64 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
+       libsoup-3.0-0 libayatana-appindicator3-1 librsvg2-2 libpipewire-0.3-0t64 libgbm1 \
     && rm -rf /var/lib/apt/lists/*
 # `/data/workspaces` is COGNIA_WORKSPACES_DIR (the per-run writable root the
 # sandbox binds) and `/data/pi-home/.pi/agent` is PI_CODING_AGENT_DIR, which
