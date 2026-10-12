@@ -240,6 +240,22 @@
     {
       "id": "cline",
       "unavailable": "The runner image installs it, but no Cognia runtime launches it: it was removed from the launch allowlist."
+    },
+    {
+      "id": "kimi",
+      "unavailable": "A system runtime: Cognia ships no distribution of the Kimi Code CLI (its catalog entry has none), so the user installs it on the host and the bundle has no pinned copy to carry."
+    },
+    {
+      "id": "qoder",
+      "unavailable": "A system runtime: Cognia ships no distribution of the Qoder CLI (its catalog entry has none), so the user installs it on the host and the bundle has no pinned copy to carry."
+    },
+    {
+      "id": "aider",
+      "unavailable": "A system runtime: Aider is a Python package Cognia does not distribute (its catalog entry has none), so the user installs it on the host and the bundle has no pinned copy to carry."
+    },
+    {
+      "id": "goose",
+      "unavailable": "A system runtime: Cognia ships no distribution of Goose (its catalog entry has none), so the user installs it on the host and the bundle has no pinned copy to carry."
     }
   ]
 }
