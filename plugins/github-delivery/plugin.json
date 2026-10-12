@@ -718,6 +718,13 @@
               },
               "body": {
                 "type": "string"
+              },
+              "marker": {
+                "type": "string",
+                "pattern": "^<!-- [a-z0-9][a-z0-9-]{0,39}:v1:[A-Za-z0-9_-]{1,64} -->$"
+              },
+              "since": {
+                "type": "string"
               }
             },
             "additionalProperties": false
@@ -751,6 +758,98 @@
               },
               "body": {
                 "type": "string"
+              },
+              "marker": {
+                "type": "string",
+                "pattern": "^<!-- [a-z0-9][a-z0-9-]{0,39}:v1:[A-Za-z0-9_-]{1,64} -->$"
+              },
+              "since": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "replyToReviewComment",
+          "operationId": "github.replyToReviewComment",
+          "label": "replyToReviewComment",
+          "handler": "replyToReviewComment",
+          "risk": "write",
+          "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "prNumber", "commentId", "body"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "prNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "commentId": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "body": {
+                "type": "string"
+              },
+              "marker": {
+                "type": "string",
+                "pattern": "^<!-- [a-z0-9][a-z0-9-]{0,39}:v1:[A-Za-z0-9_-]{1,64} -->$"
+              },
+              "since": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "updateComment",
+          "operationId": "github.updateComment",
+          "label": "updateComment",
+          "handler": "updateComment",
+          "risk": "write",
+          "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "commentId", "kind", "body", "marker"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "commentId": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["issue", "review"]
+              },
+              "body": {
+                "type": "string"
+              },
+              "marker": {
+                "type": "string",
+                "pattern": "^<!-- [a-z0-9][a-z0-9-]{0,39}:v1:[A-Za-z0-9_-]{1,64} -->$"
               }
             },
             "additionalProperties": false
@@ -1317,6 +1416,18 @@
           "risk": "write"
         },
         {
+          "id": "web-replyToReviewComment",
+          "operationId": "github.replyToReviewComment",
+          "label": "replyToReviewComment",
+          "risk": "write"
+        },
+        {
+          "id": "web-updateComment",
+          "operationId": "github.updateComment",
+          "label": "updateComment",
+          "risk": "write"
+        },
+        {
           "id": "web-labelIssue",
           "operationId": "github.labelIssue",
           "label": "labelIssue",
@@ -1430,6 +1541,8 @@
     "action.github.reviewPrInline": "github-delivery.action.reviewPrInline",
     "action.github.commentPr": "github-delivery.action.commentPr",
     "action.github.commentIssue": "github-delivery.action.commentIssue",
+    "action.github.replyToReviewComment": "github-delivery.action.replyToReviewComment",
+    "action.github.updateComment": "github-delivery.action.updateComment",
     "action.github.labelIssue": "github-delivery.action.labelIssue",
     "action.github.closeIssue": "github-delivery.action.closeIssue",
     "action.github.updateIssue": "github-delivery.action.updateIssue",

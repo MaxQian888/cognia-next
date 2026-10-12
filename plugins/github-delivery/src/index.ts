@@ -447,19 +447,153 @@ export const reviewPr: IntegrationActionHandler = (input, context) =>
 
 export const reviewPrInline: IntegrationActionHandler = (input, context) => reviewPr(input, context)
 
+/**
+ * A Bot output marker, in `@cognia/github-bot-kit`'s format. A comment action
+ * given one becomes crash-safe: the marker is unique to one publication, so
+ * before POSTing, the thread is searched for it and an earlier copy is
+ * returned instead of posting a second. A host retry after a lost response
+ * (GitHub created the comment, the reply never arrived) therefore cannot
+ * double-post.
+ */
+const OUTPUT_MARKER_PATTERN = "^<!-- [a-z0-9][a-z0-9-]{0,39}:v1:[A-Za-z0-9_-]{1,64} -->$"
+const OUTPUT_MARKER = new RegExp(OUTPUT_MARKER_PATTERN)
+
+interface GithubCommentRecord {
+  id?: number
+  body?: string | null
+  created_at?: string
+  in_reply_to_id?: number | null
+  pull_request_url?: string
+  issue_url?: string
+  html_url?: string
+}
+
+function outputMarker(
+  input: Record<string, unknown>,
+  body: string,
+  required = false
+): string | undefined {
+  if (input.marker === undefined && !required) return undefined
+  if (typeof input.marker !== "string" || !OUTPUT_MARKER.test(input.marker))
+    throw new Error("github-delivery requires a valid output marker")
+  if (!body.includes(input.marker)) throw new Error("Comment body must carry its output marker")
+  return input.marker
+}
+
+/** ISO lower bound for the reconcile search; the Bot saved it before its first attempt. */
+function sinceQuery(input: Record<string, unknown>): string {
+  if (input.since === undefined) return ""
+  if (typeof input.since !== "string" || Number.isNaN(Date.parse(input.since)))
+    throw new Error("github-delivery requires since to be an ISO timestamp")
+  return `?since=${encodeURIComponent(new Date(input.since).toISOString())}`
+}
+
+/**
+ * The earliest comment in `path` carrying `marker`. A later one can only be
+ * someone copying the marker after the Bot published, so the earliest is the
+ * Bot's. A thread longer than the read window cannot prove absence, so it
+ * refuses rather than risk a duplicate.
+ */
+async function findMarkedComment(
+  context: IntegrationActionHandlerContext,
+  path: string,
+  marker: string
+): Promise<GithubCommentRecord | undefined> {
+  const { items, truncated } = await readAllPages<GithubCommentRecord>(context, path)
+  const match = items
+    .filter((comment) => typeof comment.body === "string" && comment.body.includes(marker))
+    .sort((a, b) => Date.parse(a.created_at ?? "") - Date.parse(b.created_at ?? ""))[0]
+  if (match) return match
+  if (truncated)
+    throw new Error(
+      "Cannot verify an earlier publication: the thread is longer than the reconcile window; pass since"
+    )
+  return undefined
+}
+
+async function postConversationComment(
+  input: Record<string, unknown>,
+  context: IntegrationActionHandlerContext,
+  number: number
+) {
+  const body = requiredString(input, "body")
+  const marker = outputMarker(input, body)
+  const path = `/issues/${number}/comments`
+  if (marker) {
+    const existing = await findMarkedComment(
+      context,
+      `/repos/${repo(input)}${path}${sinceQuery(input)}`,
+      marker
+    )
+    if (existing) return existing
+  }
+  return actionRequest(context, input, path, "POST", { body })
+}
+
 export const commentPr: IntegrationActionHandler = (input, context) =>
-  actionRequest(context, input, `/issues/${positiveInteger(input, "prNumber")}/comments`, "POST", {
-    body: requiredString(input, "body"),
-  })
+  postConversationComment(input, context, positiveInteger(input, "prNumber"))
 
 export const commentIssue: IntegrationActionHandler = (input, context) =>
-  actionRequest(
-    context,
-    input,
-    `/issues/${positiveInteger(input, "issueNumber")}/comments`,
-    "POST",
-    { body: requiredString(input, "body") }
-  )
+  postConversationComment(input, context, positiveInteger(input, "issueNumber"))
+
+/**
+ * Reply in a pull request's line-comment thread. GitHub only accepts replies
+ * to a thread's root, so a reply to a reply is redirected to the root; the
+ * comment must belong to the named pull request.
+ */
+export const replyToReviewComment: IntegrationActionHandler = async (input, context) => {
+  const repository = repo(input)
+  const number = positiveInteger(input, "prNumber")
+  const commentId = positiveInteger(input, "commentId")
+  const body = requiredString(input, "body")
+  const marker = outputMarker(input, body)
+  const target = (
+    await githubRequest<GithubCommentRecord>(
+      context,
+      `/repos/${repository}/pulls/comments/${commentId}`
+    )
+  ).data
+  if (!target.pull_request_url?.endsWith(`/pulls/${number}`))
+    throw new Error("Review comment does not belong to this pull request")
+  const rootId =
+    typeof target.in_reply_to_id === "number" && target.in_reply_to_id > 0
+      ? target.in_reply_to_id
+      : commentId
+  if (marker) {
+    const existing = await findMarkedComment(
+      context,
+      `/repos/${repository}/pulls/${number}/comments${sinceQuery(input)}`,
+      marker
+    )
+    if (existing) return existing
+  }
+  return actionRequest(context, input, `/pulls/${number}/comments/${rootId}/replies`, "POST", {
+    body,
+  })
+}
+
+/**
+ * Replace the body of a comment the Bot wrote earlier (a tracking comment).
+ * Only a comment that already carries the marker can be edited, and the new
+ * body must keep it: a maintainer's token can edit anyone's comment, and this
+ * must never become a way to rewrite one the Bot did not write. Writing the
+ * body it already has is a no-op, so a retry is harmless.
+ */
+export const updateComment: IntegrationActionHandler = async (input, context) => {
+  const repository = repo(input)
+  const commentId = positiveInteger(input, "commentId")
+  const body = requiredString(input, "body")
+  const marker = outputMarker(input, body, true) as string
+  const kind = input.kind === "review" ? "pulls" : input.kind === "issue" ? "issues" : undefined
+  if (!kind) throw new Error("github-delivery requires kind to be issue or review")
+  const path = `/${kind}/comments/${commentId}`
+  const current = (await githubRequest<GithubCommentRecord>(context, `/repos/${repository}${path}`))
+    .data
+  if (typeof current.body !== "string" || !current.body.includes(marker))
+    throw new Error("Comment does not carry this output marker")
+  if (current.body === body) return current
+  return actionRequest(context, input, path, "PATCH", { body })
+}
 
 export const labelIssue: IntegrationActionHandler = (input, context) =>
   actionRequest(context, input, `/issues/${positiveInteger(input, "issueNumber")}/labels`, "POST", {
@@ -689,6 +823,11 @@ const repoProperty = { repoFullName: { type: "string", minLength: 3 } }
 const prProperty = { ...repoProperty, prNumber: { type: "integer", minimum: 1 } }
 const issueProperty = { ...repoProperty, issueNumber: { type: "integer", minimum: 1 } }
 const reviewEvent = { type: "string", enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"] }
+const markedCommentProperties = {
+  body: { type: "string" },
+  marker: { type: "string", pattern: OUTPUT_MARKER_PATTERN },
+  since: { type: "string" },
+}
 const reviewComments = {
   type: "array",
   maxItems: 50,
@@ -770,14 +909,38 @@ const actionDefinitions = [
     handler: "commentPr",
     risk: "write",
     required: ["repoFullName", "prNumber", "body"],
-    properties: { ...prProperty, body: { type: "string" } },
+    properties: { ...prProperty, ...markedCommentProperties },
   },
   {
     id: "commentIssue",
     handler: "commentIssue",
     risk: "write",
     required: ["repoFullName", "issueNumber", "body"],
-    properties: { ...issueProperty, body: { type: "string" } },
+    properties: { ...issueProperty, ...markedCommentProperties },
+  },
+  {
+    id: "replyToReviewComment",
+    handler: "replyToReviewComment",
+    risk: "write",
+    required: ["repoFullName", "prNumber", "commentId", "body"],
+    properties: {
+      ...prProperty,
+      commentId: { type: "integer", minimum: 1 },
+      ...markedCommentProperties,
+    },
+  },
+  {
+    id: "updateComment",
+    handler: "updateComment",
+    risk: "write",
+    required: ["repoFullName", "commentId", "kind", "body", "marker"],
+    properties: {
+      ...repoProperty,
+      commentId: { type: "integer", minimum: 1 },
+      kind: { type: "string", enum: ["issue", "review"] },
+      body: { type: "string" },
+      marker: { type: "string", pattern: OUTPUT_MARKER_PATTERN },
+    },
   },
   {
     id: "labelIssue",

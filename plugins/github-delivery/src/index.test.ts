@@ -481,7 +481,7 @@ describe("GitHub Delivery v3 official plugin", () => {
       kinds: ["repository"],
     })
     expect(githubIntegration.healthProvider).toEqual({ handler: "checkGithubHealth" })
-    expect(githubIntegration.actions).toHaveLength(20)
+    expect(githubIntegration.actions).toHaveLength(22)
     expect(
       githubIntegration.actions.every((action) => action.operationId === `github.${action.id}`)
     ).toBe(true)
@@ -493,7 +493,7 @@ describe("GitHub Delivery v3 official plugin", () => {
         expect.objectContaining({ id: "web", kind: "browser" }),
       ],
     })
-    expect(githubPlugin.manifest.browserSiteProviders?.[0].operations).toHaveLength(20)
+    expect(githubPlugin.manifest.browserSiteProviders?.[0].operations).toHaveLength(22)
     expect(githubPlugin.manifest.activationEvents).toBeUndefined()
     expect(githubPlugin.manifest.runtimeCompatibility).toMatchObject({
       tauri: { availability: "supported" },
@@ -1125,5 +1125,211 @@ describe("GitHub Delivery issue reads and issue creation", () => {
     await expect(
       githubExports.searchIssues({ repoFullName: "owner/repo", query: "crash repo:other/x" }, ctx)
     ).rejects.toThrow("scoped to repoFullName")
+  })
+})
+
+describe("GitHub Delivery marked Bot comments", () => {
+  const MARKER = "<!-- cognia-command:v1:task-1 -->"
+  const BODY = `Answer\n\n${MARKER}`
+  function context(
+    responses: Array<{ status?: number; headers?: Record<string, string>; data: unknown }>
+  ) {
+    const queue = [...responses]
+    const request = jest.fn(async (_url: string, _init?: { method?: string; body?: unknown }) => {
+      const next = queue.shift() ?? { data: [] }
+      return { status: next.status ?? 200, headers: next.headers ?? {}, data: next.data }
+    })
+    return {
+      request,
+      ctx: {
+        ...providerContext(request as never),
+        jobId: "job",
+        signal: new AbortController().signal,
+      },
+    }
+  }
+  const path = (url: unknown) => {
+    const parsed = new URL(String(url))
+    return `${parsed.pathname}${parsed.search}`
+  }
+
+  it("returns the earlier copy instead of posting a second after a lost response", async () => {
+    const earlier = { id: 5, body: BODY, created_at: "2026-10-12T00:00:01Z" }
+    const { request, ctx } = context([
+      {
+        data: [
+          { id: 9, body: `copied ${MARKER}`, created_at: "2026-10-12T00:05:00Z" },
+          earlier,
+          { id: 3, body: "unrelated", created_at: "2026-10-11T00:00:00Z" },
+        ],
+      },
+    ])
+    await expect(
+      githubExports.commentIssue(
+        {
+          repoFullName: "owner/repo",
+          issueNumber: 4,
+          body: BODY,
+          marker: MARKER,
+          since: "2026-10-12T00:00:00Z",
+        },
+        ctx
+      )
+    ).resolves.toEqual(earlier)
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(path(request.mock.calls[0][0])).toBe(
+      "/repos/owner/repo/issues/4/comments?since=2026-10-12T00%3A00%3A00.000Z&per_page=100&page=1"
+    )
+  })
+
+  it("posts once when no earlier copy exists, and refuses when absence cannot be proven", async () => {
+    const { request, ctx } = context([{ data: [] }, { status: 201, data: { id: 6 } }])
+    await expect(
+      githubExports.commentPr(
+        { repoFullName: "owner/repo", prNumber: 4, body: BODY, marker: MARKER },
+        ctx
+      )
+    ).resolves.toEqual({ id: 6 })
+    expect(request.mock.calls[1][1]).toMatchObject({ method: "POST" })
+    expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({ body: BODY })
+
+    const long = context(
+      Array.from({ length: 10 }, () => ({
+        headers: { link: '<https://api.github.com/x?page=2>; rel="next"' },
+        data: [{ id: 1, body: "x" }],
+      }))
+    )
+    await expect(
+      githubExports.commentIssue(
+        { repoFullName: "owner/repo", issueNumber: 4, body: BODY, marker: MARKER },
+        long.ctx
+      )
+    ).rejects.toThrow("reconcile window")
+    expect(long.request.mock.calls.every((call) => (call[1]?.method ?? "GET") === "GET")).toBe(true)
+  })
+
+  it.each([
+    [{ marker: "<!-- x -->" }, "valid output marker"],
+    [{ marker: MARKER, body: "no marker here" }, "carry its output marker"],
+    [{ marker: MARKER, since: "yesterday" }, "ISO timestamp"],
+  ])("refuses a malformed marked comment %j", async (patch, message) => {
+    const { request, ctx } = context([])
+    await expect(
+      Promise.resolve().then(() =>
+        githubExports.commentIssue(
+          { repoFullName: "owner/repo", issueNumber: 4, body: BODY, ...patch },
+          ctx
+        )
+      )
+    ).rejects.toThrow(message)
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("replies at the root of a line-comment thread on the named pull request", async () => {
+    const { request, ctx } = context([
+      {
+        data: {
+          id: 12,
+          in_reply_to_id: 10,
+          pull_request_url: "https://api.github.com/repos/owner/repo/pulls/4",
+        },
+      },
+      { data: [] },
+      { status: 201, data: { id: 13 } },
+    ])
+    await expect(
+      githubExports.replyToReviewComment(
+        { repoFullName: "owner/repo", prNumber: 4, commentId: 12, body: BODY, marker: MARKER },
+        ctx
+      )
+    ).resolves.toEqual({ id: 13 })
+    expect(request.mock.calls.map(([url, init]) => [path(url), init?.method ?? "GET"])).toEqual([
+      ["/repos/owner/repo/pulls/comments/12", "GET"],
+      ["/repos/owner/repo/pulls/4/comments?per_page=100&page=1", "GET"],
+      ["/repos/owner/repo/pulls/4/comments/10/replies", "POST"],
+    ])
+
+    const root = context([
+      { data: { id: 10, pull_request_url: "https://api.github.com/repos/owner/repo/pulls/4" } },
+      { status: 201, data: { id: 14 } },
+    ])
+    await githubExports.replyToReviewComment(
+      { repoFullName: "owner/repo", prNumber: 4, commentId: 10, body: "plain" },
+      root.ctx
+    )
+    expect(path(root.request.mock.calls[1][0])).toBe(
+      "/repos/owner/repo/pulls/4/comments/10/replies"
+    )
+  })
+
+  it("refuses to reply to a comment from another pull request", async () => {
+    const { request, ctx } = context([
+      { data: { id: 12, pull_request_url: "https://api.github.com/repos/owner/repo/pulls/40" } },
+    ])
+    await expect(
+      githubExports.replyToReviewComment(
+        { repoFullName: "owner/repo", prNumber: 4, commentId: 12, body: "x" },
+        ctx
+      )
+    ).rejects.toThrow("does not belong")
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it("edits only a comment that carries the marker, keeps it, and skips a no-op", async () => {
+    const next = `Done\n\n${MARKER}`
+    const { request, ctx } = context([
+      { data: { id: 7, body: BODY } },
+      { data: { id: 7, body: next } },
+    ])
+    await expect(
+      githubExports.updateComment(
+        { repoFullName: "owner/repo", commentId: 7, kind: "issue", body: next, marker: MARKER },
+        ctx
+      )
+    ).resolves.toEqual({ id: 7, body: next })
+    expect(request.mock.calls.map(([url, init]) => [path(url), init?.method ?? "GET"])).toEqual([
+      ["/repos/owner/repo/issues/comments/7", "GET"],
+      ["/repos/owner/repo/issues/comments/7", "PATCH"],
+    ])
+
+    const same = context([{ data: { id: 8, body: next } }])
+    await expect(
+      githubExports.updateComment(
+        { repoFullName: "owner/repo", commentId: 8, kind: "review", body: next, marker: MARKER },
+        same.ctx
+      )
+    ).resolves.toEqual({ id: 8, body: next })
+    expect(same.request).toHaveBeenCalledTimes(1)
+    expect(path(same.request.mock.calls[0][0])).toBe("/repos/owner/repo/pulls/comments/8")
+
+    const foreign = context([{ data: { id: 9, body: "a human wrote this" } }])
+    await expect(
+      githubExports.updateComment(
+        { repoFullName: "owner/repo", commentId: 9, kind: "issue", body: next, marker: MARKER },
+        foreign.ctx
+      )
+    ).rejects.toThrow("does not carry")
+    expect(foreign.request).toHaveBeenCalledTimes(1)
+    await expect(
+      Promise.resolve().then(() =>
+        githubExports.updateComment(
+          { repoFullName: "owner/repo", commentId: 9, kind: "commit", body: next, marker: MARKER },
+          context([]).ctx
+        )
+      )
+    ).rejects.toThrow("kind")
+  })
+
+  it("declares the new Bot comment actions as repository-scoped idempotent writes", () => {
+    const actions = Object.fromEntries(githubIntegration.actions.map((a) => [a.id, a]))
+    for (const id of ["replyToReviewComment", "updateComment"]) {
+      expect(actions[id]).toMatchObject({
+        risk: "write",
+        idempotency: "required",
+        scopeSelectors: [{ kind: "repository", jsonPointer: "/repoFullName" }],
+      })
+    }
+    expect(actions.updateComment.inputSchema.required).toContain("marker")
+    expect(actions.commentIssue.inputSchema.properties).toHaveProperty("marker")
   })
 })

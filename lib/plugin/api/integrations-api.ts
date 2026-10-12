@@ -26,6 +26,7 @@ import {
   integrationApiBaseUrl,
 } from "@/lib/integrations/action-runner"
 import { publishIntegrationEvent } from "@/lib/integrations/events"
+import { githubAppIdentity } from "@/lib/integrations/github-auth"
 import {
   migrateLegacyIntegration,
   rollbackIntegrationMigration,
@@ -231,6 +232,18 @@ export function createIntegrationsAPI(
           /%2f|%5c|%2e|\\/i.test(url.pathname)
         ) {
           throw new Error("Bot binding request is outside its repository scope")
+        }
+        // An installation token cannot ask `/user`. The identity an App
+        // account posts as is its bot user, which the host resolved with the
+        // App's own key; answering it here lets a Bot recognise its output
+        // the same way on either kind of account.
+        if (ownIdentity && binding.account.providerId === "github-app") {
+          const identity = await githubAppIdentity(binding.account.authSessionId)
+          return {
+            status: 200,
+            headers: {},
+            data: { login: identity.login, id: identity.id } as T,
+          }
         }
         const response = await authenticatedIntegrationRequest<T>(
           binding.account.pluginId,

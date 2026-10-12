@@ -2,7 +2,7 @@
 
 | 项目       | 内容                                                                                                                                                                                                                                                                                        |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 状态       | 修订版 r3：实现中（WP0–WP3 已合入）；尚未启用或批准上线                                                                                                                                                                                                                                     |
+| 状态       | 修订版 r3：实现中（WP0–WP4 已合入）；尚未启用或批准上线                                                                                                                                                                                                                                     |
 | 作者与日期 | Codex 初稿 2026-10-12；r2 源码核查与决策修订 2026-10-12；Asia/Shanghai                                                                                                                                                                                                                      |
 | 诉求       | 支持评论指令、权限校验、上下文收集、任务执行、结果回写与 Headless                                                                                                                                                                                                                           |
 | 范围       | 插件/共享包、Bot 运行时、Integration 事件投影、bot-run 工作区、外部 Agent、网关计量、多账号和部署                                                                                                                                                                                           |
@@ -148,7 +148,7 @@ flowchart LR
 
 ### 4.1 触发词与语法
 
-触发词由安装配置：App 账号默认 `@<app-slug>`；PAT 账号必须显式配置。本文 `@cognia` 仅为示例。原因：`@cognia` 若是 GitHub 上的真实用户名，会通知到无关的人。App slug 与 bot 用户 ID 在账号建立或刷新时用 App JWT 调用 `GET /app` 获取并保存（当前未保存，属于 B7）。
+触发词由安装配置：App 账号默认 `@<app-slug>`；PAT 账号必须显式配置。本文 `@cognia` 仅为示例。原因：`@cognia` 若是 GitHub 上的真实用户名，会通知到无关的人。App slug 与 bot 用户 ID 由 Host 用 App JWT 调用 `GET /app`、再按 `<slug>[bot]` 查用户 ID，首次使用时解析、随账号保存、每日刷新（r3 已实现：[github-auth](../../lib/integrations/github-auth.ts) `githubAppIdentity`）。插件经 Bot 绑定读 `/user` 即得到发布身份：App 账号由 Host 直接回答 bot 用户，PAT 账号照常询问 GitHub；插件不接触私钥。
 
 一条评论只允许一个指令。解析忽略代码块、行内代码、引用、HTML 注释和链接目标。触发词须独立出现在未引用逻辑行开头，大小写不敏感；邮箱、带后缀的其他账号名、复制的示例不匹配。正文是数据，不成为 shell 参数；多指令返回用法，不偷偷选第一条。
 
@@ -219,7 +219,7 @@ status/cancel 的目标限定在同一安装、账号、仓库和线程；满足
 
 `fix` 的发布永远使用 `decisionMode: "human"`，与发布模式无关（§16）。所有集成写入已在 action-runner 经过 PII gate。审批走认证界面；Headless 通过现有 `run://approval-pending` 推送到配对端。
 
-待验证：Bot 模式下 `acceptEdits` 的外部 Agent 遇到权限请求时，按 ADR-0224 A7 的 permission profile 挂起，而不是直接失败。如果会失败，ask/review 的工具集须收窄到不触发权限请求的范围。
+已验证（r3，WP4）：Bot 模式下 `acceptEdits` 的外部 Agent 遇到权限请求时不会失败，而是转成一次阻塞的人工审批（[external-agent-api](../../lib/plugin/api/external-agent-api.ts) `handlePermission`，240 秒），超时按 `reject_once` 回答，Agent 继续执行。自动发布模式下没有人值守，这类请求只会白等 4 分钟后被拒，所以 ask/review 的提示词要求 Agent 只读、不执行需要审批的命令；人工模式下可以批准。
 
 ## 6. 上下文有上限、有版本、有证据
 
@@ -244,7 +244,7 @@ status/cancel 的目标限定在同一安装、账号、仓库和线程；满足
 - 收集到的评论、PR 正文、CI 片段先经 `sanitize`（控制字符/ANSI），再经 `redactText`，与初始 prompt 同一处理。上下文清单记录脱敏数量与脱敏后 digest。
 - Agent 运行中读取的代码文件不经插件，模型请求由网关逐请求扫描；命中时网关返回 400 `pii_blocked`，任务判 `blocked`（原因码 `pii_blocked`），跟踪评论给固定模板说明，不自动重试、不放宽 gate。
 - 灰度期统计 `pii_blocked` 比例，作为是否需要进一步手段的依据。
-- 待验证（WP4）：bot isolation 下 Agent 进程只能经本地网关访问模型 provider，直连 provider 被拒；无法证明的预设不准入。
+- 已验证（r3，WP4）：网关路由下，Agent 以任务专属 HOME/XDG 启动，模型凭据只有网关 token（[gateway-task](../../lib/ai/agent/external/config/gateway-task.ts) 的 route-owned 环境变量）；没有经过验证的隔离启动契约的运行时，`cogniaGatewaySupport` 直接拒绝。用户自己的 provider 登录对任务不可达。直连路由（安装显式选择）不经网关，只有插件侧脱敏，就绪检查将其标为 `pii_boundary_unverified` 警示（§9）。
 
 ## 7. 复用执行引擎，补齐工作区与上限
 

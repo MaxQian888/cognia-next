@@ -62,6 +62,36 @@ export async function authenticatedGithubAppRequest<T>(
   return githubAppRequest<T>(sessionId, path, init)
 }
 
+/**
+ * Who an App account posts as: GitHub writes an installation's comments as
+ * the App's bot user, `<slug>[bot]`, whose numeric id is what a Bot compares
+ * an event's sender against to recognise its own output.
+ *
+ * An installation token cannot ask `/user`; only the App JWT can learn the
+ * slug (`GET /app`). The host resolves it once, keeps it with the account's
+ * metadata and refreshes it daily, so a renamed App is picked up without the
+ * plugin ever holding the private key.
+ */
+export interface GithubAppIdentity {
+  slug: string
+  /** `<slug>[bot]`. */
+  login: string
+  id: number
+  resolvedAt: number
+}
+
+const APP_IDENTITY_TTL_MS = 24 * 60 * 60_000
+
+type GithubAppIdentityResolver = (sessionId: string) => Promise<GithubAppIdentity>
+
+let githubAppIdentityResolver: GithubAppIdentityResolver | undefined
+
+/** The bot user a GitHub App account writes as; see {@link GithubAppIdentity}. */
+export async function githubAppIdentity(sessionId: string): Promise<GithubAppIdentity> {
+  if (!githubAppIdentityResolver) throw new Error("GitHub App authentication is not initialized")
+  return githubAppIdentityResolver(sessionId)
+}
+
 interface GithubAppMetadata {
   appId: number
   installationId: number
@@ -78,6 +108,8 @@ interface GithubAppMetadata {
    * session means, so nothing has to be migrated.
    */
   hostUrl?: string
+  /** Cached; see {@link GithubAppIdentity}. Absent until first resolved. */
+  identity?: GithubAppIdentity
 }
 
 interface GithubPatMetadata {
@@ -332,6 +364,48 @@ export function registerGithubIntegrationAuthProviders(
   }
   githubAppRequest = registeredAppRequest
 
+  async function resolveAppIdentity(sessionId: string): Promise<GithubAppIdentity> {
+    const metadata = await appMetadata(sessionId)
+    const cached = metadata.identity
+    if (cached && now() - cached.resolvedAt < APP_IDENTITY_TTL_MS) return cached
+    try {
+      const app = await registeredAppRequest<{ slug?: unknown }>(sessionId, "/app")
+      const slug = app.status === 200 ? app.data?.slug : undefined
+      if (typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]*$/i.test(slug)) {
+        throw new Error(`GitHub App identity lookup failed with status ${app.status}`)
+      }
+      const login = `${slug}[bot]`
+      // Public profile; the installation token can read it on github.com and
+      // on Enterprise servers that require authentication.
+      const credential = await resolveAppInstallationToken(sessionId)
+      const response = await fetchImpl(
+        `${hostOf(metadata).apiBaseUrl}/users/${encodeURIComponent(login)}`,
+        {
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${credential.accessToken}`,
+            "x-github-api-version": "2022-11-28",
+          },
+        }
+      )
+      const user = response.ok ? ((await response.json()) as { id?: unknown; login?: unknown }) : {}
+      if (typeof user.id !== "number" || !Number.isSafeInteger(user.id) || user.id < 1) {
+        throw new Error(`GitHub App bot user lookup failed with status ${response.status}`)
+      }
+      const identity: GithubAppIdentity = { slug, login, id: user.id, resolvedAt: now() }
+      // Re-read before writing so a concurrent credential change is not undone.
+      const latest = await appMetadata(sessionId)
+      await store.save(`${APP_PREFIX}${sessionId}`, JSON.stringify({ ...latest, identity }))
+      return identity
+    } catch (error) {
+      // A stale identity is still the right one unless the App was renamed;
+      // an outage must not make a Bot stop recognising its own comments.
+      if (cached) return cached
+      throw error
+    }
+  }
+  githubAppIdentityResolver = resolveAppIdentity
+
   const disposeApp = registerAuthenticationProvider({
     id: APP_PROVIDER_ID,
     label: "GitHub App",
@@ -374,43 +448,45 @@ export function registerGithubIntegrationAuthProviders(
       tokenCache.delete(sessionId)
       await store.delete(`${APP_PREFIX}${sessionId}`)
     },
-    async resolveRequestCredential(sessionId) {
-      const cached = tokenCache.get(sessionId)
-      if (cached && Date.parse(cached.expiresAt) > now() + TOKEN_REFRESH_SKEW_MS) return cached
-      const metadata = await appMetadata(sessionId)
-      const jwt = await createAppJwt(metadata.appId, metadata.privateKey, now())
-      const response = await fetchImpl(
-        `${hostOf(metadata).apiBaseUrl}/app/installations/${metadata.installationId}/access_tokens`,
+    resolveRequestCredential: (sessionId) => resolveAppInstallationToken(sessionId),
+  })
+
+  async function resolveAppInstallationToken(sessionId: string): Promise<CachedInstallationToken> {
+    const cached = tokenCache.get(sessionId)
+    if (cached && Date.parse(cached.expiresAt) > now() + TOKEN_REFRESH_SKEW_MS) return cached
+    const metadata = await appMetadata(sessionId)
+    const jwt = await createAppJwt(metadata.appId, metadata.privateKey, now())
+    const response = await fetchImpl(
+      `${hostOf(metadata).apiBaseUrl}/app/installations/${metadata.installationId}/access_tokens`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${jwt}`,
+          "x-github-api-version": "2022-11-28",
+        },
+      }
+    )
+    if (!response.ok) {
+      const error = Object.assign(
+        new Error(`GitHub App token exchange failed with status ${response.status}`),
         {
-          method: "POST",
-          headers: {
-            accept: "application/vnd.github+json",
-            authorization: `Bearer ${jwt}`,
-            "x-github-api-version": "2022-11-28",
-          },
+          status: response.status,
+          requestId: response.headers.get("x-github-request-id") ?? undefined,
+          retryAfter: response.headers.get("retry-after") ?? undefined,
         }
       )
-      if (!response.ok) {
-        const error = Object.assign(
-          new Error(`GitHub App token exchange failed with status ${response.status}`),
-          {
-            status: response.status,
-            requestId: response.headers.get("x-github-request-id") ?? undefined,
-            retryAfter: response.headers.get("retry-after") ?? undefined,
-          }
-        )
-        throw error
-      }
-      const payload = (await response.json()) as { token?: string; expires_at?: string }
-      if (!payload.token) throw new Error("GitHub App token response did not include a token")
-      const resolved = {
-        accessToken: payload.token,
-        expiresAt: payload.expires_at ?? new Date(now() + 50 * 60_000).toISOString(),
-      }
-      tokenCache.set(sessionId, resolved)
-      return resolved
-    },
-  })
+      throw error
+    }
+    const payload = (await response.json()) as { token?: string; expires_at?: string }
+    if (!payload.token) throw new Error("GitHub App token response did not include a token")
+    const resolved = {
+      accessToken: payload.token,
+      expiresAt: payload.expires_at ?? new Date(now() + 50 * 60_000).toISOString(),
+    }
+    tokenCache.set(sessionId, resolved)
+    return resolved
+  }
 
   const disposePat = registerAuthenticationProvider({
     id: PAT_PROVIDER_ID,
@@ -485,6 +561,7 @@ export function registerGithubIntegrationAuthProviders(
 
   return () => {
     if (githubAppRequest === registeredAppRequest) githubAppRequest = undefined
+    if (githubAppIdentityResolver === resolveAppIdentity) githubAppIdentityResolver = undefined
     if (githubHostLookup === registeredHostLookup) githubHostLookup = undefined
     if (githubHostsList === registeredHostsList) githubHostsList = undefined
     tokenCache.clear()

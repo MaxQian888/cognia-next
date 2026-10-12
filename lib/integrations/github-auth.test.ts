@@ -8,6 +8,7 @@ import {
   authenticatedGithubAppRequest,
   configuredGithubHosts,
   discoverGithubAppInstallations,
+  githubAppIdentity,
   githubHostForSession,
   registerGithubIntegrationAuthProviders,
   type GithubIntegrationSecretStore,
@@ -252,6 +253,110 @@ describe("host-owned GitHub Integration authentication", () => {
           headers: expect.objectContaining({ authorization: "Bearer app-jwt" }),
         })
       )
+    } finally {
+      dispose()
+    }
+  })
+
+  it("resolves the App's bot user once with the App key, caches it, and refreshes it daily", async () => {
+    let now = new Date("2026-08-09T01:00:00.000Z").getTime()
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      })
+    let slug = "cognia-bot"
+    const fetch = jest.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/app")) return json({ slug })
+      if (url.endsWith("/access_tokens")) return json({ token: "installation-token" }, 201)
+      if (url.includes("/users/")) {
+        const login = decodeURIComponent(url.split("/users/")[1])
+        return json({ login, id: login === "cognia-bot[bot]" ? 77 : 78 })
+      }
+      throw new Error(`unexpected ${url} ${String(init?.method)}`)
+    })
+    const store = memoryStore()
+    const dispose = registerGithubIntegrationAuthProviders({
+      store,
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      now: () => now,
+      createAppJwt: async () => "app-jwt",
+      listAccountSessionIds: async () => [],
+    })
+    try {
+      const session = await getSession("github-app", [], {
+        createIfNone: true,
+        configuration: {
+          appId: 1,
+          installationId: 2,
+          privateKey: "private-key",
+          hostUrl: "https://ghe.acme.io",
+        },
+      })
+      await expect(githubAppIdentity(session!.id)).resolves.toEqual({
+        slug: "cognia-bot",
+        login: "cognia-bot[bot]",
+        id: 77,
+        resolvedAt: now,
+      })
+      // `/app` with the App JWT; the bot user with the installation token, on the account's own server.
+      expect(fetch).toHaveBeenCalledWith(
+        "https://ghe.acme.io/api/v3/app",
+        expect.objectContaining({
+          headers: expect.objectContaining({ authorization: "Bearer app-jwt" }),
+        })
+      )
+      expect(fetch).toHaveBeenCalledWith(
+        "https://ghe.acme.io/api/v3/users/cognia-bot%5Bbot%5D",
+        expect.objectContaining({
+          headers: expect.objectContaining({ authorization: "Bearer installation-token" }),
+        })
+      )
+      const calls = fetch.mock.calls.length
+      await githubAppIdentity(session!.id)
+      expect(fetch.mock.calls.length).toBe(calls)
+      // Persisted with the account, never with the private key exposed elsewhere.
+      const stored = JSON.parse((await store.load(`app:${session!.id}`))!)
+      expect(stored.identity).toMatchObject({ id: 77 })
+      expect(stored.privateKey).toBe("private-key")
+
+      // A day later a renamed App is picked up.
+      now += 24 * 60 * 60_000
+      slug = "cognia-renamed"
+      await expect(githubAppIdentity(session!.id)).resolves.toMatchObject({
+        login: "cognia-renamed[bot]",
+        id: 78,
+      })
+      // An outage keeps the last known identity rather than losing it.
+      now += 24 * 60 * 60_000
+      fetch.mockImplementation(async () => json({ message: "down" }, 503))
+      await expect(githubAppIdentity(session!.id)).resolves.toMatchObject({ id: 78 })
+    } finally {
+      dispose()
+    }
+    await expect(githubAppIdentity("any")).rejects.toThrow("not initialized")
+  })
+
+  it("does not invent an identity it could not resolve", async () => {
+    const fetch = jest.fn(
+      async () =>
+        new Response(JSON.stringify({ message: "Bad credentials" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        })
+    )
+    const dispose = registerGithubIntegrationAuthProviders({
+      store: memoryStore(),
+      fetch,
+      createAppJwt: async () => "app-jwt",
+      listAccountSessionIds: async () => [],
+    })
+    try {
+      const session = await getSession("github-app", [], {
+        createIfNone: true,
+        configuration: { appId: 1, installationId: 2, privateKey: "k" },
+      })
+      await expect(githubAppIdentity(session!.id)).rejects.toThrow("status 401")
     } finally {
       dispose()
     }

@@ -9,6 +9,7 @@ import {
 } from "@/lib/integrations/registry"
 import * as botBinding from "./bot-integration-binding"
 import * as actionRunner from "@/lib/integrations/action-runner"
+import * as githubAuth from "@/lib/integrations/github-auth"
 import { setIntegrationAuthenticatedRequestExecutorForTesting } from "@/lib/integrations/action-runner"
 import { createIntegrationsAPI } from "./integrations-api"
 
@@ -28,6 +29,10 @@ jest.mock("@/lib/integrations/ingress-client", () => ({
 jest.mock("@/lib/integrations/events", () => ({
   __esModule: true,
   ...jest.requireActual("@/lib/integrations/events"),
+}))
+jest.mock("@/lib/integrations/github-auth", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/integrations/github-auth"),
 }))
 jest.mock("@/lib/integrations/migration", () => ({
   __esModule: true,
@@ -302,6 +307,38 @@ it("exposes only the bound GitHub actor identity and rejects broader identity ro
     await expect(api.authenticatedRequest(ref, url)).rejects.toThrow("scope")
   request.mockResolvedValue({ status: 403, headers: {}, data: null })
   expect((await api.authenticatedRequest(ref, "https://api.github.com/user")).data).toEqual({})
+})
+
+it("answers an App account's identity with its bot user, which an installation token cannot ask", async () => {
+  const account = {
+    id: "account",
+    pluginId: "github-delivery",
+    providerId: "github-app",
+    authSessionId: "session",
+  }
+  jest
+    .spyOn(botBinding, "resolveBotIntegrationBinding")
+    .mockResolvedValue({ account, repository: "owner/repo" } as never)
+  const identity = jest.spyOn(githubAuth, "githubAppIdentity").mockResolvedValue({
+    slug: "cognia-bot",
+    login: "cognia-bot[bot]",
+    id: 77,
+    resolvedAt: 0,
+  })
+  const request = jest.fn()
+  setIntegrationAuthenticatedRequestExecutorForTesting(request)
+  const api = createIntegrationsAPI("bot", () => true)
+  const ref = { runId: "run", slotId: "github" }
+  expect(await api.authenticatedRequest(ref, "/user")).toEqual({
+    status: 200,
+    headers: {},
+    data: { login: "cognia-bot[bot]", id: 77 },
+  })
+  expect(identity).toHaveBeenCalledWith("session")
+  expect(request).not.toHaveBeenCalled()
+  // Only the bare identity route is answered this way.
+  await expect(api.authenticatedRequest(ref, "/user/repos")).rejects.toThrow("scope")
+  identity.mockRestore()
 })
 
 it("resolves an API-root-relative path against the bound account's own deployment", async () => {
