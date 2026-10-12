@@ -40,6 +40,8 @@
       "@cognia/primitives/*": ["../../packages/primitives/src/*"],
       "@cognia/time": ["../time/src/index.ts"],
       "@cognia/time/*": ["../../packages/time/src/*"],
+      "@cognia/github-bot-kit": ["../github-bot-kit/src/index.ts"],
+      "@cognia/github-bot-kit/*": ["../../packages/github-bot-kit/src/*"],
       "@cognia/latex": ["../latex/src/index.ts"],
       "@cognia/latex/*": ["../../packages/latex/src/*"],
       "@cognia/mermaid": ["../mermaid/src/index.ts"],
