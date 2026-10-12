@@ -25,6 +25,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "github_workspace_commit_and_push",
     "task_workspace_remote_source_ensure",
     "task_workspace_project_source_ensure",
+    "code_snapshot_checkout_get",
     "github_workspace_remove",
     "github_workspace_stat",
     "integration_ingress_ack",
@@ -885,6 +886,17 @@ pub(super) async fn dispatch(
         "task_workspace_project_source_ensure" => {
             let input: cognia_task_workspace::EnsureProjectSource = required(&args, "input")?;
             crate::task_workspace::task_workspace_project_source_ensure(input)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+
+        // ADR-0224 A11b: the checkout a handed-over conversation works in.
+        // Service-only, so the brain resolves it by id and no device ever
+        // names a path on this host.
+        "code_snapshot_checkout_get" => {
+            let checkout_id: String = required(&args, "checkoutId")?;
+            crate::task_workspace::code_snapshot_checkout_get(checkout_id)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)

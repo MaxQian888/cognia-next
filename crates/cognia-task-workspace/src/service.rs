@@ -40,6 +40,9 @@ pub struct ServiceConfig {
     pub max_blob_bytes: u64,
     /// See [`EXECUTION_ROOT_ENV`]. Absent: `<data_dir>/task-workspaces`.
     pub execution_root: Option<PathBuf>,
+    /// The largest working-copy snapshot this host accepts (ADR-0224 A11b,
+    /// [`crate::CODE_SNAPSHOT_MAX_BYTES_ENV`]).
+    pub code_snapshot_max_bytes: u64,
 }
 
 impl ServiceConfig {
@@ -49,6 +52,7 @@ impl ServiceConfig {
             retention: Duration::from_secs(30 * 24 * 60 * 60),
             max_blob_bytes: 1024 * 1024 * 1024,
             execution_root: None,
+            code_snapshot_max_bytes: crate::DEFAULT_CODE_SNAPSHOT_MAX_BYTES,
         }
     }
 
@@ -115,6 +119,11 @@ pub struct TaskWorkspaceService {
     /// at a time and again on every focus; while the ledger is unchanged each
     /// of those reads is a slice of this one fold.
     resource_index: Mutex<Option<ResourceIndexFold>>,
+    /// Working-copy snapshots this device made for an always-on host
+    /// (ADR-0224 A11b).
+    code_snapshot_outbox: crate::CodeSnapshotOutbox,
+    /// Snapshots arriving on this host and the checkouts they became.
+    code_snapshot_inbox: crate::CodeSnapshotInbox,
 }
 
 #[derive(Clone)]
@@ -303,6 +312,14 @@ impl TaskWorkspaceService {
         })?;
         let sources_dir = service_dir.join("sources");
         let mirrors_dir = service_dir.join("mirrors");
+        let snapshots_dir = service_dir.join("code-snapshots");
+        // Under the execution root, so a containerised run on an always-on
+        // host mounts a handed-over checkout like any other run's worktree.
+        let code_snapshot_inbox = crate::CodeSnapshotInbox::new(
+            &snapshots_dir,
+            execution_dir.join("handoffs"),
+            config.code_snapshot_max_bytes,
+        );
         let store = Arc::new(Mutex::new(WorkspaceStore::open(
             &service_dir,
             config.max_blob_bytes,
@@ -324,6 +341,8 @@ impl TaskWorkspaceService {
             lifecycle: crate::lifecycle::WorktreeLifecycleEmitter::default(),
             git_admin_locks: Mutex::new(HashMap::new()),
             resource_index: Mutex::new(None),
+            code_snapshot_outbox: crate::CodeSnapshotOutbox::new(snapshots_dir.join("outgoing")),
+            code_snapshot_inbox,
         };
         service.recover_incomplete_runs()?;
         service.recover_workspace_bundle_turns()?;
@@ -371,6 +390,149 @@ impl TaskWorkspaceService {
         crate::project_source::ensure_project_source(input, |request| {
             self.ensure_remote_source(&request)
         })
+    }
+
+    /// Snapshot a working copy on this device for an always-on host
+    /// (ADR-0224 A11b). The bytes stay here until read out chunk by chunk.
+    pub fn create_code_snapshot(
+        &self,
+        input: &crate::CreateCodeSnapshot,
+    ) -> Result<crate::CreatedCodeSnapshot, String> {
+        self.code_snapshot_outbox.create(input)
+    }
+
+    pub fn read_code_snapshot_chunk(
+        &self,
+        snapshot_id: &str,
+        offset: u64,
+    ) -> Result<TransferChunk, String> {
+        self.code_snapshot_outbox.read_chunk(snapshot_id, offset)
+    }
+
+    pub fn discard_code_snapshot(&self, snapshot_id: &str) -> Result<(), String> {
+        self.code_snapshot_outbox.discard(snapshot_id)
+    }
+
+    pub fn code_snapshot_limits(&self) -> crate::CodeSnapshotLimits {
+        self.code_snapshot_inbox.limits()
+    }
+
+    pub fn open_code_snapshot_upload(
+        &self,
+        size_bytes: u64,
+        sha256: &str,
+    ) -> Result<crate::CodeSnapshotUpload, String> {
+        self.code_snapshot_inbox.open_upload(size_bytes, sha256)
+    }
+
+    pub fn write_code_snapshot_chunk(
+        &self,
+        upload_id: &str,
+        offset: u64,
+        data_base64: &str,
+        chunk_hash: &str,
+    ) -> Result<u64, String> {
+        self.code_snapshot_inbox
+            .write_chunk(upload_id, offset, data_base64, chunk_hash)
+    }
+
+    pub fn commit_code_snapshot_upload(
+        &self,
+        upload_id: &str,
+    ) -> Result<crate::CommittedCodeSnapshot, String> {
+        self.code_snapshot_inbox.commit_upload(upload_id)
+    }
+
+    pub fn cancel_code_snapshot_upload(&self, upload_id: &str) -> Result<(), String> {
+        self.code_snapshot_inbox.cancel_upload(upload_id)
+    }
+
+    /// The checkout a snapshot became on this host, if it did.
+    pub fn code_checkout(&self, checkout_id: &str) -> Result<Option<crate::CodeCheckout>, String> {
+        self.code_snapshot_inbox.checkout(checkout_id)
+    }
+
+    /// Turn a staged snapshot into a checkout on this host (ADR-0224 A11b).
+    ///
+    /// Idempotent per snapshot: applying one that already became a checkout
+    /// answers with that checkout, so a caller that lost the first response
+    /// can ask again. A git snapshot needs the project's repository: the
+    /// base commit is supplied through the mirror (with the host's stored
+    /// credential) into the project's source, a worktree is added on a new
+    /// `cognia/handoff-…` branch, and the patch must rebuild the desktop's
+    /// tree exactly or the checkout is refused.
+    pub fn apply_code_snapshot(
+        &self,
+        input: &crate::ApplyCodeSnapshot,
+    ) -> Result<crate::CodeCheckout, String> {
+        if let Some(existing) = self.code_snapshot_inbox.checkout(&input.snapshot_id)? {
+            return Ok(existing);
+        }
+        let staged = self
+            .code_snapshot_inbox
+            .staged(&input.snapshot_id, &input.manifest)?;
+        let checkout = match input.manifest.kind {
+            crate::CodeSnapshotKind::Tar => self.code_snapshot_inbox.apply_tar(input, &staged)?,
+            crate::CodeSnapshotKind::GitPatch => self.apply_code_patch(input, &staged)?,
+        };
+        self.code_snapshot_inbox.discard_staged(&input.snapshot_id);
+        Ok(checkout)
+    }
+
+    fn apply_code_patch(
+        &self,
+        input: &crate::ApplyCodeSnapshot,
+        staged: &Path,
+    ) -> Result<crate::CodeCheckout, String> {
+        let base = input
+            .manifest
+            .base_commit
+            .as_deref()
+            .ok_or("code_snapshot_invalid_manifest: a git snapshot names its base commit")?;
+        let tree = input
+            .manifest
+            .tree
+            .as_deref()
+            .ok_or("code_snapshot_invalid_manifest: a git snapshot names its tree")?;
+        let source = self.ensure_project_source(&crate::EnsureProjectSource {
+            roots: input.roots.clone(),
+            remote_url: input.remote_url.clone(),
+            credential: input.credential.clone(),
+        })?;
+        let source_root = PathBuf::from(&source.root);
+        if source.source == crate::ProjectSourceKind::Clone {
+            crate::remote_source::prepare_source_commit(
+                &self.mirrors_dir,
+                &source_root,
+                &crate::EnsureRemoteSource {
+                    remote_url: source.remote_url.clone().unwrap_or_default(),
+                    base: WorkspaceBaseSpec::RemoteDefault,
+                    credential: input.credential.clone(),
+                },
+                base,
+                input.manifest.base_ref.as_deref(),
+            )?;
+        }
+        let dest = self.code_snapshot_inbox.checkout_dir(&input.snapshot_id)?;
+        let branch = crate::handoff_branch(&input.snapshot_id);
+        let reason = format!("cognia handoff {}", input.snapshot_id);
+        {
+            let lock = self
+                .git_admin_lock(&source_root)
+                .unwrap_or_else(|| Arc::new(Mutex::new(())));
+            let _held = lock.lock();
+            crate::code_snapshot::check_out_patch(
+                &source_root,
+                &dest,
+                &branch,
+                base,
+                staged,
+                tree,
+                &reason,
+            )?;
+        }
+        self.code_snapshot_inbox
+            .record_patch_checkout(input, &dest, branch, source.remote_url)
     }
 
     /// Bind a stable repository ref to an explicitly trusted, device-local Git root.

@@ -89,7 +89,16 @@ export interface ThreadHandoffProjectMapping {
    */
   sourceWorkingDir?: string
   roots?: Array<{ rootId: string; relPath: string }>
+  /**
+   * The checkout the source's working copy became on the target, when the
+   * conversation was continued on an always-on host with its code (ADR-0224
+   * A11b). An id the target issued, never a path: the target resolves it to
+   * its own directory and binds the continued session there.
+   */
+  codeCheckout?: { checkoutId: string }
 }
+
+const CODE_CHECKOUT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export type ThreadHandoffCarriage = "inline" | "chunked" | "by-ref"
 
@@ -376,6 +385,16 @@ export function validateThreadHandoffTicket(value: unknown): string[] {
   validateHostRef(ticket.target, "target", errors)
 
   if (!isPlainObject(ticket.project)) errors.push("project is required")
+  else if (ticket.project.codeCheckout !== undefined) {
+    const checkout = ticket.project.codeCheckout as unknown
+    if (
+      !isPlainObject(checkout) ||
+      typeof checkout.checkoutId !== "string" ||
+      !CODE_CHECKOUT_ID.test(checkout.checkoutId)
+    ) {
+      errors.push("project.codeCheckout.checkoutId must be a checkout id")
+    }
+  }
   validateRequirements(ticket.requirements, errors)
   validateContinuation(ticket.continuation, errors)
   validateAttachments(ticket.attachments, errors)

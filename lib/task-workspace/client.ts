@@ -20,6 +20,9 @@ import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { projectTaskWorkspaceRun } from "./projection"
 import type {
   AcquireWorkspaceBundle,
+  CodeCheckout,
+  CodeSnapshotKind,
+  CreatedCodeSnapshot,
   EnsureProjectSource,
   EnsureRemoteSource,
   ProjectSource,
@@ -601,6 +604,40 @@ export function ensureRemoteWorkspaceSource(
  */
 export function ensureProjectWorkspaceSource(input: EnsureProjectSource): Promise<ProjectSource> {
   return transport.call("task_workspace_project_source_ensure", { input })
+}
+
+/**
+ * Snapshot a folder on this device for an always-on host (ADR-0224 A11b): a
+ * binary patch against a commit its remote has, or a gzip tar of a folder
+ * without git. The bytes stay here until read out with
+ * {@link readCodeSnapshotChunk}.
+ */
+export function createCodeSnapshot(input: {
+  root: string
+  maxBytes?: number
+  /** `tar` for a git checkout whose base the host cannot fetch. */
+  kind?: CodeSnapshotKind
+}): Promise<CreatedCodeSnapshot> {
+  return transport.call("code_snapshot_create", { input })
+}
+
+/** One chunk of a snapshot {@link createCodeSnapshot} staged on this device. */
+export function readCodeSnapshotChunk(snapshotId: string, offset: number): Promise<TransferChunk> {
+  return transport.call("code_snapshot_read_chunk", { snapshotId, offset })
+}
+
+/** Drop a staged snapshot once it is uploaded, or the hand-over is given up. */
+export function discardCodeSnapshot(snapshotId: string): Promise<void> {
+  return transport.call("code_snapshot_discard", { snapshotId })
+}
+
+/**
+ * The checkout a conversation handed to this always-on host works in. Loopback
+ * service plane only, like {@link ensureProjectWorkspaceSource}: the brain
+ * resolves it by id when it binds the continued session.
+ */
+export function getCodeCheckout(checkoutId: string): Promise<CodeCheckout | null> {
+  return transport.call("code_snapshot_checkout_get", { checkoutId })
 }
 
 /**

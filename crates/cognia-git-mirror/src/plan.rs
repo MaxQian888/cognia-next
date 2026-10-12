@@ -39,6 +39,27 @@
 //! not the user's, and a cache should not install itself into a machine-wide
 //! schedule. The commit-graph and multi-pack-index are written directly
 //! instead — same benefit for `merge-base` and ancestry walks, no global state.
+//!
+//! # A blobless mirror serves file contents only once asked for them
+//!
+//! The mirror holds commits and trees, and file contents only for what someone
+//! has already asked for. A checkout derived from it is a partial clone whose
+//! promisor is the mirror, so it fetches contents from the mirror on demand,
+//! and the mirror can only answer with contents it holds: it does not reach its
+//! own remote on another clone's behalf (git refuses lazy fetches inside
+//! `upload-pack`, and the credential is never stored anyway).
+//!
+//! So before a checkout of a commit, [`materialize_args`] has the mirror fetch
+//! that commit's file contents from the real remote, with the credential, in
+//! one batch. Two more things make the hand-over work, both learned against
+//! GitHub rather than a local test remote, which serves every blob:
+//!
+//! - The derive goes through a `file://` URL ([`file_url`]). Git ignores
+//!   `--filter` for a plain path, copies the objects it finds, and leaves a
+//!   checkout that is missing contents without knowing it is partial.
+//! - The mirror allows filters and requests by object id
+//!   ([`serve_config_commands`]), which is how a partial clone asks for the
+//!   contents it lacks.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -303,7 +324,9 @@ pub fn fetch_args(extra_refspecs: &[String]) -> Vec<String> {
 ///
 /// `--no-hardlinks` is not an optimisation left on the table — see the module
 /// header. `--reference` is not used for the same reason the mirror is not an
-/// alternate: this directory is one we gc.
+/// alternate: this directory is one we gc. The mirror is named by a `file://`
+/// URL so `--filter` holds and the checkout knows it is a partial clone of the
+/// mirror (see the module header).
 pub fn derive_args(mirror: &Path, destination: &Path, branch: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "clone".to_string(),
@@ -316,9 +339,59 @@ pub fn derive_args(mirror: &Path, destination: &Path, branch: Option<&str>) -> V
         args.push("--single-branch".to_string());
     }
     args.push("--".to_string());
-    args.push(mirror.to_string_lossy().into_owned());
+    args.push(file_url(mirror));
     args.push(destination.to_string_lossy().into_owned());
     args
+}
+
+/// A `file://` URL for a local repository. Git percent-decodes these, so every
+/// byte outside the unreserved set and `/` is encoded: a literal `%` in a path
+/// would otherwise be read as an escape.
+pub fn file_url(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    let mut url = String::with_capacity(raw.len() + 8);
+    url.push_str("file://");
+    if !raw.starts_with('/') {
+        url.push('/');
+    }
+    for byte in raw.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                url.push(byte as char)
+            }
+            _ => url.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    url
+}
+
+/// `git config` arguments that let a mirror answer a partial clone: filtered
+/// fetches, and requests for one object by id (how a partial clone asks for
+/// contents it lacks). Local settings on our own cache directory only.
+pub fn serve_config_commands() -> Vec<Vec<String>> {
+    [
+        ("uploadpack.allowFilter", "true"),
+        ("uploadpack.allowAnySHA1InWant", "true"),
+    ]
+    .into_iter()
+    .map(|(key, value)| vec!["config".to_string(), key.to_string(), value.to_string()])
+    .collect()
+}
+
+/// `git` arguments that write `commit`'s tree into `work_tree` from the mirror
+/// at `mirror`, which makes the mirror fetch every file content of that commit
+/// it lacks, in one batch. Run with `GIT_INDEX_FILE` pointing outside the
+/// mirror: a bare repository has no index of its own to disturb. `read-tree`
+/// rather than `checkout`, because it also takes a commit with an empty tree.
+pub fn materialize_args(mirror: &Path, work_tree: &Path, commit: &str) -> Vec<String> {
+    vec![
+        format!("--git-dir={}", mirror.to_string_lossy()),
+        format!("--work-tree={}", work_tree.to_string_lossy()),
+        "read-tree".to_string(),
+        "--reset".to_string(),
+        "-u".to_string(),
+        commit.to_string(),
+    ]
 }
 
 /// Commands that keep a mirror cheap to read, in order.
@@ -585,6 +658,39 @@ mod tests {
 
         let all_branches = derive_args(Path::new("/cache/r.git"), Path::new("/work/r"), None);
         assert!(!all_branches.contains(&"--single-branch".to_string()));
+        // A plain path would make git ignore `--filter`.
+        assert!(all_branches.contains(&"file:///cache/r.git".to_string()));
+    }
+
+    #[test]
+    fn a_file_url_encodes_what_git_would_decode() {
+        assert_eq!(file_url(Path::new("/srv/m/r.git")), "file:///srv/m/r.git");
+        assert_eq!(
+            file_url(Path::new("/Users/a b/100%/r.git")),
+            "file:///Users/a%20b/100%25/r.git"
+        );
+        assert_eq!(file_url(Path::new("C:/m/r.git")), "file:///C%3A/m/r.git");
+    }
+
+    #[test]
+    fn a_mirror_is_configured_to_answer_a_partial_clone() {
+        let commands = serve_config_commands();
+        assert!(commands.contains(&vec![
+            "config".to_string(),
+            "uploadpack.allowFilter".to_string(),
+            "true".to_string()
+        ]));
+        assert!(commands
+            .iter()
+            .all(|command| !command.contains(&"--global".to_string())));
+    }
+
+    #[test]
+    fn materializing_reads_one_tree_into_a_scratch_work_tree() {
+        let args = materialize_args(Path::new("/m/r.git"), Path::new("/tmp/w"), "abc123");
+        assert_eq!(args[0], "--git-dir=/m/r.git");
+        assert_eq!(args[1], "--work-tree=/tmp/w");
+        assert_eq!(&args[2..], ["read-tree", "--reset", "-u", "abc123"]);
     }
 
     #[test]

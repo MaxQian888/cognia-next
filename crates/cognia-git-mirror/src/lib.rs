@@ -39,9 +39,9 @@ use std::time::{Duration, SystemTime};
 
 pub use credential::GitCredential;
 pub use plan::{
-    checkout_path, clone_args, derive_args, fetch_args, is_fresh, is_mirror, maintenance_commands,
-    mirror_path, normalize_remote_url, reclaim_candidates, stamp_fetch, MirrorError,
-    DEFAULT_MIRROR_TTL,
+    checkout_path, clone_args, derive_args, fetch_args, file_url, is_fresh, is_mirror,
+    maintenance_commands, materialize_args, mirror_path, normalize_remote_url, reclaim_candidates,
+    serve_config_commands, stamp_fetch, MirrorError, DEFAULT_MIRROR_TTL,
 };
 pub use runner::{run_git, run_git_quietly, GitRun, RunError};
 
@@ -198,12 +198,15 @@ pub fn ensure_mirror(request: &MirrorRequest<'_>) -> Option<PathBuf> {
         }
         let _ = stamp_fetch(&mirror);
         run_maintenance(&mirror);
+        configure_for_serving(&mirror);
         if !request.extra_refspecs.is_empty() {
             let args = fetch_args(request.extra_refspecs);
             let _ = run_for(request, &mirror, &args);
         }
         return Some(mirror);
     }
+    // A mirror made before it served partial clones gets the settings now.
+    configure_for_serving(&mirror);
 
     // An explicit refspec is not covered by the freshness stamp: the mirror can
     // be fresh and still not hold the ref, because nothing asked for it before.
@@ -252,6 +255,20 @@ pub fn derive_from_mirror(
         return false;
     };
 
+    // The checkout needs the file contents of the commit it lands on, and the
+    // mirror holds only what someone asked for (see `plan`'s module header).
+    let wanted = branch.map_or_else(
+        || "HEAD".to_string(),
+        |branch| format!("refs/heads/{branch}"),
+    );
+    let Some(commit) = resolve_commit(&mirror, &wanted) else {
+        // Not in the mirror yet: let the network clone answer.
+        return false;
+    };
+    if materialize_commit(request, &mirror, &commit).is_err() {
+        return false;
+    }
+
     let derive = derive_args(&mirror, destination, branch);
     if !run_for(request, request.cache_root, &derive) {
         // The branch may simply not be in the mirror yet (created upstream after
@@ -277,6 +294,72 @@ pub fn derive_from_mirror(
         }
     }
     true
+}
+
+/// Let a mirror answer the partial clones derived from it. Best effort and
+/// idempotent: a mirror that cannot be configured still serves full objects.
+fn configure_for_serving(mirror: &Path) {
+    for args in serve_config_commands() {
+        let _ = run_git_quietly(GitRun::new(mirror, &args));
+    }
+}
+
+/// The commit `rev` names in the mirror, if it holds one.
+pub fn resolve_commit(mirror: &Path, rev: &str) -> Option<String> {
+    let args = vec![
+        "rev-parse".to_string(),
+        "--verify".to_string(),
+        "--quiet".to_string(),
+        "--end-of-options".to_string(),
+        format!("{rev}^{{commit}}"),
+    ];
+    let out = run_git(GitRun::new(mirror, &args).capture_stdout()).ok()?;
+    let sha = out.trim();
+    (!sha.is_empty()).then(|| sha.to_string())
+}
+
+/// Have the mirror fetch every file content of `commit` it lacks, in one
+/// batch, with the request's credential, so a checkout of `commit` derived
+/// from it finds them (see `plan`'s module header).
+///
+/// The tree is written into a scratch directory beside the mirrors and
+/// removed again; only the objects the mirror fetched stay.
+pub fn materialize_commit(
+    request: &MirrorRequest<'_>,
+    mirror: &Path,
+    commit: &str,
+) -> Result<(), String> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nonce = format!(
+        "{}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let scratch = request.cache_root.join(format!(".materialize-{nonce}"));
+    let work_tree = scratch.join("tree");
+    std::fs::create_dir_all(&work_tree)
+        .map_err(|error| format!("create {}: {error}", work_tree.display()))?;
+    let index = scratch.join("index");
+    let args = materialize_args(mirror, &work_tree, commit);
+    let lock = lock_for(mirror);
+    let result = {
+        let _held = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let auth = request.auth();
+        run_git(
+            GitRun::new(mirror, &args)
+                .maybe_credential(auth.as_ref().map(|(origin, cred)| (origin.as_str(), *cred)))
+                .maybe_budget(request.budget)
+                .env("GIT_INDEX_FILE", index.to_string_lossy()),
+        )
+    };
+    let _ = std::fs::remove_dir_all(&scratch);
+    result
+        .map(|_| ())
+        .map_err(|error| format!("fetch the files of {commit} into the mirror: {error}"))
 }
 
 /// Write the commit-graph and multi-pack-index for a mirror.
@@ -406,10 +489,125 @@ mod tests {
             DerivedOrigin::Mirror,
         ));
         let mirror = mirror_path(&cache, &remote).unwrap();
+        assert_eq!(origin_url(&source), file_url(&mirror));
+    }
+
+    /// An upstream that serves partial clones, as GitHub does. A plain local
+    /// remote serves every blob, which is how a mirror that could not hand a
+    /// checkout its files passed every test above.
+    fn partial_upstream(dir: &Path) -> String {
+        let remote = upstream(dir);
+        sh(dir, &["config", "uploadpack.allowFilter", "true"]);
+        sh(dir, &["config", "uploadpack.allowAnySHA1InWant", "true"]);
+        std::fs::write(dir.join("README.md"), "hello again\n").unwrap();
+        sh(dir, &["commit", "-am", "second"]);
+        remote
+    }
+
+    fn git_out(cwd: &Path, args: &[&str]) -> String {
+        let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+        run_git(GitRun::new(cwd, &args).capture_stdout())
+            .unwrap_or_else(|error| panic!("git {args:?}: {error}"))
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn a_blobless_mirror_still_derives_a_checkout_with_its_files() {
+        let tmp = TempDir::new().unwrap();
+        let remote = partial_upstream(&tmp.path().join("upstream"));
+        let cache = tmp.path().join("cache");
+        let request = MirrorRequest::new(&cache, &remote);
+
+        let mirror = ensure_mirror(&request).expect("mirror");
+        // The case under test: the mirror really holds no file contents yet.
         assert_eq!(
-            std::fs::canonicalize(origin_url(&source)).unwrap(),
-            std::fs::canonicalize(&mirror).unwrap()
+            git_out(&mirror, &["config", "remote.origin.promisor"]),
+            "true"
         );
+        // `--missing=print` lists what is absent without fetching it, unlike
+        // `cat-file`, which would fetch it from the upstream on the spot.
+        let missing = git_out(
+            &mirror,
+            &["rev-list", "--objects", "--missing=print", "HEAD"],
+        );
+        assert!(
+            missing.lines().any(|line| line.starts_with('?')),
+            "{missing}"
+        );
+
+        let source = tmp.path().join("source");
+        assert!(derive_from_mirror(
+            &request,
+            &source,
+            Some("main"),
+            DerivedOrigin::Mirror
+        ));
+        assert_eq!(
+            std::fs::read_to_string(source.join("README.md")).unwrap(),
+            "hello again\n"
+        );
+        // A partial clone of the mirror, so later checkouts can ask it.
+        assert_eq!(
+            git_out(&source, &["config", "remote.origin.promisor"]),
+            "true"
+        );
+    }
+
+    #[test]
+    fn a_materialized_commit_reaches_a_checkout_derived_before_it() {
+        let tmp = TempDir::new().unwrap();
+        let remote = partial_upstream(&tmp.path().join("upstream"));
+        let cache = tmp.path().join("cache");
+        let request = MirrorRequest::new(&cache, &remote);
+        let source = tmp.path().join("source");
+        assert!(derive_from_mirror(
+            &request,
+            &source,
+            None,
+            DerivedOrigin::Mirror
+        ));
+        let mirror = mirror_path(&cache, &remote).unwrap();
+        let first = resolve_commit(&mirror, "HEAD~1").expect("older commit");
+
+        materialize_commit(&request, &mirror, &first).expect("materialize");
+        let older = tmp.path().join("older");
+        git_out(
+            &source,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                older.to_str().unwrap(),
+                &first,
+            ],
+        );
+        assert_eq!(
+            std::fs::read_to_string(older.join("README.md")).unwrap(),
+            "hello\n"
+        );
+        // Nothing of the scratch tree is left beside the mirrors.
+        let leftovers: Vec<_> = std::fs::read_dir(&cache)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".materialize-")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn materializing_a_commit_the_mirror_lacks_is_an_error() {
+        let tmp = TempDir::new().unwrap();
+        let remote = partial_upstream(&tmp.path().join("upstream"));
+        let cache = tmp.path().join("cache");
+        let request = MirrorRequest::new(&cache, &remote);
+        let mirror = ensure_mirror(&request).expect("mirror");
+        assert!(materialize_commit(&request, &mirror, &"0".repeat(40)).is_err());
     }
 
     #[test]

@@ -5,6 +5,7 @@
 //! Companion transport surfaces.
 
 mod bundle;
+mod code_snapshot;
 mod confine;
 mod ledger;
 mod lifecycle;
@@ -63,6 +64,14 @@ pub use registry::{
     plan_snapshot_expiration, validate_state_transition, DirectoryReclaimCandidate,
     DirectoryReclaimReason, ImportedWorkspaceHint, ReconcileOutcome, RegistryError,
     SnapshotExpirationCandidate, SnapshotExpirationReason, WorkspaceRegistry,
+};
+pub use code_snapshot::{
+    code_snapshot_max_bytes_from, extract_tar_snapshot, handoff_branch, produce_code_snapshot,
+    validate_manifest as validate_code_snapshot_manifest, ApplyCodeSnapshot, CodeCheckout,
+    CodeSnapshotInbox, CodeSnapshotKind, CodeSnapshotLimits, CodeSnapshotManifest,
+    CodeSnapshotOutbox, CodeSnapshotUpload, CommittedCodeSnapshot, CreateCodeSnapshot,
+    CreatedCodeSnapshot, CODE_SNAPSHOT_MAX_BYTES_CEILING, CODE_SNAPSHOT_MAX_BYTES_ENV,
+    DEFAULT_CODE_SNAPSHOT_MAX_BYTES,
 };
 pub use project_source::{
     ensure_project_source, local_project_root, validate_project_remote, EnsureProjectSource,

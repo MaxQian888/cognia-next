@@ -18,7 +18,9 @@ import {
   THREAD_HANDOFF_COMMANDS,
   dispatchThreadHandoffCommand,
   isThreadHandoffCommand,
+  resolveThreadHandoffWorkspaceBinding,
 } from "./host-dispatch"
+import type { CodeCheckout } from "@/lib/task-workspace/types"
 
 jest.mock("@/lib/db/thread-handoff-tickets", () => ({
   getThreadHandoffTicket: jest.fn(async () => ({ ticketId: "ticket-1", state: "frozen" })),
@@ -127,6 +129,46 @@ describe("host handoff preflight and dispatch", () => {
     expect(importSession).not.toHaveBeenCalled()
   })
 
+  it("refuses an accept whose code checkout this host does not hold, before importing", async () => {
+    const offer = await buildThreadHandoffOffer(
+      { id: "source", title: "Thread", createdAt: 1, updatedAt: 1 },
+      { kind: "desktop", hostRef: "target" },
+      100,
+      {
+        messages: [],
+        deployments: [],
+        codeCheckout: { checkoutId: "0190e0e0-1111-7222-8333-444455556666" },
+      }
+    )
+    expect(offer.ticket.project.codeCheckout).toEqual({
+      checkoutId: "0190e0e0-1111-7222-8333-444455556666",
+    })
+    const importSession = jest.fn()
+    await expect(
+      dispatchThreadHandoffCommand(
+        "thread_handoff_accept",
+        { ticket: { ...offer.ticket, role: "target" }, envelope: offer.envelope },
+        {
+          importSession,
+          now: () => 200,
+          preflightEnvironment: async () => ({
+            capabilities: offer.ticket.requirements.capabilities,
+            hostOperations: [],
+            providerRefs: [],
+            models: [],
+            credentialProfileRefs: [],
+            workspaceRefs: [],
+            attachmentRefs: [],
+            protocolVersion: 1,
+            nativeRuntimeAvailable: false,
+          }),
+          bindingSources: { projectExists: async () => false, checkout: async () => null },
+        }
+      )
+    ).rejects.toThrow("thread_handoff_code_checkout_missing")
+    expect(importSession).not.toHaveBeenCalled()
+  })
+
   it("routes offer, preflight, source/target commit, and abort to the ownership service", async () => {
     await getDb().hostDispatchQueue.clear()
     const offer = jest
@@ -167,5 +209,60 @@ describe("host handoff preflight and dispatch", () => {
       peerDisposition: "not-accepted",
       at: 200,
     })
+  })
+})
+
+describe("resolveThreadHandoffWorkspaceBinding (ADR-0224 A11b)", () => {
+  const checkout: CodeCheckout = {
+    checkoutId: "0190e0e0-1111-7222-8333-444455556666",
+    root: "/srv/executions/handoffs/0190e0e0-1111-7222-8333-444455556666",
+    workingDir: "/srv/executions/handoffs/0190e0e0-1111-7222-8333-444455556666/apps/web",
+    kind: "git-patch",
+    branch: "cognia/handoff-444455556666",
+    baseCommit: "a".repeat(40),
+    projectId: "project-app",
+    remoteUrl: "https://github.com/acme/app.git",
+    createdAt: 1,
+  }
+  async function ticketWith(project: Record<string, unknown>) {
+    const offer = await buildThreadHandoffOffer(
+      { id: "source", title: "Thread", createdAt: 1, updatedAt: 1 },
+      { kind: "desktop", hostRef: "target" },
+      100,
+      { messages: [], deployments: [] }
+    )
+    return { ...offer.ticket, project }
+  }
+
+  it("files the session under a workspace this host has, in the checkout it resolved", async () => {
+    const binding = await resolveThreadHandoffWorkspaceBinding(
+      await ticketWith({
+        workspaceRef: "project-app",
+        codeCheckout: { checkoutId: checkout.checkoutId },
+      }),
+      { projectExists: async (id) => id === "project-app", checkout: async () => checkout }
+    )
+    expect(binding).toEqual({ projectId: "project-app", workingDir: checkout.workingDir })
+  })
+
+  it("leaves a workspace this host lacks unbound, and binds nothing without a checkout", async () => {
+    await expect(
+      resolveThreadHandoffWorkspaceBinding(await ticketWith({ workspaceRef: "project-other" }), {
+        projectExists: async () => false,
+        checkout: async () => checkout,
+      })
+    ).resolves.toEqual({})
+  })
+
+  it("refuses a checkout made for another workspace", async () => {
+    await expect(
+      resolveThreadHandoffWorkspaceBinding(
+        await ticketWith({
+          workspaceRef: "project-x",
+          codeCheckout: { checkoutId: checkout.checkoutId },
+        }),
+        { projectExists: async () => true, checkout: async () => checkout }
+      )
+    ).rejects.toThrow("thread_handoff_code_checkout_workspace_mismatch")
   })
 })

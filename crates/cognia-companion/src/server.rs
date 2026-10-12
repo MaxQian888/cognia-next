@@ -58,11 +58,17 @@ const WORKFLOW_APP_UPLOAD_BODY_LIMIT_BYTES: usize = 11 * 1024 * 1024;
 
 async fn limit_public_request_body(request: Request, next: Next) -> Response {
     use tower::{Layer as _, ServiceExt as _};
-    // The one bulk upload RPC carries up to 64 KiB of raw bytes as base64
-    // (~86 KiB JSON). Keep other public requests at their existing 64 KiB cap;
-    // the transfer handler still validates the decoded chunk size and hash.
+    // The bulk upload RPCs carry up to 64 KiB of raw bytes as base64
+    // (~86 KiB JSON): a run's resource, and a working copy handed to an
+    // always-on host (ADR-0224 A11b). Keep other public requests at their
+    // existing 64 KiB cap; the transfer handler still validates the decoded
+    // chunk size and hash.
     let limit = if request.method() == Method::POST
-        && request.uri().path() == "/api/_rpc/task_resource_upload_write_chunk"
+        && matches!(
+            request.uri().path(),
+            "/api/_rpc/task_resource_upload_write_chunk"
+                | "/api/_rpc/code_snapshot_upload_write_chunk"
+        )
     {
         128 * 1024
     } else {
@@ -1763,6 +1769,11 @@ mod tests {
         for (command, payload, expected) in [
             (
                 "task_resource_upload_write_chunk",
+                body.clone(),
+                StatusCode::OK,
+            ),
+            (
+                "code_snapshot_upload_write_chunk",
                 body.clone(),
                 StatusCode::OK,
             ),

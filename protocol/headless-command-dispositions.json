@@ -854,7 +854,10 @@
         "write_cli_home_file",
         "write_codex_auth_env",
         "write_gemini_settings_env",
-        "write_opencode_auth_env"
+        "write_opencode_auth_env",
+        "code_snapshot_create",
+        "code_snapshot_read_chunk",
+        "code_snapshot_discard"
       ],
       "commandReasons": {
         "account_bind_person": "Writes the local profile's person binding after a verified sign-in. The unlocked profile lives in this process; a remote caller has no unlocked session to bind.",
@@ -955,7 +958,10 @@
         "tray_panel_set_left_click": "Writes the OS tray icon's left-click behaviour to <cognia-home>/tray-panel.json. Same semantic dependency as tray_panel_get_config.",
         "tray_run_native_action": "Gated #[cfg(desktop)] and returns an error otherwise. Shows or hides the `main` window, or emits tray://* events that only the local renderer implements — those channels are deliberately absent from the remotely deliverable event catalog.",
         "usage_dock_reveal": "First-paint reveal, and the one dock command that is not merely desktop-shaped: it resolves the CALLING window and errors unless that window is the dock itself, so there is no caller outside the dock window for it to have.",
-        "wake_paired_host": "Sends a wake-on-LAN magic frame onto this machine's local segment. Like companion_mdns_browse, the segment is the point: relaying it would wake nothing."
+        "wake_paired_host": "Sends a wake-on-LAN magic frame onto this machine's local segment. Like companion_mdns_browse, the segment is the point: relaying it would wake nothing.",
+        "code_snapshot_create": "Reads a working copy on THIS device and stages its snapshot in this device's data directory for upload to an always-on host (ADR-0224 A11b). A host snapshotting itself has nothing to hand over.",
+        "code_snapshot_read_chunk": "Reads back a snapshot code_snapshot_create staged in this device's data directory, for the upload to an always-on host. The bytes exist only here.",
+        "code_snapshot_discard": "Deletes a snapshot code_snapshot_create staged in this device's data directory once the upload is done or abandoned. The file exists only here."
       }
     },
     {

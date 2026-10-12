@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,14 @@ import { Surface } from "@/components/surface/surface"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { getThreadHandoffTicket } from "@/lib/db/thread-handoff-tickets"
 import { getDb } from "@/lib/db/schema"
+import { formatBytesCompact } from "@/lib/observability/format-utils"
+import { isTauri } from "@/lib/platform/detect"
+import {
+  continueOnHostFailure,
+  continueOnHostRefusal,
+  continueSessionOnAlwaysOnHost,
+  type ContinueOnHostProgress,
+} from "@/lib/remote-host/code-supply/snapshot-handoff"
 import {
   recoverThreadHandoffOffer,
   startThreadHandoff,
@@ -56,6 +65,9 @@ export function ThreadHandoffSourceDialog({
   const tPreflight = useTranslations("threadHandoff.inbound")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // ADR-0224 A11b: an always-on Host can take the working copy along.
+  const [withCode, setWithCode] = useState(true)
+  const [codeProgress, setCodeProgress] = useState<ContinueOnHostProgress | null>(null)
   const hosts = useRemoteHostStore((state) => state.hosts)
   const activeHostId = useRemoteHostStore((state) => state.activeHostId)
   const remoteHosts = hosts.filter((host) => host.id !== activeHostId)
@@ -79,9 +91,36 @@ export function ThreadHandoffSourceDialog({
     ? undefined
     : (eligible.find((device) => device.deviceId === selectedId) ?? eligible[0])
   const locked = Boolean(session.handoffLock)
+  const codeRefusal = selectedRemote?.alwaysOn
+    ? continueOnHostRefusal({ session, host: selectedRemote, isDesktop: isTauri() })
+    : null
+  const offersCode = Boolean(selectedRemote?.alwaysOn) && codeRefusal !== "not-desktop"
+  const bringsCode = offersCode && codeRefusal === null && withCode
+
+  const startWithCode = async () => {
+    if (!selectedRemote) return
+    setBusy(true)
+    try {
+      const { checkout } = await continueSessionOnAlwaysOnHost(session, selectedRemote, {
+        onProgress: setCodeProgress,
+      })
+      toast.success(
+        checkout.branch
+          ? t("codeCompletedBranch", { host: selectedRemote.label, branch: checkout.branch })
+          : t("codeCompleted", { host: selectedRemote.label })
+      )
+      onOpenChange(false)
+    } catch (error) {
+      toast.error(t(`codeFailure.${continueOnHostFailure(error)}`, { host: selectedRemote.label }))
+    } finally {
+      setBusy(false)
+      setCodeProgress(null)
+    }
+  }
 
   const start = async () => {
     if (!selected && !selectedRemote) return
+    if (bringsCode) return startWithCode()
     setBusy(true)
     try {
       if (selectedRemote) {
@@ -232,6 +271,34 @@ export function ThreadHandoffSourceDialog({
                 ) : null}
               </button>
             ))}
+            {selectedRemote && offersCode ? (
+              <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+                <Checkbox
+                  checked={bringsCode}
+                  disabled={busy || codeRefusal !== null}
+                  onCheckedChange={(checked) => setWithCode(checked === true)}
+                  aria-label={t("withCode")}
+                  className="mt-0.5"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">{t("withCode")}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {codeRefusal === null
+                      ? t("withCodeDescription", { host: selectedRemote.label })
+                      : t("withCodeUnsupported", { host: selectedRemote.label })}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+            {codeProgress && selectedRemote ? (
+              <p role="status" className="text-xs text-muted-foreground">
+                {t(`codeProgress.${codeProgress.step}`, {
+                  host: selectedRemote.label,
+                  sent: formatBytesCompact(codeProgress.sentBytes ?? 0),
+                  total: formatBytesCompact(codeProgress.totalBytes ?? 0),
+                })}
+              </p>
+            ) : null}
             <p className="text-xs text-muted-foreground">{t("lossDisclosure")}</p>
           </div>
         )}

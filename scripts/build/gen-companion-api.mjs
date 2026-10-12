@@ -649,7 +649,7 @@ const HOST_CATEGORIES = [
       "Git, files, terminals, browsers, media processing, code-server, language servers, and the container image a project runs in.",
     skill: "cognia-host-development",
     pattern:
-      /^(browser_|codeserver_|environment_|file_|fs_|git_|github_workspace_|plugin_media_|video_|project_environment_|project_mutate$|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
+      /^(browser_|codeserver_|environment_|file_|fs_|git_|github_workspace_|plugin_media_|video_|project_environment_|project_mutate$|code_snapshot_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
   },
   {
     id: "system",

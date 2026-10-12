@@ -1234,6 +1234,221 @@
         ]
       }
     },
+    "code_snapshot_apply": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Turn an uploaded snapshot into a checkout on this host (cognia_task_workspace::ApplyCodeSnapshot, ADR-0224 A11b). A git snapshot becomes a worktree of the project's repository on a new cognia/handoff branch, refused unless it rebuilds the desktop's tree. The host's stored git credential is used; one sent here is ignored.",
+        "required": [
+          "input",
+          "adminLease"
+        ],
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "snapshotId": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "manifest": {
+                "type": "object",
+                "description": "What the desktop recorded about the snapshot (cognia_task_workspace::CodeSnapshotManifest).",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "git-patch",
+                      "tar"
+                    ]
+                  },
+                  "sizeBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "baseCommit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                  },
+                  "baseRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 255
+                  },
+                  "tree": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                  },
+                  "subdir": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "entries": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "kind",
+                  "sizeBytes",
+                  "sha256",
+                  "baseCommit",
+                  "baseRef",
+                  "tree",
+                  "subdir",
+                  "entries"
+                ],
+                "additionalProperties": false
+              },
+              "projectId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              },
+              "roots": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              },
+              "remoteUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "snapshotId",
+              "manifest"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "code_snapshot_upload_cancel": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId",
+          "adminLease"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "code_snapshot_upload_commit": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId",
+          "adminLease"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "code_snapshot_upload_open": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sizeBytes",
+          "sha256",
+          "adminLease"
+        ],
+        "properties": {
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "code_snapshot_upload_write_chunk": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId",
+          "offset",
+          "dataBase64",
+          "chunkHash",
+          "adminLease"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dataBase64": {
+            "type": "string"
+          },
+          "chunkHash": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "codeserver_agent_apply_edit": {
       "inputSchemaSource": "contract",
       "inputSchema": {
@@ -7254,8 +7469,7 @@
             "required": [
               "id",
               "name",
-              "roots",
-              "repository"
+              "roots"
             ],
             "additionalProperties": false
           },

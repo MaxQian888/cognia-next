@@ -36,6 +36,14 @@ jest.mock("@/stores/remote-host/remote-host-store", () => ({
   useRemoteHostStore: (selector: (value: unknown) => unknown) =>
     selector({ hosts: mockHosts, activeHostId: mockActiveHost }),
 }))
+const mockWithCode = jest.fn()
+let mockRefusal: string | null = null
+jest.mock("@/lib/platform/detect", () => ({ isTauri: () => true }))
+jest.mock("@/lib/remote-host/code-supply/snapshot-handoff", () => ({
+  continueOnHostRefusal: () => mockRefusal,
+  continueSessionOnAlwaysOnHost: (...args: unknown[]) => mockWithCode(...args),
+  continueOnHostFailure: () => "too-large",
+}))
 import {
   ThreadHandoffSourceDialog,
   threadHandoffTargetUnavailableReason,
@@ -192,4 +200,65 @@ it("preflights a desktop Host without cached feature metadata", async () => {
       label: "Desktop",
     })
   )
+})
+
+describe("an always-on Host can take the code along (ADR-0224 A11b)", () => {
+  beforeEach(() => {
+    mockRefusal = null
+    mockHosts = [
+      {
+        id: "studio",
+        label: "Studio Mac",
+        alwaysOn: true,
+        connectionState: "ready",
+        featureManifest: { hostIdentity: { kind: "desktop" } },
+      },
+    ]
+    mockWithCode.mockResolvedValue({ checkout: { branch: "cognia/handoff-abc" } })
+  })
+
+  it("brings the code by default and hands over through the code path", async () => {
+    show()
+    fireEvent.click(screen.getByRole("button", { name: /Studio Mac/ }))
+    expect(screen.getByRole("checkbox", { name: "withCode" })).toBeChecked()
+    fireEvent.click(screen.getByRole("button", { name: "continue" }))
+    await waitFor(() =>
+      expect(mockWithCode).toHaveBeenCalledWith(
+        session,
+        expect.objectContaining({ id: "studio" }),
+        expect.objectContaining({ onProgress: expect.any(Function) })
+      )
+    )
+    expect(mockRemote).not.toHaveBeenCalled()
+    expect(mockChange).toHaveBeenCalledWith(false)
+  })
+
+  it("continues without the code when the person unticks it", async () => {
+    show()
+    fireEvent.click(screen.getByRole("button", { name: /Studio Mac/ }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "withCode" }))
+    fireEvent.click(screen.getByRole("button", { name: "continue" }))
+    await waitFor(() => expect(mockRemote).toHaveBeenCalled())
+    expect(mockWithCode).not.toHaveBeenCalled()
+  })
+
+  it("explains a Host that cannot take the code and does not offer it", async () => {
+    mockRefusal = "host-unsupported"
+    show()
+    fireEvent.click(screen.getByRole("button", { name: /Studio Mac/ }))
+    expect(screen.getByRole("checkbox", { name: "withCode" })).toBeDisabled()
+    expect(screen.getByText("withCodeUnsupported")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "continue" }))
+    await waitFor(() => expect(mockRemote).toHaveBeenCalled())
+    expect(mockWithCode).not.toHaveBeenCalled()
+  })
+
+  it("names what failed and keeps the dialog open", async () => {
+    mockWithCode.mockRejectedValue(new Error("code_snapshot_too_large"))
+    show()
+    fireEvent.click(screen.getByRole("button", { name: /Studio Mac/ }))
+    fireEvent.click(screen.getByRole("button", { name: "continue" }))
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith("codeFailure.too-large"))
+    expect(mockChange).not.toHaveBeenCalledWith(false)
+  })
 })

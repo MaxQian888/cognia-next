@@ -67,6 +67,13 @@ pub(super) const COMMANDS: &[&str] = &[
     "task_resource_upload_write_chunk",
     "task_resource_upload_commit",
     "task_resource_upload_abort",
+    // A working copy handed to this always-on host (ADR-0224 A11b).
+    "code_snapshot_limits_get",
+    "code_snapshot_upload_open",
+    "code_snapshot_upload_write_chunk",
+    "code_snapshot_upload_commit",
+    "code_snapshot_upload_cancel",
+    "code_snapshot_apply",
     "task_workspace_apply",
     "task_workspace_undo",
     "task_workspace_restore_snapshot",
@@ -879,6 +886,62 @@ pub(super) async fn dispatch(
             })
             .await
             .map(|_| Value::Null)
+        }
+        // ADR-0224 A11b. A device continuing a conversation here hands over
+        // its working copy: what this host accepts, a chunked upload into a
+        // staging area, and the apply that turns it into a checkout. Every
+        // write is interactive in the manifest, so each call carries the
+        // admin lease the hand-over was granted.
+        "code_snapshot_limits_get" => crate::task_workspace::code_snapshot_limits_get()
+            .map_err(RpcError::internal)
+            .and_then(to_json),
+        "code_snapshot_upload_open" => {
+            let size_bytes: u64 = required(&args, "sizeBytes")?;
+            let sha256: String = required(&args, "sha256")?;
+            crate::task_workspace::code_snapshot_upload_open(size_bytes, sha256)
+                .await
+                .map_err(RpcError::validation_failed)
+                .and_then(to_json)
+        }
+        "code_snapshot_upload_write_chunk" => {
+            let upload_id: String = required(&args, "uploadId")?;
+            let offset: u64 = required(&args, "offset")?;
+            let data_base64: String = required(&args, "dataBase64")?;
+            let chunk_hash: String = required(&args, "chunkHash")?;
+            let permit = TRANSFER_IO_SLOTS
+                .acquire()
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))?;
+            let written = crate::task_workspace::code_snapshot_upload_write_chunk(
+                upload_id,
+                offset,
+                data_base64,
+                chunk_hash,
+            )
+            .await;
+            drop(permit);
+            written.map_err(RpcError::validation_failed).and_then(to_json)
+        }
+        "code_snapshot_upload_commit" => {
+            let upload_id: String = required(&args, "uploadId")?;
+            crate::task_workspace::code_snapshot_upload_commit(upload_id)
+                .await
+                .map_err(RpcError::validation_failed)
+                .and_then(to_json)
+        }
+        "code_snapshot_upload_cancel" => {
+            let upload_id: String = required(&args, "uploadId")?;
+            crate::task_workspace::code_snapshot_upload_cancel(upload_id)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::validation_failed)
+        }
+        "code_snapshot_apply" => {
+            let input: cognia_task_workspace::ApplyCodeSnapshot = required(&args, "input")?;
+            crate::task_workspace::code_snapshot_apply(input)
+                .await
+                .map_err(RpcError::validation_failed)
+                .and_then(to_json)
         }
         "task_workspace_apply" => {
             let run_id: String = required(&args, "runId")?;

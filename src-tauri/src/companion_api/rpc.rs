@@ -480,6 +480,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // of the task-workspace surface, which is device-reachable.
     "task_workspace_remote_source_ensure",
     "task_workspace_project_source_ensure",
+    "code_snapshot_checkout_get",
     // ADR-0090 Phase 1 — Provider Profile Store admin plane (service scope;
     // redacted docs only, secrets never transit these arms).
     "provider_profiles_list",
@@ -911,6 +912,13 @@ const KNOWN_COMMANDS: &[&str] = &[
     "task_resource_upload_write_chunk",
     "task_resource_upload_commit",
     "task_resource_upload_abort",
+    // A working copy handed to this always-on host (ADR-0224 A11b).
+    "code_snapshot_limits_get",
+    "code_snapshot_upload_open",
+    "code_snapshot_upload_write_chunk",
+    "code_snapshot_upload_commit",
+    "code_snapshot_upload_cancel",
+    "code_snapshot_apply",
     "task_workspace_apply",
     "task_workspace_undo",
     "task_workspace_restore_snapshot",
@@ -1523,6 +1531,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "task_resource_download_open",
     "task_resource_download_read_chunk",
     "task_resource_download_close",
+    "code_snapshot_limits_get",
     // Detecting installed agent runtimes reads this machine and changes only
     // when the user installs one, so an idempotency key would cache an answer
     // the caller wants fresh. It spawns only catalogued `--version` reads of
@@ -1848,6 +1857,11 @@ const CONTROL_COMMANDS: &[&str] = &[
     "task_resource_upload_write_chunk",
     "task_resource_upload_commit",
     "task_resource_upload_abort",
+    "code_snapshot_upload_open",
+    "code_snapshot_upload_write_chunk",
+    "code_snapshot_upload_commit",
+    "code_snapshot_upload_cancel",
+    "code_snapshot_apply",
     "task_workspace_apply",
     "task_workspace_undo",
     "task_workspace_resolve_conflict",
@@ -2456,6 +2470,9 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "github_workspace_stat",
     "task_workspace_remote_source_ensure",
     "task_workspace_project_source_ensure",
+    // The checkout a handed-over conversation works in (ADR-0224 A11b): the
+    // brain binds the continued session to it by id.
+    "code_snapshot_checkout_get",
     "environment_task_shell_exec",
     "environment_task_shell_release",
     "fleet_project_managed_session",

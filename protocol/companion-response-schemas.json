@@ -11551,6 +11551,131 @@
         }
       ],
       "x-cognia-wire-source": "lib/glance/remote/types.ts"
+    },
+    "CodeCheckout": {
+      "additionalProperties": false,
+      "description": "A checkout a snapshot became on this host.",
+      "properties": {
+        "baseCommit": {
+          "type": ["string", "null"]
+        },
+        "branch": {
+          "description": "The branch the worktree is on. Git only.",
+          "type": ["string", "null"]
+        },
+        "checkoutId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "Epoch milliseconds.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/CodeSnapshotKind"
+        },
+        "projectId": {
+          "type": ["string", "null"]
+        },
+        "remoteUrl": {
+          "type": ["string", "null"]
+        },
+        "root": {
+          "description": "The checkout's root.",
+          "type": "string"
+        },
+        "workingDir": {
+          "description": "Where the conversation works: `root` plus the snapshot's `subdir`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "baseCommit",
+        "branch",
+        "checkoutId",
+        "createdAt",
+        "kind",
+        "projectId",
+        "remoteUrl",
+        "root",
+        "workingDir"
+      ],
+      "type": "object"
+    },
+    "CodeSnapshotKind": {
+      "oneOf": [
+        {
+          "const": "git-patch",
+          "description": "A binary patch against a commit the remote has.",
+          "type": "string"
+        },
+        {
+          "const": "tar",
+          "description": "A gzip tar of a folder that is not a git checkout.",
+          "type": "string"
+        }
+      ]
+    },
+    "CodeSnapshotLimits": {
+      "additionalProperties": false,
+      "description": "What a host accepts.",
+      "properties": {
+        "chunkBytes": {
+          "format": "uint",
+          "maximum": 65536,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "maxBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["chunkBytes", "maxBytes"],
+      "type": "object"
+    },
+    "CodeSnapshotUpload": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkBytes": {
+          "format": "uint",
+          "maximum": 65536,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "maxBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snapshotId": {
+          "type": "string"
+        },
+        "uploadId": {
+          "type": "string"
+        }
+      },
+      "required": ["chunkBytes", "maxBytes", "snapshotId", "uploadId"],
+      "type": "object"
+    },
+    "CommittedCodeSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snapshotId": {
+          "type": "string"
+        }
+      },
+      "required": ["sha256", "sizeBytes", "snapshotId"],
+      "type": "object"
     }
   },
   "commands": {
@@ -17203,6 +17328,34 @@
     },
     "glance_quota_enable": {
       "$ref": "#/$defs/GlanceRemoteResult"
+    },
+    "code_snapshot_limits_get": {
+      "$ref": "#/$defs/CodeSnapshotLimits"
+    },
+    "code_snapshot_upload_open": {
+      "$ref": "#/$defs/CodeSnapshotUpload"
+    },
+    "code_snapshot_upload_commit": {
+      "$ref": "#/$defs/CommittedCodeSnapshot"
+    },
+    "code_snapshot_apply": {
+      "$ref": "#/$defs/CodeCheckout"
+    },
+    "code_snapshot_checkout_get": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CodeCheckout"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "code_snapshot_upload_write_chunk": {
+      "$ref": "#/$defs/IntegerResult"
+    },
+    "code_snapshot_upload_cancel": {
+      "$ref": "#/$defs/NullResult"
     }
   }
 }

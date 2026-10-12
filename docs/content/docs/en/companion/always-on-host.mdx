@@ -361,7 +361,32 @@ and runs the work there. A task set to run in a subfolder of the workspace runs 
 same subfolder of the clone. If neither the folder nor the repository can be reached,
 the run fails with the reason; it never runs in some other directory.
 
-The clone holds what was last pushed. Work you have not pushed stays on your device.
+The clone holds what was last pushed. Work you have not pushed stays on your device,
+unless you hand it over with a conversation.
+
+### Continue a conversation with its code
+
+To move a conversation you are working in to the host, open its menu, choose **Continue
+on another device…**, pick the always-on host and keep **Bring the code** ticked. The host's
+owner approves the request once, on the host. Then:
+
+1. The conversation's workspace goes to the host as a copy, even without a repository.
+2. The desktop packs its working copy. If the workspace records an `https` repository, the
+   package is a patch against the newest commit that repository already has: unpushed
+   commits, uncommitted edits, new and deleted files, binary files and file modes all
+   travel in it, and nothing needs pushing first. Otherwise the package is an archive of
+   the folder's files. Both honour `.gitignore`. An archive never includes the `.git`
+   folder.
+3. The package is uploaded to the host in checked pieces. The host fetches the starting
+   commit, checks out a fresh copy on a new `cognia/handoff-…` branch, applies the patch,
+   and keeps the copy only if it matches the desktop's files exactly.
+4. The conversation moves, and continues in that copy on the host. The copy on the desktop
+   becomes read-only, as with any handoff.
+
+A package is limited to 100 MiB by default. To change what a host accepts, set
+`COGNIA_CODE_SNAPSHOT_MAX_BYTES` (in bytes) on the host. If any step fails, nothing
+moves and the conversation stays on the desktop. The message says why: for example, the
+starting commit is not on the remote yet, or the package is too large.
 
 ## Keep the master key safe
 

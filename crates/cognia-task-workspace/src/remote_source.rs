@@ -32,7 +32,8 @@ use std::time::Duration;
 
 use cognia_git_mirror::credential::GitCredential;
 use cognia_git_mirror::{
-    checkout_path, derive_from_mirror, ensure_mirror, DerivedOrigin, MirrorRequest,
+    checkout_path, derive_from_mirror, ensure_mirror, materialize_commit, resolve_commit,
+    DerivedOrigin, MirrorRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -243,6 +244,66 @@ fn is_git_checkout(path: &Path) -> bool {
 /// and the caller's own base resolution reports anything genuinely missing with
 /// a better error than this could. An explicit refspec is not best effort,
 /// because it is the thing the caller specifically asked for.
+/// Make `commit` checkout-ready in a source [`ensure_remote_source`]
+/// supplied (ADR-0224 A11b): in the mirror, with its file contents, and in the
+/// source checkout, so a worktree can be added at it.
+///
+/// `branch` is the remote branch the commit was seen on. When the mirror does
+/// not have the commit yet (pushed after its last refresh), that branch is
+/// fetched by name; a commit on no branch the remote has cannot be supplied,
+/// and that is reported rather than guessed around.
+pub fn prepare_source_commit(
+    mirror_root: &Path,
+    source_root: &Path,
+    input: &EnsureRemoteSource,
+    commit: &str,
+    branch: Option<&str>,
+) -> Result<(), String> {
+    let remote = input.remote_url.trim();
+    let credential = input
+        .credential
+        .as_deref()
+        .and_then(GitCredential::from_token);
+    let request = MirrorRequest::new(mirror_root, remote)
+        .maybe_credential(credential.as_ref())
+        .budget(REMOTE_SUPPLY_BUDGET);
+    let mut mirror =
+        ensure_mirror(&request).ok_or_else(|| format!("could not supply a mirror for {remote}"))?;
+    if resolve_commit(&mirror, commit).is_none() {
+        if let Some(branch) = branch {
+            // The mirror is bare, so a branch can be fetched straight into its
+            // own name: nothing is checked out there to refuse it.
+            let refspecs = [format!("+refs/heads/{branch}:refs/heads/{branch}")];
+            mirror = ensure_mirror(&request.extra_refspecs(&refspecs))
+                .ok_or_else(|| format!("could not refresh the mirror for {remote}"))?;
+        }
+    }
+    if resolve_commit(&mirror, commit).as_deref() != Some(commit) {
+        return Err(format!(
+            "code_snapshot_base_unavailable: {remote} has no commit {commit}{}; push it, then try again",
+            branch.map(|branch| format!(" on {branch}")).unwrap_or_default()
+        ));
+    }
+    materialize_commit(&request, &mirror, commit)?;
+    let present = git(
+        source_root,
+        &["cat-file", "-e", &format!("{commit}^{{commit}}")],
+    )?;
+    if !present.status.success() {
+        let output = git(
+            source_root,
+            &["fetch", "--filter=blob:none", "origin", commit],
+        )?;
+        if !output.status.success() {
+            return Err(format!(
+                "fetch {commit} into the source checkout: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn refresh_from_mirror(source_root: &Path, refspecs: &[String]) -> Result<(), String> {
     let _ = git(source_root, &["fetch", "--prune", "origin"])?;
     if refspecs.is_empty() {
@@ -370,6 +431,75 @@ mod tests {
     }
 
     #[test]
+    fn a_commit_pushed_after_the_source_was_supplied_becomes_checkout_ready() {
+        let tmp = TempDir::new().unwrap();
+        let upstream_dir = tmp.path().join("upstream");
+        let remote = upstream(&upstream_dir);
+        sh(&upstream_dir, &["config", "uploadpack.allowFilter", "true"]);
+        sh(
+            &upstream_dir,
+            &["config", "uploadpack.allowAnySHA1InWant", "true"],
+        );
+        let supplied = ensure(&tmp, &remote, WorkspaceBaseSpec::RemoteDefault);
+        let root = PathBuf::from(&supplied.source_root);
+
+        // Pushed later, on a branch, with a file the source has never seen.
+        sh(&upstream_dir, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(upstream_dir.join("feature.txt"), "new\n").unwrap();
+        sh(&upstream_dir, &["add", "."]);
+        sh(&upstream_dir, &["commit", "-m", "feature"]);
+        let commit = rev_parse(&upstream_dir, "HEAD").unwrap();
+
+        let input = EnsureRemoteSource {
+            remote_url: remote.clone(),
+            base: WorkspaceBaseSpec::RemoteDefault,
+            credential: None,
+        };
+        prepare_source_commit(
+            &tmp.path().join("mirrors"),
+            &root,
+            &input,
+            &commit,
+            Some("feature"),
+        )
+        .expect("prepare");
+        let worktree = tmp.path().join("handoff");
+        let output = git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                worktree.to_str().unwrap(),
+                &commit,
+            ],
+        )
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("feature.txt")).unwrap(),
+            "new\n"
+        );
+
+        let missing = prepare_source_commit(
+            &tmp.path().join("mirrors"),
+            &root,
+            &input,
+            &"3".repeat(40),
+            Some("feature"),
+        )
+        .unwrap_err();
+        assert!(
+            missing.starts_with("code_snapshot_base_unavailable"),
+            "{missing}"
+        );
+    }
+
+    #[test]
     fn origin_is_the_mirror_and_upstream_is_the_real_remote() {
         // The inversion this module exists for. `fetch_origin_throttled` runs
         // `git fetch origin` with no credential, so `origin` has to be the
@@ -381,8 +511,8 @@ mod tests {
 
         let origin = remote_url_of(&root, "origin");
         assert_eq!(
-            std::fs::canonicalize(&origin).unwrap(),
-            std::fs::canonicalize(&supplied.mirror_path).unwrap(),
+            origin,
+            cognia_git_mirror::file_url(Path::new(&supplied.mirror_path)),
             "origin must be the mirror, not the network"
         );
         assert_eq!(

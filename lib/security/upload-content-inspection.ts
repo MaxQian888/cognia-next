@@ -1,3 +1,4 @@
+import { Gunzip } from "fflate"
 import { getFilenameExtension } from "@cognia/document/support-matrix"
 
 export type UploadContentInspectionCode = "malicious_content" | "unsafe_archive" | "type_mismatch"
@@ -178,6 +179,189 @@ function inspectZip(bytes: Uint8Array): ZipIndex {
   return { names }
 }
 
+const TAR_BLOCK = 512
+
+function tarText(bytes: Uint8Array, start: number, length: number): string {
+  const field = bytes.subarray(start, start + length)
+  const end = field.indexOf(0)
+  return new TextDecoder("utf-8").decode(end === -1 ? field : field.subarray(0, end))
+}
+
+function tarOctal(bytes: Uint8Array, start: number, length: number): number {
+  // A leading 0x80 is GNU's base-256 form, only needed past 8 GiB: no entry
+  // this inspector accepts is that large.
+  if ((bytes[start] ?? 0) & 0x80) throw new UploadContentInspectionError("unsafe_archive")
+  const text = tarText(bytes, start, length).trim()
+  if (text === "") return 0
+  if (!/^[0-7]+$/.test(text)) throw new UploadContentInspectionError("unsafe_archive")
+  return Number.parseInt(text, 8)
+}
+
+function tarHeaderChecksumOk(header: Uint8Array): boolean {
+  let sum = 0
+  for (let index = 0; index < TAR_BLOCK; index++) {
+    sum += index >= 148 && index < 156 ? 0x20 : (header[index] ?? 0)
+  }
+  return sum === tarOctal(header, 148, 8)
+}
+
+/** `path` and `linkpath` from a pax extended header. */
+function paxRecords(data: Uint8Array): Record<string, string> {
+  const records: Record<string, string> = {}
+  const text = new TextDecoder("utf-8").decode(data)
+  let offset = 0
+  while (offset < text.length) {
+    const space = text.indexOf(" ", offset)
+    if (space === -1) break
+    const length = Number.parseInt(text.slice(offset, space), 10)
+    if (!Number.isFinite(length) || length <= 0) {
+      throw new UploadContentInspectionError("unsafe_archive")
+    }
+    const record = text.slice(space + 1, offset + length - 1)
+    const equals = record.indexOf("=")
+    if (equals > 0) records[record.slice(0, equals)] = record.slice(equals + 1)
+    offset += length
+  }
+  return records
+}
+
+/** Relative, without `..`, and (for a link target) not leading out of the archive. */
+function assertTarPathInside(path: string, linkTarget?: string): void {
+  const normalized = path.replaceAll("\\", "/")
+  const segments = normalized.split("/").filter((segment) => segment !== "" && segment !== ".")
+  if (
+    normalized.startsWith("/") ||
+    /^[a-z]:\//i.test(normalized) ||
+    segments.includes("..") ||
+    segments.length === 0
+  ) {
+    throw new UploadContentInspectionError("unsafe_archive")
+  }
+  if (linkTarget === undefined) return
+  const target = linkTarget.replaceAll("\\", "/")
+  if (target.startsWith("/") || /^[a-z]:\//i.test(target)) {
+    throw new UploadContentInspectionError("unsafe_archive")
+  }
+  let depth = segments.length - 1
+  for (const segment of target.split("/")) {
+    if (segment === "" || segment === ".") continue
+    depth += segment === ".." ? -1 : 1
+    if (depth < 0) throw new UploadContentInspectionError("unsafe_archive")
+  }
+}
+
+/**
+ * Walk a tar archive's headers: regular files, folders and symlinks that stay
+ * inside it only, within the same entry, size and per-entry caps as a zip.
+ * Pax and GNU long-name records are read for the names they carry.
+ */
+export function inspectTar(bytes: Uint8Array): { names: string[] } {
+  const names: string[] = []
+  let total = 0
+  let offset = 0
+  let pending: { path?: string; linkpath?: string } = {}
+  while (offset + TAR_BLOCK <= bytes.byteLength) {
+    const header = bytes.subarray(offset, offset + TAR_BLOCK)
+    if (header.every((byte) => byte === 0)) return { names }
+    if (!tarHeaderChecksumOk(header)) throw new UploadContentInspectionError("unsafe_archive")
+    const size = tarOctal(header, 124, 12)
+    const type = String.fromCharCode(header[156] ?? 0)
+    const dataStart = offset + TAR_BLOCK
+    const dataEnd = dataStart + size
+    if (dataEnd > bytes.byteLength) throw new UploadContentInspectionError("unsafe_archive")
+    offset = dataStart + Math.ceil(size / TAR_BLOCK) * TAR_BLOCK
+
+    if (type === "x" || type === "L" || type === "K") {
+      if (size > 1024 * 1024) throw new UploadContentInspectionError("unsafe_archive")
+      const data = bytes.subarray(dataStart, dataEnd)
+      if (type === "x") {
+        const records = paxRecords(data)
+        pending = {
+          ...pending,
+          ...(records.path !== undefined ? { path: records.path } : {}),
+          ...(records.linkpath !== undefined ? { linkpath: records.linkpath } : {}),
+        }
+      } else {
+        const text = tarText(data, 0, data.byteLength)
+        pending = type === "L" ? { ...pending, path: text } : { ...pending, linkpath: text }
+      }
+      continue
+    }
+    // A global pax header changes defaults, never a name.
+    if (type === "g") continue
+
+    const prefix = tarText(header, 345, 155)
+    const headerName = tarText(header, 0, 100)
+    const name = pending.path ?? (prefix ? `${prefix}/${headerName}` : headerName)
+    const linkName = pending.linkpath ?? tarText(header, 157, 100)
+    pending = {}
+    if (type === "0" || type === "\0" || type === "7") {
+      assertTarPathInside(name)
+      if (size > MAX_ARCHIVE_ENTRY_BYTES) throw new UploadContentInspectionError("unsafe_archive")
+      total += size
+    } else if (type === "5") {
+      assertTarPathInside(name)
+    } else if (type === "2") {
+      assertTarPathInside(name, linkName)
+    } else {
+      // Hard links, devices and FIFOs: nothing an upload needs, and each can
+      // turn an unpack into a write somewhere else.
+      throw new UploadContentInspectionError("unsafe_archive")
+    }
+    names.push(name.toLowerCase())
+    if (names.length > MAX_ARCHIVE_ENTRIES || total > MAX_ARCHIVE_UNCOMPRESSED_BYTES) {
+      throw new UploadContentInspectionError("unsafe_archive")
+    }
+  }
+  // Ran out of bytes without the two zero blocks that end an archive.
+  if (offset !== bytes.byteLength || names.length === 0) {
+    throw new UploadContentInspectionError("unsafe_archive")
+  }
+  return { names }
+}
+
+/** Inflate a gzip stream, refusing past the archive cap as it goes. */
+function gunzipCapped(bytes: Uint8Array): Uint8Array {
+  const chunks: Uint8Array[] = []
+  let total = 0
+  const gunzip = new Gunzip((chunk) => {
+    total += chunk.byteLength
+    if (total > MAX_ARCHIVE_UNCOMPRESSED_BYTES + 1024 * 1024) {
+      throw new UploadContentInspectionError("unsafe_archive")
+    }
+    chunks.push(chunk)
+  })
+  try {
+    const step = 64 * 1024
+    for (let start = 0; start < bytes.byteLength; start += step) {
+      const end = Math.min(bytes.byteLength, start + step)
+      gunzip.push(bytes.subarray(start, end), end === bytes.byteLength)
+    }
+  } catch (error) {
+    if (error instanceof UploadContentInspectionError) throw error
+    throw new UploadContentInspectionError("unsafe_archive")
+  }
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const chunk of chunks) {
+    out.set(chunk, at)
+    at += chunk.byteLength
+  }
+  return out
+}
+
+function isTarName(name: string): boolean {
+  return /\.tar$/i.test(name)
+}
+
+function isGzippedTarName(name: string): boolean {
+  return /\.(tgz|tar\.gz)$/i.test(name)
+}
+
+function hasUstarMagic(bytes: Uint8Array): boolean {
+  return tarText(bytes, 257, 5) === "ustar"
+}
+
 function mediaTypeForZip(name: string, names: readonly string[]): string {
   if (names.some((entry) => entry.endsWith("vbaproject.bin"))) {
     throw new UploadContentInspectionError("malicious_content")
@@ -228,6 +412,22 @@ export function inspectUploadContent(input: {
   }
   if (OOXML_MEDIA_TYPES[extension] || ODF_MEDIA_TYPES[extension]) {
     throw new UploadContentInspectionError("type_mismatch")
+  }
+
+  // Tar, plain or gzipped (ADR-0224 A11b): checked like a zip, entry by entry.
+  if (isGzippedTarName(input.name)) {
+    if (!startsWith(input.bytes, [0x1f, 0x8b])) {
+      throw new UploadContentInspectionError("type_mismatch")
+    }
+    inspectTar(gunzipCapped(input.bytes))
+    return { mediaType: "application/gzip", archive: true }
+  }
+  if (isTarName(input.name) || hasUstarMagic(input.bytes)) {
+    if (!isTarName(input.name) || !hasUstarMagic(input.bytes)) {
+      throw new UploadContentInspectionError("type_mismatch")
+    }
+    inspectTar(input.bytes)
+    return { mediaType: "application/x-tar", archive: true }
   }
 
   const oleType = OLE_MEDIA_TYPES[extension]

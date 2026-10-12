@@ -459,6 +459,41 @@ describe("thread handoff ownership protocol", () => {
     expect((await getDb().sessions.get("session-target"))?.handoffLock).toBeUndefined()
   })
 
+  it("binds the continued session to the workspace and checkout this host resolved (ADR-0224 A11b)", async () => {
+    const offered = await offerThreadHandoff(ticket(), 200)
+    await acceptThreadHandoff(
+      {
+        ticket: {
+          ...offered,
+          role: "target",
+          target: { ...offered.target, sessionId: "session-bound" },
+          preflight: { ok: true, blockers: [], achievableFidelity: "structured", checkedAt: 300 },
+        },
+        envelope,
+      },
+      {
+        now: 400,
+        importSession: async (_envelope, sessionId) => {
+          await getDb().sessions.put({
+            id: sessionId,
+            title: "Thread",
+            createdAt: 400,
+            updatedAt: 400,
+          })
+        },
+        workspaceBinding: {
+          projectId: "workspace-main",
+          workingDir: "/srv/cognia/executions/handoffs/one/apps/web",
+        },
+      }
+    )
+    await expect(getDb().sessions.get("session-bound")).resolves.toMatchObject({
+      projectId: "workspace-main",
+      workingDir: "/srv/cognia/executions/handoffs/one/apps/web",
+      handoffLock: { state: "frozen" },
+    })
+  })
+
   it("never unfreezes a source without proof that the target did not accept", async () => {
     await offerThreadHandoff(ticket(), 200)
     await expect(

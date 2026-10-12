@@ -57814,6 +57814,27 @@
     },
     "source": {
       "available": "可用于 standalone 接力",
+      "codeCompleted": "已带着代码在 {host} 上继续。",
+      "codeCompletedBranch": "已带着代码在 {host} 上继续，分支为 {branch}。",
+      "codeFailure": {
+        "base-unavailable": "{host} 无法获取这份副本所基于的提交。请先推送后重试。",
+        "consent": "请在 {host} 上批准请求后重试。",
+        "integrity": "上传的数据已损坏，请重试。",
+        "no-remote": "{host} 没有可以起步的仓库。请为此工作区记录一个 https 远程地址，或先推送。",
+        "no-working-directory": "此对话没有可移交的工作文件夹。",
+        "other": "无法移交代码。没有任何内容被移交。",
+        "too-large": "工作副本超过了 {host} 接受的大小。请先提交并推送，或调高该 host 的上限。",
+        "tree-mismatch": "{host} 上的副本与本机不一致，已丢弃。没有任何内容被移交。",
+        "unsafe-archive": "{host} 拒绝了该归档：其中有内容指向文件夹之外。"
+      },
+      "codeProgress": {
+        "apply": "{host} 正在检出代码…",
+        "approving": "正在等待 {host} 上的批准…",
+        "conversation": "正在移交对话…",
+        "snapshot": "正在打包工作副本…",
+        "upload": "正在上传 {sent} / {total}…",
+        "workspace": "正在发送工作区…"
+      },
       "committedReadonly": "所有权已成功转移；此源副本永久只读。",
       "continue": "冻结并在该设备继续",
       "description": "选择已配对的独立设备或已配置的 Host。所有权转移前会冻结当前副本。",
@@ -57837,7 +57858,10 @@
         "paused": "配对已暂停。",
         "revoked": "配对已撤销。",
         "standalone-required": "请打开 standalone BYOK 模式并重新连接，以便设备上报 thread-handoff-v1。"
-      }
+      },
+      "withCode": "带上代码",
+      "withCodeDescription": "移交当前工作副本，包括未提交的改动。{host} 会在它的全新检出中继续。",
+      "withCodeUnsupported": "请更新 {host} 后再带上代码。"
     }
   },
   "toolCatalog": {

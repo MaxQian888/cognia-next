@@ -21,7 +21,9 @@ import {
   type AcceptedThreadHandoffProof,
   type SourceCommitProof,
   type ThreadHandoffPreflightEnvironment,
+  type ThreadHandoffWorkspaceBinding,
 } from "./service"
+import type { CodeCheckout } from "@/lib/task-workspace/types"
 
 export const THREAD_HANDOFF_COMMANDS = [
   "thread_handoff_offer",
@@ -99,9 +101,50 @@ export async function buildThreadHandoffPreflightEnvironment(
   }
 }
 
+/** What binding a continued session needs from this host. */
+export interface ThreadHandoffBindingSources {
+  projectExists(projectId: string): Promise<boolean>
+  checkout(checkoutId: string): Promise<CodeCheckout | null>
+}
+
+/**
+ * Where the continued session belongs here (ADR-0224 A11b): the workspace the
+ * ticket names when this host has it, and the checkout its code became, which
+ * this host looks up by id. A ticket that names a checkout this host does not
+ * hold is refused rather than continued without its code.
+ */
+export async function resolveThreadHandoffWorkspaceBinding(
+  ticket: ThreadHandoffTicket,
+  sources: ThreadHandoffBindingSources = defaultThreadHandoffBindingSources()
+): Promise<ThreadHandoffWorkspaceBinding> {
+  const workspaceRef = ticket.project.workspaceRef
+  const projectId =
+    workspaceRef && (await sources.projectExists(workspaceRef)) ? workspaceRef : undefined
+  const checkoutId = ticket.project.codeCheckout?.checkoutId
+  if (!checkoutId) return projectId ? { projectId } : {}
+  const checkout = await sources.checkout(checkoutId)
+  if (!checkout) throw new Error("thread_handoff_code_checkout_missing")
+  if (checkout.projectId && checkout.projectId !== (projectId ?? null)) {
+    throw new Error("thread_handoff_code_checkout_workspace_mismatch")
+  }
+  return { ...(projectId ? { projectId } : {}), workingDir: checkout.workingDir }
+}
+
+export function defaultThreadHandoffBindingSources(): ThreadHandoffBindingSources {
+  return {
+    projectExists: async (projectId) =>
+      (await getAllProjects()).some((project) => project.id === projectId),
+    checkout: async (checkoutId) => {
+      const { getCodeCheckout } = await import("@/lib/task-workspace/client")
+      return getCodeCheckout(checkoutId)
+    },
+  }
+}
+
 export interface ThreadHandoffHostDispatchDependencies {
   importSession: (envelope: CanonicalSession, sessionId: string) => Promise<void>
   preflightEnvironment?: (ticket: ThreadHandoffTicket) => Promise<ThreadHandoffPreflightEnvironment>
+  bindingSources?: ThreadHandoffBindingSources
   now?: () => number
 }
 
@@ -132,12 +175,17 @@ export async function dispatchThreadHandoffCommand(
         deps.preflightEnvironment ?? buildThreadHandoffPreflightEnvironment
       )(offered)
       const preflight = preflightThreadHandoff(offered, environment, now)
+      // Resolved here, from this host's own rows, before anything is
+      // imported: a checkout id that does not resolve refuses the accept.
+      const workspaceBinding = preflight.ok
+        ? await resolveThreadHandoffWorkspaceBinding(offered, deps.bindingSources)
+        : undefined
       return acceptThreadHandoff(
         {
           ticket: { ...offered, preflight },
           envelope: payload.envelope as CanonicalSession,
         },
-        { now, importSession: deps.importSession }
+        { now, importSession: deps.importSession, workspaceBinding }
       )
     }
     case "thread_handoff_commit": {

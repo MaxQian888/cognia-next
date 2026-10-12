@@ -140,6 +140,24 @@ describe("validateThreadHandoffTicket", () => {
     expect(validateThreadHandoffTicket(makeTicket(overrides))).toContain(expected)
   })
 
+  it("accepts a code checkout id and refuses anything else in its place (ADR-0224 A11b)", () => {
+    const checkoutId = "0190e0e0-1111-7222-8333-444455556666"
+    expect(
+      validateThreadHandoffTicket(makeTicket({ project: { codeCheckout: { checkoutId } } }))
+    ).toEqual([])
+    for (const codeCheckout of [
+      { checkoutId: "/srv/executions/handoffs/x" },
+      { checkoutId: "" },
+      "0190e0e0-1111-7222-8333-444455556666",
+    ]) {
+      expect(
+        validateThreadHandoffTicket(
+          makeTicket({ project: { codeCheckout: codeCheckout as never } })
+        )
+      ).toContain("project.codeCheckout.checkoutId must be a checkout id")
+    }
+  })
+
   describe("host refs", () => {
     it("requires source and target", () => {
       const errors = validateThreadHandoffTicket(

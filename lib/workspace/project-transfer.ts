@@ -14,6 +14,11 @@
  * both places, its folders and its repository. Conversations, knowledge files
  * and settings stay where they are. The Default workspace never moves: every
  * device has its own under the same id.
+ *
+ * A conversation continued on the host (A11b) takes its workspace too, with or
+ * without a repository: its code travels as a snapshot, so the copy only has
+ * to exist for the conversation to belong to it. Such a copy without a
+ * repository leaves the host's existing repository alone.
  */
 
 import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
@@ -33,7 +38,8 @@ export interface TransferredProject {
   name: string
   description?: string
   roots: Pick<WorkspaceRoot, "path" | "label" | "isPrimary">[]
-  repository: ProjectRepository
+  /** Absent only on the copy a continued conversation takes along. */
+  repository?: ProjectRepository
 }
 
 export interface ProjectMutateArgs {
@@ -58,6 +64,19 @@ export function canTransferProject(
 /** The host's copy of `project`; `null` for one that cannot go. */
 export function transferredProject(project: Project): TransferredProject | null {
   if (!canTransferProject(project)) return null
+  return copyOf(project)
+}
+
+/**
+ * The copy a conversation continued on the host takes along (A11b): any
+ * workspace but the Default one, which every device has already.
+ */
+export function handoffProject(project: Project): TransferredProject | null {
+  if (project.id === DEFAULT_PROJECT_ID) return null
+  return copyOf(project)
+}
+
+function copyOf(project: Project): TransferredProject {
   return {
     id: project.id,
     name: project.name,
@@ -67,7 +86,7 @@ export function transferredProject(project: Project): TransferredProject | null 
       ...(root.label ? { label: root.label } : {}),
       isPrimary: root.isPrimary,
     })),
-    repository: project.repository,
+    ...(project.repository ? { repository: project.repository } : {}),
   }
 }
 
@@ -114,7 +133,23 @@ export function parseProjectMutate(raw: unknown): ProjectMutateArgs {
     const label = text(root.label, `project.roots[${index}].label`, MAX_NAME, false)
     return { path, ...(label ? { label } : {}), isPrimary: root.isPrimary === true }
   })
-  const repository = (project.repository ?? {}) as Record<string, unknown>
+  const repository = parseRepository(project.repository)
+  return {
+    operation: "upsert",
+    operationId,
+    project: {
+      id,
+      name,
+      ...(description ? { description } : {}),
+      roots,
+      ...(repository ? { repository } : {}),
+    },
+  }
+}
+
+function parseRepository(raw: unknown): ProjectRepository | undefined {
+  if (raw === undefined || raw === null) return undefined
+  const repository = raw as Record<string, unknown>
   const remoteUrl = text(repository.remoteUrl, "project.repository.remoteUrl", MAX_PATH)!
   // Only the form a device records: https, no credential, nothing to normalize.
   if (repositoryRemoteUrl(remoteUrl) !== remoteUrl) {
@@ -124,17 +159,7 @@ export function parseProjectMutate(raw: unknown): ProjectMutateArgs {
   if (typeof capturedAt !== "number" || !Number.isFinite(capturedAt)) {
     throw new ProjectMutateError("project.repository.capturedAt must be a number")
   }
-  return {
-    operation: "upsert",
-    operationId,
-    project: {
-      id,
-      name,
-      ...(description ? { description } : {}),
-      roots,
-      repository: { remoteUrl, capturedAt },
-    },
-  }
+  return { remoteUrl, capturedAt }
 }
 
 /** The project store's writes `project_mutate` uses. */
@@ -182,7 +207,7 @@ export async function loadProjectMutateStore(): Promise<ProjectMutateStore> {
         name: project.name,
         description: project.description,
         roots: rootsOf(project),
-        repository: project.repository,
+        ...(project.repository ? { repository: project.repository } : {}),
       })
     },
     update: (project) => {
@@ -190,7 +215,8 @@ export async function loadProjectMutateStore(): Promise<ProjectMutateStore> {
         name: project.name,
         description: project.description,
         roots: rootsOf(project),
-        repository: project.repository,
+        // A copy without a repository says nothing about one: keep the host's.
+        ...(project.repository ? { repository: project.repository } : {}),
       })
     },
   }

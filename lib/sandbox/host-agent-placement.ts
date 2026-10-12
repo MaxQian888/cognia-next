@@ -180,31 +180,62 @@ export async function placeDispatchedAgent(
   await ensureHostAgentPlacement({ agentId, ...(cwd ? { cwd } : {}) }, manager)
 }
 
+/**
+ * A workspace's directories on this host besides its own folders: the clone
+ * of its repository when its folder is not here (ADR-0224 A11), and the
+ * checkout a conversation handed to this host with its code works in (A11b).
+ * A path in either belongs to the workspace, so a run there is placed by the
+ * workspace's environment rather than run on the host as if it had none.
+ */
+export function withHostRoots<T extends HostProject>(
+  projects: readonly T[],
+  extraRoots: (projectId: string) => readonly string[]
+): T[] {
+  return projects.map((project) => {
+    const known = new Set(project.roots.map((root) => root.path))
+    const extra = [...new Set(extraRoots(project.id))].filter((path) => !known.has(path))
+    if (extra.length === 0) return project
+    return {
+      ...project,
+      roots: [
+        ...project.roots,
+        ...extra.map((path, index) => ({ id: `host-root-${index}`, path, isPrimary: false })),
+      ],
+    }
+  })
+}
+
 export function defaultHostAgentPlacementSources(): HostAgentPlacementSources {
   return {
     isHost: isHeadlessHost,
     projects: async () => {
-      const [{ useProjectStore }, { knownHostRoots }] = await Promise.all([
+      const [{ useProjectStore }, { knownHostRoots }, { getDb }] = await Promise.all([
         import("@/stores/project/project-store"),
         import("@/lib/remote-host/code-supply/host-project-source"),
+        import("@/lib/db/schema"),
       ])
-      // A workspace whose folder is not here works in a clone of its
-      // repository (ADR-0224 A11); a path in that clone belongs to it too.
-      return useProjectStore.getState().projects.map((project) => {
-        const clones = knownHostRoots(project.id)
-        if (clones.length === 0) return project
-        return {
-          ...project,
-          roots: [
-            ...project.roots,
-            ...clones.map((path, index) => ({
-              id: `host-clone-${index}`,
-              path,
-              isPrimary: false,
-            })),
-          ],
-        }
-      })
+      const projects = useProjectStore.getState().projects
+      // Best-effort: a read that fails names no checkouts, and the clones
+      // still count.
+      const handedOver = await Promise.resolve()
+        .then(() =>
+          getDb()
+            .sessions.where("projectId")
+            .anyOf(projects.map((project) => project.id))
+            .filter((session) => session.handoffSource === "thread-handoff" && !!session.workingDir)
+            .toArray()
+        )
+        .catch(() => [])
+      const checkouts = new Map<string, string[]>()
+      for (const session of handedOver) {
+        const list = checkouts.get(session.projectId!) ?? []
+        list.push(session.workingDir!)
+        checkouts.set(session.projectId!, list)
+      }
+      return withHostRoots(projects, (projectId) => [
+        ...knownHostRoots(projectId),
+        ...(checkouts.get(projectId) ?? []),
+      ])
     },
     selection: async (projectId, environmentId) => {
       const { defaultRunEnvironmentSources } = await import("./run-environment")

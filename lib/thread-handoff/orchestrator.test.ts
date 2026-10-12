@@ -336,6 +336,68 @@ describe("remote Host handoff carrier", () => {
   })
 })
 
+describe("continuing with the code on an always-on host (ADR-0224 A11b)", () => {
+  beforeEach(async () => {
+    await getDb().threadHandoffTickets.clear()
+    await getDb().sessions.clear()
+    await getDb().messages.clear()
+  })
+
+  it("names the checkout in the offer and reuses the caller's admin lease", async () => {
+    const localSession = { id: "source", title: "With code", createdAt: 1, updatedAt: 1 }
+    await getDb().sessions.put(localSession)
+    const calls: string[] = []
+    let accepted: import("@cognia/agent-config-types/thread-handoff").ThreadHandoffTicket | null =
+      null
+    const leases: unknown[] = []
+    const call = jest.fn(async (name: string, args?: Record<string, unknown>) => {
+      calls.push(name)
+      if (name === "thread_handoff_preflight")
+        return { ok: true, blockers: [], achievableFidelity: "contextual", checkedAt: 1 }
+      if (name === "thread_handoff_accept") {
+        leases.push(args!.adminLease)
+        accepted = {
+          ...(args!
+            .ticket as import("@cognia/agent-config-types/thread-handoff").ThreadHandoffTicket),
+          state: "accepted",
+        }
+        return {
+          ticket: accepted,
+          proof: {
+            ticketId: accepted.ticketId,
+            state: "accepted",
+            targetHostRef: accepted.target.hostRef,
+            targetSessionId: accepted.target.sessionId,
+            sequenceDigest: accepted.continuation.sequenceDigest,
+          },
+        }
+      }
+      if (name === "thread_handoff_commit") {
+        leases.push(args!.adminLease)
+        return { ticket: { ...accepted, state: "committed" }, proof: { state: "committed" } }
+      }
+      throw new Error(`Unexpected ${name}`)
+    })
+    const openTarget = jest.fn(async () => ({
+      host: {},
+      transport: { call, subscribe: () => () => {} },
+      close: jest.fn(),
+    })) as never
+    const checkoutId = "0190e0e0-1111-7222-8333-444455556666"
+    const result = await startRemoteThreadHandoff(
+      localSession,
+      { hostRef: "always-on", kind: "desktop" },
+      100,
+      { openTarget, codeCheckout: { checkoutId }, adminLease: "lease-from-handover" }
+    )
+    expect(result.state).toBe("committed")
+    expect(result.project.codeCheckout).toEqual({ checkoutId })
+    expect(accepted!.project.codeCheckout).toEqual({ checkoutId })
+    expect(calls).not.toContain("host_admin_lease_issue")
+    expect(leases).toEqual(["lease-from-handover", "lease-from-handover"])
+  })
+})
+
 describe("remote Host recovery failures", () => {
   beforeEach(async () => {
     await getDb().threadHandoffTickets.clear()

@@ -57814,6 +57814,27 @@
     },
     "source": {
       "available": "Available for standalone handoff",
+      "codeCompleted": "Continued on {host} with the code.",
+      "codeCompletedBranch": "Continued on {host} with the code, on branch {branch}.",
+      "codeFailure": {
+        "base-unavailable": "{host} could not fetch the commit this copy starts from. Push it, then try again.",
+        "consent": "Approve the request on {host}, then try again.",
+        "integrity": "The upload arrived damaged. Try again.",
+        "no-remote": "{host} has no repository to start from. Record an https remote for this workspace, or push it first.",
+        "no-working-directory": "This conversation has no working folder to hand over.",
+        "other": "The code could not be handed over. Nothing moved.",
+        "too-large": "The working copy is larger than {host} accepts. Commit and push it, or raise the host's cap.",
+        "tree-mismatch": "The copy on {host} did not match this one, so it was discarded. Nothing moved.",
+        "unsafe-archive": "{host} refused the archive: it reached outside its folder."
+      },
+      "codeProgress": {
+        "apply": "{host} is checking out the code…",
+        "approving": "Waiting for approval on {host}…",
+        "conversation": "Handing over the conversation…",
+        "snapshot": "Packing the working copy…",
+        "upload": "Uploading {sent} of {total}…",
+        "workspace": "Sending the workspace…"
+      },
       "committedReadonly": "Ownership moved successfully. This source copy is permanently read-only.",
       "continue": "Freeze and continue there",
       "description": "Choose a paired standalone device or configured Host. This source freezes before ownership moves.",
@@ -57837,7 +57858,10 @@
         "paused": "Pairing is paused.",
         "revoked": "Pairing was revoked.",
         "standalone-required": "Open standalone BYOK mode and reconnect so the device can report thread-handoff-v1."
-      }
+      },
+      "withCode": "Bring the code",
+      "withCodeDescription": "Hands over the working copy, uncommitted changes included. {host} continues in a fresh checkout of it.",
+      "withCodeUnsupported": "Update {host} to bring the code along."
     }
   },
   "toolCatalog": {

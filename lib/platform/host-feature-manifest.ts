@@ -299,6 +299,21 @@ export const ALWAYS_ON_MIGRATION_HOST_OPERATIONS = Object.freeze([
 export const CODE_SUPPLY_HOST_OPERATIONS = Object.freeze(["project_mutate"] as const)
 
 /**
+ * The same feature's hand-over of a working copy (ADR-0224 A11b): what the
+ * host accepts, a chunked upload, and the apply that turns it into a checkout
+ * a continued conversation works in. Listed apart because only a conversation
+ * continued on the host needs them.
+ */
+export const CODE_SNAPSHOT_HOST_OPERATIONS = Object.freeze([
+  "code_snapshot_limits_get",
+  "code_snapshot_upload_open",
+  "code_snapshot_upload_write_chunk",
+  "code_snapshot_upload_commit",
+  "code_snapshot_upload_cancel",
+  "code_snapshot_apply",
+] as const)
+
+/**
  * The same feature's plugin transfer: a cogpack uploaded in chunks and
  * installed under the host's own signature and policy checks. Listed apart
  * because only an item whose plugins the host lacks needs it.
@@ -747,10 +762,12 @@ export function buildLocalHostFeatureManifest({
         ...ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS,
       ],
     }
-    // A workspace an item is bound to, sent with it (ADR-0224 A11).
+    // A workspace an item is bound to, sent with it (ADR-0224 A11), and a
+    // working copy a continued conversation hands over (A11b). The Rust arms
+    // are the same on every host.
     features["always-on.code-supply"] = {
       version: 1,
-      operations: [...CODE_SUPPLY_HOST_OPERATIONS],
+      operations: [...CODE_SUPPLY_HOST_OPERATIONS, ...CODE_SNAPSHOT_HOST_OPERATIONS],
     }
     // Both hosts seal secrets in the same store, through the same Rust arms.
     features["always-on.secrets"] = {

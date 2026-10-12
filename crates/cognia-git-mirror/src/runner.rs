@@ -62,6 +62,9 @@ pub struct GitRun<'a> {
     /// Keep stdout. Off by default because most callers only need the status,
     /// and a clone's stdout is noise.
     pub capture_stdout: bool,
+    /// Extra environment, set after the isolation (or credential) env. For a
+    /// variable git reads that has no `-c` form, such as `GIT_INDEX_FILE`.
+    pub env: Vec<(String, String)>,
 }
 
 impl<'a> GitRun<'a> {
@@ -72,6 +75,7 @@ impl<'a> GitRun<'a> {
             credential: None,
             budget: None,
             capture_stdout: false,
+            env: Vec::new(),
         }
     }
 
@@ -103,6 +107,11 @@ impl<'a> GitRun<'a> {
         self.capture_stdout = true;
         self
     }
+
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.push((key.into(), value.into()));
+        self
+    }
 }
 
 /// Run it. Blocking.
@@ -121,7 +130,7 @@ pub fn run_git(run: GitRun<'_>) -> Result<String, RunError> {
         Some((origin, credential)) => credential::auth_env(origin, credential),
         None => credential::isolation_env(),
     };
-    for (key, value) in env {
+    for (key, value) in env.into_iter().chain(run.env.iter().cloned()) {
         command.env(key, value);
     }
 
@@ -201,6 +210,19 @@ mod tests {
         let out = run_git(GitRun::new(dir.path(), &args(&["--version"])).capture_stdout())
             .expect("git --version");
         assert!(out.starts_with("git version"), "{out}");
+    }
+
+    #[test]
+    fn extra_env_reaches_the_git_it_runs() {
+        let dir = TempDir::new().unwrap();
+        let out = run_git(
+            GitRun::new(dir.path(), &args(&["var", "GIT_AUTHOR_IDENT"]))
+                .env("GIT_AUTHOR_NAME", "Mirror Probe")
+                .env("GIT_AUTHOR_EMAIL", "probe@example.com")
+                .capture_stdout(),
+        )
+        .expect("git var");
+        assert!(out.starts_with("Mirror Probe <probe@example.com>"), "{out}");
     }
 
     #[test]

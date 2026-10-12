@@ -1375,6 +1375,17 @@
         "quota": {},
         "snapshot": {}
       }
+    },
+    "code": {
+      "children": {
+        "snapshot": {
+          "children": {
+            "limits": {},
+            "upload": {},
+            "checkout": {}
+          }
+        }
+      }
     }
   }
 }

@@ -629,6 +629,81 @@ export interface ProjectSource {
   remoteUrl: string | null
 }
 
+/** `cognia_task_workspace::CodeSnapshotKind` (ADR-0224 A11b). */
+export type CodeSnapshotKind = "git-patch" | "tar"
+
+/**
+ * `cognia_task_workspace::CodeSnapshotManifest`: what a working copy handed
+ * to an always-on host amounts to. The host checks the bytes against
+ * `sha256` and, for git, the applied result against `tree`.
+ */
+export interface CodeSnapshotManifest {
+  kind: CodeSnapshotKind
+  sizeBytes: number
+  sha256: string
+  /** The commit the patch applies to: one the remote has. */
+  baseCommit: string | null
+  /** The remote branch that commit was found on. */
+  baseRef: string | null
+  /** The tree the working copy amounts to. */
+  tree: string | null
+  /** Where the working directory sits in the checkout, `/`-separated. */
+  subdir: string
+  /** Files the patch changes, or entries the tar holds. */
+  entries: number
+}
+
+/** `cognia_task_workspace::CreatedCodeSnapshot`. */
+export interface CreatedCodeSnapshot {
+  snapshotId: string
+  manifest: CodeSnapshotManifest
+  chunkBytes: number
+}
+
+/** `cognia_task_workspace::CodeSnapshotLimits`. */
+export interface CodeSnapshotLimits {
+  maxBytes: number
+  chunkBytes: number
+}
+
+/** `cognia_task_workspace::CodeSnapshotUpload`. */
+export interface CodeSnapshotUpload {
+  uploadId: string
+  snapshotId: string
+  chunkBytes: number
+  maxBytes: number
+}
+
+/** `cognia_task_workspace::CommittedCodeSnapshot`. */
+export interface CommittedCodeSnapshot {
+  snapshotId: string
+  sha256: string
+  sizeBytes: number
+}
+
+/** `cognia_task_workspace::ApplyCodeSnapshot`, as a device sends it. */
+export interface ApplyCodeSnapshot {
+  snapshotId: string
+  manifest: CodeSnapshotManifest
+  projectId?: string | null
+  roots?: string[]
+  remoteUrl?: string | null
+}
+
+/** `cognia_task_workspace::CodeCheckout`: a snapshot become a checkout on a host. */
+export interface CodeCheckout {
+  checkoutId: string
+  root: string
+  /** `root` plus the snapshot's `subdir`: where the conversation works. */
+  workingDir: string
+  kind: CodeSnapshotKind
+  branch: string | null
+  baseCommit: string | null
+  projectId: string | null
+  remoteUrl: string | null
+  createdAt: number
+}
+
 export interface RemoteSourceCheckout {
   /** The non-bare git root a bundle can now be acquired over. */
   sourceRoot: string

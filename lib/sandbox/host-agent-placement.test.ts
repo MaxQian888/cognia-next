@@ -4,6 +4,7 @@ jest.mock("./environment-outcome-message", () => ({
 
 import type { SandboxPlacementOutcome } from "./environment-placement"
 import {
+  withHostRoots,
   ensureHostAgentPlacement,
   placeDispatchedAgent,
   placeHostAgentRun,
@@ -225,5 +226,54 @@ describe("placeDispatchedAgent", () => {
     // No project holds this directory (the project store is empty here).
     await placeDispatchedAgent("a", "/tmp/elsewhere", m)
     expect(m.reconnect).toHaveBeenCalledWith("a")
+  })
+})
+
+describe("withHostRoots (ADR-0224 A11, A11b)", () => {
+  const project = {
+    id: "project-app",
+    roots: [{ id: "r1", path: "/Users/me/app", isPrimary: true }],
+  }
+
+  it("adds a workspace's clone and handed-over checkouts as roots, once each", () => {
+    const [withRoots] = withHostRoots([project], () => [
+      "/srv/sources/app",
+      "/srv/executions/handoffs/one",
+      "/srv/sources/app",
+      "/Users/me/app",
+    ])
+    expect(withRoots?.roots.map((root) => root.path)).toEqual([
+      "/Users/me/app",
+      "/srv/sources/app",
+      "/srv/executions/handoffs/one",
+    ])
+    expect(withRoots?.roots.slice(1).every((root) => !root.isPrimary)).toBe(true)
+  })
+
+  it("leaves a workspace with nothing extra untouched", () => {
+    const [same] = withHostRoots([project], () => [])
+    expect(same).toBe(project)
+  })
+
+  it("places a run in a handed-over checkout by its workspace, not on the host", async () => {
+    const place = jest.fn(async () => ({ kind: "placed" }) as never)
+    const runOnHost = jest.fn(async () => {})
+    const outcome = await placeHostAgentRun(
+      { agentId: "agent-1", cwd: "/srv/executions/handoffs/one/apps/web" },
+      {
+        isHost: () => true,
+        projects: async () => withHostRoots([project], () => ["/srv/executions/handoffs/one"]),
+        selection: async () => ({}) as never,
+        runEnvironment: async () => ({ selection: async () => ({}) }) as never,
+        place,
+        runOnHost,
+      }
+    )
+    expect(outcome.kind).toBe("resolved")
+    expect(place).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "project-app" }),
+      expect.anything()
+    )
+    expect(runOnHost).not.toHaveBeenCalled()
   })
 })

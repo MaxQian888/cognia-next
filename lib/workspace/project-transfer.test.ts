@@ -3,6 +3,7 @@ import type { Project } from "@/types"
 import {
   applyProjectMutate,
   canTransferProject,
+  handoffProject,
   parseProjectMutate,
   transferredProject,
   type ProjectMutateStore,
@@ -83,10 +84,27 @@ describe("parseProjectMutate", () => {
       args({}, { repository: { remoteUrl: "git@github.com:acme/app.git", capturedAt: 1 } }),
       args({}, { repository: { remoteUrl: "https://tok@github.com/acme/app.git", capturedAt: 1 } }),
       args({}, { repository: { remoteUrl: "https://github.com/acme/app.git" } }),
-      args({}, { repository: undefined }),
+      args({}, { repository: "https://github.com/acme/app.git" }),
     ]) {
       expect(() => parseProjectMutate(bad)).toThrow()
     }
+  })
+
+  it("accepts the copy a continued conversation takes, which may have no repository", () => {
+    const parsed = parseProjectMutate(args({}, { repository: undefined }))
+    expect(parsed.project.repository).toBeUndefined()
+    expect(parsed.project).not.toHaveProperty("repository")
+  })
+})
+
+describe("handoffProject", () => {
+  it("copies any workspace but the Default one, with or without a repository", () => {
+    expect(handoffProject(project({ repository: undefined }))).toEqual(
+      expect.objectContaining({ id: "project-app", roots: expect.any(Array) })
+    )
+    expect(handoffProject(project({ repository: undefined }))).not.toHaveProperty("repository")
+    expect(handoffProject(project())?.repository).toEqual(repository)
+    expect(handoffProject(project({ id: "project-default" }))).toBeNull()
   })
 })
 
@@ -117,5 +135,10 @@ describe("applyProjectMutate", () => {
     })
     expect(again.updated).toHaveLength(1)
     expect(again.created).toHaveLength(0)
+  })
+  it("never clears a repository the host has when the copy carries none", async () => {
+    const again = memoryStore(project())
+    await applyProjectMutate(args({}, { repository: undefined }), again.store)
+    expect(again.updated[0]).not.toHaveProperty("repository")
   })
 })

@@ -181,11 +181,23 @@ export interface AcceptedThreadHandoffProof {
   sequenceDigest: string
 }
 
+/**
+ * Where the continued session belongs on this host, as this host resolved it
+ * from the ticket (never as the ticket states it): the workspace it is filed
+ * under and, when its code came along (ADR-0224 A11b), the checkout it works
+ * in.
+ */
+export interface ThreadHandoffWorkspaceBinding {
+  projectId?: string
+  workingDir?: string
+}
+
 export async function acceptThreadHandoff(
   input: AcceptThreadHandoffInput,
   deps: {
     now?: number
     importSession: (envelope: CanonicalSession, sessionId: string) => Promise<void>
+    workspaceBinding?: ThreadHandoffWorkspaceBinding
   }
 ): Promise<{ ticket: ThreadHandoffTicket; proof: AcceptedThreadHandoffProof }> {
   assertTicket(input.ticket)
@@ -278,6 +290,7 @@ export async function acceptThreadHandoff(
       updatedAt: at,
       history,
     }
+    const binding = deps.workspaceBinding
     const updated = await db.sessions.update(sessionId, {
       handoffLock: {
         ticketId: next.ticketId,
@@ -286,6 +299,8 @@ export async function acceptThreadHandoff(
         targetSessionId: sessionId,
         at,
       },
+      ...(binding?.projectId ? { projectId: binding.projectId } : {}),
+      ...(binding?.workingDir ? { workingDir: binding.workingDir } : {}),
       updatedAt: at,
     })
     if (updated !== 1) throw new Error("thread_handoff_imported_session_missing")

@@ -8,7 +8,8 @@
 
 use cognia_task_workspace::{
     apply_revision_patch, read_confined_text, read_report_file, workspace_revision,
-    AcquireWorkspaceBundle, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn,
+    AcquireWorkspaceBundle, ApplyCodeSnapshot, CodeCheckout, CodeSnapshotLimits,
+    CodeSnapshotUpload, CommittedCodeSnapshot, CreateCodeSnapshot, CreatedCodeSnapshot, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn,
     BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffUndoOutcome, ConfinedFileRead,
     ConflictResolution, DownloadHandle, EnsureProjectSource, EnsureRemoteSource, PatchSelection,
     PatchSet, ProjectSource, PruneOutcome,
@@ -65,6 +66,11 @@ pub fn install(data_dir: PathBuf) -> Result<Arc<TaskWorkspaceService>, String> {
             .map_err(|error| format!("invalid COGNIA_TASK_WORKSPACE_RETENTION_DAYS: {error}"))?;
         config.retention = std::time::Duration::from_secs(days.saturating_mul(24 * 60 * 60));
     }
+    config.code_snapshot_max_bytes = cognia_task_workspace::code_snapshot_max_bytes_from(
+        std::env::var(cognia_task_workspace::CODE_SNAPSHOT_MAX_BYTES_ENV)
+            .ok()
+            .as_deref(),
+    )?;
     if let Ok(bytes) = std::env::var("COGNIA_TASK_WORKSPACE_MAX_BLOB_BYTES") {
         config.max_blob_bytes = bytes
             .parse::<u64>()
@@ -527,6 +533,85 @@ pub async fn task_workspace_project_source_ensure(
 ) -> Result<ProjectSource, String> {
     let input = with_stored_project_token(input);
     blocking(move |service| service.ensure_project_source(&input)).await
+}
+
+// ---------------------------------------------------------------------------
+// Working-copy snapshots (ADR-0224 A11b)
+// ---------------------------------------------------------------------------
+
+/// Snapshot a folder on this device for an always-on host: a binary patch
+/// against a commit its remote has, or a tar of a folder without git. The
+/// bytes stay on this device until read out with [`code_snapshot_read_chunk`].
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn code_snapshot_create(input: CreateCodeSnapshot) -> Result<CreatedCodeSnapshot, String> {
+    blocking(move |service| service.create_code_snapshot(&input)).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn code_snapshot_read_chunk(
+    snapshot_id: String,
+    offset: u64,
+) -> Result<TransferChunk, String> {
+    blocking(move |service| service.read_code_snapshot_chunk(&snapshot_id, offset)).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn code_snapshot_discard(snapshot_id: String) -> Result<(), String> {
+    blocking(move |service| service.discard_code_snapshot(&snapshot_id)).await
+}
+
+/// What this host accepts. Not a desktop command: a device pairing this host
+/// asks over the companion plane before it makes a snapshot.
+pub fn code_snapshot_limits_get() -> Result<CodeSnapshotLimits, String> {
+    Ok(service()?.code_snapshot_limits())
+}
+
+pub async fn code_snapshot_upload_open(
+    size_bytes: u64,
+    sha256: String,
+) -> Result<CodeSnapshotUpload, String> {
+    blocking(move |service| service.open_code_snapshot_upload(size_bytes, &sha256)).await
+}
+
+pub async fn code_snapshot_upload_write_chunk(
+    upload_id: String,
+    offset: u64,
+    data_base64: String,
+    chunk_hash: String,
+) -> Result<u64, String> {
+    blocking(move |service| {
+        service.write_code_snapshot_chunk(&upload_id, offset, &data_base64, &chunk_hash)
+    })
+    .await
+}
+
+pub async fn code_snapshot_upload_commit(upload_id: String) -> Result<CommittedCodeSnapshot, String> {
+    blocking(move |service| service.commit_code_snapshot_upload(&upload_id)).await
+}
+
+pub async fn code_snapshot_upload_cancel(upload_id: String) -> Result<(), String> {
+    blocking(move |service| service.cancel_code_snapshot_upload(&upload_id)).await
+}
+
+/// Turn a staged snapshot into a checkout here. The base commit is fetched
+/// with the git credential this host stored for the remote's host (ADR-0224
+/// A6), the same one the clone in [`task_workspace_project_source_ensure`]
+/// uses; a caller never sends one.
+pub async fn code_snapshot_apply(mut input: ApplyCodeSnapshot) -> Result<CodeCheckout, String> {
+    input.credential = with_stored_project_token(EnsureProjectSource {
+        roots: Vec::new(),
+        remote_url: input.remote_url.clone(),
+        credential: None,
+    })
+    .credential;
+    blocking(move |service| service.apply_code_snapshot(&input)).await
+}
+
+/// The checkout a handed-over conversation works in. Service-only: the brain
+/// binds the continued session to it, by id, so a path never arrives from
+/// another device.
+pub async fn code_snapshot_checkout_get(checkout_id: String) -> Result<Option<CodeCheckout>, String> {
+    blocking(move |service| service.code_checkout(&checkout_id)).await
 }
 
 /// [`with_stored_git_token`] for a project's remote.

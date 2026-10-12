@@ -123,6 +123,11 @@
       "category": "agents"
     },
     {
+      "id": "code",
+      "title": "Code",
+      "category": "development"
+    },
+    {
       "id": "codeserver",
       "title": "Code Server",
       "category": "development"
@@ -9140,6 +9145,546 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "code_snapshot_apply",
+      "category": "development",
+      "resource": "code",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "code_snapshot_apply (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Turn an uploaded snapshot into a checkout on this host (cognia_task_workspace::ApplyCodeSnapshot, ADR-0224 A11b). A git snapshot becomes a worktree of the project's repository on a new cognia/handoff branch, refused unless it rebuilds the desktop's tree. The host's stored git credential is used; one sent here is ignored.",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "snapshotId": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "manifest": {
+                "type": "object",
+                "description": "What the desktop recorded about the snapshot (cognia_task_workspace::CodeSnapshotManifest).",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "git-patch",
+                      "tar"
+                    ]
+                  },
+                  "sizeBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "baseCommit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                  },
+                  "baseRef": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 255
+                  },
+                  "tree": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                  },
+                  "subdir": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "entries": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "kind",
+                  "sizeBytes",
+                  "sha256",
+                  "baseCommit",
+                  "baseRef",
+                  "tree",
+                  "subdir",
+                  "entries"
+                ],
+                "additionalProperties": false
+              },
+              "projectId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              },
+              "roots": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              },
+              "remoteUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "snapshotId",
+              "manifest"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "description": "A checkout a snapshot became on this host.",
+        "properties": {
+          "baseCommit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "branch": {
+            "description": "The branch the worktree is on. Git only.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checkoutId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "Epoch milliseconds.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "const": "git-patch",
+                "description": "A binary patch against a commit the remote has.",
+                "type": "string"
+              },
+              {
+                "const": "tar",
+                "description": "A gzip tar of a folder that is not a git checkout.",
+                "type": "string"
+              }
+            ]
+          },
+          "projectId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remoteUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "root": {
+            "description": "The checkout's root.",
+            "type": "string"
+          },
+          "workingDir": {
+            "description": "Where the conversation works: `root` plus the snapshot's `subdir`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "baseCommit",
+          "branch",
+          "checkoutId",
+          "createdAt",
+          "kind",
+          "projectId",
+          "remoteUrl",
+          "root",
+          "workingDir"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "code_snapshot_checkout_get",
+      "category": "development",
+      "resource": "code",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "structural",
+      "summary": "code_snapshot_checkout_get (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "The checkout a handed-over conversation works in (ADR-0224 A11b). Service plane only: the brain resolves it by id, so no device names a path on this host.",
+        "required": [
+          "checkoutId"
+        ],
+        "properties": {
+          "checkoutId": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "description": "A checkout a snapshot became on this host.",
+            "properties": {
+              "baseCommit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "branch": {
+                "description": "The branch the worktree is on. Git only.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "checkoutId": {
+                "type": "string"
+              },
+              "createdAt": {
+                "description": "Epoch milliseconds.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "kind": {
+                "oneOf": [
+                  {
+                    "const": "git-patch",
+                    "description": "A binary patch against a commit the remote has.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "tar",
+                    "description": "A gzip tar of a folder that is not a git checkout.",
+                    "type": "string"
+                  }
+                ]
+              },
+              "projectId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "remoteUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "root": {
+                "description": "The checkout's root.",
+                "type": "string"
+              },
+              "workingDir": {
+                "description": "Where the conversation works: `root` plus the snapshot's `subdir`.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "baseCommit",
+              "branch",
+              "checkoutId",
+              "createdAt",
+              "kind",
+              "projectId",
+              "remoteUrl",
+              "root",
+              "workingDir"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "code_snapshot_limits_get",
+      "category": "development",
+      "resource": "code",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "code_snapshot_limits_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "What a working-copy snapshot may weigh on this host (ADR-0224 A11b).",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "description": "What a host accepts.",
+        "properties": {
+          "chunkBytes": {
+            "format": "uint",
+            "maximum": 65536,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxBytes": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chunkBytes",
+          "maxBytes"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "code_snapshot_upload_cancel",
+      "category": "development",
+      "resource": "code",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "code_snapshot_upload_cancel (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "code_snapshot_upload_commit",
+      "category": "development",
+      "resource": "code",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "code_snapshot_upload_commit (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "sha256": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "snapshotId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256",
+          "sizeBytes",
+          "snapshotId"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "code_snapshot_upload_open",
+      "category": "development",
+      "resource": "code",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "code_snapshot_upload_open (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sizeBytes",
+          "sha256"
+        ],
+        "properties": {
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "chunkBytes": {
+            "format": "uint",
+            "maximum": 65536,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxBytes": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "snapshotId": {
+            "type": "string"
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunkBytes",
+          "maxBytes",
+          "snapshotId",
+          "uploadId"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "code_snapshot_upload_write_chunk",
+      "category": "development",
+      "resource": "code",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "code_snapshot_upload_write_chunk (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId",
+          "offset",
+          "dataBase64",
+          "chunkHash"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dataBase64": {
+            "type": "string"
+          },
+          "chunkHash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "integer"
       },
       "outputTyped": true
     },
@@ -50174,8 +50719,7 @@
             "required": [
               "id",
               "name",
-              "roots",
-              "repository"
+              "roots"
             ],
             "additionalProperties": false
           }
@@ -78093,5 +78637,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "34f5b7a9899fb32e7d52a95ee401afae46d796600c53e4d4b4d52dbe69b4d1ea"
+  "catalogHash": "533a1c7d7e6fa22db430143dc51179998208e05dfe8d91441c834ad54e0c5f61"
 }

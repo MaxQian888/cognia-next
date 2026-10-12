@@ -97,6 +97,9 @@ This fixes a present defect (two events in the same second collapse into one run
 - A project gains its repository remote. The host clones it through the shared mirror cache (ADR-0176) with a credential sent from the user's device.
 - Projects do not sync between devices. Work bound to a project moves to the host together with a copy of the project that holds only its name, folders and repository remote. The Default project never moves.
 - A **snapshot handoff** carries local work: the base commit plus a binary-safe diff of uncommitted changes (tracked, untracked, deletions, modes), or a size-capped archive for a project without git. The host applies it to a fresh task checkout and refuses on a base mismatch.
+  - The base is the merge-base of `HEAD` with a branch the remote has, so unpushed commits travel inside the diff and nothing is pushed first. The diff is taken against the tree a scratch index holds after `git add -A`, and that tree id travels with it: the host rebuilds the tree the same way and refuses any result that differs.
+  - It is the code half of continuing a conversation on the host. The conversation moves by the existing thread handoff (ADR-0103), which names the checkout by an id the host issued; the host binds the continued session to it and no path crosses. One admin lease covers every step.
+  - A checkout derived from a blobless mirror has no file contents to check out until the mirror fetches them, with the credential, for the commit asked for. The mirror does that before every derive and every handoff base.
 - Results come back as a pushed branch or a patch set. The desktop applies either with one action into a new worktree.
 
 ### Secrets travel over the paired channel and are sealed on the host

@@ -100,6 +100,8 @@ export async function buildThreadHandoffOffer(
     messages?: readonly UIMessage[]
     deployments?: Awaited<ReturnType<typeof listDeploymentProfiles>>
     ticketId?: string
+    /** The checkout the working copy became on the target (ADR-0224 A11b). */
+    codeCheckout?: { checkoutId: string }
   } = {}
 ): Promise<ThreadHandoffOfferFrame> {
   if (session.collaboration) {
@@ -198,6 +200,7 @@ export async function buildThreadHandoffOffer(
       ...(session.projectId
         ? { sourceProjectId: session.projectId, workspaceRef: session.projectId }
         : {}),
+      ...(dependencies.codeCheckout ? { codeCheckout: dependencies.codeCheckout } : {}),
     },
     requirements: {
       capabilities: ["thread-handoff-v1", "thread-handoff-structured-v1"],
@@ -276,7 +279,17 @@ export async function startRemoteThreadHandoff(
   session: ChatSession,
   target: ThreadHandoffTarget,
   now = Date.now(),
-  dependencies: { openTarget?: typeof openRemoteHostTarget } = {}
+  dependencies: {
+    openTarget?: typeof openRemoteHostTarget
+    /** Continue in the checkout the working copy became there (ADR-0224 A11b). */
+    codeCheckout?: { checkoutId: string }
+    /**
+     * An admin lease the caller already holds that covers
+     * `thread_handoff_accept` and `thread_handoff_commit`, so continuing with
+     * the code asks the host's owner once rather than twice.
+     */
+    adminLease?: string
+  } = {}
 ): Promise<ThreadHandoffTicket> {
   if (session.collaboration)
     throw new Error("thread_handoff_shared_session_requires_executor_transfer")
@@ -298,10 +311,12 @@ export async function startRemoteThreadHandoff(
     }
     // A committed source never exports another transcript: retry only completes the target unlock.
     if (source?.state === "committed") {
-      const lease = await remote.transport.call<{ token: string }>("host_admin_lease_issue", {
-        operations: ["thread_handoff_commit"],
-        ttlSeconds: 600,
-      })
+      const lease = dependencies.adminLease
+        ? { token: dependencies.adminLease }
+        : await remote.transport.call<{ token: string }>("host_admin_lease_issue", {
+            operations: ["thread_handoff_commit"],
+            ttlSeconds: 600,
+          })
       await client.commitTarget(
         source.ticketId,
         {
@@ -322,12 +337,10 @@ export async function startRemoteThreadHandoff(
     let frame: ThreadHandoffOfferFrame | undefined
     let targetTicket = existingTarget
     if (existingTarget?.state !== "accepted") {
-      frame = await buildThreadHandoffOffer(
-        session,
-        target,
-        now,
-        source ? { ticketId: source.ticketId } : {}
-      )
+      frame = await buildThreadHandoffOffer(session, target, now, {
+        ...(source ? { ticketId: source.ticketId } : {}),
+        ...(dependencies.codeCheckout ? { codeCheckout: dependencies.codeCheckout } : {}),
+      })
       if (source && source.continuation.sequenceDigest !== frame.envelope.header.sequenceDigest) {
         throw new Error("thread_handoff_source_digest_changed")
       }
@@ -364,10 +377,12 @@ export async function startRemoteThreadHandoff(
       targetTicket = { ...targetTicket, preflight }
     }
     if (!source || !targetTicket) throw new Error("thread_handoff_ticket_not_found")
-    const lease = await remote.transport.call<{ token: string }>("host_admin_lease_issue", {
-      operations: ["thread_handoff_accept", "thread_handoff_commit"],
-      ttlSeconds: 600,
-    })
+    const lease = dependencies.adminLease
+      ? { token: dependencies.adminLease }
+      : await remote.transport.call<{ token: string }>("host_admin_lease_issue", {
+          operations: ["thread_handoff_accept", "thread_handoff_commit"],
+          ttlSeconds: 600,
+        })
     const accepted =
       targetTicket.state === "accepted"
         ? {
