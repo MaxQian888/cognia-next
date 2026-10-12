@@ -132,11 +132,15 @@ RUN cargo build --release --locked --bin cognia-server \
 RUN cargo build --release --locked -p cognia-cli --bin cognia
 # Small initialization utility: available beside the server before any Node runtime.
 RUN cargo build --release --locked -p cognia-bootstrap-agent --bin cognia-bootstrap
-# The Brain layout shells out to this external-agent launcher. Build it in the
-# Rust stage and pass the artifact to brain-builder instead of installing a
-# second Rust toolchain in the Node stage. It lives in the Tauri-free
-# `cognia-exec-sandbox` (ADR-0196), not the UI-automation crate.
-RUN cargo build --release --locked -p cognia-exec-sandbox --bin cognia-external-agent-launcher
+# The Brain layout ships the native helpers the CLI refuses to run without
+# (`NATIVE_HOSTS` in scripts/build/ensure-native-hosts.mjs): the external-agent
+# launcher, the sandbox exec shim and the task-workspace worker. Build them in
+# the Rust stage and pass the artifacts to brain-builder instead of installing
+# a second Rust toolchain in the Node stage. The first two live in the
+# Tauri-free `cognia-exec-sandbox` (ADR-0196), not the UI-automation crate.
+RUN cargo build --release --locked -p cognia-exec-sandbox \
+      --bin cognia-external-agent-launcher --bin cognia-sandbox-exec \
+    && cargo build --release --locked -p cognia-task-workspace --bin cognia-task-workspace-worker
 
 # PR CI target: type/borrow-check the whole graph without codegen or linking.
 FROM deps AS check
@@ -227,7 +231,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 # Sources last; the bundle step reaches cli/ + lib/ + the wider @/* TS graph.
 COPY . .
-COPY --from=builder /work/target/release/cognia-external-agent-launcher ./target/release/cognia-external-agent-launcher
+COPY --from=builder /work/target/release/cognia-external-agent-launcher /work/target/release/cognia-sandbox-exec /work/target/release/cognia-task-workspace-worker ./target/release/
 RUN npm --prefix sidecar/webclone ci --no-audit --no-fund \
     && npm --prefix sidecar/webclone run build
 RUN npm --prefix sidecar/vscode-ext-host ci --no-audit --no-fund \
