@@ -268,6 +268,22 @@ unexpected_cfgs = { level = "deny", check-cfg = ['cfg(tokio_unstable)'] }
 # making every Tauri edit relink the full type/variable-level DWARF graph.
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
+# Cargo's default, stated because the profile is part of every artifact's
+# hash: a `CARGO_INCREMENTAL=0` run builds a second, parallel copy of each
+# workspace crate in the shared target dir instead of reusing this one.
+incremental = true
+
+# Crates outside the workspace carry no debug info. With `unpacked` split
+# debuginfo it lives in object files kept beside each library, which made up
+# ~2.4 GiB of `target/debug/deps`; their frames in a backtrace still name the
+# function, without file:line. `test` inherits this.
+[profile.dev.package."*"]
+debug = 0
+
+# Ours, but outside the workspace (a path dependency from the excluded
+# signaling server), so `"*"` above would cover it.
+[profile.dev.package.cognia-signaling-core]
+debug = "line-tables-only"
 
 [profile.dev.package.rten]
 opt-level = 3
@@ -281,6 +297,11 @@ opt-level = 3
 inherits = "dev"
 debug = "full"
 split-debuginfo = "unpacked"
+
+# `dev-full` is for stepping anywhere, so it keeps full DWARF in dependencies
+# too rather than inheriting `dev`'s `"*"` override.
+[profile.dev-full.package."*"]
+debug = "full"
 
 # Keep line-table debug info in release so the crash-report subsystem's
 # minidumps (`crash::monitor`) are symbolicable offline via `minidump-stackwalk`
