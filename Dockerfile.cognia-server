@@ -232,8 +232,10 @@ RUN apt-get update \
 # Sources last; the bundle step reaches cli/ + lib/ + the wider @/* TS graph.
 COPY . .
 COPY --from=builder /work/target/release/cognia-external-agent-launcher /work/target/release/cognia-sandbox-exec /work/target/release/cognia-task-workspace-worker ./target/release/
-RUN npm --prefix sidecar/webclone ci --no-audit --no-fund \
-    && npm --prefix sidecar/webclone run build
+# The prebuild script, not a bare `npm ci`: it builds @cognia/network-guard's
+# dist/ first, then installs it with --install-links as a physical copy (the
+# shape the lockfile records and the bundle layout needs).
+RUN node scripts/build/build-webclone-sidecar.mjs
 RUN npm --prefix sidecar/vscode-ext-host ci --no-audit --no-fund \
     && npm --prefix sidecar/vscode-ext-host run build
 RUN pnpm sidecar:codeserver-agent:build
