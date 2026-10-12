@@ -64,6 +64,24 @@ describe("PairInvitationBlock", () => {
     expect(screen.getByTestId("pair-reach-relay")).toBeInTheDocument()
   })
 
+  it("warns that redeeming the invitation makes the device an owner", async () => {
+    render(<PairInvitationBlock issue={async () => ({ ...base, relay })} />)
+    expect(screen.queryByTestId("pair-owner-warning")).not.toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button"))
+    })
+    expect(screen.getByTestId("pair-owner-warning")).toHaveTextContent("ownerWarning")
+  })
+
+  it("drops the owner warning once the invitation has expired", async () => {
+    render(<PairInvitationBlock issue={async () => ({ ...base, expiresAtMs: Date.now() - 1 })} />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button"))
+    })
+    expect(screen.getByText("expired")).toBeInTheDocument()
+    expect(screen.queryByTestId("pair-owner-warning")).not.toBeInTheDocument()
+  })
+
   it("explains the block instead of hiding the button", () => {
     reach.mockReturnValue({ available: false, block: "not-owner" })
     render(<PairInvitationBlock />)

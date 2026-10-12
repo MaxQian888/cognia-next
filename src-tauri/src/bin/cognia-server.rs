@@ -1399,6 +1399,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                 "[cognia-server] owner invitation tenant={tenant_id} expires_at={}",
                 now.saturating_add(ttl_seconds)
             );
+            eprintln!("[cognia-server] {OWNER_INVITATION_WARNING}");
             Ok(())
         }
         DevicesCommand::EnrollBrowser {
@@ -1723,6 +1724,19 @@ fn run_rotate_master_key(
     Ok(())
 }
 
+/// Printed next to every single-user owner invitation this binary hands out.
+///
+/// Whoever redeems one enrolls as an Owner device with the full default grant
+/// set (`default_capabilities_for_role` in `cognia-companion-security`), and
+/// the Host asks nobody to confirm. ADR-0153 §3 needs that — on a headless
+/// deployment the first paired device is the only administrator — so the
+/// invitation is an owner credential for its lifetime, and the operator is
+/// told so where it is printed. The desktop says the same beside its QR
+/// (`settings.connectivity.pairing.ownerWarning`).
+const OWNER_INVITATION_WARNING: &str = "Warning: whoever redeems this invitation becomes an owner \
+     of this Host (terminals, commands, secrets, host administration). Hand it only to your own \
+     device and do not share it. Narrow a device's grants afterwards with `cognia-server devices revoke`.";
+
 /// How `pair` asks for and prints an invitation.
 struct PairOptions {
     /// Port of the running server.
@@ -1847,6 +1861,7 @@ async fn run_pair(
                 "Scan or paste it on the app's pair screen. The device must reach {base_url} directly."
             );
         }
+        println!("\n{OWNER_INVITATION_WARNING}");
         return Ok(());
     }
 
@@ -1889,6 +1904,9 @@ async fn run_pair(
         "It has no relay room ({}): the device must reach {base_url} directly.",
         standalone_reason.as_deref().unwrap_or("no running server answered")
     );
+    if invitation.is_some() {
+        println!("\n{OWNER_INVITATION_WARNING}");
+    }
     Ok(())
 }
 
@@ -3479,6 +3497,50 @@ mod tests {
             panic!("expected a devices command");
         };
         run_devices_admin(command).await
+    }
+
+    /// Every single-user owner invitation this binary prints carries the owner
+    /// warning: `devices invite-owner`, `pair` through a running server
+    /// (cgnp4) and the standalone `pair` (cgnp3). Pinned at the source because
+    /// these paths print to a terminal no test captures, and a new print site
+    /// that forgets the warning is exactly the regression this guards.
+    #[test]
+    fn every_owner_invitation_print_site_carries_the_owner_warning() {
+        let source = include_str!("cognia-server.rs");
+        let body_of = |start: &str, end: &str| -> &str {
+            let tail = source
+                .split(start)
+                .nth(1)
+                .unwrap_or_else(|| panic!("missing {start}"));
+            tail.split(end).next().unwrap()
+        };
+        let invite_owner = body_of(
+            "DevicesCommand::InviteOwner {",
+            "DevicesCommand::EnrollBrowser {",
+        );
+        assert!(invite_owner.contains("eprintln!(\"[cognia-server] {OWNER_INVITATION_WARNING}\")"));
+        let pair = body_of("async fn run_pair(", "\n}\n");
+        let relay = pair.split("return Ok(());").next().unwrap();
+        assert!(
+            relay.contains("println!(\"\\n{OWNER_INVITATION_WARNING}\")"),
+            "the cgnp4 branch must warn before it returns"
+        );
+        assert!(pair.contains(
+            "if invitation.is_some() {\n        println!(\"\\n{OWNER_INVITATION_WARNING}\");"
+        ));
+    }
+
+    /// The warning names what an owner device can do, not just the role word:
+    /// "owner" alone does not tell an operator that a shell is on the table.
+    #[test]
+    fn owner_invitation_warning_names_the_dangerous_powers() {
+        for needle in ["owner", "terminals", "commands", "secrets", "do not share"] {
+            assert!(
+                super::OWNER_INVITATION_WARNING.contains(needle),
+                "warning lost {needle:?}: {}",
+                super::OWNER_INVITATION_WARNING
+            );
+        }
     }
 
     /// `cognia-server devices grant|revoke` writes the store directly, with no

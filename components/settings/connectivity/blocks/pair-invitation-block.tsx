@@ -7,15 +7,22 @@
  * the invitation may carry a relay room, in which case the payload is `cgnp4`
  * and the block says so, because that is the difference between "scan this on
  * the same Wi-Fi" and "scan this anywhere".
+ *
+ * In single-user mode whoever redeems the invitation enrolls as an Owner
+ * device with the full default grant set (`default_capabilities_for_role` in
+ * `crates/cognia-companion-security`), and nothing asks the Host to confirm.
+ * The QR is therefore an owner credential for its lifetime, and the block says
+ * so next to it rather than leaving that to the device console after the fact.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CloudIcon, QrCodeIcon, WifiIcon } from "lucide-react"
+import { CloudIcon, QrCodeIcon, ShieldAlertIcon, WifiIcon } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import { toast } from "sonner"
 
 import { SettingsBlock } from "@/components/settings/common/settings-block"
+import { SettingsAlert } from "@/components/settings/common/settings-section"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Surface } from "@/components/surface/surface"
@@ -152,6 +159,11 @@ export function PairInvitationBlock({
         >
           <QRCodeSVG value={qrPayload} size={224} level="M" aria-label={t("qrAria")} />
         </Surface>
+      ) : null}
+      {issue && qrPayload && !expired ? (
+        <SettingsAlert icon={<ShieldAlertIcon className="size-4" aria-hidden="true" />}>
+          <span data-testid="pair-owner-warning">{tc("ownerWarning")}</span>
+        </SettingsAlert>
       ) : null}
       {issue ? (
         <div className="space-y-1 text-[11px] text-muted-foreground">

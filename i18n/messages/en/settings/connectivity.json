@@ -118,7 +118,8 @@
     "reachRelay": "Anywhere",
     "reachDirect": "Same network",
     "reachRelayHint": "This invitation carries a relay room: the device may redeem it from any network, and the direct address is tried first.",
-    "reachDirectHint": "This invitation has no relay room: the device must reach the address above directly. Turn the relay on under Cloud & relay to pair from anywhere."
+    "reachDirectHint": "This invitation has no relay room: the device must reach the address above directly. Turn the relay on under Cloud & relay to pair from anywhere.",
+    "ownerWarning": "Whoever redeems this invitation becomes an owner of this Host: it can open terminals, run commands, manage secrets and administer the Host. Show it only to your own device and don't share it. You can narrow a device's grants afterwards in the device console."
   },
   "remoteHosts": {
     "registryTitle": "Registered hosts",
