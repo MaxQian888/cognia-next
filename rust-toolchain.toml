@@ -1,10 +1,11 @@
-# Workspace toolchain pin. `1.96` is the floor: Matrix SDK 0.19 and
-# Wasmtime 49 require Rust 1.96.
+# Workspace build toolchain, pinned to the current stable Rust release.
+# The MSRV remains 1.96: Matrix SDK 0.19 and Wasmtime 49 require Rust 1.96.
 # All workspace members + CI compile against this channel.
 #
 # Bumping: if cargo check fails on "requires rustc X.Y.Z", check the
 # Cargo.lock for the demanding crate and either downgrade it
 # (`cargo update -p <crate>@<ver> --precise <older>`) or bump this pin.
 [toolchain]
-channel = "1.96"
-components = ["rustfmt", "clippy", "rust-analyzer"]
+channel = "1.99"
+# Rust 1.99's macOS rust-lld loads the shared LLVM library from llvm-tools.
+components = ["rustfmt", "clippy", "rust-analyzer", "llvm-tools-preview"]

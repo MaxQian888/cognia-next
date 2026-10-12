@@ -278,7 +278,7 @@ cognia-next/
 | State / data          | Zustand 5, Dexie 4 + `dexie-react-hooks`, `zundo`, React Hook Form, Zod 4                                         |
 | Editor / viz          | React Flow, Monaco, CodeMirror, Mermaid, KaTeX, three / r3f, Recharts, `motion`                                   |
 | AI                    | Claude Agent SDK, Vercel AI SDK v7, `@ai-sdk/*`, MCP, ACP, Codex App Server, OpenCode V2, Pi RPC                  |
-| Desktop core          | Tauri 2.12, Rust 1.96+, `axum`, `tokio`, `rusqlite` + `sqlite-vec`, `webrtc-rs`, `wasmtime` 49, `keyring`, `git2` |
+| Desktop core          | Tauri 2.12, Rust 1.99+, `axum`, `tokio`, `rusqlite` + `sqlite-vec`, `webrtc-rs`, `wasmtime` 49, `keyring`, `git2` |
 | Mobile                | Capacitor 8 (iOS / Android), barcode scanner, biometric / secure-storage / voice-recorder plugins                 |
 | Sidecar               | Node 26+ ESM / TypeScript, agent host, VS Code extension host, page snapshots, and editor bridge                  |
 | Terminal / extensions | Ink / React TUI, WXT browser extension, JavaScript / Python / WASM plugin runtimes                                |
