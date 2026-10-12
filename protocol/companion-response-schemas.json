@@ -10459,6 +10459,43 @@
       ],
       "type": "object"
     },
+    "ProjectSource": {
+      "additionalProperties": false,
+      "properties": {
+        "remoteUrl": {
+          "description": "The repository cloned, when it is a clone.",
+          "type": ["string", "null"]
+        },
+        "root": {
+          "description": "The directory to work in.",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/ProjectSourceKind"
+        },
+        "standsFor": {
+          "description": "The folder of the project's own this root stands in for, when it is a\nclone: paths under that folder map to the same paths under `root`.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["remoteUrl", "root", "source", "standsFor"],
+      "type": "object"
+    },
+    "ProjectSourceKind": {
+      "description": "Where the root came from.",
+      "oneOf": [
+        {
+          "const": "local",
+          "description": "One of the project's own folders exists on this host.",
+          "type": "string"
+        },
+        {
+          "const": "clone",
+          "description": "A clone of the project's repository.",
+          "type": "string"
+        }
+      ]
+    },
     "Protocol": {
       "description": "A network protocol a credential speaks.",
       "enum": ["webdav", "sftp"],
@@ -13855,6 +13892,19 @@
     "project_environment_execute": {
       "$ref": "#/$defs/LegacyRecord"
     },
+    "project_mutate": {
+      "type": "object",
+      "description": "The workspace copy this host now holds.",
+      "required": ["id", "created"],
+      "properties": {
+        "id": { "type": "string" },
+        "created": {
+          "type": "boolean",
+          "description": "False when an earlier send already made it; its name, folders and repository were brought up to date."
+        }
+      },
+      "additionalProperties": false
+    },
     "provider_catalog_refresh": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -14452,6 +14502,9 @@
     },
     "task_workspace_record_tool_event": {
       "$ref": "#/$defs/ResourceEvent"
+    },
+    "task_workspace_project_source_ensure": {
+      "$ref": "#/$defs/ProjectSource"
     },
     "task_workspace_remote_source_ensure": {
       "$ref": "#/$defs/RemoteSourceCheckout"

@@ -42,6 +42,11 @@ import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 import { rebindWorkspaceSchedules } from "@/lib/workspace/rebind-workspace-schedules"
 
 export interface CreateProjectOptions {
+  /**
+   * Keep an id the workspace already has elsewhere: a copy of another
+   * device's workspace made on an always-on host (ADR-0224 A11).
+   */
+  id?: string
   name?: string
   description?: string
   systemPrompt?: string
@@ -51,6 +56,7 @@ export interface CreateProjectOptions {
   rootDir?: string
   additionalDirs?: string[]
   metadata?: Record<string, unknown>
+  repository?: Project["repository"]
 }
 
 export type ProjectUpdates = Partial<
@@ -198,7 +204,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           ? normalizeRoots(options.roots)
           : rootsFromLegacy(options.rootDir, options.additionalDirs)
       const base: Project = {
-        id: `project-${nanoid()}`,
+        id: options.id ?? `project-${nanoid()}`,
         name: options.name?.trim() || "New Project",
         description: options.description,
         customInstructions: options.systemPrompt,
@@ -213,6 +219,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         updatedAt: now,
         lastAccessedAt: now,
         metadata: options.metadata,
+        ...(options.repository ? { repository: options.repository } : {}),
       }
       // syncDerivedDirFields owns rootDir/additionalDirs — they mirror `roots`.
       const project = syncDerivedDirFields(base)

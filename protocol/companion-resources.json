@@ -1178,6 +1178,7 @@
             "managed": {},
             "patch_set": {},
             "policy": {},
+            "project_source": {},
             "resource": {},
             "resource_capture": {},
             "resource_event": {},

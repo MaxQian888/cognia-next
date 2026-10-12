@@ -30,7 +30,7 @@ import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
 import { detectHostProfile } from "@/lib/platform/capabilities"
-import { isCliHost } from "@/lib/platform/detect"
+import { isCliHost, isHeadlessHost } from "@/lib/platform/detect"
 import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import {
@@ -2352,7 +2352,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // (ahead of the system-prompt assembly) because project instruction discovery
   // below keys off it. The composer / settings UI resolve through the same
   // helper so what the user sees always matches what the send uses.
-  const cwd = resolveEffectiveCwd({
+  let cwd = resolveEffectiveCwd({
     sessionWorkingDir: session?.workingDir,
     // The durable execution binding wins over the workspace root: a
     // `managedWorktree` session is leased into a bundle alias, and everything
@@ -2367,6 +2367,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     characterWorkingDir: character?.workingDir,
     defaultWorkingDir: appSettings?.defaultWorkingDir,
   })
+  // On an always-on Host a workspace whose folder is not here runs in a clone
+  // of its repository (ADR-0224 A11); one it cannot supply fails the turn.
+  if (isHeadlessHost() && ctx.activeProject) {
+    const { hostWorkingDirectory } =
+      await import("@/lib/remote-host/code-supply/host-project-source")
+    cwd = await hostWorkingDirectory({ cwd, project: ctx.activeProject })
+  }
   if (cwd) opts.cwd = cwd
 
   // --- Project instruction files (CLAUDE.md / AGENTS.md / AGENT.md) --------

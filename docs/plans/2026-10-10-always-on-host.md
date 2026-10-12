@@ -338,6 +338,14 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
    - An optional PR action when an integration credential exists.
 7. Tests: producer coverage (binary, untracked, deletes, modes), receiver mismatch refusal, round trip.
 
+**Outcome so far (A11a).**
+
+- **Repository (item 1).** `Project.repository` (`{remoteUrl, capturedAt}`) is read on the desktop from the main folder's `origin` (else the first remote) by `ProjectRepositoryInitializer`, once after boot and again when a main folder changes. Only credential-free `https` remotes are kept (`lib/workspace/project-repository.ts`).
+  - Deviation: the plan read it from `run-environment.ts`. That runs per run on whichever device runs it; the host has no checkout to read, so the desktop records it ahead of time.
+- **Workspaces travel.** Projects do not sync, which is why the A5 migration refused work bound to a local folder. A project with a repository now goes with the work: `project_mutate` (feature `always-on.code-supply` v1, admin-leased) writes a copy holding only name, description, folders and repository (`lib/workspace/project-transfer.ts`). The migration notes `workspace-travels` instead of blocking, and its folders no longer count as machine-bound paths. The Default project never moves.
+- **Clone-on-dispatch (item 2).** The brain resolves a project's directory through the service-only `task_workspace_project_source_ensure`: its first folder that exists on the host, else a clone through the mirror cache with the A6 git token for that remote's host (`crates/cognia-task-workspace/src/project_source.rs`). `hostWorkingDirectory` (`lib/remote-host/code-supply/host-project-source.ts`) maps a working directory into the clone at every dispatch site: `resolveSendOptions`, `resolveSessionCwd`, the remote-run service and scheduled external-agent tasks; host agent placement recognises the clone as the project's root. A project it cannot supply fails the run.
+  - Deviation: the plan named `task_workspace_remote_source_ensure` directly. That one takes a single remote and no local folders, so the project-level command wraps it.
+
 ### A12 — End-to-end proof, desktop off
 
 A recorded run on a real BYO host (Compose on Linux, and the macOS daemon) with the desktop quit:

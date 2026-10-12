@@ -58,6 +58,10 @@ export const HOST_FEATURE_IDS = [
   // (ADR-0224 A6): provider keys and git tokens, listed by name only. Its
   // absence is what the device page reads as "update the host first".
   "always-on.secrets",
+  // A copy of the workspace an item moving here is bound to (ADR-0224 A11),
+  // so this host can clone its repository. Its absence leaves such an item
+  // blocked on the missing workspace, as before.
+  "always-on.code-supply",
   "workflow.execution",
   // Host-owned external-agent configurations. Its presence is what tells a
   // browser that this host can BE the authority for an external agent — that
@@ -286,6 +290,13 @@ export const ALWAYS_ON_MIGRATION_HOST_OPERATIONS = Object.freeze([
   "bot_installation_mutate",
   "adapter_instance_mutate",
 ] as const)
+
+/**
+ * Code supply (ADR-0224 A11): a copy of the workspace an item is bound to, so
+ * the host can clone its repository. Listed apart because a host from before
+ * it can still take work that names no workspace.
+ */
+export const CODE_SUPPLY_HOST_OPERATIONS = Object.freeze(["project_mutate"] as const)
 
 /**
  * The same feature's plugin transfer: a cogpack uploaded in chunks and
@@ -735,6 +746,11 @@ export function buildLocalHostFeatureManifest({
         ...ALWAYS_ON_MIGRATION_HOST_OPERATIONS,
         ...ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS,
       ],
+    }
+    // A workspace an item is bound to, sent with it (ADR-0224 A11).
+    features["always-on.code-supply"] = {
+      version: 1,
+      operations: [...CODE_SUPPLY_HOST_OPERATIONS],
     }
     // Both hosts seal secrets in the same store, through the same Rust arms.
     features["always-on.secrets"] = {

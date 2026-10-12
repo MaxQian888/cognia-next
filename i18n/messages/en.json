@@ -14130,7 +14130,8 @@
       "note": {
         "conversationAddressRelearned": "Replies to {conversationKey} resume once that chat next writes to the Bot.",
         "schedulesTravel": "{count, plural, one {Its scheduled message set up in a chat moves to {host} with it.} other {Its # scheduled messages set up in chats move to {host} with it.}}",
-        "secretTransferred": "The secret {name} is copied into {host}'s keychain."
+        "secretTransferred": "The secret {name} is copied into {host}'s keychain.",
+        "workspaceTravels": "Its workspace “{workspace}” goes along without its folders: {host} works in a clone of {remoteUrl}. For a private repository, store a git credential for its host in {host}'s Secrets first."
       },
       "place": {
         "here": "This device",

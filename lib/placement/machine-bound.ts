@@ -199,22 +199,23 @@ export function collectKeyringRefs(value: unknown, into: Set<string> = new Set()
   return into
 }
 
-function pathReasons(record: Record<string, unknown> | undefined): MachineBoundReason[] {
+function pathReasons(
+  record: Record<string, unknown> | undefined,
+  portable: (path: string) => boolean = () => false
+): MachineBoundReason[] {
   if (!record) return []
   const reasons: MachineBoundReason[] = []
+  const bound = (value: unknown): value is string =>
+    typeof value === "string" && isLocalPath(value) && !portable(value)
   for (const field of PATH_FIELDS) {
     const value = record[field]
-    if (typeof value === "string" && isLocalPath(value)) {
-      reasons.push({ kind: "local-path", field, path: value })
-    }
+    if (bound(value)) reasons.push({ kind: "local-path", field, path: value })
   }
   for (const field of PATH_LIST_FIELDS) {
     const value = record[field]
     if (!Array.isArray(value)) continue
     for (const item of value) {
-      if (typeof item === "string" && isLocalPath(item)) {
-        reasons.push({ kind: "local-path", field, path: item })
-      }
+      if (bound(item)) reasons.push({ kind: "local-path", field, path: item })
     }
   }
   return reasons
@@ -230,8 +231,17 @@ export interface MachineBoundContext {
   target: SchedulerHostDescriptor
   /** This machine's MCP server by id, when it has one. */
   mcpServer?: (id: string) => { name: string; transport: string } | undefined
-  /** Absolute root directories of one of this machine's workspaces. */
+  /**
+   * Absolute root directories of one of this machine's workspaces. A
+   * workspace that travels with its repository (ADR-0224 A11) answers none:
+   * the host clones it rather than needing these folders.
+   */
   projectRoots?: (projectId: string) => readonly string[]
+  /**
+   * True for a path inside such a workspace's folders: it maps into the
+   * host's clone, so it does not bind the item here.
+   */
+  portablePath?: (path: string) => boolean
 }
 
 function projectReasons(
@@ -277,7 +287,7 @@ export function classifyScheduledTask(
   }
 
   const payload = task.payload as Record<string, unknown> | undefined
-  reasons.push(...pathReasons(payload))
+  reasons.push(...pathReasons(payload, context.portablePath))
   const mcpServerIds = payload?.mcpServerIds
   if (Array.isArray(mcpServerIds) && context.mcpServer) {
     for (const id of mcpServerIds) {
@@ -296,7 +306,7 @@ export function classifyScheduledTask(
 export function classifyBotInstallation(
   installation: Pick<BotInstallationRow, "config" | "projectId">,
   triggers: readonly PluginBotTriggerDef[],
-  context: Pick<MachineBoundContext, "projectRoots"> = {}
+  context: Pick<MachineBoundContext, "projectRoots" | "portablePath"> = {}
 ): MachineBoundVerdict {
   const reasons: MachineBoundReason[] = []
   for (const trigger of triggers) {
@@ -304,7 +314,7 @@ export function classifyBotInstallation(
       reasons.push({ kind: "desktop-trigger", triggerId: trigger.id })
     }
   }
-  reasons.push(...pathReasons(installation.config))
+  reasons.push(...pathReasons(installation.config, context.portablePath))
   reasons.push(...keyringReasons(installation.config))
   reasons.push(...projectReasons(installation.projectId, context.projectRoots))
   return verdict(reasons)

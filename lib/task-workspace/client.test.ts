@@ -64,6 +64,7 @@ import {
   readTaskResourceCapture,
   recordTaskResourceToolEvent,
   ensureRemoteWorkspaceSource,
+  ensureProjectWorkspaceSource,
   reconcileManagedWorkspaces,
   retryWorkspaceBundleHandoff,
   undoWorkspaceBundleHandoff,
@@ -757,6 +758,25 @@ describe("task workspace client", () => {
       },
     })
     expect(supplied.sourceRoot).toBe("/data/task-workspaces/sources/o-r-abcd")
+  })
+
+  it("asks the host where a workspace's work runs, sending no credential", async () => {
+    call.mockResolvedValueOnce({
+      root: "/data/task-workspaces/sources/github.com/acme/app",
+      source: "clone",
+      standsFor: "/Users/me/app",
+      remoteUrl: "https://github.com/acme/app.git",
+    })
+
+    const source = await ensureProjectWorkspaceSource({
+      roots: ["/Users/me/app"],
+      remoteUrl: "https://github.com/acme/app.git",
+    })
+
+    expect(call).toHaveBeenCalledWith("task_workspace_project_source_ensure", {
+      input: { roots: ["/Users/me/app"], remoteUrl: "https://github.com/acme/app.git" },
+    })
+    expect(source.source).toBe("clone")
   })
 
   it("supplies and acquires as one call, defaulting to a single primary root", async () => {

@@ -20,7 +20,9 @@ import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { projectTaskWorkspaceRun } from "./projection"
 import type {
   AcquireWorkspaceBundle,
+  EnsureProjectSource,
   EnsureRemoteSource,
+  ProjectSource,
   RemoteSourceCheckout,
   ApplyOutcome,
   BeginTaskWorkspaceTurn,
@@ -589,6 +591,16 @@ export function ensureRemoteWorkspaceSource(
   input: EnsureRemoteSource
 ): Promise<RemoteSourceCheckout> {
   return transport.call("task_workspace_remote_source_ensure", { input })
+}
+
+/**
+ * Where a workspace's work runs on this always-on host (ADR-0224 A11): one of
+ * its own folders when one exists here, else a clone of its repository made
+ * with the host's stored git credential. Loopback service plane only, like
+ * {@link ensureRemoteWorkspaceSource}: only the host's own brain asks.
+ */
+export function ensureProjectWorkspaceSource(input: EnsureProjectSource): Promise<ProjectSource> {
+  return transport.call("task_workspace_project_source_ensure", { input })
 }
 
 /**

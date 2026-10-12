@@ -238,6 +238,40 @@ describe("portableScheduledTask", () => {
   })
 })
 
+describe("createOnHost with a workspace that travels", () => {
+  it("sends the workspace before the task that needs it", async () => {
+    await putTravellingWorkspace()
+    const call = fakeTransport({
+      project_mutate: () => ({ id: "p-app", created: true }),
+      scheduled_task_import: () => ({ imported: 1, skipped: 0, errors: [] }),
+    })
+    await createOnHost(loadedTask({ projectId: "p-app" }), context(call))
+    expect(call.mock.calls.map(([name]) => name)).toEqual([
+      "project_mutate",
+      "scheduled_task_import",
+    ])
+    expect(call.mock.calls[0]![1]).toEqual({
+      operation: "upsert",
+      operationId: OP,
+      adminLease: "lease",
+      project: {
+        id: "p-app",
+        name: "App",
+        roots: [{ path: "/Users/me/app", isPrimary: true }],
+        repository: { remoteUrl: "https://github.com/acme/app.git", capturedAt: 1 },
+      },
+    })
+  })
+
+  it("sends nothing for a workspace without a repository", async () => {
+    const call = fakeTransport({
+      scheduled_task_import: () => ({ imported: 1, skipped: 0, errors: [] }),
+    })
+    await createOnHost(loadedTask({ projectId: "p-unknown" }), context(call))
+    expect(call.mock.calls.map(([name]) => name)).toEqual(["scheduled_task_import"])
+  })
+})
+
 describe("createOnHost", () => {
   it("imports a running task paused, so nothing fires before this copy is fenced", async () => {
     const call = fakeTransport({
@@ -382,6 +416,70 @@ describe("removeFromHost and remoteStatus", () => {
     expect(await remoteStatus("bot-installation", "boti_y", transport)).toBeNull()
     expect(await remoteStatus("connector-instance", "cai_1", transport)).toBe("enabled")
     expect(await remoteStatus("connector-instance", "cai_2", transport)).toBeNull()
+  })
+})
+
+/** A workspace with a repository, as this machine records one. */
+async function putTravellingWorkspace(id = "p-app") {
+  await getDb().projects.put({
+    id,
+    name: "App",
+    roots: [{ id: "r1", path: "/Users/me/app", isPrimary: true }],
+    repository: { remoteUrl: "https://github.com/acme/app.git", capturedAt: 1 },
+    knowledgeBase: [],
+    sessionIds: [],
+    sessionCount: 0,
+    messageCount: 0,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    lastAccessedAt: new Date(0),
+  } as never)
+}
+
+/** A host that takes workspace copies (ADR-0224 A11). */
+function codeSupplyManifest() {
+  return {
+    schemaVersion: 2,
+    features: { "always-on.code-supply": { version: 1, operations: ["project_mutate"] } },
+    operations: [{ name: "project_mutate", healthy: true }],
+  } as never
+}
+
+describe("checkItem with a workspace that travels (ADR-0224 A11)", () => {
+  it("lets a task bound to a workspace with a repository go, with a note instead of a blocker", async () => {
+    await putTravellingWorkspace()
+    const item = loadedTask({
+      type: "agent",
+      projectId: "p-app",
+      payload: { prompt: "x", cwd: "/Users/me/app/web" },
+    })
+    const checks = await checkItem(
+      item,
+      facts({ manifest: async () => codeSupplyManifest() }),
+      "headless",
+      false
+    )
+    expect(checks.blockers).toEqual([])
+    expect(checks.notes).toEqual([
+      {
+        kind: "workspace-travels",
+        workspace: "App",
+        remoteUrl: "https://github.com/acme/app.git",
+      },
+    ])
+  })
+
+  it("still blocks it on a host too old to take the workspace", async () => {
+    await putTravellingWorkspace()
+    const checks = await checkItem(
+      loadedTask({ type: "agent", projectId: "p-app", payload: { prompt: "x" } }),
+      facts(),
+      "headless",
+      false
+    )
+    expect(checks.blockers).toEqual([
+      { kind: "reference-missing", reference: "workspace", id: "p-app" },
+    ])
   })
 })
 

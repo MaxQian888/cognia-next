@@ -24,6 +24,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "github_workspace_clone",
     "github_workspace_commit_and_push",
     "task_workspace_remote_source_ensure",
+    "task_workspace_project_source_ensure",
     "github_workspace_remove",
     "github_workspace_stat",
     "integration_ingress_ack",
@@ -872,6 +873,18 @@ pub(super) async fn dispatch(
             // shape serves the desktop invoke and the loopback RPC.
             let input: cognia_task_workspace::EnsureRemoteSource = required(&args, "input")?;
             crate::task_workspace::task_workspace_remote_source_ensure(input)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+
+        // ADR-0224 A11: where a project's work runs on an always-on host, a
+        // clone of its repository when none of its folders exists here.
+        // Service-only for the same reason as the arm above: it clones with
+        // the host's stored git credential.
+        "task_workspace_project_source_ensure" => {
+            let input: cognia_task_workspace::EnsureProjectSource = required(&args, "input")?;
+            crate::task_workspace::task_workspace_project_source_ensure(input)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)

@@ -7173,6 +7173,106 @@
         "additionalProperties": false
       }
     },
+    "project_mutate": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "A copy of another device's workspace for the always-on work bound to it (ADR-0224 A11): its name, folders and repository, so the host can clone what it lacks. The host re-validates the shape (lib/workspace/project-transfer.ts) and refuses the Default workspace.",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "upsert"
+            ]
+          },
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "project": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "roots": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "isPrimary": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "repository": {
+                "type": "object",
+                "properties": {
+                  "remoteUrl": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "capturedAt": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "remoteUrl",
+                  "capturedAt"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "roots",
+              "repository"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "operation",
+          "operationId",
+          "project",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
     "provider_diagnostics_cancel": {
       "inputSchemaSource": "zod-contract",
       "inputSchema": {

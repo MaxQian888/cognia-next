@@ -1305,18 +1305,30 @@ async function executeExternalAgentTask(
   })
 
   try {
-    workspaceLease = payload.cwd
-      ? await openScheduledWritableBundle(task, execution, payload.cwd, "scheduled-external-agent")
+    // On an always-on Host a workspace whose folder is not here runs in a
+    // clone of its repository (ADR-0224 A11); one it cannot supply fails here.
+    let cwd = payload.cwd
+    if (isHeadlessHost() && task.projectId) {
+      const [{ getDb }, { hostWorkingDirectory }] = await Promise.all([
+        import("@/lib/db/schema"),
+        import("@/lib/remote-host/code-supply/host-project-source"),
+      ])
+      const project = await getDb().projects.get(task.projectId)
+      cwd = await hostWorkingDirectory({ cwd, project })
+    }
+    workspaceLease = cwd
+      ? await openScheduledWritableBundle(task, execution, cwd, "scheduled-external-agent")
       : null
     // An always-on Host starts the agent in the project's runtime environment
     // (ADR-0224 A8); a refusal fails the run before anything starts.
     if (isHeadlessHost()) {
-      const workingDirectory = workspaceLease?.primaryAlias ?? payload.cwd
+      const workingDirectory = workspaceLease?.primaryAlias ?? cwd
       await ensureHostAgentPlacement(
         {
           agentId: payload.agentId,
+          ...(task.projectId ? { projectId: task.projectId } : {}),
           ...(workingDirectory ? { cwd: workingDirectory } : {}),
-          ...(payload.cwd ? { projectPath: payload.cwd } : {}),
+          ...(cwd ? { projectPath: cwd } : {}),
         },
         getExternalAgentManager()
       )

@@ -28,9 +28,17 @@ import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 /** Reads, injectable so the resolver tests without a database. */
 export interface SessionCwdDeps {
   getSession: (id: string) => Promise<ChatSession | undefined>
-  getProject: (id: string) => Promise<Pick<Project, "roots"> | undefined>
+  getProject: (id: string) => Promise<Pick<Project, "id" | "roots" | "repository"> | undefined>
   getCharacterWorkingDir: (characterId: string) => Promise<string | undefined>
   getDefaultWorkingDir: () => Promise<string | undefined>
+  /**
+   * On an always-on host, the directory in the workspace's clone when its
+   * folder is not here (ADR-0224 A11); the directory itself elsewhere.
+   */
+  onHost?: (
+    cwd: string | undefined,
+    project: Pick<Project, "id" | "roots" | "repository">
+  ) => Promise<string | undefined>
 }
 
 const defaultDeps: SessionCwdDeps = {
@@ -69,7 +77,7 @@ export async function resolveSessionCwd(
       : undefined,
     quiet(() => deps.getDefaultWorkingDir()),
   ])
-  return resolveEffectiveCwd({
+  const cwd = resolveEffectiveCwd({
     sessionWorkingDir: session.workingDir,
     executionWorkspaceRoot: session.executionContext
       ? resolveSessionWorkspaceRoot(session.executionContext)
@@ -78,4 +86,13 @@ export async function resolveSessionCwd(
     characterWorkingDir,
     defaultWorkingDir,
   })
+  if (!project) return cwd
+  const onHost =
+    deps.onHost ??
+    (async (directory, owner) => {
+      const { hostWorkingDirectory } =
+        await import("@/lib/remote-host/code-supply/host-project-source")
+      return hostWorkingDirectory({ cwd: directory, project: owner })
+    })
+  return onHost(cwd, project)
 }

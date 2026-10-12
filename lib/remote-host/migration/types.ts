@@ -93,6 +93,12 @@ export type MigrationNote =
   | { kind: "secret-transferred"; name: string }
   /** Scheduled messages set up in the connector's chats move with it. */
   | { kind: "schedules-travel"; count: number }
+  /**
+   * Its workspace goes along without its folders: the host clones the
+   * repository with the git credential it holds for that git host
+   * (ADR-0224 A11).
+   */
+  | { kind: "workspace-travels"; workspace: string; remoteUrl: string }
 
 export interface MigrationPreflight {
   item: MigrationItemRef

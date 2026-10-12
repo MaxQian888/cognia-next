@@ -38,6 +38,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "mcp_set_tool_rules",
     "adapter_update_policy",
     "adapter_instance_mutate",
+    "project_mutate",
     "twin_profile_get",
     "host_capabilities",
     "host_feature_manifest",
@@ -777,6 +778,9 @@ pub(super) async fn dispatch(
         // change to one this host runs (ADR-0224). Interactive: the admin
         // lease is checked before the arm, and the TS side keeps secrets out.
         | "adapter_instance_mutate"
+        // A copy of another device's workspace for the always-on work bound
+        // to it (ADR-0224 A11). Interactive, like the move it belongs to.
+        | "project_mutate"
         | "twin_profile_get"
         | "host_capabilities"
         | "host_feature_manifest"

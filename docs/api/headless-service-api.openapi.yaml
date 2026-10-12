@@ -124045,6 +124045,247 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/project_mutate:
+    post:
+      operationId: internalRpcProjectMutate
+      tags:
+        - headless-rpc
+      summary: project_mutate (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "A copy of another device's workspace for the always-on work bound to it (ADR-0224 A11): its name, folders
+                and repository, so the host can clone what it lacks. The host re-validates the shape
+                (lib/workspace/project-transfer.ts) and refuses the Default workspace."
+              properties:
+                operation:
+                  type: string
+                  enum:
+                    - upsert
+                operationId:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+                project:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 200
+                    description:
+                      type: string
+                      maxLength: 4000
+                    roots:
+                      type: array
+                      maxItems: 32
+                      items:
+                        type: object
+                        properties:
+                          path:
+                            type: string
+                            minLength: 1
+                            maxLength: 4096
+                          label:
+                            type: string
+                            maxLength: 200
+                          isPrimary:
+                            type: boolean
+                        required:
+                          - path
+                        additionalProperties: false
+                    repository:
+                      type: object
+                      properties:
+                        remoteUrl:
+                          type: string
+                          minLength: 1
+                          maxLength: 4096
+                        capturedAt:
+                          type: number
+                      required:
+                        - remoteUrl
+                        - capturedAt
+                      additionalProperties: false
+                  required:
+                    - id
+                    - name
+                    - roots
+                    - repository
+                  additionalProperties: false
+              required:
+                - operation
+                - operationId
+                - project
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: The workspace copy this host now holds.
+                required:
+                  - id
+                  - created
+                properties:
+                  id:
+                    type: string
+                  created:
+                    type: boolean
+                    description: False when an earlier send already made it; its name, folders and repository were brought up to date.
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/provider_catalog_refresh:
     post:
       operationId: internalRpcProviderCatalogRefresh
@@ -157423,6 +157664,227 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_project_source_ensure:
+    post:
+      operationId: internalRpcTaskWorkspaceProjectSourceEnsure
+      tags:
+        - headless-rpc
+      summary: task_workspace_project_source_ensure (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: "Where a project's work runs on an always-on host: one of its own folders when one exists here, else a
+                clone of its repository made with the git credential a paired device stored for that host
+                (cognia_task_workspace::EnsureProjectSource, ADR-0224 A11). Service plane only: it clones with a stored
+                credential."
+              type: object
+              required:
+                - input
+              properties:
+                input:
+                  type: object
+                  properties:
+                    roots:
+                      type: array
+                      items:
+                        type: string
+                      description: The project's folders, primary first, as its owner's device recorded them. The first that is a directory on
+                        this host wins.
+                    remoteUrl:
+                      type:
+                        - string
+                        - "null"
+                      description: "The project's repository: credential-free https. Cloned when none of its folders exists here."
+                    credential:
+                      type:
+                        - string
+                        - "null"
+                      description: A token for the clone. When absent the host's stored git credential for the remote's host is used.
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  remoteUrl:
+                    description: The repository cloned, when it is a clone.
+                    type:
+                      - string
+                      - "null"
+                  root:
+                    description: The directory to work in.
+                    type: string
+                  source:
+                    description: Where the root came from.
+                    oneOf:
+                      - const: local
+                        description: One of the project's own folders exists on this host.
+                        type: string
+                      - const: clone
+                        description: A clone of the project's repository.
+                        type: string
+                  standsFor:
+                    description: |-
+                      The folder of the project's own this root stands in for, when it is a
+                      clone: paths under that folder map to the same paths under `root`.
+                    type:
+                      - string
+                      - "null"
+                required:
+                  - remoteUrl
+                  - root
+                  - source
+                  - standsFor
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/task_workspace_prune:
     post:
       operationId: internalRpcTaskWorkspacePrune
@@ -177918,6 +178380,7 @@ components:
           - plugin_wasm_unload
           - plugin_workspace_repo_remove
           - project_environment_execute
+          - project_mutate
           - provider_catalog_refresh
           - provider_catalog_search
           - provider_catalog_status
@@ -178051,6 +178514,7 @@ components:
           - task_workspace_pin
           - task_workspace_policy_get
           - task_workspace_policy_set
+          - task_workspace_project_source_ensure
           - task_workspace_prune
           - task_workspace_read_resource_capture
           - task_workspace_reconcile
@@ -178406,10 +178870,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 827
-  generatedRequestSchemaCount: 827
+  internalCommandCount: 829
+  generatedRequestSchemaCount: 829
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 827
+  contractRequestSchemaCount: 829
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 827
+  generatedResponseSchemaCount: 829
   loopbackOnly: true

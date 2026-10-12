@@ -22,6 +22,7 @@ export type {
   Session,
   UIMessage,
   Project,
+  ProjectRepository,
   KnowledgeFile,
   ProjectCoordinatorConfig,
   ProjectCoordinatorModelChoice,

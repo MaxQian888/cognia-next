@@ -14130,7 +14130,8 @@
       "note": {
         "conversationAddressRelearned": "{conversationKey} 下次给 Bot 发消息后，回复才会恢复。",
         "schedulesTravel": "它在聊天中设置的 {count} 条定时消息会一起迁移到 {host}。",
-        "secretTransferred": "密钥 {name} 会复制到 {host} 的钥匙串。"
+        "secretTransferred": "密钥 {name} 会复制到 {host} 的钥匙串。",
+        "workspaceTravels": "它的工作区「{workspace}」会一起迁移，但不带文件夹：{host} 会在 {remoteUrl} 的克隆中工作。如果是私有仓库，请先在 {host} 的密钥中保存该代码托管站点的 git 凭据。"
       },
       "place": {
         "here": "本设备",

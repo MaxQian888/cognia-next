@@ -408,8 +408,18 @@ const defaultDeps: RemoteRunDeps = {
       ])
     const session = await getSession(chatSessionId)
     const context = session?.executionContext
-    const cwd = context ? resolveSessionWorkspaceRoot(context) : undefined
     const projectId = context?.projectId || session?.projectId
+    // A workspace whose folder is not on this Host runs in a clone of its
+    // repository (ADR-0224 A11).
+    const [{ getDb }, { hostWorkingDirectory }] = await Promise.all([
+      import("@/lib/db/schema"),
+      import("@/lib/remote-host/code-supply/host-project-source"),
+    ])
+    const project = projectId ? await getDb().projects.get(projectId) : undefined
+    const cwd = await hostWorkingDirectory({
+      cwd: context ? resolveSessionWorkspaceRoot(context) : undefined,
+      project,
+    })
     await ensureHostAgentPlacement(
       {
         agentId,

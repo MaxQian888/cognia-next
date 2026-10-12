@@ -8,6 +8,7 @@ mod bundle;
 mod confine;
 mod ledger;
 mod lifecycle;
+mod project_source;
 mod registry;
 mod remote_source;
 mod resource;
@@ -62,6 +63,10 @@ pub use registry::{
     plan_snapshot_expiration, validate_state_transition, DirectoryReclaimCandidate,
     DirectoryReclaimReason, ImportedWorkspaceHint, ReconcileOutcome, RegistryError,
     SnapshotExpirationCandidate, SnapshotExpirationReason, WorkspaceRegistry,
+};
+pub use project_source::{
+    ensure_project_source, local_project_root, validate_project_remote, EnsureProjectSource,
+    ProjectSource, ProjectSourceKind,
 };
 pub use remote_source::{
     ensure_remote_source, extra_refspecs_for, EnsureRemoteSource, RemoteSourceCheckout,

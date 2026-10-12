@@ -463,6 +463,13 @@ export async function dispatchCommand(
       const { mutateAdapterInstanceOnHost } = await import("@/lib/connectors/instance-transfer")
       return mutateAdapterInstanceOnHost(payload)
     }
+    // A copy of another device's workspace for the always-on work bound to it
+    // (ADR-0224 A11): the host clones its repository when it lacks the
+    // folders. Interactive: the RPC layer has already checked the admin lease.
+    case "project_mutate": {
+      const { applyProjectMutate } = await import("@/lib/workspace/project-transfer")
+      return applyProjectMutate(payload)
+    }
     // Plugins a paired device carried here for an item it is moving (ADR-0224).
     // The RPC layer checked the lease and that this device uploaded every
     // byte; the host's own signature and policy checks run in the module.

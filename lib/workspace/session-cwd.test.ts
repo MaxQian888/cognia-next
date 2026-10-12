@@ -20,6 +20,31 @@ describe("resolveSessionCwd", () => {
     await expect(resolveSessionCwd("ghost", deps())).resolves.toBeUndefined()
   })
 
+  it("moves a workspace directory into the host's clone of its repository", async () => {
+    const onHost = jest.fn(async (cwd: string | undefined) =>
+      cwd?.replace("/repo/project", "/data/sources/app")
+    )
+    const project = {
+      id: "p1",
+      roots: [{ id: "r", path: "/repo/project", isPrimary: true }],
+      repository: { remoteUrl: "https://github.com/acme/app.git", capturedAt: 1 },
+    }
+    const d = deps({
+      getSession: async () => session({ projectId: "p1" }),
+      getProject: async () => project,
+      onHost,
+    })
+    await expect(resolveSessionCwd("ses_1", d)).resolves.toBe("/data/sources/app")
+    expect(onHost).toHaveBeenCalledWith("/repo/project", project)
+
+    // Without a workspace there is nothing to move.
+    onHost.mockClear()
+    await expect(
+      resolveSessionCwd("ses_1", deps({ getSession: async () => session(), onHost }))
+    ).resolves.toBe("/home/default")
+    expect(onHost).not.toHaveBeenCalled()
+  })
+
   it("prefers the session's own working directory", async () => {
     const d = deps({
       getSession: async () => session({ workingDir: "/repo/override", projectId: "p1" }),

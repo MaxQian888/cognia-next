@@ -361,6 +361,18 @@ impl TaskWorkspaceService {
         crate::remote_source::ensure_remote_source(&self.mirrors_dir, &self.sources_dir, input)
     }
 
+    /// The directory a project's work runs in on this host: one of its own
+    /// folders when one exists here, else a clone of its repository supplied
+    /// through [`Self::ensure_remote_source`] (ADR-0224 A11).
+    pub fn ensure_project_source(
+        &self,
+        input: &crate::project_source::EnsureProjectSource,
+    ) -> Result<crate::project_source::ProjectSource, String> {
+        crate::project_source::ensure_project_source(input, |request| {
+            self.ensure_remote_source(&request)
+        })
+    }
+
     /// Bind a stable repository ref to an explicitly trusted, device-local Git root.
     pub fn bind_workspace_source(
         &self,

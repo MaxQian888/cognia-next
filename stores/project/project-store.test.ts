@@ -123,6 +123,21 @@ describe("load", () => {
   })
 })
 
+describe("createProject with an id it already has elsewhere", () => {
+  it("keeps the id and the repository", () => {
+    const project = useProjectStore.getState().createProject({
+      id: "project-from-desktop",
+      name: "App",
+      repository: { remoteUrl: "https://github.com/acme/app.git", capturedAt: 1 },
+    })
+    expect(project.id).toBe("project-from-desktop")
+    expect(project.repository).toEqual({
+      remoteUrl: "https://github.com/acme/app.git",
+      capturedAt: 1,
+    })
+  })
+})
+
 describe("createProject dispatch", () => {
   it("fires dispatchProjectCreate after the project lands in state", () => {
     const project = useProjectStore.getState().createProject({ name: "Alpha" })

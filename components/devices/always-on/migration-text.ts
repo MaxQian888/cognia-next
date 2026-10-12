@@ -106,6 +106,8 @@ const NOTE: {
     t("note.conversationAddressRelearned", { conversationKey: n.conversationKey }),
   "secret-transferred": (t, n, host) => t("note.secretTransferred", { name: n.name, host }),
   "schedules-travel": (t, n, host) => t("note.schedulesTravel", { count: n.count, host }),
+  "workspace-travels": (t, n, host) =>
+    t("note.workspaceTravels", { workspace: n.workspace, remoteUrl: n.remoteUrl, host }),
 }
 
 const STATE: Record<ItemMigrationState, string> = {

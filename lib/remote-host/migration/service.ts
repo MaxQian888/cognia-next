@@ -24,7 +24,10 @@ import {
 } from "@/lib/db/item-migrations"
 import { suggestDeviceName } from "@/lib/account-sync/enrollment/platform"
 import { isOwnedElsewhere } from "@/lib/placement/ownership"
-import { ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS } from "@/lib/platform/host-feature-manifest"
+import {
+  ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS,
+  CODE_SUPPLY_HOST_OPERATIONS,
+} from "@/lib/platform/host-feature-manifest"
 import {
   withManagementChannel,
   type ManagementChannelDeps,
@@ -65,6 +68,8 @@ export const MIGRATION_LEASE_OPERATIONS = [
   // Interactive since ADR-0224 A6: a Bot's install, arm and take-back.
   "bot_installation_mutate",
   ...ALWAYS_ON_PLUGIN_TRANSFER_HOST_OPERATIONS,
+  // A workspace an item is bound to (ADR-0224 A11).
+  ...CODE_SUPPLY_HOST_OPERATIONS,
 ] as const
 
 /** Long enough for a batch over a slow relay; short enough to be worth asking for. */

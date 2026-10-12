@@ -201,6 +201,14 @@ export interface KnowledgeFile {
   updatedAt: Date
 }
 
+/** A workspace's repository, as `Project.repository` records it. */
+export interface ProjectRepository {
+  /** `origin` (else the first remote) of the primary folder, as credential-free https. */
+  remoteUrl: string
+  /** Epoch ms when it was last read from the checkout. */
+  capturedAt: number
+}
+
 export interface Project {
   id: string
   name: string
@@ -320,6 +328,14 @@ export interface Project {
     accepted: string[]
     reviewed: string[]
   }
+  /**
+   * The repository this workspace's primary folder checks out (ADR-0224 A11).
+   * Read from the checkout on a device that has the folder
+   * (`lib/workspace/project-repository.ts`), never typed in: an always-on host
+   * that lacks the folder clones this instead. Credential-free https only; a
+   * token travels as the host's stored git credential, never in the URL.
+   */
+  repository?: ProjectRepository
   /**
    * Project coordination (ADR-0204): one long-lived coordinator conversation
    * that starts worker threads. Absent = never enabled. Read through

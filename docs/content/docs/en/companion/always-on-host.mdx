@@ -190,6 +190,11 @@ item first and lists them in three groups:
   project folder, an OS-level schedule, a stdio MCP server, or something the host
   cannot run.
 
+A task or Bot that belongs to a workspace takes the workspace with it when the workspace
+has a git repository with an `https` remote. The item's note says so and names the repository
+the host clones; see [code on the host](#code-on-the-host). A workspace without one keeps the
+item here.
+
 Moving an item copies it to the host paused, then stops the copy here, then starts it
 on the host. A connection takes its credentials (into the host's keychain) and its
 scheduled chat messages with it. The copy left here is a placeholder: it does not run,
@@ -337,6 +342,26 @@ host. Opt a project out to run its tools as host processes on such a host.
 
 Containers a conversation no longer uses are removed. Ones a previous run of the server
 left behind are removed when it starts.
+
+## Code on the host
+
+Workspaces do not sync between devices. When a scheduled task or Bot moves to the host,
+its workspace goes with it as a copy that holds only the workspace's name, description,
+folders and repository remote. Conversations, knowledge files and settings stay on the
+device. The Default workspace never moves, because every device has its own.
+
+The desktop app reads each workspace's repository from the `origin` remote of its main
+folder (or the first remote when there is no `origin`) and keeps it up to date when the
+folder changes. Only `https` remotes count, stored without any user name or token.
+
+When the host runs work for a workspace, it uses the workspace's folder if that folder
+exists on the host. Otherwise it clones the repository through its shared mirror cache,
+using the git token stored for that git host (see [secrets on the host](#secrets-on-the-host)),
+and runs the work there. A task set to run in a subfolder of the workspace runs in the
+same subfolder of the clone. If neither the folder nor the repository can be reached,
+the run fails with the reason; it never runs in some other directory.
+
+The clone holds what was last pushed. Work you have not pushed stays on your device.
 
 ## Keep the master key safe
 

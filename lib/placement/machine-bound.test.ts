@@ -109,6 +109,24 @@ describe("classifyScheduledTask", () => {
     ])
   })
 
+  it("lets paths inside a workspace that travels with its repository go (ADR-0224 A11)", () => {
+    const verdict = classifyScheduledTask(
+      task({
+        type: "agent",
+        projectId: "p1",
+        payload: { prompt: "x", cwd: "/Users/me/repo/web", additionalDirectories: ["/tmp/x"] },
+      }),
+      {
+        ...headless,
+        projectRoots: () => [],
+        portablePath: (path) => path.startsWith("/Users/me/repo"),
+      }
+    )
+    expect(verdict.reasons).toEqual([
+      { kind: "local-path", field: "additionalDirectories", path: "/tmp/x" },
+    ])
+  })
+
   it("keeps a background command, which always names a directory here", () => {
     const verdict = classifyScheduledTask(
       task({ type: "background-command", payload: { command: "make", cwd: "C:\\work" } }),

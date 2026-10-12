@@ -354,6 +354,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "mcp_set_tool_rules",
     "adapter_update_policy",
     "adapter_instance_mutate",
+    "project_mutate",
     "app_settings_update",
     // Account-scoped Langfuse v4 destination. Credentials remain inside the
     // current Host and ingest accepts only AgentTraceBatchV1.
@@ -478,6 +479,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // token, so it belongs with the commands above rather than with the rest
     // of the task-workspace surface, which is device-reachable.
     "task_workspace_remote_source_ensure",
+    "task_workspace_project_source_ensure",
     // ADR-0090 Phase 1 — Provider Profile Store admin plane (service scope;
     // redacted docs only, secrets never transit these arms).
     "provider_profiles_list",
@@ -2453,6 +2455,7 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "github_workspace_remove",
     "github_workspace_stat",
     "task_workspace_remote_source_ensure",
+    "task_workspace_project_source_ensure",
     "environment_task_shell_exec",
     "environment_task_shell_release",
     "fleet_project_managed_session",

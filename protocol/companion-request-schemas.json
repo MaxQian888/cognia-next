@@ -14202,6 +14202,98 @@
       },
       "additionalProperties": false
     },
+    "project_mutate": {
+      "type": "object",
+      "description": "A copy of another device's workspace for the always-on work bound to it (ADR-0224 A11): its name, folders and repository, so the host can clone what it lacks. The host re-validates the shape (lib/workspace/project-transfer.ts) and refuses the Default workspace.",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "upsert"
+          ]
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "project": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "roots": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "isPrimary": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "repository": {
+              "type": "object",
+              "properties": {
+                "remoteUrl": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "capturedAt": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "remoteUrl",
+                "capturedAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "roots",
+            "repository"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "operation",
+        "operationId",
+        "project"
+      ],
+      "additionalProperties": false
+    },
     "provider_catalog_refresh": {
       "type": "object",
       "required": [
@@ -16360,6 +16452,43 @@
           "type": "object",
           "additionalProperties": true,
           "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_project_source_ensure": {
+      "description": "Where a project's work runs on an always-on host: one of its own folders when one exists here, else a clone of its repository made with the git credential a paired device stored for that host (cognia_task_workspace::EnsureProjectSource, ADR-0224 A11). Service plane only: it clones with a stored credential.",
+      "type": "object",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "properties": {
+            "roots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The project's folders, primary first, as its owner's device recorded them. The first that is a directory on this host wins."
+            },
+            "remoteUrl": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The project's repository: credential-free https. Cloned when none of its folders exists here."
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "A token for the clone. When absent the host's stored git credential for the remote's host is used."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

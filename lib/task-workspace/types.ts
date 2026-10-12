@@ -606,6 +606,29 @@ export interface EnsureRemoteSource {
   credential?: string
 }
 
+/**
+ * Where a workspace's work runs on an always-on host (ADR-0224 A11):
+ * `cognia_task_workspace::EnsureProjectSource`.
+ */
+export interface EnsureProjectSource {
+  /** The workspace's folders, primary first, as its owner's device recorded them. */
+  roots: string[]
+  /** Its repository: credential-free https. */
+  remoteUrl?: string | null
+}
+
+/** `cognia_task_workspace::ProjectSource`. */
+export interface ProjectSource {
+  /** The directory to work in. */
+  root: string
+  /** One of the workspace's own folders, or a clone of its repository. */
+  source: "local" | "clone"
+  /** The folder this clone stands in for; paths under it map under `root`. */
+  standsFor: string | null
+  /** The repository cloned, when it is a clone. */
+  remoteUrl: string | null
+}
+
 export interface RemoteSourceCheckout {
   /** The non-bare git root a bundle can now be acquired over. */
   sourceRoot: string

@@ -184,8 +184,27 @@ export function defaultHostAgentPlacementSources(): HostAgentPlacementSources {
   return {
     isHost: isHeadlessHost,
     projects: async () => {
-      const { useProjectStore } = await import("@/stores/project/project-store")
-      return useProjectStore.getState().projects
+      const [{ useProjectStore }, { knownHostRoots }] = await Promise.all([
+        import("@/stores/project/project-store"),
+        import("@/lib/remote-host/code-supply/host-project-source"),
+      ])
+      // A workspace whose folder is not here works in a clone of its
+      // repository (ADR-0224 A11); a path in that clone belongs to it too.
+      return useProjectStore.getState().projects.map((project) => {
+        const clones = knownHostRoots(project.id)
+        if (clones.length === 0) return project
+        return {
+          ...project,
+          roots: [
+            ...project.roots,
+            ...clones.map((path, index) => ({
+              id: `host-clone-${index}`,
+              path,
+              isPrimary: false,
+            })),
+          ],
+        }
+      })
     },
     selection: async (projectId, environmentId) => {
       const { defaultRunEnvironmentSources } = await import("./run-environment")

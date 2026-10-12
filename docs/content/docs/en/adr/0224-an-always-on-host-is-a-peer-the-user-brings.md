@@ -95,6 +95,7 @@ This fixes a present defect (two events in the same second collapse into one run
 ### Code supply
 
 - A project gains its repository remote. The host clones it through the shared mirror cache (ADR-0176) with a credential sent from the user's device.
+- Projects do not sync between devices. Work bound to a project moves to the host together with a copy of the project that holds only its name, folders and repository remote. The Default project never moves.
 - A **snapshot handoff** carries local work: the base commit plus a binary-safe diff of uncommitted changes (tracked, untracked, deletions, modes), or a size-capped archive for a project without git. The host applies it to a fresh task checkout and refuses on a base mismatch.
 - Results come back as a pushed branch or a patch set. The desktop applies either with one action into a new worktree.
 

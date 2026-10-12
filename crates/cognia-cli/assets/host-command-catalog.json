@@ -328,6 +328,11 @@
       "category": "extensions"
     },
     {
+      "id": "project",
+      "title": "Project",
+      "category": "development"
+    },
+    {
       "id": "project-environments",
       "title": "Project Environments",
       "category": "development"
@@ -50078,6 +50083,132 @@
       "outputTyped": true
     },
     {
+      "name": "project_mutate",
+      "category": "development",
+      "resource": "project",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "project_mutate (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "A copy of another device's workspace for the always-on work bound to it (ADR-0224 A11): its name, folders and repository, so the host can clone what it lacks. The host re-validates the shape (lib/workspace/project-transfer.ts) and refuses the Default workspace.",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "upsert"
+            ]
+          },
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "project": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "roots": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "isPrimary": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "repository": {
+                "type": "object",
+                "properties": {
+                  "remoteUrl": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "capturedAt": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "remoteUrl",
+                  "capturedAt"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "roots",
+              "repository"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "operation",
+          "operationId",
+          "project"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The workspace copy this host now holds.",
+        "required": [
+          "id",
+          "created"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "created": {
+            "type": "boolean",
+            "description": "False when an earlier send already made it; its name, folders and repository were brought up to date."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "provider_catalog_refresh",
       "category": "extensions",
       "resource": "provider-catalog",
@@ -68182,6 +68313,104 @@
       "outputTyped": true
     },
     {
+      "name": "task_workspace_project_source_ensure",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "task_workspace_project_source_ensure (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "description": "Where a project's work runs on an always-on host: one of its own folders when one exists here, else a clone of its repository made with the git credential a paired device stored for that host (cognia_task_workspace::EnsureProjectSource, ADR-0224 A11). Service plane only: it clones with a stored credential.",
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "roots": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The project's folders, primary first, as its owner's device recorded them. The first that is a directory on this host wins."
+              },
+              "remoteUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The project's repository: credential-free https. Cloned when none of its folders exists here."
+              },
+              "credential": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "A token for the clone. When absent the host's stored git credential for the remote's host is used."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "remoteUrl": {
+            "description": "The repository cloned, when it is a clone.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "root": {
+            "description": "The directory to work in.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Where the root came from.",
+            "oneOf": [
+              {
+                "const": "local",
+                "description": "One of the project's own folders exists on this host.",
+                "type": "string"
+              },
+              {
+                "const": "clone",
+                "description": "A clone of the project's repository.",
+                "type": "string"
+              }
+            ]
+          },
+          "standsFor": {
+            "description": "The folder of the project's own this root stands in for, when it is a\nclone: paths under that folder map to the same paths under `root`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "remoteUrl",
+          "root",
+          "source",
+          "standsFor"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "task_workspace_prune",
       "category": "tasks",
       "resource": "task-workspaces",
@@ -77864,5 +78093,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "9caa2bad063dd07073985e0453f4f546aab9076428b240d927823ec0866689d7"
+  "catalogHash": "34f5b7a9899fb32e7d52a95ee401afae46d796600c53e4d4b4d52dbe69b4d1ea"
 }

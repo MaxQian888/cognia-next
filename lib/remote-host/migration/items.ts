@@ -18,6 +18,13 @@
  */
 
 import { allRootPaths } from "@/lib/workspace/roots"
+import { isPathUnderRoot } from "@/lib/sandbox/policy-bridge"
+import {
+  CODE_SUPPLY_HOST_OPERATIONS,
+  supportsHostFeatureOperation,
+} from "@/lib/platform/host-feature-manifest"
+import { canTransferProject, transferredProject } from "@/lib/workspace/project-transfer"
+import type { Project } from "@/types"
 import type { ItemMigrationCompanion } from "@/lib/db/item-migrations"
 import { runsHere } from "@/lib/placement/ownership"
 import { getTaskTypeHostSupport } from "@/lib/scheduler/host-support"
@@ -208,16 +215,79 @@ function machineBoundBlockers(verdict: MachineBoundVerdict): MigrationBlocker[] 
   return verdict.reasons.map((reason) => ({ kind: "machine-bound", reason }))
 }
 
-async function projectRootsLookup(
+/** This machine's workspaces an item names, looked up once per check. */
+interface WorkspaceLookup {
+  /** Folders that bind an item here: none for a workspace that travels. */
+  projectRoots(projectId: string): readonly string[]
+  /** A path inside a workspace that travels with its repository. */
+  portablePath(path: string): boolean
+  /** The workspaces among them that travel (ADR-0224 A11). */
+  travelling: Project[]
+}
+
+async function workspaceLookup(
   projectIds: readonly (string | undefined)[]
-): Promise<(projectId: string) => readonly string[]> {
-  const roots = new Map<string, readonly string[]>()
+): Promise<WorkspaceLookup> {
+  const projects = new Map<string, Project | undefined>()
   for (const projectId of projectIds) {
-    if (!projectId || roots.has(projectId)) continue
-    const project = await getDb().projects.get(projectId)
-    roots.set(projectId, project ? allRootPaths(project) : [])
+    if (!projectId || projects.has(projectId)) continue
+    projects.set(projectId, await getDb().projects.get(projectId))
   }
-  return (projectId) => roots.get(projectId) ?? []
+  const travelling = [...projects.values()].filter((project): project is Project =>
+    canTransferProject(project)
+  )
+  return {
+    projectRoots: (projectId) => {
+      const project = projects.get(projectId)
+      return project && !canTransferProject(project) ? allRootPaths(project) : []
+    },
+    portablePath: (path) =>
+      travelling.some((project) =>
+        allRootPaths(project).some((root) => isPathUnderRoot(path, root))
+      ),
+    travelling,
+  }
+}
+
+/** Whether the host takes a copy of a workspace (`project_mutate`). */
+async function hostTakesWorkspaces(facts: HostFacts): Promise<boolean> {
+  const manifest = await facts.manifest().catch(() => null)
+  return (
+    manifest !== null &&
+    CODE_SUPPLY_HOST_OPERATIONS.every((operation) =>
+      supportsHostFeatureOperation(manifest, "always-on.code-supply", operation)
+    )
+  )
+}
+
+/**
+ * A workspace the item is bound to that the host does not have: travelling
+ * with its repository when the host can take it, missing otherwise.
+ */
+async function workspaceChecks(
+  projectId: string | undefined,
+  lookup: WorkspaceLookup,
+  facts: HostFacts
+): Promise<Pick<ItemChecks, "blockers" | "notes">> {
+  if (!projectId) return { blockers: [], notes: [] }
+  const travelling = lookup.travelling.find((project) => project.id === projectId)
+  if (travelling?.repository && (await hostTakesWorkspaces(facts))) {
+    return {
+      blockers: [],
+      notes: [
+        {
+          kind: "workspace-travels",
+          workspace: travelling.name,
+          remoteUrl: travelling.repository.remoteUrl,
+        },
+      ],
+    }
+  }
+  if ((await facts.ids("projects")).has(projectId)) return { blockers: [], notes: [] }
+  return {
+    blockers: [{ kind: "reference-missing", reference: "workspace", id: projectId }],
+    notes: [],
+  }
 }
 
 function stringField(
@@ -251,10 +321,12 @@ async function scheduledTaskChecks(
     const server = await getDb().mcpServers.get(id)
     if (server) mcpServers.set(id, { name: server.name, transport: server.transport })
   }
+  const workspaces = await workspaceLookup([task.projectId])
   const verdict = classifyScheduledTask(task, {
     target: describeRemoteSchedulerHost(platform),
     mcpServer: (id) => mcpServers.get(id),
-    projectRoots: await projectRootsLookup([task.projectId]),
+    projectRoots: workspaces.projectRoots,
+    portablePath: workspaces.portablePath,
   })
   blockers.push(...machineBoundBlockers(verdict))
 
@@ -292,7 +364,9 @@ async function scheduledTaskChecks(
     if (mcpServers.get(id)?.transport === "stdio") continue
     await need("mcp-server", id, inTable("mcpServers", id))
   }
-  await need("workspace", task.projectId, inTable("projects", task.projectId ?? ""))
+  const workspace = await workspaceChecks(task.projectId, workspaces, facts)
+  blockers.push(...workspace.blockers)
+  notes.push(...workspace.notes)
 
   if (task.type === "im-push") {
     const conversationKey = stringField(payload, "conversationKey")
@@ -340,8 +414,11 @@ async function botInstallationChecks(
 ): Promise<ItemChecks> {
   const { installation, entry } = item
   const blockers: MigrationBlocker[] = []
+  const notes: MigrationNote[] = []
+  const workspaces = await workspaceLookup([installation.projectId, installation.workspaceId])
   const verdict = classifyBotInstallation(installation, entry?.triggers ?? [], {
-    projectRoots: await projectRootsLookup([installation.projectId, installation.workspaceId]),
+    projectRoots: workspaces.projectRoots,
+    portablePath: workspaces.portablePath,
   })
   blockers.push(...machineBoundBlockers(verdict))
 
@@ -361,10 +438,13 @@ async function botInstallationChecks(
     })
   }
 
-  const scopeId = installation.workspaceId ?? installation.projectId
-  if (scopeId && !(await facts.ids("projects")).has(scopeId)) {
-    blockers.push({ kind: "reference-missing", reference: "workspace", id: scopeId })
-  }
+  const workspace = await workspaceChecks(
+    installation.workspaceId ?? installation.projectId,
+    workspaces,
+    facts
+  )
+  blockers.push(...workspace.blockers)
+  notes.push(...workspace.notes)
 
   const credentials = await facts.botCredentialIds()
   for (const binding of Object.values(installation.credentialBindings ?? {})) {
@@ -379,7 +459,7 @@ async function botInstallationChecks(
       })
     }
   }
-  return { blockers: [...blockers, ...plugins.blockers], notes: [], plugins: plugins.plugins }
+  return { blockers: [...blockers, ...plugins.blockers], notes, plugins: plugins.plugins }
 }
 
 async function connectorInstanceChecks(
@@ -485,10 +565,32 @@ interface ImportResult {
   errors?: string[]
 }
 
+/**
+ * Give the host its copy of the workspace an item is bound to, when that
+ * workspace travels with its repository (ADR-0224 A11). Idempotent: a resend
+ * brings the copy up to date.
+ */
+async function sendWorkspace(
+  projectId: string | undefined,
+  context: TransferContext
+): Promise<void> {
+  if (!projectId) return
+  const project = await getDb().projects.get(projectId)
+  const copy = project ? transferredProject(project) : null
+  if (!copy) return
+  await context.transport.call("project_mutate", {
+    operation: "upsert",
+    operationId: context.operationId,
+    project: copy,
+    adminLease: context.adminLease,
+  })
+}
+
 async function createScheduledTask(
   item: LoadedScheduledTask,
   context: TransferContext
 ): Promise<void> {
+  await sendWorkspace(item.task.projectId, context)
   // Arrives paused when it ran here, so nothing fires before this machine's
   // copy is fenced; `arm` resumes it.
   const status: ScheduledTaskStatus = item.task.status === "active" ? "paused" : item.task.status
@@ -528,6 +630,7 @@ async function createBotInstallation(
   const { botInstallMutation, botPolicyGrantSchema } =
     await import("@/lib/bot/control-writes/lifecycle")
   const { installation } = item
+  await sendWorkspace(installation.workspaceId ?? installation.projectId, context)
   // The wire grant is the complete triple; a partial stored ceiling stays
   // behind and the host applies its own defaults, which only narrow.
   const grant = botPolicyGrantSchema.safeParse(installation.policyGrant)

@@ -12,6 +12,7 @@ import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
 import { SessionPowerInitializer } from "./session-power-initializer"
 import { RemoteNotificationInitializer } from "./remote-notification-initializer"
 import { HostUpdateChannelInitializer } from "./host-update-channel-initializer"
+import { ProjectRepositoryInitializer } from "./project-repository-initializer"
 import { RemoteHostLivenessInitializer } from "./remote-host-liveness-initializer"
 import { UpdateCenterInitializer } from "./update-center-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
@@ -86,6 +87,12 @@ export function DeferredBootInitializersImpl() {
         inside.
       */}
       <HostUpdateChannelInitializer />
+      {/*
+        Records each workspace's repository from its checkout, so an
+        always-on host without the folder can clone it (ADR-0224 A11).
+        Desktop-gated inside.
+      */}
+      <ProjectRepositoryInitializer />
       <GatewayProvider />
       {/* No ordering dependency: a registration-only dispatch table. */}
       <ExecutionControlInitializer />

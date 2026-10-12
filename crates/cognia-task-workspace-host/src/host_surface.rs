@@ -10,7 +10,8 @@ use cognia_task_workspace::{
     apply_revision_patch, read_confined_text, read_report_file, workspace_revision,
     AcquireWorkspaceBundle, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn,
     BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffUndoOutcome, ConfinedFileRead,
-    ConflictResolution, DownloadHandle, EnsureRemoteSource, PatchSelection, PatchSet, PruneOutcome,
+    ConflictResolution, DownloadHandle, EnsureProjectSource, EnsureRemoteSource, PatchSelection,
+    PatchSet, ProjectSource, PruneOutcome,
     ReconcileOutcome, RemoteSourceCheckout, ResourceCaptureChunk, ResourceChange, ResourceEvent,
     ResourceEventKind, ResourceIndexEntry, ResourceRead, ResourceTrackingPolicy,
     RevisionApplyOutcome, RevisionPatch, RunState, ServiceConfig, TaskResourceManifest,
@@ -513,6 +514,38 @@ pub async fn task_workspace_remote_source_ensure(
 ) -> Result<RemoteSourceCheckout, String> {
     let input = with_stored_git_token(input);
     blocking(move |service| service.ensure_remote_source(&input)).await
+}
+
+/// The directory a project's work runs in on this always-on host (ADR-0224
+/// A11): one of its own folders when one exists here, else a clone of its
+/// repository with the git credential a paired device stored for that host.
+/// Service-only, like [`task_workspace_remote_source_ensure`], for the same
+/// reason: it clones with a stored credential. Not a desktop command: only
+/// the brain of an always-on host asks, over the service plane.
+pub async fn task_workspace_project_source_ensure(
+    input: EnsureProjectSource,
+) -> Result<ProjectSource, String> {
+    let input = with_stored_project_token(input);
+    blocking(move |service| service.ensure_project_source(&input)).await
+}
+
+/// [`with_stored_git_token`] for a project's remote.
+fn with_stored_project_token(mut input: EnsureProjectSource) -> EnsureProjectSource {
+    let has_token = input
+        .credential
+        .as_deref()
+        .is_some_and(|token| !token.trim().is_empty());
+    if has_token {
+        return input;
+    }
+    let Some(remote) = input.remote_url.as_deref().filter(|url| !url.trim().is_empty()) else {
+        return input;
+    };
+    match cognia_secrets::host_secrets::git_token_for_remote(remote) {
+        Ok(token) => input.credential = token,
+        Err(error) => log::warn!("stored git token unreadable: {error}"),
+    }
+    input
 }
 
 /// Fill in the host's stored git token when the caller sent none. A token the
@@ -1255,6 +1288,35 @@ mod tests {
             credential: None,
         };
         assert_eq!(super::with_stored_git_token(elsewhere).credential, None);
+    }
+
+    #[test]
+    fn a_project_clone_uses_the_token_stored_for_its_remotes_host() {
+        use cognia_secrets::host_secrets::{self, HostSecretKind};
+        host_secrets::set(HostSecretKind::Git, "project.example.com", "ghp_project", None, 1)
+            .unwrap();
+        let input = |remote: Option<&str>, credential: Option<&str>| super::EnsureProjectSource {
+            roots: vec!["/Users/me/app".to_string()],
+            remote_url: remote.map(str::to_string),
+            credential: credential.map(str::to_string),
+        };
+        let remote = Some("https://project.example.com/acme/app.git");
+        assert_eq!(
+            super::with_stored_project_token(input(remote, None))
+                .credential
+                .as_deref(),
+            Some("ghp_project")
+        );
+        assert_eq!(
+            super::with_stored_project_token(input(remote, Some("ghp_sent")))
+                .credential
+                .as_deref(),
+            Some("ghp_sent")
+        );
+        assert_eq!(
+            super::with_stored_project_token(input(None, None)).credential,
+            None
+        );
     }
 
     use super::*;
