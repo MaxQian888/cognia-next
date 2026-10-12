@@ -9,6 +9,7 @@ import {
 } from "@/lib/bot/events/envelope"
 import { provenanceForBotOutput } from "@/lib/bot/events/provenance"
 import { projectBotInstallationSnapshot } from "@/lib/bot/installation-snapshot"
+import { resolveOwnedBotAuthority } from "@/lib/bot/policy/run-authority"
 import { getDb } from "@/lib/db/schema"
 import { dismissBotDelivery, isTerminalBotDelivery } from "@/lib/db/bot-event-deliveries"
 import { writeBotTriggerState } from "@/lib/db/bot-installations"
@@ -61,7 +62,21 @@ export function createBotsAPI(
   return {
     async getInstallation(runId) {
       const { installation, resolved } = await own(runId)
-      return projectBotInstallationSnapshot(installation, resolved.definition)
+      const snapshot = await projectBotInstallationSnapshot(installation, resolved.definition)
+      // The run's own policy checkpoint decides whether a policy approval is
+      // answered automatically; a run without one cannot have it.
+      const policyDecisions = await resolveOwnedBotAuthority(pluginId, runId)
+        .then((authority) => authority.automatedPublicationAllowed)
+        .catch(() => false)
+      return {
+        ...snapshot,
+        readiness: {
+          policyDecisions,
+          ...(installation.executionRoute
+            ? { executionRoute: installation.executionRoute.mode }
+            : {}),
+        },
+      }
     },
     async enqueue(runId, input) {
       const { resolved } = await own(runId)

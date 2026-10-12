@@ -251,6 +251,10 @@ export function fixture(
         : null
     ),
     recordMonitor: jest.fn(async () => undefined),
+    health: jest.fn(async (_binding: unknown) => ({
+      health: "healthy",
+      checkedAt: new Date(NOW).toISOString(),
+    })),
     getInstallation: jest.fn(async () => ({
       id: "install",
       createdAt: NOW - 86_400_000,
@@ -258,6 +262,11 @@ export function fixture(
       webhookEnabled: false,
       config: {},
       triggerState: {},
+      triggers: [
+        { id: "github", kind: "event", armed: false },
+        { id: "poll", kind: "poll", armed: true },
+      ],
+      readiness: { policyDecisions: true, executionRoute: "gateway" },
     })),
     // The host checks out an exact SHA as itself, and a pull ref at the PR's head.
     acquire: jest.fn(async (spec: { ref: string }) => ({
@@ -317,7 +326,11 @@ export function fixture(
       recordMonitor: mocks.recordMonitor,
       getInstallation: mocks.getInstallation,
     },
-    integrations: { authenticatedRequest: request, executeAction: mocks.action },
+    integrations: {
+      authenticatedRequest: request,
+      executeAction: mocks.action,
+      checkAccountHealth: mocks.health,
+    },
     workspace: { acquire: mocks.acquire, snapshot: mocks.snapshot },
     agent: { runExternalAgent: mocks.agent },
     i18n: { t: jest.fn(translate) },

@@ -2,7 +2,7 @@
 
 | 项目       | 内容                                                                                                                                                                                                                                                                                        |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 状态       | 修订版 r3：实现中（WP0–WP5 已合入）；尚未启用或批准上线                                                                                                                                                                                                                                     |
+| 状态       | 修订版 r3：实现中（WP0–WP6 已合入）；尚未启用或批准上线                                                                                                                                                                                                                                     |
 | 作者与日期 | Codex 初稿 2026-10-12；r2 源码核查与决策修订 2026-10-12；Asia/Shanghai                                                                                                                                                                                                                      |
 | 诉求       | 支持评论指令、权限校验、上下文收集、任务执行、结果回写与 Headless                                                                                                                                                                                                                           |
 | 范围       | 插件/共享包、Bot 运行时、Integration 事件投影、bot-run 工作区、外部 Agent、网关计量、多账号和部署                                                                                                                                                                                           |
@@ -420,7 +420,7 @@ POST 超时既不能确认结果，也不能证明未写，标 `writeback_uncert
 
 启用前就绪检查：插件/共享包版本、账号/仓库、白名单非空、真实权限探测、接入模式（`webhook_ready`/`polling_only`）、持久 DB/工作区、绑定 Git 凭据检出、预设/模型/认证、网关出网约束、写权限、发布模式所需授权、人工决策通道（人工模式）。
 
-明确的 `needs_setup` 原因码：`allowlist_empty`、`permission_probe_failed`、`private_clone_unavailable`、`executor_unavailable`、`pii_boundary_unverified`、`publication_grant_missing`、`decision_channel_missing`、`trigger_conflict`。每个任务执行时再检查一次，启用时通过不代表永久有效。
+明确的原因码：阻断（`needs_setup`）的有 `allowlist_empty`、`trigger_required`、`trigger_conflict`、`no_ingress`、`permission_probe_failed`、`private_clone_unavailable`；只告警、Bot 以较窄形态继续运行的有 `publication_grant_missing`（自动模式缺 autopilot 授权，回复改为等人批准）、`pii_boundary_unverified`（直连路由）、`executor_unavailable`（未选模型路由）。`decision_channel_missing` 不由插件判定：待批准项由 Host 推送到配对端，插件无从得知是否有人在线。每次接收都做便宜检查；手动 `check` 触发器做全量检查，含一次经绑定账号的真实检出。启用时通过不代表永久有效。
 
 同仓库只指定一个 Host/account 路由。租约只保护同一 DB，无法去重两个独立 Host 同时收到的同一指令，所以拒绝本地重复安装，由运营指定唯一路由。迁移顺序：先关闭旧接收，处理或取消在途任务，再重新安装，最后切入口。首批不做跨 Host 自动故障转移。
 
@@ -695,3 +695,6 @@ GitHub 官方 API（2026-10-12 核查）：[用户权限](https://docs.github.co
 | 上下文脱敏由 Host 完成                                                                    | `ctx.agent.runExternalAgent` 已对整段提示词执行 `redactText` 并过 PII gate，插件只做控制字符清洗；插件不能 import `@cognia/redact`（作者边界）                     |
 | 控制回复（help/status/cancel/用法/未启用/过期）走独立 `reply` 触发器                      | 接收运行从不等待人工；人工发布模式下回复的审批不占用接收槽                                                                                                         |
 | 回写崩溃窗口由 Delivery 动作自身核对                                                      | `commentIssue`/`commentPr`/`replyToReviewComment` 带标记与 `since` 时先查已有副本；Host 重试也不会重复发帖                                                         |
+| 就绪检查：插件判定能看到的，Host 只回答两个事实                                           | `getInstallation().readiness` 只暴露 `policyDecisions`（policy 审批是否自动通过）与 `executionRoute`（gateway/native），不暴露授权细节；其余由插件经绑定账号实测   |
+| 同 Host 同仓库同触发词只允许一个安装（`trigger_conflict`）                                | 插件存储中的认领记录，持有者每次接收续期，闲置 1 小时失效；Bot 平台只按安装去重，两个安装会各回一遍                                                                |
+| 配对审批与重启恢复不新增代码                                                              | 核查确认：待批准项经现有 `run://approval-pending` 推送配对端；重启后由 `step.run` 记忆化与租约恢复，测试覆盖各阶段重放                                             |

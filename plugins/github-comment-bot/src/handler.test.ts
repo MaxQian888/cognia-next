@@ -38,12 +38,8 @@ it("polls when due, moves its cursor only after success, and reports polling-onl
   })
   // With webhooks the poll is a five-minute safety net.
   f.mocks.getInstallation.mockResolvedValue({
-    id: "install",
-    createdAt: NOW - 86_400_000,
-    activatedAt: NOW - 3_600_000,
+    ...(await f.mocks.getInstallation()),
     webhookEnabled: true,
-    config: {},
-    triggerState: {},
   })
   await expect(
     receiveCommands(f.context, f.run, f.config, () => NOW + 120_000)
@@ -102,4 +98,48 @@ it("routes execute and reply runs, and stops when cancelled", async () => {
   aborted.abort()
   c.run.signal = aborted.signal
   await expect(handleCommandRun(c.context, c.run, c.now)).rejects.toThrow()
+})
+
+it("checks setup end to end and records blocking problems in the monitor", async () => {
+  const ready = fixture({ triggerId: "check" })
+  await expect(handleCommandRun(ready.context, ready.run, ready.now)).resolves.toMatchObject({
+    summary: "Ready (polling_only)",
+    output: { status: "ready", trigger: "@cognia-bot", problems: [] },
+  })
+  expect(ready.mocks.recordMonitor).toHaveBeenCalledWith("run", { lastSuccessAt: NOW })
+
+  const broken = fixture({ triggerId: "check" })
+  broken.mocks.health.mockResolvedValue({
+    health: "degraded",
+    message: "suspended",
+    checkedAt: "t",
+  } as never)
+  broken.mocks.getInstallation.mockResolvedValue({
+    id: "install",
+    createdAt: NOW - 1000,
+    webhookEnabled: false,
+    config: {},
+    triggerState: {},
+    triggers: [],
+    readiness: { policyDecisions: false },
+  } as never)
+  await expect(handleCommandRun(broken.context, broken.run, broken.now)).resolves.toMatchObject({
+    summary: "Needs setup: no_ingress, permission_probe_failed",
+    output: { status: "needs_setup" },
+  })
+  expect(broken.mocks.recordMonitor).toHaveBeenCalledWith("run", {
+    lastError: expect.stringContaining("permission_probe_failed: suspended"),
+  })
+})
+
+it("refuses a second installation answering the same trigger in the same repository", async () => {
+  const first = fixture({ triggerId: "poll", source: "schedule" as never })
+  await receiveCommands(first.context, first.run, first.config, first.now)
+  // Same host storage, another installation.
+  const second = fixture({ triggerId: "poll", source: "schedule" as never })
+  ;(second.context as { storage: unknown }).storage = first.context.storage
+  second.run.installationId = "other"
+  await expect(handleCommandRun(second.context, second.run, second.now)).resolves.toMatchObject({
+    output: { status: "needs_setup", reasonCode: "trigger_conflict" },
+  })
 })

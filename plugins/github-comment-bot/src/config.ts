@@ -20,7 +20,8 @@ export const ALLOWLIST_REQUIRED_MESSAGE =
  */
 export class SetupError extends Error {
   constructor(
-    readonly code: "repository_missing" | "allowlist_empty" | "trigger_required",
+    readonly code:
+      "repository_missing" | "allowlist_empty" | "trigger_required" | "trigger_conflict",
     message: string
   ) {
     super(message)

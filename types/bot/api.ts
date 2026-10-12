@@ -48,6 +48,27 @@ export interface BotCredentialSlotSnapshot {
   bound: boolean
 }
 
+/**
+ * What the host will do with this installation's requests right now, as a
+ * handler may know it: modes and yes/no answers, never which model, account
+ * or grant. Present on `ctx.bots.getInstallation` (a run exists, so the
+ * run's own policy ceiling applies); absent for lifecycle hooks.
+ */
+export interface BotInstallationReadiness {
+  /**
+   * A `decisionMode: "policy"` approval is answered by host policy. False
+   * means it becomes a person's decision (the installation lacks an
+   * autopilot grant without required write approval, or a ceiling narrows it).
+   */
+  policyDecisions: boolean
+  /**
+   * The model lane the installation's external agents run on: `gateway`
+   * (a Cognia model, behind the per-request PII check and a hard cost
+   * ceiling) or `native` (the agent's own login). Absent until chosen.
+   */
+  executionRoute?: "gateway" | "native"
+}
+
 export interface BotInstallationSnapshot {
   id: string
   createdAt: number
@@ -63,6 +84,7 @@ export interface BotInstallationSnapshot {
   scope: { kind: BotScopeKind; workspaceId?: string; projectId?: string }
   triggers: BotTriggerSnapshot[]
   credentialSlots: BotCredentialSlotSnapshot[]
+  readiness?: BotInstallationReadiness
 }
 
 /**

@@ -24,6 +24,10 @@ jest.mock("@/lib/bot/control-writes/local", () => ({
 jest.mock("@/lib/db/integrations", () => ({
   getIntegrationIngressEndpoint: (...args: unknown[]) => endpoint(...args),
 }))
+const authority = jest.fn()
+jest.mock("@/lib/bot/policy/run-authority", () => ({
+  resolveOwnedBotAuthority: (...args: unknown[]) => authority(...args),
+}))
 jest.mock("@/lib/bot/runtime/run", () => ({
   ...jest.requireActual("@/lib/bot/runtime/run"),
   getLiveBotRunSignal: () => liveSignal.current,
@@ -65,6 +69,7 @@ beforeEach(async () => {
   dispatch.mockResolvedValue({ id: "delivery" })
   endpoint.mockResolvedValue(undefined)
   liveSignal.current = new AbortController().signal
+  authority.mockResolvedValue({ automatedPublicationAllowed: false })
   pendingParks.clear()
 })
 it("requires permission and run ownership", async () => {
@@ -89,6 +94,31 @@ it("returns defaults and only enabled bound webhook state", async () => {
   } as never)
   endpoint.mockResolvedValue({ accountId: "account", enabled: true })
   expect((await api.getInstallation("run")).webhookEnabled).toBe(true)
+})
+it("tells a handler whether policy decisions are automatic and which model lane it runs on", async () => {
+  const api = createBotsAPI("p", () => true)
+  expect((await api.getInstallation("run")).readiness).toEqual({ policyDecisions: false })
+  expect(authority).toHaveBeenCalledWith("p", "run")
+  authority.mockResolvedValue({ automatedPublicationAllowed: true })
+  own.mockResolvedValue({
+    installation: {
+      ...installation,
+      executionRoute: {
+        mode: "gateway",
+        providerId: "openai",
+        modelId: "gpt-5",
+        accountId: "acct",
+      },
+    },
+    resolved,
+  })
+  const snapshot = await api.getInstallation("run")
+  // The lane only: never which provider, model or account.
+  expect(snapshot.readiness).toEqual({ policyDecisions: true, executionRoute: "gateway" })
+  expect(JSON.stringify(snapshot)).not.toContain("gpt-5")
+  // A run with no policy checkpoint cannot have automatic decisions.
+  authority.mockRejectedValue(new Error("Bot run has no host policy checkpoint"))
+  expect((await api.getInstallation("run")).readiness?.policyDecisions).toBe(false)
 })
 it("queues only declared manual work with stable identity and correlation", async () => {
   const api = createBotsAPI("p", () => true)

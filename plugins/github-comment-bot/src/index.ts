@@ -54,6 +54,12 @@ export const githubCommentBotDef = {
       holdConcurrencyWhileWaiting: false,
     },
     {
+      id: "check",
+      kind: "manual",
+      label: "Check setup",
+      concurrencyKey: "github-cmd-check",
+    },
+    {
       id: "reply",
       kind: "manual",
       label: "Post a control reply",

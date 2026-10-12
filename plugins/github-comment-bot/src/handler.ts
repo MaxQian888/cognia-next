@@ -12,6 +12,7 @@ import { parseConfig, SetupError, type Config } from "./config"
 import { executeCommand } from "./execute"
 import { readerFor, readIdentity, resolveTrigger } from "./identity"
 import { initialCursor, pollCandidates, WEBHOOK_SAFETY_NET_MS, type PollCursor } from "./poll"
+import { checkReadiness, claimTrigger, hostWarnings } from "./readiness"
 import { candidateFromEvent, considerCandidate, type CandidateOutcome } from "./receive"
 import { AuthorCheckUnavailableError } from "./recheck"
 import { replyToCommand } from "./reply"
@@ -29,6 +30,8 @@ export async function receiveCommands(
   const reader = readerFor(ctx, run, config, now)
   const identity = await readIdentity(reader)
   const trigger = resolveTrigger(config, identity)
+  await claimTrigger(ctx, run, config.repository, trigger, now)
+  const warnings = hostWarnings(installation, config).map((problem) => problem.code)
   const watermark = installation.activatedAt ?? installation.createdAt
   const env = { reader, identity, trigger, watermark, now }
   const counts: Partial<Record<CandidateOutcome, number>> = {}
@@ -41,7 +44,7 @@ export async function receiveCommands(
     if (candidate) tally(await considerCandidate(ctx, run, config, env, candidate))
     return {
       summary: candidate ? "Comment event handled" : "Not a command event for this repository",
-      output: { ingress: "webhook", counts },
+      output: { ingress: "webhook", counts, warnings },
     }
   }
 
@@ -86,6 +89,7 @@ export async function receiveCommands(
       output: {
         ingress: installation.webhookEnabled ? "webhook_ready" : "polling_only",
         counts,
+        warnings,
       },
     }
   } catch (error) {
@@ -104,6 +108,38 @@ export async function receiveCommands(
   }
 }
 
+/** The `check` trigger: every readiness check, including a real checkout. */
+export async function checkSetup(
+  ctx: PluginContext,
+  run: BotRunContextV1,
+  config: Config,
+  now: () => number = Date.now
+) {
+  const installation = await ctx.bots.getInstallation(run.runId)
+  const reader = readerFor(ctx, run, config, now)
+  const identity = await readIdentity(reader)
+  const trigger = resolveTrigger(config, identity)
+  await claimTrigger(ctx, run, config.repository, trigger, now)
+  const report = await checkReadiness(ctx, run, config, reader, installation, { cloneProbe: true })
+  const blocking = report.problems.filter((problem) => problem.blocking)
+  await ctx.bots.recordMonitor(
+    run.runId,
+    blocking.length
+      ? {
+          lastError: blocking
+            .map((problem) => `${problem.code}: ${problem.detail ?? ""}`)
+            .join("; "),
+        }
+      : { lastSuccessAt: now() }
+  )
+  return {
+    summary: report.ready
+      ? `Ready (${report.ingress})`
+      : `Needs setup: ${blocking.map((p) => p.code).join(", ")}`,
+    output: { status: report.ready ? "ready" : "needs_setup", trigger, ...report },
+  }
+}
+
 export async function handleCommandRun(
   ctx: PluginContext,
   run: BotRunContextV1,
@@ -117,6 +153,8 @@ export async function handleCommandRun(
         return await executeCommand(ctx, run, config, now)
       case "reply":
         return await replyToCommand(ctx, run, config, now)
+      case "check":
+        return await checkSetup(ctx, run, config, now)
       default:
         return await receiveCommands(ctx, run, config, now)
     }
