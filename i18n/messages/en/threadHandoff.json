@@ -75,5 +75,41 @@
     "resume": "Resume handoff",
     "title": "Continue this conversation here?",
     "working": "Verifying ownership…"
+  },
+  "bringBack": {
+    "title": "This conversation continues on {host}",
+    "body": "This copy is read-only.",
+    "anotherDevice": "another device",
+    "action": "Bring the changes back",
+    "actionDescription": "Puts what was done on {host} into a new worktree here. This folder stays as it is.",
+    "unsupported": "Update {host} to bring its changes back here.",
+    "progress": {
+      "approving": "Waiting for approval on {host}…",
+      "export": "{host} is packing the changes…",
+      "download": "Downloading {received} of {total}…",
+      "apply": "Checking the changes out into a new worktree…"
+    },
+    "broughtBack": "The changes from {host} are in a new worktree.",
+    "alreadyHere": "Nothing new since last time; this is the same worktree.",
+    "landedWorktree": "Branch {branch}, in {path}",
+    "landedFolder": "In a new folder: {path}",
+    "notPushed": "{host} could not push the branch, so the commits came over directly. Push it from the new worktree when you are ready.",
+    "reveal": "Show in folder",
+    "openPullRequest": "Open pull request",
+    "pullRequestOpened": "Pull request #{number}",
+    "pullRequestBody": "Work from a conversation continued on {host} with Cognia.",
+    "pullRequestFailed": "The pull request could not be opened.",
+    "failure": {
+      "consent": "Approve the request on {host}, then try again.",
+      "unchanged": "Nothing has changed on {host} since the conversation moved there.",
+      "checkout-gone": "{host} no longer has the copy this conversation worked in.",
+      "fetch-failed": "The branch could not be fetched from the repository. Check that you can pull from it here, then try again.",
+      "mismatch": "What arrived was not what {host} sent, so nothing was checked out.",
+      "not-git": "The folder this conversation started from is no longer a git checkout.",
+      "too-large": "The changes are larger than this device accepts.",
+      "integrity": "The download was interrupted or damaged. Try again.",
+      "no-working-directory": "This conversation has no folder on this device to bring the changes next to.",
+      "other": "The changes could not be brought back from {host}."
+    }
   }
 }

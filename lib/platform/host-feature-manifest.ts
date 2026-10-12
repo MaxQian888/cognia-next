@@ -314,6 +314,17 @@ export const CODE_SNAPSHOT_HOST_OPERATIONS = Object.freeze([
 ] as const)
 
 /**
+ * The same feature's return of that work (ADR-0224 A11c): the export of a
+ * handed-over checkout (pushed as a branch, or staged as a bundle or tar), and
+ * the chunked read of what was staged.
+ */
+export const CODE_RESULT_HOST_OPERATIONS = Object.freeze([
+  "code_checkout_export",
+  "code_result_read_chunk",
+  "code_result_discard",
+] as const)
+
+/**
  * The same feature's plugin transfer: a cogpack uploaded in chunks and
  * installed under the host's own signature and policy checks. Listed apart
  * because only an item whose plugins the host lacks needs it.
@@ -767,7 +778,11 @@ export function buildLocalHostFeatureManifest({
     // are the same on every host.
     features["always-on.code-supply"] = {
       version: 1,
-      operations: [...CODE_SUPPLY_HOST_OPERATIONS, ...CODE_SNAPSHOT_HOST_OPERATIONS],
+      operations: [
+        ...CODE_SUPPLY_HOST_OPERATIONS,
+        ...CODE_SNAPSHOT_HOST_OPERATIONS,
+        ...CODE_RESULT_HOST_OPERATIONS,
+      ],
     }
     // Both hosts seal secrets in the same store, through the same Rust arms.
     features["always-on.secrets"] = {

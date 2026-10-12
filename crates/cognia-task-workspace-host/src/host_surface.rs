@@ -8,20 +8,20 @@
 
 use cognia_task_workspace::{
     apply_revision_patch, read_confined_text, read_report_file, workspace_revision,
-    AcquireWorkspaceBundle, ApplyCodeSnapshot, CodeCheckout, CodeSnapshotLimits,
-    CodeSnapshotUpload, CommittedCodeSnapshot, CreateCodeSnapshot, CreatedCodeSnapshot, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn,
-    BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffUndoOutcome, ConfinedFileRead,
-    ConflictResolution, DownloadHandle, EnsureProjectSource, EnsureRemoteSource, PatchSelection,
-    PatchSet, ProjectSource, PruneOutcome,
-    ReconcileOutcome, RemoteSourceCheckout, ResourceCaptureChunk, ResourceChange, ResourceEvent,
-    ResourceEventKind, ResourceIndexEntry, ResourceRead, ResourceTrackingPolicy,
-    RevisionApplyOutcome, RevisionPatch, RunState, ServiceConfig, TaskResourceManifest,
-    TaskResourceSummary, TaskRun, TaskWorkspace, TaskWorkspaceEventSink,
-    TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle,
-    WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome, WorkspaceEnvironmentSummary,
-    WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent, WorkspaceMaintenanceRequest,
-    WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision, WorktreeLifecycleEvent,
-    WorktreeLifecycleKind, WorktreeLifecycleSink,
+    AcquireWorkspaceBundle, AppliedCodeResult, ApplyCodeResult, ApplyCodeSnapshot, ApplyOutcome,
+    BeginTaskRun, BeginWorkspaceBundleTurn, BundleHandoffOutcome, BundleHandoffRequest,
+    BundleHandoffUndoOutcome, CodeCheckout, CodeResult, CodeSnapshotLimits, CodeSnapshotUpload,
+    CommittedCodeSnapshot, ConfinedFileRead, ConflictResolution, CreateCodeSnapshot,
+    CreatedCodeSnapshot, DownloadHandle, EnsureProjectSource, EnsureRemoteSource,
+    ExportCodeCheckout, PatchSelection, PatchSet, ProjectSource, PruneOutcome, ReconcileOutcome,
+    RemoteSourceCheckout, ResourceCaptureChunk, ResourceChange, ResourceEvent, ResourceEventKind,
+    ResourceIndexEntry, ResourceRead, ResourceTrackingPolicy, RevisionApplyOutcome, RevisionPatch,
+    RunState, ServiceConfig, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
+    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
+    UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome,
+    WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
+    WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision,
+    WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -543,7 +543,9 @@ pub async fn task_workspace_project_source_ensure(
 /// against a commit its remote has, or a tar of a folder without git. The
 /// bytes stay on this device until read out with [`code_snapshot_read_chunk`].
 #[cfg_attr(feature = "tauri-host", tauri::command)]
-pub async fn code_snapshot_create(input: CreateCodeSnapshot) -> Result<CreatedCodeSnapshot, String> {
+pub async fn code_snapshot_create(
+    input: CreateCodeSnapshot,
+) -> Result<CreatedCodeSnapshot, String> {
     blocking(move |service| service.create_code_snapshot(&input)).await
 }
 
@@ -585,7 +587,9 @@ pub async fn code_snapshot_upload_write_chunk(
     .await
 }
 
-pub async fn code_snapshot_upload_commit(upload_id: String) -> Result<CommittedCodeSnapshot, String> {
+pub async fn code_snapshot_upload_commit(
+    upload_id: String,
+) -> Result<CommittedCodeSnapshot, String> {
     blocking(move |service| service.commit_code_snapshot_upload(&upload_id)).await
 }
 
@@ -610,8 +614,82 @@ pub async fn code_snapshot_apply(mut input: ApplyCodeSnapshot) -> Result<CodeChe
 /// The checkout a handed-over conversation works in. Service-only: the brain
 /// binds the continued session to it, by id, so a path never arrives from
 /// another device.
-pub async fn code_snapshot_checkout_get(checkout_id: String) -> Result<Option<CodeCheckout>, String> {
+pub async fn code_snapshot_checkout_get(
+    checkout_id: String,
+) -> Result<Option<CodeCheckout>, String> {
     blocking(move |service| service.code_checkout(&checkout_id)).await
+}
+
+/// Export the work a handed-over checkout holds (ADR-0224 A11c). The push
+/// carries the git credential this host stored for the remote's host, as the
+/// fetch in [`code_snapshot_apply`] did; a caller never sends one.
+pub async fn code_checkout_export(mut input: ExportCodeCheckout) -> Result<CodeResult, String> {
+    blocking(move |service| {
+        let remote_url = service
+            .code_checkout(&input.checkout_id)?
+            .and_then(|checkout| checkout.remote_url);
+        input.credential = with_stored_project_token(EnsureProjectSource {
+            roots: Vec::new(),
+            remote_url,
+            credential: None,
+        })
+        .credential;
+        service.export_code_checkout(&input)
+    })
+    .await
+}
+
+pub async fn code_result_read_chunk(
+    result_id: String,
+    offset: u64,
+) -> Result<TransferChunk, String> {
+    blocking(move |service| service.read_code_result_chunk(&result_id, offset)).await
+}
+
+pub async fn code_result_discard(result_id: String) -> Result<(), String> {
+    blocking(move |service| service.discard_code_result(&result_id)).await
+}
+
+/// Receive a host's exported bundle or tar on this device, chunk by chunk,
+/// for [`code_result_apply`].
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn code_result_receive_open(
+    size_bytes: u64,
+    sha256: String,
+) -> Result<CodeSnapshotUpload, String> {
+    blocking(move |service| service.open_code_result_receive(size_bytes, &sha256)).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn code_result_receive_write_chunk(
+    upload_id: String,
+    offset: u64,
+    data_base64: String,
+    chunk_hash: String,
+) -> Result<u64, String> {
+    blocking(move |service| {
+        service.write_code_result_chunk(&upload_id, offset, &data_base64, &chunk_hash)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn code_result_receive_commit(
+    upload_id: String,
+) -> Result<CommittedCodeSnapshot, String> {
+    blocking(move |service| service.commit_code_result_receive(&upload_id)).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn code_result_receive_cancel(upload_id: String) -> Result<(), String> {
+    blocking(move |service| service.cancel_code_result_receive(&upload_id)).await
+}
+
+/// Put a host's exported work into a new worktree (or folder) on this
+/// device, fetching a pushed branch with the user's own git credentials.
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn code_result_apply(input: ApplyCodeResult) -> Result<AppliedCodeResult, String> {
+    blocking(move |service| service.apply_code_result(&input)).await
 }
 
 /// [`with_stored_git_token`] for a project's remote.
@@ -623,7 +701,11 @@ fn with_stored_project_token(mut input: EnsureProjectSource) -> EnsureProjectSou
     if has_token {
         return input;
     }
-    let Some(remote) = input.remote_url.as_deref().filter(|url| !url.trim().is_empty()) else {
+    let Some(remote) = input
+        .remote_url
+        .as_deref()
+        .filter(|url| !url.trim().is_empty())
+    else {
         return input;
     };
     match cognia_secrets::host_secrets::git_token_for_remote(remote) {

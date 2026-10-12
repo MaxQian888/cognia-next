@@ -84,6 +84,11 @@ jest.mock("@/components/project-coordinator/project-paused-banner", () => ({
     <div data-testid="project-paused-banner-stub">{projectId}</div>
   ),
 }))
+jest.mock("@/components/thread-handoff/handed-off-banner", () => ({
+  HandedOffBanner: ({ session }: { session: { id: string } }) => (
+    <div data-testid="handed-off-banner-stub">{session.id}</div>
+  ),
+}))
 jest.mock("./archived-conversation-banner", () => ({
   ArchivedConversationBanner: ({ session }: { session: { id: string } }) => (
     <div data-testid="archived-banner-stub">{session.id}</div>
@@ -1850,6 +1855,27 @@ describe("ChatPane — a user turn restores an archived conversation (ADR-0213 D
     expect(screen.queryByTestId("archived-banner-stub")).not.toBeInTheDocument()
     rerender(<ChatPane {...makeProps()} activeSession={archived} />)
     expect(screen.getByTestId("archived-banner-stub")).toHaveTextContent("s1")
+  })
+
+  it("shows the handed-off banner only once a handoff is committed", () => {
+    const { rerender } = render(<ChatPane {...makeProps()} />)
+    expect(screen.queryByTestId("handed-off-banner-stub")).not.toBeInTheDocument()
+    const lock = { ticketId: "t1", targetHostRef: "host-1", at: 1 }
+    const base = makeProps().activeSession as ChatSession
+    rerender(
+      <ChatPane
+        {...makeProps()}
+        activeSession={{ ...base, handoffLock: { ...lock, state: "frozen" } }}
+      />
+    )
+    expect(screen.queryByTestId("handed-off-banner-stub")).not.toBeInTheDocument()
+    rerender(
+      <ChatPane
+        {...makeProps()}
+        activeSession={{ ...base, handoffLock: { ...lock, state: "committed" } }}
+      />
+    )
+    expect(screen.getByTestId("handed-off-banner-stub")).toBeInTheDocument()
   })
 
   it("shows no banner on an imported subagent transcript", () => {

@@ -65,6 +65,11 @@ import {
   recordTaskResourceToolEvent,
   ensureRemoteWorkspaceSource,
   ensureProjectWorkspaceSource,
+  openCodeResultReceive,
+  writeCodeResultChunk,
+  commitCodeResultReceive,
+  cancelCodeResultReceive,
+  applyCodeResult,
   reconcileManagedWorkspaces,
   retryWorkspaceBundleHandoff,
   undoWorkspaceBundleHandoff,
@@ -777,6 +782,39 @@ describe("task workspace client", () => {
       input: { roots: ["/Users/me/app"], remoteUrl: "https://github.com/acme/app.git" },
     })
     expect(source.source).toBe("clone")
+  })
+
+  it("receives a host's exported work and applies it beside the original folder", async () => {
+    call.mockResolvedValue(undefined)
+    await openCodeResultReceive(42, "a".repeat(64))
+    await writeCodeResultChunk({ uploadId: "u", offset: 0, dataBase64: "AA==", chunkHash: "h" })
+    await commitCodeResultReceive("u")
+    await cancelCodeResultReceive("u")
+    const result = {
+      checkoutId: "0192f0c4-7a1e-7b3c-9d2e-4f5a6b7c8d9e",
+      kind: "branch" as const,
+      branch: "cognia/codex-4f5a6b7c8d9e",
+      commit: "c".repeat(40),
+      baseCommit: "b".repeat(40),
+      baseRef: "main",
+      remoteUrl: "https://github.com/acme/app",
+      subdir: "",
+      files: 2,
+      pushError: null,
+      transfer: null,
+    }
+    await applyCodeResult({ root: "/Users/me/app", result })
+
+    expect(call.mock.calls).toEqual([
+      ["code_result_receive_open", { sizeBytes: 42, sha256: "a".repeat(64) }],
+      [
+        "code_result_receive_write_chunk",
+        { uploadId: "u", offset: 0, dataBase64: "AA==", chunkHash: "h" },
+      ],
+      ["code_result_receive_commit", { uploadId: "u" }],
+      ["code_result_receive_cancel", { uploadId: "u" }],
+      ["code_result_apply", { input: { root: "/Users/me/app", result } }],
+    ])
   })
 
   it("supplies and acquires as one call, defaulting to a single primary root", async () => {

@@ -388,6 +388,29 @@ A package is limited to 100 MiB by default. To change what a host accepts, set
 moves and the conversation stays on the desktop. The message says why: for example, the
 starting commit is not on the remote yet, or the package is too large.
 
+### Bring the changes back
+
+The desktop's copy of a conversation that moved to the host shows a banner naming the host.
+When its code went along, the banner has **Bring the changes back**. The host's owner
+approves once more, and then:
+
+1. The host takes what its copy holds now: the agent's commits, plus one more commit for
+   anything left uncommitted. Its own branch and files are left as they are.
+2. It pushes that as a `cognia/<agent>-…` branch to the workspace's repository, with the
+   git token it stores for that repository's host. When it cannot push (no token, no
+   repository, or the push is refused), the same commits come back to the desktop directly
+   as a git bundle. A folder without git comes back as an archive of its files.
+3. The desktop fetches the branch with your own git credentials, or downloads the bundle in
+   checked pieces, and checks it out on a new branch in a **new worktree**. The folder the
+   conversation started from is never changed. A folder without git is unpacked into a new
+   folder.
+
+The banner shows where the worktree is, with **Show in folder**. When the repository is on
+GitHub and a GitHub account (or a `gh` login) is connected, **Open pull request** opens a
+draft pull request from that branch to the branch the conversation started from. Bring the
+changes back again later to get the newer work; it lands in another new worktree, and asking
+when nothing changed answers with the same one.
+
 ## Keep the master key safe
 
 Everything the host stores encrypted (device identities, provider and connector

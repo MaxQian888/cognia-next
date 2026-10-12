@@ -629,8 +629,11 @@ export interface ProjectSource {
   remoteUrl: string | null
 }
 
-/** `cognia_task_workspace::CodeSnapshotKind` (ADR-0224 A11b). */
-export type CodeSnapshotKind = "git-patch" | "tar"
+/**
+ * `cognia_task_workspace::CodeSnapshotKind` (ADR-0224 A11b). `git-bundle` is
+ * only ever work coming back from a host (A11c), never a snapshot.
+ */
+export type CodeSnapshotKind = "git-patch" | "tar" | "git-bundle"
 
 /**
  * `cognia_task_workspace::CodeSnapshotManifest`: what a working copy handed
@@ -641,11 +644,11 @@ export interface CodeSnapshotManifest {
   kind: CodeSnapshotKind
   sizeBytes: number
   sha256: string
-  /** The commit the patch applies to: one the remote has. */
+  /** The commit the patch applies to (one the remote has), or a bundle's prerequisite. */
   baseCommit: string | null
   /** The remote branch that commit was found on. */
   baseRef: string | null
-  /** The tree the working copy amounts to. */
+  /** The tree the working copy amounts to; for a bundle, its tip's tree. */
   tree: string | null
   /** Where the working directory sits in the checkout, `/`-separated. */
   subdir: string
@@ -699,9 +702,57 @@ export interface CodeCheckout {
   kind: CodeSnapshotKind
   branch: string | null
   baseCommit: string | null
+  /** The remote branch `baseCommit` was found on. */
+  baseRef: string | null
+  /** Where the working directory sits in the checkout, `/`-separated. */
+  subdir: string
   projectId: string | null
   remoteUrl: string | null
   createdAt: number
+}
+
+/** `cognia_task_workspace::CodeResultKind` (ADR-0224 A11c): how work comes back. */
+export type CodeResultKind = "branch" | "bundle" | "tar"
+
+/** `cognia_task_workspace::CodeResultTransfer`: bytes waiting on the host. */
+export interface CodeResultTransfer {
+  resultId: string
+  manifest: CodeSnapshotManifest
+  chunkBytes: number
+}
+
+/** `cognia_task_workspace::CodeResult`: a handed-over checkout's work, exported. */
+export interface CodeResult {
+  checkoutId: string
+  kind: CodeResultKind
+  /** The `cognia/<agent>-…` branch the work is on. Git only. */
+  branch: string | null
+  /** That branch's tip. Git only. */
+  commit: string | null
+  baseCommit: string | null
+  /** The remote branch the conversation started from. Git only. */
+  baseRef: string | null
+  remoteUrl: string | null
+  subdir: string
+  /** Files changed since the base, or entries in the tar. */
+  files: number
+  /** Why the branch was not pushed, when it comes as a bundle. */
+  pushError: string | null
+  /** The bytes to read, for a bundle or a tar. */
+  transfer: CodeResultTransfer | null
+}
+
+/** `cognia_task_workspace::AppliedCodeResult`: where the work landed on this device. */
+export interface AppliedCodeResult {
+  /** The new worktree, or the new folder for a tar. */
+  path: string
+  /** `path` plus the result's `subdir`. */
+  workingDir: string
+  /** The local branch the worktree is on. Git only. */
+  branch: string | null
+  commit: string | null
+  /** Applied before: this is the worktree that apply made. */
+  reused: boolean
 }
 
 export interface RemoteSourceCheckout {

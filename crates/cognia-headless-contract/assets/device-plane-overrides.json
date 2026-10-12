@@ -1234,6 +1234,94 @@
         ]
       }
     },
+    "code_checkout_export": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Export the work a handed-over checkout holds (cognia_task_workspace::ExportCodeCheckout, ADR-0224 A11c): pushed as cognia/<agent>-<id> with the host's stored git credential when the repository takes it, else staged as a git bundle (or a tar for a folder without git) for code_result_read_chunk. One sent here is ignored.",
+        "required": [
+          "input",
+          "adminLease"
+        ],
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "checkoutId": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36
+              },
+              "agent": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+              }
+            },
+            "required": [
+              "checkoutId"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "code_result_discard": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "resultId",
+          "adminLease"
+        ],
+        "properties": {
+          "resultId": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "code_result_read_chunk": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "resultId",
+          "offset",
+          "adminLease"
+        ],
+        "properties": {
+          "resultId": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "code_snapshot_apply": {
       "inputSchemaSource": "contract",
       "inputSchema": {

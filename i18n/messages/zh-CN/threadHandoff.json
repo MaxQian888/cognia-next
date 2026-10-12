@@ -75,5 +75,41 @@
     "resume": "继续恢复",
     "title": "在此设备继续该会话？",
     "working": "正在校验所有权…"
+  },
+  "bringBack": {
+    "title": "此会话已在 {host} 上继续",
+    "body": "此副本为只读。",
+    "anotherDevice": "另一台设备",
+    "action": "取回改动",
+    "actionDescription": "将 {host} 上完成的改动放入本机新的工作树，原文件夹保持不变。",
+    "unsupported": "请更新 {host}，以便将其改动取回到这里。",
+    "progress": {
+      "approving": "正在等待 {host} 上的批准…",
+      "export": "{host} 正在打包改动…",
+      "download": "正在下载 {received} / {total}…",
+      "apply": "正在将改动检出到新的工作树…"
+    },
+    "broughtBack": "来自 {host} 的改动已放入新的工作树。",
+    "alreadyHere": "自上次以来没有新改动，这是同一个工作树。",
+    "landedWorktree": "分支 {branch}，位于 {path}",
+    "landedFolder": "位于新文件夹：{path}",
+    "notPushed": "{host} 无法推送该分支，因此提交已直接传回。准备好后可在新的工作树中推送。",
+    "reveal": "在文件夹中显示",
+    "openPullRequest": "创建拉取请求",
+    "pullRequestOpened": "拉取请求 #{number}",
+    "pullRequestBody": "来自在 {host} 上通过 Cognia 继续的会话的工作。",
+    "pullRequestFailed": "无法创建拉取请求。",
+    "failure": {
+      "consent": "请在 {host} 上批准请求，然后重试。",
+      "unchanged": "自会话转移后，{host} 上没有任何改动。",
+      "checkout-gone": "{host} 上已不再保留此会话使用的副本。",
+      "fetch-failed": "无法从仓库获取该分支。请确认本机可以从该仓库拉取，然后重试。",
+      "mismatch": "收到的内容与 {host} 发送的不一致，因此未检出任何内容。",
+      "not-git": "此会话最初所在的文件夹已不再是 git 检出。",
+      "too-large": "改动超出了本设备可接收的大小。",
+      "integrity": "下载中断或已损坏，请重试。",
+      "no-working-directory": "此会话在本设备上没有可放置改动的文件夹。",
+      "other": "无法从 {host} 取回改动。"
+    }
   }
 }

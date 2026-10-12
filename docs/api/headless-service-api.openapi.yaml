@@ -21704,6 +21704,703 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/code_checkout_export:
+    post:
+      operationId: internalRpcCodeCheckoutExport
+      tags:
+        - headless-rpc
+      summary: code_checkout_export (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "Export the work a handed-over checkout holds (cognia_task_workspace::ExportCodeCheckout, ADR-0224 A11c):
+                pushed as cognia/<agent>-<id> with the host's stored git credential when the repository takes it, else
+                staged as a git bundle (or a tar for a folder without git) for code_result_read_chunk. One sent here is
+                ignored."
+              required:
+                - input
+              properties:
+                input:
+                  type: object
+                  properties:
+                    checkoutId:
+                      type: string
+                      minLength: 36
+                      maxLength: 36
+                    agent:
+                      type:
+                        - string
+                        - "null"
+                      pattern: ^[a-z0-9][a-z0-9-]{0,31}$
+                  required:
+                    - checkoutId
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                description: A checkout's work, ready to come back.
+                properties:
+                  baseCommit:
+                    description: The commit the conversation started from. Git only.
+                    type:
+                      - string
+                      - "null"
+                  baseRef:
+                    description: The remote branch that commit was found on. Git only.
+                    type:
+                      - string
+                      - "null"
+                  branch:
+                    description: The branch the work is on. Git only.
+                    type:
+                      - string
+                      - "null"
+                  checkoutId:
+                    type: string
+                  commit:
+                    description: The tip of that branch. Git only.
+                    type:
+                      - string
+                      - "null"
+                  files:
+                    description: Files changed since the base, or entries in the tar.
+                    format: uint64
+                    minimum: 0
+                    type: integer
+                  kind:
+                    description: How the work comes back.
+                    oneOf:
+                      - const: branch
+                        description: Pushed to the repository's remote as `branch`.
+                        type: string
+                      - const: bundle
+                        description: A git bundle to read from the host.
+                        type: string
+                      - const: tar
+                        description: A gzip tar of a folder without git, to read from the host.
+                        type: string
+                  pushError:
+                    description: Why the branch was not pushed, when it comes as a bundle.
+                    type:
+                      - string
+                      - "null"
+                  remoteUrl:
+                    type:
+                      - string
+                      - "null"
+                  subdir:
+                    description: Where the conversation's working directory sits inside the checkout.
+                    type: string
+                  transfer:
+                    anyOf:
+                      - additionalProperties: false
+                        description: Bytes waiting on the host to be read out chunk by chunk.
+                        properties:
+                          chunkBytes:
+                            format: uint
+                            maximum: 65536
+                            minimum: 1
+                            type: integer
+                          manifest:
+                            additionalProperties: false
+                            description: |-
+                              What the desktop recorded about a snapshot. Travels with it; the host
+                              checks the bytes against `sha256` and the applied result against `tree`.
+                            properties:
+                              baseCommit:
+                                description: The commit the patch applies to, or a bundle's prerequisite. Git only.
+                                type:
+                                  - string
+                                  - "null"
+                              baseRef:
+                                description: The remote branch that commit was found on, so the host can fetch it.
+                                type:
+                                  - string
+                                  - "null"
+                              entries:
+                                description: Files the patch changes, or entries the tar holds.
+                                format: uint64
+                                minimum: 0
+                                type: integer
+                              kind:
+                                oneOf:
+                                  - const: git-patch
+                                    description: A binary patch against a commit the remote has.
+                                    type: string
+                                  - const: tar
+                                    description: A gzip tar of a folder that is not a git checkout.
+                                    type: string
+                                  - const: git-bundle
+                                    description: |-
+                                      A git bundle of the commits a handed-over checkout made on top of its
+                                      base: how the work comes back when the host cannot push it
+                                      (ADR-0224 A11c). Never applied as a snapshot.
+                                    type: string
+                              sha256:
+                                type: string
+                              sizeBytes:
+                                format: uint64
+                                minimum: 0
+                                type: integer
+                              subdir:
+                                description: |-
+                                  Where the working directory sits inside the checkout, `/`-separated,
+                                  empty for its root.
+                                type: string
+                              tree:
+                                description: |-
+                                  The tree the working copy amounts to; for a bundle, its tip's tree.
+                                  Git only.
+                                type:
+                                  - string
+                                  - "null"
+                            required:
+                              - baseCommit
+                              - baseRef
+                              - entries
+                              - kind
+                              - sha256
+                              - sizeBytes
+                              - subdir
+                              - tree
+                            type: object
+                          resultId:
+                            type: string
+                        required:
+                          - chunkBytes
+                          - manifest
+                          - resultId
+                        type: object
+                      - type: "null"
+                    description: The bytes to read, for a bundle or a tar.
+                required:
+                  - baseCommit
+                  - baseRef
+                  - branch
+                  - checkoutId
+                  - commit
+                  - files
+                  - kind
+                  - pushError
+                  - remoteUrl
+                  - subdir
+                  - transfer
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/code_result_discard:
+    post:
+      operationId: internalRpcCodeResultDiscard
+      tags:
+        - headless-rpc
+      summary: code_result_discard (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - resultId
+              properties:
+                resultId:
+                  type: string
+                  minLength: 36
+                  maxLength: 36
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/code_result_read_chunk:
+    post:
+      operationId: internalRpcCodeResultReadChunk
+      tags:
+        - headless-rpc
+      summary: code_result_read_chunk (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - resultId
+                - offset
+              properties:
+                resultId:
+                  type: string
+                  minLength: 36
+                  maxLength: 36
+                offset:
+                  type: integer
+                  minimum: 0
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  chunkHash:
+                    type: string
+                  dataBase64:
+                    type: string
+                  eof:
+                    type: boolean
+                  nextOffset:
+                    format: uint64
+                    minimum: 0
+                    type: integer
+                  offset:
+                    format: uint64
+                    minimum: 0
+                    type: integer
+                required:
+                  - chunkHash
+                  - dataBase64
+                  - eof
+                  - nextOffset
+                  - offset
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/code_snapshot_apply:
     post:
       operationId: internalRpcCodeSnapshotApply
@@ -21814,6 +22511,12 @@ paths:
                     type:
                       - string
                       - "null"
+                  baseRef:
+                    default: null
+                    description: The remote branch `base_commit` was found on. Git only.
+                    type:
+                      - string
+                      - "null"
                   branch:
                     description: The branch the worktree is on. Git only.
                     type:
@@ -21833,6 +22536,12 @@ paths:
                       - const: tar
                         description: A gzip tar of a folder that is not a git checkout.
                         type: string
+                      - const: git-bundle
+                        description: |-
+                          A git bundle of the commits a handed-over checkout made on top of its
+                          base: how the work comes back when the host cannot push it
+                          (ADR-0224 A11c). Never applied as a snapshot.
+                        type: string
                   projectId:
                     type:
                       - string
@@ -21844,11 +22553,16 @@ paths:
                   root:
                     description: The checkout's root.
                     type: string
+                  subdir:
+                    default: ""
+                    description: Where the working directory sits inside the checkout, `/`-separated.
+                    type: string
                   workingDir:
                     description: "Where the conversation works: `root` plus the snapshot's `subdir`."
                     type: string
                 required:
                   - baseCommit
+                  - baseRef
                   - branch
                   - checkoutId
                   - createdAt
@@ -21856,6 +22570,7 @@ paths:
                   - projectId
                   - remoteUrl
                   - root
+                  - subdir
                   - workingDir
                 type: object
         "202":
@@ -22035,6 +22750,12 @@ paths:
                         type:
                           - string
                           - "null"
+                      baseRef:
+                        default: null
+                        description: The remote branch `base_commit` was found on. Git only.
+                        type:
+                          - string
+                          - "null"
                       branch:
                         description: The branch the worktree is on. Git only.
                         type:
@@ -22054,6 +22775,12 @@ paths:
                           - const: tar
                             description: A gzip tar of a folder that is not a git checkout.
                             type: string
+                          - const: git-bundle
+                            description: |-
+                              A git bundle of the commits a handed-over checkout made on top of its
+                              base: how the work comes back when the host cannot push it
+                              (ADR-0224 A11c). Never applied as a snapshot.
+                            type: string
                       projectId:
                         type:
                           - string
@@ -22065,11 +22792,16 @@ paths:
                       root:
                         description: The checkout's root.
                         type: string
+                      subdir:
+                        default: ""
+                        description: Where the working directory sits inside the checkout, `/`-separated.
+                        type: string
                       workingDir:
                         description: "Where the conversation works: `root` plus the snapshot's `subdir`."
                         type: string
                     required:
                       - baseCommit
+                      - baseRef
                       - branch
                       - checkoutId
                       - createdAt
@@ -22077,6 +22809,7 @@ paths:
                       - projectId
                       - remoteUrl
                       - root
+                      - subdir
                       - workingDir
                     type: object
                   - type: "null"
@@ -179291,6 +180024,9 @@ components:
           - claude_set_provider_env
           - claude_sidecar_status
           - claude_tool_result_decision
+          - code_checkout_export
+          - code_result_discard
+          - code_result_read_chunk
           - code_snapshot_apply
           - code_snapshot_checkout_get
           - code_snapshot_limits_get
@@ -180290,10 +181026,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 836
-  generatedRequestSchemaCount: 836
+  internalCommandCount: 839
+  generatedRequestSchemaCount: 839
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 836
+  contractRequestSchemaCount: 839
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 836
+  generatedResponseSchemaCount: 839
   loopbackOnly: true

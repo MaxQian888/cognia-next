@@ -124,6 +124,10 @@ pub struct TaskWorkspaceService {
     code_snapshot_outbox: crate::CodeSnapshotOutbox,
     /// Snapshots arriving on this host and the checkouts they became.
     code_snapshot_inbox: crate::CodeSnapshotInbox,
+    /// Work a handed-over checkout exported, waiting to be read (A11c).
+    code_result_outbox: crate::CodeSnapshotOutbox,
+    /// Work coming back to this device, and the worktrees it became.
+    code_result_inbox: crate::CodeSnapshotInbox,
 }
 
 #[derive(Clone)]
@@ -320,6 +324,11 @@ impl TaskWorkspaceService {
             execution_dir.join("handoffs"),
             config.code_snapshot_max_bytes,
         );
+        let code_result_inbox = crate::CodeSnapshotInbox::new(
+            &snapshots_dir.join("returns"),
+            execution_dir.join("returns"),
+            config.code_snapshot_max_bytes,
+        );
         let store = Arc::new(Mutex::new(WorkspaceStore::open(
             &service_dir,
             config.max_blob_bytes,
@@ -343,6 +352,8 @@ impl TaskWorkspaceService {
             resource_index: Mutex::new(None),
             code_snapshot_outbox: crate::CodeSnapshotOutbox::new(snapshots_dir.join("outgoing")),
             code_snapshot_inbox,
+            code_result_outbox: crate::CodeSnapshotOutbox::new(snapshots_dir.join("results")),
+            code_result_inbox,
         };
         service.recover_incomplete_runs()?;
         service.recover_workspace_bundle_turns()?;
@@ -474,6 +485,10 @@ impl TaskWorkspaceService {
         let checkout = match input.manifest.kind {
             crate::CodeSnapshotKind::Tar => self.code_snapshot_inbox.apply_tar(input, &staged)?,
             crate::CodeSnapshotKind::GitPatch => self.apply_code_patch(input, &staged)?,
+            crate::CodeSnapshotKind::GitBundle => return Err(
+                "code_snapshot_invalid_manifest: a bundle is how work comes back, not a snapshot"
+                    .into(),
+            ),
         };
         self.code_snapshot_inbox.discard_staged(&input.snapshot_id);
         Ok(checkout)
@@ -531,8 +546,101 @@ impl TaskWorkspaceService {
                 &reason,
             )?;
         }
+        // A host that has the project's folder itself still knows where its
+        // work goes back to: the repository the workspace records.
+        let remote_url = source.remote_url.or_else(|| {
+            input
+                .remote_url
+                .as_deref()
+                .and_then(|url| crate::project_source::validate_project_remote(url.trim()).ok())
+        });
         self.code_snapshot_inbox
-            .record_patch_checkout(input, &dest, branch, source.remote_url)
+            .record_patch_checkout(input, &dest, branch, remote_url)
+    }
+
+    /// Export the work a handed-over checkout holds (ADR-0224 A11c): pushed
+    /// as `cognia/<agent>-…` when the repository takes it, else staged here
+    /// as a bundle (or a tar for a folder without git) to be read out.
+    pub fn export_code_checkout(
+        &self,
+        input: &crate::ExportCodeCheckout,
+    ) -> Result<crate::CodeResult, String> {
+        let checkout = self
+            .code_snapshot_inbox
+            .checkout(&input.checkout_id)?
+            .ok_or_else(|| {
+                format!(
+                    "code_result_not_found: no checkout {} on this host",
+                    input.checkout_id
+                )
+            })?;
+        let root = PathBuf::from(&checkout.root);
+        let lock = self
+            .git_admin_lock(&root)
+            .unwrap_or_else(|| Arc::new(Mutex::new(())));
+        let _held = lock.lock();
+        crate::code_result::export_checkout(
+            &checkout,
+            input,
+            &self.code_result_outbox,
+            self.code_snapshot_inbox.limits().max_bytes,
+        )
+    }
+
+    pub fn read_code_result_chunk(
+        &self,
+        result_id: &str,
+        offset: u64,
+    ) -> Result<TransferChunk, String> {
+        self.code_result_outbox.read_chunk(result_id, offset)
+    }
+
+    pub fn discard_code_result(&self, result_id: &str) -> Result<(), String> {
+        self.code_result_outbox.discard(result_id)
+    }
+
+    pub fn open_code_result_receive(
+        &self,
+        size_bytes: u64,
+        sha256: &str,
+    ) -> Result<crate::CodeSnapshotUpload, String> {
+        self.code_result_inbox.open_upload(size_bytes, sha256)
+    }
+
+    pub fn write_code_result_chunk(
+        &self,
+        upload_id: &str,
+        offset: u64,
+        data_base64: &str,
+        chunk_hash: &str,
+    ) -> Result<u64, String> {
+        self.code_result_inbox
+            .write_chunk(upload_id, offset, data_base64, chunk_hash)
+    }
+
+    pub fn commit_code_result_receive(
+        &self,
+        upload_id: &str,
+    ) -> Result<crate::CommittedCodeSnapshot, String> {
+        self.code_result_inbox.commit_upload(upload_id)
+    }
+
+    pub fn cancel_code_result_receive(&self, upload_id: &str) -> Result<(), String> {
+        self.code_result_inbox.cancel_upload(upload_id)
+    }
+
+    /// Put work that came back into a new worktree (or folder) on this
+    /// device, never into the folder the conversation started from.
+    pub fn apply_code_result(
+        &self,
+        input: &crate::ApplyCodeResult,
+    ) -> Result<crate::AppliedCodeResult, String> {
+        let root = PathBuf::from(input.root.trim());
+        let lock = self
+            .git_admin_lock(&root)
+            .unwrap_or_else(|| Arc::new(Mutex::new(())));
+        let _held = lock.lock();
+        crate::code_result::apply_result(input, &self.code_result_inbox)
     }
 
     /// Bind a stable repository ref to an explicitly trusted, device-local Git root.
@@ -9402,5 +9510,180 @@ mod tests {
         assert!(service
             .read_resource_capture("run-2", "plan.md", 0, 10)
             .is_err());
+    }
+
+    /// A conversation's code goes to a host and its work comes back: the
+    /// desktop's snapshot becomes a checkout there, the agent works in it, and
+    /// the export arrives on the desktop as a new worktree (ADR-0224 A11b/c).
+    #[test]
+    fn code_handed_to_a_host_comes_back_as_a_new_worktree() {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+
+        fn git(cwd: &Path, args: &[&str]) -> String {
+            let output = std::process::Command::new("git")
+                .current_dir(cwd)
+                .args(args)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let seed = tmp.path().join("seed");
+        fs::create_dir_all(&seed).unwrap();
+        git(&seed, &["init", "-q", "--initial-branch=main", "."]);
+        fs::write(seed.join("README.md"), "hello\n").unwrap();
+        git(&seed, &["add", "."]);
+        git(&seed, &["commit", "-q", "-m", "first"]);
+        let upstream = tmp.path().join("upstream.git");
+        git(
+            tmp.path(),
+            &[
+                "clone",
+                "-q",
+                "--bare",
+                seed.to_str().unwrap(),
+                upstream.to_str().unwrap(),
+            ],
+        );
+        let desk = tmp.path().join("desk");
+        let host_folder = tmp.path().join("host-folder");
+        for dest in [&desk, &host_folder] {
+            git(
+                tmp.path(),
+                &[
+                    "clone",
+                    "-q",
+                    upstream.to_str().unwrap(),
+                    dest.to_str().unwrap(),
+                ],
+            );
+        }
+        fs::write(desk.join("README.md"), "hello, from the desk\n").unwrap();
+
+        let desk_data = TempDir::new().unwrap();
+        let host_data = TempDir::new().unwrap();
+        let desktop =
+            TaskWorkspaceService::open(ServiceConfig::new(desk_data.path().into())).unwrap();
+        let host = TaskWorkspaceService::open(ServiceConfig::new(host_data.path().into())).unwrap();
+
+        // There: the snapshot, uploaded and applied.
+        let created = desktop
+            .create_code_snapshot(&crate::CreateCodeSnapshot {
+                root: desk.to_string_lossy().into_owned(),
+                max_bytes: None,
+                kind: None,
+            })
+            .unwrap();
+        let upload = host
+            .open_code_snapshot_upload(created.manifest.size_bytes, &created.manifest.sha256)
+            .unwrap();
+        let mut offset = 0;
+        loop {
+            let chunk = desktop
+                .read_code_snapshot_chunk(&created.snapshot_id, offset)
+                .unwrap();
+            offset = host
+                .write_code_snapshot_chunk(
+                    &upload.upload_id,
+                    chunk.offset,
+                    &chunk.data_base64,
+                    &chunk.chunk_hash,
+                )
+                .unwrap();
+            if chunk.eof {
+                break;
+            }
+        }
+        let committed = host.commit_code_snapshot_upload(&upload.upload_id).unwrap();
+        let checkout = host
+            .apply_code_snapshot(&crate::ApplyCodeSnapshot {
+                snapshot_id: committed.snapshot_id,
+                manifest: created.manifest.clone(),
+                project_id: None,
+                roots: vec![host_folder.to_string_lossy().into_owned()],
+                remote_url: None,
+                credential: None,
+            })
+            .unwrap();
+        let worked_in = PathBuf::from(&checkout.working_dir);
+        fs::write(worked_in.join("NOTES.md"), "written on the host\n").unwrap();
+
+        // Back: no repository to push to, so a bundle, read out and applied.
+        let result = host
+            .export_code_checkout(&crate::ExportCodeCheckout {
+                checkout_id: checkout.checkout_id.clone(),
+                agent: Some("codex".into()),
+                credential: None,
+            })
+            .unwrap();
+        assert_eq!(result.kind, crate::CodeResultKind::Bundle);
+        let transfer = result.transfer.clone().unwrap();
+        let receive = desktop
+            .open_code_result_receive(transfer.manifest.size_bytes, &transfer.manifest.sha256)
+            .unwrap();
+        let mut offset = 0;
+        loop {
+            let chunk = host
+                .read_code_result_chunk(&transfer.result_id, offset)
+                .unwrap();
+            assert!(!STANDARD.decode(&chunk.data_base64).unwrap().is_empty());
+            offset = desktop
+                .write_code_result_chunk(
+                    &receive.upload_id,
+                    chunk.offset,
+                    &chunk.data_base64,
+                    &chunk.chunk_hash,
+                )
+                .unwrap();
+            if chunk.eof {
+                break;
+            }
+        }
+        let received = desktop
+            .commit_code_result_receive(&receive.upload_id)
+            .unwrap();
+        host.discard_code_result(&transfer.result_id).unwrap();
+        let applied = desktop
+            .apply_code_result(&crate::ApplyCodeResult {
+                root: desk.to_string_lossy().into_owned(),
+                result: result.clone(),
+                received_id: Some(received.snapshot_id),
+            })
+            .unwrap();
+        let worktree = PathBuf::from(&applied.path);
+        assert!(worktree.starts_with(desk_data.path()));
+        assert_eq!(
+            fs::read_to_string(worktree.join("README.md")).unwrap(),
+            "hello, from the desk\n"
+        );
+        assert_eq!(
+            fs::read_to_string(worktree.join("NOTES.md")).unwrap(),
+            "written on the host\n"
+        );
+        assert_eq!(
+            applied.branch.as_deref(),
+            Some(crate::code_result_branch(&checkout.checkout_id, "codex").as_str())
+        );
+        // An unknown checkout is refused.
+        let error = host
+            .export_code_checkout(&crate::ExportCodeCheckout {
+                checkout_id: "0192f0c4-7a1e-7b3c-9d2e-000000000000".into(),
+                agent: None,
+                credential: None,
+            })
+            .unwrap_err();
+        assert!(error.starts_with("code_result_not_found"), "{error}");
     }
 }

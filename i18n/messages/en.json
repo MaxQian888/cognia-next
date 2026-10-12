@@ -57786,6 +57786,42 @@
     "switchToLight": "Switch to light mode"
   },
   "threadHandoff": {
+    "bringBack": {
+      "action": "Bring the changes back",
+      "actionDescription": "Puts what was done on {host} into a new worktree here. This folder stays as it is.",
+      "alreadyHere": "Nothing new since last time; this is the same worktree.",
+      "anotherDevice": "another device",
+      "body": "This copy is read-only.",
+      "broughtBack": "The changes from {host} are in a new worktree.",
+      "failure": {
+        "checkout-gone": "{host} no longer has the copy this conversation worked in.",
+        "consent": "Approve the request on {host}, then try again.",
+        "fetch-failed": "The branch could not be fetched from the repository. Check that you can pull from it here, then try again.",
+        "integrity": "The download was interrupted or damaged. Try again.",
+        "mismatch": "What arrived was not what {host} sent, so nothing was checked out.",
+        "no-working-directory": "This conversation has no folder on this device to bring the changes next to.",
+        "not-git": "The folder this conversation started from is no longer a git checkout.",
+        "other": "The changes could not be brought back from {host}.",
+        "too-large": "The changes are larger than this device accepts.",
+        "unchanged": "Nothing has changed on {host} since the conversation moved there."
+      },
+      "landedFolder": "In a new folder: {path}",
+      "landedWorktree": "Branch {branch}, in {path}",
+      "notPushed": "{host} could not push the branch, so the commits came over directly. Push it from the new worktree when you are ready.",
+      "openPullRequest": "Open pull request",
+      "progress": {
+        "apply": "Checking the changes out into a new worktree…",
+        "approving": "Waiting for approval on {host}…",
+        "download": "Downloading {received} of {total}…",
+        "export": "{host} is packing the changes…"
+      },
+      "pullRequestBody": "Work from a conversation continued on {host} with Cognia.",
+      "pullRequestFailed": "The pull request could not be opened.",
+      "pullRequestOpened": "Pull request #{number}",
+      "reveal": "Show in folder",
+      "title": "This conversation continues on {host}",
+      "unsupported": "Update {host} to bring its changes back here."
+    },
     "inbound": {
       "accept": "Continue on this device",
       "blocker": {

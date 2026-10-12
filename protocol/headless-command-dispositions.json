@@ -857,7 +857,12 @@
         "write_opencode_auth_env",
         "code_snapshot_create",
         "code_snapshot_read_chunk",
-        "code_snapshot_discard"
+        "code_snapshot_discard",
+        "code_result_receive_open",
+        "code_result_receive_write_chunk",
+        "code_result_receive_commit",
+        "code_result_receive_cancel",
+        "code_result_apply"
       ],
       "commandReasons": {
         "account_bind_person": "Writes the local profile's person binding after a verified sign-in. The unlocked profile lives in this process; a remote caller has no unlocked session to bind.",
@@ -961,7 +966,12 @@
         "wake_paired_host": "Sends a wake-on-LAN magic frame onto this machine's local segment. Like companion_mdns_browse, the segment is the point: relaying it would wake nothing.",
         "code_snapshot_create": "Reads a working copy on THIS device and stages its snapshot in this device's data directory for upload to an always-on host (ADR-0224 A11b). A host snapshotting itself has nothing to hand over.",
         "code_snapshot_read_chunk": "Reads back a snapshot code_snapshot_create staged in this device's data directory, for the upload to an always-on host. The bytes exist only here.",
-        "code_snapshot_discard": "Deletes a snapshot code_snapshot_create staged in this device's data directory once the upload is done or abandoned. The file exists only here."
+        "code_snapshot_discard": "Deletes a snapshot code_snapshot_create staged in this device's data directory once the upload is done or abandoned. The file exists only here.",
+        "code_result_receive_open": "Stages, in this device's data directory, the bundle or tar an always-on host exported from a handed-over conversation (ADR-0224 A11c), for code_result_apply on this same device.",
+        "code_result_receive_write_chunk": "Writes one chunk of the work coming back from an always-on host into this device's staging area. The bytes are only ever applied here.",
+        "code_result_receive_commit": "Seals the received bundle or tar in this device's staging area and checks it against its hash. Nothing reads it but code_result_apply here.",
+        "code_result_receive_cancel": "Drops a half-received bundle or tar from this device's staging area.",
+        "code_result_apply": "Adds a worktree (or folder) of THIS device's repository holding the work an always-on host exported, fetching with this user's own git credentials (ADR-0224 A11c). The repository it lands in exists only here."
       }
     },
     {

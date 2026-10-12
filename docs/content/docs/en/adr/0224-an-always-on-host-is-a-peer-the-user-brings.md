@@ -101,6 +101,9 @@ This fixes a present defect (two events in the same second collapse into one run
   - It is the code half of continuing a conversation on the host. The conversation moves by the existing thread handoff (ADR-0103), which names the checkout by an id the host issued; the host binds the continued session to it and no path crosses. One admin lease covers every step.
   - A checkout derived from a blobless mirror has no file contents to check out until the mirror fetches them, with the credential, for the commit asked for. The mirror does that before every derive and every handoff base.
 - Results come back as a pushed branch or a patch set. The desktop applies either with one action into a new worktree.
+  - The host commits anything left uncommitted on top of the agent's commits, without moving its branch, and pushes the tip as `cognia/<agent>-<id>` with its stored git credential.
+  - When it cannot push, the same commits come back as a git bundle whose only prerequisite is the base, so the desktop gets them exactly, commit ids included. That is the patch set. A project without git comes back as an archive.
+  - The desktop fetches the branch with the user's own credentials, or reads the bundle in checked pieces. It refuses any commit other than the one the host named, and checks it out on a new branch in a new worktree, never in the folder the conversation started from. When the repository is on GitHub and a credential is connected, it offers a draft pull request.
 
 ### Secrets travel over the paired channel and are sealed on the host
 

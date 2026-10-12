@@ -5,6 +5,7 @@
 //! Companion transport surfaces.
 
 mod bundle;
+mod code_result;
 mod code_snapshot;
 mod confine;
 mod ledger;
@@ -64,6 +65,11 @@ pub use registry::{
     plan_snapshot_expiration, validate_state_transition, DirectoryReclaimCandidate,
     DirectoryReclaimReason, ImportedWorkspaceHint, ReconcileOutcome, RegistryError,
     SnapshotExpirationCandidate, SnapshotExpirationReason, WorkspaceRegistry,
+};
+pub use code_result::{
+    result_branch as code_result_branch, validate_result_agent as validate_code_result_agent,
+    AppliedCodeResult, ApplyCodeResult, CodeResult, CodeResultKind, CodeResultTransfer,
+    ExportCodeCheckout, DEFAULT_RESULT_AGENT as DEFAULT_CODE_RESULT_AGENT,
 };
 pub use code_snapshot::{
     code_snapshot_max_bytes_from, extract_tar_snapshot, handoff_branch, produce_code_snapshot,

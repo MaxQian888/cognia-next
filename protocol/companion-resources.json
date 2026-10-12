@@ -1378,6 +1378,12 @@
     },
     "code": {
       "children": {
+        "checkout": {},
+        "result": {
+          "children": {
+            "receive": {}
+          }
+        },
         "snapshot": {
           "children": {
             "limits": {},

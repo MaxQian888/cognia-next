@@ -2579,6 +2579,333 @@
       },
       "additionalProperties": false
     },
+    "code_checkout_export": {
+      "type": "object",
+      "description": "Export the work a handed-over checkout holds (cognia_task_workspace::ExportCodeCheckout, ADR-0224 A11c): pushed as cognia/<agent>-<id> with the host's stored git credential when the repository takes it, else staged as a git bundle (or a tar for a folder without git) for code_result_read_chunk. One sent here is ignored.",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "properties": {
+            "checkoutId": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36
+            },
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+            }
+          },
+          "required": [
+            "checkoutId"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "code_result_apply": {
+      "type": "object",
+      "description": "Put a host's exported work into a new worktree (or folder) on this device (cognia_task_workspace::ApplyCodeResult, ADR-0224 A11c), never into the folder the conversation started from. A pushed branch is fetched with the user's own git credentials; a bundle or tar comes from code_result_receive_*.",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "result": {
+              "type": "object",
+              "description": "The work a host exported (cognia_task_workspace::CodeResult), as code_checkout_export answered it.",
+              "properties": {
+                "checkoutId": {
+                  "type": "string",
+                  "minLength": 36,
+                  "maxLength": 36
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "branch",
+                    "bundle",
+                    "tar"
+                  ]
+                },
+                "branch": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "commit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                },
+                "baseCommit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                },
+                "baseRef": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "remoteUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 4096
+                },
+                "subdir": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "files": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "pushError": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 65536
+                },
+                "transfer": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "resultId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36
+                    },
+                    "manifest": {
+                      "type": "object",
+                      "description": "What the bytes are (cognia_task_workspace::CodeSnapshotManifest): a git bundle of the commits on top of the base, or a gzip tar.",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "git-patch",
+                            "tar",
+                            "git-bundle"
+                          ]
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "baseCommit": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                        },
+                        "baseRef": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 255
+                        },
+                        "tree": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                        },
+                        "subdir": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "entries": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "sizeBytes",
+                        "sha256",
+                        "baseCommit",
+                        "baseRef",
+                        "tree",
+                        "subdir",
+                        "entries"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "chunkBytes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65536
+                    }
+                  },
+                  "required": [
+                    "resultId",
+                    "manifest",
+                    "chunkBytes"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "checkoutId",
+                "kind",
+                "subdir",
+                "files"
+              ],
+              "additionalProperties": false
+            },
+            "receivedId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 36,
+              "maxLength": 36
+            }
+          },
+          "required": [
+            "root",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "code_result_discard": {
+      "type": "object",
+      "required": [
+        "resultId"
+      ],
+      "properties": {
+        "resultId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36
+        }
+      },
+      "additionalProperties": false
+    },
+    "code_result_read_chunk": {
+      "type": "object",
+      "required": [
+        "resultId",
+        "offset"
+      ],
+      "properties": {
+        "resultId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "code_result_receive_cancel": {
+      "type": "object",
+      "required": [
+        "uploadId"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "code_result_receive_commit": {
+      "type": "object",
+      "required": [
+        "uploadId"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "code_result_receive_open": {
+      "type": "object",
+      "description": "Receive a host's exported bundle or tar on this device (ADR-0224 A11c).",
+      "required": [
+        "sizeBytes",
+        "sha256"
+      ],
+      "properties": {
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "code_result_receive_write_chunk": {
+      "type": "object",
+      "required": [
+        "uploadId",
+        "offset",
+        "dataBase64",
+        "chunkHash"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dataBase64": {
+          "type": "string"
+        },
+        "chunkHash": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "code_snapshot_apply": {
       "type": "object",
       "description": "Turn an uploaded snapshot into a checkout on this host (cognia_task_workspace::ApplyCodeSnapshot, ADR-0224 A11b). A git snapshot becomes a worktree of the project's repository on a new cognia/handoff branch, refused unless it rebuilds the desktop's tree. The host's stored git credential is used; one sent here is ignored.",

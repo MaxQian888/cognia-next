@@ -20,8 +20,12 @@ import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { projectTaskWorkspaceRun } from "./projection"
 import type {
   AcquireWorkspaceBundle,
+  AppliedCodeResult,
   CodeCheckout,
+  CodeResult,
   CodeSnapshotKind,
+  CodeSnapshotUpload,
+  CommittedCodeSnapshot,
   CreatedCodeSnapshot,
   EnsureProjectSource,
   EnsureRemoteSource,
@@ -629,6 +633,50 @@ export function readCodeSnapshotChunk(snapshotId: string, offset: number): Promi
 /** Drop a staged snapshot once it is uploaded, or the hand-over is given up. */
 export function discardCodeSnapshot(snapshotId: string): Promise<void> {
   return transport.call("code_snapshot_discard", { snapshotId })
+}
+
+/**
+ * Receive the bundle or tar an always-on host exported (ADR-0224 A11c) into
+ * this device's staging area, chunk by chunk, for {@link applyCodeResult}.
+ */
+export function openCodeResultReceive(
+  sizeBytes: number,
+  sha256: string
+): Promise<CodeSnapshotUpload> {
+  return transport.call("code_result_receive_open", { sizeBytes, sha256 })
+}
+
+/** Write one chunk read from the host; answers the next offset. */
+export function writeCodeResultChunk(input: {
+  uploadId: string
+  offset: number
+  dataBase64: string
+  chunkHash: string
+}): Promise<number> {
+  return transport.call("code_result_receive_write_chunk", input)
+}
+
+/** Seal a received result, checked against its whole-file hash. */
+export function commitCodeResultReceive(uploadId: string): Promise<CommittedCodeSnapshot> {
+  return transport.call("code_result_receive_commit", { uploadId })
+}
+
+/** Drop a half-received result. */
+export function cancelCodeResultReceive(uploadId: string): Promise<void> {
+  return transport.call("code_result_receive_cancel", { uploadId })
+}
+
+/**
+ * Put a host's exported work into a new worktree (or folder) on this device,
+ * never into `root` itself. A pushed branch is fetched with the user's own git
+ * credentials; a bundle or tar must have been received first.
+ */
+export function applyCodeResult(input: {
+  root: string
+  result: CodeResult
+  receivedId?: string | null
+}): Promise<AppliedCodeResult> {
+  return transport.call("code_result_apply", { input })
 }
 
 /**

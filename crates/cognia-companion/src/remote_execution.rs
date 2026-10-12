@@ -301,6 +301,7 @@ pub(super) fn rate_limit_class(descriptor: &CommandDescriptor) -> super::rate_li
             | "task_resource_download_read_chunk"
             | "task_resource_upload_write_chunk"
             | "code_snapshot_upload_write_chunk"
+            | "code_result_read_chunk"
     ) {
         return super::rate_limit::RequestClass::MediaTransfer;
     }
@@ -1045,6 +1046,7 @@ mod tests {
                     | "task_resource_download_read_chunk"
                     | "task_resource_upload_write_chunk"
                     | "code_snapshot_upload_write_chunk"
+                    | "code_result_read_chunk"
             ) {
                 super::super::rate_limit::RequestClass::MediaTransfer
             } else if descriptor.operation == CommandOperation::Read {
@@ -1071,6 +1073,8 @@ mod tests {
             "plugin_media_close_transfer",
             "task_resource_download_read_chunk",
             "task_resource_upload_write_chunk",
+            "code_snapshot_upload_write_chunk",
+            "code_result_read_chunk",
         ] {
             assert_eq!(
                 rate_limit_class(super::super::command_manifest::descriptor(command).unwrap()),

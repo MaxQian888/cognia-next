@@ -11559,6 +11559,11 @@
         "baseCommit": {
           "type": ["string", "null"]
         },
+        "baseRef": {
+          "default": null,
+          "description": "The remote branch `base_commit` was found on. Git only.",
+          "type": ["string", "null"]
+        },
         "branch": {
           "description": "The branch the worktree is on. Git only.",
           "type": ["string", "null"]
@@ -11584,6 +11589,11 @@
           "description": "The checkout's root.",
           "type": "string"
         },
+        "subdir": {
+          "default": "",
+          "description": "Where the working directory sits inside the checkout, `/`-separated.",
+          "type": "string"
+        },
         "workingDir": {
           "description": "Where the conversation works: `root` plus the snapshot's `subdir`.",
           "type": "string"
@@ -11591,6 +11601,7 @@
       },
       "required": [
         "baseCommit",
+        "baseRef",
         "branch",
         "checkoutId",
         "createdAt",
@@ -11598,8 +11609,119 @@
         "projectId",
         "remoteUrl",
         "root",
+        "subdir",
         "workingDir"
       ],
+      "type": "object"
+    },
+    "CodeResult": {
+      "additionalProperties": false,
+      "description": "A checkout's work, ready to come back.",
+      "properties": {
+        "baseCommit": {
+          "description": "The commit the conversation started from. Git only.",
+          "type": ["string", "null"]
+        },
+        "baseRef": {
+          "description": "The remote branch that commit was found on. Git only.",
+          "type": ["string", "null"]
+        },
+        "branch": {
+          "description": "The branch the work is on. Git only.",
+          "type": ["string", "null"]
+        },
+        "checkoutId": {
+          "type": "string"
+        },
+        "commit": {
+          "description": "The tip of that branch. Git only.",
+          "type": ["string", "null"]
+        },
+        "files": {
+          "description": "Files changed since the base, or entries in the tar.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/CodeResultKind"
+        },
+        "pushError": {
+          "description": "Why the branch was not pushed, when it comes as a bundle.",
+          "type": ["string", "null"]
+        },
+        "remoteUrl": {
+          "type": ["string", "null"]
+        },
+        "subdir": {
+          "description": "Where the conversation's working directory sits inside the checkout.",
+          "type": "string"
+        },
+        "transfer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodeResultTransfer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The bytes to read, for a bundle or a tar."
+        }
+      },
+      "required": [
+        "baseCommit",
+        "baseRef",
+        "branch",
+        "checkoutId",
+        "commit",
+        "files",
+        "kind",
+        "pushError",
+        "remoteUrl",
+        "subdir",
+        "transfer"
+      ],
+      "type": "object"
+    },
+    "CodeResultKind": {
+      "description": "How the work comes back.",
+      "oneOf": [
+        {
+          "const": "branch",
+          "description": "Pushed to the repository's remote as `branch`.",
+          "type": "string"
+        },
+        {
+          "const": "bundle",
+          "description": "A git bundle to read from the host.",
+          "type": "string"
+        },
+        {
+          "const": "tar",
+          "description": "A gzip tar of a folder without git, to read from the host.",
+          "type": "string"
+        }
+      ]
+    },
+    "CodeResultTransfer": {
+      "additionalProperties": false,
+      "description": "Bytes waiting on the host to be read out chunk by chunk.",
+      "properties": {
+        "chunkBytes": {
+          "format": "uint",
+          "maximum": 65536,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "manifest": {
+          "$ref": "#/$defs/CodeSnapshotManifest"
+        },
+        "resultId": {
+          "type": "string"
+        }
+      },
+      "required": ["chunkBytes", "manifest", "resultId"],
       "type": "object"
     },
     "CodeSnapshotKind": {
@@ -11613,8 +11735,63 @@
           "const": "tar",
           "description": "A gzip tar of a folder that is not a git checkout.",
           "type": "string"
+        },
+        {
+          "const": "git-bundle",
+          "description": "A git bundle of the commits a handed-over checkout made on top of its\nbase: how the work comes back when the host cannot push it\n(ADR-0224 A11c). Never applied as a snapshot.",
+          "type": "string"
         }
       ]
+    },
+    "CodeSnapshotManifest": {
+      "additionalProperties": false,
+      "description": "What the desktop recorded about a snapshot. Travels with it; the host\nchecks the bytes against `sha256` and the applied result against `tree`.",
+      "properties": {
+        "baseCommit": {
+          "description": "The commit the patch applies to, or a bundle's prerequisite. Git only.",
+          "type": ["string", "null"]
+        },
+        "baseRef": {
+          "description": "The remote branch that commit was found on, so the host can fetch it.",
+          "type": ["string", "null"]
+        },
+        "entries": {
+          "description": "Files the patch changes, or entries the tar holds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/CodeSnapshotKind"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "subdir": {
+          "description": "Where the working directory sits inside the checkout, `/`-separated,\nempty for its root.",
+          "type": "string"
+        },
+        "tree": {
+          "description": "The tree the working copy amounts to; for a bundle, its tip's tree.\nGit only.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "baseCommit",
+        "baseRef",
+        "entries",
+        "kind",
+        "sha256",
+        "sizeBytes",
+        "subdir",
+        "tree"
+      ],
+      "type": "object"
     },
     "CodeSnapshotLimits": {
       "additionalProperties": false,
@@ -17355,6 +17532,15 @@
       "$ref": "#/$defs/IntegerResult"
     },
     "code_snapshot_upload_cancel": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "code_checkout_export": {
+      "$ref": "#/$defs/CodeResult"
+    },
+    "code_result_read_chunk": {
+      "$ref": "#/$defs/TransferChunk"
+    },
+    "code_result_discard": {
       "$ref": "#/$defs/NullResult"
     }
   }

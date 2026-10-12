@@ -74,6 +74,9 @@ pub(super) const COMMANDS: &[&str] = &[
     "code_snapshot_upload_commit",
     "code_snapshot_upload_cancel",
     "code_snapshot_apply",
+    "code_checkout_export",
+    "code_result_read_chunk",
+    "code_result_discard",
     "task_workspace_apply",
     "task_workspace_undo",
     "task_workspace_restore_snapshot",
@@ -920,7 +923,9 @@ pub(super) async fn dispatch(
             )
             .await;
             drop(permit);
-            written.map_err(RpcError::validation_failed).and_then(to_json)
+            written
+                .map_err(RpcError::validation_failed)
+                .and_then(to_json)
         }
         "code_snapshot_upload_commit" => {
             let upload_id: String = required(&args, "uploadId")?;
@@ -942,6 +947,29 @@ pub(super) async fn dispatch(
                 .await
                 .map_err(RpcError::validation_failed)
                 .and_then(to_json)
+        }
+        "code_checkout_export" => {
+            let input: cognia_task_workspace::ExportCodeCheckout = required(&args, "input")?;
+            crate::task_workspace::code_checkout_export(input)
+                .await
+                .map_err(RpcError::validation_failed)
+                .and_then(to_json)
+        }
+        "code_result_read_chunk" => {
+            let result_id: String = required(&args, "resultId")?;
+            let offset: u64 = required(&args, "offset")?;
+            run_transfer_io(move || {
+                crate::task_workspace::service()?.read_code_result_chunk(&result_id, offset)
+            })
+            .await
+            .and_then(to_json)
+        }
+        "code_result_discard" => {
+            let result_id: String = required(&args, "resultId")?;
+            crate::task_workspace::code_result_discard(result_id)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::validation_failed)
         }
         "task_workspace_apply" => {
             let run_id: String = required(&args, "runId")?;

@@ -73,6 +73,10 @@ pub enum CodeSnapshotKind {
     GitPatch,
     /// A gzip tar of a folder that is not a git checkout.
     Tar,
+    /// A git bundle of the commits a handed-over checkout made on top of its
+    /// base: how the work comes back when the host cannot push it
+    /// (ADR-0224 A11c). Never applied as a snapshot.
+    GitBundle,
 }
 
 /// What the desktop recorded about a snapshot. Travels with it; the host
@@ -84,11 +88,12 @@ pub struct CodeSnapshotManifest {
     pub kind: CodeSnapshotKind,
     pub size_bytes: u64,
     pub sha256: String,
-    /// The commit the patch applies to. Git only.
+    /// The commit the patch applies to, or a bundle's prerequisite. Git only.
     pub base_commit: Option<String>,
     /// The remote branch that commit was found on, so the host can fetch it.
     pub base_ref: Option<String>,
-    /// The tree the working copy amounts to. Git only.
+    /// The tree the working copy amounts to; for a bundle, its tip's tree.
+    /// Git only.
     pub tree: Option<String>,
     /// Where the working directory sits inside the checkout, `/`-separated,
     /// empty for its root.
@@ -204,6 +209,12 @@ pub struct CodeCheckout {
     /// The branch the worktree is on. Git only.
     pub branch: Option<String>,
     pub base_commit: Option<String>,
+    /// The remote branch `base_commit` was found on. Git only.
+    #[serde(default)]
+    pub base_ref: Option<String>,
+    /// Where the working directory sits inside the checkout, `/`-separated.
+    #[serde(default)]
+    pub subdir: String,
     pub project_id: Option<String>,
     pub remote_url: Option<String>,
     /// Epoch milliseconds.
@@ -229,13 +240,13 @@ pub fn code_snapshot_max_bytes_from(value: Option<&str>) -> Result<u64, String> 
 // Ids and validation
 // ---------------------------------------------------------------------------
 
-fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
 /// A snapshot or checkout id names a file and a directory, so only the shape
 /// this module mints is accepted.
-fn validate_id(id: &str) -> Result<(), String> {
+pub(crate) fn validate_id(id: &str) -> Result<(), String> {
     uuid::Uuid::parse_str(id)
         .ok()
         .filter(|parsed| parsed.hyphenated().to_string() == id)
@@ -243,7 +254,7 @@ fn validate_id(id: &str) -> Result<(), String> {
         .ok_or_else(|| format!("code_snapshot_invalid_id: {id:?}"))
 }
 
-fn validate_object_id(label: &str, value: &str) -> Result<(), String> {
+pub(crate) fn validate_object_id(label: &str, value: &str) -> Result<(), String> {
     let ok = matches!(value.len(), 40 | 64)
         && value
             .bytes()
@@ -331,6 +342,21 @@ pub fn validate_manifest(manifest: &CodeSnapshotManifest) -> Result<(), String> 
                 validate_branch_name(base_ref)?;
             }
         }
+        CodeSnapshotKind::GitBundle => {
+            let base = manifest
+                .base_commit
+                .as_deref()
+                .ok_or("code_snapshot_invalid_manifest: a bundle names its base commit")?;
+            validate_object_id("baseCommit", base)?;
+            let tree = manifest
+                .tree
+                .as_deref()
+                .ok_or("code_snapshot_invalid_manifest: a bundle names its tip's tree")?;
+            validate_object_id("tree", tree)?;
+            if let Some(base_ref) = manifest.base_ref.as_deref() {
+                validate_branch_name(base_ref)?;
+            }
+        }
         CodeSnapshotKind::Tar => {
             if manifest.base_commit.is_some() || manifest.tree.is_some() {
                 return Err(
@@ -342,7 +368,7 @@ pub fn validate_manifest(manifest: &CodeSnapshotManifest) -> Result<(), String> 
     Ok(())
 }
 
-fn hash_file(path: &Path) -> Result<(String, u64), String> {
+pub(crate) fn hash_file(path: &Path) -> Result<(String, u64), String> {
     let mut file = File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; 256 * 1024];
@@ -360,7 +386,7 @@ fn hash_file(path: &Path) -> Result<(String, u64), String> {
     Ok((hex::encode(hasher.finalize()), size))
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as i64)
@@ -391,7 +417,7 @@ fn remove_older_than(dir: &Path, ttl: Duration) {
 
 /// How the git a step runs is configured.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum GitConfig {
+pub(crate) enum GitConfig {
     /// The user's own configuration: line endings, filters and excludes decide
     /// what their working copy amounts to.
     User,
@@ -400,14 +426,14 @@ enum GitConfig {
     Isolated,
 }
 
-struct Git<'a> {
-    cwd: &'a Path,
-    config: GitConfig,
-    index: Option<&'a Path>,
+pub(crate) struct Git<'a> {
+    pub(crate) cwd: &'a Path,
+    pub(crate) config: GitConfig,
+    pub(crate) index: Option<&'a Path>,
 }
 
 impl<'a> Git<'a> {
-    fn user(cwd: &'a Path) -> Self {
+    pub(crate) fn user(cwd: &'a Path) -> Self {
         Self {
             cwd,
             config: GitConfig::User,
@@ -415,7 +441,7 @@ impl<'a> Git<'a> {
         }
     }
 
-    fn isolated(cwd: &'a Path) -> Self {
+    pub(crate) fn isolated(cwd: &'a Path) -> Self {
         Self {
             cwd,
             config: GitConfig::Isolated,
@@ -423,7 +449,7 @@ impl<'a> Git<'a> {
         }
     }
 
-    fn command(&self, args: &[&str]) -> Command {
+    pub(crate) fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new("git");
         command.arg("-C").arg(self.cwd).args(args);
         command.stdin(Stdio::null());
@@ -440,7 +466,7 @@ impl<'a> Git<'a> {
         command
     }
 
-    fn run(&self, args: &[&str]) -> Result<String, String> {
+    pub(crate) fn run(&self, args: &[&str]) -> Result<String, String> {
         let output = self
             .command(args)
             .output()
@@ -455,7 +481,7 @@ impl<'a> Git<'a> {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    fn ok(&self, args: &[&str]) -> bool {
+    pub(crate) fn ok(&self, args: &[&str]) -> bool {
         self.command(args)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -466,7 +492,7 @@ impl<'a> Git<'a> {
 
 /// The tree a working copy amounts to: `HEAD` (when there is one) plus
 /// `git add -A` in a scratch index, so the user's own index is untouched.
-fn working_tree_id(
+pub(crate) fn working_tree_id(
     git_dir_cwd: &Path,
     config: GitConfig,
     scratch: &Path,
@@ -488,7 +514,7 @@ fn working_tree_id(
 
 /// The remote the project's repository was recorded from: `origin`, else the
 /// first remote (the rule `lib/workspace/project-repository.ts` applies).
-fn recorded_remote(git: &Git<'_>) -> Result<String, String> {
+pub(crate) fn recorded_remote(git: &Git<'_>) -> Result<String, String> {
     let remotes = git.run(&["remote"])?;
     let names: Vec<&str> = remotes
         .lines()
@@ -637,7 +663,7 @@ fn write_patch(
     Ok(written)
 }
 
-fn too_large(max_bytes: u64) -> String {
+pub(crate) fn too_large(max_bytes: u64) -> String {
     format!(
         "code_snapshot_too_large: the working copy is more than {} MiB; commit and push it, or raise the cap",
         max_bytes / (1024 * 1024)
@@ -664,6 +690,10 @@ pub fn produce_code_snapshot(
     }
     let is_git = Git::user(root).ok(&["rev-parse", "--is-inside-work-tree"]);
     let produced = match kind {
+        Some(CodeSnapshotKind::GitBundle) => Err(
+            "code_snapshot_invalid_manifest: a bundle is how work comes back, not a snapshot"
+                .to_string(),
+        ),
         Some(CodeSnapshotKind::Tar) => produce_tar(root, max_bytes, out),
         Some(CodeSnapshotKind::GitPatch) if !is_git => Err(format!(
             "code_snapshot_not_git: {} is not a git checkout",
@@ -732,7 +762,11 @@ fn relative_subdir(toplevel: &Path, root: &Path) -> Result<String, String> {
         .join("/"))
 }
 
-fn produce_tar(root: &Path, max_bytes: u64, out: &Path) -> Result<CodeSnapshotManifest, String> {
+pub(crate) fn produce_tar(
+    root: &Path,
+    max_bytes: u64,
+    out: &Path,
+) -> Result<CodeSnapshotManifest, String> {
     let file = File::create(out).map_err(|error| format!("create {}: {error}", out.display()))?;
     let encoder =
         flate2::write::GzEncoder::new(BufWriter::new(file), flate2::Compression::default());
@@ -1032,6 +1066,26 @@ impl CodeSnapshotOutbox {
         })
     }
 
+    /// Have `produce` write a new entry, returning its id with what
+    /// `produce` answered. A failed entry is removed.
+    pub fn put_with<T>(
+        &self,
+        produce: impl FnOnce(&Path) -> Result<T, String>,
+    ) -> Result<(String, T), String> {
+        fs::create_dir_all(&self.dir)
+            .map_err(|error| format!("create {}: {error}", self.dir.display()))?;
+        remove_older_than(&self.dir, PRODUCED_TTL);
+        let id = new_id();
+        let out = self.path(&id)?;
+        match produce(&out) {
+            Ok(value) => Ok((id, value)),
+            Err(error) => {
+                let _ = fs::remove_file(&out);
+                Err(error)
+            }
+        }
+    }
+
     pub fn read_chunk(&self, snapshot_id: &str, offset: u64) -> Result<TransferChunk, String> {
         let path = self.path(snapshot_id)?;
         let mut file =
@@ -1251,6 +1305,8 @@ impl CodeSnapshotInbox {
             kind: CodeSnapshotKind::Tar,
             branch: None,
             base_commit: None,
+            base_ref: None,
+            subdir: String::new(),
             project_id: input.project_id.clone(),
             remote_url: None,
             created_at: now_ms(),
@@ -1282,6 +1338,8 @@ impl CodeSnapshotInbox {
             kind: CodeSnapshotKind::GitPatch,
             branch: Some(branch),
             base_commit: input.manifest.base_commit.clone(),
+            base_ref: input.manifest.base_ref.clone(),
+            subdir: input.manifest.subdir.clone(),
             project_id: input.project_id.clone(),
             remote_url,
             created_at: now_ms(),

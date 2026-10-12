@@ -220,6 +220,8 @@ describe("resolveThreadHandoffWorkspaceBinding (ADR-0224 A11b)", () => {
     kind: "git-patch",
     branch: "cognia/handoff-444455556666",
     baseCommit: "a".repeat(40),
+    baseRef: "main",
+    subdir: "",
     projectId: "project-app",
     remoteUrl: "https://github.com/acme/app.git",
     createdAt: 1,

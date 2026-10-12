@@ -31,6 +31,7 @@ import { CharacterMissingBanner } from "./character-missing-banner"
 import { WorkSubmissionNotice } from "./work-submission-notice"
 import { ProjectPausedBanner } from "@/components/project-coordinator/project-paused-banner"
 import { ArchivedConversationBanner } from "./archived-conversation-banner"
+import { HandedOffBanner } from "@/components/thread-handoff/handed-off-banner"
 import { useUnarchiveOnUserTurn } from "@/hooks/chat/use-unarchive-on-user-turn"
 import {
   EmptyChatState,
@@ -1029,6 +1030,13 @@ export function ChatPane({
       {activeSession.archivedAt != null && activeSession.kind !== "subagent" ? (
         <ChatColumn className="mt-2">
           <ArchivedConversationBanner session={activeSession} />
+        </ChatColumn>
+      ) : null}
+      {/* ADR-0103 / ADR-0224 A11c — a conversation that moved to another
+          device says where, and brings back the work its code got there. */}
+      {activeSession.handoffLock?.state === "committed" ? (
+        <ChatColumn className="mt-2">
+          <HandedOffBanner session={activeSession} />
         </ChatColumn>
       ) : null}
       <ExternalAgentSessionPanel

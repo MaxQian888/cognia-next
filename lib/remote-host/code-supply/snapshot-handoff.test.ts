@@ -93,6 +93,8 @@ const checkout: CodeCheckout = {
   kind: "git-patch",
   branch: "cognia/handoff-444455556666",
   baseCommit: "b".repeat(40),
+  baseRef: "main",
+  subdir: "",
   projectId: "project-app",
   remoteUrl: repository.remoteUrl,
   createdAt: 1,

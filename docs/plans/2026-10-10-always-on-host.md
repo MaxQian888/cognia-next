@@ -356,6 +356,16 @@ Every seam below was located by a read-only survey on 2026-10-10. Line numbers d
 - **Workspace copy.** `project_mutate` now accepts a copy without a repository, for the conversation to belong to. A copy without one leaves the host's repository alone.
 - **Found and fixed: blobless mirror derive.** A checkout derived from a blobless mirror of a real https remote could not check out its files (`upload-pack: not our ref`), so A11a's clone-on-dispatch and the ADR-0176 supply path failed against GitHub; local test remotes serve every blob and hid it. The mirror now allows filter and by-id fetches, derives over `file://` so the checkout is a real partial clone, and fetches the needed commit's file contents itself (with the credential) before every derive and handoff base (`materialize_commit`).
 
+**Outcome (A11c).**
+
+- **Export (item 6, host).** `code_checkout_export` (admin-leased, `crates/cognia-task-workspace/src/code_result.rs`) takes the checkout as it stands: the agent's commits plus one commit for anything left uncommitted, built from a scratch index so the agent's branch and index do not move. It points `cognia/<agent>-<id>` at that tip and pushes it (`push.negotiate`, so a partial clone sends only the work) with the stored git token. A host that has the project's folder itself still pushes to the workspace's recorded repository.
+  - Deviation: the patch set is a git bundle whose only prerequisite is the base, not a format-patch series. It carries the agent's commits exactly (binary-safe, commit ids checkable) and needs no committer identity on the desktop. A tar checkout comes back as a tar.
+  - Read out with `code_result_read_chunk` (transfer rate class) and dropped with `code_result_discard`.
+- **Apply (item 6, desktop).** `code_result_receive_{open,write_chunk,commit,cancel}` stage a bundle or tar on the desktop; `code_result_apply` fetches the pushed branch with the user's own git credentials (into the remote-tracking ref when a remote has that URL, and sets the upstream) or out of the bundle, refuses any tip but the commit the host named (and, for a bundle, its tree), and adds a new worktree on a new local branch under the execution root's `returns/`. A tar is unpacked into a new folder there. The same result applied again answers with the same worktree; a newer one lands beside it on `-2`, `-3`…
+- **Entry.** The handed-off conversation's desktop copy shows `HandedOffBanner` (where the conversation went, and **Bring the changes back** when its code went along), driven by `lib/remote-host/code-supply/result-return.ts`.
+- **PR (item 6).** With a GitHub credential (connected account or `gh`), **Open pull request** opens a draft from the branch onto the base branch through the existing `GitHubPullRequestProvider`; a bundle's local branch is pushed first.
+- **Tests (item 7).** Round trips through both services (snapshot there, export back), push and bundle paths, uncommitted work, mismatch refusals, re-apply, tar.
+
 ### A12 — End-to-end proof, desktop off
 
 A recorded run on a real BYO host (Compose on Linux, and the macOS daemon) with the desktop quit:

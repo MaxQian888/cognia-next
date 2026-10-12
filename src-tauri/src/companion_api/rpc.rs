@@ -919,6 +919,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "code_snapshot_upload_commit",
     "code_snapshot_upload_cancel",
     "code_snapshot_apply",
+    // Its work coming back (ADR-0224 A11c).
+    "code_checkout_export",
+    "code_result_read_chunk",
+    "code_result_discard",
     "task_workspace_apply",
     "task_workspace_undo",
     "task_workspace_restore_snapshot",
@@ -1862,6 +1866,10 @@ const CONTROL_COMMANDS: &[&str] = &[
     "code_snapshot_upload_commit",
     "code_snapshot_upload_cancel",
     "code_snapshot_apply",
+    // Its work coming back (ADR-0224 A11c).
+    "code_checkout_export",
+    "code_result_read_chunk",
+    "code_result_discard",
     "task_workspace_apply",
     "task_workspace_undo",
     "task_workspace_resolve_conflict",
