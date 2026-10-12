@@ -268,11 +268,11 @@ fs.appendFileSync(
     assert.equal(result.code, 0, result.stderr)
     assert.match(result.stdout, /cgnp3\|fresh-invitation/)
     assert.deepEqual(JSON.parse((await readFile(buildLog, "utf8")).trim()), {
-      args: ["terminal-host:prepare:dev"],
-      // The pairing rebuild compiles the same headless binary, so it skips the
-      // multi-gigabyte tauri resource staging for the same reason the serve
-      // build does.
-      tauriConfig: '{"bundle":{"resources":[]}}',
+      // The pairing rebuild compiles the same headless binary as the serve
+      // build, and like it leaves TAURI_CONFIG alone: build.rs skips the
+      // resource staging for every development build.
+      args: ["terminal-host:prepare:headless"],
+      tauriConfig: null,
     })
   }
 )
@@ -510,15 +510,14 @@ fs.appendFileSync(
       ["exec", "node", "scripts/build/build-mcp-sidecar.mjs"],
       ["exec", "node", "scripts/build/build-vscode-ext-host-sidecar.mjs"],
       ["sidecar:codeserver-agent:build"],
-      ["terminal-host:prepare:dev"],
+      ["terminal-host:prepare:headless"],
     ]
   )
-  // Only the cargo step reads TAURI_CONFIG, and only it may be overridden:
-  // leaking the empty resource list into any other step would be a silent
-  // configuration change for builds that do need the bundle.
+  // No step gets a TAURI_CONFIG: a value here would split the cargo step's
+  // build-script fingerprint from `tauri dev` and rust-analyzer.
   assert.deepEqual(
     steps.map((step) => step.tauriConfig),
-    [null, null, null, null, null, null, '{"bundle":{"resources":[]}}']
+    [null, null, null, null, null, null, null]
   )
 })
 
@@ -1048,7 +1047,7 @@ fs.appendFileSync(process.env.COGNIA_BUILD_LOG, JSON.stringify(process.argv.slic
       ["exec", "node", "scripts/build/build-mcp-sidecar.mjs"],
       ["exec", "node", "scripts/build/build-vscode-ext-host-sidecar.mjs"],
       ["sidecar:codeserver-agent:build"],
-      ["terminal-host:prepare:dev"],
+      ["terminal-host:prepare:headless"],
     ])
   }
 )

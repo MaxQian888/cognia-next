@@ -62,6 +62,15 @@ pnpm monaco:copy      # Copy Monaco assets into public/
 - `prepare` (run after `pnpm install`) installs Husky git hooks.
 - `tauri build`'s `beforeBuildCommand` runs `pnpm build` so you don't have to run them in sequence.
 
+### The desktop dev loop
+
+`pnpm tauri:dev` (`scripts/dev/tauri.mjs`) builds the native helpers (`cognia-server`, the external-agent launcher, the bootstrap agent and the `cognia` CLI) before the Tauri CLI starts its 180-second wait for the frontend, then hands over to `tauri dev`.
+
+- **Nothing is staged into `target/`.** In a development build `src-tauri/build.rs` drops `bundle.resources` and `bundle.externalBin`. Dev code reads resources from the checkout, and Cargo writes the helper binaries straight into `target/debug/`. Don't export a `TAURI_CONFIG` to get this: the build script tracks that variable, so a value that differs between entry points re-runs it and recompiles `app_lib`.
+- **One feature set.** Left alone, the Tauri CLI runs `cargo run --no-default-features --features ocr-paddle`, a different feature set from a plain `cargo build`, and Cargo keeps a separate copy of every unit per feature set. `pnpm tauri:dev` therefore passes `--features default`, which makes the CLI ask for `default,ocr-paddle`, the plain set. `terminal-host:prepare:dev`, the VS Code LLDB entries, `cargo test` and rust-analyzer all build plainly, so the desktop compiles `app_lib` once. Only the headless server (`terminal-host:prepare:headless`) adds `workspace-runtime-exec`.
+- **What restarts the app.** The Tauri watcher kills, rebuilds and relaunches the app on any change under `src-tauri/` or a workspace crate it depends on. When that happens the window reopens at `/` and all in-memory state is lost. `.taurignore` excludes staged resources, generated files and editor droppings. `.gitignore` does not filter these events.
+- **Shared checkout.** Other sessions' Rust edits restart your app too. Run `pnpm tauri:dev:nowatch` to keep frontend hot reload but restart the native side only by hand.
+
 ## Project structure at a glance
 
 <Files>

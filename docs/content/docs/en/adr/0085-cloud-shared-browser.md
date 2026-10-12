@@ -30,7 +30,7 @@ A runtime's secret is the file in `COGNIA_WORKSPACE_RUNTIME_SECRET_DIR` named af
 
 One machine cannot satisfy that contract: `{workspace_id}` has to resolve in DNS, and the workspace id a client sends is a project id minted at run time, so nothing can pre-place its secret file. Development therefore addresses a single runtime directly through `COGNIA_WORKSPACE_RUNTIME_URL` plus a shared `COGNIA_WORKSPACE_RUNTIME_SECRET` — the same variable the runtime itself reads. The pair is accepted only when the URL names a loopback host: one URL and one secret mean every workspace shares a browser, which is the isolation the templated locator exists to provide.
 
-`pnpm dev:web-headless` starts that runtime as a third local service and hands the Host the pair; `pnpm dev:workspace-runtime` starts it alone. The local `cognia-server` must be built with `--features workspace-runtime-exec`, which `terminal-host:prepare:dev` does. Chromium is not bundled: `pnpm exec playwright install chromium` is a prerequisite for opening a session, and its absence is reported as a startup hint rather than a failure.
+`pnpm dev:web-headless` starts that runtime as a third local service and hands the Host the pair; `pnpm dev:workspace-runtime` starts it alone. The local `cognia-server` must be built with `--features workspace-runtime-exec`, which `terminal-host:prepare:headless` (the build step of `pnpm dev:headless`) does; the desktop's `terminal-host:prepare:dev` keeps the release feature set so it shares compiled units with `pnpm tauri:dev`. Chromium is not bundled: `pnpm exec playwright install chromium` is a prerequisite for opening a session, and its absence is reported as a startup hint rather than a failure.
 
 ### Browser session and engine contract
 

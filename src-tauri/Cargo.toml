@@ -49,7 +49,10 @@ path = "src/bin/cognia-webrtc-peer.rs"
 required-features = ["webrtc-harness"]
 
 [build-dependencies]
-tauri-build = { version = "2.7.0", features = [] }
+tauri-build = { version = "2.7.0", features = ["codegen"] }
+# build.rs patches TAURI_CONFIG for development builds (see
+# `apply_dev_bundle_override`).
+serde_json.workspace = true
 
 [dependencies]
 serde_json.workspace = true

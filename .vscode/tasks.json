@@ -84,17 +84,13 @@
       "problemMatcher": []
     },
     {
-      // The native half of tauri.conf.json `beforeDevCommand`. TAURI_CONFIG must
-      // match DEV_TAURI_CONFIG in scripts/dev/tauri.mjs byte for byte, or the
-      // cognia-server build re-runs the sidecar resource copy.
+      // The native half of tauri.conf.json `beforeDevCommand`. Leave TAURI_CONFIG
+      // unset: src-tauri/build.rs skips resource and sidecar staging for every
+      // development build, and an exported value would split the build-script
+      // fingerprint from `pnpm tauri:dev` and rust-analyzer.
       "label": "tauri:prepare-dev",
       "type": "shell",
-      "command": "pnpm terminal-host:prepare:dev && pnpm external-agent-launcher:prepare:dev && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build",
-      "options": {
-        "env": {
-          "TAURI_CONFIG": "{\"bundle\":{\"resources\":[]}}"
-        }
-      },
+      "command": "pnpm terminal-host:prepare:dev && pnpm external-agent-launcher:prepare:dev && pnpm bootstrap-agent:prepare:dev && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build",
       "problemMatcher": []
     },
     {
@@ -107,7 +103,7 @@
       // tauri.conf.json `beforeBuildCommand`, verbatim.
       "label": "tauri:prepare-build",
       "type": "shell",
-      "command": "pnpm terminal-host:prepare && pnpm external-agent-launcher:prepare && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build && pnpm build && pnpm tauri:frontend:check",
+      "command": "pnpm terminal-host:prepare && pnpm external-agent-launcher:prepare && pnpm bootstrap-agent:prepare && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build && pnpm build && pnpm tauri:frontend:check",
       "problemMatcher": []
     },
     {

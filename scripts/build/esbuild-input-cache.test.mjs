@@ -67,6 +67,26 @@ test("source siblings and package resolution metadata invalidate a previously va
   assert.equal(f.fresh(), false)
 })
 
+test("a package.json scripts edit keeps the cache; a resolution edit does not", (t) => {
+  const f = fixture(t)
+  const manifest = path.join(f.root, "package.json")
+  writeFileSync(manifest, JSON.stringify({ name: "x", scripts: { dev: "a" }, dependencies: {} }))
+  f.save()
+  assert.equal(f.fresh(), true)
+
+  writeFileSync(
+    manifest,
+    JSON.stringify({ name: "x", scripts: { dev: "b", tauri: "c" }, "// 01": "", dependencies: {} })
+  )
+  assert.equal(f.fresh(), true)
+
+  writeFileSync(manifest, JSON.stringify({ name: "x", scripts: { dev: "b" }, dependencies: { y: "1" } }))
+  assert.equal(f.fresh(), false)
+  f.save()
+  writeFileSync(manifest, "{ not json")
+  assert.equal(f.fresh(), false)
+})
+
 test("missing or corrupt records, removed sources, output tampering and option changes cannot hit", (t) => {
   const f = fixture(t)
   assert.equal(f.fresh(), false)

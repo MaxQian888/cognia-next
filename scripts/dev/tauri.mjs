@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { buildCogniaCli } from "./ensure-cognia-cli.mjs"
 
 export function withFailFastDev(args) {
   if (args[0] !== "dev") return args
@@ -17,37 +18,32 @@ export function withFailFastDev(args) {
 }
 
 /**
- * `tauri-build` re-stages every `bundle.resources` entry each time the build
- * script runs, with an unconditional per-file `std::fs::copy`. The list expands
- * to ~156k `rerun-if-changed` paths, 98% of them under `sidecar/node_modules`,
- * which costs minutes of almost entirely kernel time per run. `beforeDevCommand`
- * gates the dev server behind that copy, so on a cold cache the wait outlives
- * Tauri's 180s frontend timeout and `tauri dev` aborts before Next.js starts.
- *
- * A development build reads none of the staged payload: every `resource_dir()`
- * consumer falls back to the checkout — `claude::sidecar::sidecar_dir`,
- * `node_runtime::bundled_candidates`, `pi_extension` (which reuses
- * `sidecar_dir`), `hooks::builtin::builtin_base_dir`, and
- * `cognia-terminal::terminal_script_dir`. Emptying the list makes all five
- * resolve from the repo. Packaged bundles and `pnpm tauri build` are untouched
- * and still stage the real resources.
- *
- * Must stay byte-identical to `HEADLESS_TAURI_CONFIG` in `scripts/dev/headless.mjs`:
- * `tauri-build` declares `rerun-if-env-changed=TAURI_CONFIG`, so a differing
- * value would give a headless build and a desktop dev build separate build-script
- * fingerprints and make each switch between them pay the copy again.
+ * `tauri dev` replaces the app's default features with an explicit list
+ * (`--no-default-features --features ocr-paddle`), a different feature set
+ * from the one a plain `cargo build` / `cargo test` / rust-analyzer resolves
+ * (`default` + `ocr-paddle`). Cargo keys every artifact on that set, so the two
+ * kept separate copies of `app_lib` and the app binaries. Naming `default`
+ * makes the CLI ask for `default,ocr-paddle`, the same set, so `tauri dev` and
+ * plain cargo share one build. A caller that turns default features off itself
+ * (`-- --no-default-features`) keeps its own choice.
  */
-export const DEV_TAURI_CONFIG = JSON.stringify({ bundle: { resources: [] } })
-
-/**
- * Empty `bundle.resources` for `tauri dev` only. An explicit `TAURI_CONFIG`
- * already in the environment wins — `scripts/dev/headless.mjs` and any manual
- * override set one deliberately.
- */
-export function withDevResourceEnv(args, env) {
-  if (args[0] !== "dev") return env
-  if (env.TAURI_CONFIG) return env
-  return { ...env, TAURI_CONFIG: DEV_TAURI_CONFIG }
+export function withDefaultFeatures(args) {
+  if (args[0] !== "dev") return args
+  const separator = args.indexOf("--")
+  const tauriArgs = separator === -1 ? args : args.slice(0, separator)
+  const cargoArgs = separator === -1 ? [] : args.slice(separator + 1)
+  if (cargoArgs.includes("--no-default-features")) return args
+  for (let i = 0; i < tauriArgs.length; i++) {
+    const arg = tauriArgs[i]
+    const value =
+      arg === "--features" || arg === "-f"
+        ? tauriArgs[i + 1]
+        : arg.startsWith("--features=")
+          ? arg.slice("--features=".length)
+          : undefined
+    if (value?.split(/[\s,]+/).includes("default")) return args
+  }
+  return ["dev", "--features", "default", ...args.slice(1)]
 }
 
 /**
@@ -60,11 +56,11 @@ export function withDevResourceEnv(args, env) {
  * still running.
  *
  * The wrapper runs those cargo steps first, before the CLI's clock starts, with
- * the same environment `tauri dev` passes down (`TAURI_CONFIG` is part of the
- * `src-tauri` build-script fingerprint). The copies inside `beforeDevCommand`
- * then finish as fingerprint no-ops in a second or two, so the wait only covers
- * `predev` and Next.js startup. `beforeDevCommand` keeps the steps so a direct
- * `tauri dev` or the system-node launcher still prepares everything.
+ * the same environment `tauri dev` passes down. The copies inside
+ * `beforeDevCommand` then finish as fingerprint no-ops in a second or two, so
+ * the wait only covers `predev` and Next.js startup. `beforeDevCommand` keeps
+ * the steps so a direct `tauri dev` or the system-node launcher still prepares
+ * everything.
  *
  * Only `pnpm <script>` steps whose package script is a `cargo build` qualify:
  * cargo is the step whose cost can exceed the timeout, and the only one whose
@@ -122,11 +118,16 @@ export function resolveBeforeDevCommand(args, baseConfig, root) {
   return typeof command === "string" ? command : null
 }
 
-export function devPrepareScripts(args, root) {
-  if (args[0] !== "dev") return []
+/** A `tauri dev` invocation that will build and launch the app (not `--help`). */
+export function isDevLaunch(args) {
+  if (args[0] !== "dev") return false
   const separator = args.indexOf("--")
   const tauriArgs = separator === -1 ? args : args.slice(0, separator)
-  if (tauriArgs.includes("--help") || tauriArgs.includes("-h")) return []
+  return !tauriArgs.includes("--help") && !tauriArgs.includes("-h")
+}
+
+export function devPrepareScripts(args, root) {
+  if (!isDevLaunch(args)) return []
 
   const config = JSON.parse(readFileSync(path.join(root, "src-tauri/tauri.conf.json"), "utf8"))
   const { scripts } = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"))
@@ -150,19 +151,30 @@ function runPnpmScript(name, { cwd, env }) {
 
 export async function runTauri(args, { env = process.env } = {}) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
-  const childEnv = withDevResourceEnv(args, env)
-
+  // `src-tauri/build.rs` drops `bundle.resources` / `bundle.externalBin` from
+  // every development build itself, so no `TAURI_CONFIG` is exported here: an
+  // extra value would split this build's fingerprint from rust-analyzer's and
+  // `cargo test`'s and re-run the build script on every switch.
   for (const name of devPrepareScripts(args, root)) {
-    const result = await runPnpmScript(name, { cwd: root, env: childEnv })
+    const result = await runPnpmScript(name, { cwd: root, env })
     if (result.signal || result.code !== 0) return result
+  }
+  // `predev` (inside `beforeDevCommand`, so inside the 180s wait) builds the
+  // plugin-author CLI. Warm it here first; it stays best-effort there and here.
+  if (isDevLaunch(args)) {
+    try {
+      buildCogniaCli(env)
+    } catch (error) {
+      console.warn("[tauri] cognia CLI warm-up failed; predev will retry:", error)
+    }
   }
 
   const require = createRequire(import.meta.url)
   const tauriCli = require.resolve("@tauri-apps/cli/tauri.js")
   // The wrapper runs the installed CLI; launching must not trigger pnpm's implicit install.
-  const child = spawn(process.execPath, [tauriCli, ...withFailFastDev(args)], {
+  const child = spawn(process.execPath, [tauriCli, ...withFailFastDev(withDefaultFeatures(args))], {
     cwd: root,
-    env: childEnv,
+    env,
     stdio: "inherit",
   })
 

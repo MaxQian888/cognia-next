@@ -52,6 +52,15 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
 - `prepare`（在 `pnpm install` 后运行）安装 Husky git hooks。
 - `tauri build` 的 `beforeBuildCommand` 会先跑 `pnpm build`，免去你手动连跑。
 
+### 桌面端开发循环
+
+`pnpm tauri:dev`（`scripts/dev/tauri.mjs`）会在 Tauri CLI 开始 180 秒前端等待之前，先编译好原生辅助程序（`cognia-server`、外部 agent 启动器、bootstrap agent 和 `cognia` CLI），然后再交给 `tauri dev`。
+
+- **不往 `target/` 拷贝任何东西。** 开发构建中 `src-tauri/build.rs` 会清空 `bundle.resources` 和 `bundle.externalBin`。开发态代码直接从仓库读取资源，Cargo 也会把辅助二进制直接产出到 `target/debug/`。不要为此导出 `TAURI_CONFIG`：构建脚本会跟踪这个变量，各入口的取值一旦不同，就会重跑构建脚本并重新编译 `app_lib`。
+- **同一套 feature。** 不加干预时，Tauri CLI 执行的是 `cargo run --no-default-features --features ocr-paddle`，与普通 `cargo build` 解析出的 feature 集合不同，而 Cargo 会为每套 feature 各保留一份编译单元。因此 `pnpm tauri:dev` 会传入 `--features default`，让 CLI 请求 `default,ocr-paddle`，即普通构建的那一套。`terminal-host:prepare:dev`、VS Code 的 LLDB 配置、`cargo test` 和 rust-analyzer 都按普通方式构建，所以桌面端只编译一次 `app_lib`。只有 headless 服务端（`terminal-host:prepare:headless`）额外启用 `workspace-runtime-exec`。
+- **什么会让应用重启。** `src-tauri/` 或其依赖的任一工作区 crate 下有任何变动，Tauri watcher 都会结束、重新编译并重新拉起应用。重启后窗口回到 `/`，内存中的状态全部丢失。`.taurignore` 排除了暂存资源、生成文件和编辑器临时文件；`.gitignore` 不会过滤这些事件。
+- **共享工作区。** 其他会话改 Rust 也会让你的应用重启。可以用 `pnpm tauri:dev:nowatch`：前端热更新照常，原生侧只在你手动重启时才更新。
+
 ## 项目结构速览
 
 <Files>

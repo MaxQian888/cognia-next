@@ -1,8 +1,12 @@
 fn main() {
+    // Generate embedded assets before rustc records its dependency timestamp.
+    // Macro-time icon caching otherwise makes the first unchanged build dirty.
+    let codegen = tauri_build::CodegenContext::new();
+
     // `attributes` is only mutated inside the `#[cfg(windows)]` block below; on
     // other targets the binding stays untouched, so scope the `mut` lint there.
     #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut attributes = tauri_build::Attributes::new();
+    let mut attributes = tauri_build::Attributes::new().codegen(codegen);
 
     // Windows: take manifest embedding away from `tauri-build` so the SAME
     // Common-Controls v6 manifest is linked into bins AND test binaries from a
@@ -52,10 +56,61 @@ fn main() {
     // regresses into a runtime "not allowed. Command not found".
     sync_app_command_grant();
 
+    apply_dev_bundle_override();
+
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 
     #[cfg(feature = "parse-liteparse")]
     copy_pdfium_next_to_binary();
+}
+
+/// Development builds (`tauri` compiled without `custom-protocol`: `tauri dev`,
+/// `cargo build/check/test/clippy`, rust-analyzer, the headless server) stage
+/// neither `bundle.resources` nor `bundle.externalBin` next to the binary.
+///
+/// - `resources`: `tauri-build` copies every entry with an unconditional
+///   per-file `fs::copy` each time this script runs. The sidecar `node_modules`
+///   globs alone are ~150k files (~3 GB under `target/<profile>/_up_/`). A dev
+///   build reads none of it: every `resource_dir()` consumer falls back to the
+///   checkout (see `scripts/dev/tauri.mjs`).
+/// - `externalBin`: `tauri-build` copies `binaries/<name>-<triple>` over
+///   `target/<profile>/<name>`. Those are the release artifacts from the last
+///   `pnpm tauri build`, so the copy replaced the debug `cognia-server`,
+///   launcher and bootstrap binaries the dev prepare steps had just built, and
+///   the desktop ran weeks-old helpers. Cargo already places the dev builds of
+///   all three there.
+///
+/// Doing this here instead of through a `TAURI_CONFIG` exported by each dev
+/// launcher keeps the build-script environment identical for every entry
+/// point, so switching between `tauri dev`, rust-analyzer and `cargo test` no
+/// longer re-runs this script and recompiles `app_lib`. Any `TAURI_CONFIG`
+/// already set (`tauri dev --config ...`) is kept and patched, not replaced.
+/// Packaged builds (`tauri build`, including `--debug`) enable
+/// `custom-protocol` and stage both lists unchanged.
+fn apply_dev_bundle_override() {
+    if !tauri_build::is_dev() {
+        return;
+    }
+    let mut config = match std::env::var("TAURI_CONFIG") {
+        Ok(raw) => serde_json::from_str::<serde_json::Value>(&raw)
+            .expect("TAURI_CONFIG must be a JSON object"),
+        Err(_) => serde_json::Value::Object(Default::default()),
+    };
+    let root = config
+        .as_object_mut()
+        .expect("TAURI_CONFIG must be a JSON object");
+    let bundle = root
+        .entry("bundle")
+        .or_insert_with(|| serde_json::Value::Object(Default::default()));
+    if !bundle.is_object() {
+        *bundle = serde_json::Value::Object(Default::default());
+    }
+    let bundle = bundle.as_object_mut().expect("bundle is an object");
+    bundle.insert("resources".into(), serde_json::Value::Array(Vec::new()));
+    bundle.insert("externalBin".into(), serde_json::Value::Array(Vec::new()));
+    // The build script is single-threaded until `tauri_build::try_build`, which
+    // reads `TAURI_CONFIG` from this process's environment.
+    std::env::set_var("TAURI_CONFIG", config.to_string());
 }
 
 /// Regenerate `permissions/all-app-commands.toml` from the `generate_handler!`

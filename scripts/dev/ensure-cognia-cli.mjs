@@ -24,6 +24,7 @@
  */
 
 import { execaSync } from "execa"
+import { fileURLToPath } from "node:url"
 
 const tag = "[ensure-cognia-cli]"
 
@@ -35,24 +36,26 @@ function isTauriDev() {
 }
 
 /** True when `cargo` is on PATH and runnable. */
-function hasCargo() {
+function hasCargo(env) {
   try {
-    return execaSync("cargo", ["--version"], { stdio: "ignore", reject: false }).exitCode === 0
+    return execaSync("cargo", ["--version"], { env, stdio: "ignore", reject: false }).exitCode === 0
   } catch {
     return false
   }
 }
 
-function main() {
-  if (process.env.COGNIA_SKIP_CLI_BUILD === "1") {
+/**
+ * Build the CLI unless `COGNIA_SKIP_CLI_BUILD=1`. Never throws and never fails:
+ * `scripts/dev/tauri.mjs` also calls this before the Tauri CLI starts its 180s
+ * frontend wait, so the cargo work lands outside that budget and the `predev`
+ * run below finishes as a fingerprint no-op.
+ */
+export function buildCogniaCli(env = process.env) {
+  if (env.COGNIA_SKIP_CLI_BUILD === "1") {
     console.log(`${tag} COGNIA_SKIP_CLI_BUILD=1 — skipping.`)
     return
   }
-  if (!isTauriDev()) {
-    // Web `pnpm dev` — nothing to do.
-    return
-  }
-  if (!hasCargo()) {
+  if (!hasCargo(env)) {
     console.warn(
       `${tag} cargo not found — skipping CLI build. Install Rust, or run ` +
         `\`cargo install --locked --path crates/cognia-cli\` to enable Plugin DevTools.`
@@ -62,6 +65,7 @@ function main() {
 
   console.log(`${tag} building cognia CLI (cargo build -p cognia-cli)…`)
   const build = execaSync("cargo", ["build", "-p", "cognia-cli"], {
+    env,
     stdio: "inherit",
     reject: false,
   })
@@ -75,10 +79,20 @@ function main() {
   }
 }
 
-try {
-  main()
-} catch (err) {
-  console.warn(`${tag} unexpected error — skipping:`, err)
+function main() {
+  if (!isTauriDev()) {
+    // Web `pnpm dev` — nothing to do.
+    return
+  }
+  buildCogniaCli()
 }
-// Always succeed: predev must not block `next dev`.
-process.exit(0)
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    main()
+  } catch (err) {
+    console.warn(`${tag} unexpected error — skipping:`, err)
+  }
+  // Always succeed: predev must not block `next dev`.
+  process.exit(0)
+}

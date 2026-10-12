@@ -29,7 +29,7 @@ runtime secret 是 `COGNIA_WORKSPACE_RUNTIME_SECRET_DIR` 下以 workspace id 命
 
 单机满足不了上面的契约：`{workspace_id}` 需要在 DNS 里解析，而客户端送来的 workspace id 是运行期才产生的 project id，没有任何脚本能预先放好它的 secret 文件。因此开发环境改为用 `COGNIA_WORKSPACE_RUNTIME_URL` 直连单个 runtime，配一个共享的 `COGNIA_WORKSPACE_RUNTIME_SECRET`——runtime 自己读的就是这个变量。这一对仅在 URL 指向回环地址时被接受：一个 URL 加一个 secret 意味着所有 workspace 共用同一个浏览器，而这正是模板定位器要提供的隔离。
 
-`pnpm dev:web-headless` 会把该 runtime 作为第三个本地服务拉起，并把这一对下发给 Host；`pnpm dev:workspace-runtime` 用于单独启动它。本地 `cognia-server` 必须带 `--features workspace-runtime-exec` 编译，`terminal-host:prepare:dev` 已经这么做。Chromium 不随包分发：开会话前需要 `pnpm exec playwright install chromium`，缺失时只在启动时提示，不阻断启动。
+`pnpm dev:web-headless` 会把该 runtime 作为第三个本地服务拉起，并把这一对下发给 Host；`pnpm dev:workspace-runtime` 用于单独启动它。本地 `cognia-server` 必须带 `--features workspace-runtime-exec` 编译，`terminal-host:prepare:headless`（`pnpm dev:headless` 的构建步骤）已经这么做；桌面端的 `terminal-host:prepare:dev` 保持与发布版相同的 feature 集合，以便与 `pnpm tauri:dev` 共享编译产物。Chromium 不随包分发：开会话前需要 `pnpm exec playwright install chromium`，缺失时只在启动时提示，不阻断启动。
 
 ### BrowserSession 与统一引擎
 

@@ -162,9 +162,9 @@ export async function stageBundledPlugins({
     fsImpl.readFileSync(path.join(pluginsRoot, "browser-builtins.json"), "utf8")
   )
 
-  fsImpl.rmSync(target, { recursive: true, force: true })
-  fsImpl.mkdirSync(target, { recursive: true })
-
+  // Everything is collected first and written last: a failing include leaves
+  // the previous stage intact, and an unchanged stage is not rewritten.
+  const pending = new Map()
   const catalog = { entries: {} }
   for (const [dir, entry] of Object.entries(bundled)) {
     if (!/^[a-z0-9][a-z0-9._-]*$/.test(dir))
@@ -204,10 +204,8 @@ export async function stageBundledPlugins({
     const staged = []
     for (const relative of [...new Set(files)].sort()) {
       const from = path.join(source, relative)
-      const to = path.join(target, dir, relative)
-      fsImpl.mkdirSync(path.dirname(to), { recursive: true })
       const bytes = fsImpl.readFileSync(from)
-      fsImpl.writeFileSync(to, bytes)
+      pending.set(`${dir}/${relative}`, bytes)
       staged.push({
         path: relative,
         bytes: bytes.length,
@@ -246,9 +244,7 @@ export async function stageBundledPlugins({
           .some((part) => part === ".." || part === "." || !part || NEVER_STAGE.has(part))
       )
         throw new Error(`Unsafe built plugin path: ${relative}`)
-      const to = path.join(target, dir, relative)
-      fsImpl.mkdirSync(path.dirname(to), { recursive: true })
-      fsImpl.writeFileSync(to, bytes)
+      pending.set(`${dir}/${relative}`, Buffer.from(bytes))
       staged.push({
         path: relative,
         bytes: bytes.length,
@@ -258,10 +254,56 @@ export async function stageBundledPlugins({
     catalog.entries[dir] = { id: built.manifest.id, version: built.manifest.version, files: staged }
   }
 
+  // `src-tauri/resources/plugins` sits in a folder the `tauri dev` watcher
+  // covers, and the catalog is imported by the renderer: rewriting identical
+  // bytes on every `predev` would restart a running desktop app and push a
+  // pointless HMR update.
+  const changed = !stagedTreeMatches(target, pending, fsImpl)
+  if (changed) {
+    fsImpl.rmSync(target, { recursive: true, force: true })
+    fsImpl.mkdirSync(target, { recursive: true })
+    for (const [relative, bytes] of pending) {
+      const to = path.join(target, ...relative.split("/"))
+      fsImpl.mkdirSync(path.dirname(to), { recursive: true })
+      fsImpl.writeFileSync(to, bytes)
+    }
+  }
+
   const catalogPath = catalogFile ?? path.join(root, CATALOG_FILE)
-  fsImpl.mkdirSync(path.dirname(catalogPath), { recursive: true })
-  fsImpl.writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`)
-  return { stagedDir: target, catalogPath, catalog }
+  const catalogText = `${JSON.stringify(catalog, null, 2)}\n`
+  const currentCatalog = fsImpl.existsSync(catalogPath)
+    ? fsImpl.readFileSync(catalogPath, "utf8")
+    : null
+  if (currentCatalog !== catalogText) {
+    fsImpl.mkdirSync(path.dirname(catalogPath), { recursive: true })
+    fsImpl.writeFileSync(catalogPath, catalogText)
+  }
+  return { stagedDir: target, catalogPath, catalog, changed }
+}
+
+/**
+ * True when `target` holds exactly the files in `pending` (keys are
+ * `/`-separated paths relative to `target`) with identical bytes.
+ */
+export function stagedTreeMatches(target, pending, fsImpl = fs) {
+  if (!fsImpl.existsSync(target)) return pending.size === 0
+  const present = []
+  const walk = (dir, prefix) => {
+    for (const entry of fsImpl.readdirSync(dir, { withFileTypes: true })) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (entry.isDirectory()) walk(path.join(dir, entry.name), relative)
+      else present.push(relative)
+    }
+  }
+  walk(target, "")
+  if (present.length !== pending.size) return false
+  return present.every((relative) => {
+    const expected = pending.get(relative)
+    return (
+      expected !== undefined &&
+      fsImpl.readFileSync(path.join(target, ...relative.split("/"))).equals(expected)
+    )
+  })
 }
 
 const invokedDirectly =

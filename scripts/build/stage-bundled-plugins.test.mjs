@@ -220,3 +220,64 @@ test("include expansion rejects traversal and symlinks and excludes installed de
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("an unchanged stage is not rewritten, and a drifted one is restaged", async () => {
+  const out = tempDir()
+  const stageDir = path.join(out, "stage")
+  const catalogFile = path.join(out, "catalog.json")
+  try {
+    const first = await stageBundledPlugins({ outDir: stageDir, catalogFile })
+    assert.equal(first.changed, true)
+    const manifest = path.join(stageDir, "repowiki", "plugin.json")
+    const past = new Date(Date.now() - 60_000)
+    fs.utimesSync(manifest, past, past)
+    fs.utimesSync(catalogFile, past, past)
+
+    // The `tauri dev` watcher covers the stage dir and the renderer imports the
+    // catalog: a no-op predev must leave both untouched.
+    const second = await stageBundledPlugins({ outDir: stageDir, catalogFile })
+    assert.equal(second.changed, false)
+    assert.equal(fs.statSync(manifest).mtimeMs, past.getTime())
+    assert.equal(fs.statSync(catalogFile).mtimeMs, past.getTime())
+
+    fs.writeFileSync(path.join(stageDir, "repowiki", "stray.txt"), "residue")
+    fs.writeFileSync(manifest, "{}")
+    const third = await stageBundledPlugins({ outDir: stageDir, catalogFile })
+    assert.equal(third.changed, true)
+    assert.ok(!fs.existsSync(path.join(stageDir, "repowiki", "stray.txt")))
+    assert.equal(
+      fs.readFileSync(manifest, "utf8"),
+      fs.readFileSync(path.join("plugins", "repowiki", "plugin.json"), "utf8")
+    )
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true })
+  }
+})
+
+test("a failing include leaves the previous stage in place", async () => {
+  const out = tempDir()
+  const stageDir = path.join(out, "stage")
+  const catalogFile = path.join(out, "catalog.json")
+  try {
+    await stageBundledPlugins({ outDir: stageDir, catalogFile })
+    const fake = {
+      ...fs,
+      readFileSync: (file, encoding) =>
+        String(file).endsWith("distribution.json")
+          ? JSON.stringify({
+              bundled: {
+                repowiki: { id: "cognia-repowiki", reason: "x", include: ["plugin.json", "gone/**/*"] },
+              },
+              devOnly: {},
+            })
+          : fs.readFileSync(file, encoding),
+    }
+    await assert.rejects(
+      () => stageBundledPlugins({ outDir: stageDir, catalogFile, fsImpl: fake }),
+      /matched no files/u
+    )
+    assert.ok(fs.existsSync(path.join(stageDir, "repowiki", "plugin.json")))
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true })
+  }
+})

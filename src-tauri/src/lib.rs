@@ -323,6 +323,10 @@ impl cognia_vector::CredentialStore for KeyringVectorCredentialStore {
     }
 }
 
+fn application_context() -> tauri::Context<tauri::Wry> {
+    tauri::tauri_build_context!()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // ADR-0196 — library crates spawn through `cognia_core::rt` rather than
@@ -1930,7 +1934,7 @@ pub fn run() {
         // Every boot step, in order, lives in `startup` (one setup hook: Tauri
         // keeps only the last closure handed to `Builder::setup`).
         .setup(startup::run)
-        .build(tauri::generate_context!())
+        .build(application_context())
         .expect("error while building tauri application")
         .run(|app, event| {
             window_behavior::handle_run_event(app, &event);
@@ -1940,6 +1944,20 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn build_time_context_preserves_the_window_icon() {
+        let context = super::application_context();
+        let icon = context
+            .default_window_icon()
+            .expect("the application context must include its window icon");
+        assert!(icon.width() > 0);
+        assert!(icon.height() > 0);
+        assert_eq!(
+            icon.rgba().len(),
+            (icon.width() * icon.height() * 4) as usize
+        );
+    }
+
     #[test]
     fn exit_cleanup_keeps_the_ui_event_loop_available() {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();

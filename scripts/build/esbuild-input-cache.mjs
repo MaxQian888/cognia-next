@@ -22,6 +22,29 @@ export function readOptional(file) {
   }
 }
 
+/**
+ * The bytes a build input is fingerprinted by. A `package.json` counts only for
+ * what can change resolution or the bundle (`exports`, `imports`, `type`,
+ * dependencies, ...): its `scripts` and `//` comment keys are dropped, because
+ * the root manifest's scripts change several times a week and each edit would
+ * otherwise rebuild every bundle.
+ */
+export function readFingerprint(file) {
+  const bytes = readOptional(file)
+  if (!bytes || path.basename(file) !== "package.json") return bytes
+  let manifest
+  try {
+    manifest = JSON.parse(bytes)
+  } catch {
+    return bytes
+  }
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return bytes
+  const relevant = Object.fromEntries(
+    Object.entries(manifest).filter(([key]) => key !== "scripts" && !key.startsWith("//"))
+  )
+  return Buffer.from(JSON.stringify(relevant))
+}
+
 export function readBuildCache(file) {
   const bytes = readOptional(file)
   try {
@@ -106,7 +129,7 @@ export function captureBuildInputs(root, inputs, extraFiles) {
   }
   configFiles(path.join(root, "tsconfig.json"), files)
   return {
-    files: hashSources([...files], readOptional),
+    files: hashSources([...files], readFingerprint),
     directories: Object.fromEntries(
       [...directories].sort().map((directory) => [directory, directoryEntries(directory)])
     ),
@@ -122,7 +145,7 @@ export function isBuildCacheFresh(cache, root, key, requiredOutputs) {
   )
     return false
   for (const [file, digest] of Object.entries(cache.inputs.files)) {
-    const bytes = readOptional(file)
+    const bytes = readFingerprint(file)
     if ((bytes ? sha256(bytes) : null) !== digest) return false
   }
   for (const [directory, entries] of Object.entries(cache.inputs.directories)) {

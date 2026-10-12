@@ -89,12 +89,13 @@
       "presentation": { "group": "2-tauri", "order": 1 }
     },
     {
-      // Mirrors `pnpm tauri:dev`: default features (ocr-paddle) so the build
-      // shares artifacts with it, and the same empty `bundle.resources`
-      // TAURI_CONFIG as scripts/dev/tauri.mjs (it must stay byte-identical, or
-      // the ~2.9 GB sidecar resource copy re-runs on every switch). The dev
-      // profile keeps line tables only: breakpoints and stepping work, locals
-      // do not. Use the dev-full entry below when you need variables.
+      // Shares artifacts with `pnpm tauri:dev`, which asks the Tauri CLI for the
+      // default features by name (scripts/dev/tauri.mjs), so both resolve the
+      // same feature set as this plain build and app_lib compiles once. No TAURI_CONFIG
+      // either (src-tauri/build.rs skips resource and sidecar staging for every
+      // development build). The dev profile keeps line tables only: breakpoints
+      // and stepping work, locals do not. Use the dev-full entry below when you
+      // need variables.
       "name": "Tauri: LLDB debug (dev profile)",
       "type": "lldb",
       "request": "launch",
@@ -105,9 +106,6 @@
           "--bin",
           "cognia-next"
         ],
-        "env": {
-          "TAURI_CONFIG": "{\"bundle\":{\"resources\":[]}}"
-        },
         "filter": { "name": "cognia-next", "kind": "bin" }
       },
       "cwd": "${workspaceFolder}/src-tauri",
@@ -143,9 +141,6 @@
           "--profile",
           "dev-full"
         ],
-        "env": {
-          "TAURI_CONFIG": "{\"bundle\":{\"resources\":[]}}"
-        },
         "filter": { "name": "cognia-next", "kind": "bin" }
       },
       "cwd": "${workspaceFolder}/src-tauri",
@@ -211,10 +206,7 @@
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": ["test", "--no-run", "--lib", "-p", "${input:rustPackage}"],
-        "env": {
-          "TAURI_CONFIG": "{\"bundle\":{\"resources\":[]}}"
-        }
+        "args": ["test", "--no-run", "--lib", "-p", "${input:rustPackage}"]
       },
       "args": ["${input:rustTestFilter}", "--nocapture", "--test-threads=1"],
       "cwd": "${workspaceFolder}",

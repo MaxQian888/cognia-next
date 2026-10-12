@@ -1,0 +1,30 @@
+# `tauri dev` file-watcher filter (gitignore syntax, relative to this file).
+#
+# The Tauri CLI watches `src-tauri/` and every workspace crate it depends on,
+# and kills, rebuilds and relaunches the desktop app on any event that survives
+# this filter. `.gitignore` does NOT filter events below a watched folder, so a
+# generated or staged file inside one restarts the app (the window reopens at
+# `/` with all state lost, which reads as "HMR is broken"). List here only
+# outputs whose change never needs a native rebuild.
+
+# Staged by predev/prebuild scripts (stage-bundled-plugins, prepare-plugin-node,
+# stage-browser-runtime); read from disk at runtime, never compiled in.
+src-tauri/resources/plugins/
+src-tauri/resources/plugin-node/
+src-tauri/resources/browser-runtime/
+
+# Release sidecars written by `pnpm tauri build`'s beforeBuildCommand.
+src-tauri/binaries/
+
+# Written by build.rs / tauri-build during the build the watcher just started:
+# `all-app-commands.toml` is derived from `src/lib.rs` (which is watched), and
+# `gen/` holds the generated ACL schemas.
+src-tauri/permissions/all-app-commands.toml
+src-tauri/gen/
+
+# Interpreter and editor droppings anywhere under a watched crate.
+**/__pycache__/
+*.pyc
+*.swp
+*.swo
+*~

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { runTauri } from "../dev/tauri.mjs"
 
 const BUNDLED_NODE_RESOURCE = "resources/plugin-node/**/*"
 
@@ -40,10 +41,7 @@ async function run(subcommand, forwardedArgs) {
   const override = createSystemNodeOverride(config)
   const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
   const args = [
-    "exec",
-    "tauri",
     subcommand,
-    ...(subcommand === "dev" ? ["--exit-on-panic"] : []),
     "--features",
     "system-node-runtime",
     "--config",
@@ -51,8 +49,15 @@ async function run(subcommand, forwardedArgs) {
     ...forwardedArgs,
   ]
 
+  if (subcommand === "dev") {
+    const result = await runTauri(args)
+    if (result.signal) process.kill(process.pid, result.signal)
+    process.exitCode = result.code ?? 1
+    return
+  }
+
   await new Promise((resolveRun, reject) => {
-    const child = spawn(pnpm, args, { cwd: root, stdio: "inherit" })
+    const child = spawn(pnpm, ["exec", "tauri", ...args], { cwd: root, stdio: "inherit" })
     child.once("error", reject)
     child.once("exit", (code, signal) => {
       if (code === 0) resolveRun()
