@@ -121,11 +121,11 @@ pub fn apply_rlimits(cmd: &mut tokio::process::Command, limits: ResolvedLimits) 
     }
 }
 
-/// Resource id type for `setrlimit` — Linux types it as `__rlimit_resource_t`,
-/// other unices as `c_int`.
-#[cfg(target_os = "linux")]
+/// Resource id type for `setrlimit` — glibc types it as `__rlimit_resource_t`,
+/// musl (the static agent bundle) and other unices as `c_int`.
+#[cfg(all(target_os = "linux", not(target_env = "musl")))]
 type RlimitResource = libc::__rlimit_resource_t;
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(all(unix, not(all(target_os = "linux", not(target_env = "musl")))))]
 type RlimitResource = libc::c_int;
 
 #[cfg(unix)]
