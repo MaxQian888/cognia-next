@@ -80,7 +80,10 @@ export const githubDevinBotDef = {
   policy: {
     maxAuthority: "bypassPermissions",
     maxAutonomy: "autopilot",
-    maxConcurrentRuns: 1,
+    // The monitor (poll, webhook, scan, backfill) and one `work` run at a time:
+    // `work` is serialised per repository by its own key, and the monitor has to
+    // keep polling while a 30-minute work run executes.
+    maxConcurrentRuns: 2,
     maxRunDurationMs: 1_800_000,
     allowSelfTriggering: false,
   },

@@ -6,6 +6,7 @@ import {
   claimBotDelivery,
   enqueueBotDelivery,
   markBotDeliveryRunning,
+  parkBotDelivery,
 } from "@/lib/db/bot-event-deliveries"
 import { installBot, updateBotInstallation } from "@/lib/db/bot-installations"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
@@ -35,13 +36,14 @@ function envelope(overrides: Partial<BotEventEnvelopeV1> = {}): BotEventEnvelope
   }
 }
 
-async function seedInstallation(handler = jest.fn()) {
+async function seedInstallation(handler = jest.fn(), policy?: PluginBotDef["policy"]) {
   const definition: PluginBotDef = {
     id: "digest",
     name: "Digest",
     version: "1.0.0",
     executor: "handler",
     triggers: [{ id: "opened", kind: "manual" }],
+    ...(policy ? { policy } : {}),
   } as PluginBotDef
   registerBot("digest", { id: "acme:digest", definition, handler }, { pluginId: "acme" })
   return installBot({
@@ -281,6 +283,73 @@ describe("drainBotDeliveries", () => {
     const attempts = await drainBotDeliveries({ owner: "host-a", now })
     expect(attempts).toEqual([])
     expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("holds a delivery back while the installation runs its maxConcurrentRuns", async () => {
+    const handler = jest.fn()
+    await seedInstallation(handler, { maxConcurrentRuns: 1 })
+    await enqueueBotDelivery({ envelope: envelope(), concurrencyKey: "repo#1", now: NOW })
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "bev_2", deliveryId: "bdl_2" }),
+      concurrencyKey: "repo#2",
+      now: NOW,
+    })
+    // A different key is executing on another host: the slot is taken.
+    await claimBotDelivery("bdl_1", "host-b", NOW)
+    await markBotDeliveryRunning("bdl_1", "run_x", NOW)
+
+    const attempts = await drainBotDeliveries({ owner: "host-a", now })
+    expect(attempts).toEqual([
+      { deliveryId: "bdl_2", outcome: { status: "skipped", reason: "throttled" } },
+    ])
+    expect(handler).not.toHaveBeenCalled()
+    // Not charged: it waits for the slot, it did not fail.
+    expect(await getDb().botEventDeliveries.get("bdl_2")).toMatchObject({
+      status: "pending",
+      attempts: 0,
+    })
+  })
+
+  it("runs up to maxConcurrentRuns deliveries in one pass and no more", async () => {
+    const handler = jest.fn()
+    await seedInstallation(handler, { maxConcurrentRuns: 2 })
+    for (const n of [1, 2, 3]) {
+      await enqueueBotDelivery({
+        envelope: envelope({ eventId: `bev_${n}`, deliveryId: `bdl_${n}` }),
+        concurrencyKey: `repo#${n}`,
+        now: NOW,
+      })
+    }
+    // Hold every handler open so the attempts overlap.
+    const releases: Array<() => void> = []
+    handler.mockImplementation(() => new Promise<void>((resolve) => releases.push(resolve)))
+    const pass = drainBotDeliveries({ owner: "host-a", now })
+    while (releases.length < 2) await new Promise((resolve) => setTimeout(resolve, 10))
+    for (const release of releases) release()
+    const attempts = await pass
+    expect(handler).toHaveBeenCalledTimes(2)
+    expect(
+      attempts.filter(
+        (attempt) => "reason" in attempt.outcome && attempt.outcome.reason === "throttled"
+      )
+    ).toHaveLength(1)
+  })
+
+  it("does not count a run parked on a person against maxConcurrentRuns", async () => {
+    const handler = jest.fn()
+    await seedInstallation(handler, { maxConcurrentRuns: 1 })
+    await enqueueBotDelivery({ envelope: envelope(), concurrencyKey: "repo#1", now: NOW })
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "bev_2", deliveryId: "bdl_2" }),
+      concurrencyKey: "repo#2",
+      now: NOW,
+    })
+    await claimBotDelivery("bdl_1", "host-a", NOW)
+    await markBotDeliveryRunning("bdl_1", "run_x", NOW)
+    await parkBotDelivery("bdl_1", NOW + 60_000, undefined, NOW)
+
+    await drainBotDeliveries({ owner: "host-a", now })
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 
   it("runs deliveries with different concurrency keys in the same pass", async () => {

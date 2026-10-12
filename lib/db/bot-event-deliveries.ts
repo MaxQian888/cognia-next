@@ -242,10 +242,19 @@ export async function listDueBotDeliveries(
  * Serialized in a transaction so two runners reading the same due row cannot
  * both conclude they won.
  */
+export interface ClaimBotDeliveryLimits {
+  /**
+   * The installation's effective `maxConcurrentRuns`. Checked inside the claim
+   * transaction, so passes claiming in parallel cannot jointly overshoot it.
+   */
+  maxConcurrentRuns?: number
+}
+
 export async function claimBotDelivery(
   id: string,
   owner: string,
-  now = Date.now()
+  now = Date.now(),
+  limits: ClaimBotDeliveryLimits = {}
 ): Promise<BotEventDeliveryRow | undefined> {
   const db = getDb()
   return db.transaction("rw", db.botEventDeliveries, async () => {
@@ -262,6 +271,13 @@ export async function claimBotDelivery(
     if (
       row.concurrencyKey &&
       (await countActiveBotDeliveriesForKey(row.concurrencyKey, now, row.id)) > 0
+    ) {
+      return undefined
+    }
+    if (
+      limits.maxConcurrentRuns !== undefined &&
+      (await countRunningBotDeliveriesForInstallation(row.installationId, now, row.id)) >=
+        limits.maxConcurrentRuns
     ) {
       return undefined
     }
@@ -528,6 +544,32 @@ export async function countActiveBotDeliveriesForKey(
   // crash left a row nothing could clear, and every later delivery on that key
   // was skipped as serialised forever after.
   return rows.filter((row) => row.id !== excludeId && holdsConcurrency(row, now)).length
+}
+
+/**
+ * Attempts of one installation that are executing right now: claimed or
+ * running under a live lease. This is what `maxConcurrentRuns` bounds.
+ *
+ * A parked run is deliberately not counted. It is waiting on a person, holds
+ * no executor, and counting it would let one unanswered approval stop every
+ * other run of the installation (including the short ones that answer status
+ * and cancel requests about it).
+ */
+export async function countRunningBotDeliveriesForInstallation(
+  installationId: string,
+  now = Date.now(),
+  excludeId?: string
+): Promise<number> {
+  const rows = await getDb()
+    .botEventDeliveries.where("[installationId+status]")
+    .anyOf([
+      [installationId, "leased"],
+      [installationId, "running"],
+    ])
+    .toArray()
+  return rows.filter(
+    (row) => row.id !== excludeId && isLocallyOwned(row) && !isAbandonedAttempt(row, now)
+  ).length
 }
 
 /** One delivery by id. A primary-key read, so a control write can check state. */

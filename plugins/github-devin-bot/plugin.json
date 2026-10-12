@@ -128,7 +128,7 @@
       "policy": {
         "maxAuthority": "bypassPermissions",
         "maxAutonomy": "autopilot",
-        "maxConcurrentRuns": 1,
+        "maxConcurrentRuns": 2,
         "maxRunDurationMs": 1800000,
         "allowSelfTriggering": false
       },

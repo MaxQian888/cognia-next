@@ -11,6 +11,7 @@ import {
   claimBotDelivery,
   completeBotDelivery,
   countActiveBotDeliveriesForKey,
+  countRunningBotDeliveriesForInstallation,
   dismissBotDelivery,
   enqueueBotDelivery,
   failBotDelivery,
@@ -580,5 +581,47 @@ describe("botEventDeliveries parked on a question", () => {
     await pruneSettledBotDeliveries(NOW + BOT_DELIVERY_RETENTION_MS + 1)
 
     expect((await getDb().botEventDeliveries.get("del_1"))?.status).toBe("dismissed")
+  })
+})
+
+describe("installation run slots", () => {
+  beforeEach(async () => {
+    __resetDbForTesting()
+    await getDb().botEventDeliveries.clear()
+  })
+
+  async function enqueueN(n: number) {
+    for (let i = 1; i <= n; i += 1) {
+      await enqueueBotDelivery({
+        envelope: envelope({ eventId: `evt_${i}`, deliveryId: `del_${i}` }),
+        now: NOW,
+      })
+    }
+  }
+
+  it("counts only live, executing attempts of the installation", async () => {
+    await enqueueN(4)
+    await claimBotDelivery("del_1", "host", NOW)
+    await claimBotDelivery("del_2", "host", NOW)
+    await markBotDeliveryRunning("del_2", "run_2", NOW)
+    await claimBotDelivery("del_3", "host", NOW)
+    await markBotDeliveryRunning("del_3", "run_3", NOW)
+    await parkBotDelivery("del_3", NOW + 60_000, undefined, NOW)
+
+    // leased + running count; parked and pending do not.
+    expect(await countRunningBotDeliveriesForInstallation("boti_1", NOW)).toBe(2)
+    expect(await countRunningBotDeliveriesForInstallation("boti_1", NOW, "del_1")).toBe(1)
+    // An abandoned lease frees its slot.
+    expect(
+      await countRunningBotDeliveriesForInstallation("boti_1", NOW + BOT_DELIVERY_LEASE_MS + 1)
+    ).toBe(0)
+    expect(await countRunningBotDeliveriesForInstallation("boti_2", NOW)).toBe(0)
+  })
+
+  it("refuses a claim once the installation's slots are full", async () => {
+    await enqueueN(2)
+    expect(await claimBotDelivery("del_1", "host", NOW, { maxConcurrentRuns: 1 })).toBeDefined()
+    expect(await claimBotDelivery("del_2", "host", NOW, { maxConcurrentRuns: 1 })).toBeUndefined()
+    expect(await claimBotDelivery("del_2", "host", NOW, { maxConcurrentRuns: 2 })).toBeDefined()
   })
 })

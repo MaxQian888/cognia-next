@@ -15,6 +15,7 @@
 import {
   claimBotDelivery,
   countActiveBotDeliveriesForKey,
+  countRunningBotDeliveriesForInstallation,
   dismissBotDelivery,
   findParkedBotDeliveryWaitingFor,
   listDueBotDeliveries,
@@ -78,6 +79,11 @@ export type BotSkipReason =
   /** Another delivery with the same concurrency key is in flight. */
   | "serialised"
   /**
+   * The installation already runs its `maxConcurrentRuns`. The row stays
+   * pending, uncharged, and is picked up once a slot frees.
+   */
+  | "throttled"
+  /**
    * A run is already parked on this event's correlation key. The row stays so
    * that run can read its envelope on re-entry, but starting a second run for
    * the answer the first one asked for would be a duplicate.
@@ -137,8 +143,34 @@ async function attemptDelivery(
     if (active > 0) return { status: "skipped", reason: "serialised" }
   }
 
-  const claimed = await claimBotDelivery(delivery.id, options.owner, now())
-  if (!claimed) return { status: "skipped", reason: "leased_elsewhere" }
+  // The effective ceiling (organisation, plugin, definition and installation
+  // folded) decides the slot count. Resolved before the claim because the
+  // claim is where the count is enforced; an installation that cannot be
+  // resolved has no ceiling to apply and is dismissed after the claim below.
+  const maxConcurrentRuns = await effectiveMaxConcurrentRuns(delivery.installationId, options)
+  if (
+    maxConcurrentRuns !== undefined &&
+    (await countRunningBotDeliveriesForInstallation(delivery.installationId, now(), delivery.id)) >=
+      maxConcurrentRuns
+  ) {
+    return { status: "skipped", reason: "throttled" }
+  }
+
+  const claimed = await claimBotDelivery(delivery.id, options.owner, now(), {
+    ...(maxConcurrentRuns !== undefined ? { maxConcurrentRuns } : {}),
+  })
+  if (!claimed) {
+    // A parallel attempt in this same pass can take the last slot between the
+    // check above and the claim; the claim enforced it, so say so.
+    const full =
+      maxConcurrentRuns !== undefined &&
+      (await countRunningBotDeliveriesForInstallation(
+        delivery.installationId,
+        now(),
+        delivery.id
+      )) >= maxConcurrentRuns
+    return { status: "skipped", reason: full ? "throttled" : "leased_elsewhere" }
+  }
 
   const installation = await getBotInstallation(claimed.installationId)
   if (!installation) {
@@ -180,6 +212,19 @@ async function attemptDelivery(
     clearInterval(heartbeat)
     options.signal?.removeEventListener("abort", cancel)
   }
+}
+
+async function effectiveMaxConcurrentRuns(
+  installationId: string,
+  options: BotDeliveryRunnerOptions
+): Promise<number | undefined> {
+  const installation = await getBotInstallation(installationId)
+  if (!installation) return undefined
+  const resolved = await resolveInstalledBot(installation, {
+    ...(options.organizationPolicy ? { organizationPolicy: options.organizationPolicy } : {}),
+  })
+  const max = resolved?.policy.maxConcurrentRuns
+  return typeof max === "number" && Number.isFinite(max) && max >= 1 ? Math.floor(max) : undefined
 }
 
 export interface BotDeliveryRunnerHandle {

@@ -10696,7 +10696,7 @@
             "policy": {
               "maxAuthority": "bypassPermissions",
               "maxAutonomy": "autopilot",
-              "maxConcurrentRuns": 1,
+              "maxConcurrentRuns": 2,
               "maxRunDurationMs": 1800000,
               "allowSelfTriggering": false
             },
@@ -10783,14 +10783,14 @@
       "path": "builtin://github-devin-bot",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/github-devin-bot/fea1c84239a3cb816543b4497914627ab5ea173fcbfc41570bfe89d693a5b35c.cjs",
-        "sha256": "fea1c84239a3cb816543b4497914627ab5ea173fcbfc41570bfe89d693a5b35c",
+        "url": "/_cognia/builtin-plugins/github-devin-bot/0577646476a37f9c7197b0790d8562e24577dd12880e64db9a6dde15586197ca.cjs",
+        "sha256": "0577646476a37f9c7197b0790d8562e24577dd12880e64db9a6dde15586197ca",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/github-devin-bot/resources/",
         "entryHashes": {
-          "dist/index.js": "fea1c84239a3cb816543b4497914627ab5ea173fcbfc41570bfe89d693a5b35c"
+          "dist/index.js": "0577646476a37f9c7197b0790d8562e24577dd12880e64db9a6dde15586197ca"
         }
       }
     },
