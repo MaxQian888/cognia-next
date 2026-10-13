@@ -209,8 +209,8 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(h.enqueued[0].text).toContain("mention\\\\_activates")
-    expect(h.enqueued[0].text).toMatch(/queue depth\*\*: 2/)
+    expect(h.enqueued[0].text).toContain("mention&#95;activates")
+    expect(h.enqueued[0].text).toContain("<font color='grey'>队列</font>")
     expect(h.enqueued[0].text).toMatch(/run-1/)
   })
 
@@ -237,7 +237,7 @@ describe("maybeHandleControlCommand", () => {
     const denied = harness()
     await maybeHandleControlCommand(event, makeAdapter(), undefined, RESOLVED, denied.deps)
     expect(denied.closedTopics).toHaveLength(0)
-    expect(denied.enqueued[0].text).toMatch(/not allowed/)
+    expect(denied.enqueued[0].text).toContain("你没有权限在此会话执行该命令")
   })
 
   it("/agent verify starts a bounded Lark probe without pre-verifying readiness", async () => {

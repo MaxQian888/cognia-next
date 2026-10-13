@@ -19,6 +19,15 @@ import {
   type A2UIWalkNode,
   bindingHintFields,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { buildLarkCommandFrame } from "./command-cards"
+import {
+  LARK_ICON,
+  escapeLarkCardText,
+  larkButtonRow,
+  larkCard,
+  type LarkCardTone,
+  type LarkIcon,
+} from "./card-kit"
 
 // ---------------------------------------------------------------------------
 // Lark message body shape (im/v1/messages)
@@ -37,75 +46,41 @@ export interface LarkMessageBody {
 // ---------------------------------------------------------------------------
 
 /**
- * Escape characters that Lark markdown treats specially.
- *
- * Lark uses @ for mentions and \ as an escape character.
- * We escape both so that user text containing these is rendered literally.
+ * Text shown verbatim inside a card `markdown` element. Card markdown escapes
+ * with HTML entities, not backslashes (a backslash renders as itself, which
+ * is how "\\@机器人" reached the chat); see `escapeLarkCardText`.
  */
 export function escapeLarkMarkdown(text: string): string {
-  return text.replace(/\\/g, "\\\\").replace(/@/g, "\\@")
+  return escapeLarkCardText(text)
+}
+
+/**
+ * Markdown meant to render as markdown, with every `<at` opener broken by a
+ * zero-width space so authored text can never mention anyone.
+ */
+function disarmLarkMentions(markdown: string): string {
+  return markdown.replace(/<at\b/gi, "<\u200Bat")
 }
 
 function usesCommandFrame(surfaceId: string): boolean {
   return /^(help:|welcome:|schedule-list-)/.test(surfaceId)
 }
 
-/** Shared Card 2.0 frame for command replies and help/welcome surfaces. */
-export function buildLarkCommandFrame(
-  title: string,
-  elements: Record<string, unknown>[],
-  tone: "info" | "success" | "warning" = "info"
-): Record<string, unknown> {
-  return {
-    schema: "2.0",
-    config: { update_multi: true, summary: { content: title } },
-    header: {
-      title: { tag: "plain_text", content: title },
-      template: tone === "warning" ? "orange" : tone === "success" ? "green" : "blue",
-      padding: "12px 16px 12px 16px",
-    },
-    body: { padding: "16px", vertical_spacing: "12px", elements },
-  }
+/**
+ * How a projected surface's header reads, from what its id says it is: an
+ * approval asks for a decision (orange), a question asks for an answer, help
+ * and the schedule list inform.
+ */
+function surfaceHeaderStyle(surfaceId: string): { tone: LarkCardTone; icon?: LarkIcon } {
+  if (/^(tool_approve:|plan_approve:|media_grant:|wfsurf:)/.test(surfaceId))
+    return { tone: "warning", icon: LARK_ICON.approval }
+  if (surfaceId.startsWith("au_")) return { tone: "info", icon: LARK_ICON.help }
+  if (/^(help:|welcome:)/.test(surfaceId)) return { tone: "info", icon: LARK_ICON.bot }
+  if (surfaceId.startsWith("schedule-list-")) return { tone: "info", icon: LARK_ICON.calendar }
+  return { tone: "info" }
 }
 
-/** Preserve every reply line while making command syntax easy to scan. */
-export function buildLarkCommandReply(
-  command: string,
-  text: string,
-  outcome: "applied" | "denied" | "unknown"
-): MessageSegment {
-  const read = ["commands", "status", "sessions", "dir", "tasks", "agent"].includes(command)
-  const tone = outcome !== "applied" ? "warning" : read ? "info" : "success"
-  const label =
-    outcome === "denied"
-      ? "未执行 · Not applied"
-      : outcome === "unknown"
-        ? "未知命令 · Unknown command"
-        : "命令回复 · Command reply"
-  // Escape dynamic values, including card mention tags, before adding styling.
-  const escaped = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/([\\`*_\[\]])/g, "\\$1")
-  const lines = escaped.split("\n").map((line) => {
-    const field = line.match(/^(•\s+)([^:]+):\s*(.*)$/)
-    if (field) return `${field[1]}**${field[2]}**: ${field[3]}`
-    const commandLine = line.match(/^(•\s+)(\/[^—]+) — (.*)$/)
-    if (commandLine) return `**${commandLine[2].trim()}**\n${commandLine[3]}`
-    return line.endsWith(":") ? `**${line.slice(0, -1)}**` : line
-  })
-  const elements: Record<string, unknown>[] = []
-  // Bound the component count; long output stays intact in the final block.
-  for (let i = 0; i < lines.length; i += 8) {
-    elements.push({ tag: "markdown", content: lines.slice(i, i + 8).join("\n") })
-  }
-  const bounded = elements.length > 24 ? [{ tag: "markdown", content: escaped }] : elements
-  return {
-    type: "card",
-    card: { kind: "lark", payload: buildLarkCommandFrame(`/${command} · ${label}`, bounded, tone) },
-  }
-}
+export { buildLarkCommandFrame, buildLarkCommandReply } from "./command-cards"
 
 // ---------------------------------------------------------------------------
 // Segment → Lark body
@@ -131,7 +106,7 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
       }
 
     case "markdown": {
-      const escaped = escapeLarkMarkdown(seg.md)
+      const escaped = disarmLarkMentions(seg.md)
       return {
         msg_type: "interactive",
         content: JSON.stringify({
@@ -343,7 +318,7 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
         if (title && !header) header = { title: plain(title) }
         else if (title) result.push(markdown(`**${escapeLarkMarkdown(title)}**`))
         if (raw.description) result.push(markdown(escapeLarkMarkdown(stringValue(raw.description))))
-        return [...result, ...(await children())]
+        return [...result, ...groupButtons(await children())]
       }
       case "Text": {
         const text = escapeLarkMarkdown(stringValue(raw.text))
@@ -392,12 +367,14 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
             tag: "button",
             ...common,
             text: plain(stringValue(raw.text) || action || "Button"),
+            // The one action a card asks for is filled; the rest stay quiet.
             type:
               raw.variant === "primary"
-                ? "primary"
+                ? "primary_filled"
                 : raw.variant === "destructive"
                   ? "danger"
                   : "default",
+            size: "medium",
             ...(formAction ? { form_action_type: formAction } : {}),
             ...(formAction === "reset"
               ? {}
@@ -553,6 +530,10 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
         // Tables and forms must remain at their legal root placement. Deep
         // layouts flatten before exceeding Feishu's five-container limit.
         if (depth >= 3 || containsTag(rendered, ["table", "form"])) return rendered
+        // A row of buttons sits at the buttons' own width, left-aligned,
+        // rather than stretched into equal columns with gaps between.
+        if (rendered.length && rendered.every((element) => element.tag === "button"))
+          return [larkButtonRow(rendered) as LarkCardElement]
         return rendered.length
           ? [
               {
@@ -653,7 +634,7 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
       case "Column":
       case "List":
       case "ButtonGroup":
-        return children()
+        return groupButtons(await children())
       default:
         return [
           markdown(
@@ -674,10 +655,44 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
   const elements = await render(input.surface.rootId)
   if (!elements.length && !header)
     return { msg_type: "text", content: JSON.stringify({ text: "[empty]" }) }
+  const style = surfaceHeaderStyle(input.surfaceId)
   const card = usesCommandFrame(input.surfaceId)
-    ? buildLarkCommandFrame(header?.title.content ?? input.surface.title ?? "Cognia", elements)
-    : { schema: "2.0", ...(header ? { header } : {}), body: { elements } }
+    ? buildLarkCommandFrame(
+        header?.title.content ?? input.surface.title ?? "Cognia",
+        elements,
+        "info",
+        style.icon ? { icon: style.icon } : {}
+      )
+    : larkCard({
+        ...(header
+          ? { header: { title: header.title.content, tone: style.tone, icon: style.icon } }
+          : {}),
+        elements,
+      })
   return { msg_type: "interactive", content: JSON.stringify(boundGeneratedCard(card)) }
+}
+
+/**
+ * Consecutive buttons as one compact row. Outside a form only: a form's
+ * submit and reset buttons keep their own placement.
+ */
+function groupButtons(elements: LarkCardElement[]): LarkCardElement[] {
+  const out: LarkCardElement[] = []
+  let run: LarkCardElement[] = []
+  const flush = () => {
+    if (run.length > 1) out.push(larkButtonRow(run) as LarkCardElement)
+    else out.push(...run)
+    run = []
+  }
+  for (const element of elements) {
+    if (element.tag === "button" && !element.form_action_type && !element.name) run.push(element)
+    else {
+      flush()
+      out.push(element)
+    }
+  }
+  flush()
+  return out
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -890,9 +905,10 @@ export async function segmentsToLarkBodyAsync(
     if (seg.type === "text" || seg.type === "markdown") {
       const text = seg.type === "text" ? seg.text : seg.md
       if (!text) continue
+      // Text shows as typed; markdown renders, with only its mentions disarmed.
       combinedElements.push({
         tag: "markdown",
-        content: escapeLarkMarkdown(text),
+        content: seg.type === "text" ? escapeLarkMarkdown(text) : disarmLarkMentions(text),
       })
       continue
     }

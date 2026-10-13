@@ -26,12 +26,7 @@ import {
 } from "@/lib/connectors/activity/activity-to-a2ui"
 import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
 import { sanitizeActivityLabel, safeStableActivityId } from "@/lib/execution/run-activity"
-import {
-  buildFollowUpItems,
-  followUpHintLine,
-  RUN_ACTION_LABEL_EN,
-  RUN_ACTION_LABEL_ZH,
-} from "./follow-up-items"
+import { buildFollowUpItems, RUN_ACTION_LABEL_EN, RUN_ACTION_LABEL_ZH } from "./follow-up-items"
 import {
   createLarkCotClient,
   createLarkCotProjectionState,
@@ -43,6 +38,16 @@ import {
 } from "./lark-cot"
 import type { LarkCotProjectionState } from "./lark-cot"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import {
+  LARK_ICON,
+  escapeLarkCardText,
+  larkButton,
+  larkButtonRow,
+  larkCardHeader,
+  larkToneTemplate,
+  type LarkCardTone,
+  type LarkIcon,
+} from "@/lib/connectors/adapters/lark/card-kit"
 
 type LarkMethod = "POST" | "PUT" | "PATCH" | "DELETE"
 export type LarkRunRequest = (method: LarkMethod, path: string, body: unknown) => Promise<unknown>
@@ -287,6 +292,32 @@ function graphSignature(snapshot: RunProjectionSnapshot): string {
     : ""
 }
 
+/** What a run's state looks like in the header: tone and icon. */
+function runStatusLook(status: RunProjectionSnapshot["status"]): {
+  tone: LarkCardTone
+  icon: LarkIcon
+} {
+  if (status === "completed") return { tone: "success", icon: LARK_ICON.success }
+  if (status === "failed") return { tone: "danger", icon: LARK_ICON.error }
+  if (status === "cancelled") return { tone: "neutral", icon: LARK_ICON.stop }
+  if (status === "paused") return { tone: "warning", icon: LARK_ICON.pause }
+  if (status === "waiting" || status === "recovery_required")
+    return { tone: "warning", icon: LARK_ICON.approval }
+  return { tone: "info", icon: LARK_ICON.waiting }
+}
+
+/** Each control's button: the decision it asks for is filled, stopping is red. */
+const ACTION_LOOK: Record<RunControlAction, { type: string; icon: LarkIcon }> = {
+  approve: { type: "primary_filled", icon: LARK_ICON.done },
+  deny: { type: "danger", icon: LARK_ICON.close },
+  stop: { type: "danger", icon: LARK_ICON.stop },
+  pause: { type: "default", icon: LARK_ICON.pause },
+  resume: { type: "primary", icon: LARK_ICON.resume },
+  retry: { type: "primary", icon: LARK_ICON.refresh },
+  steer: { type: "default", icon: LARK_ICON.edit },
+  open_details: { type: "default", icon: LARK_ICON.link },
+}
+
 function cardJson(
   snapshot: RunProjectionSnapshot,
   streaming: boolean,
@@ -300,6 +331,7 @@ function cardJson(
   const statusLabel = i18n.runStatus(snapshot.status)
   const title = presentation.title || runTitleForPresentation(snapshot, i18n)
   const actionLabel = zh ? ACTION_LABEL_ZH : ACTION_LABEL_EN
+  const look = runStatusLook(snapshot.status)
   const details = summaryContent(snapshot, cotActive, presentation)
   const runUrl = buildRunDetailsUrl(safeRunId, webBase)
   const detailsUrl =
@@ -316,48 +348,42 @@ function cardJson(
   const actions = snapshot.allowedActions
     .filter((action) => action !== "open_details" || detailsUrl)
     .slice(0, 5)
-    .map((action) => ({
-      tag: "button",
-      text: {
-        tag: "plain_text",
-        content:
+    .map((action) =>
+      larkButton({
+        text:
           action === "open_details" && snapshot.workflowGraph
             ? zh
               ? "完整工作流"
               : "Full workflow"
             : actionLabel[action],
-      },
-      type:
-        action === "approve"
-          ? "primary"
-          : action === "deny" || action === "stop"
-            ? "danger"
-            : "default",
-      behaviors:
-        action === "open_details"
-          ? [
-              {
-                type: "open_url",
-                default_url: detailsUrl!,
-              },
-            ]
-          : [
-              {
-                type: "callback",
-                value: {
-                  actionId: `run:${safeRunId}:${action}:${snapshot.revision}`,
-                  surfaceId: `execution-run:${safeRunId}`,
-                  componentId: `run-action-${action}`,
-                  action,
-                  runId: safeRunId,
-                  revision: snapshot.revision,
-                  ...(snapshot.pendingInterrupt
-                    ? { interruptId: safeStableActivityId(snapshot.pendingInterrupt.id) }
-                    : {}),
+        type: ACTION_LOOK[action].type as Parameters<typeof larkButton>[0]["type"],
+        icon: ACTION_LOOK[action].icon,
+        behaviors:
+          action === "open_details"
+            ? [
+                {
+                  type: "open_url",
+                  default_url: detailsUrl!,
                 },
-              },
-            ],
-    }))
+              ]
+            : [
+                {
+                  type: "callback",
+                  value: {
+                    actionId: `run:${safeRunId}:${action}:${snapshot.revision}`,
+                    surfaceId: `execution-run:${safeRunId}`,
+                    componentId: `run-action-${action}`,
+                    action,
+                    runId: safeRunId,
+                    revision: snapshot.revision,
+                    ...(snapshot.pendingInterrupt
+                      ? { interruptId: safeStableActivityId(snapshot.pendingInterrupt.id) }
+                      : {}),
+                  },
+                },
+              ],
+      })
+    )
   return {
     schema: "2.0",
     config: {
@@ -372,20 +398,18 @@ function cardJson(
         print_strategy: "fast",
       },
     },
+    // The state is the headline; what is running is the subtitle, left out
+    // when it is only the generic kind ("Agent"). In a thread the question it
+    // answers sits right above the card already.
     header: {
+      ...larkCardHeader({
+        title: statusLabel,
+        ...(title !== i18n.runKind(snapshot.kind) ? { subtitle: clamp(title, 120) } : {}),
+        icon: look.icon,
+        tone: look.tone,
+      }),
       ...larkCardHeaderExtras(presentation),
-      title: { tag: "plain_text", content: `${clamp(title, 180)} · ${statusLabel}` },
-      template: larkCardHeaderTheme(
-        presentation,
-        snapshot.status === "completed"
-          ? "green"
-          : snapshot.status === "failed"
-            ? "red"
-            : ["waiting", "paused", "recovery_required"].includes(snapshot.status)
-              ? "orange"
-              : "blue"
-      ),
-      padding: "12px 16px 12px 16px",
+      template: larkCardHeaderTheme(presentation, larkToneTemplate(look.tone)),
     },
     body: {
       ...larkCardBodyStyle(presentation),
@@ -444,20 +468,7 @@ function cardJson(
                 },
               ],
             },
-        ...(actions.length > 0
-          ? [
-              {
-                tag: "column_set",
-                element_id: ACTIONS_ELEMENT_ID,
-                columns: actions.map((button) => ({
-                  tag: "column",
-                  width: "weighted",
-                  weight: 1,
-                  elements: [button],
-                })),
-              },
-            ]
-          : []),
+        ...(actions.length > 0 ? [larkButtonRow(actions, { element_id: ACTIONS_ELEMENT_ID })] : []),
       ],
     },
   }
@@ -548,20 +559,24 @@ function statusContent(
 ): string {
   const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
   const i18n = resolveActivityI18n(snapshot.locale)
-  const escape = (value: string) =>
-    value
-      .replace(/([\\`*_\[\]])/g, "\\$1")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
   const safeLabel = (value: unknown, fallback: string) =>
-    escape(sanitizeActivityLabel(value, fallback))
+    escapeLarkCardText(sanitizeActivityLabel(value, fallback))
   const ratio = snapshot.progress.completed / snapshot.progress.total
   const bar =
     snapshot.progress.trustworthy && snapshot.progress.total > 0 && Number.isFinite(ratio)
       ? "■".repeat(Math.round(Math.max(0, Math.min(1, ratio)) * 10)) +
         "□".repeat(10 - Math.round(Math.max(0, Math.min(1, ratio)) * 10))
       : undefined
-  const overview = `**${i18n.runStatus(snapshot.status)}**${presentation.showElapsed ? ` · ${zh ? "用时" : "Elapsed"} ${i18n.elapsed(Math.max(0, Math.round(snapshot.elapsedMs / 1000)))}` : ""}`
+  // The header names the state; this line only measures it.
+  const measures = [
+    presentation.showElapsed
+      ? `${zh ? "用时" : "Elapsed"} ${i18n.elapsed(Math.max(0, Math.round(snapshot.elapsedMs / 1000)))}`
+      : undefined,
+    snapshot.progress.trustworthy && snapshot.progress.total > 1
+      ? `${zh ? "进度" : "Progress"} ${snapshot.progress.completed}/${snapshot.progress.total}`
+      : undefined,
+  ].filter(Boolean)
+  const overview = measures.length ? `<font color='grey'>${measures.join(" · ")}</font>` : undefined
   const waiting = snapshot.pendingInterrupt
     ? `**${zh ? "需要你的操作" : "Your action is needed"}**\n${zh ? "请使用下方按钮批准或拒绝，再继续执行。" : "Use the controls below to approve or deny before execution continues."}`
     : undefined
@@ -573,16 +588,21 @@ function statusContent(
           .map((artifact) => `▣ ${safeLabel(artifact.title, "Artifact")}`)
           .join("\n")
       : undefined
-  return [
+  // Every control is a button on this card, so the typed-reply hint other
+  // platforms print would only repeat them.
+  const lines = [
     overview,
-    presentation.showProgress ? bar : undefined,
+    presentation.showProgress && snapshot.progress.total > 1 ? bar : undefined,
     waiting,
     artifacts,
-    followUpHintLine(buildFollowUpItems(snapshot), zh),
-    cotActive ? i18n.cotProcessInline : undefined,
+    cotActive
+      ? `<font color='grey'>${escapeLarkCardText(i18n.cotProcessInline)}</font>`
+      : undefined,
   ]
     .filter(Boolean)
-    .join("\n\n")
+    .join("\n")
+  // An empty markdown element is not a valid card component.
+  return lines || `<font color='grey'>${escapeLarkCardText(i18n.runStatus(snapshot.status))}</font>`
 }
 
 function actionsElement(

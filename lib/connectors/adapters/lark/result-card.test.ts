@@ -70,7 +70,7 @@ it("applies responsive answer text and header decorations without changing markd
     },
   })
   expect(card.header).toMatchObject({
-    title: { content: "回复 / Reply" },
+    title: { content: "回复" },
     subtitle: { content: "Weekly report" },
     text_tag_list: [
       { tag: "text_tag", text: { tag: "plain_text", content: "team" }, color: "neutral" },
@@ -125,31 +125,37 @@ describe("buildLarkResultCard — card shape", () => {
     const card = buildLarkResultCard({ ...BASE, status: "error" })
     const header = card.header as Record<string, unknown>
     expect(header.template).toBe("red")
-    expect((header.title as { content: string }).content).toBe("出错了 / Something went wrong")
+    expect((header.title as { content: string }).content).toBe("出错了")
+    expect(header.icon).toMatchObject({ tag: "standard_icon", token: "error_filled" })
+    expect(
+      (
+        buildLarkResultCard({ ...BASE, status: "error", locale: "en" }).header as {
+          title: { content: string }
+        }
+      ).title.content
+    ).toBe("Something went wrong")
   })
 
-  it("interrupted status gets an orange header, compact width, and the 🛑 status line", () => {
+  it("interrupted status gets an orange header with the stop icon and compact width", () => {
     const card = buildLarkResultCard({ ...BASE, status: "interrupted" })
     const header = card.header as Record<string, unknown>
     expect(header.template).toBe("orange")
-    expect((header.title as { content: string }).content).toBe("任务已停止 / Stopped")
+    expect((header.title as { content: string }).content).toBe("任务已停止")
+    expect(header.icon).toMatchObject({ token: "stop_outlined" })
     const config = card.config as Record<string, unknown>
     expect(config.width_mode).toBe("compact")
-    const els = elements(card)
-    const stopped = els.find((el) => el.element_id === "interrupted_status")
-    expect(stopped).toMatchObject({
-      tag: "markdown",
-      content: "🛑 **任务已停止 / Stopped**",
-      text_size: "notation",
-    })
-    // The 🛑 line is prepended before the answer element.
-    expect(els.indexOf(stopped!)).toBeLessThan(els.findIndex((el) => el.element_id === "answer"))
+    // The header says it stopped; the body does not repeat it above the answer.
+    expect(elements(card)[0].element_id).toBe("answer")
   })
 
-  it("falls back to a bilingual summary title when the answer is empty", () => {
+  it("falls back to a summary title in the reader's language when the answer is empty", () => {
     const card = buildLarkResultCard({ answer: "   ", status: "done" })
     const config = card.config as Record<string, unknown>
-    expect((config.summary as { content: string }).content).toBe("回复 / Reply")
+    expect((config.summary as { content: string }).content).toBe("回复")
+    const english = buildLarkResultCard({ answer: "", status: "done", locale: "en-US" })
+    expect(
+      ((english.config as Record<string, unknown>).summary as { content: string }).content
+    ).toBe("Reply")
     // An empty answer still yields a body element rather than a bare footer.
     expect(elements(card).some((el) => el.element_id === "answer")).toBe(true)
   })
@@ -316,7 +322,7 @@ describe("buildLarkResultCard — footer", () => {
     expect(elements(card).some((el) => el.tag === "hr" || el.element_id === "footer")).toBe(false)
   })
 
-  it("joins at + details + elapsed with ` · `, after an hr", () => {
+  it("joins at + elapsed + details in one grey notation line, with no divider", () => {
     const card = buildLarkResultCard({
       ...BASE,
       initiatorOpenId: "ou_abc123",
@@ -326,10 +332,10 @@ describe("buildLarkResultCard — footer", () => {
     const els = elements(card)
     const noteIndex = els.findIndex((el) => el.element_id === "footer")
     expect(els[noteIndex]).toMatchObject({ tag: "markdown", text_size: "notation" })
-    expect(els.some((el) => el.tag === "note")).toBe(false)
-    expect(els[noteIndex - 1].tag).toBe("hr")
+    expect(els.some((el) => el.tag === "note" || el.tag === "hr")).toBe(false)
+    // The mention stays outside any <font>, where it would not render as one.
     expect(footerContent(card)).toBe(
-      "<at id=ou_abc123></at> · [查看详情 / Details](https://app.example.com/agent-runs?run=r1) · 耗时 4.2s / elapsed"
+      "<at id=ou_abc123></at><font color='grey'> · </font><font color='grey'>用时 4.2s</font><font color='grey'> · </font>[查看详情](https://app.example.com/agent-runs?run=r1)"
     )
     expect((els[noteIndex] as { element_id?: string }).element_id).toBe("footer")
   })
@@ -352,14 +358,14 @@ describe("buildLarkResultCard — footer", () => {
     })
     const content = footerContent(card)!
     expect(content).not.toContain("javascript:")
-    expect(content).toBe("耗时 0.5s / elapsed")
+    expect(content).toBe("<font color='grey'>用时 0.5s</font>")
   })
 
   it("appends the red interrupted marker only for interrupted status", () => {
     const interrupted = buildLarkResultCard({ ...BASE, status: "interrupted" })
-    expect(footerContent(interrupted)).toBe("<font color='red'>已被用户中断 / Interrupted</font>")
+    expect(footerContent(interrupted)).toBe("<font color='red'>已被中断</font>")
     const done = buildLarkResultCard({ ...BASE, elapsedMs: 100 })
-    expect(footerContent(done)).not.toContain("Interrupted")
+    expect(footerContent(done)).not.toContain("已被中断")
   })
 })
 

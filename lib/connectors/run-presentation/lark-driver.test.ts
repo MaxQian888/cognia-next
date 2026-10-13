@@ -184,9 +184,11 @@ describe("Lark run presentation driver", () => {
     expect(request.mock.calls.some((call) => call[1].includes("message_cot"))).toBe(false)
     const create = request.mock.calls.find((call) => call[1] === "/cardkit/v1/cards")!
     const card = JSON.parse((create[2] as { data: string }).data)
+    // The state is the headline; the configured name is the subtitle.
     expect(card.header).toMatchObject({
       template: "purple",
-      title: { content: "Release bot · Working" },
+      title: { content: "Working" },
+      subtitle: { content: "Release bot" },
     })
     expect(card.body).toMatchObject({ padding: "8px", vertical_spacing: "4px" })
     expect(card.config.width_mode).toBe("fill")
@@ -648,6 +650,55 @@ describe("Lark run presentation driver", () => {
     expect(send?.body).toEqual(expect.objectContaining({ reply_in_thread: true }))
     expect(calls.some((call) => call.path.includes("receive_id_type=chat_id"))).toBe(false)
     expect(JSON.stringify(calls)).not.toContain("Process shown in the thinking timeline above")
+  })
+
+  it("headlines the state, measures it quietly, and offers each control as one compact button", async () => {
+    const calls: Array<{ path: string; body: unknown }> = []
+    const driver = createLarkRunPresentationDriver(async (_method, path, body) => {
+      calls.push({ path, body })
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-look" } }
+      return { data: { message_id: "msg-look" } }
+    })
+    const zh = { ...snapshot(1), locale: "zh-CN", allowedActions: ["stop", "steer"] as const }
+    await driver.open(topicTarget, { ...zh, allowedActions: [...zh.allowedActions] })
+    const card = JSON.parse(
+      (calls.find((call) => call.path === "/cardkit/v1/cards")!.body as { data: string }).data
+    )
+    expect(card.header).toMatchObject({
+      title: { content: "处理中" },
+      icon: { tag: "standard_icon", token: "time_outlined" },
+      template: "wathet",
+    })
+    const text = JSON.stringify(card.body)
+    // The header names the state, so the body only measures it…
+    expect(text).toContain("<font color='grey'>用时")
+    expect(text).not.toContain("**处理中**")
+    // …and the buttons are the controls: no typed-reply hint repeats them.
+    expect(text).not.toContain("回复以操作")
+    const actions = card.body.elements.find(
+      (element: { element_id?: string }) => element.element_id === "run_actions"
+    )
+    expect(actions).toMatchObject({ tag: "column_set", flex_mode: "flow" })
+    expect(actions.columns.map((column: { width: string }) => column.width)).toEqual([
+      "auto",
+      "auto",
+    ])
+    expect(actions.columns[0].elements[0]).toMatchObject({
+      text: { content: "停止" },
+      type: "danger",
+      icon: { token: "stop_outlined" },
+    })
+
+    calls.length = 0
+    await createLarkRunPresentationDriver(async (_method, path, body) => {
+      calls.push({ path, body })
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-done" } }
+      return { data: { message_id: "msg-done" } }
+    }).open(topicTarget, { ...snapshot(3, "completed"), locale: "zh-CN" })
+    const done = JSON.parse(
+      (calls.find((call) => call.path === "/cardkit/v1/cards")!.body as { data: string }).data
+    )
+    expect(done.header).toMatchObject({ template: "green", icon: { token: "succeed_filled" } })
   })
 
   it("trims oversized card bodies below the CardKit 30KB limit", async () => {

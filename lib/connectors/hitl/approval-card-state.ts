@@ -2,41 +2,50 @@ import { enqueueGoverned } from "@/lib/connectors/delivery-gateway"
 import { waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
 import { appendAudit } from "@/lib/connectors/audit"
 import { buildLarkCommandFrame } from "@/lib/connectors/adapters/lark/card"
+import {
+  LARK_ICON,
+  larkMarkdown,
+  larkNote,
+  type LarkIcon,
+} from "@/lib/connectors/adapters/lark/card-kit"
 import type { ConversationReference } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 
 export type ApprovalCardState =
   "approved" | "denied" | "expired" | "processed" | "failed" | "answered" | "skipped" | "cancelled"
 
+/** How each closed state reads: title, icon and colour. */
+const CLOSED_STATE: Record<
+  ApprovalCardState,
+  { title: string; icon: LarkIcon; tone: "success" | "warning" | "info" }
+> = {
+  approved: { title: "已批准", icon: LARK_ICON.success, tone: "success" },
+  denied: { title: "已拒绝", icon: LARK_ICON.close, tone: "warning" },
+  expired: { title: "已过期", icon: LARK_ICON.waiting, tone: "warning" },
+  processed: { title: "已处理", icon: LARK_ICON.success, tone: "success" },
+  failed: { title: "处理失败", icon: LARK_ICON.error, tone: "warning" },
+  answered: { title: "已回答", icon: LARK_ICON.success, tone: "success" },
+  skipped: { title: "已跳过", icon: LARK_ICON.done, tone: "info" },
+  cancelled: { title: "已停止", icon: LARK_ICON.stop, tone: "warning" },
+}
+
 export function approvalStateSegment(state: ApprovalCardState, detail?: string): MessageSegment {
-  const title = {
-    approved: "✓ 已批准 / Approved",
-    denied: "⊘ 已拒绝 / Denied",
-    expired: "◷ 已过期 / Expired",
-    processed: "✓ 已处理 / Processed",
-    failed: "✕ 处理失败 / Failed",
-    answered: "✓ 已回答 / Answered",
-    skipped: "↷ 已跳过 / Skipped",
-    cancelled: "⊘ 已停止 / Stopped",
-  }[state]
+  const closed = CLOSED_STATE[state]
   const trimmed = detail?.trim()
   return {
     type: "card",
     card: {
       kind: "lark",
       payload: buildLarkCommandFrame(
-        title,
+        closed.title,
         [
-          ...(trimmed ? [{ tag: "markdown" as const, content: trimmed.slice(0, 500) }] : []),
-          {
-            tag: "markdown",
-            content:
-              "此请求已结束，操作按钮已移除。 / This request is closed. Its action buttons have been removed.",
-          },
+          // The detail is markdown its producer wrote (the question in bold,
+          // the answer quoted); only a mention in it is disarmed.
+          ...(trimmed ? [larkMarkdown(trimmed.slice(0, 500).replace(/<at\b/gi, "<\u200Bat"))] : []),
+          larkNote("此请求已结束，操作按钮已移除。"),
         ],
-        state === "approved" || state === "processed" || state === "answered"
-          ? "success"
-          : "warning"
+        closed.tone,
+        { icon: closed.icon }
       ),
     },
   }

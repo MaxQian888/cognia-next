@@ -64,9 +64,19 @@ describe("handleUnresolvedPrincipal", () => {
     expect(JSON.stringify(auditRow)).not.toContain("ou_1")
 
     const enqueued = deps.enqueue.mock.calls[0][0] as {
-      request: { segments: Array<{ text: string }>; metadata: { idempotencyKey: string } }
+      request: {
+        segments: Array<{ type: string; card?: { payload: Record<string, unknown> } }>
+        metadata: { idempotencyKey: string }
+      }
     }
-    expect(enqueued.request.segments[0].text).toContain("fb_code1")
+    // A card with the code large enough to read out to an administrator.
+    const notice = enqueued.request.segments[0]
+    expect(notice.type).toBe("card")
+    expect(notice.card!.payload).toMatchObject({
+      schema: "2.0",
+      header: { title: { content: "需要先关联账号" }, template: "orange" },
+    })
+    expect(JSON.stringify(notice.card!.payload)).toContain("**fb&#95;code1**")
     // Idempotency key pins the notice to (adapter, senderHash, UTC day).
     expect(enqueued.request.metadata.idempotencyKey).toBe(
       `principal-unbound:lk-1:${expectedHash}:20250720`

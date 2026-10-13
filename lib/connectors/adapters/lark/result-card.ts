@@ -1,15 +1,14 @@
 /**
  * Lark "result card" builder — the completed ai-run answer surface.
  *
- * Today a finished reply ships as a bare Card-1.0 `{elements:[{tag:"div",
- * text:{tag:"lark_md"}}]}` (see `card.ts` `segmentToLarkBody`): no header
- * state, no quote of the triggering message, no footer, and inline
- * `![](…)` images render as raw markdown text. This module projects the
- * final answer into a proper Card 2.0 result card, mirroring the shape the
- * aiden-bot lark-daemon converged on:
+ * The completed answer as a Card 2.0 result card (`segmentToLarkBody`
+ * would otherwise send a bare markdown block): no header when it succeeded,
+ * a coloured one when it failed or stopped, an optional quote of the
+ * triggering message, the answer, and one grey footer line. Its words follow
+ * the reader's language (`locale`), Chinese when that is unknown:
  *
  *   {schema:"2.0", config:{update_multi, summary, width_mode?}, header?,
- *    body:{elements:[ quote?, interrupted?, answer…, img…, hr+footer? ]}}
+ *    body:{elements:[ quote?, answer…, img…, footer? ]}}
  *
  * Design notes:
  *   - The answer is model-authored markdown rendered VERBATIM (Lark card
@@ -28,8 +27,8 @@
  *     the card as its own request (the shape every existing card reply
  *     already uses).
  *
- * Connector-side strings are inline bilingual literals — no next-intl here
- * (same convention as `buildToolApprovalSurface`).
+ * Connector-side strings are inline literals in both languages — no next-intl
+ * here (same convention as `buildToolApprovalSurface`).
  */
 
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -41,6 +40,13 @@ import {
   larkCardMarkdownStyle,
   larkCardHeaderExtras,
 } from "./card-presentation"
+import {
+  LARK_ICON,
+  larkCardHeader,
+  larkToneTemplate,
+  type LarkCardTone,
+  type LarkIcon,
+} from "./card-kit"
 
 export type LarkResultCardStatus = "done" | "error" | "interrupted"
 
@@ -57,6 +63,8 @@ export interface LarkResultCardInput {
   /** Absolute web URL to the run detail page. */
   detailsUrl?: string
   presentation?: unknown
+  /** The reader's language (`larkReplyLocale`); Chinese when unknown. */
+  locale?: string
 }
 
 /** Lark markdown elements silently truncate oversized content; stay well under. */
@@ -78,18 +86,40 @@ const MENTION_OPENER_PATTERN = /<at\b/gi
 /** Zero-width space — breaks the `<at` token without a visible glyph. */
 const ZWSP = "\u200B"
 
-const HEADER_BY_STATUS: Record<
-  Exclude<LarkResultCardStatus, "done">,
-  { title: string; template: string }
-> = {
-  error: { title: "出错了 / Something went wrong", template: "red" },
-  interrupted: { title: "任务已停止 / Stopped", template: "orange" },
+/** The card's words, in the reader's language. */
+const RESULT_TEXT = {
+  zh: {
+    error: "出错了",
+    interrupted: "任务已停止",
+    reply: "回复",
+    quote: "回复：",
+    details: "查看详情",
+    elapsed: (seconds: string) => `用时 ${seconds}s`,
+    interruptedNote: "已被中断",
+  },
+  en: {
+    error: "Something went wrong",
+    interrupted: "Stopped",
+    reply: "Reply",
+    quote: "Re: ",
+    details: "Details",
+    elapsed: (seconds: string) => `Elapsed ${seconds}s`,
+    interruptedNote: "Interrupted",
+  },
+} as const
+
+type ResultText = (typeof RESULT_TEXT)["zh" | "en"]
+
+function resultText(locale: string | undefined): ResultText {
+  return locale && !locale.toLowerCase().startsWith("zh") ? RESULT_TEXT.en : RESULT_TEXT.zh
 }
 
-const SUMMARY_FALLBACK: Record<LarkResultCardStatus, string> = {
-  done: "回复 / Reply",
-  error: "出错了 / Something went wrong",
-  interrupted: "任务已停止 / Stopped",
+const HEADER_BY_STATUS: Record<
+  Exclude<LarkResultCardStatus, "done">,
+  { title: (text: ResultText) => string; tone: LarkCardTone; icon: LarkIcon }
+> = {
+  error: { title: (text) => text.error, tone: "danger", icon: LARK_ICON.error },
+  interrupted: { title: (text) => text.interrupted, tone: "warning", icon: LARK_ICON.stop },
 }
 
 /**
@@ -201,33 +231,41 @@ function splitMarkdownChunks(text: string, limit = ANSWER_ELEMENT_LIMIT): string
 }
 
 /** Push-notification / chat-list preview: the first ~60 chars of the answer. */
-function summaryContent(answer: string, status: LarkResultCardStatus): string {
-  const text = answer.trim().slice(0, SUMMARY_LIMIT)
-  return text || SUMMARY_FALLBACK[status]
+function summaryContent(answer: string, status: LarkResultCardStatus, text: ResultText): string {
+  const preview = answer.trim().slice(0, SUMMARY_LIMIT)
+  return (
+    preview || (status === "done" ? text.reply : status === "error" ? text.error : text.interrupted)
+  )
 }
 
-function footerElements(input: LarkResultCardInput): Record<string, unknown>[] {
+/**
+ * One quiet line under the answer: who asked (groups only), time, details.
+ * Each part carries its own colour: a mention inside a `<font>` would not
+ * render as one, and the red interrupted mark must not nest in the grey.
+ */
+function footerElements(input: LarkResultCardInput, text: ResultText): Record<string, unknown>[] {
+  const grey = (content: string) => `<font color='grey'>${content}</font>`
   const parts: string[] = []
   if (input.initiatorOpenId && OPEN_ID_PATTERN.test(input.initiatorOpenId)) {
     parts.push(`<at id=${input.initiatorOpenId}></at>`)
   }
-  if (input.detailsUrl && WEB_URL_PATTERN.test(input.detailsUrl)) {
-    parts.push(`[查看详情 / Details](${input.detailsUrl})`)
-  }
   if (input.elapsedMs !== undefined && Number.isFinite(input.elapsedMs)) {
-    parts.push(`耗时 ${(input.elapsedMs / 1000).toFixed(1)}s / elapsed`)
+    parts.push(grey(text.elapsed((input.elapsedMs / 1000).toFixed(1))))
+  }
+  if (input.detailsUrl && WEB_URL_PATTERN.test(input.detailsUrl)) {
+    parts.push(`[${text.details}](${input.detailsUrl})`)
   }
   if (input.status === "interrupted") {
-    parts.push("<font color='red'>已被用户中断 / Interrupted</font>")
+    parts.push(`<font color='red'>${text.interruptedNote}</font>`)
   }
   if (parts.length === 0) return []
   return [
-    { tag: "hr" },
     {
       tag: "markdown",
       element_id: "footer",
-      content: parts.join(" · "),
+      content: parts.join(grey(" · ")),
       text_size: "notation",
+      margin: "4px 0 0 0",
     },
   ]
 }
@@ -242,22 +280,14 @@ function footerElements(input: LarkResultCardInput): Record<string, unknown>[] {
  */
 export function buildLarkResultCard(input: LarkResultCardInput): Record<string, unknown> {
   const presentation = normalizeLarkCardPresentation(input.presentation)
+  const text = resultText(input.locale)
   const elements: Record<string, unknown>[] = []
 
   if (presentation.showQuote && input.quote?.trim()) {
     elements.push({
       tag: "markdown",
       element_id: "quote",
-      content: `> 回复：${sanitizeQuote(input.quote)}`,
-    })
-  }
-
-  if (input.status === "interrupted") {
-    elements.push({
-      tag: "markdown",
-      element_id: "interrupted_status",
-      content: "🛑 **任务已停止 / Stopped**",
-      text_size: "notation",
+      content: `> ${text.quote}${sanitizeQuote(input.quote)}`,
     })
   }
 
@@ -294,10 +324,10 @@ export function buildLarkResultCard(input: LarkResultCardInput): Record<string, 
 
   if (presentation.showFooter)
     elements.push(
-      ...footerElements({
-        ...input,
-        elapsedMs: presentation.showElapsed ? input.elapsedMs : undefined,
-      })
+      ...footerElements(
+        { ...input, elapsedMs: presentation.showElapsed ? input.elapsedMs : undefined },
+        text
+      )
     )
 
   const card: Record<string, unknown> = {
@@ -306,7 +336,7 @@ export function buildLarkResultCard(input: LarkResultCardInput): Record<string, 
       update_multi: true,
       ...larkCardConfigStyle(presentation),
       ...(presentation.width !== "default" ? { width_mode: presentation.width } : {}),
-      summary: { content: summaryContent(input.answer, input.status) },
+      summary: { content: summaryContent(input.answer, input.status, text) },
       ...(input.status === "interrupted" && presentation.width === "default"
         ? { width_mode: "compact" }
         : {}),
@@ -316,9 +346,9 @@ export function buildLarkResultCard(input: LarkResultCardInput): Record<string, 
   if (input.status !== "done") {
     const header = HEADER_BY_STATUS[input.status]
     card["header"] = {
-      title: { tag: "plain_text", content: header.title },
-      template: larkCardHeaderTheme(presentation, header.template),
+      ...larkCardHeader({ title: header.title(text), tone: header.tone, icon: header.icon }),
       ...larkCardHeaderExtras(presentation),
+      template: larkCardHeaderTheme(presentation, larkToneTemplate(header.tone)),
     }
   } else if (
     presentation.title ||
@@ -327,9 +357,9 @@ export function buildLarkResultCard(input: LarkResultCardInput): Record<string, 
     presentation.headerTags
   ) {
     card.header = {
-      title: { tag: "plain_text", content: presentation.title || SUMMARY_FALLBACK.done },
-      template: larkCardHeaderTheme(presentation, "green"),
+      ...larkCardHeader({ title: presentation.title || text.reply, tone: "success" }),
       ...larkCardHeaderExtras(presentation),
+      template: larkCardHeaderTheme(presentation, "green"),
     }
   }
   return card
@@ -348,7 +378,7 @@ export function buildLarkResultCardSegment(input: LarkResultCardInput): MessageS
         template_variable: {
           answer: neutralizeMentions(input.answer),
           status: input.status,
-          title: presentation.title || SUMMARY_FALLBACK.done,
+          title: presentation.title || resultText(input.locale).reply,
           quote: presentation.showQuote ? sanitizeQuote(input.quote ?? "") : "",
           elapsed_ms:
             presentation.showElapsed && Number.isFinite(input.elapsedMs)

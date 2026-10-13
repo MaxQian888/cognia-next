@@ -7,28 +7,24 @@ import {
 } from "./card"
 
 describe("escapeLarkMarkdown", () => {
-  it("escapes backslash", () => {
-    expect(escapeLarkMarkdown("a\\b")).toBe("a\\\\b")
+  // Card markdown escapes with HTML entities; a backslash renders as itself,
+  // which is how "\\@机器人" once reached a chat.
+  it("writes markdown syntax as entities, never as backslashes", () => {
+    expect(escapeLarkMarkdown("a\\b *x* _y_ [l](u)")).toBe(
+      "a&#92;b &#42;x&#42; &#95;y&#95; &#91;l&#93;&#40;u&#41;"
+    )
   })
 
-  it("escapes @ signs", () => {
-    expect(escapeLarkMarkdown("hello @user")).toBe("hello \\@user")
+  it("leaves @ alone: a card only mentions through an <at> tag", () => {
+    expect(escapeLarkMarkdown("群聊中 @机器人")).toBe("群聊中 @机器人")
   })
 
-  it("passes through **bold** and *italic* unchanged", () => {
-    expect(escapeLarkMarkdown("**bold** and *italic*")).toBe("**bold** and *italic*")
-  })
-
-  it("passes through [link](url) unchanged", () => {
-    expect(escapeLarkMarkdown("[link](https://example.com)")).toBe("[link](https://example.com)")
+  it("disarms tags so text cannot mention anyone", () => {
+    expect(escapeLarkMarkdown("<at id=all></at>")).toBe("&#60;at id=all&#62;&#60;/at&#62;")
   })
 
   it("handles empty string", () => {
     expect(escapeLarkMarkdown("")).toBe("")
-  })
-
-  it("escapes multiple @ and backslash in one string", () => {
-    expect(escapeLarkMarkdown("@all \\n @user")).toBe("\\@all \\\\n \\@user")
   })
 })
 
@@ -50,9 +46,11 @@ describe("segmentToLarkBody", () => {
     expect(content.body.elements[0]).toMatchObject({ tag: "markdown", content: "**bold** text" })
   })
 
-  it("markdown segment escapes @ in content", () => {
-    const body = segmentToLarkBody({ type: "markdown", md: "hey @user" })
-    expect(JSON.parse(body!.content).body.elements[0].content).toContain("\\@user")
+  it("markdown segment renders as markdown and only disarms mentions", () => {
+    const body = segmentToLarkBody({ type: "markdown", md: "hey @user **bold** <at id=all></at>" })
+    const content = JSON.parse(body!.content).body.elements[0].content
+    expect(content).toContain("hey @user **bold**")
+    expect(content).not.toMatch(/<at\b/)
   })
 
   it("image segment with image_key → msg_type image", () => {
@@ -234,8 +232,10 @@ describe("command Card 2.0 presentation", () => {
       expect(body.msg_type).toBe("interactive")
       const card = JSON.parse(body.content)
       expect(card.schema).toBe("2.0")
-      expect(card.header.template).toBe("blue")
-      expect(card.body.padding).toBe("16px")
+      expect(card.header.template).toBe("wathet")
+      expect(card.header.icon.tag).toBe("standard_icon")
+      expect(card.header.subtitle.content).toBe(`/${command}`)
+      expect(card.body.padding).toBe("12px 16px 16px 16px")
       expect(JSON.stringify(card.body)).toContain("muse1.3")
       expect(card.elements).toBeUndefined()
     }
@@ -244,8 +244,10 @@ describe("command Card 2.0 presentation", () => {
     expect(buildLarkCommandFrame("Done", [], "success")).toHaveProperty("header.template", "green")
     const denied = segmentToLarkBody(buildLarkCommandReply("model", "No permission", "denied"))!
     const card = JSON.parse(denied.content)
-    expect(card.header.title.content).toContain("未执行")
+    expect(card.header.title.content).toBe("未执行")
     expect(card.header.template).toBe("orange")
+    expect(card.header.icon.token).toBe("safe_outlined")
+    expect(JSON.stringify(card.body)).toContain("No permission")
   })
   it("escapes dynamic mention and formatting syntax and preserves long output", () => {
     const text = "<at id=all></at> **title** " + "line\n".repeat(220)
@@ -253,7 +255,8 @@ describe("command Card 2.0 presentation", () => {
       segmentToLarkBody(buildLarkCommandReply("sessions", text, "applied"))!.content
     )
     expect(card.body.elements).toHaveLength(1)
-    expect(card.body.elements[0].content).toContain("&lt;at id=all&gt;")
+    expect(card.body.elements[0].content).toContain("&#60;at id=all&#62;")
+    expect(card.body.elements[0].content).toContain("&#42;&#42;title&#42;&#42;")
     expect(card.body.elements[0].content).not.toContain("<at")
     expect(card.body.elements[0].content.split("line")).toHaveLength(221)
   })

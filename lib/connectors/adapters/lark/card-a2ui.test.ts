@@ -94,13 +94,20 @@ describe("buildLarkA2UICard", () => {
     const parsed = JSON.parse(body.content)
     expect(parsed.header.title.content).toBe("Approve?")
     expect(parsed.schema).toBe("2.0")
-    expect(parsed.body.elements).toHaveLength(2)
-    expect(parsed.body.elements[0]).toMatchObject({
+    // Side-by-side buttons share one compact row; the primary one is filled.
+    expect(parsed.body.elements).toHaveLength(1)
+    const row = parsed.body.elements[0]
+    expect(row).toMatchObject({ tag: "column_set", flex_mode: "flow" })
+    const buttons = row.columns.map((column: { width: string; elements: unknown[] }) => {
+      expect(column.width).toBe("auto")
+      return column.elements[0]
+    })
+    expect(buttons[0]).toMatchObject({
       tag: "button",
-      type: "primary",
+      type: "primary_filled",
       text: { content: "Yes" },
     })
-    expect(parsed.body.elements[1]).toMatchObject({ tag: "button", type: "danger" })
+    expect(buttons[1]).toMatchObject({ tag: "button", type: "danger" })
     // Bindings round-trip.
     const binding = await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:b1:yes")
     expect(binding?.componentId).toBe("b1")

@@ -17,6 +17,7 @@ import { recordConnectorMetric } from "@/lib/connectors/metrics"
 import { createBindRequest } from "@/lib/db/feishu-principals"
 import { markConnectorInboundJobHistoryOnly } from "@/lib/db/connector-inbound-jobs"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
+import { buildLarkBindNoticeCard } from "@/lib/connectors/adapters/lark/command-cards"
 import { hashOpenId, type PrincipalResolution } from "./resolve"
 
 export type UnresolvedPrincipalResolution = Exclude<
@@ -30,14 +31,6 @@ export interface UnresolvedPrincipalDependencies {
   bindRequest: typeof createBindRequest
   markHistoryOnly: typeof markConnectorInboundJobHistoryOnly
   now: () => number
-}
-
-/** Bilingual IM literal, following the follow-up-control outbound convention. */
-function unboundReplyText(bindCode: string): string {
-  return [
-    `This Feishu account is not linked to Cognia yet. Ask your administrator to approve bind code ${bindCode}.`,
-    `该飞书账号尚未关联 Cognia。请联系管理员审批绑定码 ${bindCode}。`,
-  ].join("\n")
 }
 
 function utcDayStamp(at: number): string {
@@ -98,7 +91,8 @@ export async function handleUnresolvedPrincipal(
       conversationKey: event.conversationKey,
       request: {
         conversationRef: event.conversationRef,
-        segments: [{ type: "text", text: unboundReplyText(request.id) }],
+        // The registry is Feishu's alone, so the notice is always its card.
+        segments: [buildLarkBindNoticeCard(request.id)],
         metadata: {
           idempotencyKey: `principal-unbound:${event.adapterId}:${openIdHash}:${utcDayStamp(now)}`,
         },

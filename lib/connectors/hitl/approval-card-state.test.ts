@@ -27,10 +27,26 @@ it.each([
   expect(JSON.stringify(segment)).not.toContain('"button"')
   expect(JSON.stringify(segment)).toContain('"schema":"2.0"')
 })
-it("renders the ask_user terminal states bilingually", () => {
-  expect(JSON.stringify(approvalStateSegment("answered"))).toContain("已回答 / Answered")
-  expect(JSON.stringify(approvalStateSegment("skipped"))).toContain("已跳过 / Skipped")
-  expect(JSON.stringify(approvalStateSegment("cancelled"))).toContain("已停止 / Stopped")
+it("titles each closed state with its own icon and colour", () => {
+  const header = (state: Parameters<typeof approvalStateSegment>[0]) =>
+    (approvalStateSegment(state) as { card: { payload: { header: Record<string, unknown> } } }).card
+      .payload.header
+  expect(header("answered")).toMatchObject({
+    title: { content: "已回答" },
+    template: "green",
+    icon: { token: "succeed_filled" },
+  })
+  expect(header("skipped")).toMatchObject({ title: { content: "已跳过" } })
+  expect(header("cancelled")).toMatchObject({
+    title: { content: "已停止" },
+    template: "orange",
+    icon: { token: "stop_outlined" },
+  })
+})
+it("keeps the detail's markdown but disarms a mention in it", () => {
+  const text = JSON.stringify(approvalStateSegment("answered", "**Q** <at id=all></at>"))
+  expect(text).toContain("**Q**")
+  expect(text).not.toMatch(/<at\b/)
 })
 it("includes the optional detail above the closed notice", () => {
   const withDetail = JSON.stringify(approvalStateSegment("answered", "**Q**\n> Selected: A"))

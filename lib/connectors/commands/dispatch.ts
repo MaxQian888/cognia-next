@@ -68,6 +68,7 @@ import { handleHandoffCommand } from "./handoff"
 import { handleScheduleCommand, type ScheduleCommandScheduler } from "./schedule"
 import * as R from "./render"
 import { buildLarkCommandReply } from "../adapters/lark/card"
+import { buildLarkStatusCard } from "../adapters/lark/command-cards"
 
 /**
  * Legacy spellings, kept as aliases onto the named presets.
@@ -353,63 +354,65 @@ export async function maybeHandleControlCommand(
       const enabledRules = (adapterRow.dispatchRules ?? [])
         .filter((rule) => rule.enabled !== false)
         .map((rule, index) => R.renderDispatchRuleSummary(rule, index + 1))
-      await reply(
-        R.renderStatus({
-          // The named preset the resolved axes add up to. A `delegate`
-          // conversation mirrors to `mode: "auto"`, so reporting the mirror
-          // alone told the operator the bot answers in the thread when it
-          // actually runs in the background. When the axes match no preset
-          // (a `confirm` or `autopilot` autonomy), name them instead of
-          // printing a bare "custom" nobody can act on.
-          behaviour:
-            behaviourPreset === IM_MODE_CUSTOM
-              ? `${IM_MODE_CUSTOM} (${effectiveConfig.autonomy.effective} / ${effectiveConfig.engagement.effective})`
-              : behaviourPreset,
-          mode: override?.mode ?? resolved.mode,
-          model:
-            targetManaged ??
-            modelBinding(effectiveConfig.model.effective, effectiveConfig.model.source),
-          provider:
-            targetManaged ??
-            modelBinding(effectiveConfig.provider.effective, effectiveConfig.provider.source),
-          character: override?.characterDisabled
-            ? "已关闭 / none"
-            : character?.name
-              ? R.withSource(character.name, routing.characterSource)
-              : "默认 / default",
-          reasoning:
-            override?.reasoningOverride ??
-            botDefault(adapterRow.defaultReasoning) ??
-            "默认 / default",
-          approvalMode: override?.approvalMode ?? "prompt",
-          team: routing.teamId
-            ? routing.teamSource === "instance-default"
-              ? R.withBotDefault(routing.teamId)
-              : routing.teamSource === "rule" || routing.teamSource === "assignment"
-                ? R.withSource(routing.teamId, routing.teamSource)
-                : routing.teamId
-            : override?.teamDisabled
-              ? "已关闭 / off"
-              : "无 / none",
-          workflow: routing.workflowId
-            ? R.withSource(routing.workflowId, routing.workflowSource)
-            : override?.workflowDisabled
-              ? "已关闭 / off"
-              : "无 / none",
-          routeSource: R.sourceLabel(routeSource),
-          matchedRule: ruleHit
-            ? ruleHit.rule.name?.trim()
-              ? `${ruleHit.rule.name.trim()} (${ruleHit.rule.id})`
-              : ruleHit.rule.id
+      const statusView: R.StatusView = {
+        // The named preset the resolved axes add up to. A `delegate`
+        // conversation mirrors to `mode: "auto"`, so reporting the mirror
+        // alone told the operator the bot answers in the thread when it
+        // actually runs in the background. When the axes match no preset
+        // (a `confirm` or `autopilot` autonomy), name them instead of
+        // printing a bare "custom" nobody can act on.
+        behaviour:
+          behaviourPreset === IM_MODE_CUSTOM
+            ? `${IM_MODE_CUSTOM} (${effectiveConfig.autonomy.effective} / ${effectiveConfig.engagement.effective})`
+            : behaviourPreset,
+        mode: override?.mode ?? resolved.mode,
+        model:
+          targetManaged ??
+          modelBinding(effectiveConfig.model.effective, effectiveConfig.model.source),
+        provider:
+          targetManaged ??
+          modelBinding(effectiveConfig.provider.effective, effectiveConfig.provider.source),
+        character: override?.characterDisabled
+          ? "已关闭 / none"
+          : character?.name
+            ? R.withSource(character.name, routing.characterSource)
+            : "默认 / default",
+        reasoning:
+          override?.reasoningOverride ??
+          botDefault(adapterRow.defaultReasoning) ??
+          "默认 / default",
+        approvalMode: override?.approvalMode ?? "prompt",
+        team: routing.teamId
+          ? routing.teamSource === "instance-default"
+            ? R.withBotDefault(routing.teamId)
+            : routing.teamSource === "rule" || routing.teamSource === "assignment"
+              ? R.withSource(routing.teamId, routing.teamSource)
+              : routing.teamId
+          : override?.teamDisabled
+            ? "已关闭 / off"
             : "无 / none",
-          responseAdapter: routing.respondViaAdapterId
-            ? R.withSource(routing.respondViaAdapterId, routing.respondViaSource)
-            : `${event.adapterId}（接收 Adapter / receiving adapter）`,
-          enabledRules,
-          sessionTitle: active?.title ?? "无 / none",
-          sessionIdPrefix: active ? idPrefix(active.id) : "—",
-          assignee: R.renderAssignee(override?.assignee),
-        }),
+        workflow: routing.workflowId
+          ? R.withSource(routing.workflowId, routing.workflowSource)
+          : override?.workflowDisabled
+            ? "已关闭 / off"
+            : "无 / none",
+        routeSource: R.sourceLabel(routeSource),
+        matchedRule: ruleHit
+          ? ruleHit.rule.name?.trim()
+            ? `${ruleHit.rule.name.trim()} (${ruleHit.rule.id})`
+            : ruleHit.rule.id
+          : "无 / none",
+        responseAdapter: routing.respondViaAdapterId
+          ? R.withSource(routing.respondViaAdapterId, routing.respondViaSource)
+          : `${event.adapterId}（接收 Adapter / receiving adapter）`,
+        enabledRules,
+        sessionTitle: active?.title ?? "无 / none",
+        sessionIdPrefix: active ? idPrefix(active.id) : "—",
+        assignee: R.renderAssignee(override?.assignee),
+      }
+      // Feishu draws the view as tiles; elsewhere it is the bilingual text.
+      await reply(
+        event.platform === "lark" ? [buildLarkStatusCard(statusView)] : R.renderStatus(statusView),
         "applied"
       )
       return true

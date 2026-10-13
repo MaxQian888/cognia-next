@@ -2833,7 +2833,7 @@ describe("installRuntime — ai-run Lark result card", () => {
 
   it("ships the completed answer as a standalone Card 2.0 segment", async () => {
     await seedLark({ settings: { webEntryBaseUrl: "https://app.example.com" } })
-    await callHandler(larkEvent(), "ai-run")
+    await callHandler(larkEvent({ plainText: "帮我看看发布进度" }), "ai-run")
 
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs).toHaveLength(1)
@@ -2852,7 +2852,7 @@ describe("installRuntime — ai-run Lark result card", () => {
     const footer = String(elements.find((el) => el.element_id === "footer")?.content ?? "")
     expect(footer).toContain("<at id=ou_alice></at>")
     expect(footer).toContain("https://app.example.com/agent-runs?run=")
-    expect(footer).toContain("耗时")
+    expect(footer).toContain("用时")
 
     // Native reply quoting is on by default in a group → the request carries
     // replyTo and the card has no redundant blockquote.
@@ -2868,7 +2868,28 @@ describe("installRuntime — ai-run Lark result card", () => {
     expect(job.request.replyTo).toBeUndefined()
     const payload = cardPayloadOf(job)
     const quote = (payload.body?.elements ?? []).find((el) => el.element_id === "quote")
-    expect(quote?.content).toBe("> 回复：deploy the build")
+    // The card answers in the language the asker wrote in.
+    expect(quote?.content).toBe("> Re: deploy the build")
+  })
+
+  it("does not mention the reader to themselves in a private chat", async () => {
+    await seedLark()
+    await callHandler(
+      larkEvent({
+        conversationKey: "lark:adapter_lark:oc_priv",
+        channel: { id: "oc_priv", name: "DM", kind: "private" },
+        plainText: "17 乘 23 等于多少",
+      }),
+      "ai-run"
+    )
+
+    const [job] = await getDb().outboundQueue.toArray()
+    const payload = cardPayloadOf(job)
+    const footer = String(
+      (payload.body?.elements ?? []).find((el) => el.element_id === "footer")?.content ?? ""
+    )
+    expect(footer).not.toContain("<at ")
+    expect(footer).toContain("用时")
   })
 
   it("never renders a quote element in a private chat", async () => {

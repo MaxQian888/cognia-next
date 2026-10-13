@@ -70,6 +70,7 @@ import {
   splitLarkCardSegments,
   withLarkResultCard,
 } from "@/lib/connectors/adapters/lark/result-card"
+import { larkReplyLocale } from "@/lib/connectors/adapters/lark/card-kit"
 import { buildSteerPayload, steerBlocksOf } from "@/lib/claude/steer"
 import { deliveryTargetFromEvent } from "@/types/connectors/event"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
@@ -1750,7 +1751,12 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             conversationKey: event.conversationKey,
             status: "active",
             deliveryMode: "native",
-            locale: appSettings?.language,
+            // A Feishu card answers in the language its reader wrote in,
+            // not the host's own UI language.
+            locale:
+              event.platform === "lark"
+                ? larkReplyLocale(event.plainText, appSettings?.language)
+                : appSettings?.language,
             sourceMessageId: event.canReplyToMessage === false ? undefined : event.messageId,
             deliveryTarget: deliveryTargetFromEvent(event),
             recipientUserId: event.sender.remoteUserId,
@@ -2180,9 +2186,14 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             // only when quoting is off; a private chat never needs it.
             quote: !quoteReply && event.channel.kind !== "private" ? event.plainText : undefined,
             elapsedMs: Date.now() - turnStartedAt,
-            initiatorOpenId: /^ou_[A-Za-z0-9]+$/.test(event.sender.remoteUserId)
-              ? event.sender.remoteUserId
-              : undefined,
+            // Naming the asker tells a group who the answer is for; in a
+            // private chat it only mentions the reader to themselves.
+            initiatorOpenId:
+              event.channel.kind !== "private" &&
+              /^ou_[A-Za-z0-9]+$/.test(event.sender.remoteUserId)
+                ? event.sender.remoteUserId
+                : undefined,
+            locale: larkReplyLocale(event.plainText, appSettings?.language),
             detailsUrl:
               buildRunDetailsUrl(executionRunId, resolveWebEntryBase(adapterRow)) ?? undefined,
             fallbackAnswer: recoveredText,
