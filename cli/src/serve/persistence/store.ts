@@ -76,6 +76,17 @@ export interface DurabilityStoreOptions {
    * journalled as a commit.
    */
   importInitialState?: (sources: readonly DurabilitySourceLike[]) => Promise<void>
+  /**
+   * Re-declare schema the databases only gain at runtime (plugin tables)
+   * before the persisted state is restored, given the version each database
+   * was persisted at. A built-in plugin's tables lift the account database
+   * above its code version once they exist, and restoring that checkpoint
+   * into the code version alone is refused as a schema mismatch.
+   */
+  prepareDynamicSchema?: (
+    sources: readonly DurabilitySourceLike[],
+    persistedVersions: Readonly<Record<string, number>>
+  ) => Promise<void>
   /** Commits between automatic compactions. 0 disables auto-compaction. */
   compactEveryCommits?: number
   /** Injected clock (tests). */
@@ -264,7 +275,17 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
   backendRef = resolved.backend
   sequence = resolved.backend.lastSequence()
 
-  await withAllSuppressed(captures, () => restoreState(sources, resolved.state))
+  await withAllSuppressed(captures, async () => {
+    if (opts.prepareDynamicSchema) {
+      await opts.prepareDynamicSchema(
+        sources,
+        Object.fromEntries(
+          Object.entries(resolved.state.dbs).map(([name, entry]) => [name, entry.schema.version])
+        )
+      )
+    }
+    await restoreState(sources, resolved.state)
+  })
 
   function compact(): Promise<void> {
     if (compacting) return compacting

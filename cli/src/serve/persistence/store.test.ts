@@ -590,6 +590,43 @@ describe("openDurabilityStore", () => {
     await reopened.close()
   })
 
+  it("lifts a database to the version its plugin tables were persisted at before restoring", async () => {
+    const source = makeSource()
+    const store = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [source],
+      compactEveryCommits: 0,
+    })
+    ;(source.db as { verno: number }).verno = 142
+    source.db.tables.push(new FakeTable("pluginRows"))
+    await source.db.commit("pluginRows", { type: "put", values: [{ id: "plugin-row" }] })
+    await store.compact()
+    await store.close()
+
+    // A restarted brain opens at the code version, before any plugin runs.
+    const bare = makeSource("CogniaDB", 141)
+    await expect(
+      openDurabilityStore({ home, accountId: "acct", getSources: async () => [bare] })
+    ).rejects.toThrow(expect.objectContaining({ code: "checkpoint-schema-mismatch" }))
+
+    const revived = makeSource("CogniaDB", 141)
+    const prepared: Array<Record<string, number>> = []
+    const reopened = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [revived],
+      prepareDynamicSchema: async (sources, versions) => {
+        prepared.push({ ...versions })
+        ;(sources[0].db as { verno: number }).verno = versions.CogniaDB
+        sources[0].db.tables.push(new FakeTable("pluginRows"))
+      },
+    })
+    expect(prepared).toEqual([{ CogniaDB: 142 }])
+    expect(await revived.db.tables[2].toArray()).toEqual([{ id: "plugin-row" }])
+    await reopened.close()
+  })
+
   it("exposes the live state for parity tooling", async () => {
     const source = makeSource()
     const store = await openDurabilityStore({

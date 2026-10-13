@@ -663,7 +663,12 @@ function resolveSourcesFactory(opts: EnsureCliDbOptions): () => Promise<readonly
   }
 }
 
-async function prepareBuiltinPluginSchema(
+/**
+ * Re-declare the built-in plugins' Dexie tables up to the version a snapshot
+ * or checkpoint was persisted at, so it restores onto the same schema. Shared
+ * by the snapshot store here and the ledger store (`serve/durability.ts`).
+ */
+export async function prepareBuiltinPluginSchema(
   sources: readonly SnapshotSource[],
   snapshotVersions: Readonly<Record<string, number>>
 ): Promise<void> {

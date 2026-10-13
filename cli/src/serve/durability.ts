@@ -20,6 +20,7 @@ import {
   ensureCliDb,
   hasSnapshotStore,
   importSnapshotStore,
+  prepareBuiltinPluginSchema,
   type CliDbHandle,
   type SnapshotStoreImportResult,
 } from "../db/bootstrap"
@@ -226,6 +227,8 @@ async function startLedgerDurability(
         }
       : undefined,
     getSources: resolveDurabilitySources,
+    prepareDynamicSchema: (sources, persistedVersions) =>
+      prepareBuiltinPluginSchema(sources as unknown as SnapshotSource[], persistedVersions),
     whenReady: async () => {
       const { whenSeeded } = await import("@/lib/db/schema")
       await whenSeeded()

@@ -306,6 +306,78 @@ describe("startDurability", () => {
   })
 })
 
+describe("ledger restore over built-in plugin tables", () => {
+  // A built-in plugin's tables lift the account database one version above the
+  // code's once they exist, and a compaction pins that version into the
+  // checkpoint. A restarted brain opens at the code version, before any plugin
+  // runs; without re-declaring those tables first, the restore refused the
+  // checkpoint and the brain exited on every start (the always-on host's bot
+  // went down this way after one image update).
+  it("restores a checkpoint persisted above the code version", async () => {
+    const [{ installFakeIndexedDb }, { __resetDbForTesting, CURRENT_SCHEMA_VERSION }] =
+      await Promise.all([import("@/lib/headless/node-indexeddb"), import("@/lib/db/schema")])
+    const [{ openDurabilityStore }, { restorePluginTables }, { getBrowserBuiltinRegistry }] =
+      await Promise.all([
+        import("./persistence/store"),
+        import("@/lib/plugin/dexie/bridge"),
+        import("@/lib/plugin/core/browser-builtin-registry"),
+      ])
+    const { prepareBuiltinPluginSchema } = await import("../db/bootstrap")
+    await installFakeIndexedDb()
+    __resetCliDbForTesting()
+    __resetDbForTesting()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-serve-plugin-"))
+    // The plugin whose tables lifted the box's account database.
+    const plugin = getBrowserBuiltinRegistry().find(
+      (entry) => entry.manifest.id === "zhihu-content-pipeline"
+    )!
+    const table = `${plugin.manifest.id}:${plugin.manifest.dexie!.tables[0].name}`
+    const sources = async () => {
+      const db = getDb()
+      return [{ name: db.name, db: db as never }]
+    }
+
+    try {
+      const first = await openDurabilityStore({
+        home,
+        accountId: "acct_plugin",
+        backend: "sqlite-v5",
+        getSources: sources,
+        compactEveryCommits: 0,
+      })
+      await restorePluginTables(
+        () => getDb(),
+        new Map([[plugin.manifest.id, plugin.manifest.dexie!]]),
+        { registerMissing: true }
+      )
+      expect(getDb().verno).toBe(CURRENT_SCHEMA_VERSION + 1)
+      await getDb().table(table).put({ id: "row-1" })
+      await first.compact()
+      await first.close()
+
+      // Restart: a fresh in-memory database at the code version.
+      await getDb().delete()
+      __resetDbForTesting()
+
+      const second = await openDurabilityStore({
+        home,
+        accountId: "acct_plugin",
+        getSources: sources,
+        prepareDynamicSchema: (dbs, versions) => prepareBuiltinPluginSchema(dbs as never, versions),
+      })
+      expect(getDb().verno).toBe(CURRENT_SCHEMA_VERSION + 1)
+      expect(await getDb().table(table).get("row-1")).toEqual({ id: "row-1" })
+      await second.close()
+    } finally {
+      await getDb()
+        .delete()
+        .catch(() => {})
+      __resetDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("resolveDurabilityBackend", () => {
   let home: string
   beforeEach(() => {
