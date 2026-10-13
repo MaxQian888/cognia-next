@@ -11,6 +11,10 @@ on:
         description: "Optional warm run ID to replay its exact cache; defaults to cache_run"
         type: string
         default: ""
+      smoke_image_run:
+        description: "Only smoke the existing images from this benchmark run ID"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -36,6 +40,7 @@ jobs:
           VARIANT: ${{ matrix.variant }}
           CACHE_RUN: ${{ inputs.cache_run }}
           CACHE_SOURCE_RUN: ${{ inputs.cache_source_run }}
+          SMOKE_IMAGE_RUN: ${{ inputs.smoke_image_run }}
         run: |
           set -euo pipefail
           if [[ -n "$CACHE_RUN" && ! "$CACHE_RUN" =~ ^[0-9]+$ ]]; then
@@ -47,12 +52,17 @@ jobs:
             exit 1
           fi
           owner="${GITHUB_REPOSITORY_OWNER,,}"
+          if [[ -n "$SMOKE_IMAGE_RUN" && ! "$SMOKE_IMAGE_RUN" =~ ^[0-9]+$ ]]; then
+            echo 'smoke_image_run must be a numeric workflow run ID' >&2
+            exit 1
+          fi
+          image_run="${SMOKE_IMAGE_RUN:-$GITHUB_RUN_ID}"
           cache_run="${CACHE_RUN:-$GITHUB_RUN_ID}"
           cache_source_run="${CACHE_SOURCE_RUN:-$cache_run}"
           {
             echo "cache=ghcr.io/$owner/cognia-server:bench-$cache_run-$VARIANT-cache"
             echo "cache_from=ghcr.io/$owner/cognia-server:bench-$cache_run-$VARIANT-cache-$cache_source_run"
-            echo "image=ghcr.io/$owner/cognia-server:bench-$GITHUB_RUN_ID-$VARIANT"
+            echo "image=ghcr.io/$owner/cognia-server:bench-$image_run-$VARIANT"
           } >> "$GITHUB_OUTPUT"
           compression=gzip
           if [[ "$VARIANT" == candidate-zstd ]]; then compression=zstd; fi
@@ -86,6 +96,7 @@ jobs:
           df -h > "$RUNNER_TEMP/server-benchmark/disk-before.txt"
 
       - uses: docker/setup-buildx-action@v4
+        if: inputs.smoke_image_run == ''
         id: builder
 
       - uses: docker/login-action@v4
@@ -95,6 +106,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build full image and export isolated cache
+        if: inputs.smoke_image_run == ''
         id: full
         uses: docker/build-push-action@v7
         with:
@@ -108,6 +120,7 @@ jobs:
           cache-to: type=registry,ref=${{ steps.bench.outputs.cache }}-${{ github.run_id }},mode=max,compression=${{ steps.bench.outputs.compression }}${{ steps.bench.outputs.compression == 'zstd' && ',compression-level=3' || '' }}
 
       - name: Build slim image using the same builder
+        if: inputs.smoke_image_run == ''
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -119,6 +132,7 @@ jobs:
           cache-from: type=registry,ref=${{ steps.bench.outputs.cache }}-${{ github.run_id }}
 
       - name: Export Cargo timings
+        if: inputs.smoke_image_run == ''
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -128,6 +142,7 @@ jobs:
           outputs: type=local,dest=${{ runner.temp }}/server-benchmark/cargo-timings
 
       - name: Record disk use and release the benchmark builder
+        if: inputs.smoke_image_run == ''
         env:
           BUILDER: ${{ steps.builder.outputs.name }}
         run: |
@@ -140,6 +155,7 @@ jobs:
           node-version: 26
 
       - name: Smoke full and slim runtime images
+        timeout-minutes: 10
         env:
           IMAGE: ${{ steps.bench.outputs.image }}
           SHARE_UPLOAD_SECRET: ci-smoke-secret
