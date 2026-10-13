@@ -158,6 +158,18 @@ const ORDER: Record<DeviceKind, readonly DeviceSectionId[]> = {
  * phone or a worker cannot be named, and a `/pair` Host has its `hostId`
  * stripped because the store cannot address it.
  */
+/**
+ * The ref a host's management channel is opened with (ADR-0224 A6, A10): its
+ * remote-host store id, or, for the `/pair` Host this app is connected to, its
+ * `companion:<hostId>` row ref (`lib/remote-host/target-transport.ts`). A
+ * `/pair` Host the app is not routed to cannot be reached, so it has none.
+ */
+export function managementRefOf(row: DeviceRow): string | null {
+  if (row.kind !== "remote-host") return null
+  if (row.hostId) return row.hostId
+  return row.ref.startsWith("companion:") && row.runtime.isRoutingTarget ? row.ref : null
+}
+
 export function canOwnTiming(row: DeviceRow): boolean {
   return row.kind === "local" || (row.kind === "remote-host" && Boolean(row.hostId))
 }
@@ -165,12 +177,14 @@ export function canOwnTiming(row: DeviceRow): boolean {
 function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
   switch (id) {
     case "always-on":
-    // Secrets go over the host's own management channel, which names the host
-    // by its store id too (ADR-0224 A6); so do its updates (A10).
+      // Moving work names the host by its store id; a `/pair` host has none,
+      // and a client paired to it already runs everything there.
+      return row.kind === "remote-host" && Boolean(row.hostId)
+    // Secrets and updates go over the host's management channel (ADR-0224
+    // A6, A10), which reaches a store host and the connected `/pair` Host.
     case "host-secrets":
     case "host-updates":
-      // Moving work names the host by its store id; a `/pair` host has none.
-      return row.kind === "remote-host" && Boolean(row.hostId)
+      return Boolean(managementRefOf(row))
     case "ssh":
     case "files":
       return row.kind === "ssh-host"

@@ -291,6 +291,12 @@ export interface DeviceRow {
   role?: string
   /** Host rows only: what kind of host this is. See {@link HostRole}. */
   hostRole?: HostRole
+  /**
+   * Remote-host rows only: the operation-level contract the Host last
+   * reported. A section that needs one of its features asks this, since a
+   * `/pair` Host has no remote-host store entry to read it from.
+   */
+  featureManifest?: HostFeatureManifest
 
   adminState: DeviceAdminState
   /**

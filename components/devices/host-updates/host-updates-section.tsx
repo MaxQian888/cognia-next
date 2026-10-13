@@ -33,6 +33,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { useHostUpdate, type UseHostUpdateDeps } from "@/hooks/remote-host/use-host-update"
 import type { DeviceRow } from "@/lib/devices/types"
+import { managementRefOf } from "@/lib/devices/section-plan"
 import {
   canInstallHostUpdate,
   type HostUpdateChannel,
@@ -71,7 +72,7 @@ function phaseLine(t: Translate, status: HostUpdateStatus): string {
 export function HostUpdatesSection({ row, deps }: { row: DeviceRow; deps?: UseHostUpdateDeps }) {
   const t = useTranslations("devices.hostUpdates")
   const format = useFormatter()
-  const hostId = row.kind === "remote-host" ? (row.hostId ?? null) : null
+  const hostId = managementRefOf(row)
   const { status, unsupported, error, pending, refresh, install, configure } = useHostUpdate(
     hostId,
     deps

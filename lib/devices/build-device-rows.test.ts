@@ -533,6 +533,10 @@ describe("row composition", () => {
       dimension: "host-feature",
       value: "workflow.execution",
     })
+    // The contract itself rides along, for sections that gate on a feature.
+    expect(row.featureManifest).toEqual(manifestV2("published-id"))
+    const bare = find(buildDeviceRows(input({ remoteHosts: [host()] })), "host:h1")
+    expect(bare).not.toHaveProperty("featureManifest")
   })
 
   it("gives a worker no platform matrix, because its ids are a different vocabulary", () => {

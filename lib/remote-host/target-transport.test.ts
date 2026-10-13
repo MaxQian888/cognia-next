@@ -8,7 +8,12 @@ jest.mock("@/lib/signaling/crypto", () => ({
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import type { Transport } from "@/lib/tauri/transport-types"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
-import { openRemoteHostTarget } from "./target-transport"
+import {
+  isPairedHostTargetCurrent,
+  openRemoteHostTarget,
+  pairedHostIdOf,
+  type PairedHostTargetDeps,
+} from "./target-transport"
 
 const transport: Transport = {
   call: jest.fn(),
@@ -136,4 +141,90 @@ it("keeps the direct route when the signaling key will not import", async () => 
   const config = createTransport.mock.calls[0]?.[0]()
   expect(config?.devicePrivateKeyJwk?.d).toBe("private")
   expect(config?.signalingPrivateKey).toBeUndefined()
+})
+
+describe("the /pair Host this app is connected to", () => {
+  const appTransport: Transport = { call: jest.fn(), subscribe: jest.fn(() => () => undefined) }
+  const liveConfig: CompanionConfig = {
+    targetId: "box",
+    baseUrl: "https://127.0.0.1:27890",
+    deviceId: "phone-device",
+    deviceKeyThumbprint: "thumb",
+    serverVersion: "0.1.0",
+    devicePrivateKeyJwk: { kty: "EC", d: "secret" },
+    signalingPrivateKeyJwk: { kty: "EC", d: "signing-secret" },
+    serviceToken: "service",
+  }
+  const record = {
+    hostId: "box",
+    accountNamespace: "acct",
+    label: "Cognia云主机",
+    createdAt: 42,
+  }
+  const paired = (over: Partial<PairedHostTargetDeps> = {}): PairedHostTargetDeps => ({
+    activeTarget: () => ({ accountId: "acct", targetId: "box" }),
+    loadRecord: async () => record as never,
+    loadConfig: () => liveConfig,
+    transport: () => appTransport,
+    ...over,
+  })
+
+  it("reads the Host id out of a companion ref, and nothing else", () => {
+    expect(pairedHostIdOf("companion:box")).toBe("box")
+    expect(pairedHostIdOf("companion:")).toBeNull()
+    expect(pairedHostIdOf("local-row")).toBeNull()
+  })
+
+  it("borrows the app's own connection, never closes it, and keeps the keys out", async () => {
+    const target = await openRemoteHostTarget("companion:box", { paired: paired() })
+    expect(target.transport).toBe(appTransport)
+    expect(target.host).toMatchObject({
+      id: "companion:box",
+      label: "Cognia云主机",
+      addedAt: 42,
+      connectionState: "ready",
+      config: { deviceId: "phone-device", targetId: "box" },
+    })
+    for (const secret of [
+      "devicePrivateKeyJwk",
+      "signalingPrivateKeyJwk",
+      "signalingPrivateKey",
+      "serviceToken",
+    ]) {
+      expect(target.host.config).not.toHaveProperty(secret)
+    }
+    target.close()
+    // The store path's transports are destroyed on close; this one is the app's.
+    expect(appTransport).not.toHaveProperty("destroy")
+  })
+
+  it("refuses a /pair Host the app is not connected to, or one no longer paired", async () => {
+    await expect(openRemoteHostTarget("companion:other", { paired: paired() })).rejects.toThrow(
+      "not the Host this app is connected to"
+    )
+    await expect(
+      openRemoteHostTarget("companion:box", {
+        paired: paired({ loadConfig: () => ({ ...liveConfig, targetId: "elsewhere" }) }),
+      })
+    ).rejects.toThrow("not the Host this app is connected to")
+    await expect(
+      openRemoteHostTarget("companion:box", { paired: paired({ activeTarget: () => null }) })
+    ).rejects.toThrow("not the Host this app is connected to")
+    await expect(
+      openRemoteHostTarget("companion:box", { paired: paired({ loadRecord: async () => null }) })
+    ).rejects.toThrow("not paired")
+  })
+
+  it("is current only while the app is still connected to it with the same pairing", () => {
+    expect(isPairedHostTargetCurrent("box", "phone-device", paired())).toBe(true)
+    expect(isPairedHostTargetCurrent("box", undefined, paired())).toBe(true)
+    expect(isPairedHostTargetCurrent("box", "old-device", paired())).toBe(false)
+    expect(
+      isPairedHostTargetCurrent(
+        "box",
+        "phone-device",
+        paired({ activeTarget: () => ({ accountId: "acct", targetId: "desk" }) })
+      )
+    ).toBe(false)
+  })
 })

@@ -1,6 +1,14 @@
 /** @jest-environment jsdom */
 
 import type { RemoteHostTarget } from "@/lib/remote-host/target-transport"
+
+// Whether the app is still connected to a `/pair` Host is the target module's
+// question (it reads the live runtime target); the channel only asks it.
+let pairedCurrent = true
+jest.mock("@/lib/remote-host/target-transport", () => ({
+  ...jest.requireActual("@/lib/remote-host/target-transport"),
+  isPairedHostTargetCurrent: () => pairedCurrent,
+}))
 import type { Transport } from "@/lib/tauri/transport-types"
 import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
 
@@ -176,6 +184,29 @@ it("reopens a channel whose host was re-paired or removed since it opened", asyn
   closeStaleManagementChannels()
   await Promise.resolve()
   expect(second.close).toHaveBeenCalled()
+})
+
+it("ends a /pair Host's channel once the app is connected elsewhere", async () => {
+  pairedCurrent = true
+  const pairedHost = host({ id: "companion:box", config: { ...host().config, deviceId: "phone" } })
+  const first = target(pairedHost)
+  const second = target(pairedHost)
+  const openTarget = jest
+    .fn()
+    .mockResolvedValueOnce(first.value)
+    .mockResolvedValueOnce(second.value)
+  ;(await acquireManagementChannel("companion:box", { openTarget })).release()
+  await Promise.resolve()
+  // Still the connected Host: the warm channel is shared, though the store
+  // has never heard of it.
+  ;(await acquireManagementChannel("companion:box", { openTarget })).release()
+  expect(openTarget).toHaveBeenCalledTimes(1)
+
+  pairedCurrent = false
+  await acquireManagementChannel("companion:box", { openTarget })
+  expect(openTarget).toHaveBeenCalledTimes(2)
+  expect(first.close).toHaveBeenCalled()
+  pairedCurrent = true
 })
 
 it("gives the lease back after one piece of work, even when it fails", async () => {

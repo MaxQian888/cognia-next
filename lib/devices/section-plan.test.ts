@@ -4,6 +4,7 @@ import {
   packHalfSections,
   planDeviceSections,
   type DevicePlannedSection,
+  managementRefOf,
 } from "./section-plan"
 
 const CELL: DeviceCapabilityCell = {
@@ -150,6 +151,21 @@ describe("planDeviceSections", () => {
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-updates")
     const routed = { ...pairHost, runtime: { ...pairHost.runtime, isRoutingTarget: true } }
     expect(ids(planDeviceSections(routed).sections)).toContain("routing")
+  })
+
+  it("manages the /pair Host this app is connected to over the app's own connection", () => {
+    const pairHost = row({ ref: "companion:x", kind: "remote-host", hostId: undefined })
+    const routed = { ...pairHost, runtime: { ...pairHost.runtime, isRoutingTarget: true } }
+    expect(managementRefOf(routed)).toBe("companion:x")
+    expect(managementRefOf(pairHost)).toBeNull()
+    const sections = ids(planDeviceSections(routed).sections)
+    expect(sections).toContain("host-secrets")
+    expect(sections).toContain("host-updates")
+    // Still nothing to move: a client paired to it already runs everything there.
+    expect(sections).not.toContain("always-on")
+    // A store host is managed by its store id, routed or not.
+    expect(managementRefOf(row({ ref: "host:h1", kind: "remote-host", hostId: "h1" }))).toBe("h1")
+    expect(managementRefOf(row({ ref: "device:a", kind: "paired-device" }))).toBeNull()
   })
 
   it("moves a worker's missing capability vocabulary into the shared record", () => {

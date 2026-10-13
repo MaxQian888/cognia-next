@@ -25,6 +25,12 @@ import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 
 import { HostSecretsSection, type HostSecretsSectionDeps } from "./host-secrets-section"
 
+// The `/pair` Host's own pairing, which the section reads for "by this device".
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  ...jest.requireActual("@/lib/tauri/transport-companion"),
+  loadCompanionConfig: () => ({ targetId: "box", deviceId: "phone" }),
+}))
+
 const row = {
   ref: "host:mini",
   kind: "remote-host",
@@ -166,5 +172,25 @@ describe("HostSecretsSection", () => {
     )
     expect(load).not.toHaveBeenCalled()
     expect(screen.queryByTestId("host-secrets-add")).toBeNull()
+  })
+})
+
+describe("HostSecretsSection on the /pair Host this app is connected to", () => {
+  const paired = {
+    ref: "companion:box",
+    kind: "remote-host",
+    label: "Cognia云主机",
+    featureManifest: buildLocalHostFeatureManifest({ platform: "headless" }),
+    runtime: { isRoutingTarget: true },
+  } as unknown as DeviceRow
+
+  it("manages it by its companion ref, with what its row reported and this pairing's device", async () => {
+    useRemoteHostStore.setState({ hosts: [] } as never)
+    const load = jest.fn(async () => listed)
+    render(<HostSecretsSection row={paired} deps={{ requestLease: async () => lease, load }} />)
+    expect(await screen.findByTestId("host-secrets-list")).toBeInTheDocument()
+    expect(load).toHaveBeenCalledWith("companion:box")
+    // Written by this phone's pairing, so it reads as this device's.
+    expect(screen.getByTestId("host-secret-provider:custom-x")).toHaveTextContent("by this device")
   })
 })

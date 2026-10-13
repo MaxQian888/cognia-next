@@ -15,7 +15,12 @@
  * down and rebuilt each time. Opening never touches the app's routing.
  */
 
-import { openRemoteHostTarget, type RemoteHostTarget } from "@/lib/remote-host/target-transport"
+import {
+  isPairedHostTargetCurrent,
+  openRemoteHostTarget,
+  pairedHostIdOf,
+  type RemoteHostTarget,
+} from "@/lib/remote-host/target-transport"
 import type { Transport } from "@/lib/tauri/transport-types"
 import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
 
@@ -56,6 +61,8 @@ interface Entry {
  */
 function isStale(hostRef: string, entry: Entry): boolean {
   if (entry.deviceId === undefined) return false
+  const pairedHostId = pairedHostIdOf(hostRef)
+  if (pairedHostId) return !isPairedHostTargetCurrent(pairedHostId, entry.deviceId)
   const host = useRemoteHostStore.getState().hosts.find((candidate) => candidate.id === hostRef)
   return !host || host.config.deviceId !== entry.deviceId
 }

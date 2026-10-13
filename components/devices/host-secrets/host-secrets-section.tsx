@@ -50,6 +50,8 @@ import {
 import { useHostSecrets } from "@/hooks/remote-host/use-host-secrets"
 import { useMigrationLease } from "@/hooks/remote-host/use-migration-lease"
 import type { DeviceRow } from "@/lib/devices/types"
+import { managementRefOf } from "@/lib/devices/section-plan"
+import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { supportsHostFeatureOperation } from "@/lib/platform/host-feature-manifest"
 import {
   deleteHostSecret,
@@ -109,17 +111,19 @@ export function HostSecretsSection({
   const t = useTranslations("devices.hostSecrets")
   const tc = useTranslations("devices.alwaysOn.consent")
   const format = useFormatter()
-  const hostId = row.hostId ?? null
+  const hostId = managementRefOf(row)
   const host = row.label
   const remoteHost = useRemoteHostStore((state) =>
     hostId ? state.hosts.find((candidate) => candidate.id === hostId) : undefined
   )
-  const manifest = remoteHost?.featureManifest
+  // A `/pair` Host is not in the store; its row carries what it reported.
+  const manifest = remoteHost?.featureManifest ?? row.featureManifest
   // An unknown manifest is asked anyway; only a host that answered without
   // the feature is known to be too old.
   const supported =
     !manifest || supportsHostFeatureOperation(manifest, "always-on.secrets", "host_secret_list")
-  const ownDeviceId = remoteHost?.config.deviceId
+  const ownDeviceId =
+    remoteHost?.config.deviceId ?? (remoteHost ? undefined : loadCompanionConfig()?.deviceId)
   const { entries, error, reload } = useHostSecrets(hostId, {
     enabled: supported,
     load: deps.load ?? listHostSecrets,
