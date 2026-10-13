@@ -768,6 +768,23 @@ async function externalAgentTurn() {
   const token = (await composeExec(["cognia-server", "issue-service-token"])).trim()
   check(token.split(".").length === 3, "issue-service-token printed a JWT")
 
+  // With the T2 overlay (sandbox pool on) a headless host places every
+  // external agent in a runner container (ADR-0224 A8), and the stub ships
+  // only in the server image, so its lifecycle cannot run there. The policy
+  // denial below is placement-independent and still runs.
+  // `sandbox-pool` in host_capabilities is coarse (every headless host lists
+  // it); whether the pool is ON is answered here, `sandbox_pool_disabled`
+  // when it is off, as compose-runtime-environment.mjs reads it.
+  const driver = await containerRpcResponse("environment_driver_status", {}, token)
+  if (driver.status === 200 && typeof driver.body?.driver === "string") {
+    skip("sandbox pool on (T2): external agents run in the runner image, which has no smoke stub")
+  } else {
+    await stubAgentLifecycle(token)
+  }
+  await spawnPolicyDenial(token)
+}
+
+async function stubAgentLifecycle(token) {
   const spawned = await containerRpc(
     "spawn_external_agent",
     {
@@ -800,7 +817,9 @@ async function externalAgentTurn() {
 
   const killed = await containerRpc("kill_external_agent", { agent_id: "smoke-agent-1" }, token)
   check(killed === null, "kill_external_agent stopped the stub")
+}
 
+async function spawnPolicyDenial(token) {
   // Policy denial is audited + rejected: an arbitrary binary must not spawn.
   const denied = await containerRpc(
     "spawn_external_agent",
