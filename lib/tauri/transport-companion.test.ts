@@ -65,7 +65,7 @@ import {
 const mockVaultSecrets = new Map<string, string>()
 jest.mock("@/lib/runtime/browser-vault", () => ({
   getActiveBrowserVault: () => ({
-    accountId: "acct_transport",
+    localAccountId: "acct_transport",
     async storeSecret(name: string, value: string) {
       mockVaultSecrets.set(name, value)
     },
