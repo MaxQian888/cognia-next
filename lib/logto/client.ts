@@ -116,6 +116,8 @@ export interface LogtoDrivers {
   waitForCode: (params: {
     redirectUri: string
     state: string
+    /** The request's PKCE verifier; always given by the sign-in flow. */
+    codeVerifier?: string
   }) => Promise<{ code: string; state: string }>
   /** Injectable fetch (defaults to global). */
   fetchImpl?: typeof fetch

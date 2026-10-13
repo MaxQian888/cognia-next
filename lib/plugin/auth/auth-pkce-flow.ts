@@ -24,8 +24,11 @@ export interface PkceFlowConfig {
   /**
    * Await the redirect and return the `code`+`state`. Implementations bind a
    * loopback server (desktop/CLI) or listen on a BroadcastChannel (web).
+   * `codeVerifier` is this request's PKCE verifier, for a driver that can
+   * recover a code the redirect never delivered by proving it holds the
+   * verifier (the phone's app-return claim, `lib/logto/capacitor-drivers.ts`).
    */
-  waitForCode: (params: { redirectUri: string; state: string }) => Promise<{
+  waitForCode: (params: { redirectUri: string; state: string; codeVerifier: string }) => Promise<{
     code: string
     state: string
   }>
@@ -72,6 +75,7 @@ export async function runPkceAuthFlow(config: PkceFlowConfig): Promise<PkceToken
   const { code, state: returnedState } = await config.waitForCode({
     redirectUri: config.redirectUri,
     state,
+    codeVerifier: verifier,
   })
   if (returnedState !== state) {
     throw new Error("OAuth state mismatch — possible CSRF; aborting")

@@ -52,6 +52,22 @@ describe("runPkceAuthFlow", () => {
     expect(init.body as string).toContain("code_verifier=")
   })
 
+  it("hands waitForCode the verifier the token exchange proves", async () => {
+    const config = baseConfig()
+    await runPkceAuthFlow(config)
+    const [params] = (config.waitForCode as jest.Mock).mock.calls[0]
+    expect(params.state).toBe("fixed-state")
+    const body = new URLSearchParams((config.fetchImpl as jest.Mock).mock.calls[0][1].body)
+    expect(params.codeVerifier).toBe(body.get("code_verifier"))
+    const opened = new URL((config.openUrl as jest.Mock).mock.calls[0][0])
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(params.codeVerifier)
+    )
+    const challenge = Buffer.from(digest).toString("base64url")
+    expect(opened.searchParams.get("code_challenge")).toBe(challenge)
+  })
+
   it("throws on a state mismatch (CSRF guard)", async () => {
     const config = baseConfig({
       waitForCode: jest.fn(async () => ({ code: "c", state: "WRONG" })),

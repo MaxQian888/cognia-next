@@ -11,7 +11,9 @@
  *
  * `openUrl` only remembers the URL. `runOAuth` opens the browser itself, and
  * opening it twice would leave one sheet under another. A request naming a
- * provider whose app is installed (Feishu) is handed to that app instead.
+ * provider whose app is installed (Feishu) is handed to that app instead, and
+ * when that app will not open the deep link back, the code is claimed from
+ * the issuer with this request's PKCE verifier (`claimAppReturn`).
  */
 
 import { isAppHandoffAvailable, openInApp } from "@/lib/capacitor/app-handoff"
@@ -35,7 +37,44 @@ export interface LogtoCapacitorDriverDeps {
   timeoutMs?: number
   fetchImpl?: typeof fetch
   /** The provider app that can run this authorize request, if any. Tests swap it. */
-  appHandoff?: (authorizeUrl: string) => AppHandoff | undefined
+  appHandoff?: (authorizeUrl: string, pickup?: AppReturnPickup) => AppHandoff | undefined
+}
+
+/** What proves this app sent the authorize request, to claim its code back. */
+export interface AppReturnPickup {
+  state: string
+  codeVerifier: string
+  fetchImpl?: typeof fetch
+}
+
+/** The issuer's app-return claim (services/identity-server/src/app-return.ts). */
+export const APP_RETURN_CLAIM_PATH = "/api/app-return/claim"
+
+/**
+ * Ask the issuer for the code it redirected to this app, proving the request
+ * is ours with its PKCE verifier. Null when there is none: not issued yet,
+ * already taken, expired, or an issuer without app returns. The code is then
+ * redeemed at the token endpoint like a delivered one, PKCE checked again.
+ */
+export async function claimAppReturn(
+  authorizeUrl: string,
+  pickup: AppReturnPickup
+): Promise<{ code: string; state: string } | null> {
+  const response = await (pickup.fetchImpl ?? fetch)(
+    new URL(APP_RETURN_CLAIM_PATH, authorizeUrl).toString(),
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ state: pickup.state, code_verifier: pickup.codeVerifier }),
+    }
+  )
+  if (!response.ok) return null
+  const body = (await response.json().catch(() => null)) as {
+    code?: unknown
+    state?: unknown
+  } | null
+  if (typeof body?.code !== "string" || !body.code || body.state !== pickup.state) return null
+  return { code: body.code, state: pickup.state }
 }
 
 /**
@@ -43,13 +82,17 @@ export interface LogtoCapacitorDriverDeps {
  * in that app, where the person is already signed in; any other runs in the
  * in-app browser. See `lib/oauth/app-handoff.ts`.
  */
-export function providerAppHandoff(authorizeUrl: string): AppHandoff | undefined {
+export function providerAppHandoff(
+  authorizeUrl: string,
+  pickup?: AppReturnPickup
+): AppHandoff | undefined {
   const handoff = appHandoffFor(authorizeUrl)
   if (!handoff) return undefined
   return {
     open: async () =>
       (await isAppHandoffAvailable(handoff.target)) && openInApp(handoff.target, handoff.url),
     onReturn: (handler) => subscribeResume(handler),
+    ...(pickup ? { recover: () => claimAppReturn(authorizeUrl, pickup) } : {}),
   }
 }
 
@@ -60,13 +103,16 @@ export function createLogtoCapacitorDrivers(deps: LogtoCapacitorDriverDeps = {})
     openUrl: (url) => {
       authorizeUrl = url
     },
-    waitForCode: async ({ state }) => {
+    waitForCode: async ({ state, codeVerifier }) => {
       if (!authorizeUrl) throw new Error("Logto authorize URL was never opened")
       const outcome = await (deps.runOAuth ?? defaultRunOAuth)({
         authorizeUrl,
         provider: "logto",
         timeoutMs: deps.timeoutMs,
-        appHandoff: (deps.appHandoff ?? providerAppHandoff)(authorizeUrl),
+        appHandoff: (deps.appHandoff ?? providerAppHandoff)(
+          authorizeUrl,
+          codeVerifier ? { state, codeVerifier, fetchImpl: deps.fetchImpl } : undefined
+        ),
         accept: (route) => {
           if (route.kind !== "logto_callback") return null
           if (route.state !== state) return "mismatch"

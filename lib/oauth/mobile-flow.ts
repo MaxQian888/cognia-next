@@ -69,7 +69,8 @@ export interface AwaitCallbackOptions {
 export interface CallbackResult {
   code: string
   state: string | null
-  via: "deeplink" | "manual"
+  /** `recovered`: claimed by the app after the other app kept the callback (`AppHandoff.recover`). */
+  via: "deeplink" | "manual" | "recovered"
 }
 
 export type CallbackOutcome =
@@ -173,6 +174,12 @@ export interface AppHandoff {
   open(): Promise<boolean>
   /** Calls `handler` each time this app comes back to the foreground. */
   onReturn(handler: () => void): Promise<() => void>
+  /**
+   * Fetch the callback the other app kept: it may refuse to open the deep
+   * link, and the person then comes back by hand. Null when there is none
+   * (yet); never throws for "not there".
+   */
+  recover?(): Promise<{ code: string; state: string | null } | null>
 }
 
 /**
@@ -248,6 +255,8 @@ export async function runOAuth(opts: RunOAuthOptions): Promise<CallbackOutcome> 
  * Wait for the callback while another app runs the authorization. There is
  * no sheet to close here: the person leaving that app and coming back is the
  * cancel, once the grace for a callback arriving with the return has passed.
+ * Each return first asks `recover` for a callback the other app kept, and the
+ * grace does not cancel while that answer is on its way.
  * Null when the app did not take the request, with the callback wait still
  * running for the browser that replaces it.
  */
@@ -260,11 +269,30 @@ async function runInApp(
   if (wait.isSettled()) return wait.outcome
   let grace: ReturnType<typeof setTimeout> | undefined
   let removeReturn: (() => void) | undefined
+  let recovering: Promise<void> | undefined
+  const recover = () => {
+    if (!handoff.recover) return Promise.resolve()
+    recovering ??= handoff
+      .recover()
+      .then(
+        (kept) => {
+          if (kept) wait.settle({ kind: "ok", result: { ...kept, via: "recovered" } })
+        },
+        () => undefined
+      )
+      .finally(() => {
+        recovering = undefined
+      })
+    return recovering
+  }
   try {
     const remove = await handoff
       .onReturn(() => {
         clearTimeout(grace)
-        grace = setTimeout(() => wait.settle({ kind: "cancelled" }), APP_RETURN_GRACE_MS)
+        void recover()
+        grace = setTimeout(() => {
+          void (recovering ?? Promise.resolve()).then(() => wait.settle({ kind: "cancelled" }))
+        }, APP_RETURN_GRACE_MS)
       })
       .catch(() => undefined)
     if (wait.isSettled()) {

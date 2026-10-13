@@ -439,6 +439,81 @@ describe("runOAuth app handoff", () => {
     expect(await pending).toMatchObject({ kind: "ok", result: { code: "code" } })
   })
 
+  it("recovers the callback the other app kept when the person comes back by hand", async () => {
+    const app = {
+      ...handoff(async () => true),
+      recover: jest.fn(async () => ({ code: "kept", state: "state" })),
+    }
+    const pending = runOAuth({
+      provider: "logto",
+      authorizeUrl: "https://login.example",
+      appHandoff: app,
+    })
+    await new Promise((done) => setTimeout(done, 0))
+    comeBack()
+    expect(await pending).toEqual({
+      kind: "ok",
+      result: { code: "kept", state: "state", via: "recovered" },
+    })
+    expect(app.recover).toHaveBeenCalledTimes(1)
+    expect(removeReturn).toHaveBeenCalledTimes(1)
+  })
+
+  it("cancels after the grace when there is nothing to recover, or recovering fails", async () => {
+    for (const recover of [async () => null, async () => Promise.reject(new Error("offline"))]) {
+      jest.useFakeTimers()
+      const app = { ...handoff(async () => true), recover: jest.fn(recover) }
+      const pending = runOAuth({
+        provider: "logto",
+        authorizeUrl: "https://login.example",
+        appHandoff: app,
+      })
+      await jest.advanceTimersByTimeAsync(0)
+      comeBack()
+      await jest.advanceTimersByTimeAsync(APP_RETURN_GRACE_MS)
+      expect(await pending).toEqual({ kind: "cancelled" })
+      expect(app.recover).toHaveBeenCalledTimes(1)
+      jest.useRealTimers()
+    }
+  })
+
+  it("lets a slow recovery answer before the grace cancels", async () => {
+    for (const kept of [{ code: "late", state: "state" }, null]) {
+      jest.useFakeTimers()
+      let answer!: (value: typeof kept) => void
+      const app = {
+        ...handoff(async () => true),
+        recover: jest.fn(
+          () =>
+            new Promise<typeof kept>((done) => {
+              answer = done
+            })
+        ),
+      }
+      const pending = runOAuth({
+        provider: "logto",
+        authorizeUrl: "https://login.example",
+        appHandoff: app,
+      })
+      let settled = false
+      void pending.then(() => {
+        settled = true
+      })
+      await jest.advanceTimersByTimeAsync(0)
+      comeBack()
+      // A second return while the first answer is out reuses it.
+      comeBack()
+      await jest.advanceTimersByTimeAsync(APP_RETURN_GRACE_MS * 3)
+      expect(settled).toBe(false)
+      answer(kept)
+      expect(await pending).toEqual(
+        kept ? { kind: "ok", result: { ...kept, via: "recovered" } } : { kind: "cancelled" }
+      )
+      expect(app.recover).toHaveBeenCalledTimes(1)
+      jest.useRealTimers()
+    }
+  })
+
   it("falls back to the in-app browser when the app does not take the request", async () => {
     browser.open.mockImplementation(async () => {
       callback(route)

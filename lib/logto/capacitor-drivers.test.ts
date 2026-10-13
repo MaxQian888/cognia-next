@@ -1,7 +1,9 @@
 /** @jest-environment jsdom */
 
 import {
+  APP_RETURN_CLAIM_PATH,
   LogtoSignInCancelled,
+  claimAppReturn,
   createLogtoCapacitorDrivers,
   providerAppHandoff,
 } from "./capacitor-drivers"
@@ -16,6 +18,11 @@ jest.mock("@/lib/capacitor/app", () => ({ subscribeResume: jest.fn() }))
 
 const nativeHandoff = jest.requireMock("@/lib/capacitor/app-handoff")
 const nativeApp = jest.requireMock("@/lib/capacitor/app")
+const jsonResponse = (body: unknown, init: ResponseInit = {}) =>
+  new Response(JSON.stringify(body), {
+    ...init,
+    headers: { "content-type": "application/json" },
+  })
 const feishuAuthorize =
   "https://id.cognia.cn/api/auth/oauth2/authorize?client_id=cognia-app&state=st&provider=feishu"
 
@@ -91,11 +98,21 @@ describe("createLogtoCapacitorDrivers", () => {
       kind: "ok" as const,
       result: { code: "c", state: "st", via: "deeplink" as const },
     }))
-    const drivers = createLogtoCapacitorDrivers({ runOAuth, appHandoff })
+    const fetchImpl = jest.fn() as unknown as typeof fetch
+    const drivers = createLogtoCapacitorDrivers({ runOAuth, appHandoff, fetchImpl })
+    await drivers.openUrl(feishuAuthorize)
+    await drivers.waitForCode({ state: "st", redirectUri: "x", codeVerifier: "v" })
+    expect(appHandoff).toHaveBeenCalledWith(feishuAuthorize, {
+      state: "st",
+      codeVerifier: "v",
+      fetchImpl,
+    })
+    expect(runOAuth).toHaveBeenCalledWith(expect.objectContaining({ appHandoff: handoff }))
+
+    // Without a verifier there is nothing to claim with.
     await drivers.openUrl(feishuAuthorize)
     await drivers.waitForCode({ state: "st", redirectUri: "x" })
-    expect(appHandoff).toHaveBeenCalledWith(feishuAuthorize)
-    expect(runOAuth).toHaveBeenCalledWith(expect.objectContaining({ appHandoff: handoff }))
+    expect(appHandoff).toHaveBeenLastCalledWith(feishuAuthorize, undefined)
   })
 
   it("refuses to wait for a URL that was never opened", async () => {
@@ -130,11 +147,68 @@ describe("providerAppHandoff", () => {
     expect(nativeHandoff.openInApp).not.toHaveBeenCalled()
   })
 
+  it("recovers through the issuer's claim only when it can prove the request", async () => {
+    expect(providerAppHandoff(feishuAuthorize)!.recover).toBeUndefined()
+    const fetchImpl = jest.fn(async () =>
+      jsonResponse({ code: "kept", state: "st" })
+    ) as unknown as typeof fetch
+    const handoff = providerAppHandoff(feishuAuthorize, {
+      state: "st",
+      codeVerifier: "v",
+      fetchImpl,
+    })!
+    await expect(handoff.recover!()).resolves.toEqual({ code: "kept", state: "st" })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      `https://id.cognia.cn${APP_RETURN_CLAIM_PATH}`,
+      expect.objectContaining({ method: "POST" })
+    )
+  })
+
   it("treats this app's resume as the return", async () => {
     const remove = jest.fn()
     nativeApp.subscribeResume.mockResolvedValue(remove)
     const handler = jest.fn()
     await expect(providerAppHandoff(feishuAuthorize)!.onReturn(handler)).resolves.toBe(remove)
     expect(nativeApp.subscribeResume).toHaveBeenCalledWith(handler)
+  })
+})
+
+describe("claimAppReturn", () => {
+  const pickup = (response: Response | Promise<never>) => {
+    const fetchImpl = jest.fn(async () => response) as unknown as jest.Mock
+    return {
+      fetchImpl,
+      pickup: { state: "st", codeVerifier: "verifier", fetchImpl: fetchImpl as typeof fetch },
+    }
+  }
+
+  it("posts the state and verifier to the issuer's claim and returns the code", async () => {
+    const { fetchImpl, pickup: claim } = pickup(jsonResponse({ code: "kept", state: "st" }))
+    await expect(claimAppReturn(feishuAuthorize, claim)).resolves.toEqual({
+      code: "kept",
+      state: "st",
+    })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe("https://id.cognia.cn/api/app-return/claim")
+    expect(init.headers).toMatchObject({ "content-type": "application/json" })
+    expect(JSON.parse(init.body)).toEqual({ state: "st", code_verifier: "verifier" })
+  })
+
+  it("has nothing for a refused claim or an answer that is not this request's", async () => {
+    for (const response of [
+      jsonResponse({ error: "not_found" }, { status: 404 }),
+      jsonResponse({ error: "x" }, { status: 503 }),
+      jsonResponse({ code: "kept", state: "someone-else" }),
+      jsonResponse({ code: "", state: "st" }),
+      jsonResponse({ state: "st" }),
+      new Response("not json"),
+    ]) {
+      await expect(claimAppReturn(feishuAuthorize, pickup(response).pickup)).resolves.toBeNull()
+    }
+  })
+
+  it("lets a network failure surface to the flow, which treats it as nothing kept", async () => {
+    const { pickup: claim } = pickup(Promise.reject(new Error("offline")))
+    await expect(claimAppReturn(feishuAuthorize, claim)).rejects.toThrow("offline")
   })
 })
