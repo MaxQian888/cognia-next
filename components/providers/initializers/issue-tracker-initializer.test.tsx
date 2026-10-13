@@ -214,6 +214,18 @@ describe("IssueTrackerInitializer — the change feed (ADR-0206)", () => {
     expect(mockInstallCollabFeed).not.toHaveBeenCalled()
     expect(mockInstallNotificationsSync).not.toHaveBeenCalled()
   })
+
+  it("moves the shared runtime to the newly unlocked account", () => {
+    unlockedAccountId = "acct-before"
+    const { rerender, unmount } = render(<IssueTrackerInitializer />)
+    unlockedAccountId = "acct-after"
+    rerender(<IssueTrackerInitializer />)
+    expect(mockDetachFeed).toHaveBeenCalledTimes(1)
+    expect(mockDetachNotifications).toHaveBeenCalledTimes(1)
+    expect(mockInstallCollabFeed).toHaveBeenLastCalledWith("acct-after")
+    expect(mockInstallNotificationsSync).toHaveBeenLastCalledWith("acct-after")
+    unmount()
+  })
 })
 
 describe("IssueTrackerInitializer — collaboration notifications (ADR-0207)", () => {

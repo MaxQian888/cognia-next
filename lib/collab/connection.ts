@@ -111,7 +111,7 @@ export function saveCollabConnection(
     ...(webOrigin ? { webOrigin } : {}),
   }
   store(deps)?.setItem(connectionKey(localAccountId), JSON.stringify(normalized))
-  if (!deps.local && typeof window !== "undefined") {
+  if (!deps.local && typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
     window.dispatchEvent(new Event(CONNECTION_CHANGED_EVENT))
   }
   return normalized
@@ -130,13 +130,14 @@ export function forgetCollabConnection(
   deps: CollabConnectionDeps = {}
 ): void {
   store(deps)?.removeItem(connectionKey(localAccountId))
-  if (!deps.local && typeof window !== "undefined") {
+  if (!deps.local && typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
     window.dispatchEvent(new Event(CONNECTION_CHANGED_EVENT))
   }
 }
 
 export function subscribeCollabConnection(listener: () => void): () => void {
-  if (typeof window === "undefined") return () => {}
+  if (typeof window === "undefined" || typeof window.addEventListener !== "function")
+    return () => {}
   window.addEventListener(CONNECTION_CHANGED_EVENT, listener)
   return () => window.removeEventListener(CONNECTION_CHANGED_EVENT, listener)
 }

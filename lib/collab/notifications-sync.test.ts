@@ -734,4 +734,22 @@ describe("installCollabNotificationsSync", () => {
     expect(h.delivered.map((input) => input.sourceRef?.id)).toEqual(["ntf_1"])
     stop()
   })
+
+  it("keeps its boot pull working when window is a storage shim without DOM events", async () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "window")
+    Object.defineProperty(globalThis, "window", { configurable: true, value: globalThis })
+    try {
+      const h = harness("acct-window-shim")
+      const stop = installCollabNotificationsSync("acct-window-shim", {
+        ...h.deps,
+        installReadPropagation: () => () => undefined,
+      })
+      await settle()
+      expect(h.server.client.identity).toHaveBeenCalledTimes(1)
+      stop()
+    } finally {
+      if (original) Object.defineProperty(globalThis, "window", original)
+      else Reflect.deleteProperty(globalThis, "window")
+    }
+  })
 })

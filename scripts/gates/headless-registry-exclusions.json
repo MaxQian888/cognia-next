@@ -15,8 +15,8 @@
       "reason": "The Codex half of the same decision as anthropic-usage-scheduler-initializer: it resolves the active account through subscription_get_active, which is target:client / internal-transport and local-only in the dispositions ledger. The brain's Codex credentials come from the server secret store via claude_set_*, not from the interactive desktop vault this loop probes."
     },
     "components/providers/initializers/deferred-boot-initializers-impl.tsx": {
-      "symbols": ["startRendererWorkOutbox"],
-      "reason": "The renderer half of ADR-0125 durable work submission: it drains the browser-local queue of work this client originated. The brain is the receiving authority, not a submitter, and runs the server half — registered as `work-submission-outbox` in lib/headless/runtimes/initializers.ts. Running both in one process would have the brain drain its own inbox back into itself."
+      "symbols": ["startRendererWorkOutbox", "installDefaultPhantomRunGuard"],
+      "reason": "The renderer half of ADR-0125 durable work submission: it drains the browser-local queue of work this client originated. The brain is the receiving authority, not a submitter, and runs the server half — registered as `work-submission-outbox` in lib/headless/runtimes/initializers.ts. Running both in one process would have the brain drain its own inbox back into itself. installDefaultPhantomRunGuard repairs renderer chat-store projections using this client's HostState replica and mobile outbox (lib/chat/phantom-run-runtime.ts). Those are not the authoritative host turn state. The brain already starts HostStateService through desktop-message-source / desktop-write-source; that service acquires the host lease and settles orphaned turns before serving. Installing the renderer projection repair there would add a second lifecycle writer using client evidence instead of the host authority."
     },
     "components/providers/initializers/dock-pages-lifecycle-initializer.tsx": {
       "symbols": ["startDockPageSync", "subscribeDockPageLifecycle"],
@@ -24,7 +24,7 @@
     },
     "components/providers/initializers/issue-tracker-initializer.tsx": {
       "symbols": ["installCollabRefreshScheduler", "installIssueNotificationCommands"],
-      "reason": "Registers the `issue.open` notification command, whose whole body is a Next App Router `router.push`. Navigation is an act on a UI surface the brain does not have; the paired device that RECEIVES the notification installs this command in its own renderer. The other eight effects in this initializer are brain work and are registered as `issue-tracker` in lib/headless/runtimes/issue-tracker.ts. installCollabRefreshScheduler is the BROWSER half of the collab pull: it gates every tick on document.visibilityState, re-runs on window focus, and returns a no-op when either global is missing, so registering it in a brain would add a runtime that starts cleanly and refreshes nothing. The brain half is registered as `collab-refresh` in lib/headless/runtimes/collab-refresh.ts and runs the same host-neutral requestCollabRefresh on the same collabRefreshDelay backoff, without a visibility question it has no way to ask."
+      "reason": "Registers the `issue.open` notification command, whose whole body is a Next App Router `router.push`. Navigation is an act on a UI surface the brain does not have; the paired device that RECEIVES the notification installs this command in its own renderer. Host-neutral issue tracking is registered as `issue-tracker` in lib/headless/runtimes/issue-tracker.ts; the change feed and notification sync share lib/headless/runtimes/collab-runtime.ts across both hosts. installCollabRefreshScheduler is the BROWSER half of the collab pull: it gates every tick on document.visibilityState, re-runs on window focus, and returns a no-op when either global is missing, so registering it in a brain would add a runtime that starts cleanly and refreshes nothing. The brain half is registered as `collab-refresh` in lib/headless/runtimes/collab-refresh.ts and runs the same host-neutral requestCollabRefresh on the same collabRefreshDelay backoff, without a visibility question it has no way to ask."
     },
     "components/providers/initializers/managed-ide-broker-initializer.tsx": {
       "symbols": ["attachManagedIdeBroker"],
@@ -81,6 +81,18 @@
     "components/providers/initializers/shared-chat-lifecycle-initializer.tsx": {
       "symbols": ["subscribeCollabConnection"],
       "reason": "Owns the paired renderer client: subscriptions track its visible/open chat panes, local Dexie cache, window focus and document visibility, and restart when that client changes its paired endpoint. The authoritative collab service owns shared sessions and run queues; a headless brain has no pane selection or browser endpoint to mirror and must not duplicate the renderer stream owner."
+    },
+    "components/providers/initializers/media-generation-initializer.tsx": {
+      "symbols": ["startVideoJobReconciler"],
+      "reason": "ADR-0205 deliberately separates the renderer's durable Dexie video queue from the caller-driven CLI/headless API. videos.get / videos.content pass an explicit provider snapshot to the in-memory engine (lib/ai/operations/handlers/video-job-bridge.ts); the default VideoJobHost.getSnapshot throws because this host has no implicit provider settings. This renderer sweeper calls engine.poll without a snapshot, which would settle generating headless jobs as failed, not advance them. The renderer installs its own snapshot, asset and Dexie adapters before sweeping; the brain must retain the explicit-request polling contract recorded in lib/headless/runtimes/index.ts."
+    },
+    "components/providers/initializers/renderer-perf-initializer.tsx": {
+      "symbols": ["subscribePerformanceSecurityBarrier", "subscribeRuntimeTargetContext"],
+      "reason": "These subscriptions scope the document's RendererPerformanceCollector and browser OperationPerformanceRecorder to the renderer's active routing target and synchronously clear its measurements on account lock/switch. They own WebView sampling and browser-local performance storage, not host execution or security policy. A brain has no document or renderer routing surface to sample or clear; its process metrics are registered separately as performance-runtime."
+    },
+    "components/providers/initializers/update-center-initializer.tsx": {
+      "symbols": ["subscribeFlexibleUpdateDownloaded"],
+      "reason": "This effect is guarded by native Android and Google Play Services availability. It listens to the Capacitor/Play in-app-update downloaded event and offers a Sonner toast opening the consented Update Center action. A headless host has no Android activity, Play download or renderer toast; ADR-0224 host updates are owned by cognia-server's verified catalog and idle-time updater, not this mobile app subscription."
     }
   }
 }

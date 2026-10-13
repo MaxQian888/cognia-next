@@ -19,6 +19,43 @@ import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-con
 import { durabilityRoot, openBackend } from "./persistence/backend"
 import { BRIDGE_PROTOCOL_VERSION } from "./protocol"
 import { projectWorkerPlacement, resolveServeCollabConfig, serveCommand } from "./serve-command"
+import type { HeadlessRuntimeContext } from "@/lib/headless/types"
+
+const mockBootOrder: string[] = []
+const mockCollabAdapter = {
+  resolve: jest.fn().mockResolvedValue(null),
+  refresh: jest.fn().mockResolvedValue(null),
+  refreshAll: jest.fn().mockResolvedValue(null),
+  local: { getItem: jest.fn(), setItem: jest.fn(), removeItem: jest.fn() },
+}
+jest.mock("./durability", () => {
+  const actual = jest.requireActual("./durability")
+  return {
+    ...actual,
+    startDurability: async (...args: unknown[]) => {
+      const result = await actual.startDurability(...args)
+      mockBootOrder.push("durability-restored")
+      return result
+    },
+  }
+})
+jest.mock("./collab-reader", () => ({
+  startHeadlessCollabReader: async () => {
+    mockBootOrder.push("collab-activated")
+    return { status: "active", runtime: mockCollabAdapter, stop: () => undefined }
+  },
+}))
+jest.mock("@/lib/headless/bootstrap", () => {
+  const actual = jest.requireActual("@/lib/headless/bootstrap")
+  return {
+    ...actual,
+    bootstrapHeadlessRuntimes: (context: HeadlessRuntimeContext) => {
+      expect(context.collab).toBe(mockCollabAdapter)
+      mockBootOrder.push("runtimes-started")
+      return actual.bootstrapHeadlessRuntimes(context)
+    },
+  }
+})
 
 type Listener = (event: { data?: unknown }) => void
 
@@ -207,6 +244,7 @@ describe("serveCommand", () => {
   })
 
   it("boots, answers a sync-pull from Dexie, and flushes on shutdown", async () => {
+    mockBootOrder.length = 0
     __resetCliDbForTesting()
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-serve-e2e-"))
     const controlPlane = await startControlPlane()
@@ -265,6 +303,8 @@ describe("serveCommand", () => {
           // Account sync on, with a CLI home that holds no sign-in.
           COGNIA_ACCOUNT_SYNC: "1",
           COGNIA_HOME: path.join(home, "cli-home"),
+          COGNIA_COLLAB_URL: "https://collab.test",
+          COGNIA_COLLAB_ORG_ID: "org_acme",
         }),
         wsFactory: (url) => new FakeServerSocket(url),
         shutdown,
@@ -275,6 +315,7 @@ describe("serveCommand", () => {
     }
 
     expect(code).toBe(0)
+    expect(mockBootOrder).toEqual(["durability-restored", "collab-activated", "runtimes-started"])
     const joined = out.logs.join("")
     expect(joined).toContain("bridge connected")
     expect(joined).toContain("desktop-sync-source")

@@ -6,8 +6,7 @@ import { useRouter } from "next/navigation"
 import { detectPlatform } from "@/lib/platform/detect"
 import { installPackWarningRefreshWiring } from "@/lib/plugin/character-pack/warning-refresh-wiring"
 import { installPluginRuntimeLogBridge } from "@/lib/plugin/devtools/plugin-log-bridge"
-import { installExternalAgentConfigHookSource } from "@/lib/plugin/messaging/external-agent-config-hook-source"
-import { installGlanceVisibilityHookSource } from "@/lib/plugin/messaging/glance-visibility-hook-source"
+import { startPluginHookSources } from "@/lib/headless/runtimes/plugin-runtime"
 import { loggers } from "@cognia/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 import { disposeMicrovmAdapters } from "@/lib/sandbox/microvm-bridge"
@@ -106,21 +105,10 @@ export function PluginRuntimeInitializer({
     return installPluginRuntimeLogBridge()
   }, [shouldRun])
 
-  // `onExternalAgentConfigChange` is fired from one store subscription rather
-  // than from every writer (Settings, the phone, the CLI, `ctx.externalAgents`),
-  // so a writer can never forget to fire it (ADR-0216).
+  // The renderer and brain own the same external-agent and glance hook feeds.
   useEffect(() => {
     if (!shouldRun) return
-    return installExternalAgentConfigHookSource()
-  }, [shouldRun])
-
-  // `onGlanceVisibilityChange`, the hook twin of `ctx.glance.onVisibilityChange`
-  // for Python plugins, is reconciled from the glance module registry in one
-  // place, so a plugin hears its modules' current state once it listens
-  // (ADR-0225 §6).
-  useEffect(() => {
-    if (!shouldRun) return
-    return installGlanceVisibilityHookSource()
+    return startPluginHookSources()
   }, [shouldRun])
 
   useEffect(() => {

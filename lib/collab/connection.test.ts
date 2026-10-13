@@ -90,4 +90,17 @@ describe("collab connection", () => {
     saveCollabConnection("acct_a", { baseUrl: "https://b.example" })
     expect(listener).toHaveBeenCalledTimes(2)
   })
+
+  it("saves connection state when the brain window shim has no dispatchEvent", () => {
+    const original = window.dispatchEvent
+    Object.defineProperty(window, "dispatchEvent", { configurable: true, value: undefined })
+    try {
+      saveCollabConnection("brain", { baseUrl: "https://collab.test" })
+      expect(loadCollabConnection("brain")?.baseUrl).toBe("https://collab.test")
+      forgetCollabConnection("brain")
+      expect(loadCollabConnection("brain")).toBeNull()
+    } finally {
+      Object.defineProperty(window, "dispatchEvent", { configurable: true, value: original })
+    }
+  })
 })

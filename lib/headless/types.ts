@@ -84,6 +84,8 @@ export interface HeadlessRuntimeContext {
   backupFilesystem?: import("@/lib/data/backup-scheduler").BackupFilesystem
   /** Node plugin host adapter; native disk lifecycle stays in cognia-server. */
   pluginRuntime?: HeadlessPluginRuntimeAdapter
+  /** Collaboration uses the CLI's own Logto session, never the desktop keyring. */
+  collab?: import("./runtimes/collab-runtime").HeadlessCollabAdapter
   /**
    * Account sync for this host (ADR-0215 phase 3a): its own sign-in and the
    * key store the `cognia-agent account-sync` commands write. Absent when the

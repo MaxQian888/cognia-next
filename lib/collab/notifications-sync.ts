@@ -877,7 +877,12 @@ export function installCollabNotificationsSync(
   localAccountId: string,
   deps: InstallCollabNotificationsSyncDeps = {}
 ): () => void {
-  const windowRef = deps.window ?? (typeof window === "undefined" ? undefined : window)
+  // The brain's IndexedDB shim exposes window without DOM event methods.
+  const windowRef =
+    deps.window ??
+    (typeof window === "undefined" || typeof window.addEventListener !== "function"
+      ? undefined
+      : window)
   const documentRef = deps.document ?? (typeof document === "undefined" ? undefined : document)
   let stopped = false
   // The server's id for this person, learned from the first successful pull.

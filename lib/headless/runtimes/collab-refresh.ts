@@ -23,6 +23,7 @@ import {
   getCollabRefreshState,
   requestCollabRefresh,
 } from "@/lib/collab/refresh-scheduler"
+import { pullCollabNotifications } from "@/lib/collab/notifications-sync"
 import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
@@ -50,7 +51,22 @@ registerHeadlessRuntime({
 
     const run = () => {
       if (stopped) return
-      void requestCollabRefresh(ctx.localAccountId)
+      const adapter = ctx.collab
+      const refresh = adapter
+        ? async () => {
+            // Notification reads need a fallback even when the server has no
+            // feed; a windowless host cannot rely on focus or online events.
+            await pullCollabNotifications(ctx.localAccountId, {
+              resolve: adapter.resolve,
+              local: adapter.local,
+            })
+            // Keep the brain's periodic pull even while the feed is live:
+            // changes between its boot pull and socket handshake produced no
+            // frame, and this host has no focus event to repair that gap.
+            await requestCollabRefresh(ctx.localAccountId, adapter.refreshAll)
+          }
+        : () => requestCollabRefresh(ctx.localAccountId)
+      void refresh()
         .catch(() => {
           // `requestCollabRefresh` already records the failure and swallows it.
           // This catch exists only so an unexpected throw cannot kill the loop.

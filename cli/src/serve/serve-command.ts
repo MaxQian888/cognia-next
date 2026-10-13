@@ -132,6 +132,22 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   await ensureHeadlessAccount(localAccountId)
   out.write(`serve: account ${localAccountId} unlocked\n`)
 
+  // ── 3. Durability ──────────────────────────────────────────────────────────
+  const durability = await startDurability({
+    home,
+    accountId: localAccountId,
+    debounceMs: flushDebounce,
+    proc,
+    env,
+    onLegacyImport: (result) => {
+      if (result.kind === "none") return
+      out.write(
+        `serve: imported ${result.tables} tables from the previous snapshot store; it was left in place as a rollback source\n`
+      )
+    },
+  })
+  out.write(`serve: durability ${durability.backend}\n`)
+
   // Optional read-only collaboration plane. Credentials are loaded from the
   // CLI's existing 0600 Logto session; no bearer token is accepted in env.
   const cliHome = resolveHome(env, os.homedir())
@@ -150,22 +166,6 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   if (collabReader?.status === "not-signed-in") {
     out.write("serve: collaboration configured; run `cognia-agent logto login` to activate\n")
   }
-
-  // ── 3. Durability ──────────────────────────────────────────────────────────
-  const durability = await startDurability({
-    home,
-    accountId: localAccountId,
-    debounceMs: flushDebounce,
-    proc,
-    env,
-    onLegacyImport: (result) => {
-      if (result.kind === "none") return
-      out.write(
-        `serve: imported ${result.tables} tables from the previous snapshot store; it was left in place as a rollback source\n`
-      )
-    },
-  })
-  out.write(`serve: durability ${durability.backend}\n`)
 
   // ── 4. Control plane: CompanionTransport with the service token ───────────
   let currentToken = serviceToken
@@ -247,6 +247,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     notifyDbWrite: durability.notifyDbWrite,
     backupFilesystem,
     ...(accountSync ? { accountSync } : {}),
+    ...(collabReader?.runtime ? { collab: collabReader.runtime } : {}),
     pluginRuntime: createNodePluginRuntimeAdapter(),
     resolveMessage,
     log: (level, message) => {

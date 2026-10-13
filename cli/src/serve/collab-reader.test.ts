@@ -1,7 +1,7 @@
 import { LogtoRefreshError, type LogtoSession } from "@/lib/logto/client"
 
 import type { LogtoSessionFs } from "../config/logto-session"
-import { startHeadlessCollabReader } from "./collab-reader"
+import { createCollabCursorStorage, startHeadlessCollabReader } from "./collab-reader"
 
 function sessionToken(sub: string): string {
   const payload = Buffer.from(JSON.stringify({ sub })).toString("base64url")
@@ -47,24 +47,23 @@ it("stays inactive without the existing 0600 Logto session", async () => {
   expect(reader.status).toBe("not-signed-in")
 })
 
-it("binds the server identity and installs read-only polling", async () => {
+it("binds the server identity and hands its own credentials to the registered runtimes", async () => {
   const bind = jest.fn().mockResolvedValue({})
-  const timeout = jest.fn().mockReturnValue({ unref: jest.fn() })
+  const session = sessionFs({
+    issuer: "https://issuer.test/oidc",
+    clientId: "brain",
+    resource: "collab",
+    accessToken: sessionToken("logto-subject"),
+    scopes: [],
+  })
   const reader = await startHeadlessCollabReader({
     localAccountId: "acct-1",
     cliHome: "/home",
     config: { url: "https://collab.test", orgId: ORG },
     deps: {
-      sessionFs: sessionFs({
-        issuer: "https://issuer.test/oidc",
-        clientId: "brain",
-        resource: "collab",
-        accessToken: sessionToken("logto-subject"),
-        scopes: [],
-      }),
+      sessionFs: session,
       fetchImpl,
       registry: { bind, get: jest.fn().mockResolvedValue({ orgId: ORG }) } as never,
-      setTimeout: timeout as never,
     },
   })
   expect(reader.status).toBe("active")
@@ -76,8 +75,48 @@ it("binds the server identity and installs read-only polling", async () => {
       logtoSubject: "logto-subject",
     })
   )
-  expect(timeout).toHaveBeenCalled()
+  const resolved = await reader.runtime!.resolve("acct-1")
+  expect(resolved?.orgId).toBe(ORG)
+  expect(resolved?.client.baseUrl).toBe("https://collab.test")
+  expect(await reader.runtime!.resolve("another-account")).toBeNull()
+  session.remove("/home/logto.json")
+  expect(await reader.runtime!.resolve("acct-1")).toBeNull()
   reader.stop()
+})
+
+describe("durable collaboration notification cursors", () => {
+  function files() {
+    const values = new Map<string, string>()
+    return {
+      values,
+      fs: {
+        readFile: (file: string) => values.get(file) ?? null,
+        writeFileAtomic: (file: string, value: string) => {
+          values.set(file, value)
+        },
+      },
+    }
+  }
+
+  it("survives adapter recreation and isolates profiles", () => {
+    const { fs } = files()
+    const first = createCollabCursorStorage("/home", "acct-1", fs)
+    first.setItem("scope", JSON.stringify({ cursor: { afterSeq: 7 }, pendingReadIds: ["n1"] }))
+    const reopened = createCollabCursorStorage("/home", "acct-1", fs)
+    expect(reopened.getItem("scope")).toBe(first.getItem("scope"))
+    expect(createCollabCursorStorage("/home", "acct-2", fs).getItem("scope")).toBeNull()
+    reopened.removeItem("scope")
+    expect(first.getItem("scope")).toBeNull()
+  })
+
+  it.each(["{broken", "[]", '{"scope":123}'])("recovers %s as a quiet first pull", (raw) => {
+    const { fs, values } = files()
+    values.set("/home/collab-notifications/acct-1.json", raw)
+    const local = createCollabCursorStorage("/home", "acct-1", fs)
+    expect(local.getItem("scope")).toBeNull()
+    local.setItem("scope", "recovered")
+    expect(local.getItem("scope")).toBe("recovered")
+  })
 })
 
 describe("a refresh that is refused vs one that merely failed", () => {

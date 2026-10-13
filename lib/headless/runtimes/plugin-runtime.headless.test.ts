@@ -34,6 +34,18 @@ jest.mock("@/lib/plugin/devtools/plugin-log-bridge", () => ({
   installPluginRuntimeLogBridge: () => mockInstallPluginRuntimeLogBridge(),
 }))
 
+jest.mock("@/lib/plugin/messaging/external-agent-config-hook-source", () => ({
+  installExternalAgentConfigHookSource: jest.fn(),
+}))
+jest.mock("@/lib/plugin/messaging/glance-visibility-hook-source", () => ({
+  installGlanceVisibilityHookSource: jest.fn(),
+}))
+import { installExternalAgentConfigHookSource } from "@/lib/plugin/messaging/external-agent-config-hook-source"
+import { installGlanceVisibilityHookSource } from "@/lib/plugin/messaging/glance-visibility-hook-source"
+
+const mockDisposeExternalAgentHooks = jest.fn()
+const mockDisposeGlanceHooks = jest.fn()
+
 const mockEnsureDefaultCogset = jest.fn(async () => true)
 const mockStopWriteThrough = jest.fn()
 const mockStopFollower = jest.fn()
@@ -54,6 +66,8 @@ beforeAll(async () => {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  jest.mocked(installExternalAgentConfigHookSource).mockReturnValue(mockDisposeExternalAgentHooks)
+  jest.mocked(installGlanceVisibilityHookSource).mockReturnValue(mockDisposeGlanceHooks)
 })
 
 function context(pluginRuntime?: HeadlessRuntimeContext["pluginRuntime"]) {
@@ -138,6 +152,54 @@ it("reports the runtime as failed when the Node adapter is absent", async () => 
   const result = await bootstrapHeadlessRuntimes(ctx)
   expect(result.started).toEqual([])
   expect(result.failed[0]?.name).toBe("plugin-runtime")
+})
+
+describe("shared plugin hook sources", () => {
+  it("observes startup changes without a window and releases both feeds on stop", async () => {
+    expect(typeof window).toBe("undefined")
+    mockSubscribe.mockReturnValue(() => undefined)
+    const runtime = {
+      start: jest.fn(async () => {
+        expect(installExternalAgentConfigHookSource).toHaveBeenCalledTimes(1)
+        expect(installGlanceVisibilityHookSource).toHaveBeenCalledTimes(1)
+      }),
+      reconcile: jest.fn(async () => undefined),
+    }
+    const result = await bootstrapHeadlessRuntimes(context(runtime).ctx)
+    expect(result.failed).toEqual([])
+    expect(mockDisposeExternalAgentHooks).not.toHaveBeenCalled()
+    expect(mockDisposeGlanceHooks).not.toHaveBeenCalled()
+    await result.stop()
+    expect(mockDisposeExternalAgentHooks).toHaveBeenCalledTimes(1)
+    expect(mockDisposeGlanceHooks).toHaveBeenCalledTimes(1)
+  })
+
+  it("releases both feeds when the plugin adapter fails to start", async () => {
+    const runtime = {
+      start: jest.fn(async () => {
+        throw new Error("boot failed")
+      }),
+      reconcile: jest.fn(async () => undefined),
+    }
+    const result = await bootstrapHeadlessRuntimes(context(runtime).ctx)
+    expect(result.failed[0]?.name).toBe("plugin-runtime")
+    expect(mockDisposeExternalAgentHooks).toHaveBeenCalledTimes(1)
+    expect(mockDisposeGlanceHooks).toHaveBeenCalledTimes(1)
+  })
+
+  it("rolls back the first feed if the second cannot be installed", async () => {
+    jest.mocked(installGlanceVisibilityHookSource).mockImplementationOnce(() => {
+      throw new Error("glance hook unavailable")
+    })
+    const runtime = {
+      start: jest.fn(async () => undefined),
+      reconcile: jest.fn(async () => undefined),
+    }
+    const result = await bootstrapHeadlessRuntimes(context(runtime).ctx)
+    expect(result.failed[0]?.name).toBe("plugin-runtime")
+    expect(mockDisposeExternalAgentHooks).toHaveBeenCalledTimes(1)
+    expect(runtime.start).not.toHaveBeenCalled()
+  })
 })
 
 describe("character-pack warning refresh", () => {

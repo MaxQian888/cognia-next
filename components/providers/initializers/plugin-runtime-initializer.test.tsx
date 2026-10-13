@@ -239,6 +239,22 @@ describe("PluginRuntimeInitializer", () => {
     expect(mockInstallGlanceVisibilityHookSource).not.toHaveBeenCalled()
   })
 
+  it("releases and reinstalls both shared hook feeds on a capability change", () => {
+    const { rerender, unmount } = render(<PluginRuntimeInitializer />)
+    mockPluginRuntimeRequested = false
+    rerender(<PluginRuntimeInitializer />)
+    expect(mockExternalAgentHookTeardown).toHaveBeenCalledTimes(1)
+    expect(mockGlanceHookTeardown).toHaveBeenCalledTimes(1)
+
+    mockPluginRuntimeRequested = true
+    rerender(<PluginRuntimeInitializer />)
+    expect(mockInstallExternalAgentConfigHookSource).toHaveBeenCalledTimes(2)
+    expect(mockInstallGlanceVisibilityHookSource).toHaveBeenCalledTimes(2)
+    unmount()
+    expect(mockExternalAgentHookTeardown).toHaveBeenCalledTimes(2)
+    expect(mockGlanceHookTeardown).toHaveBeenCalledTimes(2)
+  })
+
   it("reinstalls character-pack warning refresh wiring after a StrictMode replay", () => {
     mockDetectPlatform.mockReturnValue("web")
     mockResolveBootstrap.mockReturnValue({

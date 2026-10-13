@@ -44,7 +44,8 @@
  * - `backup-scheduler` — the shared encrypted local/WebDAV scheduler with an
  *   injected host filesystem and the server secret-store auto-key (T-A6).
  * - `plugin-runtime` — boots the canonical Node PluginManager and serially
- *   reconciles native install/restore/uninstall events from cognia-server.
+ *   reconciles native install/restore/uninstall events from cognia-server;
+ *   installs the shared external-agent config and glance visibility hooks.
  * - `workflow-trigger-bridge` — subscribes to `workflow:trigger` on the brain's
  *   events plane so the Rust cron daemon / webhook router in cognia-server
  *   actually start workflow runs (host-neutral `installTriggerBridge`).
@@ -61,6 +62,8 @@
  *   shared backoff. The desktop's `installCollabRefreshScheduler` is excluded
  *   because it gates on `document.visibilityState`, so in a brain it would
  *   register and refresh nothing. Same body, no visibility question.
+ * - `collab-runtime` — the shared change feed and notification synchronization,
+ *   using the brain's file-backed session and durable notification cursors.
  * - `plan-notification` — the ADR-0045 `plan.respond` notification command;
  *   approve/reject/start mutate the brain-side plan runtime, and an orchestrated
  *   plan starts running from here.
@@ -107,7 +110,12 @@
  *   `setInterval` sweeper over the Dexie job table, elected per window with
  *   Web Locks. Headless and CLI hosts keep video jobs in the engine's
  *   in-memory store and advance them only when a caller polls
- *   `videos.get` / `videos.content`, so there is nothing to sweep.
+ *   `videos.get` / `videos.content` with an explicit provider snapshot. The
+ *   default host cannot resolve one for a background poll; sweeping it would
+ *   fail generating jobs rather than recover the renderer's durable queue.
+ * - `phantom-run-guard` — repairs renderer chat-store projections using the
+ *   client's HostState replica and outbound queue. The brain's HostStateService
+ *   already recovers authoritative turns under its host lease.
  * - `storage-persistence` — `navigator.storage.persist()` is a browser API.
  * - `window-title`, `context-keys`, `appearance` — WebView chrome/UI state.
  * - `window-liveness-initializers` — reveals and heartbeats the Tauri main
@@ -187,6 +195,7 @@ import "./performance-runtime"
 import "./workflow-trigger-bridge"
 import "./issue-tracker"
 import "./collab-refresh"
+import "./collab-runtime"
 import "./plan-notification"
 import "./room-runner"
 import "./sftp-transfer-pump"

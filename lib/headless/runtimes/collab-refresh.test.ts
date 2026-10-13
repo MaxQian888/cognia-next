@@ -4,9 +4,14 @@ import type { HeadlessRuntimeContext } from "../types"
 const requestCollabRefreshMock = jest.fn()
 const collabRefreshDelayMock = jest.fn()
 const getCollabRefreshStateMock = jest.fn()
+const pullCollabNotificationsMock = jest.fn()
+
+jest.mock("@/lib/collab/notifications-sync", () => ({
+  pullCollabNotifications: (...args: unknown[]) => pullCollabNotificationsMock(...args),
+}))
 
 jest.mock("@/lib/collab/refresh-scheduler", () => ({
-  requestCollabRefresh: (accountId: string) => requestCollabRefreshMock(accountId),
+  requestCollabRefresh: (...args: unknown[]) => requestCollabRefreshMock(...args),
   collabRefreshDelay: (failures: number) => collabRefreshDelayMock(failures),
   getCollabRefreshState: (accountId: string) => getCollabRefreshStateMock(accountId),
 }))
@@ -40,6 +45,7 @@ beforeEach(() => {
   requestCollabRefreshMock.mockReset().mockResolvedValue({ status: "refreshed" })
   collabRefreshDelayMock.mockReset().mockReturnValue(60_000)
   getCollabRefreshStateMock.mockReset().mockReturnValue({ failures: 0 })
+  pullCollabNotificationsMock.mockReset().mockResolvedValue({ status: "skipped" })
 })
 
 afterEach(() => {
@@ -110,4 +116,28 @@ it("does not start on a host other than the brain", async () => {
   const result = await bootstrap({ ...makeContext(), host: "other" as "brain" })
   expect(result.started).not.toContain("collab-refresh")
   await result.stop()
+})
+
+it("polls notifications and mirrors with the host adapter until teardown", async () => {
+  const bootstrap = await loadFresh()
+  const context = makeContext()
+  context.collab = {
+    resolve: jest.fn().mockResolvedValue(null),
+    refresh: jest.fn().mockResolvedValue(null),
+    refreshAll: jest.fn().mockResolvedValue(null),
+    local: { getItem: jest.fn(), setItem: jest.fn(), removeItem: jest.fn() },
+  }
+  const result = await bootstrap(context)
+  await jest.advanceTimersByTimeAsync(60_000)
+  expect(requestCollabRefreshMock).toHaveBeenCalledWith("acct-1", context.collab.refreshAll)
+  expect(pullCollabNotificationsMock).toHaveBeenCalledWith("acct-1", {
+    resolve: context.collab.resolve,
+    local: context.collab.local,
+  })
+  await jest.advanceTimersByTimeAsync(60_000)
+  expect(requestCollabRefreshMock).toHaveBeenCalledTimes(2)
+  expect(pullCollabNotificationsMock).toHaveBeenCalledTimes(2)
+  await result.stop()
+  await jest.advanceTimersByTimeAsync(60_000)
+  expect(pullCollabNotificationsMock).toHaveBeenCalledTimes(2)
 })

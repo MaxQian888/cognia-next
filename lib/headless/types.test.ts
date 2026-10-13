@@ -14,6 +14,12 @@ describe("headless runtime contracts", () => {
       notifyDbWrite: jest.fn(),
       resolveMessage: (key) => key,
       log: jest.fn(),
+      collab: {
+        resolve: async () => null,
+        refresh: async () => null,
+        refreshAll: async () => null,
+        local: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+      },
     }
     const teardown = jest.fn()
     const runtime: HeadlessRuntime = {
@@ -21,6 +27,7 @@ describe("headless runtime contracts", () => {
       hosts: ["brain"],
       start: async (received) => {
         expect(received).toBe(context)
+        expect(await received.collab?.resolve(received.localAccountId)).toBeNull()
         return teardown
       },
     }
