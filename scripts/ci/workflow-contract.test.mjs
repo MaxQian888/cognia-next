@@ -11,6 +11,34 @@ import { ESLint } from "eslint"
 const readWorkflow = (name) =>
   readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), "utf8")
 
+test("server images share one builder and retain intermediate caches and Cargo diagnostics", async () => {
+  const job = parse(await readWorkflow("images.yml")).jobs["cognia-server-image"]
+  const full = job.steps.find((step) => step.id === "build-full")
+  const slim = job.steps.find((step) => step.id === "build-slim")
+  assert.equal(job["runs-on"], "ubuntu-latest")
+  assert.equal(
+    job.steps.filter((step) => step.uses?.startsWith("docker/setup-buildx-action@")).length,
+    1
+  )
+  assert.ok(job.steps.indexOf(full) < job.steps.indexOf(slim))
+  assert.equal(full.with.target, "runtime-full")
+  assert.equal(slim.with.target, "runtime-slim")
+  assert.match(full.with["cache-to"], /mode=max,compression=zstd,compression-level=3/)
+  assert.doesNotMatch(full.with["cache-to"], /force-compression=true/)
+  assert.equal(slim.with["cache-to"], undefined)
+  const timings = job.steps.find((step) => step.with?.target === "build-timings")
+  assert.ok(job.steps.indexOf(timings) > job.steps.indexOf(slim))
+  assert.equal(timings.with["cache-to"], undefined)
+  assert.equal(timings.with.outputs, "type=local,dest=${{ runner.temp }}/server-cargo-timings")
+  assert.ok(
+    job.steps.some(
+      (step) =>
+        step.uses?.startsWith("actions/upload-artifact@") &&
+        step.with?.name === "server-cargo-timings"
+    )
+  )
+})
+
 test("iOS tagged releases verify the IPA before uploading to TestFlight and gate publication", async () => {
   const { jobs } = parse(await readWorkflow("release.yml"))
   const ios = jobs["build-ios"]

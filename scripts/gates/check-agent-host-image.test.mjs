@@ -175,6 +175,66 @@ test("server dependency cooking has the same capture linker prerequisite as fina
   assert.match(dockerfile, /\blibgbm1\b/)
 })
 
+test("server dependency cooking prepares each shipped feature graph without workspace unification", () => {
+  const dockerfile = readFileSync(
+    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    "utf8"
+  )
+  const plans = (stage, command) =>
+    [
+      ...stageText(dockerfile, stage)
+        .replace(/\\\n/g, " ")
+        .matchAll(new RegExp(`cargo ${command} ([^\\n&]+)`, "g")),
+    ].map(([, args]) => ({
+      bins: [...args.matchAll(/--bin ([\w-]+)/g)].map((match) => match[1]),
+      packages: [...args.matchAll(/(?:-p|--package) ([\w-]+)/g)].map((match) => match[1]),
+      features: args.match(/--features ([\w,-]+)/)?.[1] ?? "",
+      release: args.includes("--release"),
+      locked: args.includes("--locked"),
+    }))
+  const expected = [
+    {
+      bins: ["cognia-server"],
+      packages: [],
+      features: "container-exec,k8s-exec,workspace-runtime-exec,otel-export",
+      release: true,
+      locked: true,
+    },
+    { bins: ["cognia"], packages: ["cognia-cli"], features: "", release: true, locked: true },
+    {
+      bins: ["cognia-bootstrap"],
+      packages: ["cognia-bootstrap-agent"],
+      features: "",
+      release: true,
+      locked: true,
+    },
+    {
+      bins: ["cognia-external-agent-launcher", "cognia-sandbox-exec"],
+      packages: ["cognia-exec-sandbox"],
+      features: "",
+      release: true,
+      locked: true,
+    },
+    {
+      bins: ["cognia-task-workspace-worker"],
+      packages: ["cognia-task-workspace"],
+      features: "",
+      release: true,
+      locked: true,
+    },
+  ]
+  assert.deepEqual(plans("builder", "build"), expected, "shipping features remain unchanged")
+  assert.deepEqual(
+    plans("deps", "chef cook"),
+    expected,
+    "cook caches the same distinct feature graphs"
+  )
+  assert.doesNotMatch(
+    stageText(dockerfile, "deps"),
+    /--workspace|--all-features|--no-default-features/
+  )
+})
+
 test("both server compile stages carry Rust out-of-tree embedded inputs", () => {
   const root = fileURLToPath(new URL("../../", import.meta.url))
   const dockerfile = readFileSync(

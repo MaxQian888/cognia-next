@@ -440,7 +440,8 @@ jobs:
       # Full is the superset, so its mode=max export holds every stage slim
       # needs too; slim exports nothing, or it would overwrite the ref with a
       # subset. `ignore-error` keeps a registry hiccup from failing a good build.
-      - id: build-full
+      - name: Build full server image
+        id: build-full
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -450,9 +451,10 @@ jobs:
           tags: ${{ steps.meta-full.outputs.tags }}
           labels: ${{ steps.meta-full.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache,mode=max,ignore-error=true
+          cache-to: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache,mode=max,compression=zstd,compression-level=3,ignore-error=true
 
-      - id: build-slim
+      - name: Build slim server image from shared stages
+        id: build-slim
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -462,6 +464,22 @@ jobs:
           tags: ${{ steps.meta-slim.outputs.tags }}
           labels: ${{ steps.meta-slim.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
+
+      - name: Export server Cargo timings
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.cognia-server
+          target: build-timings
+          outputs: type=local,dest=${{ runner.temp }}/server-cargo-timings
+
+      - name: Upload server Cargo timings
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-cargo-timings
+          path: ${{ runner.temp }}/server-cargo-timings
+          if-no-files-found: error
+          retention-days: 7
 
       # ADR-0224 A10: a Compose host updates by digest, never by tag. The
       # offline catalog signer needs the exact digest this run pushed

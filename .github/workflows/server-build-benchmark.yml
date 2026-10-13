@@ -1,0 +1,164 @@
+name: Server image benchmark
+
+on:
+  # Temporary bootstrap trigger for validating this workflow before merge.
+  push:
+    branches: [codex/ci-server-build-phase1]
+  workflow_dispatch:
+    inputs:
+      cache_run:
+        description: "Prior cold benchmark run ID; empty starts an isolated cold build"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: server benchmark (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline-gzip, candidate-gzip, candidate-zstd]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Prepare isolated benchmark
+        id: bench
+        env:
+          VARIANT: ${{ matrix.variant }}
+          CACHE_RUN: ${{ inputs.cache_run }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CACHE_RUN" && ! "$CACHE_RUN" =~ ^[0-9]+$ ]]; then
+            echo 'cache_run must be a numeric workflow run ID' >&2
+            exit 1
+          fi
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          cache_run="${CACHE_RUN:-$GITHUB_RUN_ID}"
+          {
+            echo "cache=ghcr.io/$owner/cognia-server:bench-$cache_run-$VARIANT-cache"
+            echo "cache_from=ghcr.io/$owner/cognia-server:bench-$cache_run-$VARIANT-cache-$cache_run"
+            echo "image=ghcr.io/$owner/cognia-server:bench-$GITHUB_RUN_ID-$VARIANT"
+          } >> "$GITHUB_OUTPUT"
+          compression=gzip
+          if [[ "$VARIANT" == candidate-zstd ]]; then compression=zstd; fi
+          echo "compression=$compression" >> "$GITHUB_OUTPUT"
+          dockerfile="$RUNNER_TEMP/Dockerfile.server-benchmark"
+          if [[ "$VARIANT" == baseline-gzip ]]; then
+            git show 97ac8dd09025043cdc01f7a376579ef9dbc98a17:Dockerfile.cognia-server > "$dockerfile"
+            # Equivalent diagnostic/tool-version changes in both arms.
+            python3 - "$dockerfile" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          source = path.read_text().replace('pkg-config libssl-dev', 'time pkg-config libssl-dev')
+          source = source.replace('cargo install cargo-chef --locked', 'cargo install cargo-chef --version 0.1.78 --locked')
+          source = source.replace('cargo chef cook --release', '/usr/bin/time -v cargo chef cook --timings --release')
+          source = source.replace('cargo build --release', '/usr/bin/time -v cargo build --timings --release')
+          source += '\nFROM scratch AS build-timings\nCOPY --from=builder /work/target/cargo-timings/ /\n'
+          path.write_text(source)
+          PY
+          else
+            cp Dockerfile.cognia-server "$dockerfile"
+          fi
+          echo "file=$dockerfile" >> "$GITHUB_OUTPUT"
+          if [[ -n "$CACHE_RUN" ]]; then
+            # Same harmless source change in every arm, on a fresh runner.
+            printf '\n// Source-only CI build benchmark.\n' >> src-tauri/src/bin/cognia-server.rs
+          fi
+          mkdir -p "$RUNNER_TEMP/server-benchmark"
+          cp "$dockerfile" "$RUNNER_TEMP/server-benchmark/Dockerfile"
+          lscpu > "$RUNNER_TEMP/server-benchmark/cpu.txt"
+          free -h > "$RUNNER_TEMP/server-benchmark/memory-before.txt"
+          df -h > "$RUNNER_TEMP/server-benchmark/disk-before.txt"
+
+      - uses: docker/setup-buildx-action@v4
+        id: builder
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build full image and export isolated cache
+        id: full
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ steps.bench.outputs.file }}
+          target: runtime-full
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.bench.outputs.image }}-full
+          cache-from: type=registry,ref=${{ steps.bench.outputs.cache_from }}
+          cache-to: type=registry,ref=${{ steps.bench.outputs.cache }}-${{ github.run_id }},mode=max,compression=${{ steps.bench.outputs.compression }}${{ steps.bench.outputs.compression == 'zstd' && ',compression-level=3' || '' }}
+
+      - name: Build slim image using the same builder
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ steps.bench.outputs.file }}
+          target: runtime-slim
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.bench.outputs.image }}-slim
+
+      - name: Export Cargo timings
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ steps.bench.outputs.file }}
+          target: build-timings
+          outputs: type=local,dest=${{ runner.temp }}/server-benchmark/cargo-timings
+
+      - name: Record disk use and release the benchmark builder
+        env:
+          BUILDER: ${{ steps.builder.outputs.name }}
+        run: |
+          df -h > "$RUNNER_TEMP/server-benchmark/disk-after.txt"
+          docker buildx du > "$RUNNER_TEMP/server-benchmark/buildkit-du.txt"
+          docker buildx rm "$BUILDER"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      - name: Smoke full and slim runtime images
+        env:
+          IMAGE: ${{ steps.bench.outputs.image }}
+          SHARE_UPLOAD_SECRET: ci-smoke-secret
+          COGNIA_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
+          COGNIA_SMOKE_AGENT: "1"
+        run: |
+          set -euo pipefail
+          docker build -t cognia-signaling:ci services/signaling-server
+          docker build -t cognia-share:ci services/share-server
+          export SIGNALING_IMAGE=cognia-signaling:ci SHARE_IMAGE=cognia-share:ci
+          for variant in full slim; do
+            export COGNIA_SERVER_IMAGE="$IMAGE-$variant"
+            docker pull "$COGNIA_SERVER_IMAGE"
+            docker run --rm "$COGNIA_SERVER_IMAGE" --help
+            docker run --rm --entrypoint cognia "$COGNIA_SERVER_IMAGE" --help
+            docker run --rm --entrypoint cognia-bootstrap "$COGNIA_SERVER_IMAGE" --help
+            docker compose -f deploy/compose/docker-compose.yml --profile server up -d --wait
+            node scripts/smoke/compose-smoke.mjs --tier server
+            docker compose -f deploy/compose/docker-compose.yml --profile server down -v
+          done
+
+      - name: Capture smoke diagnostics
+        if: failure()
+        run: docker compose -f deploy/compose/docker-compose.yml --profile server logs --no-color > "$RUNNER_TEMP/server-benchmark/compose.log" 2>&1
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: server-benchmark-${{ matrix.variant }}
+          path: ${{ runner.temp }}/server-benchmark
+          retention-days: 7
