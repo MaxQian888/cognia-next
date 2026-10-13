@@ -262,6 +262,18 @@ impl DockerCli {
         command
     }
 
+    /// `compose config` for the server alone. The service is named because
+    /// Compose drops a service whose profile is not active, and the stack's
+    /// server sits behind `profiles: [server]`: untargeted, the config has no
+    /// such service and `adopt` refused every real deployment.
+    fn config_command(&self, at: &ServerContainer, image: &str) -> Command {
+        let mut command = self.compose(at, Some(image));
+        command
+            .args(["config", "--format", "json"])
+            .arg(&at.service);
+        command
+    }
+
     async fn image_digests(&self, image_id: &str) -> Result<Vec<String>, String> {
         let mut command = self.docker();
         command
@@ -336,8 +348,7 @@ impl ComposeHost for DockerCli {
     }
 
     async fn resolved_image(&self, at: &ServerContainer, image: &str) -> Result<String, String> {
-        let mut command = self.compose(at, Some(image));
-        command.args(["config", "--format", "json"]);
+        let command = self.config_command(at, image);
         let raw = run(command, Duration::from_secs(60)).await?;
         let config: Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
         config["services"][&at.service]["image"]
@@ -430,6 +441,28 @@ mod tests {
         assert!(container.runs(&digest));
         assert!(!container.runs("ghcr.io/x/cognia-server@sha256:cc"));
         assert!(!container.runs("ghcr.io/x/cognia-server:latest"));
+    }
+
+    #[test]
+    fn config_targets_the_server_so_its_profile_applies() {
+        let container = parse_container(&inspect(), Vec::new()).unwrap();
+        let cli = DockerCli::new(
+            PathBuf::from("docker"),
+            "cognia".into(),
+            "cognia-server".into(),
+            "https://127.0.0.1:27890/readyz".into(),
+        );
+        let command = cli.config_command(&container, "ghcr.io/x/cognia-server@sha256:aa");
+        let args: Vec<String> = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let config = args.iter().position(|arg| arg == "config").unwrap();
+        assert_eq!(
+            &args[config..],
+            ["config", "--format", "json", "cognia-server"]
+        );
     }
 
     #[test]
