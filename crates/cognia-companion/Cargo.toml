@@ -105,6 +105,8 @@ serde_json.workspace = true
 serde_urlencoded = "0.7"
 sha1 = "0.11"
 sha2.workspace = true
+# The machine's name, for the name a Host reports to the clients it pairs.
+sysinfo = { workspace = true, features = ["system"] }
 tar.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true

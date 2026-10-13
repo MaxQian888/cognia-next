@@ -66,7 +66,14 @@ pub fn router() -> Router<SharedState> {
 
 /// Bumped when a field is ADDED. Nothing is ever removed or reshaped: a
 /// client built against version 1 keeps reading version 2.
-pub const AUTH_CONFIG_VERSION: u32 = 4;
+pub const AUTH_CONFIG_VERSION: u32 = 5;
+
+/// The name this Host reports to the clients that pair with it. Set it on a
+/// headless or containerised Host, whose machine name is meaningless.
+pub const ENV_HOST_NAME: &str = "COGNIA_HOST_NAME";
+
+/// Longest name reported, in characters.
+const HOST_NAME_MAX_CHARS: usize = 64;
 
 /// Registration policy of every deployment this server describes. The first
 /// owner presents the one-time bootstrap credential; everyone after joins by
@@ -110,6 +117,11 @@ struct AuthConfigResponse {
     signaling: SignalingPublicConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     collaboration: Option<CollaborationPublicConfig>,
+    /// Version 5. What a client calls this Host until its user renames it.
+    /// Without it a client could only name a Host by its address, which for a
+    /// relay-only Host is its own loopback (`127.0.0.1`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -326,12 +338,46 @@ fn auth_config_payload(
                 json!({ "urls": ["stun:stun.cloudflare.com:3478"] }),
             ],
         },
+        host_name: host_display_name(),
         collaboration: collaboration_config_from(
             non_empty_env(ENV_PUBLIC_COLLAB_SERVICE_URL)
                 .or_else(|| non_empty_env(ENV_COLLAB_SERVICE_URL)),
             non_empty_env(ENV_WEB_ORIGIN),
         ),
     })
+}
+
+/// [`ENV_HOST_NAME`], else the machine's own name without a local DNS suffix.
+fn host_display_name() -> Option<String> {
+    host_display_name_from(non_empty_env(ENV_HOST_NAME), sysinfo::System::host_name())
+}
+
+fn host_display_name_from(configured: Option<String>, machine: Option<String>) -> Option<String> {
+    configured
+        .and_then(|name| clean_host_name(&name))
+        .or_else(|| {
+            machine.and_then(|name| {
+                let lowered = name.to_ascii_lowercase();
+                let trimmed = [".local", ".lan", ".localdomain", ".home"]
+                    .iter()
+                    .find(|suffix| lowered.ends_with(*suffix))
+                    .map_or(name.as_str(), |suffix| &name[..name.len() - suffix.len()]);
+                clean_host_name(trimmed)
+            })
+        })
+}
+
+/// One line of printable text, whitespace collapsed, at most
+/// [`HOST_NAME_MAX_CHARS`]; `None` when nothing is left.
+fn clean_host_name(raw: &str) -> Option<String> {
+    let collapsed = raw
+        .split(|character: char| character.is_whitespace() || character.is_control())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let name: String = collapsed.chars().take(HOST_NAME_MAX_CHARS).collect();
+    let name = name.trim_end().to_string();
+    (!name.is_empty() && name != "localhost").then_some(name)
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -3417,9 +3463,10 @@ mod tests {
                 ice_servers: vec![],
             },
             collaboration: None,
+            host_name: None,
         };
         let value = serde_json::to_value(&response).unwrap();
-        assert_eq!(value["configVersion"], 4);
+        assert_eq!(value["configVersion"], 5);
         assert_eq!(value["oidc"]["issuerKind"], "logto");
         assert_eq!(value["deploymentMode"], "multi-tenant");
         assert_eq!(value["oidc"]["webClientId"], "web");
@@ -3433,6 +3480,62 @@ mod tests {
             serde_json::json!(["web-popup", "native-loopback", "deep-link"])
         );
         assert!(value.get("collaboration").is_none());
+        assert!(value.get("hostName").is_none());
+
+        let named = AuthConfigResponse {
+            host_name: Some("Studio Mac".into()),
+            ..response
+        };
+        assert_eq!(
+            serde_json::to_value(&named).unwrap()["hostName"],
+            "Studio Mac"
+        );
+    }
+
+    #[test]
+    fn a_host_reports_its_configured_name_else_its_machine_name() {
+        let machine = || Some("Maxs-MacBook-Pro.local".to_string());
+        assert_eq!(
+            host_display_name_from(Some("Cloud box".into()), machine()).as_deref(),
+            Some("Cloud box")
+        );
+        assert_eq!(
+            host_display_name_from(None, machine()).as_deref(),
+            Some("Maxs-MacBook-Pro")
+        );
+        // A configured name that cleans to nothing falls back to the machine.
+        assert_eq!(
+            host_display_name_from(Some("\u{7}\n ".into()), machine()).as_deref(),
+            Some("Maxs-MacBook-Pro")
+        );
+        for (machine, expected) in [
+            ("BOX.LAN", Some("BOX")),
+            ("studio.home", Some("studio")),
+            ("localhost", None),
+            (".local", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                host_display_name_from(None, Some(machine.into())).as_deref(),
+                expected,
+                "{machine}"
+            );
+        }
+        assert_eq!(host_display_name_from(None, None), None);
+    }
+
+    #[test]
+    fn a_host_name_is_one_short_printable_line() {
+        assert_eq!(
+            clean_host_name("  Max's\tStudio\n Mac  ").as_deref(),
+            Some("Max's Studio Mac")
+        );
+        let long = "名".repeat(HOST_NAME_MAX_CHARS + 10);
+        assert_eq!(
+            clean_host_name(&long).map(|name| name.chars().count()),
+            Some(HOST_NAME_MAX_CHARS)
+        );
+        assert_eq!(clean_host_name("\u{0}\u{1b}"), None);
     }
 
     // The desktop reads its own configuration in-process because its webview

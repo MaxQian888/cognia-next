@@ -221,6 +221,9 @@ services:
       COGNIA_LARK_WEB_BASE: ${COGNIA_LARK_WEB_BASE:-}
       COGNIA_SIGNALING_URL: ${COGNIA_SIGNALING_URL:-ws://signaling:7892/signaling}
       COGNIA_PUBLIC_SIGNALING_URL: ${COGNIA_PUBLIC_SIGNALING_URL:-}
+      # The name paired apps show for this Host (auth config `hostName`). A
+      # container's own hostname is a random id, so name it here.
+      COGNIA_HOST_NAME: ${COGNIA_HOST_NAME:-}
       COGNIA_ALLOWED_WEB_ORIGINS: ${COGNIA_ALLOWED_WEB_ORIGINS:-}
       COGNIA_ALLOW_PRIVATE_NETWORK: ${COGNIA_ALLOW_PRIVATE_NETWORK:-false}
       # Brain collaboration is read-only. Its bearer credential comes from the
