@@ -27,6 +27,7 @@ function deps(overrides: Partial<AcquireDeps> = {}): AcquireDeps {
     // Default to "not a repository" so the handle shape stays exact; the
     // headRef tests below opt in.
     headOf: async () => null,
+    checkoutRef: async () => {},
     ...overrides,
   }
 }
@@ -68,6 +69,16 @@ describe("cacheIsReusable", () => {
     // Cloning over it would fail on a non-empty directory, which is why the
     // caller clears it instead.
     expect(cacheIsReusable("abc123", origin, "https://github.com/other/repo.git")).toBe(false)
+  })
+
+  it("rejects a cache with an extra remote even when origin matches", () => {
+    expect(
+      cacheIsReusable(
+        "abc123",
+        [...origin, { name: "extra", url: "https://enterprise.example/o/r.git" }],
+        "https://github.com/o/r.git"
+      )
+    ).toBe(false)
   })
 })
 
@@ -196,15 +207,26 @@ describe("acquireWorkspace", () => {
     })
   })
 
-  it("carries an explicit ref onto the handle", async () => {
+  it("checks out a fresh clone before recording its requested ref and HEAD", async () => {
+    const order: string[] = []
     const handle = await acquireWorkspace(
       { kind: "git-url", url: "https://github.com/o/r.git", ref: "v2" },
-      deps()
+      deps({
+        checkoutRef: async (_root, ref) => {
+          order.push(ref)
+        },
+        headOf: async () => {
+          order.push("head")
+          return "v2-sha"
+        },
+      })
     )
     expect(handle.remote?.ref).toBe("v2")
+    expect(handle.headRef).toBe("v2-sha")
+    expect(order).toEqual(["v2", "head"])
   })
 
-  it("forwards extra allowed hosts to the guarded clone", async () => {
+  it("only forwards a host authorized by the installed manifest", async () => {
     let guards: unknown
     await acquireWorkspace(
       {
@@ -213,6 +235,7 @@ describe("acquireWorkspace", () => {
         allowedHosts: ["git.internal.example"],
       },
       deps({
+        allowedCloneHosts: ["git.internal.example"],
         clone: (async (_url: string, destination: string, g: unknown) => {
           guards = g
           return destination
@@ -220,6 +243,102 @@ describe("acquireWorkspace", () => {
       })
     )
     expect(guards).toEqual({ allowedHosts: ["git.internal.example"] })
+  })
+
+  it.each(["git-url", "auto"] as const)(
+    "rejects caller-widened hosts for %s before cache access",
+    async (kind) => {
+      const cache = jest.fn()
+      const clone = jest.fn()
+      const input = "https://git.internal.example/o/r.git"
+      const spec = kind === "git-url" ? { kind, url: input } : { kind, input }
+      await expect(
+        acquireWorkspace(
+          { ...spec, allowedHosts: ["git.internal.example"] },
+          deps({ repoCacheDir: cache, clone })
+        )
+      ).rejects.toThrow(/manifest.*host/i)
+      expect(cache).not.toHaveBeenCalled()
+      expect(clone).not.toHaveBeenCalled()
+    }
+  )
+
+  it("replaces enterprise caches without ambient fetch even when their remote matches", async () => {
+    const calls: string[] = []
+    const fetchAll = jest.fn()
+    await acquireWorkspace(
+      { kind: "git-url", url: "https://git.example.com/o/r.git" },
+      deps({
+        allowedCloneHosts: ["git.example.com"],
+        authorizeRemote: async () => {
+          calls.push("consent")
+        },
+        repoCacheDir: async () => {
+          calls.push("cache")
+          return "/cache"
+        },
+        headOf: async () => "cached",
+        remotesOf: async () => [{ name: "origin", url: "https://git.example.com/o/r.git" }],
+        fetchAll,
+        removeRepoCache: async () => {
+          calls.push("remove")
+          return true
+        },
+        clone: async () => {
+          calls.push("clone")
+          return "/cache"
+        },
+      })
+    )
+    expect(calls).toEqual(["consent", "cache", "remove", "clone"])
+    expect(fetchAll).not.toHaveBeenCalled()
+  })
+
+  it("does not return a misleading ref when checkout fails or is unavailable", async () => {
+    const spec = { kind: "git-url" as const, url: "https://github.com/o/r.git", ref: "missing" }
+    await expect(acquireWorkspace(spec, deps({ checkoutRef: undefined }))).rejects.toThrow(
+      /checkout/i
+    )
+    await expect(
+      acquireWorkspace(
+        spec,
+        deps({
+          checkoutRef: async () => {
+            throw new Error("unknown ref")
+          },
+        })
+      )
+    ).rejects.toThrow("unknown ref")
+  })
+
+  it("keeps enterprise ref checkout inside the isolated clone operation", async () => {
+    const clone = jest.fn(async () => "/cache")
+    const checkoutRef = jest.fn()
+    const handle = await acquireWorkspace(
+      { kind: "git-url", url: "https://git.example.com/o/r.git", ref: "v2" },
+      deps({
+        allowedCloneHosts: ["git.example.com"],
+        clone,
+        checkoutRef,
+      })
+    )
+    expect(clone).toHaveBeenCalledWith("https://git.example.com/o/r.git", expect.any(String), {
+      allowedHosts: ["git.example.com"],
+      checkoutRef: "v2",
+    })
+    expect(handle.remote?.ref).toBe("v2")
+    expect(checkoutRef).not.toHaveBeenCalled()
+    clone.mockRejectedValueOnce(new Error("isolated checkout failed"))
+    await expect(
+      acquireWorkspace(
+        { kind: "auto", input: "git.example.com/o/r#missing" },
+        deps({
+          allowedCloneHosts: ["git.example.com"],
+          clone,
+          checkoutRef,
+        })
+      )
+    ).rejects.toThrow("isolated checkout failed")
   })
 
   it("routes an auto spec by what the user typed", async () => {

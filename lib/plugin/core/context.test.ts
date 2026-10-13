@@ -59,6 +59,7 @@ import {
   __resetViewContainersForTesting,
 } from "@/lib/plugin/registries/view-container-registry"
 import { useUIStore } from "@/stores/ui"
+import { getPluginConsentBroker } from "../security/consent-broker"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -2345,6 +2346,31 @@ describe("createPluginContext", () => {
 })
 
 describe("createFullPluginContext", () => {
+  it("passes the installed clone host declaration to the workspace consent gate", async () => {
+    const plugin = createMockPlugin()
+    plugin.manifest = {
+      ...plugin.manifest,
+      permissions: ["git:write"],
+      workspaceCloneHosts: ["git.example.com"],
+    }
+    getPermissionGuard().grant(plugin.manifest.id, "git:write")
+    const consent = jest.spyOn(getPluginConsentBroker(), "request").mockResolvedValue(false)
+    try {
+      const context = createFullPluginContext(plugin, mockManager)
+      await expect(
+        context.workspace.acquire({ kind: "auto", input: "git.example.com/o/r" })
+      ).rejects.toThrow("consent denied")
+      expect(consent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginId: plugin.manifest.id,
+          scope: "workspace-clone:git.example.com",
+        })
+      )
+    } finally {
+      consent.mockRestore()
+    }
+  })
+
   it("wires link registration to live permission grants and its lifecycle scope", async () => {
     clearAllLinkMatchers()
     const scope = new PluginDisposableScope("test-plugin")

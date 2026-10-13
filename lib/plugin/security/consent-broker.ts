@@ -72,6 +72,8 @@ export interface PluginConsentRequest {
   permission: PluginPermission
   /** Optional reason string supplied by the calling site. */
   reason?: string
+  /** Host-owned operation/target identity. Broad grants never approve a scoped request. */
+  scope?: string
   /**
    * Present only for binary-spawn prompts. Its presence is what tells the
    * overlay to offer the (default-off) "remember this binary" checkbox.
@@ -124,6 +126,7 @@ export class PluginConsentBroker {
       resolve: Resolver
       pluginId: string
       permission: PluginPermission
+      scope?: string
       timeoutHandle: ReturnType<typeof setTimeout>
     }
   >()
@@ -167,7 +170,7 @@ export class PluginConsentBroker {
   }
 
   private async ask(req: PluginConsentRequest): Promise<BinaryConsentOutcome> {
-    if (this.hasSessionGrant(req.pluginId, req.permission)) {
+    if (this.hasSessionGrant(req.pluginId, req.permission, req.scope)) {
       return { granted: true, remember: false }
     }
     const requestId = generateRequestId()
@@ -183,6 +186,7 @@ export class PluginConsentBroker {
         resolve,
         pluginId: req.pluginId,
         permission: req.permission,
+        scope: req.scope,
         timeoutHandle,
       })
       try {
@@ -191,6 +195,7 @@ export class PluginConsentBroker {
           pluginId: req.pluginId,
           permission: req.permission,
           reason: req.reason,
+          scope: req.scope,
           binary: req.binary,
           timeoutMs: this.timeoutMs,
         })
@@ -214,7 +219,7 @@ export class PluginConsentBroker {
     this.pending.delete(requestId)
     clearTimeout(row.timeoutHandle)
     if (response.allow && response.persist) {
-      this.sessionGrants.add(sessionKey(row.pluginId, row.permission))
+      this.sessionGrants.add(sessionKey(row.pluginId, row.permission, row.scope))
     }
     row.resolve({
       granted: response.allow,
@@ -225,8 +230,8 @@ export class PluginConsentBroker {
     return true
   }
 
-  hasSessionGrant(pluginId: string, permission: PluginPermission): boolean {
-    return this.sessionGrants.has(sessionKey(pluginId, permission))
+  hasSessionGrant(pluginId: string, permission: PluginPermission, scope?: string): boolean {
+    return this.sessionGrants.has(sessionKey(pluginId, permission, scope))
   }
 
   /** Drop every grant — used by the kill switch / app reload. */
@@ -257,8 +262,8 @@ export class PluginConsentBroker {
   }
 }
 
-function sessionKey(pluginId: string, permission: PluginPermission): string {
-  return `${pluginId}:${permission}`
+function sessionKey(pluginId: string, permission: PluginPermission, scope?: string): string {
+  return `${pluginId}:${permission}:${JSON.stringify(scope ?? null)}`
 }
 
 function generateRequestId(): string {

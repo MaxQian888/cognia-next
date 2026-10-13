@@ -70,6 +70,7 @@ import {
   type PluginPathViolation,
 } from "@/lib/plugin/core/plugin-path"
 import { IdeManifestError, normalizeIdeManifest } from "@/lib/plugin/ide/manifest"
+import { validateWorkspaceCloneHosts } from "@/lib/plugin/workspace/clone-hosts"
 import { validateTemplateDefinition } from "@/lib/templates/contracts"
 import { validateTemplatePackageManifest } from "@/lib/templates/package-manifest"
 import { isValidLinkMatcherPattern } from "@/lib/plugin/api/link-matchers"
@@ -1837,6 +1838,28 @@ export function validatePluginManifest(
           "Use only documented permissions or ensure runtime guard supports this permission."
         )
       }
+    }
+  }
+
+  if (m.workspaceCloneHosts !== undefined) {
+    try {
+      const hosts = validateWorkspaceCloneHosts(m.workspaceCloneHosts)
+      if (
+        hosts.length > 0 &&
+        (!Array.isArray(m.permissions) || !m.permissions.includes("git:write"))
+      ) {
+        pushError(
+          "workspaceCloneHosts",
+          "manifest.workspaceCloneHosts.permission",
+          '"workspaceCloneHosts" requires the declared "git:write" permission'
+        )
+      }
+    } catch (error) {
+      pushError(
+        "workspaceCloneHosts",
+        "manifest.workspaceCloneHosts.invalid",
+        error instanceof Error ? error.message : String(error)
+      )
     }
   }
 

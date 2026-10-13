@@ -448,7 +448,7 @@ export function createFullPluginContext(
     i18n: enhancedI18n,
     ocr: createOcrAPI(pluginId),
     decisions: createDecisionsAPI(pluginId),
-    workspace: createWorkspaceAPI(pluginId),
+    workspace: createWorkspaceAPI(pluginId, plugin.manifest),
     modal: createModalAPI(pluginId),
     webview: createWebviewAPI(pluginId, plugin.manifest.networkAccess),
     auth: createAuthAPI(pluginId, {

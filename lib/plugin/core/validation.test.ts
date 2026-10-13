@@ -109,6 +109,52 @@ describe("Plugin Validation", () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    describe("workspaceCloneHosts", () => {
+      it("accepts enterprise hosts only with the declared clone permission", () => {
+        const manifest: PluginManifest = {
+          ...createValidManifest(),
+          workspaceCloneHosts: ["git.corp.example"],
+          permissions: ["git:write"],
+        }
+        expect(validatePluginManifest(manifest).valid).toBe(true)
+        expect(validatePluginManifest({ ...manifest, permissions: [] }).diagnostics).toContainEqual(
+          expect.objectContaining({ code: "manifest.workspaceCloneHosts.permission" })
+        )
+        expect(
+          validatePluginManifest({
+            ...manifest,
+            permissions: undefined,
+            optionalPermissions: ["git:write"],
+          }).valid
+        ).toBe(false)
+      })
+
+      it.each([
+        null,
+        "git.corp.example",
+        ["https://git.corp.example"],
+        ["127.0.0.1"],
+        ["git.corp.example", "git.corp.example"],
+      ])("rejects malformed allowlists at the manifest boundary: %p", (workspaceCloneHosts) => {
+        const result = validatePluginManifest({
+          ...createValidManifest(),
+          permissions: ["git:write"],
+          workspaceCloneHosts,
+        })
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics).toContainEqual(
+          expect.objectContaining({ code: "manifest.workspaceCloneHosts.invalid" })
+        )
+      })
+
+      it("permits omitted and empty declarations without a clone permission", () => {
+        expect(validatePluginManifest(createValidManifest()).valid).toBe(true)
+        expect(
+          validatePluginManifest({ ...createValidManifest(), workspaceCloneHosts: [] }).valid
+        ).toBe(true)
+      })
+    })
+
     it.each([42, {}, [], null, "", "   "])("rejects invalid plugin identity icon %p", (icon) => {
       expect(validatePluginManifest({ ...createValidManifest(), icon }).diagnostics).toContainEqual(
         expect.objectContaining({

@@ -35,7 +35,12 @@ import { allRootPaths } from "@/lib/workspace/roots"
 import { getActiveWorkspaceRoot } from "./workspace-root"
 import { pluginHasApiPermission } from "./permission-api"
 import { getPermissionGuard } from "../security/permission-guard"
-import type { PluginPermission, PluginAPIPermission } from "@/types/plugin/plugin"
+import { getPluginConsentBroker } from "../security/consent-broker"
+import {
+  validateWorkspaceCloneHosts,
+  DEFAULT_WORKSPACE_CLONE_HOSTS,
+} from "../workspace/clone-hosts"
+import type { PluginPermission, PluginAPIPermission, PluginManifest } from "@/types/plugin/plugin"
 import {
   acquireBotWorkspace,
   assertOwnedBotWorkspace,
@@ -91,7 +96,11 @@ export interface PluginWorkspaceAPI {
    * Obtain a checkout to read.
    *
    * A remote is cloned into this plugin's own data directory under guard rails
-   * (https only, host allow-list, shallow, timed, size bounded). A local path
+   * (https only, host allow-list, timed, size bounded). Remote acquisition
+   * requires declared `git:write`, a live grant, and host-scoped user consent.
+   * Enterprise hosts must be declared in `manifest.workspaceCloneHosts` and
+   * are freshly cloned without ambient credentials. Bot runs use their bound
+   * integration account's host and credentials instead. A local path
    * must be inside a workspace the user has already opened — a plugin naming
    * an arbitrary directory is the filesystem escape the rest of the plugin API
    * is built to prevent.
@@ -125,8 +134,13 @@ export interface PluginWorkspaceAPI {
   release(handle: PluginWorkspaceHandle): Promise<boolean>
 }
 
-export function createWorkspaceAPI(pluginId: string): PluginWorkspaceAPI {
+export function createWorkspaceAPI(
+  pluginId: string,
+  manifest: Pick<PluginManifest, "permissions" | "workspaceCloneHosts"> = {}
+): PluginWorkspaceAPI {
   const logger = createPluginSystemLogger(pluginId)
+  const declaredPermissions = new Set(manifest.permissions ?? [])
+  const allowedCloneHosts = Object.freeze(validateWorkspaceCloneHosts(manifest.workspaceCloneHosts))
   const requirePermissions = (...permissions: PluginPermission[]) => {
     for (const permission of permissions)
       if (
@@ -178,7 +192,28 @@ export function createWorkspaceAPI(pluginId: string): PluginWorkspaceAPI {
         requirePermissions("filesystem:write", "git:write", "integrations:read")
         return acquireBotWorkspace(pluginId, spec, defaultAcquireDeps(pluginId, openWorkspaceRoots))
       }
-      return acquireWorkspace(spec, defaultAcquireDeps(pluginId, openWorkspaceRoots))
+      return acquireWorkspace(spec, {
+        ...defaultAcquireDeps(pluginId, openWorkspaceRoots),
+        allowedCloneHosts,
+        authorizeRemote: async (remote) => {
+          if (!declaredPermissions.has("git:write"))
+            throw new Error("workspace clone requires the manifest to declare git:write")
+          requirePermissions("git:write")
+          const credentials = DEFAULT_WORKSPACE_CLONE_HOSTS.includes(remote.host)
+            ? "This may use your saved Git credentials for this host."
+            : "Your saved Git credentials will not be used for this host."
+          const allowed = await getPluginConsentBroker().request({
+            pluginId,
+            permission: "git:write",
+            scope: `workspace-clone:${remote.host}`,
+            reason: `Clone or refresh ${remote.url}. ${credentials}`,
+          })
+          if (!allowed) throw new Error("Workspace clone consent denied")
+          // The consent overlay can stay open while a grant is revoked,
+          // forbidden, or the active profile is locked.
+          requirePermissions("git:write")
+        },
+      })
     },
     snapshot: (handle) => {
       requirePermissions("filesystem:read", "git:read")

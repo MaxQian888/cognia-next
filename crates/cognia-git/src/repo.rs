@@ -96,7 +96,9 @@ pub const DEFAULT_CLONE_HOSTS: &[&str] = &["github.com", "gitlab.com", "bitbucke
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CloneGuards {
-    /// Extra hosts beyond [`DEFAULT_CLONE_HOSTS`].
+    /// Extra hosts beyond [`DEFAULT_CLONE_HOSTS`], already authorized by the
+    /// caller's permission boundary. These hosts never receive ambient
+    /// credentials and bypass the shared mirror.
     pub allowed_hosts: Vec<String>,
     /// `--depth`. `0` clones full history, which is the default.
     ///
@@ -128,8 +130,12 @@ pub struct CloneGuards {
     /// URL's own host, with the global and system Git config dropped, so the
     /// machine's ambient credential helper can never answer in its place. A
     /// credentialed clone always goes to the network: the shared mirror is
-    /// public-only.
+    /// public-only. It fetches complete blobs so later checkout cannot start
+    /// an unauthenticated lazy fetch after this one-shot token is gone.
     pub token: Option<SecretToken>,
+    /// Select a branch, tag or commit before returning the clone. Enterprise
+    /// hosts keep this checkout inside the same credential isolation policy.
+    pub checkout_ref: Option<String>,
 }
 
 /// A credential that never prints. Deserialize-only: it arrives from the host
@@ -278,6 +284,58 @@ fn guarded_clone_args(depth: u32, remote_url: &str, destination: &std::path::Pat
     args
 }
 
+/// Isolated clones must be complete: checking out a missing blob from a
+/// partial clone starts a new Git process after the one-shot isolation ends.
+fn isolated_clone_args(depth: u32, remote_url: &str, destination: &std::path::Path) -> Vec<String> {
+    let mut args = guarded_clone_args(depth, remote_url, destination);
+    args.retain(|arg| arg != "--filter=blob:none");
+    args
+}
+
+fn validate_checkout_ref(value: &str) -> Result<&str> {
+    let value = value.trim();
+    let reference = if value.starts_with("refs/") {
+        value.to_string()
+    } else {
+        format!("refs/heads/{value}")
+    };
+    if value.is_empty() || value.starts_with('-') || !git2::Reference::is_valid_name(&reference) {
+        return Err(GitError::InvalidArgument("invalid checkout ref".into()));
+    }
+    Ok(value)
+}
+
+fn isolated_clone_env(
+    remote_url: &str,
+    token: Option<&SecretToken>,
+) -> Result<Vec<(String, String)>> {
+    let mut env = match token {
+        Some(token) => credentialed_env(remote_url, token)?,
+        None => cognia_git_mirror::credential::isolation_env(),
+    };
+    let count = env
+        .iter()
+        .filter(|(key, _)| key.starts_with("GIT_CONFIG_KEY_"))
+        .count();
+    let policies = [
+        ("credential.helper", ""),
+        ("http.followRedirects", "false"),
+        ("protocol.allow", "never"),
+        ("protocol.https.allow", "always"),
+        ("init.templateDir", ""),
+    ];
+    env.retain(|(key, _)| key != "GIT_CONFIG_COUNT");
+    env.push((
+        "GIT_CONFIG_COUNT".into(),
+        (count + policies.len()).to_string(),
+    ));
+    for (offset, (key, value)) in policies.into_iter().enumerate() {
+        env.push((format!("GIT_CONFIG_KEY_{}", count + offset), key.into()));
+        env.push((format!("GIT_CONFIG_VALUE_{}", count + offset), value.into()));
+    }
+    Ok(env)
+}
+
 /// Serve the clone out of the shared bare mirror when we can (ADR-0176).
 ///
 /// Returns `false` for "the cache did not answer, go to the network", which is
@@ -330,6 +388,8 @@ async fn clone_from_mirror(
 /// Clone with guard rails: https-only, host allow-list, no embedded
 /// credentials, blobless by default, under a wall-clock budget, and bounded in
 /// size.
+/// Non-default hosts and bound-token clones use a fresh, complete clone under
+/// an isolated environment, with redirects and ambient credentials disabled.
 ///
 /// The size bound is a **post-condition**, not a pre-emptive limit: git offers
 /// no reliable "stop at N bytes", so an oversized repository is cloned, then
@@ -358,7 +418,14 @@ async fn clone_repo_guarded_inner(
     destination: &str,
     guards: &CloneGuards,
 ) -> Result<String> {
-    validate_clone_url(remote_url, &guards.allowed_hosts)?;
+    let host = validate_clone_url(remote_url, &guards.allowed_hosts)?;
+    let checkout_ref = guards
+        .checkout_ref
+        .as_deref()
+        .map(validate_checkout_ref)
+        .transpose()?;
+    let isolate_credentials =
+        guards.token.is_some() || !DEFAULT_CLONE_HOSTS.contains(&host.as_str());
 
     let destination_path = std::path::PathBuf::from(destination);
     if !destination_path.is_absolute() {
@@ -381,16 +448,18 @@ async fn clone_repo_guarded_inner(
             .max(1),
     );
 
-    let credential_env = match &guards.token {
-        Some(token) => credentialed_env(remote_url.trim(), token)?,
-        None => Vec::new(),
-    };
-    let use_mirror =
-        guards.token.is_none() && guards.use_mirror.unwrap_or(CLONE_DEFAULT_USE_MIRROR);
+    let use_mirror = !isolate_credentials && guards.use_mirror.unwrap_or(CLONE_DEFAULT_USE_MIRROR);
     if !use_mirror || !clone_from_mirror(depth, remote_url.trim(), &destination_path, budget).await
     {
-        let args = guarded_clone_args(depth, remote_url.trim(), &destination_path);
-        match exec::run_within_env(parent, args, budget, &credential_env).await? {
+        let outcome = if isolate_credentials {
+            let args = isolated_clone_args(depth, remote_url.trim(), &destination_path);
+            let env = isolated_clone_env(remote_url.trim(), guards.token.as_ref())?;
+            exec::run_clone_isolated(args, budget, &env).await?
+        } else {
+            let args = guarded_clone_args(depth, remote_url.trim(), &destination_path);
+            exec::run_within(parent, args, budget).await?
+        };
+        match outcome {
             exec::Budgeted::Completed => {}
             exec::Budgeted::TimedOut => {
                 // A half-written checkout is worse than none: the next call
@@ -400,6 +469,29 @@ async fn clone_repo_guarded_inner(
                 return Err(GitError::CommandFailed(
                     format!("clone timed out after {}s", budget.as_secs()).into(),
                 ));
+            }
+        }
+    }
+
+    if let Some(checkout_ref) = checkout_ref {
+        let destination = destination_path.to_string_lossy();
+        let args = ["-C", destination.as_ref(), "checkout", checkout_ref, "--"];
+        let result = if isolate_credentials {
+            let env = isolated_clone_env(remote_url.trim(), guards.token.as_ref())?;
+            exec::run_clone_isolated(args, budget, &env).await
+        } else {
+            exec::run_within(parent, args, budget).await
+        };
+        match result {
+            Ok(exec::Budgeted::Completed) => {}
+            result => {
+                let _ = tokio::fs::remove_dir_all(&destination_path).await;
+                return match result {
+                    Err(error) => Err(error),
+                    _ => Err(GitError::CommandFailed(
+                        format!("checkout timed out after {}s", budget.as_secs()).into(),
+                    )),
+                };
             }
         }
     }
@@ -540,13 +632,87 @@ pub async fn ignore_add(repo_path: &str, pattern: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn guarded_checkout_accepts_named_refs_and_commits_but_not_options_or_paths() {
+        for reference in [
+            "main",
+            "release/v1",
+            "v1.2.3",
+            "refs/tags/v1.2.3",
+            "refs/heads/main",
+            "abc1234",
+            "HEAD",
+        ] {
+            assert_eq!(super::validate_checkout_ref(reference).unwrap(), reference);
+        }
+        for reference in [
+            "",
+            " ",
+            "--orphan=other",
+            "-b",
+            "feature..other",
+            "main~1",
+            "foo bar",
+            "main\nother",
+            "a:b",
+        ] {
+            assert!(
+                super::validate_checkout_ref(reference).is_err(),
+                "{reference:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn isolated_clones_cannot_lazily_fetch_with_ambient_credentials() {
+        for depth in [0, 1] {
+            let args = super::isolated_clone_args(
+                depth,
+                "https://enterprise.example/repo.git",
+                std::path::Path::new("/destination"),
+            );
+            assert!(!args.iter().any(|arg| arg.starts_with("--filter")));
+            assert_eq!(args.iter().any(|arg| arg == "--depth"), depth > 0);
+        }
+    }
+
+    #[test]
+    fn isolated_clone_policy_disables_helpers_redirects_and_other_transports() {
+        let token = super::SecretToken::new("bound-secret");
+        for token in [None, Some(&token)] {
+            let env =
+                super::isolated_clone_env("https://enterprise.example/repo.git", token).unwrap();
+            let values: std::collections::HashMap<_, _> = env.iter().cloned().collect();
+            let count: usize = values["GIT_CONFIG_COUNT"].parse().unwrap();
+            let config: std::collections::HashMap<_, _> = (0..count)
+                .map(|index| {
+                    (
+                        values[&format!("GIT_CONFIG_KEY_{index}")].as_str(),
+                        values[&format!("GIT_CONFIG_VALUE_{index}")].as_str(),
+                    )
+                })
+                .collect();
+            assert_eq!(config["credential.helper"], "");
+            assert_eq!(config["http.followRedirects"], "false");
+            assert_eq!(config["protocol.allow"], "never");
+            assert_eq!(config["protocol.https.allow"], "always");
+            assert_eq!(config["init.templateDir"], "");
+            assert_eq!(
+                config.contains_key("http.https://enterprise.example/.extraheader"),
+                token.is_some()
+            );
+        }
+    }
+
+    #[test]
     fn a_clone_token_never_prints_and_arrives_as_a_plain_string() {
         let guards: super::CloneGuards = serde_json::from_value(serde_json::json!({
             "allowedHosts": ["ghe.example.com"],
-            "token": "ghs_secret_value"
+            "token": "ghs_secret_value",
+            "checkoutRef": "release/v1"
         }))
         .unwrap();
         assert_eq!(guards.token.as_ref().unwrap().expose(), "ghs_secret_value");
+        assert_eq!(guards.checkout_ref.as_deref(), Some("release/v1"));
         let printed = format!("{guards:?}");
         assert!(!printed.contains("ghs_secret_value"), "{printed}");
         assert!(printed.contains("<redacted>"));

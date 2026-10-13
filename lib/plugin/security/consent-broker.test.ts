@@ -72,6 +72,26 @@ describe("PluginConsentBroker", () => {
     await expect(promise).resolves.toBe(true)
   })
 
+  it("keeps clone-host consent separate from broad Git grants and other hosts", async () => {
+    const request = { pluginId: "p1", permission: "git:write" as const }
+    const broad = broker.request(request)
+    broker.respond(captured[0].requestId, { allow: true, persist: true })
+    await broad
+    const enterprise = { ...request, scope: "workspace-clone:git.example.com" }
+    const first = broker.request(enterprise)
+    expect(captured).toHaveLength(2)
+    broker.respond(captured[1].requestId, { allow: true, persist: true })
+    await expect(first).resolves.toBe(true)
+    await expect(broker.request(enterprise)).resolves.toBe(true)
+    expect(captured).toHaveLength(2)
+    const other = broker.request({ ...request, scope: "workspace-clone:other.example.com" })
+    expect(captured).toHaveLength(3)
+    broker.respond(captured[2].requestId, { allow: false, persist: false })
+    await expect(other).resolves.toBe(false)
+    broker.clearSessionGrantsForPlugin("p1")
+    expect(broker.hasSessionGrant("p1", "git:write", enterprise.scope)).toBe(false)
+  })
+
   it("clearSessionGrantsForPlugin only removes the targeted plugin's grants", async () => {
     const a = broker.request({ pluginId: "a", permission: "shell:execute" })
     broker.respond(captured[0].requestId, { allow: true, persist: true })

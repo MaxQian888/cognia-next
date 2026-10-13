@@ -46,13 +46,20 @@ import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { isHeadlessHost } from "@/lib/platform/detect"
 
 import { parseRepoSpec, repoCacheSegments, type RepoSpec } from "./repo-spec"
+import { DEFAULT_WORKSPACE_CLONE_HOSTS, validateWorkspaceCloneHosts } from "./clone-hosts"
 
 /** How the caller named the repository. */
 export type WorkspaceAcquireSpec =
   | import("./bot-run").BotRunWorkspaceSpec
   | { kind: "current-project" }
   | { kind: "local-path"; path: string }
-  | { kind: "git-url"; url: string; ref?: string; allowedHosts?: string[] }
+  | {
+      kind: "git-url"
+      url: string
+      ref?: string
+      /** Compatibility hint only; every entry must already be manifest-authorized. */
+      allowedHosts?: string[]
+    }
   /** Whatever the user typed — resolved by {@link parseRepoSpec}. */
   | { kind: "auto"; input: string; allowedHosts?: string[] }
 
@@ -89,6 +96,10 @@ export class WorkspaceAcquireError extends Error {
 }
 
 export interface AcquireDeps {
+  /** Host-owned snapshot of the installed manifest; never copied from the call spec. */
+  allowedCloneHosts?: readonly string[]
+  /** Plugin API authorization, before any cache access or network operation. */
+  authorizeRemote?: (remote: Extract<RepoSpec, { kind: "remote" }>) => Promise<void>
   /**
    * Roots the user has opened; a local path must live inside one. May resolve
    * asynchronously so a caller can load the project store lazily.
@@ -135,7 +146,9 @@ export function cacheIsReusable(
   url: string
 ): boolean {
   if (!cachedHead) return false
-  return remotes.some((remote) => remote.url === url)
+  // Refresh fetches all configured remotes. A matching origin must not mask
+  // an extra remote that would contact an unapproved host with credentials.
+  return remotes.length === 1 && remotes[0].name === "origin" && remotes[0].url === url
 }
 
 /**
@@ -210,13 +223,33 @@ export async function acquireWorkspace(
     }
   }
 
+  const manifestHosts = validateWorkspaceCloneHosts(deps.allowedCloneHosts)
+  const allowedHosts = new Set([...DEFAULT_WORKSPACE_CLONE_HOSTS, ...manifestHosts])
+  const requestedHosts = validateWorkspaceCloneHosts(resolved.allowedHosts)
+  if (
+    !allowedHosts.has(resolved.spec.host) ||
+    requestedHosts.some((host) => !allowedHosts.has(host))
+  ) {
+    throw new WorkspaceAcquireError("The installed manifest does not allow this clone host")
+  }
+  const customHost = !DEFAULT_WORKSPACE_CLONE_HOSTS.includes(resolved.spec.host)
+  // Only the validated destination host reaches Rust. Caller options cannot
+  // expand the manifest policy, including when a checkout already exists.
+  resolved.allowedHosts = customHost ? [resolved.spec.host] : undefined
+  if (resolved.spec.ref && !customHost && !deps.checkoutRef)
+    throw new WorkspaceAcquireError("This runtime cannot checkout the requested ref")
+  await deps.authorizeRemote?.(resolved.spec)
   const destination = await deps.repoCacheDir(repoCacheSegments(resolved.spec))
+  // Existing enterprise caches may contain partial-clone or credential config.
+  // Recreate them through the isolated, full-clone host path; ambient fetch is
+  // never safe here, even when the saved remote URL matches.
+  if (customHost) await deps.removeRepoCache(repoCacheSegments(resolved.spec))
   // The cache directory was only ever a clone *destination*: every acquisition
   // re-cloned the repository from scratch, so a plugin that scans a repo paid a
   // full network clone every time it ran. Reuse it when it already holds this
   // repository, refreshing rather than refetching everything.
   const root =
-    (await reuseCachedClone(destination, resolved, deps)) ??
+    (customHost ? null : await reuseCachedClone(destination, resolved, deps)) ??
     (await cloneFresh(destination, resolved, deps))
   return {
     root,
@@ -280,12 +313,15 @@ async function cloneFresh(
   resolved: Extract<ResolvedSpec, { kind: "remote" }>,
   deps: AcquireDeps
 ): Promise<string> {
+  const isolatedCheckout = !DEFAULT_WORKSPACE_CLONE_HOSTS.includes(resolved.spec.host)
   const root = await deps.clone(resolved.spec.url, destination, {
     ...(resolved.allowedHosts?.length ? { allowedHosts: resolved.allowedHosts } : {}),
+    ...(isolatedCheckout && resolved.spec.ref ? { checkoutRef: resolved.spec.ref } : {}),
   })
   if (!root) {
     throw new WorkspaceAcquireError("cloning is unavailable in this runtime (no git bridge)")
   }
+  if (resolved.spec.ref && !isolatedCheckout) await deps.checkoutRef!(root, resolved.spec.ref)
   return root
 }
 

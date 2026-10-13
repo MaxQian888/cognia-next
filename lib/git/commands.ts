@@ -775,6 +775,8 @@ export async function gitInit(path: string): Promise<void> {
 export interface GitCloneGuards {
   /** Hosts beyond github.com / gitlab.com / bitbucket.org. */
   allowedHosts?: string[]
+  /** Checkout inside the guarded host operation, retaining credential/config isolation. */
+  checkoutRef?: string
   /**
    * `--depth`. 0 clones full history, which is the default.
    *

@@ -206,6 +206,63 @@ where
     for (key, value) in envs {
         command.env(key, value);
     }
+    run_command_within(command, args, budget).await
+}
+
+/// Clone without the user's Git configuration, helpers, netrc or injected
+/// environment. The empty cwd also prevents discovery of a parent repository
+/// whose local config could rewrite the remote or supply credentials.
+pub(crate) async fn run_clone_isolated<I, S>(
+    args: I,
+    budget: Duration,
+    envs: &[(String, String)],
+) -> Result<Budgeted, GitError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let home = tempfile::tempdir().map_err(|err| {
+        GitError::CommandFailed(format!("create isolated Git home: {err}").into())
+    })?;
+    let mut command = base_command(home.path());
+    isolate_clone_command(&mut command, home.path());
+    command.envs(envs.iter().cloned());
+    run_command_within(command, args, budget).await
+}
+
+fn isolate_clone_command(command: &mut Command, home: &Path) {
+    command.env_clear();
+    // Retain only what resolves the installed Git executable and its OS
+    // runtime. In particular, GIT_CONFIG_PARAMETERS, GIT_EXEC_PATH, proxy
+    // credentials, askpass programs and trace sinks must not pass through.
+    for key in ["PATH", "SystemRoot", "WINDIR"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    command
+        .current_dir(home)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("XDG_CONFIG_HOME", home)
+        .env("GIT_CEILING_DIRECTORIES", home)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("GIT_ASKPASS", "")
+        .env("SSH_ASKPASS", "")
+        .env("LC_ALL", "C")
+        .env("LANG", "C");
+}
+
+async fn run_command_within<I, S>(
+    mut command: Command,
+    args: I,
+    budget: Duration,
+) -> Result<Budgeted, GitError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
     let mut child = command
         .args(args)
         .stdout(Stdio::null())
@@ -367,6 +424,234 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn isolated_checkout_does_not_run_ambient_filters_or_hooks() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("repo");
+        let repo = git2::Repository::init(&path).unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+        let attributes = repo.blob(b"payload.txt filter=ambient\n").unwrap();
+        let mut parent = None;
+        for (reference, contents) in [("main", "first\n"), ("requested", "second\n")] {
+            let mut builder = repo.treebuilder(None).unwrap();
+            builder
+                .insert(".gitattributes", attributes, 0o100644)
+                .unwrap();
+            builder
+                .insert(
+                    "payload.txt",
+                    repo.blob(contents.as_bytes()).unwrap(),
+                    0o100644,
+                )
+                .unwrap();
+            let tree = repo.find_tree(builder.write().unwrap()).unwrap();
+            let parents: Vec<_> = parent.iter().collect();
+            let oid = repo
+                .commit(
+                    Some(&format!("refs/heads/{reference}")),
+                    &signature,
+                    &signature,
+                    reference,
+                    &tree,
+                    &parents,
+                )
+                .unwrap();
+            parent = Some(repo.find_commit(oid).unwrap());
+        }
+        repo.set_head("refs/heads/main").unwrap();
+        let hooks = fixture.path().join("hooks");
+        std::fs::create_dir(&hooks).unwrap();
+        let marker = fixture.path().join("hook-ran");
+        let hook = hooks.join("post-checkout");
+        std::fs::write(
+            &hook,
+            format!("#!/bin/sh\nprintf ran > '{}'\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let global = fixture.path().join("global.config");
+        let mut config = git2::Config::open(&global).unwrap();
+        config
+            .set_str("core.hooksPath", hooks.to_str().unwrap())
+            .unwrap();
+        config
+            .set_str("filter.ambient.smudge", "printf ambient-filter")
+            .unwrap();
+        config.set_str("filter.ambient.clean", "cat").unwrap();
+        let checkout = |reference: &str, isolated: bool| {
+            let mut command = base_command(&path);
+            command.env("GIT_CONFIG_GLOBAL", &global);
+            if isolated {
+                isolate_clone_command(&mut command, home.path());
+                command.envs(cognia_git_mirror::credential::isolation_env());
+            }
+            command.args([
+                "-C",
+                path.to_str().unwrap(),
+                "checkout",
+                "--force",
+                reference,
+                "--",
+            ]);
+            command
+        };
+        assert!(
+            checkout("main", true)
+                .output()
+                .await
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            checkout("requested", false)
+                .output()
+                .await
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(marker.exists(), "control must execute the ambient hook");
+        assert_eq!(
+            std::fs::read_to_string(path.join("payload.txt")).unwrap(),
+            "ambient-filter"
+        );
+
+        assert!(
+            checkout("main", true)
+                .output()
+                .await
+                .unwrap()
+                .status
+                .success()
+        );
+        std::fs::remove_file(&marker).unwrap();
+        assert!(
+            checkout("requested", true)
+                .output()
+                .await
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            !marker.exists(),
+            "isolated checkout must not run the ambient hook"
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join("payload.txt")).unwrap(),
+            "second\n"
+        );
+        assert_eq!(repo.head().unwrap().shorthand().unwrap(), "requested");
+    }
+
+    #[tokio::test]
+    async fn isolated_clone_command_refuses_ambient_helpers_and_injected_config() {
+        let fixture = tempfile::tempdir().unwrap();
+        let trusted_home = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(fixture.path()).unwrap();
+        let helper = "!f() { printf 'username=ambient-user\\npassword=ambient-secret\\n'; }; f";
+        repo.config()
+            .unwrap()
+            .set_str("credential.helper", helper)
+            .unwrap();
+        let global = fixture.path().join("global.config");
+        let mut config = git2::Config::open(&global).unwrap();
+        config.set_str("credential.helper", helper).unwrap();
+        config
+            .set_str("http.extraHeader", "Authorization: ambient-secret")
+            .unwrap();
+        config
+            .set_str(
+                "url.https://ambient-secret@other.example/.insteadOf",
+                "https://enterprise.example/",
+            )
+            .unwrap();
+
+        let contaminated = || {
+            let mut command = base_command(fixture.path());
+            command
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", &global)
+                .env(
+                    "GIT_CONFIG_PARAMETERS",
+                    "'http.extraHeader=Authorization: injected-secret'",
+                )
+                .env("GIT_CONFIG_COUNT", "1")
+                .env("GIT_CONFIG_KEY_0", "credential.helper")
+                .env("GIT_CONFIG_VALUE_0", helper)
+                .env("GIT_ASKPASS", "ambient-askpass")
+                .env("GIT_DIR", repo.path());
+            command
+        };
+        // Prove the fixture supplies credentials without any server:
+        // `credential fill` invokes a helper through real Git.
+        let mut control = contaminated();
+        control
+            .args(["credential", "fill"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = control.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"protocol=https\nhost=enterprise.example\n\n")
+            .await
+            .unwrap();
+        let output = child.wait_with_output().await.unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("ambient-secret"));
+
+        let isolated = || {
+            let mut command = contaminated();
+            isolate_clone_command(&mut command, trusted_home.path());
+            command.envs(cognia_git_mirror::credential::isolation_env());
+            command
+        };
+        let mut command = isolated();
+        command
+            .args(["credential", "fill"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"protocol=https\nhost=enterprise.example\n\n")
+            .await
+            .unwrap();
+        let output = child.wait_with_output().await.unwrap();
+        assert!(!output.status.success(), "helper must not answer");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("ambient-secret"));
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("terminal prompts disabled"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let output = isolated()
+            .args(["config", "--list"])
+            .output()
+            .await
+            .unwrap();
+        assert!(output.status.success());
+        let config = String::from_utf8_lossy(&output.stdout);
+        assert!(!config.contains("ambient-secret"), "{config}");
+        assert!(!config.contains("injected-secret"), "{config}");
+        assert!(!config.contains("insteadof"), "{config}");
+    }
 
     /// `git switch` and the `git checkout` fallback word this differently, and
     /// `branch.rs::checkout` can emit either, so both must classify.

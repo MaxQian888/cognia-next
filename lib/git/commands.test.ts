@@ -247,11 +247,12 @@ describe("when on a companion transport (Capacitor / paired web)", () => {
     await expect(
       gitCloneGuarded("https://github.com/openai/codex.git", target, {
         allowedHosts: ["github.com"],
+        checkoutRef: "v2",
       })
     ).resolves.toBe(target)
     expect(callMock).toHaveBeenCalledWith("git_clone_guarded", {
       remoteUrl: "https://github.com/openai/codex.git",
-      guards: { allowedHosts: ["github.com"] },
+      guards: { allowedHosts: ["github.com"], checkoutRef: "v2" },
       workspaceRef: {
         kind: "plugin-cache",
         pluginId: "docs-plugin",

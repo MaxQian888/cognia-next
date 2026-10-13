@@ -734,6 +734,14 @@ export interface PluginManifest {
   /** Required permissions */
   permissions?: PluginPermission[]
 
+  /**
+   * Extra HTTPS clone hosts for workspace acquisition, beyond the host defaults.
+   * Exact lowercase DNS names only: no URLs, ports, wildcards, or IP addresses.
+   * Requires declared `git:write` and explicit consent for each target host.
+   * Non-default hosts clone without the user's ambient Git credentials.
+   */
+  workspaceCloneHosts?: string[]
+
   /** Optional permissions (requested at runtime) */
   optionalPermissions?: PluginPermission[]
 
