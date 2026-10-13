@@ -648,10 +648,10 @@ rtk git status --short --branch
 
 核查中发现、与本方案无关的缺陷，另开独立任务：
 
-1. 运行时“库插件”概念：在 IPC `expose/call` 之上加声明式契约，并由 `dependencies` 推导 `allowedCallers`。写 ADR。
-2. 插件契约 catalog 中 `events.ipc.*` 的 `requiredPermissions` 为空，与运行时实际要求的 `ipc:call`/`ipc:expose` 不一致。
-3. `agent-turn` 在没有 `sessionId` 时，会复用该角色最近的会话并改写其 `workingDir`，可能改动用户自己的聊天会话。
-4. 非 bot-run 的 `ctx.workspace.acquire` 允许插件传入 `allowedHosts` 扩大 clone 主机白名单，而且不做权限检查。
+1. 运行时“库插件”概念：在 IPC `expose/call` 之上加声明式契约，并由 `dependencies` 推导 `allowedCallers`。写 ADR。**已完成**：ADR-0226，`72e6f56ff`。
+2. 插件契约 catalog 中 `events.ipc.*` 的 `requiredPermissions` 为空，与运行时实际要求的 `ipc:call`/`ipc:expose` 不一致。**已完成**：`a3cc2dfd3`。
+3. `agent-turn` 在没有 `sessionId` 时，会复用该角色最近的会话并改写其 `workingDir`，可能改动用户自己的聊天会话。**已完成**：`d09b6d1c4`。
+4. 非 bot-run 的 `ctx.workspace.acquire` 允许插件传入 `allowedHosts` 扩大 clone 主机白名单，而且不做权限检查。**已完成**：`e5268a468`。
 
 ## 19. 评审决定
 
