@@ -124,6 +124,7 @@ jobs:
           context: .
           file: ${{ steps.bench.outputs.file }}
           target: build-timings
+          cache-from: type=registry,ref=${{ steps.bench.outputs.cache }}-${{ github.run_id }}
           outputs: type=local,dest=${{ runner.temp }}/server-benchmark/cargo-timings
 
       - name: Record disk use and release the benchmark builder
