@@ -330,6 +330,12 @@ const COMMAND_MANIFEST = JSON.parse(
   readFileSync(path.join(REPO_ROOT, "protocol/companion-commands.json"), "utf8")
 )
 const COMMANDS = new Map(COMMAND_MANIFEST.commands.map((command) => [command.name, command]))
+// The Headless catalog cognia-server embeds (cognia-headless-contract
+// include_bytes!s this file), so healthz must report exactly its version,
+// hash and size when the image was built from this checkout.
+const HEADLESS_CATALOG = JSON.parse(
+  readFileSync(path.join(REPO_ROOT, "crates/cognia-cli/assets/host-command-catalog.json"), "utf8")
+)
 
 /**
  * Run a command INSIDE the cognia-server container → stdout.
@@ -373,8 +379,15 @@ async function rpc(name, args, auth) {
     headers,
     body: JSON.stringify(args ?? {}),
   })
-  const body = await res.json().catch(() => null)
-  return { status: res.status, body }
+  const envelope = await res.json().catch(() => null)
+  // The device plane answers `{requestId, result}`; errors are problem
+  // documents without it. Unwrap the way the real client does
+  // (lib/tauri/transport-companion.ts), so callers read the result itself.
+  const body =
+    res.ok && envelope !== null && typeof envelope === "object" && Object.hasOwn(envelope, "result")
+      ? envelope.result
+      : envelope
+  return { status: res.status, body, envelope }
 }
 
 /** Loopback RPC from inside the container (service scope). */
@@ -384,6 +397,8 @@ async function containerRpc(name, args, token) {
 }
 
 async function containerRpcResponse(name, args, token) {
+  const idempotency =
+    COMMANDS.get(name)?.idempotency === "required" ? ["-H", `Idempotency-Key: ${randomUUID()}`] : []
   const out = await composeExec([
     "curl",
     "-sk",
@@ -394,6 +409,7 @@ async function containerRpcResponse(name, args, token) {
     `Authorization: Bearer ${token}`,
     "-H",
     "Content-Type: application/json",
+    ...idempotency,
     "-d",
     JSON.stringify(args ?? {}),
     "-w",
@@ -410,15 +426,18 @@ async function containerRpcResponse(name, args, token) {
 }
 
 async function headlessContractGuards(health) {
-  check(health?.headlessContract?.schemaVersion === 1, "healthz reports Headless contract v1")
+  const expected = HEADLESS_CATALOG
   check(
-    typeof health?.headlessContract?.catalogHash === "string" &&
-      health.headlessContract.catalogHash.length === 64,
-    "healthz reports the 64-character Headless catalog hash"
+    health?.headlessContract?.schemaVersion === expected.schemaVersion,
+    `healthz reports Headless contract v${expected.schemaVersion} (got v${health?.headlessContract?.schemaVersion})`
   )
   check(
-    health?.headlessContract?.commandCount === 450,
-    `healthz reports all 450 Headless commands (got ${health?.headlessContract?.commandCount})`
+    health?.headlessContract?.catalogHash === expected.catalogHash,
+    `healthz reports this checkout's Headless catalog hash (got ${health?.headlessContract?.catalogHash})`
+  )
+  check(
+    health?.headlessContract?.commandCount === expected.commands.length,
+    `healthz reports all ${expected.commands.length} Headless commands (got ${health?.headlessContract?.commandCount})`
   )
   const token = (await composeExec(["cognia-server", "issue-service-token"])).trim()
   const invalid = await containerRpcResponse("mcp_oauth_status", {}, token)
@@ -589,14 +608,101 @@ async function dataPlaneRoundtrip(jwt) {
   check(pull.status === 200, `sync_pull → 200 (got ${pull.status}: ${JSON.stringify(pull.body)})`)
   check(Array.isArray(pull.body?.rows), "sync_pull delta has rows[] (answered by the brain)")
 
+  // message_send only appends to a session the host already has, so create
+  // one first through HostState, as a paired browser does for a new chat.
+  const sessionId = await createHostSession(jwt)
   const marker = `smoke-${Date.now()}`
-  const send = await rpc("message_send", { session_id: "smoke-session", content: marker }, jwt)
-  check(send.status === 200, `message_send → 200 (got ${send.status})`)
-  const read = await rpc("message_get_by_session", { session_id: "smoke-session" }, jwt)
+  const send = await rpc("message_send", { session_id: sessionId, content: marker }, jwt)
   check(
-    read.body?.rows?.some((row) => row.content === marker),
-    "message_send round-trips through the brain's Dexie"
+    send.status === 200,
+    `message_send → 200 (got ${send.status}: ${JSON.stringify(send.body)})`
   )
+  const read = await rpc("message_get_by_session", { session_id: sessionId }, jwt)
+  check(
+    // One page (ADR-0175 B3): `items`, each a MessageRow (`content`) or, from
+    // the brain's bridge, a StoredMessage whose text lives in `parts`.
+    read.body?.items?.some(
+      (row) =>
+        row.content === marker ||
+        row.parts?.some((part) => part?.type === "text" && part.text === marker)
+    ),
+    `message_send round-trips through the brain's Dexie (got ${read.status}: ${JSON.stringify(read.body).slice(0, 300)})`
+  )
+}
+
+/**
+ * Mint the interactive-approval lease an `approval: interactive` command
+ * needs, the way lib/tauri/admin-lease.ts does. When the host asks for consent
+ * (REMOTE_CONSENT_REQUIRED, with a short code), answer it from the console
+ * side — the loopback service principal — and ask again.
+ */
+async function issueAdminLease(operations, jwt) {
+  let lease = await rpc("host_admin_lease_issue", { operations, ttlSeconds: 300 }, jwt)
+  const refusal = JSON.stringify(lease.body ?? "")
+  if (lease.status !== 200 && refusal.includes("REMOTE_CONSENT_REQUIRED")) {
+    const code = /\(code\s+([A-Za-z0-9]+)\)/.exec(refusal)?.[1]
+    check(Boolean(code), "the consent refusal carries an approval code")
+    const token = (await composeExec(["cognia-server", "issue-service-token"])).trim()
+    const answered = await containerRpcResponse(
+      "host_consent_respond",
+      { requestId: code, approve: true },
+      token
+    )
+    check(answered.status === 200, `host_consent_respond approved ${code} (got ${answered.status})`)
+    lease = await rpc("host_admin_lease_issue", { operations, ttlSeconds: 300 }, jwt)
+  }
+  check(
+    lease.status === 200 && typeof lease.body?.token === "string",
+    `host_admin_lease_issue → lease for ${operations.join(", ")} (got ${lease.status})`
+  )
+  return lease.body?.token
+}
+
+/** Create a session on the host via a HostState `session.create` action. */
+async function createHostSession(jwt) {
+  const manifest = await rpc("host_feature_manifest", {}, jwt)
+  const scope = manifest.body?.hostStateScope
+  check(
+    typeof scope?.accountId === "string" && typeof scope?.runtimeTargetId === "string",
+    "host_feature_manifest reports the HostState scope"
+  )
+  const status = await rpc("host_state_status", scope, jwt)
+  check(
+    status.status === 200 && typeof status.body?.hostId === "string",
+    `host_state_status → 200 (got ${status.status})`
+  )
+  const adminLease = await issueAdminLease(["host_state_submit"], jwt)
+  const sessionId = `smoke-session-${randomUUID()}`
+  const actionId = randomUUID()
+  const submit = await rpc(
+    "host_state_submit",
+    {
+      ...scope,
+      adminLease,
+      actions: [
+        {
+          // sessionStateChannel() in packages/agent-config-types/src/host-state.ts
+          channel: `cognia://target/${encodeURIComponent(scope.runtimeTargetId)}/sessions/${encodeURIComponent(sessionId)}`,
+          ...scope,
+          hostId: status.body.hostId,
+          hostGeneration: status.body.hostGeneration,
+          sessionId,
+          clientId: "compose-smoke",
+          clientSeq: 1,
+          actionId,
+          createdAt: Date.now(),
+          action: { kind: "session.create", title: "Compose smoke" },
+        },
+      ],
+    },
+    jwt
+  )
+  const receipt = submit.body?.results?.[0]
+  check(
+    submit.status === 200 && receipt?.actionId === actionId && receipt?.outcome === "applied",
+    `host_state_submit session.create applied (got ${submit.status}: ${JSON.stringify(submit.body)})`
+  )
+  return sessionId
 }
 
 async function chatTurn(jwt) {
@@ -708,11 +814,24 @@ async function externalAgentTurn() {
 }
 
 async function webhookIngressShape() {
-  const res = await fetch(`${SERVER_URL}/connectors/webhook/telegram/ghost`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: "{}",
-  })
+  // Webhook ingress shares the per-source-IP pre-auth bucket with pairing
+  // (middleware::pre_auth_rate_limit), which this run has just drained from
+  // the same address. Wait out the advertised interval instead of assuming a
+  // fresh bucket.
+  let res
+  for (let attempt = 0; attempt < 4; attempt++) {
+    res = await fetch(`${SERVER_URL}/connectors/webhook/telegram/ghost`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    })
+    if (res.status !== 429) break
+    const problem = await res.json().catch(() => null)
+    const seconds = Number(
+      problem?.details?.retryAfterSeconds ?? res.headers.get("retry-after") ?? 3
+    )
+    await delay(Math.max(1, seconds) * 1000)
+  }
   check(res.status === 404, `unregistered webhook adapter → 404 (got ${res.status})`)
   const body = await res.json().catch(() => null)
   check(body?.error === "adapter not registered", "webhook rejection shape is deterministic")
