@@ -60,6 +60,7 @@
           "id": "poll",
           "kind": "poll",
           "label": "Monitor repository",
+          "labelKey": "trigger.poll",
           "everyMs": 60000,
           "cursor": "github",
           "enabledByDefault": false,
@@ -70,6 +71,7 @@
           "kind": "event",
           "source": "integration",
           "label": "GitHub events",
+          "labelKey": "trigger.github",
           "enabledByDefault": false,
           "types": [
             "issues.opened",
@@ -89,12 +91,14 @@
         {
           "id": "scan",
           "kind": "manual",
-          "label": "Check repository now"
+          "label": "Check repository now",
+          "labelKey": "trigger.scan"
         },
         {
           "id": "backfill",
           "kind": "manual",
           "label": "Process selected historical items",
+          "labelKey": "trigger.backfill",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -111,6 +115,7 @@
           "id": "work",
           "kind": "manual",
           "label": "Process queued repository work",
+          "labelKey": "trigger.work",
           "concurrencyKey": "github-work:{{resource.scope}}",
           "holdConcurrencyWhileWaiting": false
         }
@@ -184,6 +189,11 @@
   "i18n": {
     "locales": {
       "en": {
+        "trigger.poll": "Monitor repository",
+        "trigger.github": "GitHub events",
+        "trigger.scan": "Check repository now",
+        "trigger.backfill": "Process selected historical items",
+        "trigger.work": "Process queued repository work",
         "manifest.name": "GitHub Devin Bot",
         "manifest.description": "A github.com repository maintenance Bot powered by Devin SWE-2, with configurable execution and publication approval. GitHub Enterprise Server is not supported yet.",
         "approval.publishReview.title": "Publish this GitHub review?",
@@ -191,6 +201,11 @@
         "approval.publish.message": "Review the exact content and target revision. Test results below are agent-reported; no automatic merge is performed."
       },
       "zh-CN": {
+        "trigger.poll": "监控仓库",
+        "trigger.github": "GitHub 事件",
+        "trigger.scan": "立即检查仓库",
+        "trigger.backfill": "处理选定的历史条目",
+        "trigger.work": "处理队列中的仓库任务",
         "manifest.name": "GitHub Devin 机器人",
         "manifest.description": "由 Devin SWE-2 驱动的 github.com 仓库维护机器人，执行与发布审批均可配置。暂不支持 GitHub Enterprise Server。",
         "approval.publishReview.title": "要发布这条 GitHub 评审吗？",

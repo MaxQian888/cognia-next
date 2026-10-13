@@ -25,6 +25,7 @@ export const githubDevinBotDef = {
       id: "poll",
       kind: "poll",
       label: "Monitor repository",
+      labelKey: "trigger.poll",
       everyMs: 60_000,
       cursor: "github",
       enabledByDefault: false,
@@ -35,6 +36,7 @@ export const githubDevinBotDef = {
       kind: "event",
       source: "integration",
       label: "GitHub events",
+      labelKey: "trigger.github",
       enabledByDefault: false,
       types: [
         "issues.opened",
@@ -49,11 +51,12 @@ export const githubDevinBotDef = {
       concurrencyKey: "github-monitor",
       conditions: { repositoryConfigKey: "repository" },
     },
-    { id: "scan", kind: "manual", label: "Check repository now" },
+    { id: "scan", kind: "manual", label: "Check repository now", labelKey: "trigger.scan" },
     {
       id: "backfill",
       kind: "manual",
       label: "Process selected historical items",
+      labelKey: "trigger.backfill",
       inputSchema: {
         type: "object",
         properties: {
@@ -70,6 +73,7 @@ export const githubDevinBotDef = {
       id: "work",
       kind: "manual",
       label: "Process queued repository work",
+      labelKey: "trigger.work",
       concurrencyKey: "github-work:{{resource.scope}}",
       holdConcurrencyWhileWaiting: false,
     },

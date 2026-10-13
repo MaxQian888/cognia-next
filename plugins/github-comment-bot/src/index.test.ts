@@ -11,6 +11,27 @@ it("keeps the packaged manifest identical to the module manifest", () => {
   expect(JSON.parse(JSON.stringify(manifest))).toEqual(packaged)
 })
 
+it("ships English and Chinese labels for every trigger with literal fallbacks", () => {
+  expect(githubCommentBotDef.triggers.map((trigger) => trigger.labelKey)).toEqual([
+    "trigger.github",
+    "trigger.poll",
+    "trigger.check",
+    "trigger.execute",
+    "trigger.reply",
+  ])
+  const locales = packaged.i18n.locales
+  expect(
+    githubCommentBotDef.triggers.map(
+      (trigger) => locales.en[trigger.labelKey as keyof typeof locales.en]
+    )
+  ).toEqual(githubCommentBotDef.triggers.map((trigger) => trigger.label))
+  expect(
+    githubCommentBotDef.triggers.map(
+      (trigger) => locales["zh-CN"][trigger.labelKey as keyof (typeof locales)["zh-CN"]]
+    )
+  ).toEqual(["GitHub 评论", "轮询评论", "检查配置", "回答队列中的指令", "发布控制回复"])
+})
+
 it("declares a default-off Bot that can only comment, never approve or merge", () => {
   expect(githubCommentBotDef.triggers.filter((trigger) => "enabledByDefault" in trigger)).toEqual([
     expect.objectContaining({ id: "github", enabledByDefault: false }),

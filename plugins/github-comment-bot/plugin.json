@@ -49,6 +49,11 @@
   "i18n": {
     "locales": {
       "en": {
+        "trigger.github": "GitHub comments",
+        "trigger.poll": "Poll comments",
+        "trigger.check": "Check setup",
+        "trigger.execute": "Answer a queued command",
+        "trigger.reply": "Post a control reply",
         "manifest.name": "GitHub Comment Bot",
         "manifest.description": "Answer allowlisted collaborators' @-mention commands in GitHub issue and pull request comments with a read-only agent: questions, comment reviews, status, cancel and help.",
         "reply.help": "**Commands** (start a line with the mention; one command per comment):\n\n```\n{trigger} ask <question>     answer a question about this issue or pull request\n{trigger} review [focus]     review this pull request (comments only)\n{trigger} status [task]      show this thread's tasks\n{trigger} cancel [task]      cancel the latest or the named task\n{trigger} help               show this help\n```\n\nText after the mention without a command is treated as `ask`. Only allowlisted collaborators with write access can use these commands.",
@@ -95,6 +100,11 @@
         "approval.tracking.message": "A fixed status line for the task; it contains no command text."
       },
       "zh-CN": {
+        "trigger.github": "GitHub 评论",
+        "trigger.poll": "轮询评论",
+        "trigger.check": "检查配置",
+        "trigger.execute": "回答队列中的指令",
+        "trigger.reply": "发布控制回复",
         "manifest.name": "GitHub 评论机器人",
         "manifest.description": "在 GitHub Issue 与拉取请求评论中响应白名单协作者的 @ 指令，由只读智能体回答问题、发表评论式评审，并支持状态查询、取消与帮助。",
         "reply.help": "**指令**（以提及开头另起一行；每条评论一个指令）：\n\n```\n{trigger} ask <问题>      回答关于此 Issue 或拉取请求的问题\n{trigger} review [重点]   评审此拉取请求（仅评论）\n{trigger} status [任务]   查看本线程的任务\n{trigger} cancel [任务]   取消最近一个或指定的任务\n{trigger} help            显示此帮助\n```\n\n提及之后没有指令的文字按 `ask` 处理。只有白名单中且有写权限的协作者可以使用这些指令。",
@@ -157,6 +167,7 @@
           "kind": "event",
           "source": "integration",
           "label": "GitHub comments",
+          "labelKey": "trigger.github",
           "enabledByDefault": false,
           "types": [
             "issue_comment.created",
@@ -176,6 +187,7 @@
           "id": "poll",
           "kind": "poll",
           "label": "Poll comments",
+          "labelKey": "trigger.poll",
           "everyMs": 60000,
           "everyMsConfigKey": "pollIntervalMs",
           "cursor": "comments",
@@ -186,12 +198,14 @@
           "id": "check",
           "kind": "manual",
           "label": "Check setup",
+          "labelKey": "trigger.check",
           "concurrencyKey": "github-cmd-check"
         },
         {
           "id": "execute",
           "kind": "manual",
           "label": "Answer a queued command",
+          "labelKey": "trigger.execute",
           "concurrencyKey": "github-cmd:{{resource.scope}}",
           "holdConcurrencyWhileWaiting": false
         },
@@ -199,6 +213,7 @@
           "id": "reply",
           "kind": "manual",
           "label": "Post a control reply",
+          "labelKey": "trigger.reply",
           "concurrencyKey": "github-cmd-reply:{{resource.id}}",
           "holdConcurrencyWhileWaiting": false
         }

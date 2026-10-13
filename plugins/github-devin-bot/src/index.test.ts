@@ -11,6 +11,33 @@ it("keeps the packaged and builtin manifest identical to the definition", () => 
   expect(JSON.parse(JSON.stringify(manifest))).toEqual(packagedManifest)
 })
 
+it("ships English and Chinese labels for every trigger with literal fallbacks", () => {
+  expect(githubDevinBotDef.triggers.map((trigger) => trigger.labelKey)).toEqual([
+    "trigger.poll",
+    "trigger.github",
+    "trigger.scan",
+    "trigger.backfill",
+    "trigger.work",
+  ])
+  const locales = packagedManifest.i18n.locales
+  expect(
+    githubDevinBotDef.triggers.map(
+      (trigger) => locales.en[trigger.labelKey as keyof typeof locales.en]
+    )
+  ).toEqual(githubDevinBotDef.triggers.map((trigger) => trigger.label))
+  expect(
+    githubDevinBotDef.triggers.map(
+      (trigger) => locales["zh-CN"][trigger.labelKey as keyof (typeof locales)["zh-CN"]]
+    )
+  ).toEqual([
+    "监控仓库",
+    "GitHub 事件",
+    "立即检查仓库",
+    "处理选定的历史条目",
+    "处理队列中的仓库任务",
+  ])
+})
+
 it("asks only for the permissions its host calls need and stays opt-in", () => {
   // workspace.acquire → filesystem:read + network:fetch; snapshot → git:read;
   // publish → filesystem:write + git:write + integrations:execute; bots.* →

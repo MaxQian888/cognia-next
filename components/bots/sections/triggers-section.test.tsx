@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import type { BotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
+import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 
 const setBotTriggerArmed = jest.fn(
   async (_input: { installationId: string; triggerId: string; armed: boolean }) => undefined
@@ -39,6 +40,8 @@ beforeEach(() => {
   }
 })
 
+afterEach(() => unregisterPluginI18n("acme"))
+
 function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
   return {
     id: "boti_1",
@@ -67,6 +70,103 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
 }
 
 describe("BotTriggersSection", () => {
+  it("uses the owning plugin's translated trigger label for text and arming", () => {
+    registerPluginI18n({
+      pluginId: "acme",
+      messages: { en: { "plugin.acme.trigger.push": "New pull request" } },
+    })
+    render(
+      <BotTriggersSection
+        row={row({
+          triggers: [
+            {
+              id: "push",
+              kind: "event",
+              armed: true,
+              labelKey: "trigger.push",
+              label: "On new PR",
+            },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByText("New pull request")).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Arm New pull request" })).toBeEnabled()
+    expect(screen.queryByText("On new PR")).not.toBeInTheDocument()
+  })
+
+  it("resolves a plugin trigger key even when the literal label is omitted", () => {
+    registerPluginI18n({
+      pluginId: "acme",
+      messages: { en: { "plugin.acme.trigger.push": "New pull request" } },
+    })
+    render(
+      <BotTriggersSection
+        row={row({
+          triggers: [{ id: "push", kind: "event", armed: true, labelKey: "trigger.push" }],
+        })}
+      />
+    )
+    expect(screen.getByRole("switch", { name: "Arm New pull request" })).toBeEnabled()
+  })
+
+  it("keeps the literal label when the plugin key is missing", () => {
+    render(
+      <BotTriggersSection
+        row={row({
+          triggers: [
+            {
+              id: "push",
+              kind: "event",
+              armed: true,
+              labelKey: "trigger.missing",
+              label: "On new PR",
+            },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByRole("switch", { name: "Arm On new PR" })).toBeEnabled()
+    expect(screen.queryByText(/trigger.missing/)).not.toBeInTheDocument()
+  })
+
+  it.each([undefined, "trigger.missing"])(
+    "falls back to the translated kind without a literal label (key: %s)",
+    (labelKey) => {
+      render(
+        <BotTriggersSection
+          row={row({ triggers: [{ id: "push", kind: "event", armed: true, labelKey }] })}
+        />
+      )
+      expect(screen.getByRole("switch", { name: "Arm Event" })).toBeEnabled()
+    }
+  )
+
+  it("does not resolve plugin keys for a local definition with a namespaced id", () => {
+    registerPluginI18n({
+      pluginId: "acme",
+      messages: { en: { "plugin.acme.trigger.push": "New pull request" } },
+    })
+    render(
+      <BotTriggersSection
+        row={row({
+          source: "local",
+          triggers: [
+            {
+              id: "push",
+              kind: "event",
+              armed: true,
+              labelKey: "trigger.push",
+              label: "Local event",
+            },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByRole("switch", { name: "Arm Local event" })).toBeEnabled()
+    expect(screen.queryByText("New pull request")).not.toBeInTheDocument()
+  })
+
   it("lists a disarmed trigger rather than hiding it", () => {
     // "No schedule" and "a schedule that is switched off" are different
     // answers, and dropping the row makes them look identical.

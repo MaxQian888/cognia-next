@@ -30,12 +30,17 @@ import { AdapterForm, type JsonSchema } from "@/components/settings/connections/
 import { useBotControlActions, useBotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
 import { BOT_WRITE_COMMANDS } from "@/lib/bot/control-writes"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
+import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
+import { parseBotDefinitionId } from "@/lib/plugin/registries/bot-registry"
 
 export function RunBotNowButton({ row }: { row: BotConsoleRow }) {
   const t = useTranslations("bots")
+  const tRoot = useTranslations()
   const readiness = useBotWriteReadiness(BOT_WRITE_COMMANDS.runManual)
   const actions = useBotControlActions()
   const [selected, setSelected] = useState("")
+  const pluginId =
+    row.source === "plugin" ? parseBotDefinitionId(row.definitionId)?.pluginId : undefined
 
   // A manual run needs somewhere to attribute itself. A definition with no
   // manual trigger has not asked to be startable by hand, and starting its
@@ -66,7 +71,14 @@ export function RunBotNowButton({ row }: { row: BotConsoleRow }) {
         >
           {manuals.map((trigger) => (
             <NativeSelectOption key={trigger.id} value={trigger.id}>
-              {trigger.label ?? trigger.id}
+              {pluginId
+                ? resolvePluginLabel(
+                    tRoot,
+                    pluginId,
+                    trigger.labelKey,
+                    trigger.label ?? t(`trigger.kind.${trigger.kind}`)
+                  )
+                : (trigger.label ?? t(`trigger.kind.${trigger.kind}`))}
             </NativeSelectOption>
           ))}
         </NativeSelect>

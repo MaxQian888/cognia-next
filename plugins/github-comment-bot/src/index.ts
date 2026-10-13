@@ -27,6 +27,7 @@ export const githubCommentBotDef = {
       kind: "event",
       source: "integration",
       label: "GitHub comments",
+      labelKey: "trigger.github",
       enabledByDefault: false,
       types: [...COMMAND_EVENT_TYPES],
       // Receiving is short and never waits on a person; one at a time keeps
@@ -38,6 +39,7 @@ export const githubCommentBotDef = {
       id: "poll",
       kind: "poll",
       label: "Poll comments",
+      labelKey: "trigger.poll",
       everyMs: 60_000,
       everyMsConfigKey: "pollIntervalMs",
       cursor: "comments",
@@ -50,12 +52,14 @@ export const githubCommentBotDef = {
       id: "check",
       kind: "manual",
       label: "Check setup",
+      labelKey: "trigger.check",
       concurrencyKey: "github-cmd-check",
     },
     {
       id: "execute",
       kind: "manual",
       label: "Answer a queued command",
+      labelKey: "trigger.execute",
       // One answer per repository at a time; a parked publication decision
       // does not hold the slot.
       concurrencyKey: "github-cmd:{{resource.scope}}",
@@ -65,6 +69,7 @@ export const githubCommentBotDef = {
       id: "reply",
       kind: "manual",
       label: "Post a control reply",
+      labelKey: "trigger.reply",
       concurrencyKey: "github-cmd-reply:{{resource.id}}",
       holdConcurrencyWhileWaiting: false,
     },

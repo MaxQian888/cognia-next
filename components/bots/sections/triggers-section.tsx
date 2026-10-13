@@ -27,26 +27,29 @@ import { Switch } from "@/components/ui/switch"
 import { useBotControlActions, useBotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
 import { BOT_WRITE_COMMANDS } from "@/lib/bot/control-writes"
 import type { BotConsoleRow, BotTriggerSummary } from "@/lib/bot/console/bot-rows"
+import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
+import { parseBotDefinitionId } from "@/lib/plugin/registries/bot-registry"
 import { cn } from "@/lib/utils"
 
 import { BotTriggerIcon, useBotIntervalText } from "../bot-visuals"
 
 interface TriggerRowProps {
   trigger: BotTriggerSummary
+  pluginId?: string
   canArm: boolean
   busy: boolean
   onArmedChange: (armed: boolean) => void
 }
 
-function TriggerRow({ trigger, canArm, busy, onArmedChange }: TriggerRowProps) {
+function TriggerRow({ trigger, pluginId, canArm, busy, onArmedChange }: TriggerRowProps) {
   const t = useTranslations("bots")
+  const tRoot = useTranslations()
   const interval = useBotIntervalText()
 
-  // The author's own label wins when there is one. `labelKey` is the
-  // translated form, but it names a key in the OWNING PLUGIN's catalogue, not
-  // in ours, so it cannot be resolved from here and the literal label is what
-  // is left. Falling back to the kind keeps the row readable either way.
-  const title = trigger.label ?? t(`trigger.kind.${trigger.kind}`)
+  const fallback = trigger.label ?? t(`trigger.kind.${trigger.kind}`)
+  const title = pluginId
+    ? resolvePluginLabel(tRoot, pluginId, trigger.labelKey, fallback)
+    : fallback
 
   const detail =
     trigger.everyMs !== undefined
@@ -100,6 +103,8 @@ export function BotTriggersSection({ row }: { row: BotConsoleRow }) {
   const t = useTranslations("bots")
   const readiness = useBotWriteReadiness(BOT_WRITE_COMMANDS.setTriggerArmed)
   const actions = useBotControlActions()
+  const pluginId =
+    row.source === "plugin" ? parseBotDefinitionId(row.definitionId)?.pluginId : undefined
 
   if (row.triggers.length === 0) {
     return (
@@ -127,6 +132,7 @@ export function BotTriggersSection({ row }: { row: BotConsoleRow }) {
           <TriggerRow
             key={trigger.id}
             trigger={trigger}
+            pluginId={pluginId}
             canArm={canArm}
             busy={actions.pending.has(`trigger:${trigger.id}`)}
             onArmedChange={(armed) => void actions.setTriggerArmed(row.id, trigger.id, armed)}

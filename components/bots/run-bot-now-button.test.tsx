@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import type { BotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
+import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 
 const runNow = jest.fn(
   async (_installationId: string, _triggerId?: string, _input?: unknown) => undefined
@@ -60,7 +61,103 @@ beforeEach(() => {
   }
 })
 
+afterEach(() => unregisterPluginI18n("acme"))
+
 describe("RunBotNowButton", () => {
+  it("uses the owning plugin's translated manual label and still submits its trigger id", async () => {
+    registerPluginI18n({
+      pluginId: "acme",
+      messages: { en: { "plugin.acme.trigger.check": "Check plugin setup" } },
+    })
+    render(
+      <RunBotNowButton
+        row={row({
+          triggers: [
+            { id: "run", kind: "manual", armed: true, label: "Run" },
+            {
+              id: "check",
+              kind: "manual",
+              armed: true,
+              labelKey: "trigger.check",
+              label: "Check setup",
+            },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByRole("option", { name: "Check plugin setup" })).toHaveValue("check")
+    expect(screen.queryByRole("option", { name: "Check setup" })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "check" } })
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
+    await waitFor(() => expect(runNow).toHaveBeenCalledWith("boti_1", "check"))
+  })
+
+  it("resolves a plugin key without a literal manual label", () => {
+    registerPluginI18n({
+      pluginId: "acme",
+      messages: { en: { "plugin.acme.trigger.check": "Check plugin setup" } },
+    })
+    render(
+      <RunBotNowButton
+        row={row({
+          triggers: [
+            { id: "run", kind: "manual", armed: true, label: "Run" },
+            { id: "check", kind: "manual", armed: true, labelKey: "trigger.check" },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByRole("option", { name: "Check plugin setup" })).toHaveValue("check")
+  })
+
+  it.each([
+    { labelKey: "trigger.missing", label: "Check setup", expected: "Check setup" },
+    { labelKey: undefined, label: "Check setup", expected: "Check setup" },
+    { labelKey: "trigger.missing", label: undefined, expected: "Run by hand" },
+    { labelKey: undefined, label: undefined, expected: "Run by hand" },
+  ])(
+    "falls back to $expected (key: $labelKey, literal: $label)",
+    ({ labelKey, label, expected }) => {
+      render(
+        <RunBotNowButton
+          row={row({
+            triggers: [
+              { id: "run", kind: "manual", armed: true, label: "Run" },
+              { id: "check", kind: "manual", armed: true, labelKey, label },
+            ],
+          })}
+        />
+      )
+      expect(screen.getByRole("option", { name: expected })).toHaveValue("check")
+      expect(screen.queryByRole("option", { name: /trigger.missing/ })).not.toBeInTheDocument()
+    }
+  )
+
+  it("does not resolve plugin keys for a local definition with a namespaced id", () => {
+    registerPluginI18n({
+      pluginId: "acme",
+      messages: { en: { "plugin.acme.trigger.check": "Check plugin setup" } },
+    })
+    render(
+      <RunBotNowButton
+        row={row({
+          source: "local",
+          triggers: [
+            { id: "run", kind: "manual", armed: true, label: "Run" },
+            {
+              id: "check",
+              kind: "manual",
+              armed: true,
+              labelKey: "trigger.check",
+              label: "Local check",
+            },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByRole("option", { name: "Local check" })).toHaveValue("check")
+    expect(screen.queryByRole("option", { name: "Check plugin setup" })).not.toBeInTheDocument()
+  })
   it("uses the shared schema form for explicit historical item selection", async () => {
     render(
       <RunBotNowButton
