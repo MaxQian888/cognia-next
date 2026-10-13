@@ -76,6 +76,7 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
         const { runPluginAgentTurn } = await import("@/lib/plugin/api/agent-turn")
         return runPluginAgentTurn(input, {
           grantSource: { kind: "bot", id: ctx.definition.id },
+          sessionKey: ctx.installationId,
           unattendedLabel: `Bot: ${ctx.definition.name}`,
         })
       })

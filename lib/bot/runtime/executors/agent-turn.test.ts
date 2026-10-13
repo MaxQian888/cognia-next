@@ -1,3 +1,6 @@
+jest.mock("@/lib/plugin/api/agent-turn", () => ({ runPluginAgentTurn: jest.fn() }))
+import { runPluginAgentTurn } from "@/lib/plugin/api/agent-turn"
+
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
 import { BotExecutorUnavailableError, type BotExecutorContext } from "./types"
@@ -89,6 +92,22 @@ describe("agentTurnPrompt", () => {
 })
 
 describe("createAgentTurnBotExecutor", () => {
+  it("scopes the real host adapter by bot installation while preserving grant attribution", async () => {
+    const run = jest.mocked(runPluginAgentTurn)
+    run.mockResolvedValue({ sessionId: "bot-session", text: "done", status: "completed" })
+    await createAgentTurnBotExecutor()(ctx())
+    expect(run).toHaveBeenLastCalledWith(expect.objectContaining({ characterId: "char_1" }), {
+      grantSource: { kind: "bot", id: "acme:summary" },
+      sessionKey: "boti_1",
+      unattendedLabel: "Bot: Summary",
+    })
+    await createAgentTurnBotExecutor()(ctx({ installationId: "boti_2" }))
+    expect(run).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ sessionKey: "boti_2" })
+    )
+  })
+
   it("marks the run needs approval, naming the tools, when the turn was denied a permission", async () => {
     const run = jest.fn().mockResolvedValue({
       sessionId: "s1",

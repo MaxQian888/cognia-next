@@ -170,7 +170,8 @@ export function createAgentTurnNode(runtime: AgentTurnRuntime) {
         },
         sessionId: {
           type: "string",
-          description: "Reuse a specific chat session; otherwise reused/created per role.",
+          description:
+            "Continue a session returned by this plugin for the same character; otherwise reuse/create one for this role and cwd.",
         },
         timeoutSec: {
           type: "number",

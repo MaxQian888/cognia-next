@@ -2991,14 +2991,14 @@
       "path": "builtin://cognia-backend-refactor",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-backend-refactor/4818cbb6a20e8dee90fca795d45052f0acdd22b2a7bd11612860b93fdbda539e.cjs",
-        "sha256": "4818cbb6a20e8dee90fca795d45052f0acdd22b2a7bd11612860b93fdbda539e",
+        "url": "/_cognia/builtin-plugins/cognia-backend-refactor/5ca55b78c5328c5e044e91d26ea76b372ea7d6376bc819956dc451d72cf3abc6.cjs",
+        "sha256": "5ca55b78c5328c5e044e91d26ea76b372ea7d6376bc819956dc451d72cf3abc6",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-backend-refactor/resources/",
         "entryHashes": {
-          "dist/index.js": "4818cbb6a20e8dee90fca795d45052f0acdd22b2a7bd11612860b93fdbda539e"
+          "dist/index.js": "5ca55b78c5328c5e044e91d26ea76b372ea7d6376bc819956dc451d72cf3abc6"
         }
       }
     },
@@ -6261,6 +6261,7 @@
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-office/resources/",
         "entryHashes": {
+          "runtime/probe.mjs": "f6e8a6ed860fb27d4b43051d8e76475e016ab82b27884527193cbb6ce5779d2a",
           "dist/index.js": "d523f72b54e44d14be3438ced4ca16eaecc2906e8a2e1faad25432d58f1e8429"
         }
       }

@@ -122,6 +122,17 @@ describe("executeAgentTurn", () => {
     expect(mRun.mock.calls[0][0]).not.toHaveProperty("sessionId")
   })
 
+  it("surfaces a rejected session without retrying into an implicit conversation", async () => {
+    mRun.mockRejectedValueOnce(new Error('runPluginAgentTurn: session "missing" not found'))
+    await expect(
+      executeAgentTurn(
+        makeCtx({ prompt: "go", cwd: "/repo", role: "refactorer", sessionId: "missing" })
+      )
+    ).rejects.toThrow('session "missing" not found')
+    expect(mRun).toHaveBeenCalledTimes(1)
+    expect(mRun).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "missing" }))
+  })
+
   it("passes a custom timeoutSec through as milliseconds", async () => {
     await executeAgentTurn(
       makeCtx({ prompt: "go", cwd: "/repo", role: "refactorer", timeoutSec: 30 })

@@ -6,6 +6,11 @@ export interface PluginAgentTurnRequest {
   characterId: string
   prompt: string
   cwd: string
+  /**
+   * Continue a session returned by this caller's earlier turn for this character.
+   * Unknown or foreign sessions are rejected. Omit to reuse/create a caller-owned
+   * session for the character and cwd; interactive chats are never adopted.
+   */
   sessionId?: string
   timeoutMs?: number
   signal?: AbortSignal

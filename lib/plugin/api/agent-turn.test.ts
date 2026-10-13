@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 /**
- * What matters here is the session reuse ladder and the permission posture:
+ * What matters here is caller-owned session reuse and the permission posture:
  * a headless turn that silently widens permissions, or that spawns a new
  * session per call, is the failure mode this API exists to prevent.
  */
@@ -46,6 +46,22 @@ jest.mock("@/lib/claude/run-and-capture", () => ({
 
 import { PluginAgentTurnError, runPluginAgentTurn } from "./agent-turn"
 
+const caller = { grantSource: { kind: "plugin" as const, id: "acme" } }
+const owner = { kind: "plugin" as const, id: "acme" }
+const ownedSession = {
+  id: "sess-owned",
+  characterId: "char-1",
+  workingDir: "/repo",
+  agentTurnOwner: owner,
+}
+
+function runTurn(
+  request: Parameters<typeof runPluginAgentTurn>[0],
+  options: Parameters<typeof runPluginAgentTurn>[1] = caller
+) {
+  return runPluginAgentTurn(request, options)
+}
+
 const base = { characterId: "char-1", prompt: "go", cwd: "/repo" }
 
 beforeEach(() => {
@@ -60,7 +76,7 @@ beforeEach(() => {
 })
 
 /** The host's own grant every unattended turn carries (ADR-0224 A7). */
-const HOST_GRANT = { schemaVersion: 1, source: { kind: "plugin" }, permissionProfile: {} }
+const HOST_GRANT = { schemaVersion: 1, source: owner, permissionProfile: {} }
 
 describe("runPluginAgentTurn", () => {
   it("parks a permission ask and reports needs_approval when nobody answers", async () => {
@@ -80,7 +96,7 @@ describe("runPluginAgentTurn", () => {
       expect(decision?.message).toContain("needs_approval")
       return { text: "I could not edit the file.", messageId: "m1" }
     })
-    const result = await runPluginAgentTurn({ characterId: "c1", prompt: "go", cwd: "/repo" })
+    const result = await runTurn({ characterId: "c1", prompt: "go", cwd: "/repo" })
     expect(result.status).toBe("needs_approval")
     expect(result.needsApproval).toEqual([
       expect.objectContaining({ requestId: "r1", toolName: "Edit" }),
@@ -107,12 +123,12 @@ describe("runPluginAgentTurn", () => {
       expect(decision).toEqual({ decision: "allow" })
       return { text: "Edited.", messageId: "m1" }
     })
-    const result = await runPluginAgentTurn(base)
+    const result = await runTurn(base)
     expect(result.status).toBe("completed")
   })
 
   it("parks a Bot's turn under its own name and links it to the Bots page", async () => {
-    await runPluginAgentTurn(base, {
+    await runTurn(base, {
       grantSource: { kind: "bot", id: "inst-1" },
       unattendedLabel: "Bot: Release notes",
     })
@@ -128,12 +144,12 @@ describe("runPluginAgentTurn", () => {
 
   it("closes a parked run as failed when the turn throws", async () => {
     runAndCaptureAssistantReply.mockRejectedValue(new Error("sidecar exited"))
-    await expect(runPluginAgentTurn(base)).rejects.toThrow("sidecar exited")
+    await expect(runTurn(base)).rejects.toThrow("sidecar exited")
     expect(parkFinish).toHaveBeenCalledWith("failed", undefined)
   })
 
   it("reports completed when the turn never asked for a permission", async () => {
-    const result = await runPluginAgentTurn({ characterId: "c1", prompt: "go", cwd: "/repo" })
+    const result = await runTurn({ characterId: "c1", prompt: "go", cwd: "/repo" })
     expect(result.status).toBe("completed")
     expect(result.needsApproval).toBeUndefined()
     const [, , , opts] = runAndCaptureAssistantReply.mock.calls[0] as unknown[]
@@ -143,60 +159,179 @@ describe("runPluginAgentTurn", () => {
   })
 
   it("refuses an empty prompt or cwd before touching the database", async () => {
-    await expect(runPluginAgentTurn({ ...base, prompt: "  " })).rejects.toBeInstanceOf(
-      PluginAgentTurnError
-    )
-    await expect(runPluginAgentTurn({ ...base, cwd: "" })).rejects.toBeInstanceOf(
-      PluginAgentTurnError
-    )
+    await expect(runTurn({ ...base, prompt: "  " })).rejects.toBeInstanceOf(PluginAgentTurnError)
+    await expect(runTurn({ ...base, cwd: "" })).rejects.toBeInstanceOf(PluginAgentTurnError)
     expect(resolveCharacterById).not.toHaveBeenCalled()
   })
 
   it("refuses an unknown character rather than running a default persona", async () => {
     resolveCharacterById.mockResolvedValue(null as never)
-    await expect(runPluginAgentTurn(base)).rejects.toThrow(/character "char-1" not found/)
+    await expect(runTurn(base)).rejects.toThrow(/character "char-1" not found/)
   })
 
-  it("reuses the character's most recent session instead of creating one per turn", async () => {
-    listSessions.mockResolvedValue([{ id: "sess-old", characterId: "char-1", workingDir: "/repo" }])
-    await expect(runPluginAgentTurn(base)).resolves.toMatchObject({ sessionId: "sess-old" })
+  it("never adopts or repins the user's most recent chat when sessionId is absent", async () => {
+    const interactive = { id: "user-chat", characterId: "char-1", workingDir: "/user-repo" }
+    listSessions.mockResolvedValue([interactive])
+    await expect(runTurn(base)).resolves.toMatchObject({ sessionId: "sess-new" })
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        characterId: "char-1",
+        workingDir: "/repo",
+        agentTurnOwner: owner,
+      })
+    )
+    expect(updateSession).not.toHaveBeenCalled()
+    expect(runAndCaptureAssistantReply).toHaveBeenCalledWith(
+      "sess-new",
+      "go",
+      expect.anything(),
+      expect.anything()
+    )
+    expect(interactive.workingDir).toBe("/user-repo")
+  })
+
+  it("rejects an unknown explicit sessionId without falling back or creating a session", async () => {
+    listSessions.mockResolvedValue([
+      ownedSession,
+      {
+        id: "user-chat",
+        characterId: "char-1",
+        workingDir: "/user-repo",
+      },
+    ])
+    await expect(runTurn({ ...base, sessionId: "missing" })).rejects.toThrow(/session.*not found/)
+    expect(listSessions).not.toHaveBeenCalled()
+    expect(createSession).not.toHaveBeenCalled()
+    expect(updateSession).not.toHaveBeenCalled()
+    expect(runAndCaptureAssistantReply).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["interactive", undefined, "char-1"],
+    ["another plugin", { kind: "plugin", id: "other" }, "char-1"],
+    ["a bot with the same id", { kind: "bot", id: "acme" }, "char-1"],
+    ["another caller key", { ...owner, key: "other" }, "char-1"],
+    ["another character", owner, "char-2"],
+  ])(
+    "rejects an explicit session belonging to %s before writing or running",
+    async (_label, agentTurnOwner, characterId) => {
+      getSession.mockResolvedValue({
+        ...ownedSession,
+        agentTurnOwner,
+        characterId,
+        workingDir: "/user-repo",
+      })
+      await expect(runTurn({ ...base, sessionId: "sess-owned" })).rejects.toThrow(
+        PluginAgentTurnError
+      )
+      expect(createSession).not.toHaveBeenCalled()
+      expect(updateSession).not.toHaveBeenCalled()
+      expect(runAndCaptureAssistantReply).not.toHaveBeenCalled()
+    }
+  )
+
+  it("reuses only the caller's session for this character and cwd", async () => {
+    listSessions.mockResolvedValue([
+      { ...ownedSession, id: "user-chat", agentTurnOwner: undefined },
+      { ...ownedSession, id: "other-plugin", agentTurnOwner: { ...owner, id: "other" } },
+      { ...ownedSession, id: "other-kind", agentTurnOwner: { ...owner, kind: "bot" } },
+      { ...ownedSession, id: "other-key", agentTurnOwner: { ...owner, key: "other" } },
+      { ...ownedSession, id: "other-character", characterId: "char-2" },
+      { ...ownedSession, id: "other-repo", workingDir: "/other" },
+      ownedSession,
+    ])
+    await expect(runTurn(base)).resolves.toMatchObject({ sessionId: "sess-owned" })
+    expect(createSession).not.toHaveBeenCalled()
+    expect(updateSession).not.toHaveBeenCalled()
+  })
+
+  it("creates separate history in another cwd instead of repinning an implicit session", async () => {
+    listSessions.mockResolvedValue([{ ...ownedSession, workingDir: "/other" }])
+    await expect(runTurn(base)).resolves.toMatchObject({ sessionId: "sess-new" })
+    expect(updateSession).not.toHaveBeenCalled()
+  })
+
+  it("allows an explicit owned session to continue in a new cwd", async () => {
+    getSession.mockResolvedValue({ ...ownedSession, workingDir: "/old" })
+    await expect(runTurn({ ...base, sessionId: " sess-owned " })).resolves.toMatchObject({
+      sessionId: "sess-owned",
+    })
+    expect(updateSession).toHaveBeenCalledWith("sess-owned", { workingDir: "/repo" })
+    expect(listSessions).not.toHaveBeenCalled()
     expect(createSession).not.toHaveBeenCalled()
   })
 
-  it("repins a reused session onto the requested cwd", async () => {
-    listSessions.mockResolvedValue([{ id: "sess-old", characterId: "char-1", workingDir: "/old" }])
-    await runPluginAgentTurn(base)
-    expect(updateSession).toHaveBeenCalledWith("sess-old", { workingDir: "/repo" })
+  it("does not rewrite an explicit owned session already in the requested cwd", async () => {
+    getSession.mockResolvedValue(ownedSession)
+    await expect(runTurn({ ...base, sessionId: "sess-owned" })).resolves.toMatchObject({
+      sessionId: "sess-owned",
+    })
+    expect(updateSession).not.toHaveBeenCalled()
   })
 
-  it("creates a session only when the character has none", async () => {
-    await expect(runPluginAgentTurn(base)).resolves.toMatchObject({ sessionId: "sess-new" })
+  it("reuses a persisted ownership stamp on subsequent calls", async () => {
+    await runTurn(base)
+    const created = (createSession.mock.calls[0] as unknown[])[0] as Record<string, unknown>
+    listSessions.mockResolvedValue([{ ...created, id: "sess-new" }])
+    await expect(runTurn(base)).resolves.toMatchObject({ sessionId: "sess-new" })
+    expect(createSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("isolates bot installations under the same definition", async () => {
+    const botSource = { kind: "bot" as const, id: "bot-def" }
+    listSessions.mockResolvedValue([
+      { ...ownedSession, agentTurnOwner: { ...botSource, key: "installation-a" } },
+    ])
+    await expect(
+      runTurn(base, { grantSource: botSource, sessionKey: "installation-b" })
+    ).resolves.toMatchObject({ sessionId: "sess-new" })
     expect(createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ characterId: "char-1", workingDir: "/repo" })
+      expect.objectContaining({
+        agentTurnOwner: { ...botSource, key: "installation-b" },
+      })
     )
+    await expect(
+      runTurn(base, { grantSource: botSource, sessionKey: "installation-a" })
+    ).resolves.toMatchObject({ sessionId: "sess-owned" })
+    expect(createSession).toHaveBeenCalledTimes(1)
+    expect(updateSession).not.toHaveBeenCalled()
+  })
+
+  it("refuses a missing caller identity even when a grant claims one", async () => {
+    await expect(
+      runPluginAgentTurn({
+        ...base,
+        capabilityGrants: [{ schemaVersion: 1, source: owner }],
+      })
+    ).rejects.toThrow(/caller identity/)
+    await expect(runTurn(base, { grantSource: { kind: "plugin" } })).rejects.toThrow(
+      /caller identity/
+    )
+    expect(createSession).not.toHaveBeenCalled()
+    expect(runAndCaptureAssistantReply).not.toHaveBeenCalled()
   })
 
   it("leaves the character's permission posture alone unless asked", async () => {
-    await runPluginAgentTurn(base)
+    await runTurn(base)
     const [, , sendOptions] = runAndCaptureAssistantReply.mock.calls[0] as unknown[]
     expect(sendOptions).not.toHaveProperty("permissionMode")
   })
 
   it("applies an explicit bypass only for the call that asked for it", async () => {
-    await runPluginAgentTurn({ ...base, permissionMode: "bypassPermissions" })
+    await runTurn({ ...base, permissionMode: "bypassPermissions" })
     const [, , sendOptions] = runAndCaptureAssistantReply.mock.calls[0] as unknown[]
     expect(sendOptions).toMatchObject({ permissionMode: "bypassPermissions" })
   })
 
   it("resolves under the caller's composition instead of the desktop default", async () => {
-    await runPluginAgentTurn({ ...base, composition: { presetId: "minimal" } })
+    await runTurn({ ...base, composition: { presetId: "minimal" } })
     expect(resolveSendOptions).toHaveBeenCalledWith(
       expect.objectContaining({ compositionSelection: { presetId: "minimal" } })
     )
   })
 
   it("hands validated grants to the resolver, stamped with the real caller", async () => {
-    await runPluginAgentTurn(
+    await runTurn(
       {
         ...base,
         capabilityGrants: [
@@ -227,7 +362,7 @@ describe("runPluginAgentTurn", () => {
 
   it("refuses a malformed grant rather than running without it", async () => {
     await expect(
-      runPluginAgentTurn({
+      runTurn({
         ...base,
         capabilityGrants: [{ schemaVersion: 1, source: { kind: "plugin" }, maxTurns: 0 } as never],
       })
@@ -236,7 +371,7 @@ describe("runPluginAgentTurn", () => {
   })
 
   it("sends only the host's unattended grant when the caller set none", async () => {
-    await runPluginAgentTurn(base)
+    await runTurn(base)
     const ctx = (resolveSendOptions.mock.calls[0] as unknown[])[0] as Record<string, unknown>
     expect(ctx).not.toHaveProperty("compositionSelection")
     expect(ctx.capabilityGrants).toEqual([HOST_GRANT])
@@ -244,7 +379,7 @@ describe("runPluginAgentTurn", () => {
 
   it("survives an unreadable settings row", async () => {
     getSettings.mockRejectedValue(new Error("db closed"))
-    await expect(runPluginAgentTurn(base)).resolves.toMatchObject({ text: "done" })
+    await expect(runTurn(base)).resolves.toMatchObject({ text: "done" })
     expect(resolveSendOptions).toHaveBeenCalledWith(expect.objectContaining({ appSettings: null }))
   })
 })

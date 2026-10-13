@@ -39,6 +39,7 @@ import {
 import { createUnattendedPermissionResponder } from "@/lib/claude/unattended-permission-responder"
 import { createUnattendedPark } from "@/lib/claude/unattended-park"
 import type { AgentCapabilityGrantV1 } from "@cognia/agent-config-types/agent-capability-grant"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 export {
   PluginAgentTurnError,
@@ -48,33 +49,42 @@ export {
 } from "@cognia/plugin-sdk/api/agent-turn"
 
 /**
- * Resolve-or-create the session for `characterId`, pinned to `cwd`.
- *
- * Reuses the character's most recent session rather than spawning one per
- * turn, so a multi-step run keeps its conversation.
+ * Reuse only a session created for this caller and character. Implicit reuse
+ * also requires the same cwd; only an explicit owned session may be repinned.
+ * Legacy sessions have no ownership stamp and must never be adopted by title.
  */
 async function ensureSession(
   characterId: string,
   cwd: string,
+  owner: NonNullable<ChatSession["agentTurnOwner"]>,
   sessionId?: string
 ): Promise<string> {
   const db = await import("@/lib/db/sessions")
+  const isOwned = (session: ChatSession) =>
+    session.characterId === characterId &&
+    session.agentTurnOwner?.kind === owner.kind &&
+    session.agentTurnOwner.id === owner.id &&
+    session.agentTurnOwner.key === owner.key
   if (sessionId) {
     const existing = await db.getSession(sessionId)
-    if (existing) {
-      if (existing.workingDir !== cwd) await db.updateSession(existing.id, { workingDir: cwd })
-      return existing.id
+    if (!existing) {
+      throw new PluginAgentTurnError(`runPluginAgentTurn: session "${sessionId}" not found`)
     }
+    if (!isOwned(existing)) {
+      throw new PluginAgentTurnError(
+        `runPluginAgentTurn: session "${sessionId}" is not owned by this caller and character`
+      )
+    }
+    if (existing.workingDir !== cwd) await db.updateSession(existing.id, { workingDir: cwd })
+    return existing.id
   }
-  const match = (await db.listSessions()).find((s) => s.characterId === characterId)
-  if (match) {
-    if (match.workingDir !== cwd) await db.updateSession(match.id, { workingDir: cwd })
-    return match.id
-  }
+  const match = (await db.listSessions()).find((s) => isOwned(s) && s.workingDir === cwd)
+  if (match) return match.id
   const created = await db.createSession({
     title: `Plugin turn — ${characterId}`,
     characterId,
     workingDir: cwd,
+    agentTurnOwner: owner,
   })
   return created.id
 }
@@ -106,8 +116,11 @@ export interface RunPluginAgentTurnOptions {
   /**
    * Who is calling, stamped over every grant's self-declared source so the
    * audit trail names the real caller. Host-side callers (bots) pass their own.
+   * A non-empty id is required to establish session ownership.
    */
   grantSource?: { kind: "plugin" | "bot"; id?: string }
+  /** Host-owned conversation scope within the caller, such as a Bot installation id. */
+  sessionKey?: string
   /** What a parked approval calls this turn ("Bot: Release notes"). */
   unattendedLabel?: string
 }
@@ -128,6 +141,10 @@ export async function runPluginAgentTurn(
   const cwd = request.cwd.trim()
   if (!prompt) throw new PluginAgentTurnError("runPluginAgentTurn requires a non-empty prompt")
   if (!cwd) throw new PluginAgentTurnError("runPluginAgentTurn requires an absolute cwd")
+  const source = options.grantSource
+  if (!source?.id?.trim()) {
+    throw new PluginAgentTurnError("runPluginAgentTurn requires a host-attributed caller identity")
+  }
 
   const [{ resolveCharacterById }, sessionsDb, { getSettings }, { resolveSendOptions }, runner] =
     await Promise.all([
@@ -146,9 +163,17 @@ export async function runPluginAgentTurn(
   }
 
   const callerGrants = await acceptedGrants(request, options.grantSource)
-  const source = options.grantSource ?? { kind: "plugin" as const }
   const capabilityGrants = [unattendedGrant(source), ...(callerGrants ?? [])]
-  const sessionId = await ensureSession(request.characterId, cwd, request.sessionId?.trim())
+  const sessionId = await ensureSession(
+    request.characterId,
+    cwd,
+    {
+      kind: source.kind,
+      id: source.id,
+      ...(options.sessionKey ? { key: options.sessionKey } : {}),
+    },
+    request.sessionId?.trim()
+  )
   const appSettings = await getSettings().catch(() => undefined)
   const sendOptions = await resolveSendOptions({
     session: (await sessionsDb.getSession(sessionId)) ?? null,

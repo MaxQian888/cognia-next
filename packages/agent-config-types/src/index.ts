@@ -2456,6 +2456,12 @@ export interface ChatSession {
   /** Who opened this conversation, when it was not the app's own UI. */
   origin?: SessionOrigin
   /**
+   * Host-stamped ownership of an unattended plugin/Bot conversation. Missing
+   * on interactive and legacy sessions, which agent turns must not adopt.
+   * `key` scopes a caller further (e.g. one Bot installation). Non-indexed.
+   */
+  agentTurnOwner?: { kind: "plugin" | "bot"; id: string; key?: string }
+  /**
    * Owning workspace (Project) id — Workspace isolation column (Dexie v86).
    * Stamped on create via `resolveScopeProjectId`; the v86 upgrade backfills
    * legacy rows from `Project.sessionIds[]`. Optional only for back-compat
