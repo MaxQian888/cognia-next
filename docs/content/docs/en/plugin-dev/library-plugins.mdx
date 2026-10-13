@@ -1,0 +1,245 @@
+---
+title: Runtime library plugins
+description: Publish reusable RPC contracts and consumer-owned JavaScript modules through installed plugin dependencies.
+---
+
+# Runtime library plugins
+
+A library is an independently installed plugin with a `library` contribution.
+Use RPC when you need schema-checked JSON calls across supported JavaScript and
+Python runtimes. Use direct modules when JavaScript consumers need functions,
+classes, or callbacks with independent state.
+
+This API requires Cognia 0.2.0 or later (contract catalog 1.3.0). Declare the host
+floor in both provider and consumer manifests. A development host still reporting
+0.1.0 does not satisfy that requirement. Build-time packages such as
+`github-bot-kit` continue to work unchanged.
+
+## Declare a provider
+
+The following manifest provides one RPC method and one JS module:
+
+```json
+{
+  "id": "math-library",
+  "name": "Math library",
+  "version": "1.0.0",
+  "description": "Reusable calculations",
+  "type": "frontend",
+  "main": "dist/index.js",
+  "engines": { "cognia": ">=0.2.0" },
+  "capabilities": ["library"],
+  "permissions": ["ipc:expose"],
+  "library": {
+    "rpc": {
+      "add": {
+        "description": "Add two numbers",
+        "inputSchema": {
+          "type": "array",
+          "items": [{ "type": "number" }, { "type": "number" }],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "outputSchema": { "type": "number" },
+        "risk": "read",
+        "requiredPermissions": []
+      }
+    },
+    "modules": {
+      "counter": {
+        "entry": "dist/counter.cjs",
+        "description": "Consumer-owned counters",
+        "risk": "read",
+        "requiredPermissions": []
+      }
+    }
+  }
+}
+```
+
+Register every declared JS RPC method during activation. Missing implementations
+fail activation and roll back registrations. The manifest supplies schema,
+permission, and risk metadata; an `allowedCallers` list cannot override it.
+
+```ts
+import { definePluginManifest, type PluginDefinition } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
+
+const plugin: PluginDefinition = {
+  manifest: definePluginManifest(manifestJson),
+  activate(ctx) {
+    ctx.events.ipc.expose({
+      add: (a, b) => (a as number) + (b as number),
+    })
+  },
+}
+export default plugin
+```
+
+The input schema describes the entire positional argument array; the output
+schema describes the returned JSON value. Return `null` for operations without a
+result. Draft-07 object and boolean schemas are supported. Unknown keywords,
+other dialects, unresolved references, accessors, cycles, nonfinite numbers, and
+non-JSON values are rejected. No coercion or defaults are applied. Arguments and
+results are copied, bounded by the IPC byte limit, and limited to 128 nesting
+levels; schema declarations have a 256 KiB bound. Schemas may use local
+references, including definitions, but the host never fetches remote schemas.
+
+A public method/module name starts with a letter and contains letters, numbers,
+underscores, or hyphens (up to 128 characters). Prototype-path names are rejected.
+`requiredPermissions` must contain unique known permissions also declared in the
+provider's `permissions`.
+
+## Declare and call a dependency
+
+```json
+{
+  "id": "math-consumer",
+  "name": "Math consumer",
+  "version": "1.0.0",
+  "description": "Uses the installed math library",
+  "type": "frontend",
+  "main": "dist/index.js",
+  "engines": { "cognia": ">=0.2.0" },
+  "capabilities": [],
+  "permissions": ["ipc:call"],
+  "dependencies": { "math-library": "^1.0.0" }
+}
+```
+
+Enable the consumer after installing the provider. Cognia enables installed
+required dependencies first; it does not download missing dependencies. Missing
+providers, semver conflicts, or dependency cycles prevent activation. There is
+one installed version per plugin ID. Contracts version with the provider;
+breaking changes require a major version. Optional and transitive dependencies
+do not authorize library access.
+
+```ts
+import { definePluginManifest, type PluginDefinition } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
+
+const plugin: PluginDefinition = {
+  manifest: definePluginManifest(manifestJson),
+  async activate(ctx) {
+    const sum = await ctx.events.ipc.call<number>("math-library", "add", [2, 3])
+    const { Counter } = await ctx.libraries.importModule<{
+      Counter: new () => { id: number; increment(): number }
+    }>("math-library", "counter")
+    const counter = new Counter()
+    ctx.logger.info("Calculation", { sum, count: counter.increment() })
+  },
+}
+export default plugin
+```
+
+`describeExposedMethods` includes a `library` object containing version, schemas,
+risk, and required permissions for eligible callers. The existing
+[IPC documentation](./inter-plugin-communication) describes timeouts, aborts,
+and circuit breakers. Invalid input fails before entering the provider breaker;
+invalid output is a provider failure. A timeout or abort cannot undo side effects
+that have already run. Retained IPC handles reject after consumer teardown.
+
+## Export a consumer-owned JavaScript module
+
+Use a dedicated bundled `.cjs` entry, distinct from the provider's main entry.
+The default export is a factory returning `{ exports, dispose? }`:
+
+```ts
+import type { PluginLibraryModuleFactory } from "@cognia/plugin-sdk"
+
+// Bundle this entry as dist/counter.cjs, separately from the plugin main.
+let created = 0
+const createModule: PluginLibraryModuleFactory = (ctx) => {
+  class Counter {
+    readonly id = ++created
+    private value = 0
+    increment() { return ++this.value }
+  }
+  return {
+    exports: { Counter, owner: ctx.pluginId },
+    dispose() { created = 0 },
+  }
+}
+export default createModule
+```
+
+The repository plugin bundler discovers `library.modules.*.entry`, emits CJS,
+and includes the entry in browser integrity assets and native packages. External
+authors must likewise bundle dependencies into each module entry. Do not rely on
+static cross-plugin imports or native ESM cache-busting for isolation.
+
+The host evaluates and instantiates the module once per consumer activation.
+Concurrent imports of the same provider/module share initialization. Another
+consumer gets separate top-level and factory state. Exports are real JS values;
+calling them is not RPC. `ctx` belongs to the consumer, never to the provider.
+Use `ctx.lifecycle.signal`, `ctx.lifecycle.onDispose`, or the returned disposer
+to release resources. Initialization that finishes after teardown is disposed
+without exposing its exports.
+
+The consumer's guarded host context preserves existing permissions and consent
+checks. Host access through old contexts rejects after teardown, including after
+the same consumer ID is enabled again. Plain retained JS values cannot be
+revoked. The runtime isolates bundle-local state, not global objects or shared
+host modules; this is the existing trusted JS runtime, not a new sandbox.
+
+## Permissions and consent
+
+Declaring a dependency grants no permission. RPC requires `ipc:call` on the
+consumer and `ipc:expose` on the provider. Both principals independently need
+every method's `requiredPermissions`. Module import requires consumer `ipc:call`
+and both principals' module permissions. For example, a method requiring
+`filesystem:read` is unavailable until both plugins have that permission.
+
+Existing silent/confirm/forbid policies remain in force, with grants rechecked
+after consent and before dispatch/result delivery. A host without an interactive
+consent responder rejects confirm-tier operations. `risk` informs discovery and
+audit; it does not grant anything or add a separate approval prompt.
+
+## Python RPC
+
+A Python provider uses `type: "python"`, `main: "main.py"`, capability `library`,
+permission `ipc:expose`, and the same `library.rpc` schema. Add
+`"handler": "add"` to the method above and omit `library.modules`. The host invokes
+the named public module-level function. Python consumers use the nested IPC API:
+
+```python
+# main.py of a Python provider. The manifest method adds "handler": "add".
+from cognia import ctx
+
+def add(a: float, b: float) -> float:
+    return a + b
+
+# A Python consumer declares ipc:call and dependencies, just like JS.
+async def on_startup():
+    result = await ctx.events.ipc.call("math-library", "add", [2, 3])
+    methods = await ctx.events.ipc.describeExposedMethods("math-library")
+    await ctx.logger.info("Calculation", {"sum": result, "methods": methods})
+```
+
+Python can call JS or Python providers, and JS can call Python providers on a
+Python-capable host. It cannot directly import JS modules. Python callback-based
+IPC exposure/subscriptions are unavailable; use manifest handlers. The embedded
+shim and installable SDK agree, and raw `ctx.call` cannot bypass runtime limits.
+
+## Lifecycle and supported runtimes
+
+| Runtime | RPC | Direct JS modules |
+| --- | --- | --- |
+| Ordinary frontend/hybrid JS, including CLI/headless | Yes | Yes |
+| Python on a Python-capable host | Yes | No |
+| Isolated Node sandbox or WASM | No | No |
+
+Enabled consumers block provider disable, update, and hot reload. Installed
+required consumers block uninstall even when disabled. Stop dependents first,
+replace the provider, and explicitly re-enable them for fresh instances; state is
+not migrated. RPC may wake an authorized idle-suspended provider. Module imports
+require an active provider; dependency lifecycle protection prevents idle
+suspension while an enabled consumer relies on it.
+
+The Plugin messaging card under Settings → Observability → Diagnostics → System
+shows RPC versions, risks, and permissions. Bounded host call history contains
+identities, method, version, outcome, and duration; arguments and results are not
+recorded. Existing undeclared IPC methods keep their legacy compatibility rules.
+
+See [ADR-0226](../adr/0226-library-plugins-declare-contracts-over-ipc) for the
+architecture and lifetime guarantees.

@@ -39,6 +39,12 @@ describe("Version Parsing", () => {
   })
 
   describe("compareVersions", () => {
+    it("orders prereleases semantically and ignores build metadata", () => {
+      expect(compareVersions("1.0.0-rc.2", "1.0.0-rc.10")).toBe(-1)
+      expect(compareVersions("1.0.0", "1.0.0-rc.10")).toBe(1)
+      expect(compareVersions("1.0.0+one", "1.0.0+two")).toBe(0)
+      expect(() => compareVersions("bad", "1.0.0")).toThrow()
+    })
     it("should compare equal versions", () => {
       expect(compareVersions("1.0.0", "1.0.0")).toBe(0)
       expect(compareVersions("2.3.4", "2.3.4")).toBe(0)
@@ -115,6 +121,27 @@ describe("Constraint Parsing", () => {
   })
 
   describe("satisfiesConstraint", () => {
+    it.each([
+      ["0.2.9", "^0.2.3", true],
+      ["0.3.0", "^0.2.3", false],
+      ["0.0.4", "^0.0.3", false],
+      ["0.0.3", "^0.0.3", true],
+      ["2.4.0", ">=2.0.0 <3.0.0", true],
+      ["3.0.0", ">=2.0.0 <3.0.0", false],
+      ["3.1.0", "^1.0.0 || ^3.0.0", true],
+      ["2.0.0", "^1.0.0 || ^3.0.0", false],
+      ["1.4.9", "1.2 - 1.4", true],
+      ["1.5.0", "1.2 - 1.4", false],
+      ["1.8.2", "1.x", true],
+      ["2.0.0", "1.x", false],
+      ["1.0.0-rc.2", "*", false],
+      ["1.0.0-rc.2", ">=1.0.0-rc.1 <2.0.0", true],
+      ["1.1.0-rc.2", ">=1.0.0-rc.1 <2.0.0", false],
+      ["invalid", "*", false],
+      ["1.0.0", "invalid", false],
+    ])("matches version %s against %s as %s", (version, range, expected) => {
+      expect(satisfiesConstraint(version, range)).toBe(expected)
+    })
     it("should satisfy exact versions", () => {
       expect(satisfiesConstraint("1.2.3", "1.2.3")).toBe(true)
       expect(satisfiesConstraint("1.2.4", "1.2.3")).toBe(false)
@@ -196,6 +223,40 @@ describe("DependencyResolver", () => {
   })
 
   describe("Dependency Resolution", () => {
+    it("checks both consumers of an already-visited single installed library", async () => {
+      resolver.setInstalledPlugins([
+        createManifest("root", "1.0.0", { first: "*", second: "*" }),
+        createManifest("first", "1.0.0", { library: "^1.0.0" }),
+        createManifest("second", "1.0.0", { library: "^2.0.0" }),
+        createManifest("library", "1.5.0"),
+      ])
+      const result = await resolver.resolve("root")
+      expect(result.success).toBe(false)
+      expect(result.conflicts).toContainEqual(
+        expect.objectContaining({
+          dependencyId: "library",
+          requiredBy: [{ pluginId: "second", constraint: "^2.0.0" }],
+        })
+      )
+    })
+
+    it("rejects circular dependency activation instead of reporting a successful partial order", async () => {
+      resolver.setInstalledPlugins([
+        createManifest("first", "1.0.0", { second: "*" }),
+        createManifest("second", "1.0.0", { first: "*" }),
+      ])
+      const result = await resolver.resolve("first")
+      expect(result.success).toBe(false)
+      expect(result.conflicts[0]?.reason).toContain("Circular dependency")
+    })
+
+    it("does not accept an incompatible marketplace version when no matching version exists", async () => {
+      resolver.setInstalledPlugins([createManifest("consumer", "1.0.0", { library: "^2.0.0" })])
+      resolver.setPluginProvider(async () => createManifest("library", "1.0.0"))
+      const result = await resolver.resolve("consumer")
+      expect(result.success).toBe(false)
+      expect(result.conflicts[0]?.dependencyId).toBe("library")
+    })
     beforeEach(() => {
       resolver.setInstalledPlugins([
         createManifest("core", "1.0.0"),

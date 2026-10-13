@@ -244,6 +244,7 @@ import type {
 } from "@/types/plugin/plugin-agent-sdk"
 import type { FullPluginContext as PublicFullPluginContext } from "@cognia/plugin-sdk/context"
 import { PluginDisposableScope, withPluginDisposableScope } from "./disposable-scope"
+import { PluginLibraryError } from "../library/access"
 import { PLUGIN_RESOURCE_EFFECTS } from "./resource-effects"
 import { withGovernedPluginContext } from "../contracts/governed-context"
 import { pluginApiRuntimeForType } from "../contracts/interface-catalog"
@@ -355,6 +356,16 @@ export function createFullPluginContext(
 
   // Create feature APIs
   const contextAPI: PluginContextAPI = {
+    libraries: {
+      importModule: async <T extends Record<string, unknown>>(
+        providerId: string,
+        moduleName: string
+      ) => {
+        if (scope.signal.aborted)
+          throw new PluginLibraryError("disposed", "Calling plugin activation has ended")
+        return manager.importLibraryModule<T>(pluginId, providerId, moduleName, scopedContext)
+      },
+    },
     session: createSessionAPI(pluginId),
     project: createProjectAPI(pluginId, {
       getReadingSettings: () => useSettingsStore.getState().settings?.knowledgeReading,
@@ -411,7 +422,7 @@ export function createFullPluginContext(
   }
 
   // Add new communication and utility APIs to base context
-  const ipcAPI = createIPCAPI(pluginId)
+  const ipcAPI = createIPCAPI(pluginId, scope.signal)
   const eventAPI = createEventAPI(pluginId)
   // Merge IPC and events into the base context events
   const enhancedEvents = {
@@ -513,12 +524,13 @@ export function createFullPluginContext(
     hasPermission: (permission) => permissionsAPI.hasPermission(permission),
   })
   scope.track(() => revokePluginFileHandles(pluginId), "ctx.files.handles")
-  return withPluginDisposableScope(
+  const scopedContext = withPluginDisposableScope(
     scope,
     "ctx",
     governedContext,
     manager.isPluginLedgerV2Enabled?.() === false ? {} : PLUGIN_RESOURCE_EFFECTS
   ) as FullPluginContext
+  return scopedContext
 }
 
 /**

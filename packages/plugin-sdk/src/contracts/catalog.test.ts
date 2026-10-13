@@ -1,6 +1,7 @@
 import sourcePluginPoints from "../../contract/plugin-points.json"
 import {
   PLUGIN_LOCALIZED_LABEL_PATHS,
+  PLUGIN_API_NAMESPACE_CONTRACTS,
   AUTHOR_CAPABILITY_CONTRACTS,
   AUTHOR_PLUGIN_POINT_CONTRACTS,
   CANONICAL_PLUGIN_CAPABILITIES,
@@ -134,5 +135,33 @@ it("catalogs subscriptions as host-executed declarative metadata", () => {
     field: "subscriptionProviders",
     capabilities: ["subscription-provider"],
     execution: "host",
+  })
+})
+
+it("declares library packaging paths and runtime-specific RPC access", () => {
+  expect(CANONICAL_PLUGIN_CAPABILITIES).toContain("library")
+  expect(PLUGIN_PATH_FIELD_CONTRACTS).toContainEqual({
+    path: "library.modules.*.entry",
+    runtime: "javascript",
+    requiredFor: [],
+    executable: true,
+  })
+  expect(PLUGIN_MANIFEST_CONTRIBUTIONS).toContainEqual({
+    field: "library.rpc",
+    capabilities: ["library"],
+    execution: "javascript",
+    pythonExecution: "supported",
+  })
+  const events = PLUGIN_API_NAMESPACE_CONTRACTS.find((entry) => entry.id === "events")!
+  expect(
+    events.methods
+      .filter((method) => (method.runtimes ?? events.runtimes).includes("python"))
+      .map((method) => method.name)
+  ).toEqual(["ipc.call", "ipc.describeExposedMethods", "ipc.getExposedMethods"])
+  const libraries = PLUGIN_API_NAMESPACE_CONTRACTS.find((entry) => entry.id === "libraries")!
+  expect(libraries.runtimes).toEqual(["frontend", "hybrid"])
+  expect(libraries.methods[0]).toMatchObject({
+    requiredPermissions: ["ipc:call"],
+    resourceEffect: { kind: "host-owned" },
   })
 })

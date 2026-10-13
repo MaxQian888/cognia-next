@@ -14,6 +14,8 @@ import { TimeoutError } from "@cognia/primitives"
 import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
 import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
 import catalog from "@/packages/plugin-sdk/contract/catalog.json"
+import type { PluginManifest } from "@/types/plugin"
+import { getPermissionGuard } from "../security/permission-guard"
 
 jest.mock("../contracts/diagnostics-store", () => ({
   recordSilentFailure: jest.fn(),
@@ -29,7 +31,8 @@ const mockHasPerm = pluginHasApiPermission as jest.MockedFunction<typeof pluginH
 // Lazy-imported by PluginIPC.tryResumeSuspendedTarget — mock the store +
 // manager so the idle-suspend wake path is deterministic.
 const mockResumePlugin = jest.fn<Promise<void>, [string, string?]>()
-const mockPluginRecords: { value: Record<string, { status: string }> } = { value: {} }
+const mockPluginRecords: { value: Record<string, { status: string; manifest?: PluginManifest }> } =
+  { value: {} }
 jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: { getState: () => ({ plugins: mockPluginRecords.value }) },
 }))
@@ -780,5 +783,228 @@ describe("IPC hardening (W3.5/W3.6)", () => {
     await expect(ipc.call("powerless", "sleeping-target", "m")).rejects.toThrow(
       /no exposed methods/
     )
+  })
+})
+
+describe("declarative library RPC", () => {
+  let ipc: PluginIPC
+  let manifest: PluginManifest
+  let handler: jest.Mock
+  beforeEach(() => {
+    resetPluginIPC()
+    ipc = getPluginIPC()
+    mockResumePlugin.mockReset()
+    const objectSchema = {
+      type: "object",
+      properties: { x: { type: "number" } },
+      required: ["x"],
+      additionalProperties: false,
+    }
+    manifest = {
+      id: "library",
+      name: "Library",
+      description: "Library fixture",
+      capabilities: ["library"],
+      type: "frontend",
+      version: "1.2.0",
+      permissions: ["ipc:expose", "filesystem:read"],
+      library: {
+        rpc: {
+          increment: {
+            description: "Increment a value",
+            risk: "read",
+            requiredPermissions: ["filesystem:read"],
+            inputSchema: { type: "array", items: [objectSchema], minItems: 1, maxItems: 1 },
+            outputSchema: objectSchema,
+          },
+        },
+      },
+    } as PluginManifest
+    mockPluginRecords.value = {
+      library: { manifest, status: "enabled" },
+      consumer: {
+        manifest: {
+          id: "consumer",
+          name: "Consumer",
+          version: "1.0.0",
+          description: "Consumer fixture",
+          capabilities: [],
+          type: "frontend",
+          dependencies: { library: "^1.0.0" },
+        } as PluginManifest,
+        status: "loaded",
+      },
+      stranger: {
+        manifest: { id: "stranger", type: "frontend" } as PluginManifest,
+        status: "enabled",
+      },
+    }
+    getPermissionGuard().registerPlugin("library", manifest.permissions!)
+    getPermissionGuard().registerPlugin("consumer", ["ipc:call", "filesystem:read"])
+    getPermissionGuard().registerPlugin("stranger", ["ipc:call", "filesystem:read"])
+    ipc.registerPlugin("library", manifest.permissions, manifest)
+    handler = jest.fn((value: unknown) => ({ x: (value as { x: number }).x + 1 }))
+    ipc.expose("library", { increment: { handler, allowedCallers: ["stranger"] } })
+    ipc.completeLibraryActivation("library")
+  })
+
+  it("derives eligibility from dependencies rather than handwritten allowedCallers", async () => {
+    await expect(ipc.call("consumer", "library", "increment", [{ x: 1 }])).resolves.toEqual({
+      x: 2,
+    })
+    await expect(ipc.call("stranger", "library", "increment", [{ x: 1 }])).rejects.toThrow(
+      "dependency"
+    )
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(ipc.getExposedMethods("library", "stranger")).toEqual([])
+    expect(ipc.describeExposedMethods("library", "consumer")[0].library?.risk).toBe("read")
+  })
+
+  it("rejects schema-invalid or non-JSON arguments before dispatch and the breaker", async () => {
+    await expect(ipc.call("consumer", "library", "increment", [{ x: "1" }])).rejects.toThrow(
+      "validation"
+    )
+    await expect(ipc.call("consumer", "library", "increment", [() => 1])).rejects.toThrow()
+    expect(handler).not.toHaveBeenCalled()
+    expect(ipc.getBreakerState("library", "increment")).toBeNull()
+  })
+
+  it("copies both directions and isolates discovery metadata", async () => {
+    const input = { x: 1 }
+    const returned = { x: 2 }
+    handler.mockImplementation((value) => {
+      value.x = 5
+      return returned
+    })
+    const described = ipc.describeExposedMethods("library", "consumer")[0].library!
+    described.outputSchema = { type: "string" }
+    described.requiredPermissions.length = 0
+    const result = await ipc.call<{ x: number }>("consumer", "library", "increment", [input])
+    expect(input).toEqual({ x: 1 })
+    expect(result).toEqual(returned)
+    expect(result).not.toBe(returned)
+    expect(
+      ipc.describeExposedMethods("library", "consumer")[0].library?.requiredPermissions
+    ).toEqual(["filesystem:read"])
+  })
+
+  it("validates provider outputs and bounds their size", async () => {
+    handler.mockReturnValue({ x: "wrong" })
+    await expect(ipc.call("consumer", "library", "increment", [{ x: 1 }])).rejects.toThrow(
+      "output schema"
+    )
+    expect(ipc.getBreakerState("library", "increment")).not.toBeNull()
+    handler.mockReturnValue({ x: 2, text: "x".repeat(1024 * 1024) })
+    await expect(ipc.call("consumer", "library", "increment", [{ x: 1 }])).rejects.toThrow()
+  })
+
+  it("refuses incomplete activation and adapts declared Python handlers", async () => {
+    ipc.registerPlugin("library", manifest.permissions, manifest)
+    expect(() => ipc.completeLibraryActivation("library")).toThrow("was not exposed")
+    manifest.library!.rpc!.increment.handler = "increment_python"
+    ipc.registerPlugin("library", manifest.permissions, manifest)
+    const python = jest.fn(async () => ({ x: 8 }))
+    ipc.completeLibraryActivation("library", python)
+    await expect(ipc.call("consumer", "library", "increment", [{ x: 1 }])).resolves.toEqual({
+      x: 8,
+    })
+    expect(python).toHaveBeenCalledWith("increment_python", [{ x: 1 }])
+  })
+
+  it("requires provider and caller permissions independently", async () => {
+    getPermissionGuard().revoke("library", "filesystem:read")
+    await expect(ipc.call("consumer", "library", "increment", [{ x: 1 }])).rejects.toThrow()
+    expect(ipc.getExposedMethods("library", "consumer")).toEqual([])
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("does not wake a library for an undeclared consumer", async () => {
+    ipc.unexpose("library")
+    mockPluginRecords.value.library.status = "suspended"
+    await expect(ipc.call("stranger", "library", "increment", [{ x: 1 }])).rejects.toThrow(
+      "dependency"
+    )
+    expect(mockResumePlugin).not.toHaveBeenCalled()
+  })
+
+  it("wakes an eligible library and uses the complete resumed contract", async () => {
+    ipc.unexpose("library")
+    mockPluginRecords.value.library.status = "suspended"
+    mockResumePlugin.mockImplementation(async () => {
+      // The real manager hydrates a new manifest object during resume.
+      manifest = { ...manifest, library: JSON.parse(JSON.stringify(manifest.library)) }
+      mockPluginRecords.value.library.manifest = manifest
+      ipc.registerPlugin("library", manifest.permissions, manifest)
+      ipc.expose("library", { increment: handler })
+      ipc.completeLibraryActivation("library")
+      mockPluginRecords.value.library.status = "enabled"
+    })
+    await expect(ipc.call("consumer", "library", "increment", [{ x: 1 }])).resolves.toEqual({
+      x: 2,
+    })
+    expect(mockResumePlugin).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not accept a changed contract or caller during wake-up", async () => {
+    ipc.unexpose("library")
+    mockPluginRecords.value.library.status = "suspended"
+    mockResumePlugin.mockImplementation(async () => {
+      manifest = JSON.parse(JSON.stringify(manifest)) as PluginManifest
+      manifest.library!.rpc!.increment.outputSchema = { type: "string" }
+      mockPluginRecords.value.library.manifest = manifest
+      ipc.registerPlugin("library", manifest.permissions, manifest)
+      ipc.expose("library", { increment: handler })
+      ipc.completeLibraryActivation("library")
+      mockPluginRecords.value.library.status = "enabled"
+    })
+    await expect(ipc.call("consumer", "library", "increment", [{ x: 1 }])).rejects.toThrow(
+      "changed during wake-up"
+    )
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("rejects a late result after provider teardown", async () => {
+    let resolve!: (value: unknown) => void
+    handler.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    const pending = ipc.call("consumer", "library", "increment", [{ x: 1 }])
+    await Promise.resolve()
+    await Promise.resolve()
+    ipc.unexpose("library")
+    resolve({ x: 2 })
+    await expect(pending).rejects.toThrow("unavailable")
+    expect(ipc.getLibraryCallHistory()[0]).toMatchObject({ version: "1.2.0", outcome: "failure" })
+  })
+
+  it("rejects calls through an expired consumer context", async () => {
+    const controller = new AbortController()
+    const api = createIPCAPI("consumer", controller.signal)
+    controller.abort()
+    await expect(api.call("library", "increment", [{ x: 1 }])).rejects.toThrow("disposed")
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("audits identity and risk without retaining payloads", async () => {
+    await ipc.call("consumer", "library", "increment", [{ x: 4 }])
+    const audit = ipc.getLibraryCallHistory()
+    expect(audit).toEqual([
+      expect.objectContaining({
+        callerId: "consumer",
+        providerId: "library",
+        method: "increment",
+        risk: "read",
+        outcome: "success",
+      }),
+    ])
+    expect(audit[0]).not.toHaveProperty("args")
+    expect(audit[0]).not.toHaveProperty("result")
+    audit[0].outcome = "failure"
+    expect(ipc.getLibraryCallHistory()[0].outcome).toBe("success")
+    ipc.clear()
+    expect(ipc.getLibraryCallHistory()).toEqual([])
   })
 })

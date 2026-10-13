@@ -48014,11 +48014,33 @@
         "title": "Inbox telemetry"
       },
       "pluginMessaging": {
+        "audit": {
+          "caller": "Caller",
+          "duration": "Duration",
+          "durationValue": "{duration} ms",
+          "empty": "No library RPC calls recorded yet.",
+          "failure": "Failed",
+          "method": "Method",
+          "outcome": "Outcome",
+          "provider": "Library",
+          "risk": "Risk",
+          "success": "Succeeded",
+          "title": "Recent library RPC calls",
+          "version": "Version"
+        },
         "degradedTitle": "Degraded RPC endpoints",
         "description": "Live inter-plugin messaging — exposed RPC methods, active channels, and circuit-breaker health across the IPC and event-bus singletons.",
         "exposedEmpty": "No plugin has exposed any RPC methods.",
         "exposedTitle": "Exposed RPC methods",
+        "libraryVersion": "Library {version}",
+        "noAdditionalPermissions": "None",
         "refresh": "Refresh",
+        "requiredPermissions": "Required permissions: {permissions}",
+        "risk": {
+          "destructive": "Destructive",
+          "read": "Read only",
+          "write": "Writes data"
+        },
         "stats": {
           "busSubscriptions": "Event-bus subscriptions",
           "channels": "IPC channels",

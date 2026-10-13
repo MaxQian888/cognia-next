@@ -2,6 +2,8 @@ import type {
   FullPluginContext,
   NativeVideoInfo,
   PluginContext,
+  PluginLibrariesAPI,
+  PluginLibraryModuleFactory,
   PluginProjectWebviewAPI,
   VideoAnalysisFrame,
   VideoAnalysisManifest,
@@ -10,6 +12,21 @@ import type {
 } from "./index"
 
 describe("public FullPluginContext", () => {
+  it("exposes consumer-bound library factories and typed asynchronous imports", async () => {
+    const factory: PluginLibraryModuleFactory<{ increment: () => number }> = () => {
+      let value = 0
+      return { exports: { increment: () => ++value } }
+    }
+    const consumer = {} as PluginContext
+    const first = await factory(consumer)
+    const second = await factory(consumer)
+    expect(first.exports.increment()).toBe(1)
+    expect(first.exports.increment()).toBe(2)
+    expect(second.exports.increment()).toBe(1)
+    const assertCompatible = <T extends PluginLibrariesAPI>(value: T): PluginContext["libraries"] =>
+      value
+    expect(assertCompatible).toBeDefined()
+  })
   it("exports only the bounded document methods to sandboxed project clients", () => {
     type RequiredMethods =
       | "listKnowledgeDocuments"

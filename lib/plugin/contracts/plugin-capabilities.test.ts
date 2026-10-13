@@ -1,11 +1,20 @@
 import {
   PLUGIN_CAPABILITY_CONTRACTS,
   getPluginCapabilityContract,
+  capabilityPythonExecution,
   validatePluginCapabilities,
 } from "./plugin-capabilities"
 import { AUTHOR_CAPABILITY_CONTRACTS } from "@/packages/plugin-sdk/src/contracts/catalog"
 
 describe("plugin capability contracts", () => {
+  it("admits library contracts and advertises the Python RPC path", () => {
+    expect(validatePluginCapabilities(["library"]).allowed).toBe(true)
+    expect(getPluginCapabilityContract("library")?.manifestFields).toEqual([
+      "library.rpc",
+      "library.modules",
+    ])
+    expect(capabilityPythonExecution("library")).toBe("supported")
+  })
   it("keeps host proof metadata aligned with the public author catalog", () => {
     expect(
       PLUGIN_CAPABILITY_CONTRACTS.map(({ id, support, manifestFields }) => ({

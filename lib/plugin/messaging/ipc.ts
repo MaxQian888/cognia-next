@@ -8,7 +8,11 @@
  * - Typed event subscriptions
  */
 
-import type { PluginPermission } from "@/types/plugin"
+import type { PluginManifest, PluginPermission } from "@/types/plugin"
+import type { PluginLibraryMethod } from "@/types/plugin/plugin-library"
+import { assertLibraryAccess, authorizeLibraryAccess, PluginLibraryError } from "../library/access"
+import { cloneLibraryJson, validateLibraryValue } from "../library/schema"
+import { getPermissionGuard } from "../security/permission-guard"
 import { withTimeout } from "@cognia/primitives"
 import { createCircuitBreaker, type CircuitBreaker } from "@/lib/connectors/circuit-breaker"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
@@ -155,6 +159,18 @@ export interface ExposedMethod {
   schema?: IpcMethodSchema
   /** Target-side ACL — plugin ids allowed to invoke. Omitted = any caller. */
   allowedCallers?: string[]
+  library?: PluginLibraryMethod
+}
+
+export interface LibraryCallAudit {
+  callerId: string
+  providerId: string
+  method: string
+  version: string
+  risk: PluginLibraryMethod["risk"]
+  outcome: "success" | "failure"
+  durationMs: number
+  timestamp: number
 }
 
 export interface IPCConfig {
@@ -185,6 +201,15 @@ export class PluginIPC {
   private messageHistory: IPCMessage[] = []
   private readonly maxHistory: number
   private pluginPermissions: Map<string, Set<PluginPermission>> = new Map()
+  private libraryContracts = new Map<
+    string,
+    {
+      version: string
+      methods: Record<string, PluginLibraryMethod>
+      ready: boolean
+    }
+  >()
+  private libraryAudit: LibraryCallAudit[] = []
   /**
    * One breaker per `(targetPluginId, methodName)` pair. Created
    * lazily on first call so the breaker map only grows for endpoints
@@ -213,12 +238,51 @@ export class PluginIPC {
   // Plugin Registration
   // ===========================================================================
 
-  registerPlugin(pluginId: string, permissions: PluginPermission[] = []): void {
+  registerPlugin(
+    pluginId: string,
+    permissions: PluginPermission[] = [],
+    manifest?: PluginManifest
+  ): void {
     this.pluginPermissions.set(pluginId, new Set(permissions))
     this.exposedMethods.set(pluginId, new Map())
+    this.libraryContracts.delete(pluginId)
+    if (manifest?.library?.rpc && Object.keys(manifest.library.rpc).length > 0) {
+      this.libraryContracts.set(pluginId, {
+        version: manifest.version,
+        methods: cloneLibraryJson(manifest.library.rpc, this.config.maxMessageSize),
+        ready: false,
+      })
+    }
+  }
+
+  /** Publish only a complete contract; named Python handlers use the existing host bridge. */
+  completeLibraryActivation(
+    pluginId: string,
+    callPython?: (handler: string, args: unknown[]) => Promise<unknown>
+  ): void {
+    const contract = this.libraryContracts.get(pluginId)
+    if (!contract) return
+    for (const [name, declaration] of Object.entries(contract.methods)) {
+      if (declaration.handler) {
+        if (!callPython)
+          throw new PluginLibraryError(
+            "contract",
+            `Python handler unavailable for ${pluginId}.${name}`
+          )
+        this.expose(pluginId, { [name]: (...args) => callPython(declaration.handler!, args) })
+      }
+      if (!this.exposedMethods.get(pluginId)?.has(name)) {
+        throw new PluginLibraryError(
+          "contract",
+          `Declared library method ${pluginId}.${name} was not exposed`
+        )
+      }
+    }
+    contract.ready = true
   }
 
   unregisterPlugin(pluginId: string): void {
+    this.libraryContracts.delete(pluginId)
     // Remove all subscriptions for this plugin
     for (const [channel, subs] of this.subscriptions.entries()) {
       for (const sub of subs) {
@@ -406,13 +470,20 @@ export class PluginIPC {
       // + discovery metadata.
       const descriptor: IpcExposedMethodDescriptor =
         typeof value === "function" ? { handler: value } : value
+      const library = this.libraryContracts.get(pluginId)?.methods[name]
+      if (typeof descriptor.handler !== "function") {
+        throw new PluginLibraryError("contract", `IPC handler ${pluginId}.${name} must be callable`)
+      }
       methodMap.set(name, {
         name,
         pluginId,
         handler: descriptor.handler,
-        description: descriptor.description ?? descriptor.schema?.description,
-        schema: descriptor.schema,
-        allowedCallers: descriptor.allowedCallers ? [...descriptor.allowedCallers] : undefined,
+        description:
+          library?.description ?? descriptor.description ?? descriptor.schema?.description,
+        schema: library ? undefined : descriptor.schema,
+        allowedCallers:
+          !library && descriptor.allowedCallers ? [...descriptor.allowedCallers] : undefined,
+        library,
       })
     }
 
@@ -420,6 +491,9 @@ export class PluginIPC {
   }
 
   unexpose(pluginId: string, methodName?: string): void {
+    const contract = this.libraryContracts.get(pluginId)
+    if (contract && (!methodName || Object.hasOwn(contract.methods, methodName)))
+      contract.ready = false
     if (methodName) {
       this.exposedMethods.get(pluginId)?.delete(methodName)
     } else {
@@ -452,6 +526,131 @@ export class PluginIPC {
     methodName: string,
     args: unknown[] = [],
     options: PluginIPCCallOptions = {}
+  ): Promise<T> {
+    if (Object.hasOwn(this.libraryContracts.get(targetPluginId)?.methods ?? {}, methodName)) {
+      return this.callLibrary<T>(callerId, targetPluginId, methodName, args, options)
+    }
+    return this.dispatchCall<T>(callerId, targetPluginId, methodName, args, options)
+  }
+
+  private async callLibrary<T>(
+    callerId: string,
+    targetPluginId: string,
+    methodName: string,
+    args: unknown[],
+    options: PluginIPCCallOptions
+  ): Promise<T> {
+    const declaredContract = this.libraryContracts.get(targetPluginId)!
+    const declaration = declaredContract.methods[methodName]
+    const started = Date.now()
+    let outcome: LibraryCallAudit["outcome"] = "failure"
+    try {
+      if (options.signal?.aborted) throw new IPCAbortError()
+      const initial = assertLibraryAccess(callerId, targetPluginId)
+      const initialManifest = initial.caller.manifest
+      const initialVersion = initial.provider.manifest.version
+      const initialContract = this.libraryContracts.get(targetPluginId)
+      const guard = getPermissionGuard()
+      guard.require(callerId, "ipc:call", `library:${methodName}`)
+      guard.require(targetPluginId, "ipc:expose", `library:${methodName}`)
+      for (const principal of new Set([callerId, targetPluginId])) {
+        for (const permission of declaration.requiredPermissions) {
+          guard.require(principal, permission, `library:${methodName}`)
+        }
+      }
+      const input = cloneLibraryJson(args, this.config.maxMessageSize)
+      const invalid = validateLibraryValue(declaration.inputSchema, input)
+      if (invalid) throw new IPCSchemaError(targetPluginId, methodName, invalid)
+      const waking =
+        initial.provider.status === "suspended" &&
+        !this.exposedMethods.get(targetPluginId)?.has(methodName)
+      if (waking) await this.tryResumeSuspendedTarget(targetPluginId)
+      const current = assertLibraryAccess(callerId, targetPluginId)
+      const contract = this.libraryContracts.get(targetPluginId)
+      // Resume hydrates a new manifest and registers a fresh contract. Only that
+      // expected generation transition may proceed, with the same declaration.
+      if (
+        current.caller.manifest !== initialManifest ||
+        current.provider.manifest.version !== initialVersion ||
+        (!waking && contract !== initialContract) ||
+        JSON.stringify(contract?.methods[methodName]) !== JSON.stringify(declaration)
+      ) {
+        throw new PluginLibraryError("disposed", "Library or caller changed during wake-up")
+      }
+      if (options.signal?.aborted) throw new IPCAbortError()
+      const recheck = await authorizeLibraryAccess(
+        callerId,
+        targetPluginId,
+        declaration.requiredPermissions,
+        `rpc:${methodName}`
+      )
+      recheck()
+      if (options.signal?.aborted) throw new IPCAbortError()
+      const method = this.exposedMethods.get(targetPluginId)?.get(methodName)
+      const checkLifetime = () => {
+        recheck()
+        getPermissionGuard().require(targetPluginId, "ipc:expose", `library:${methodName}`)
+        if (
+          !contract?.ready ||
+          this.libraryContracts.get(targetPluginId) !== contract ||
+          !method ||
+          this.exposedMethods.get(targetPluginId)?.get(methodName) !== method
+        ) {
+          throw new PluginLibraryError(
+            "unavailable",
+            `Library ${targetPluginId} is unavailable or changed`
+          )
+        }
+      }
+      checkLifetime()
+      const result = await this.dispatchCall<T>(
+        callerId,
+        targetPluginId,
+        methodName,
+        input,
+        options,
+        (value) => {
+          checkLifetime()
+          const output = cloneLibraryJson(value, this.config.maxMessageSize)
+          const violation = validateLibraryValue(declaration.outputSchema, output)
+          if (violation)
+            throw new PluginLibraryError(
+              "contract",
+              `Library output schema violation for ${targetPluginId}.${methodName}: ${violation}`
+            )
+          return output as T
+        }
+      )
+      checkLifetime()
+      outcome = "success"
+      return result
+    } finally {
+      this.libraryAudit.push({
+        callerId,
+        providerId: targetPluginId,
+        method: methodName,
+        version: declaredContract.version,
+        risk: declaration.risk,
+        outcome,
+        durationMs: Date.now() - started,
+        timestamp: started,
+      })
+      if (this.libraryAudit.length > this.maxHistory)
+        this.libraryAudit.splice(0, this.libraryAudit.length - this.maxHistory)
+    }
+  }
+
+  getLibraryCallHistory(): LibraryCallAudit[] {
+    return this.libraryAudit.map((entry) => ({ ...entry }))
+  }
+
+  private async dispatchCall<T>(
+    callerId: string,
+    targetPluginId: string,
+    methodName: string,
+    args: unknown[],
+    options: PluginIPCCallOptions,
+    validateResult?: (value: unknown) => T
   ): Promise<T> {
     let methodMap = this.exposedMethods.get(targetPluginId)
     let method = methodMap?.get(methodName)
@@ -507,14 +706,20 @@ export class PluginIPC {
       throw new IPCAbortError("aborted before dispatch")
     }
 
-    this.log("call", { callerId, targetPluginId, methodName, args })
+    this.log(
+      "call",
+      method.library
+        ? { callerId, targetPluginId, methodName }
+        : { callerId, targetPluginId, methodName, args }
+    )
 
     const timeoutMs = options.timeoutMs ?? this.config.defaultTimeout
     const label = `ipc.call:${targetPluginId}.${methodName}`
 
     const handlerPromise = (async () => {
+      let result: unknown
       try {
-        return (await method.handler(...args)) as T
+        result = await method.handler(...args)
       } catch (error) {
         throw new Error(
           `RPC call to ${targetPluginId}.${methodName} failed: ${
@@ -522,6 +727,7 @@ export class PluginIPC {
           }`
         )
       }
+      return validateResult ? validateResult(result) : (result as T)
     })()
 
     let abortListener: (() => void) | null = null
@@ -569,6 +775,22 @@ export class PluginIPC {
    */
   /** ACL check for one exposed method. The owner can always call itself. */
   private callerAllowed(method: ExposedMethod, callerId: string): boolean {
+    if (method.library) {
+      try {
+        assertLibraryAccess(callerId, method.pluginId)
+        const guard = getPermissionGuard()
+        return (
+          this.libraryContracts.get(method.pluginId)?.ready === true &&
+          guard.check(callerId, "ipc:call") &&
+          guard.check(method.pluginId, "ipc:expose") &&
+          [callerId, method.pluginId].every((id) =>
+            method.library!.requiredPermissions.every((p) => guard.check(id, p))
+          )
+        )
+      } catch {
+        return false
+      }
+    }
     if (!method.allowedCallers) return true
     if (callerId === method.pluginId) return true
     return method.allowedCallers.includes(callerId)
@@ -699,6 +921,21 @@ export class PluginIPC {
         name: m.name,
         description: m.description,
         schema: m.schema,
+        ...(m.library
+          ? {
+              library: cloneLibraryJson(
+                {
+                  version: this.libraryContracts.get(pluginId)!.version,
+                  description: m.library.description,
+                  inputSchema: m.library.inputSchema,
+                  outputSchema: m.library.outputSchema,
+                  risk: m.library.risk,
+                  requiredPermissions: m.library.requiredPermissions,
+                },
+                this.config.maxMessageSize
+              ),
+            }
+          : {}),
       }))
   }
 
@@ -849,6 +1086,8 @@ export class PluginIPC {
   // ===========================================================================
 
   clear(): void {
+    this.libraryContracts.clear()
+    this.libraryAudit = []
     this.subscriptions.clear()
     this.exposedMethods.clear()
     this.messageHistory = []
@@ -886,7 +1125,7 @@ export function resetPluginIPC(): void {
 // Context API Factory
 // =============================================================================
 
-export function createIPCAPI(pluginId: string): PluginIPCAPI {
+export function createIPCAPI(pluginId: string, signal?: AbortSignal): PluginIPCAPI {
   const ipc = getPluginIPC()
 
   // Cross-plugin reach is permission-gated, mirroring how `agent:dispatch`
@@ -895,6 +1134,8 @@ export function createIPCAPI(pluginId: string): PluginIPCAPI {
   // the prelude to calling, W3.5) require `ipc:call`; publishing callable
   // methods requires `ipc:expose`. Receiving (`on`) stays ungated.
   const requirePerm = (permission: "ipc:call" | "ipc:expose", method: string): void => {
+    if (signal?.aborted)
+      throw new PluginLibraryError("disposed", "Plugin context has been disposed")
     if (!pluginHasApiPermission(pluginId, permission)) {
       throw new Error(
         `ipc.${method} requires the "${permission}" permission — declare it in the plugin manifest.`
@@ -932,7 +1173,11 @@ export function createIPCAPI(pluginId: string): PluginIPCAPI {
       options?: PluginIPCCallOptions
     ) => {
       requirePerm("ipc:call", "call")
-      return ipc.call<T>(pluginId, targetPluginId, method, args, options)
+      const signals = [signal, options?.signal].filter((s): s is AbortSignal => Boolean(s))
+      return ipc.call<T>(pluginId, targetPluginId, method, args, {
+        ...options,
+        ...(signals.length ? { signal: AbortSignal.any(signals) } : {}),
+      })
     },
     getExposedMethods: (targetPluginId) => {
       requirePerm("ipc:call", "getExposedMethods")

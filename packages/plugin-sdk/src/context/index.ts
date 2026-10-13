@@ -430,3 +430,14 @@ export type {
   PluginWebSearchResult,
   PluginWebSearchSuccess,
 } from "@/types/plugin/plugin-host-tools"
+
+export type {
+  PluginLibrarySchema,
+  PluginLibraryRisk,
+  PluginLibraryMethod,
+  PluginLibraryModule,
+  PluginLibraryContract,
+  PluginLibrariesAPI,
+  PluginLibraryModuleInstance,
+  PluginLibraryModuleFactory,
+} from "@/types/plugin/plugin-library"

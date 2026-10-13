@@ -1934,6 +1934,29 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/contracts/module-bridge-map.test.ts",
     ],
   },
+  {
+    id: "library",
+    support: "supported",
+    manifestFields: ["library.rpc", "library.modules"],
+    runtimeBinding:
+      "Dependency-governed IPC contracts and consumer-scoped library module factories",
+    hostBindings: [
+      "lib/plugin/messaging/ipc.ts",
+      "lib/plugin/library/modules.ts",
+      "lib/plugin/core/manager.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/manifest/index.ts",
+      "packages/plugin-sdk/src/context/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/ctx.py"],
+    docs: "docs/content/docs/en/plugin-dev/library-plugins.mdx",
+    requiredTests: [
+      "lib/plugin/core/validation.test.ts",
+      "lib/plugin/library/modules.test.ts",
+      "lib/plugin/messaging/ipc.test.ts",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = AUTHOR_CAPABILITY_IDS as readonly PluginCapability[]

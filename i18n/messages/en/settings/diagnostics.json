@@ -23,6 +23,14 @@
     "description": "Live inter-plugin messaging — exposed RPC methods, active channels, and circuit-breaker health across the IPC and event-bus singletons.",
     "exposedEmpty": "No plugin has exposed any RPC methods.",
     "exposedTitle": "Exposed RPC methods",
+    "libraryVersion": "Library {version}",
+    "requiredPermissions": "Required permissions: {permissions}",
+    "noAdditionalPermissions": "None",
+    "risk": {
+      "read": "Read only",
+      "write": "Writes data",
+      "destructive": "Destructive"
+    },
     "refresh": "Refresh",
     "stats": {
       "busSubscriptions": "Event-bus subscriptions",
@@ -31,7 +39,21 @@
       "ipcMessages": "IPC messages",
       "ipcSubscriptions": "IPC subscriptions"
     },
-    "title": "Plugin messaging"
+    "title": "Plugin messaging",
+    "audit": {
+      "title": "Recent library RPC calls",
+      "empty": "No library RPC calls recorded yet.",
+      "caller": "Caller",
+      "provider": "Library",
+      "method": "Method",
+      "version": "Version",
+      "risk": "Risk",
+      "outcome": "Outcome",
+      "duration": "Duration",
+      "success": "Succeeded",
+      "failure": "Failed",
+      "durationValue": "{duration} ms"
+    }
   },
   "sandboxAudit": {
     "description": "Recent sandbox_exec calls — allow / deny / error, command, duration. Mirrors the in-memory audit ring.",

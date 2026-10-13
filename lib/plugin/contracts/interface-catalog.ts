@@ -101,7 +101,7 @@ export function evaluatePluginApiCall(input: {
     }
   }
   const mode = descriptor.namespace.enforcement
-  if (!descriptor.namespace.runtimes.includes(input.runtime)) {
+  if (!(descriptor.runtimes ?? descriptor.namespace.runtimes).includes(input.runtime)) {
     return { allowed: false, mode, reason: "runtime", missingPermissions: [], descriptor }
   }
   if (!descriptor.namespace.platforms.includes(input.platform)) {

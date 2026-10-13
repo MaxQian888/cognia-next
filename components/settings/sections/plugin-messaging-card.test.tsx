@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 
@@ -23,7 +23,55 @@ beforeEach(() => {
   resetMessageBus()
 })
 
+afterEach(() => {
+  jest.restoreAllMocks()
+})
+
 describe("PluginMessagingCard", () => {
+  it("shows recent library audit metadata and refreshes outcomes", () => {
+    const history = jest.spyOn(getPluginIPC(), "getLibraryCallHistory").mockReturnValue([])
+    wrap(<PluginMessagingCard />)
+    expect(screen.getByText("No library RPC calls recorded yet.")).toBeInTheDocument()
+    history.mockReturnValue([
+      {
+        callerId: "consumer",
+        providerId: "utils",
+        method: "parse",
+        version: "1.2.0",
+        risk: "read",
+        outcome: "success",
+        durationMs: 12,
+        timestamp: 1,
+      },
+      {
+        callerId: "blocked",
+        providerId: "utils",
+        method: "remove",
+        version: "1.2.0",
+        risk: "destructive",
+        outcome: "failure",
+        durationMs: 3,
+        timestamp: 2,
+      },
+    ])
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    const table = screen.getByRole("table", { name: "Recent library RPC calls" })
+    const rows = within(table).getAllByRole("row")
+    expect(rows).toHaveLength(3)
+    expect(rows[1]).toHaveTextContent("blockedutilsremove1.2.0DestructiveFailed3 ms")
+    expect(rows[2]).toHaveTextContent("consumerutilsparse1.2.0Read onlySucceeded12 ms")
+    for (const heading of [
+      "Caller",
+      "Library",
+      "Method",
+      "Version",
+      "Risk",
+      "Outcome",
+      "Duration",
+    ]) {
+      expect(within(table).getByRole("columnheader", { name: heading })).toBeInTheDocument()
+    }
+  })
   it("shows the empty state when no plugin exposes methods", () => {
     wrap(<PluginMessagingCard />)
     expect(screen.getByTestId("plugin-messaging-exposed-empty")).toBeInTheDocument()
@@ -74,5 +122,34 @@ describe("PluginMessagingCard", () => {
     fireEvent.click(screen.getByTestId("plugin-messaging-refresh"))
 
     expect(screen.getByTestId("plugin-messaging-exposed")).toHaveTextContent("late-plugin")
+  })
+
+  it("shows the declared library version, risk, and required permissions", () => {
+    const ipc = getPluginIPC()
+    ipc.registerPlugin("library", ["ipc:expose"], {
+      id: "library",
+      name: "Library fixture",
+      description: "Library diagnostics fixture",
+      type: "frontend",
+      capabilities: [],
+      version: "1.2.0",
+      library: {
+        rpc: {
+          read: {
+            description: "Read library data",
+            risk: "read",
+            requiredPermissions: ["filesystem:read"],
+            inputSchema: { type: "array" },
+            outputSchema: true,
+          },
+        },
+      },
+    })
+    ipc.expose("library", { read: () => null })
+    ipc.completeLibraryActivation("library")
+    wrap(<PluginMessagingCard />)
+    expect(screen.getByText("Library 1.2.0")).toBeInTheDocument()
+    expect(screen.getByText("Read only")).toBeInTheDocument()
+    expect(screen.getByText("Required permissions: filesystem:read")).toBeInTheDocument()
   })
 })

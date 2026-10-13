@@ -109,7 +109,13 @@ fn path_values<'a>(value: &'a serde_json::Value, segments: &[&str], values: &mut
         }
         return;
     };
-    if let Some(key) = segment.strip_suffix("[]") {
+    if *segment == "*" {
+        if let Some(object) = value.as_object() {
+            for child in object.values() {
+                path_values(child, rest, values);
+            }
+        }
+    } else if let Some(key) = segment.strip_suffix("[]") {
         if let Some(array) = value.get(key).and_then(|v| v.as_array()) {
             for child in array {
                 path_values(child, rest, values);
@@ -195,6 +201,16 @@ fn build_plan(
     replacements.insert(source, "dist/index.js".to_string());
     let mut references = std::collections::BTreeSet::new();
     collect_module_entries(manifest, &mut references)?;
+    let mut library_entries = Vec::new();
+    path_values(
+        manifest,
+        &["library", "modules", "*", "entry"],
+        &mut library_entries,
+    );
+    let library_entries = library_entries
+        .into_iter()
+        .map(normalized_rel)
+        .collect::<Result<std::collections::BTreeSet<_>>>()?;
     for entry in references {
         if replacements.contains_key(&entry) {
             continue;
@@ -208,8 +224,13 @@ fn build_plan(
             replacements.insert(entry, "dist/index.js".to_string());
             continue;
         }
+        let extension = if library_entries.contains(&entry) {
+            "cjs"
+        } else {
+            "js"
+        };
         let output = format!(
-            "dist/entries/{}.js",
+            "dist/entries/{}.{extension}",
             Path::new(&entry)
                 .with_extension("")
                 .to_string_lossy()
@@ -877,6 +898,30 @@ mod tests {
         ] {
             assert!(archive.by_name(path).is_ok(), "missing {path}");
         }
+    }
+
+    #[test]
+    fn keyed_library_modules_build_to_cjs_and_ship_in_the_archive() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let manifest = json!({"id":"library", "version":"1.0.0", "main":"src/index.ts",
+            "library":{"modules":{"utils":{"entry":"src/utils.cjs"}}}});
+        let plan = build_plan(root, &manifest, false).unwrap();
+        assert_eq!(
+            plan.manifest["library"]["modules"]["utils"]["entry"],
+            "dist/entries/src/utils.cjs"
+        );
+        for output in plan.entries.values() {
+            let file = root.join(output);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, "module.exports = {}; ").unwrap();
+        }
+        let archive_path = root.join("library.zip");
+        pack_frontend_bundle(&archive_path, root, &plan.manifest, "dist/index.js").unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(archive_path).unwrap()).unwrap();
+        assert!(archive.by_name("dist/entries/src/utils.cjs").is_ok());
+        let escaping = json!({"main":"src/index.ts", "library":{"modules":{"utils":{"entry":"../escape.cjs"}}}});
+        assert!(build_plan(root, &escaping, false).is_err());
     }
 
     #[test]

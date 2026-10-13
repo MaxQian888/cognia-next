@@ -66,6 +66,7 @@ struct ManifestContribution {
     field: String,
     execution: String,
     javascript_when: Option<JavascriptWhen>,
+    python_execution: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -198,7 +199,13 @@ fn collect_path_values<'a>(value: &'a Value, segments: &[&str], output: &mut Vec
         output.push(value);
         return;
     };
-    if let Some(field) = segment.strip_suffix("[]") {
+    if *segment == "*" {
+        if let Some(items) = value.as_object() {
+            for item in items.values() {
+                collect_path_values(item, rest, output);
+            }
+        }
+    } else if let Some(field) = segment.strip_suffix("[]") {
         if let Some(items) = value.get(field).and_then(Value::as_array) {
             for item in items {
                 collect_path_values(item, rest, output);
@@ -236,7 +243,13 @@ fn nested_value<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
 }
 
 fn contribution_requires_javascript(manifest: &Value, contribution: &ManifestContribution) -> bool {
-    let entries = match manifest.get(&contribution.field) {
+    if contribution.field == "library.rpc"
+        && manifest.get("type").and_then(Value::as_str) == Some("python")
+        && contribution.python_execution.as_deref() == Some("supported")
+    {
+        return false;
+    }
+    let entries = match nested_value(manifest, &contribution.field) {
         Some(Value::Array(entries)) if !entries.is_empty() => entries.as_slice(),
         Some(value @ Value::Object(_)) => std::slice::from_ref(value),
         _ => return false,
@@ -497,6 +510,7 @@ mod tests {
     fn rejects_unsafe_paths_from_top_level_nested_and_array_fields() {
         for manifest in [
             json!({ "id": "demo", "type": "frontend", "main": "../outside.js" }),
+            json!({ "id": "demo", "type": "frontend", "main": "index.js", "library": { "modules": { "utils": { "entry": "../outside.cjs" } } } }),
             json!({ "id": "demo", "type": "frontend", "main": "index.js", "configComponent": { "entry": "C:\\outside.js" } }),
             json!({ "id": "demo", "type": "frontend", "main": "index.js", "contextPanels": [{ "entry": "..\\outside.js" }] }),
             json!({ "id": "demo", "type": "frontend", "main": "index.js", "runtimeCompatibility": { "mobile": { "entrypoint": "/outside.js" } } }),
@@ -510,6 +524,18 @@ mod tests {
         ] {
             assert!(validate_manifest_contract(&manifest).is_err());
         }
+    }
+
+    #[test]
+    fn library_rpc_allows_python_but_library_modules_require_javascript() {
+        let rpc = json!({"id":"demo", "type":"python", "pythonMain":"main.py",
+            "library":{"rpc":{"add":{"handler":"add"}}}});
+        validate_manifest_contract(&rpc).unwrap();
+        let modules = json!({"id":"demo", "type":"python", "pythonMain":"main.py",
+            "library":{"modules":{"utils":{"entry":"utils.cjs"}}}});
+        assert!(validate_manifest_contract(&modules)
+            .unwrap_err()
+            .contains("library.modules"));
     }
 
     #[test]

@@ -48014,11 +48014,33 @@
         "title": "Inbox 遥测"
       },
       "pluginMessaging": {
+        "audit": {
+          "caller": "调用方",
+          "duration": "耗时",
+          "durationValue": "{duration} 毫秒",
+          "empty": "尚无库 RPC 调用记录。",
+          "failure": "失败",
+          "method": "方法",
+          "outcome": "结果",
+          "provider": "库",
+          "risk": "风险",
+          "success": "成功",
+          "title": "最近的库 RPC 调用",
+          "version": "版本"
+        },
         "degradedTitle": "降级的 RPC 端点",
         "description": "实时插件间通信——IPC 与事件总线单例上暴露的 RPC 方法、活动通道及熔断器健康状态。",
         "exposedEmpty": "尚无插件暴露任何 RPC 方法。",
         "exposedTitle": "已暴露的 RPC 方法",
+        "libraryVersion": "库版本 {version}",
+        "noAdditionalPermissions": "无",
         "refresh": "刷新",
+        "requiredPermissions": "所需权限：{permissions}",
+        "risk": {
+          "destructive": "破坏性操作",
+          "read": "只读",
+          "write": "写入数据"
+        },
         "stats": {
           "busSubscriptions": "事件总线订阅",
           "channels": "IPC 通道",

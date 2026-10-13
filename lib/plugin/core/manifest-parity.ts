@@ -39,9 +39,19 @@ export function findPluginManifestParityIssues(
     issues.push({ field: "id", packaged: packaged.id, module: moduleManifest.id })
   }
   for (const contract of PLUGIN_MANIFEST_CONTRIBUTIONS) {
-    const field = contract.field as keyof PluginManifest
-    const packagedValue = packaged[field]
-    const moduleValue = moduleManifest[field]
+    const field = contract.field
+    const valueAt = (manifest: PluginManifest): unknown =>
+      field
+        .split(".")
+        .reduce<unknown>(
+          (value, key) =>
+            value && typeof value === "object" && Object.hasOwn(value, key)
+              ? (value as Record<string, unknown>)[key]
+              : undefined,
+          manifest
+        )
+    const packagedValue = valueAt(packaged)
+    const moduleValue = valueAt(moduleManifest)
     if (comparable(packagedValue) !== comparable(moduleValue)) {
       issues.push({ field: String(field), packaged: packagedValue, module: moduleValue })
     }

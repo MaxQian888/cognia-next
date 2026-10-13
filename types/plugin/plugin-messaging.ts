@@ -115,6 +115,8 @@ export interface IpcExposedMethodInfo {
   name: string
   description?: string
   schema?: IpcMethodSchema
+  /** Manifest-owned library contract, copied for discovery; never includes the handler. */
+  library?: Omit<import("./plugin-library").PluginLibraryMethod, "handler"> & { version: string }
 }
 
 /** Plugin-scoped façade over the inter-plugin IPC manager. */

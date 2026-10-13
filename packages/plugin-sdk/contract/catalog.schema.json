@@ -359,6 +359,13 @@
                 "name": {
                   "type": "string"
                 },
+                "runtimes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "enum": ["frontend", "hybrid", "python", "wasm", "vscode"] },
+                  "uniqueItems": true,
+                  "description": "Optional subset of namespace runtimes; omission inherits the namespace."
+                },
                 "requiredPermissions": {
                   "type": "array",
                   "items": {

@@ -33,6 +33,7 @@ import {
 } from "@/lib/plugin/contracts/diagnostics-store"
 import type { Plugin, PluginContext, PluginManifest } from "@/types/plugin"
 import { PluginServiceRegistry } from "./service-registry"
+import { evaluatePluginBundle } from "./evaluate-plugin-bundle"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { getMessageBus, SystemEvents, resetMessageBus } from "@/lib/plugin/messaging/message-bus"
@@ -1389,6 +1390,26 @@ describe("PluginManager", () => {
       })
       return { store, old, result, manager: new PluginManager({ pluginDirectory: "/plugins" }) }
     }
+
+    it("blocks replacement before committing staged files when an installed provider has active consumers", async () => {
+      const { store, old, manager } = setup(true)
+      store.plugins.consumer = {
+        manifest: { ...createManifest("consumer"), dependencies: { [manifest.id]: "^1.0.0" } },
+        path: "/plugins/consumer",
+        source: "local",
+        status: "enabled",
+        config: {},
+      }
+      await expect(manager.installWasmPluginFromLocalFile("/tmp/p.zip", decision)).rejects.toThrow(
+        "consumer"
+      )
+      expect(store.plugins[manifest.id]).toBe(old)
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_commit_staged_update", expect.anything())
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_discard_staged_update", {
+        pluginId: manifest.id,
+        transactionId: "wasm-txn-1",
+      })
+    })
 
     it("does not change grants or the previous plugin when backend staging fails", async () => {
       const { store, old, manager } = setup(true)
@@ -5870,6 +5891,190 @@ describe("PluginManager", () => {
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_call", expect.anything())
     })
 
+    it.each([true, false])(
+      "activates a standalone library with implemented RPC=%s through the real loader",
+      async (implemented) => {
+        resetPluginIPC()
+        const { PermissionGuard } = jest.requireActual<
+          typeof import("@/lib/plugin/security/permission-guard")
+        >("@/lib/plugin/security/permission-guard")
+        const guard = new PermissionGuard({ confirmDangerousByDefault: false })
+        ;(getPermissionGuard as jest.Mock).mockReturnValue(guard)
+        const provider = createTypedPlugin("runtime-library", "frontend")
+        provider.source = "dev"
+        provider.manifest = {
+          ...provider.manifest,
+          capabilities: [],
+          main: "main.cjs",
+          engines: { cognia: ">=0.2.0" },
+          permissions: ["ipc:expose"],
+          library: {
+            rpc: {
+              double: {
+                description: "Double",
+                risk: "read",
+                requiredPermissions: [],
+                inputSchema: { type: "array", items: { type: "number" }, minItems: 1, maxItems: 1 },
+                outputSchema: { type: "number" },
+              },
+            },
+            modules: {
+              utils: {
+                entry: "utils.cjs",
+                description: "Utils",
+                risk: "read",
+                requiredPermissions: [],
+              },
+            },
+          },
+        }
+        const store = createLoadStore(provider)
+        store.loadPlugin.mockImplementation(async () => {
+          store.plugins[provider.manifest.id].status = "loaded"
+        })
+        const consumer = createTypedPlugin("consumer-a", "frontend", "enabled")
+        consumer.manifest.dependencies = { [provider.manifest.id]: "^1.0.0" }
+        consumer.manifest.permissions = ["ipc:call"]
+        const other = { ...consumer, manifest: { ...consumer.manifest, id: "consumer-b" } }
+        store.plugins[consumer.manifest.id] = consumer
+        store.plugins[other.manifest.id] = other
+        mockGetState.mockReturnValue(store)
+        ;(usePluginStore.setState as unknown as jest.Mock).mockImplementation((update) =>
+          Object.assign(store, update(store))
+        )
+        guard.registerPlugin(consumer.manifest.id, ["ipc:call"])
+        guard.registerPlugin(other.manifest.id, ["ipc:call"])
+        const importer = jest.fn(async (path: string) =>
+          evaluatePluginBundle(
+            path.endsWith("utils.cjs")
+              ? "let topLevel = 0; exports.default = ctx => ({exports: {next: () => ++topLevel, Counter: class { value = ++topLevel }, callback: fn => fn(ctx.pluginId)}})"
+              : `exports.default = {manifest: ${JSON.stringify(provider.manifest)}, activate: ctx => { ${implemented ? "ctx.events.ipc.expose({double: n => n * 2})" : ""} }}`,
+            path
+          )
+        )
+        const manager = new PluginManager({
+          pluginDirectory: "/plugins",
+          frontendImporter: importer,
+        })
+        if (!implemented) {
+          await expect(manager.loadPlugin(provider.manifest.id)).rejects.toThrow("double")
+          expect(getPluginIPC().getAllExposedMethods().has(provider.manifest.id)).toBe(false)
+          expect(store.loadPlugin).not.toHaveBeenCalled()
+          resetPluginIPC()
+          return
+        }
+        await manager.loadPlugin(provider.manifest.id)
+        expect(store.plugins[provider.manifest.id].status).toBe("loaded")
+        getPluginIPC().registerPlugin(consumer.manifest.id, ["ipc:call"], consumer.manifest)
+        await expect(
+          getPluginIPC().call(consumer.manifest.id, provider.manifest.id, "double", [4])
+        ).resolves.toBe(8)
+        type Exports = {
+          next(): number
+          Counter: new () => { value: number }
+          callback(fn: (id: string) => unknown): unknown
+        }
+        const { createFullPluginContext } =
+          jest.requireActual<typeof import("./context")>("./context")
+        const firstContext = createFullPluginContext(consumer, manager)
+        const secondContext = createFullPluginContext(other, manager)
+        const a = await firstContext.libraries.importModule<Exports>(provider.manifest.id, "utils")
+        const b = await secondContext.libraries.importModule<Exports>(provider.manifest.id, "utils")
+        expect(a.next()).toBe(1)
+        expect(new a.Counter().value).toBe(2)
+        expect(b.next()).toBe(1)
+        const callback = jest.fn((id) => id)
+        expect(a.callback(callback)).toBe("consumer-a")
+        expect(callback).toHaveBeenCalledWith("consumer-a")
+        await manager.getPluginDisposableScope(consumer.manifest.id).dispose()
+        expect(() => a.callback(callback)).toThrow("activation has ended")
+        await manager.getPluginDisposableScope(other.manifest.id).dispose()
+        await manager.getPluginDisposableScope(provider.manifest.id).dispose()
+        resetPluginIPC()
+      }
+    )
+
+    it("auto-enables a disabled library before activating its consumer through the real loader", async () => {
+      resetPluginIPC()
+      const { PermissionGuard } = jest.requireActual<
+        typeof import("@/lib/plugin/security/permission-guard")
+      >("@/lib/plugin/security/permission-guard")
+      const guard = new PermissionGuard({ confirmDangerousByDefault: false })
+      ;(getPermissionGuard as jest.Mock).mockReturnValue(guard)
+      const provider = createTypedPlugin("disabled-library", "frontend", "disabled")
+      provider.source = "dev"
+      provider.manifest = {
+        ...provider.manifest,
+        main: "main.cjs",
+        capabilities: [],
+        engines: { cognia: ">=0.2.0" },
+        permissions: ["ipc:expose"],
+        library: {
+          rpc: {
+            double: {
+              description: "Double",
+              risk: "read",
+              requiredPermissions: [],
+              inputSchema: { type: "array", items: { type: "number" }, minItems: 1, maxItems: 1 },
+              outputSchema: { type: "number" },
+            },
+          },
+        },
+      }
+      const consumer = createTypedPlugin("library-consumer", "frontend")
+      consumer.source = "dev"
+      consumer.manifest = {
+        ...consumer.manifest,
+        main: "main.cjs",
+        capabilities: [],
+        permissions: ["ipc:call"],
+        dependencies: { [provider.manifest.id]: "^1.0.0" },
+      }
+      const store = {
+        ...createLoadStore(provider),
+        enablePlugin: jest.fn(async (id: string) => {
+          store.plugins[id].status = "enabled"
+        }),
+      }
+      store.plugins[consumer.manifest.id] = consumer
+      store.loadPlugin.mockImplementation(async (id?: string) => {
+        if (id) store.plugins[id].status = "loaded"
+      })
+      mockGetState.mockReturnValue(store)
+      ;(usePluginStore.setState as unknown as jest.Mock).mockImplementation((update) =>
+        Object.assign(store, update(store))
+      )
+      const lifecycleStateAdapter = new InMemoryPluginLifecycleStateAdapter()
+      await lifecycleStateAdapter.write(provider.manifest.id, 0, { intent: "disabled" })
+      const importer = jest.fn(async (path: string) => {
+        const isProvider = path.includes(provider.manifest.id)
+        return evaluatePluginBundle(
+          `exports.default = {manifest: ${JSON.stringify(isProvider ? provider.manifest : consumer.manifest)}, activate: async ctx => { ${isProvider ? "ctx.events.ipc.expose({double: n => n * 2})" : `if (await ctx.events.ipc.call('${provider.manifest.id}', 'double', [4]) !== 8) throw new Error('Library result mismatch')`} }}`,
+          path
+        )
+      })
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        frontendImporter: importer,
+        lifecycleStateAdapter,
+      })
+      try {
+        await manager.enablePlugin(consumer.manifest.id)
+        expect(store.enablePlugin.mock.calls.map(([id]) => id)).toEqual([
+          provider.manifest.id,
+          consumer.manifest.id,
+        ])
+        expect(store.plugins[provider.manifest.id].status).toBe("enabled")
+        expect(store.plugins[consumer.manifest.id].status).toBe("enabled")
+        expect((await lifecycleStateAdapter.read(provider.manifest.id)).intent).toBe("enabled")
+        expect(importer).toHaveBeenCalledTimes(2)
+      } finally {
+        await manager.getPluginDisposableScope(consumer.manifest.id).dispose()
+        await manager.getPluginDisposableScope(provider.manifest.id).dispose()
+        resetPluginIPC()
+      }
+    })
+
     it("loadPlugin routes python plugins through the Python host", async () => {
       const plugin = createTypedPlugin("py-plugin", "python")
       const store = createLoadStore(plugin)
@@ -5893,6 +6098,66 @@ describe("PluginManager", () => {
       // (an actual failure message) would indicate a load error.
       expect(store.setPluginError).not.toHaveBeenCalledWith("py-plugin", expect.any(String))
     })
+
+    it.each([undefined, [], ["double"]])(
+      "checks declared Python library handlers against host callables %j before publication",
+      async (callableFunctions) => {
+        resetPluginIPC()
+        const plugin = createTypedPlugin("python-library", "python")
+        plugin.manifest.engines = { cognia: ">=0.2.0" }
+        plugin.manifest.permissions = ["ipc:expose"]
+        plugin.manifest.library = {
+          rpc: {
+            double: {
+              description: "Double",
+              handler: "double",
+              risk: "read",
+              requiredPermissions: [],
+              inputSchema: { type: "array" },
+              outputSchema: { type: "number" },
+            },
+          },
+        }
+        const store = createLoadStore(plugin)
+        mockGetState.mockReturnValue(store)
+        mockInvoke.mockImplementation(async (command: string) => {
+          if (command === "plugin_python_load") {
+            return {
+              tool_count: 0,
+              hook_count: 0,
+              generation: "python-library-generation",
+              callable_functions: callableFunctions,
+            }
+          }
+          return command === "plugin_python_get_tools" ? [] : undefined
+        })
+        const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+        stubLoader(manager)
+        try {
+          if (callableFunctions?.includes("double")) {
+            await expect(manager.loadPlugin(plugin.manifest.id)).resolves.toBeUndefined()
+            expect(store.loadPlugin).toHaveBeenCalledWith(plugin.manifest.id, { viaManager: false })
+            expect(getPluginIPC().getAllExposedMethods().get(plugin.manifest.id)).toEqual([
+              "double",
+            ])
+          } else {
+            await expect(manager.loadPlugin(plugin.manifest.id)).rejects.toThrow(
+              /library.*double.*callable/i
+            )
+            expect(store.loadPlugin).not.toHaveBeenCalled()
+            expect(store.registerPluginTool).not.toHaveBeenCalled()
+            expect(mockInvoke).toHaveBeenCalledWith("plugin_python_unload", {
+              pluginId: plugin.manifest.id,
+              generation: "python-library-generation",
+            })
+            expect(getPluginIPC().getAllExposedMethods().has(plugin.manifest.id)).toBe(false)
+          }
+        } finally {
+          await manager.getPluginDisposableScope(plugin.manifest.id).dispose()
+          resetPluginIPC()
+        }
+      }
+    )
 
     it("loadPlugin does NOT route wasm plugins through the Python host", async () => {
       const plugin = createTypedPlugin("wasm-plugin", "wasm")
@@ -7404,10 +7669,10 @@ describe("PluginManager", () => {
       ).toBe(true)
     })
 
-    it("blocks enable when a required dependency is disabled", async () => {
+    it("blocks enable when a required dependency has errored", async () => {
       const store = {
         plugins: {
-          a: mkPlugin("a", {}, "disabled"),
+          a: mkPlugin("a", {}, "error"),
           b: mkPlugin("b", { dependencies: { a: "*" } }),
         },
         enablePlugin: jest.fn(),
@@ -7665,6 +7930,25 @@ describe("PluginManager", () => {
       await expect(manager.suspendPlugin("p")).resolves.toBeUndefined()
       expect(store.plugins.p.status).toBe("disabled")
     })
+
+    it.each(["enabled", "suspended"] as const)(
+      "protects a %s library from teardown with enabled dependents",
+      async (status) => {
+        const store = {
+          plugins: {
+            p: mkPlugin("p", status),
+            consumer: mkPlugin("consumer", "enabled", { dependencies: { p: "^1.0.0" } }),
+          },
+        }
+        mockGetState.mockReturnValue(store)
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        if (status === "enabled")
+          await expect(manager.suspendPlugin("p")).rejects.toThrow("consumer")
+        await expect(manager.disablePlugin("p")).rejects.toThrow("consumer")
+        await expect(manager.reloadPlugin("p")).rejects.toThrow("consumer")
+        expect(store.plugins.p.status).toBe(status)
+      }
+    )
 
     it("resumePlugin no-ops unless the plugin is suspended", async () => {
       const store = { plugins: { p: mkPlugin("p", "enabled") } }

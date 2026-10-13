@@ -57,6 +57,11 @@ function validateIdentity(manifest) {
 
 function pathValues(object, expression) {
   const [part, ...rest] = expression.split(".")
+  if (part === "*") {
+    return Object.values(object ?? {}).flatMap((value) =>
+      rest.length ? pathValues(value, rest.join(".")) : typeof value === "string" ? [value] : []
+    )
+  }
   const array = part.endsWith("[]")
   const value = object?.[array ? part.slice(0, -2) : part]
   return (array ? (value ?? []) : [value]).flatMap((item) =>
@@ -214,13 +219,15 @@ export async function buildFrontendPlugin({
     [path.relative(pluginRoot, source).replaceAll(path.sep, "/")]: "dist/index.js",
   }
   const entries = new Map([[source, "dist/index.js"]])
+  const libraryEntries = new Set(pathValues(manifest, "library.modules.*.entry"))
   for (const contract of catalog.pathFields.filter((field) => field.runtime === "javascript")) {
     if (contract.path.startsWith("nodeRuntime.")) continue
     for (const value of pathValues(manifest, contract.path)) {
       if (contract.sentinels?.includes(value)) continue
       const relative = relativePath(value)
       if (mapping[value]) continue
-      const output = `dist/entries/${relative.replace(/\.[cm]?[jt]sx?$/, "")}.js`
+      const extension = libraryEntries.has(value) ? "cjs" : "js"
+      const output = `dist/entries/${relative.replace(/\.[cm]?[jt]sx?$/, "")}.${extension}`
       mapping[value] = output
       entries.set(path.join(pluginRoot, relative), output)
     }

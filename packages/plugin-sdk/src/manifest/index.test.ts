@@ -5,6 +5,7 @@ import type {
   A2UIPluginComponentDef,
   A2UITemplateDef,
   PluginManifest,
+  PluginLibraryContract,
   PluginDefinition,
   PluginCapability,
   PluginManifestDexieBlock,
@@ -62,6 +63,41 @@ import type {
 } from "./index"
 
 describe("plugin-sdk: manifest", () => {
+  it("accepts versioned RPC contracts and dedicated JS modules through the author manifest", () => {
+    const library: PluginLibraryContract = {
+      rpc: {
+        echo: {
+          description: "Echo JSON",
+          inputSchema: { type: "array" },
+          outputSchema: true,
+          risk: "read",
+          requiredPermissions: [],
+        },
+      },
+      modules: {
+        utils: {
+          description: "Utilities",
+          entry: "dist/utils.cjs",
+          risk: "read",
+          requiredPermissions: [],
+        },
+      },
+    }
+    const definition = manifest.definePlugin({
+      manifest: {
+        id: "example-library",
+        name: "Library",
+        version: "1.0.0",
+        type: "frontend",
+        capabilities: ["library"],
+        main: "index.js",
+        description: "Example",
+        library,
+      },
+      activate: async () => undefined,
+    })
+    expect(definition.manifest.library).toBe(library)
+  })
   it("exposes definePlugin as a runtime helper", () => {
     expect(typeof manifest.definePlugin).toBe("function")
   })

@@ -50,9 +50,17 @@ export function validateApiSurfaceCompatibility(catalog, baseline) {
         errors.push(`removed platform ${platform} from ${expected.id}`)
       }
     }
-    const methods = new Set(current.methods.map((method) => method.id))
+    const methods = new Map(current.methods.map((method) => [method.id, method]))
     for (const method of expected.methods) {
       if (!methods.has(method)) errors.push(`removed method ${method}`)
+      else {
+        const effectiveRuntimes = methods.get(method).runtimes ?? current.runtimes
+        for (const runtime of expected.methodRuntimes?.[method] ?? expected.runtimes) {
+          if (!effectiveRuntimes.includes(runtime)) {
+            errors.push(`removed runtime ${runtime} from method ${method}`)
+          }
+        }
+      }
     }
   }
   if (errors.length > 0) {
@@ -88,6 +96,15 @@ export function validateInterfaceCatalog(catalog) {
       methods.add(method.id)
       if (method.id !== `${namespace.id}.${method.name}`) {
         throw new Error(`API method ${method.id} must be namespaced by ${namespace.id}`)
+      }
+      if (
+        method.runtimes !== undefined &&
+        (method.runtimes.length === 0 ||
+          method.runtimes.some((runtime) => !namespace.runtimes.includes(runtime)))
+      ) {
+        throw new Error(
+          `API method ${method.id} runtimes must be a nonempty subset of namespace runtimes`
+        )
       }
       for (const permission of method.requiredPermissions) {
         if (!permissions.has(permission)) {
@@ -449,10 +466,10 @@ export function renderApiReference(catalog) {
     .filter((namespace) => namespace.methods.length > 0)
     .map(
       (namespace) =>
-        `## \`${namespace.authorPath}\`\n\n| Method | Permissions | Risk | Idempotent |\n| --- | --- | --- | --- |\n${namespace.methods
+        `## \`${namespace.authorPath}\`\n\n| Method | Permissions | Risk | Idempotent | Runtimes |\n| --- | --- | --- | --- | --- |\n${namespace.methods
           .map(
             (method) =>
-              `| \`${method.id}\` | ${method.requiredPermissions.map((permission) => `\`${permission}\``).join(", ") || "None"} | ${method.risk} | ${method.idempotent ? "Yes" : "No"} |`
+              `| \`${method.id}\` | ${method.requiredPermissions.map((permission) => `\`${permission}\``).join(", ") || "None"} | ${method.risk} | ${method.idempotent ? "Yes" : "No"} | ${(method.runtimes ?? namespace.runtimes).join(", ")} |`
           )
           .join("\n")}`
     )

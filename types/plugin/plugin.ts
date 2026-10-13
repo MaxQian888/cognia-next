@@ -171,6 +171,7 @@ export type PluginContributionBackend = "js" | "python"
  * Plugin capabilities - what the plugin can provide
  */
 export type PluginCapability =
+  | "library" // Provides governed runtime RPC and consumer-owned JS modules
   | "tools" // Provides Agent tools
   | "native-anthropic-tool" // Wraps an Anthropic native tool (computer/bash/text_editor)
   | "components" // Provides A2UI components
@@ -648,6 +649,9 @@ export interface PluginManifest {
 
   /** Style entry point (CSS) */
   styles?: string
+
+  /** Independently installable RPC contracts and consumer-owned JS modules. */
+  library?: import("./plugin-library").PluginLibraryContract
 
   // Dependencies
   /**
@@ -3861,6 +3865,8 @@ export interface PythonLoadResult {
   hook_count: number
   generation: string
   hooks?: PythonHookDeclaration[]
+  /** Public module callables discovered after startup, without invoking them. */
+  callable_functions?: string[]
 }
 
 /**
@@ -5635,6 +5641,9 @@ export interface PluginPermissionAPI {
  * Plugin context API with all feature-specific APIs
  */
 export interface PluginContextAPI {
+  /** Governed, consumer-scoped runtime imports from required library dependencies. */
+  libraries: import("./plugin-library").PluginLibrariesAPI
+
   /** Session management API */
   session: PluginSessionAPI
 

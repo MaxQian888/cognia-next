@@ -18,6 +18,20 @@ import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile, utimes } from "
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { build } from "esbuild"
+import { createHash } from "node:crypto"
+
+test("stages and integrity-pins independently importable library CJS entries", async (t) => {
+  const f = await fixture(t)
+  const pluginRoot = path.join(f.root, "plugins/cognia-pdf")
+  const manifest = { id: "cognia-pdf", version: "1", main: "src/index.ts", library: { modules: { utils: { entry: "src/utils.cjs" } } } }
+  await writeFile(path.join(pluginRoot, "plugin.json"), JSON.stringify(manifest))
+  await writeFile(path.join(pluginRoot, "src/index.ts"), `export default {manifest: ${JSON.stringify(manifest)}, activate() {}}`)
+  await writeFile(path.join(pluginRoot, "src/utils.cjs"), "module.exports=()=>({exports:{value:42}})")
+  const entry = (await f.run())["cognia-pdf"]
+  const modulePath = entry.manifest.library.modules.utils.entry
+  const bytes = await readFile(path.join(f.root, "public", entry.asset.resourcesUrl, modulePath))
+  assert.equal(entry.asset.entryHashes[modulePath], createHash("sha256").update(bytes).digest("hex"))
+})
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "browser-builtin-cache-"))

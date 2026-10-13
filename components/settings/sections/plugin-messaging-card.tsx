@@ -15,16 +15,18 @@ import { RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
+import { getPluginIPC, type LibraryCallAudit } from "@/lib/plugin/messaging/ipc"
 import { getMessageBus } from "@/lib/plugin/messaging/message-bus"
+import type { IpcExposedMethodInfo } from "@/types/plugin/plugin-messaging"
 
 interface MessagingSnapshot {
+  libraryCalls: LibraryCallAudit[]
   busSubscriptions: number
   busHistory: number
   ipcSubscriptions: number
   ipcExposedMethods: number
   ipcMessages: number
-  exposed: Array<{ pluginId: string; methods: Array<{ name: string; description?: string }> }>
+  exposed: Array<{ pluginId: string; methods: IpcExposedMethodInfo[] }>
   channels: Array<{ channel: string; subscribers: string[] }>
   degradedBreakers: Array<{ pluginId: string; methodName: string; state: string }>
 }
@@ -40,9 +42,7 @@ function readSnapshot(): MessagingSnapshot {
   for (const [pluginId] of ipc.getAllExposedMethods().entries()) {
     exposed.push({
       pluginId,
-      methods: ipc
-        .describeExposedMethods(pluginId)
-        .map((m) => ({ name: m.name, description: m.description })),
+      methods: ipc.describeExposedMethods(pluginId),
     })
   }
 
@@ -52,6 +52,7 @@ function readSnapshot(): MessagingSnapshot {
   }
 
   return {
+    libraryCalls: ipc.getLibraryCallHistory().reverse(),
     busSubscriptions:
       busStats.totalSubscriptions + busStats.wildcardSubscriptions + busStats.patternSubscriptions,
     busHistory: busStats.historySize,
@@ -149,6 +150,21 @@ export function PluginMessagingCard() {
                         {m.description && (
                           <span className="text-muted-foreground">{m.description}</span>
                         )}
+                        {m.library && (
+                          <>
+                            <Badge variant="outline">
+                              {t("libraryVersion", { version: m.library.version })}
+                            </Badge>
+                            <Badge variant="secondary">{t(`risk.${m.library.risk}`)}</Badge>
+                            <span className="text-muted-foreground">
+                              {t("requiredPermissions", {
+                                permissions:
+                                  m.library.requiredPermissions.join(", ") ||
+                                  t("noAdditionalPermissions"),
+                              })}
+                            </span>
+                          </>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -159,6 +175,52 @@ export function PluginMessagingCard() {
             <p className="text-muted-foreground" data-testid="plugin-messaging-exposed-empty">
               {t("exposedEmpty")}
             </p>
+          )}
+        </div>
+        <div className="space-y-1">
+          <p className="font-medium">{t("audit.title")}</p>
+          {snapshot && snapshot.libraryCalls.length > 0 ? (
+            <div className="max-h-64 overflow-auto rounded-md border">
+              <table className="w-full text-left">
+                <caption className="sr-only">{t("audit.title")}</caption>
+                <thead>
+                  <tr>
+                    {(
+                      [
+                        "caller",
+                        "provider",
+                        "method",
+                        "version",
+                        "risk",
+                        "outcome",
+                        "duration",
+                      ] as const
+                    ).map((column) => (
+                      <th key={column} scope="col" className="px-2 py-1">
+                        {t(`audit.${column}`)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshot.libraryCalls.map((call, index) => (
+                    <tr key={`${call.timestamp}:${index}`}>
+                      <td className="px-2 py-1 font-mono">{call.callerId}</td>
+                      <td className="px-2 py-1 font-mono">{call.providerId}</td>
+                      <td className="px-2 py-1 font-mono">{call.method}</td>
+                      <td className="px-2 py-1">{call.version}</td>
+                      <td className="px-2 py-1">{t(`risk.${call.risk}`)}</td>
+                      <td className="px-2 py-1">{t(`audit.${call.outcome}`)}</td>
+                      <td className="px-2 py-1 tabular-nums">
+                        {t("audit.durationValue", { duration: call.durationMs })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">{t("audit.empty")}</p>
           )}
         </div>
       </CardContent>

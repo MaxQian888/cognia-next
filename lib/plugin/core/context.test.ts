@@ -317,6 +317,7 @@ const mockManager = {
   callPythonFunction: jest.fn(),
   evalPython: jest.fn(),
   importPythonModule: jest.fn(),
+  importLibraryModule: jest.fn(),
   callPythonModule: jest.fn(),
   getPythonModuleAttribute: jest.fn(),
 } as unknown as PluginManager
@@ -2346,6 +2347,40 @@ describe("createPluginContext", () => {
 })
 
 describe("createFullPluginContext", () => {
+  it("binds library imports to the consumer and its final guarded context", async () => {
+    const plugin = createMockPlugin()
+    plugin.manifest.permissions = [...(plugin.manifest.permissions ?? []), "ipc:call"]
+    getPermissionGuard().grant(plugin.manifest.id, "ipc:call")
+    const context = createFullPluginContext(plugin, mockManager)
+    jest.mocked(mockManager.importLibraryModule).mockResolvedValue({ answer: 42 })
+    await expect(context.libraries.importModule("library", "utils")).resolves.toEqual({
+      answer: 42,
+    })
+    expect(mockManager.importLibraryModule).toHaveBeenCalledWith(
+      plugin.manifest.id,
+      "library",
+      "utils",
+      context
+    )
+  })
+  it("rejects retained library imports after the consumer context is disposed", async () => {
+    const plugin = createMockPlugin()
+    plugin.manifest.permissions = [...(plugin.manifest.permissions ?? []), "ipc:call"]
+    getPermissionGuard().grant(plugin.manifest.id, "ipc:call")
+    const scope = new PluginDisposableScope(plugin.manifest.id, 1)
+    const manager = {
+      ...mockManager,
+      getPluginDisposableScope: () => scope,
+    } as unknown as PluginManager
+    const context = createFullPluginContext(plugin, manager)
+    await scope.dispose()
+    jest.mocked(mockManager.importLibraryModule).mockClear()
+    await expect(context.libraries.importModule("library", "utils")).rejects.toThrow(
+      "activation has ended"
+    )
+    expect(mockManager.importLibraryModule).not.toHaveBeenCalled()
+  })
+
   it("passes the installed clone host declaration to the workspace consent gate", async () => {
     const plugin = createMockPlugin()
     plugin.manifest = {
@@ -3241,6 +3276,7 @@ describe("python host-call parity (ADR-0145)", () => {
         // decisions through the same guarded ctx.decisions.
         "decisions",
         "editor",
+        "events",
         // ADR-0216: python plugins manage external-agent configurations through
         // the same guarded, secret-free ctx.externalAgents.
         "externalAgents",
@@ -3290,7 +3326,18 @@ describe("python host-call parity (ADR-0145)", () => {
           ? jest
               .requireActual<typeof import("./logger")>("./logger")
               .createPluginSystemLogger("parity-probe")
-          : (context as unknown as Record<string, unknown>)[id]
+          : id === "events"
+            ? {
+                ipc: jest
+                  .requireActual<typeof import("../messaging/ipc")>("../messaging/ipc")
+                  .createIPCAPI("parity-probe"),
+                bus: jest
+                  .requireActual<typeof import("../messaging/message-bus")>(
+                    "../messaging/message-bus"
+                  )
+                  .createEventAPI("parity-probe"),
+              }
+            : (context as unknown as Record<string, unknown>)[id]
 
       // Method names are dotted for nested surfaces (`sessions.create`,
       // `guardrails.register`), which is how the contract models them.
@@ -3301,6 +3348,7 @@ describe("python host-call parity (ADR-0145)", () => {
         }, root)
 
       const missing = namespace.methods
+        .filter((method) => !method.runtimes || method.runtimes.includes("python"))
         .map((method) => method.name)
         .filter((name) => typeof resolve(surface, name) !== "function")
       expect(missing).toEqual([])

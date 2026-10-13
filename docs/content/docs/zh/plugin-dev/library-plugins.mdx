@@ -1,0 +1,225 @@
+---
+title: 运行时库插件
+description: 通过已安装插件的依赖关系，发布可复用 RPC 契约和消费者独立的 JavaScript 模块。
+---
+
+# 运行时库插件
+
+库是带有 `library` contribution 的独立安装插件。需要跨支持的 JavaScript 和
+Python 运行时、经过 schema 校验的 JSON 调用时使用 RPC；JavaScript 消费者需要
+具有独立状态的函数、类或回调时使用直接模块。
+
+该 API 要求 Cognia 0.2.0 或更高版本（契约目录 1.3.0）。提供者和消费者都应在
+manifest 声明最低宿主版本。仍报告 0.1.0 的开发宿主不满足要求。
+`github-bot-kit` 等构建期包继续按原方式使用。
+
+## 声明提供者
+
+下面的 manifest 同时提供一个 RPC 方法和一个 JS 模块：
+
+```json
+{
+  "id": "math-library",
+  "name": "Math library",
+  "version": "1.0.0",
+  "description": "Reusable calculations",
+  "type": "frontend",
+  "main": "dist/index.js",
+  "engines": { "cognia": ">=0.2.0" },
+  "capabilities": ["library"],
+  "permissions": ["ipc:expose"],
+  "library": {
+    "rpc": {
+      "add": {
+        "description": "Add two numbers",
+        "inputSchema": {
+          "type": "array",
+          "items": [{ "type": "number" }, { "type": "number" }],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "outputSchema": { "type": "number" },
+        "risk": "read",
+        "requiredPermissions": []
+      }
+    },
+    "modules": {
+      "counter": {
+        "entry": "dist/counter.cjs",
+        "description": "Consumer-owned counters",
+        "risk": "read",
+        "requiredPermissions": []
+      }
+    }
+  }
+}
+```
+
+在启用阶段注册每个已声明的 JS RPC 方法。缺少实现会使启用失败并回滚注册。
+manifest 提供 schema、权限和风险元数据，`allowedCallers` 列表不能覆盖它们。
+
+```ts
+import { definePluginManifest, type PluginDefinition } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
+
+const plugin: PluginDefinition = {
+  manifest: definePluginManifest(manifestJson),
+  activate(ctx) {
+    ctx.events.ipc.expose({
+      add: (a, b) => (a as number) + (b as number),
+    })
+  },
+}
+export default plugin
+```
+
+输入 schema 描述完整的位置参数数组，输出 schema 描述返回的 JSON 值。
+无结果操作返回 `null`。支持 draft-07 对象和布尔 schema；未知关键字、其他方言、
+无法解析的引用、accessor、循环、非有限数字以及非 JSON 值会被拒绝。
+不转换类型、不填充默认值。参数和结果会复制，受 IPC 字节上限及 128 层嵌套深度
+限制；schema 声明上限为 256 KiB。可使用包括 definitions 在内的本地引用，
+宿主不会从远程下载 schema。
+
+公开方法／模块名以字母开头，可包含字母、数字、下划线或连字符，最多 128 个字符；
+拒绝原型路径名称。`requiredPermissions` 必须由互不重复的已知权限组成，且都要在
+提供者 `permissions` 中声明。
+
+## 声明并调用依赖
+
+```json
+{
+  "id": "math-consumer",
+  "name": "Math consumer",
+  "version": "1.0.0",
+  "description": "Uses the installed math library",
+  "type": "frontend",
+  "main": "dist/index.js",
+  "engines": { "cognia": ">=0.2.0" },
+  "capabilities": [],
+  "permissions": ["ipc:call"],
+  "dependencies": { "math-library": "^1.0.0" }
+}
+```
+
+先安装提供者，再启用消费者。Cognia 先启用已经安装的必需依赖，不下载缺失依赖。
+缺少提供者、semver 冲突或依赖循环都会阻止启用。每个插件 ID 只安装一个版本。
+契约随提供者版本发布，破坏性变更升级 major。可选依赖和传递依赖不授权访问库。
+
+```ts
+import { definePluginManifest, type PluginDefinition } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
+
+const plugin: PluginDefinition = {
+  manifest: definePluginManifest(manifestJson),
+  async activate(ctx) {
+    const sum = await ctx.events.ipc.call<number>("math-library", "add", [2, 3])
+    const { Counter } = await ctx.libraries.importModule<{
+      Counter: new () => { id: number; increment(): number }
+    }>("math-library", "counter")
+    const counter = new Counter()
+    ctx.logger.info("Calculation", { sum, count: counter.increment() })
+  },
+}
+export default plugin
+```
+
+`describeExposedMethods` 为符合条件的调用者返回包含版本、schema、风险和所需
+权限的 `library` 对象。超时、取消和熔断行为见
+[IPC 文档](./inter-plugin-communication)。无效输入在进入提供者熔断器之前
+失败；无效输出视为提供者失败。超时或取消不能撤销已经发生的副作用。消费者结束后，
+保留的 IPC handle 会拒绝调用。
+
+## 导出消费者独立的 JavaScript 模块
+
+使用专门打包的 `.cjs` 入口，不能与提供者 main 相同。默认导出是返回
+`{ exports, dispose? }` 的 factory：
+
+```ts
+import type { PluginLibraryModuleFactory } from "@cognia/plugin-sdk"
+
+// Bundle this entry as dist/counter.cjs, separately from the plugin main.
+let created = 0
+const createModule: PluginLibraryModuleFactory = (ctx) => {
+  class Counter {
+    readonly id = ++created
+    private value = 0
+    increment() { return ++this.value }
+  }
+  return {
+    exports: { Counter, owner: ctx.pluginId },
+    dispose() { created = 0 },
+  }
+}
+export default createModule
+```
+
+仓库插件打包器发现 `library.modules.*.entry`，输出 CJS，并将入口包含在浏览器
+完整性资源和原生包中。外部作者也必须将依赖打入各模块入口。不能依赖静态跨插件
+import 或原生 ESM cache-busting 来隔离状态。
+
+宿主为消费者本次启用求值并实例化一次模块。同一提供者／模块的并发导入共享初始化；
+其他消费者拥有独立的模块顶层状态和 factory 状态。导出是真实 JS 值，调用不经过
+RPC。`ctx` 属于消费者，不属于提供者。通过 `ctx.lifecycle.signal`、
+`ctx.lifecycle.onDispose` 或返回的 disposer 释放资源。消费者结束后才完成的
+初始化会被清理，不会暴露导出。
+
+消费者受控的宿主 context 保留现有权限与审批检查。结束后旧 context 访问宿主会
+被拒绝，即使同一个消费者 ID 已再次启用。普通保留的 JS 值无法撤销。运行时隔离
+bundle 内状态，不隔离全局对象或共享宿主模块；这沿用可信 JS 运行时，不是新沙箱。
+
+## 权限与审批
+
+声明依赖不授予权限。RPC 要求消费者持有 `ipc:call`、提供者持有 `ipc:expose`，
+双方还必须分别持有方法的全部 `requiredPermissions`。模块导入要求消费者持有
+`ipc:call`，双方分别持有模块权限。例如，要求 `filesystem:read` 的方法只有
+在双方都持有该权限时才可调用。
+
+现有 silent/confirm/forbid 策略继续生效，审批之后及分发／返回结果前会重新检查
+授权。没有交互审批响应器的宿主拒绝 confirm 级操作。`risk` 用于发现和审计，不
+授权能力，也不引入独立的审批提示。
+
+## Python RPC
+
+Python 提供者使用 `type: "python"`、`main: "main.py"`、`library` capability、
+`ipc:expose` 权限以及相同的 `library.rpc` schema。在上述方法中增加
+`"handler": "add"`，省略 `library.modules`。宿主调用对应的公开模块级函数。
+Python 消费者使用嵌套 IPC API：
+
+```python
+# main.py of a Python provider. The manifest method adds "handler": "add".
+from cognia import ctx
+
+def add(a: float, b: float) -> float:
+    return a + b
+
+# A Python consumer declares ipc:call and dependencies, just like JS.
+async def on_startup():
+    result = await ctx.events.ipc.call("math-library", "add", [2, 3])
+    methods = await ctx.events.ipc.describeExposedMethods("math-library")
+    await ctx.logger.info("Calculation", {"sum": result, "methods": methods})
+```
+
+Python 可调用 JS 或 Python 提供者；在具备 Python 能力的宿主上，JS 也可调用
+Python 提供者。Python 不能直接导入 JS 模块，也不支持基于 Python 回调的 IPC
+暴露／订阅，应使用 manifest handler。内嵌 shim 和可安装 SDK 保持一致，原始
+`ctx.call` 不能绕过运行时限制。
+
+## 生命周期和支持的运行时
+
+| 运行时 | RPC | 直接 JS 模块 |
+| --- | --- | --- |
+| 普通 frontend/hybrid JS，包括 CLI/headless | 支持 | 支持 |
+| 具备 Python 能力的宿主上的 Python | 支持 | 不支持 |
+| 独立 Node 沙箱或 WASM | 不支持 | 不支持 |
+
+已启用的消费者阻止提供者停用、更新和热重载。仍然安装的必需消费者即使已停用也会
+阻止卸载。先停止依赖者，替换提供者，再显式启用以获得新实例；不会迁移状态。
+RPC 可唤醒已授权的空闲挂起提供者；模块导入要求提供者活跃。依赖生命周期保护会
+防止提供者在已启用消费者仍然依赖它时被空闲挂起。
+
+Settings → Observability → Diagnostics → System 下的 Plugin messaging 卡显示
+RPC 版本、风险和权限。宿主有界的调用历史包含身份、方法、版本、结果状态和耗时，
+不记录参数或返回数据。未声明的旧 IPC 方法保留原有兼容规则。
+
+架构与生命周期保证见
+[ADR-0226](../adr/0226-library-plugins-declare-contracts-over-ipc)。

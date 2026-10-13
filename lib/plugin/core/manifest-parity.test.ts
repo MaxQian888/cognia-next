@@ -64,6 +64,45 @@ describe("plugin manifest package parity", () => {
     expect(() => assertPluginManifestParity(packaged, moduleManifest)).toThrow(/plugin\.json/)
   })
 
+  it("compares nested library contributions without downgrading to legacy IPC", () => {
+    const moduleManifest: PluginManifest = {
+      ...base(),
+      library: {
+        rpc: {
+          ping: {
+            description: "Ping",
+            inputSchema: true,
+            outputSchema: true,
+            risk: "read",
+            requiredPermissions: [],
+          },
+        },
+        modules: {
+          utils: {
+            entry: "dist/utils.cjs",
+            description: "Utilities",
+            risk: "read",
+            requiredPermissions: [],
+          },
+        },
+      },
+    }
+    expect(
+      findPluginManifestParityIssues(base(), moduleManifest).map((issue) => issue.field)
+    ).toEqual(["library.rpc", "library.modules"])
+    expect(() => assertPluginManifestParity(base(), moduleManifest)).toThrow(
+      PluginManifestParityError
+    )
+    expect(findPluginManifestParityIssues(moduleManifest, structuredClone(moduleManifest))).toEqual(
+      []
+    )
+    const changed = structuredClone(moduleManifest)
+    changed.library!.rpc!.ping.risk = "write"
+    expect(
+      findPluginManifestParityIssues(moduleManifest, changed).map((issue) => issue.field)
+    ).toEqual(["library.rpc"])
+  })
+
   it("reports a drifted module id", () => {
     expect(findPluginManifestParityIssues(base(), { ...base(), id: "other" })).toEqual(
       expect.arrayContaining([expect.objectContaining({ field: "id" })])

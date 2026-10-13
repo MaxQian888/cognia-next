@@ -39,6 +39,7 @@ import type {
   PluginOptionalServiceListener,
 } from "@/types/plugin"
 import { PluginLoader } from "@/lib/plugin/core/loader"
+import { PluginLibraryModules } from "@/lib/plugin/library/modules"
 import {
   PluginServiceRegistry,
   pluginServiceRegistry,
@@ -864,6 +865,11 @@ export class PluginManager {
   private a2uiBridge: PluginA2UIBridge | null = null
   private themesBridge: PluginThemesBridge | null = null
   private contexts: Map<string, FullPluginContext> = new Map()
+  private readonly libraryModules = new PluginLibraryModules({
+    getPluginDisposableScope: (pluginId) => this.getPluginDisposableScope(pluginId),
+    peekPluginDisposableScope: (pluginId) => this.disposableScopes.get(pluginId),
+    importLibraryEntry: (provider, entry) => this.loader.importLibraryEntry(provider, entry),
+  })
   private disposableScopes: Map<string, PluginDisposableScope> = new Map()
   private readonly runtimeCleanupFailures = new Map<
     string,
@@ -1045,6 +1051,15 @@ export class PluginManager {
     })
     this.disposableScopes.set(pluginId, scope)
     return scope
+  }
+
+  importLibraryModule<T extends Record<string, unknown>>(
+    consumerId: string,
+    providerId: string,
+    moduleName: string,
+    context: FullPluginContext
+  ): Promise<T> {
+    return this.libraryModules.importModule<T>(consumerId, providerId, moduleName, context)
   }
 
   isPluginLedgerV2Enabled(): boolean {
@@ -2259,11 +2274,24 @@ export class PluginManager {
   /**
    * Throw `PluginDependencyError` (after recording diagnostics) when a plugin's
    * required dependencies can't be satisfied. Evaluated against the live store
-   * snapshot, so a dependency that is merely "installed" (and will be enabled)
-   * does NOT block — only missing / disabled / version-mismatched / cyclic deps do.
+   * snapshot. An explicit enable may activate installed disabled dependencies;
+   * normalize only that required closure, leaving startup load-order policy intact.
    */
   private assertRequiredDependenciesSatisfied(pluginId: string): void {
-    const { blocked, cycles } = resolveLoadOrder(this.buildLoadOrderInputs())
+    const inputs = this.buildLoadOrderInputs()
+    const byId = new Map(inputs.map((input) => [input.id, input]))
+    const pending = [pluginId]
+    const requested = new Set<string>()
+    while (pending.length > 0) {
+      const id = pending.pop()!
+      if (requested.has(id)) continue
+      requested.add(id)
+      const input = byId.get(id)
+      if (!input) continue
+      if (input.status === "disabled") input.status = "installed"
+      pending.push(...Object.keys(input.dependencies ?? {}))
+    }
+    const { blocked, cycles } = resolveLoadOrder(inputs)
     const reasons = blocked.get(pluginId)
     if (reasons && reasons.length > 0) {
       this.recordDependencyDiagnostics(pluginId, reasons)
@@ -3381,6 +3409,8 @@ export class PluginManager {
       graphReservation = this.reservePluginRuntimeGraph(pluginId)
       const store = usePluginStore.getState()
       previous = store.plugins[pluginId]
+      const blockedBy = await this.getRuntimeBlockingDependentIds(pluginId)
+      if (blockedBy.length > 0) throw new PluginDependencyInUseError(pluginId, blockedBy)
       previouslyRemoved = Boolean(store.removedPlugins?.[pluginId])
       previousRow = await getPlugin(pluginId)
       priorGrants = {
@@ -3814,6 +3844,7 @@ export class PluginManager {
       const enableDebug = shouldEnablePluginDebug(plugin)
 
       // Create plugin context with optional debug instrumentation
+      getPluginIPC().registerPlugin(pluginId, plugin.manifest.permissions ?? [], plugin.manifest)
       const context = createFullPluginContext(plugin, this, {
         enableDebug,
         generation: this.activationLeases.get(pluginId)?.generation ?? 0,
@@ -3913,6 +3944,12 @@ export class PluginManager {
       if (plugin.manifest.type === "python" || plugin.manifest.type === "hybrid") {
         await this.loadPythonPlugin(pluginId)
       }
+      getPluginIPC().completeLibraryActivation(
+        pluginId,
+        plugin.manifest.type === "python" || plugin.manifest.type === "hybrid"
+          ? (handler, args) => this.callPythonFunction(pluginId, handler, args)
+          : undefined
+      )
 
       // WASM plugins declare their agent tools in the manifest (the WIT
       // contract has no tool-listing export) and implement a single
@@ -3931,9 +3968,7 @@ export class PluginManager {
       // exactly once per transition. Persisted on the Dexie row so it survives
       // restarts. Failures here must never fail the load — wrap log-only.
       await this.fireInstallOrUpdateHooks(pluginId, plugin.manifest.version)
-      // Register the plugin with the inter-plugin IPC manager so its permission
-      // map + method registry exist, then announce the load on the event bus.
-      getPluginIPC().registerPlugin(pluginId, plugin.manifest.permissions ?? [])
+      // IPC registration and declared-method validation completed before publication.
       this.emitLifecycleEvent(SystemEvents.PLUGIN_LOADED, pluginId)
       this.recordPluginVerification(pluginId, {
         status: "loaded",
@@ -4073,7 +4108,7 @@ export class PluginManager {
     }
 
     // Required-dependency gate (load-order, ADR-0017/0032 parity): reject a
-    // missing / disabled / version-mismatched / cyclic required dependency
+    // missing / errored / version-mismatched / cyclic required dependency
     // before doing any load work. Runs outside the try below so the typed
     // `PluginDependencyError` surfaces to callers instead of being wrapped.
     // Phase 2/7 — dependencies. Covers the required-dep gate AND the recursion
@@ -4093,7 +4128,11 @@ export class PluginManager {
       if (dep && dep.status !== "enabled") {
         // Each dependency gets its OWN progress entry keyed by depId, running
         // 0/7 → 7/7 independently while this plugin sits at `dependencies`.
-        await this.enablePlugin(depId, "dependency", { activationParentId: pluginId })
+        if ((await this.getPluginLifecycleState(depId)).intent === "disabled") {
+          await this.setPluginIntent(depId, "enabled", "dependency")
+        } else {
+          await this.enablePlugin(depId, "dependency", { activationParentId: pluginId })
+        }
       }
     }
 
@@ -4331,6 +4370,8 @@ export class PluginManager {
     }
 
     if (plugin.status === "suspended") {
+      const blockedBy = await this.getRuntimeBlockingDependentIds(pluginId)
+      if (blockedBy.length > 0) throw new PluginDependencyInUseError(pluginId, blockedBy)
       const { suspendPluginExternalServices } = await import("@/lib/external-services/lifecycle")
       await suspendPluginExternalServices(pluginId)
       store.setPluginStatus?.(pluginId, "disabled")
@@ -4863,6 +4904,8 @@ export class PluginManager {
     if (!plugin || plugin.status !== "enabled") {
       return
     }
+    const blockedBy = await this.getRuntimeBlockingDependentIds(pluginId)
+    if (blockedBy.length > 0) throw new PluginDependencyInUseError(pluginId, blockedBy)
     try {
       if (this.runtimeServicesEnabled()) {
         await this.quiesceServiceConsumers(pluginId)
@@ -6846,6 +6889,20 @@ export class PluginManager {
         throw new Error(`Python host did not return a runtime generation for ${pluginId}`)
       }
       this.bindPythonGeneration(pluginId, pythonGeneration)
+
+      const callableFunctions = new Set(
+        Array.isArray(loadResult.callable_functions) ? loadResult.callable_functions : []
+      )
+      for (const [method, declaration] of Object.entries(plugin.manifest.library?.rpc ?? {})) {
+        if (declaration.handler && !callableFunctions.has(declaration.handler)) {
+          // Keep the generation bound until teardown acknowledges success, so
+          // failed cleanup can be retried by the activation rollback.
+          await this.unloadPythonPlugin(pluginId)
+          throw new Error(
+            `Library method ${method} requires callable Python handler ${declaration.handler}`
+          )
+        }
+      }
 
       // Get registered tools from Python
       const pythonTools = await this.invokeNativeHost<

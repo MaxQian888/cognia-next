@@ -65,7 +65,10 @@ def test_methods_are_exactly_the_contracts_methods():
     for namespace in API_NAMESPACE_CONTRACTS:
         if "python" not in (namespace.get("runtimes") or ()):
             continue
-        expected = {method["name"] for method in namespace["methods"]}
+        expected = {
+            method["name"] for method in namespace["methods"]
+            if "python" in method.get("runtimes", namespace["runtimes"])
+        }
         assert PYTHON_HOST_NAMESPACES[namespace["id"]] == expected
         # `dir()` lists what attribute access resolves at THIS level, so a
         # grouped method contributes its group head (`sessions`) rather than
@@ -112,7 +115,8 @@ def test_callback_methods_are_derived_from_the_contract_not_a_local_list():
         expected = {
             method["name"]
             for method in namespace["methods"]
-            if (method.get("resourceEffect") or {}).get("kind") == "returned-disposer"
+            if "python" in method.get("runtimes", namespace["runtimes"])
+            and (method.get("resourceEffect") or {}).get("kind") == "returned-disposer"
         }
         assert CALLBACK_HOST_METHODS[namespace["id"]] == expected
 
@@ -426,3 +430,24 @@ def test_external_agents_call_shapes_reach_the_host(fresh_runtime):
         ("externalAgents.create", {"name": "X", "protocol": "acp"}),
         ("externalAgents.setEnabled", {"args": ["cfg-1", False]}),
     ]
+
+
+def test_ipc_nested_calls_and_discovery_use_the_python_method_subset(fresh_runtime):
+    assert PYTHON_HOST_NAMESPACES["events"] == {
+        "ipc.call", "ipc.getExposedMethods", "ipc.describeExposedMethods",
+    }
+    seen = _record_calls(fresh_runtime, result={"value": 3})
+    assert asyncio.run(cognia.ctx.events.ipc.call("math", "add", [1, 2])) == {"value": 3}
+    asyncio.run(cognia.ctx.events.ipc.getExposedMethods("math"))
+    asyncio.run(cognia.ctx.events.ipc.describeExposedMethods("math"))
+    assert seen == [
+        ("events.ipc.call", {"args": ["math", "add", [1, 2]]}),
+        ("events.ipc.getExposedMethods", {"args": ["math"]}),
+        ("events.ipc.describeExposedMethods", {"args": ["math"]}),
+    ]
+    with pytest.raises(AttributeError):
+        cognia.ctx.events.ipc.expose
+    with pytest.raises(AttributeError):
+        cognia.ctx.events.bus
+    with pytest.raises(AttributeError):
+        cognia.ctx.libraries

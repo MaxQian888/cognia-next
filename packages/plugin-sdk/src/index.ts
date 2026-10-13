@@ -602,3 +602,14 @@ export type {
   BotWorkspaceSnapshot,
   BotWorkspacePublishInput,
 } from "@/lib/plugin/workspace/bot-run"
+
+export type {
+  PluginLibrarySchema,
+  PluginLibraryRisk,
+  PluginLibraryMethod,
+  PluginLibraryModule,
+  PluginLibraryContract,
+  PluginLibrariesAPI,
+  PluginLibraryModuleInstance,
+  PluginLibraryModuleFactory,
+} from "@/types/plugin/plugin-library"

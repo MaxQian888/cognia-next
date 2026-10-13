@@ -8,6 +8,56 @@ import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { buildFrontendPlugin, writeFrontendPackage } from "./build-frontend-plugins.mjs"
 
+test("packages keyed library entries as independent CJS bundles with transitive state", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "library-plugin-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const pluginRoot = path.join(root, "plugins/example")
+  await mkdir(path.join(pluginRoot, "src"), { recursive: true })
+  const manifest = {
+    id: "example",
+    version: "1.0.0",
+    type: "frontend",
+    main: "src/index.ts",
+    library: { modules: { utils: { entry: "src/utils.cjs" } } },
+  }
+  await writeFile(path.join(pluginRoot, "plugin.json"), JSON.stringify(manifest))
+  await writeFile(
+    path.join(pluginRoot, "src/index.ts"),
+    `export default { manifest: ${JSON.stringify(manifest)}, activate() {} }`
+  )
+  await writeFile(path.join(pluginRoot, "src/state.cjs"), "let count=0; exports.next=()=>++count")
+  await writeFile(
+    path.join(pluginRoot, "src/utils.cjs"),
+    "const {next}=require('./state.cjs'); module.exports = (ctx) => ({exports: { next, id: ctx.pluginId }})"
+  )
+  const result = await buildFrontendPlugin({ root, directory: "example" })
+  const entry = result.manifest.library.modules.utils.entry
+  assert.equal(entry, "dist/entries/src/utils.cjs")
+  const evaluate = () => {
+    const cjsModule = { exports: {} }
+    new Function("module", "exports", result.files.get(entry).toString())(
+      cjsModule,
+      cjsModule.exports
+    )
+    return cjsModule.exports({ pluginId: "consumer" }).exports
+  }
+  const first = evaluate(),
+    second = evaluate()
+  assert.equal(first.next(), 1)
+  assert.equal(first.next(), 2)
+  assert.equal(second.next(), 1)
+  const archive = await JSZip.loadAsync(
+    await readFile(await writeFrontendPackage(result, path.join(root, "out")))
+  )
+  assert.ok(archive.file(entry))
+  assert.ok(result.inputs.includes(path.join(pluginRoot, "src/state.cjs")))
+  manifest.library.modules.utils.entry = "../outside.cjs"
+  await assert.rejects(
+    buildFrontendPlugin({ root, directory: "example", moduleManifest: manifest }),
+    /Unsafe plugin path/
+  )
+})
+
 test("a misspelled plugin selection fails instead of reporting an empty successful build", () => {
   assert.throws(
     () =>

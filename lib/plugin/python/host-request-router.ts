@@ -16,6 +16,7 @@
  * recorded when the contract started lying about python capabilities.
  */
 
+import { PLUGIN_API_NAMESPACE_CONTRACTS } from "@/packages/plugin-sdk/src/contracts/catalog"
 import type { PluginContext } from "@/types/plugin/plugin"
 
 /** One plugin → host RPC frame, as it arrives from the Rust runtime. */
@@ -95,6 +96,28 @@ export async function routePythonHostRequest(
     if (FORBIDDEN_SEGMENTS.has(segment) || segment.startsWith("_")) {
       return { ok: false, error: `host call '${frame.method}' traverses a private path` }
     }
+  }
+
+  // The catalog is authoritative for runtime availability as well as the SDK
+  // proxy. Raw ctx.call frames must not resurrect JS-only callback/module APIs.
+  // Preserve existing raw aliases not yet catalogued in an available namespace;
+  // they still resolve against the permission-guarded context below.
+  const namespace = PLUGIN_API_NAMESPACE_CONTRACTS.find((entry) => entry.id === segments[0])
+  const methodPath = segments.slice(1).join(".")
+  const contract = namespace?.methods.find(
+    (entry) => entry.name === methodPath || methodPath.startsWith(`${entry.name}.`)
+  )
+  if (namespace && !(contract?.runtimes ?? namespace.runtimes).includes("python")) {
+    return { ok: false, error: `host call '${frame.method}' is unavailable to python plugins` }
+  }
+  if (contract?.resourceEffect.kind === "returned-disposer") {
+    return {
+      ok: false,
+      error: `host call '${frame.method}' registers a host-side callback; declare the contribution in plugin.json instead`,
+    }
+  }
+  if (contract && contract.name !== methodPath) {
+    return { ok: false, error: `host call '${frame.method}' traverses a callable method` }
   }
 
   const context = deps.getContext(frame.pluginId)

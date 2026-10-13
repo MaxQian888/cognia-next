@@ -51,6 +51,7 @@ def _python_namespaces() -> Dict[str, FrozenSet[str]]:
     return {
         namespace["id"]: frozenset(
             method["name"] for method in namespace.get("methods", [])
+            if "python" in method.get("runtimes", namespace["runtimes"])
         )
         for namespace in API_NAMESPACE_CONTRACTS
         if "python" in (namespace.get("runtimes") or ())
@@ -74,7 +75,8 @@ def _callback_methods() -> Dict[str, FrozenSet[str]]:
         namespace["id"]: frozenset(
             method["name"]
             for method in namespace.get("methods", [])
-            if (method.get("resourceEffect") or {}).get("kind") == "returned-disposer"
+            if "python" in method.get("runtimes", namespace["runtimes"])
+            and (method.get("resourceEffect") or {}).get("kind") == "returned-disposer"
         )
         for namespace in API_NAMESPACE_CONTRACTS
         if "python" in (namespace.get("runtimes") or ())

@@ -239,8 +239,14 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
         }
     }
     let is_populated_array = |field: &str| -> bool {
-        match obj.get(field) {
+        let mut segments = field.split('.');
+        let value = segments
+            .next()
+            .and_then(|first| obj.get(first))
+            .and_then(|first| segments.try_fold(first, |current, segment| current.get(segment)));
+        match value {
             Some(Value::Array(a)) => !a.is_empty(),
+            Some(Value::Object(block)) if field.starts_with("library.") => !block.is_empty(),
             // `workflows` is an object block ({ nodes, triggers }), not an
             // array contribution — parity with validation.ts `hasField`.
             Some(Value::Object(block)) if field == "workflows" => {
@@ -476,8 +482,18 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
     let mut python_backed_experimental: Option<&str> = None;
     let populated_js_contribution = MANIFEST_CONTRIBUTIONS.iter().find_map(
         |(field, _, execution, entry_path, condition_path, condition_equals, python_execution)| {
-            let entries: Vec<&Value> = match obj.get(*field) {
+            let mut segments = field.split('.');
+            let value = segments
+                .next()
+                .and_then(|first| obj.get(first))
+                .and_then(|first| {
+                    segments.try_fold(first, |current, segment| current.get(segment))
+                });
+            let entries: Vec<&Value> = match value {
                 Some(Value::Array(entries)) if !entries.is_empty() => entries.iter().collect(),
+                Some(Value::Object(entries)) if field.starts_with("library.") => {
+                    entries.values().collect()
+                }
                 Some(value @ Value::Object(_)) => vec![value],
                 _ => return None,
             };
@@ -1651,6 +1667,21 @@ fn collect_path_values<'a>(
     let Some((segment, rest)) = segments.split_first() else {
         return;
     };
+    if *segment == "*" {
+        for (key, value) in obj {
+            let field = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            if rest.is_empty() {
+                output.push((value, field));
+            } else if let Some(object) = value.as_object() {
+                collect_path_values(object, rest, &field, output);
+            }
+        }
+        return;
+    }
     let (key, is_array) = match segment.strip_suffix("[]") {
         Some(key) => (key, true),
         None => (*segment, false),
@@ -1852,6 +1883,18 @@ fn is_valid_dexie_table_name(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manifest_paths_lint_each_keyed_library_module() {
+        let manifest = serde_json::json!({"library":{"modules":{
+            "safe":{"entry":"dist/safe.cjs"},
+            "escaping":{"entry":"../outside.cjs"}
+        }}});
+        let mut diagnostics = Vec::new();
+        lint_manifest_paths(manifest.as_object().unwrap(), &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].field, "library.modules.escaping.entry");
+    }
 
     #[test]
     fn manifest_paths_lint_every_nested_array_element() {

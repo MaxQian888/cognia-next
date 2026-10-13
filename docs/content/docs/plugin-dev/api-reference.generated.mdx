@@ -7,7 +7,7 @@ description: Generated from the canonical Plugin Interface Catalog.
 
 # Plugin API Reference
 
-Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtime enforcement remains fail-closed for unmapped methods.
+Contract `1.3.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtime enforcement remains fail-closed for unmapped methods.
 
 | Namespace | Methods | Declared permissions | Runtimes | Data class |
 | --- | ---: | --- | --- | --- |
@@ -36,7 +36,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.dexie` | 2 | None | frontend, hybrid | internal |
 | `ctx.editor` | 9 | `editor:read`, `editor:write` | frontend, hybrid, python | internal |
 | `ctx.eval` | 5 | `tests:run`, `database:read`, `ai:chat`, `database:write` | frontend, hybrid | sensitive |
-| `ctx.events` | 17 | `events:publish`, `events:subscribe`, `ipc:call`, `ipc:expose` | frontend, hybrid | internal |
+| `ctx.events` | 17 | `events:publish`, `events:subscribe`, `ipc:call`, `ipc:expose` | frontend, hybrid, python | internal |
 | `ctx.export` | 8 | `export:session`, `export:project` | frontend, hybrid | internal |
 | `ctx.extensions` | 3 | `extension:ui` | frontend, hybrid | internal |
 | `ctx.externalAgents` | 21 | `agent:external:read`, `agent:external:manage` | frontend, hybrid, python | sensitive |
@@ -94,6 +94,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.workflow` | 25 | `canvas:write`, `canvas:run`, `workflow:read`, `connectors:send`, `session:read` | frontend, hybrid | internal |
 | `ctx.workspace` | 11 | `filesystem:read`, `network:fetch`, `git:read`, `filesystem:write`, `git:write`, `integrations:execute` | frontend, hybrid, python | internal |
 | `ctx.nodeRuntime` | 5 | `filesystem:read`, `filesystem:write`, `shell:execute`, `network:fetch` | frontend, hybrid, python | internal |
+| `ctx.libraries` | 1 | `ipc:call` | frontend, hybrid | internal |
 
 ## Adapter error codes
 
@@ -112,1299 +113,1305 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 ## `ctx.a2ui`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `a2ui.createSurface` | None | low | No |
-| `a2ui.deleteSurface` | None | low | No |
-| `a2ui.getSurface` | None | low | Yes |
-| `a2ui.registerComponent` | None | low | No |
-| `a2ui.registerTemplate` | None | low | No |
-| `a2ui.setReady` | None | low | Yes |
-| `a2ui.updateComponents` | None | low | No |
-| `a2ui.updateDataModel` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `a2ui.createSurface` | None | low | No | frontend, hybrid, python |
+| `a2ui.deleteSurface` | None | low | No | frontend, hybrid, python |
+| `a2ui.getSurface` | None | low | Yes | frontend, hybrid, python |
+| `a2ui.registerComponent` | None | low | No | frontend, hybrid, python |
+| `a2ui.registerTemplate` | None | low | No | frontend, hybrid, python |
+| `a2ui.setReady` | None | low | Yes | frontend, hybrid, python |
+| `a2ui.updateComponents` | None | low | No | frontend, hybrid, python |
+| `a2ui.updateDataModel` | None | low | No | frontend, hybrid, python |
 
 ## `ctx.agent`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `agent.cancelAgent` | `agent:control` | high | No |
-| `agent.context.listProviders` | None | low | Yes |
-| `agent.context.queryTwinMemory` | `twin:read` | medium | Yes |
-| `agent.context.readSharedMemory` | `agent:shared-memory:read` | medium | Yes |
-| `agent.context.registerProvider` | None | low | No |
-| `agent.context.unregisterProvider` | None | low | No |
-| `agent.dispatchSubagent` | `agent:dispatch` | medium | No |
-| `agent.executeAgent` | `agent:control` | high | No |
-| `agent.guardrails.list` | None | low | Yes |
-| `agent.guardrails.register` | None | low | No |
-| `agent.guardrails.unregister` | None | low | No |
-| `agent.invokeTool` | `agent:control` | high | No |
-| `agent.invokeDependencyTool` | `agent:control` | high | No |
-| `agent.registerExternalAgentAdapter` | None | low | No |
-| `agent.registerExternalAgentPreset` | None | low | No |
-| `agent.registerMcpServerPreset` | None | low | No |
-| `agent.registerMode` | None | low | No |
-| `agent.registerNativeAnthropicTool` | None | low | No |
-| `agent.registerSkill` | None | low | No |
-| `agent.registerTool` | None | low | No |
-| `agent.run` | `agent:control` | high | No |
-| `agent.runCharacterTurn` | `agent:control` | high | No |
-| `agent.runExternalAgent` | `agent:dispatch-external` | medium | No |
-| `agent.runStreamed` | `agent:control` | high | No |
-| `agent.runTeam` | `agent:dispatch` | medium | No |
-| `agent.sessions.create` | `agent:control` | high | No |
-| `agent.sessions.resume` | `agent:control` | high | No |
-| `agent.unregisterMode` | None | low | No |
-| `agent.unregisterTool` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `agent.cancelAgent` | `agent:control` | high | No | frontend, hybrid, python |
+| `agent.context.listProviders` | None | low | Yes | frontend, hybrid, python |
+| `agent.context.queryTwinMemory` | `twin:read` | medium | Yes | frontend, hybrid, python |
+| `agent.context.readSharedMemory` | `agent:shared-memory:read` | medium | Yes | frontend, hybrid, python |
+| `agent.context.registerProvider` | None | low | No | frontend, hybrid, python |
+| `agent.context.unregisterProvider` | None | low | No | frontend, hybrid, python |
+| `agent.dispatchSubagent` | `agent:dispatch` | medium | No | frontend, hybrid, python |
+| `agent.executeAgent` | `agent:control` | high | No | frontend, hybrid, python |
+| `agent.guardrails.list` | None | low | Yes | frontend, hybrid, python |
+| `agent.guardrails.register` | None | low | No | frontend, hybrid, python |
+| `agent.guardrails.unregister` | None | low | No | frontend, hybrid, python |
+| `agent.invokeTool` | `agent:control` | high | No | frontend, hybrid, python |
+| `agent.invokeDependencyTool` | `agent:control` | high | No | frontend, hybrid, python |
+| `agent.registerExternalAgentAdapter` | None | low | No | frontend, hybrid, python |
+| `agent.registerExternalAgentPreset` | None | low | No | frontend, hybrid, python |
+| `agent.registerMcpServerPreset` | None | low | No | frontend, hybrid, python |
+| `agent.registerMode` | None | low | No | frontend, hybrid, python |
+| `agent.registerNativeAnthropicTool` | None | low | No | frontend, hybrid, python |
+| `agent.registerSkill` | None | low | No | frontend, hybrid, python |
+| `agent.registerTool` | None | low | No | frontend, hybrid, python |
+| `agent.run` | `agent:control` | high | No | frontend, hybrid, python |
+| `agent.runCharacterTurn` | `agent:control` | high | No | frontend, hybrid, python |
+| `agent.runExternalAgent` | `agent:dispatch-external` | medium | No | frontend, hybrid, python |
+| `agent.runStreamed` | `agent:control` | high | No | frontend, hybrid, python |
+| `agent.runTeam` | `agent:dispatch` | medium | No | frontend, hybrid, python |
+| `agent.sessions.create` | `agent:control` | high | No | frontend, hybrid, python |
+| `agent.sessions.resume` | `agent:control` | high | No | frontend, hybrid, python |
+| `agent.unregisterMode` | None | low | No | frontend, hybrid, python |
+| `agent.unregisterTool` | None | low | No | frontend, hybrid, python |
 
 ## `ctx.ai`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `ai.chat` | `ai:chat` | medium | No |
-| `ai.embed` | `ai:embed` | medium | No |
-| `ai.getAvailableModels` | None | low | Yes |
-| `ai.getDefaultModel` | None | low | Yes |
-| `ai.getDefaultProvider` | None | low | Yes |
-| `ai.getProviderModels` | None | low | Yes |
-| `ai.registerProvider` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `ai.chat` | `ai:chat` | medium | No | frontend, hybrid, python |
+| `ai.embed` | `ai:embed` | medium | No | frontend, hybrid, python |
+| `ai.getAvailableModels` | None | low | Yes | frontend, hybrid, python |
+| `ai.getDefaultModel` | None | low | Yes | frontend, hybrid, python |
+| `ai.getDefaultProvider` | None | low | Yes | frontend, hybrid, python |
+| `ai.getProviderModels` | None | low | Yes | frontend, hybrid, python |
+| `ai.registerProvider` | None | low | No | frontend, hybrid, python |
 
 ## `ctx.artifact`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `artifact.closeArtifact` | `artifact:write` | high | No |
-| `artifact.createArtifact` | `artifact:write` | high | No |
-| `artifact.deleteArtifact` | `artifact:write` | high | No |
-| `artifact.getActiveArtifact` | `artifact:read` | medium | Yes |
-| `artifact.getArtifact` | `artifact:read` | medium | Yes |
-| `artifact.listArtifacts` | `artifact:read` | medium | Yes |
-| `artifact.listVersions` | `artifact:read` | low | Yes |
-| `artifact.onArtifactChange` | `artifact:read` | medium | No |
-| `artifact.openArtifact` | `artifact:write` | high | No |
-| `artifact.registerRenderer` | `artifact:write` | high | No |
-| `artifact.restoreVersion` | `artifact:write` | medium | No |
-| `artifact.updateArtifact` | `artifact:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `artifact.closeArtifact` | `artifact:write` | high | No | frontend, hybrid |
+| `artifact.createArtifact` | `artifact:write` | high | No | frontend, hybrid |
+| `artifact.deleteArtifact` | `artifact:write` | high | No | frontend, hybrid |
+| `artifact.getActiveArtifact` | `artifact:read` | medium | Yes | frontend, hybrid |
+| `artifact.getArtifact` | `artifact:read` | medium | Yes | frontend, hybrid |
+| `artifact.listArtifacts` | `artifact:read` | medium | Yes | frontend, hybrid |
+| `artifact.listVersions` | `artifact:read` | low | Yes | frontend, hybrid |
+| `artifact.onArtifactChange` | `artifact:read` | medium | No | frontend, hybrid |
+| `artifact.openArtifact` | `artifact:write` | high | No | frontend, hybrid |
+| `artifact.registerRenderer` | `artifact:write` | high | No | frontend, hybrid |
+| `artifact.restoreVersion` | `artifact:write` | medium | No | frontend, hybrid |
+| `artifact.updateArtifact` | `artifact:write` | high | No | frontend, hybrid |
 
 ## `ctx.auth`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `auth.createPkceFlow` | `auth:provide` | high | No |
-| `auth.getSession` | `auth:consume` | medium | No |
-| `auth.getSessions` | `auth:consume` | medium | Yes |
-| `auth.onDidChangeSessions` | None | low | No |
-| `auth.registerProvider` | `auth:provide` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `auth.createPkceFlow` | `auth:provide` | high | No | frontend, hybrid |
+| `auth.getSession` | `auth:consume` | medium | No | frontend, hybrid |
+| `auth.getSessions` | `auth:consume` | medium | Yes | frontend, hybrid |
+| `auth.onDidChangeSessions` | None | low | No | frontend, hybrid |
+| `auth.registerProvider` | `auth:provide` | medium | No | frontend, hybrid |
 
 ## `ctx.automation`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `automation.capabilities` | `automation:read` | medium | Yes |
-| `automation.captureDisplay` | `automation:screenshot` | medium | No |
-| `automation.click` | `automation:click` | high | No |
-| `automation.clickText` | `automation:read`, `automation:screenshot`, `automation:click` | high | No |
-| `automation.cursorPosition` | `automation:read` | high | Yes |
-| `automation.drag` | `automation:pointer` | high | No |
-| `automation.find` | `automation:read` | medium | Yes |
-| `automation.findText` | `automation:read`, `automation:screenshot` | medium | Yes |
-| `automation.expandElement` | `automation:read` | medium | Yes |
-| `automation.getAppState` | `automation:read`, `automation:screenshot` | medium | No |
-| `automation.getFocus` | `automation:read` | high | Yes |
-| `automation.holdKey` | `automation:type` | high | No |
-| `automation.keys` | `automation:type` | high | Yes |
-| `automation.launchApp` | `automation:window` | medium | No |
-| `automation.listApps` | `automation:read` | medium | Yes |
-| `automation.mouseButton` | `automation:click` | medium | No |
-| `automation.mouseMove` | `automation:pointer` | high | No |
-| `automation.paste` | `automation:type` | medium | No |
-| `automation.performAction` | `automation:click`, `automation:type`, `automation:pointer`, `automation:window` | high | No |
-| `automation.pickAtPoint` | `automation:read` | medium | No |
-| `automation.queryElements` | `automation:read` | medium | Yes |
-| `automation.readTree` | `automation:read` | medium | Yes |
-| `automation.screenshot` | `automation:screenshot` | medium | No |
-| `automation.scroll` | `automation:pointer` | high | No |
-| `automation.type` | `automation:type` | high | No |
-| `automation.windowOp` | `automation:window` | high | No |
-| `automation.zoom` | `automation:read`, `automation:screenshot` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `automation.capabilities` | `automation:read` | medium | Yes | frontend, hybrid |
+| `automation.captureDisplay` | `automation:screenshot` | medium | No | frontend, hybrid |
+| `automation.click` | `automation:click` | high | No | frontend, hybrid |
+| `automation.clickText` | `automation:read`, `automation:screenshot`, `automation:click` | high | No | frontend, hybrid |
+| `automation.cursorPosition` | `automation:read` | high | Yes | frontend, hybrid |
+| `automation.drag` | `automation:pointer` | high | No | frontend, hybrid |
+| `automation.find` | `automation:read` | medium | Yes | frontend, hybrid |
+| `automation.findText` | `automation:read`, `automation:screenshot` | medium | Yes | frontend, hybrid |
+| `automation.expandElement` | `automation:read` | medium | Yes | frontend, hybrid |
+| `automation.getAppState` | `automation:read`, `automation:screenshot` | medium | No | frontend, hybrid |
+| `automation.getFocus` | `automation:read` | high | Yes | frontend, hybrid |
+| `automation.holdKey` | `automation:type` | high | No | frontend, hybrid |
+| `automation.keys` | `automation:type` | high | Yes | frontend, hybrid |
+| `automation.launchApp` | `automation:window` | medium | No | frontend, hybrid |
+| `automation.listApps` | `automation:read` | medium | Yes | frontend, hybrid |
+| `automation.mouseButton` | `automation:click` | medium | No | frontend, hybrid |
+| `automation.mouseMove` | `automation:pointer` | high | No | frontend, hybrid |
+| `automation.paste` | `automation:type` | medium | No | frontend, hybrid |
+| `automation.performAction` | `automation:click`, `automation:type`, `automation:pointer`, `automation:window` | high | No | frontend, hybrid |
+| `automation.pickAtPoint` | `automation:read` | medium | No | frontend, hybrid |
+| `automation.queryElements` | `automation:read` | medium | Yes | frontend, hybrid |
+| `automation.readTree` | `automation:read` | medium | Yes | frontend, hybrid |
+| `automation.screenshot` | `automation:screenshot` | medium | No | frontend, hybrid |
+| `automation.scroll` | `automation:pointer` | high | No | frontend, hybrid |
+| `automation.type` | `automation:type` | high | No | frontend, hybrid |
+| `automation.windowOp` | `automation:window` | high | No | frontend, hybrid |
+| `automation.zoom` | `automation:read`, `automation:screenshot` | medium | Yes | frontend, hybrid |
 
 ## `ctx.backup`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `backup.create` | `backup:read` | medium | No |
-| `backup.getLatestSuccessful` | `backup:read` | medium | Yes |
-| `backup.listHistory` | `backup:read` | medium | Yes |
-| `backup.restore` | `backup:write` | high | No |
-| `backup.serialize` | `backup:read` | medium | No |
-| `backup.validate` | `backup:read` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `backup.create` | `backup:read` | medium | No | frontend, hybrid |
+| `backup.getLatestSuccessful` | `backup:read` | medium | Yes | frontend, hybrid |
+| `backup.listHistory` | `backup:read` | medium | Yes | frontend, hybrid |
+| `backup.restore` | `backup:write` | high | No | frontend, hybrid |
+| `backup.serialize` | `backup:read` | medium | No | frontend, hybrid |
+| `backup.validate` | `backup:read` | medium | Yes | frontend, hybrid |
 
 ## `ctx.bots`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `bots.getInstallation` | `agent:control` | low | Yes |
-| `bots.enqueue` | `agent:control` | medium | Yes |
-| `bots.cancelResource` | `agent:control` | medium | Yes |
-| `bots.recordMonitor` | `agent:control` | low | Yes |
-| `bots.stepBegin` | `agent:control` | low | Yes |
-| `bots.stepComplete` | `agent:control` | low | Yes |
-| `bots.stepFail` | `agent:control` | low | Yes |
-| `bots.waitForApproval` | `agent:control` | medium | Yes |
-| `bots.waitForEvent` | `agent:control` | low | Yes |
-| `bots.log` | `agent:control` | low | No |
-| `bots.progress` | `agent:control` | low | No |
-| `bots.writeTriggerState` | `agent:control` | medium | Yes |
-| `bots.setTriggerArmed` | `agent:control` | medium | Yes |
-| `bots.listDeliveries` | `agent:control` | low | Yes |
-| `bots.getRunResult` | `agent:control` | low | Yes |
-| `bots.emit` | `agent:control` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `bots.getInstallation` | `agent:control` | low | Yes | frontend, hybrid, python |
+| `bots.enqueue` | `agent:control` | medium | Yes | frontend, hybrid, python |
+| `bots.cancelResource` | `agent:control` | medium | Yes | frontend, hybrid, python |
+| `bots.recordMonitor` | `agent:control` | low | Yes | frontend, hybrid, python |
+| `bots.stepBegin` | `agent:control` | low | Yes | frontend, hybrid, python |
+| `bots.stepComplete` | `agent:control` | low | Yes | frontend, hybrid, python |
+| `bots.stepFail` | `agent:control` | low | Yes | frontend, hybrid, python |
+| `bots.waitForApproval` | `agent:control` | medium | Yes | frontend, hybrid, python |
+| `bots.waitForEvent` | `agent:control` | low | Yes | frontend, hybrid, python |
+| `bots.log` | `agent:control` | low | No | frontend, hybrid, python |
+| `bots.progress` | `agent:control` | low | No | frontend, hybrid, python |
+| `bots.writeTriggerState` | `agent:control` | medium | Yes | frontend, hybrid, python |
+| `bots.setTriggerArmed` | `agent:control` | medium | Yes | frontend, hybrid, python |
+| `bots.listDeliveries` | `agent:control` | low | Yes | frontend, hybrid, python |
+| `bots.getRunResult` | `agent:control` | low | Yes | frontend, hybrid, python |
+| `bots.emit` | `agent:control` | medium | Yes | frontend, hybrid, python |
 
 ## `ctx.browser`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `browser.isDomainAuthorized` | `agent:control` | medium | Yes |
-| `browser.primeDomainGrants` | `agent:control` | medium | Yes |
-| `browser.routeEngine` | `agent:control` | high | Yes |
-| `browser.saveAnnotation` | `agent:control`, `session:read` | high | No |
-| `browser.primeLocalRouting` | `agent:control` | low | Yes |
-| `browser.ensureLocalEngine` | `agent:control` | high | Yes |
-| `browser.openPane` | `agent:control` | medium | No |
-| `browser.attachDownload` | `agent:control` | medium | No |
-| `browser.isSurfaceVisible` | `agent:control` | low | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `browser.isDomainAuthorized` | `agent:control` | medium | Yes | frontend, hybrid |
+| `browser.primeDomainGrants` | `agent:control` | medium | Yes | frontend, hybrid |
+| `browser.routeEngine` | `agent:control` | high | Yes | frontend, hybrid |
+| `browser.saveAnnotation` | `agent:control`, `session:read` | high | No | frontend, hybrid |
+| `browser.primeLocalRouting` | `agent:control` | low | Yes | frontend, hybrid |
+| `browser.ensureLocalEngine` | `agent:control` | high | Yes | frontend, hybrid |
+| `browser.openPane` | `agent:control` | medium | No | frontend, hybrid |
+| `browser.attachDownload` | `agent:control` | medium | No | frontend, hybrid |
+| `browser.isSurfaceVisible` | `agent:control` | low | Yes | frontend, hybrid |
 
 ## `ctx.canvas`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `canvas.addComment` | `canvas:write` | high | No |
-| `canvas.closeCanvas` | `canvas:write` | high | No |
-| `canvas.closeCollaborationSession` | `canvas:write` | high | No |
-| `canvas.createCollaborationSession` | `canvas:write` | high | No |
-| `canvas.createDocument` | `canvas:write` | high | No |
-| `canvas.deleteComment` | `canvas:write` | high | No |
-| `canvas.deleteDocument` | `canvas:write` | high | No |
-| `canvas.executeAction` | `canvas:write` | high | No |
-| `canvas.executeActionStreaming` | `canvas:write` | high | No |
-| `canvas.executePython` | `canvas:write` | high | No |
-| `canvas.getActiveCollaborationSession` | `canvas:read` | medium | Yes |
-| `canvas.getCollaborationSession` | `canvas:read` | medium | Yes |
-| `canvas.getComments` | `canvas:read` | medium | Yes |
-| `canvas.getContent` | `canvas:read` | medium | Yes |
-| `canvas.getCurrentDocument` | `canvas:read` | medium | Yes |
-| `canvas.getDocument` | `canvas:read` | medium | Yes |
-| `canvas.getSelection` | `canvas:read` | medium | Yes |
-| `canvas.getVersions` | `canvas:read` | medium | Yes |
-| `canvas.insertText` | `canvas:read` | medium | No |
-| `canvas.listRecentCollaborationSessions` | `canvas:read` | medium | Yes |
-| `canvas.onCanvasChange` | `canvas:read` | medium | No |
-| `canvas.onContentChange` | `canvas:read` | medium | No |
-| `canvas.openDocument` | `canvas:write` | high | No |
-| `canvas.replaceSelection` | `canvas:read` | medium | No |
-| `canvas.replyToComment` | `canvas:read` | medium | No |
-| `canvas.resolveComment` | `canvas:read` | medium | No |
-| `canvas.restoreVersion` | `canvas:write` | high | No |
-| `canvas.saveVersion` | `canvas:write` | high | No |
-| `canvas.setContent` | `canvas:write` | high | No |
-| `canvas.setSelection` | `canvas:write` | high | No |
-| `canvas.updateComment` | `canvas:write` | high | No |
-| `canvas.updateDocument` | `canvas:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `canvas.addComment` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.closeCanvas` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.closeCollaborationSession` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.createCollaborationSession` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.createDocument` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.deleteComment` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.deleteDocument` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.executeAction` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.executeActionStreaming` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.executePython` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.getActiveCollaborationSession` | `canvas:read` | medium | Yes | frontend, hybrid |
+| `canvas.getCollaborationSession` | `canvas:read` | medium | Yes | frontend, hybrid |
+| `canvas.getComments` | `canvas:read` | medium | Yes | frontend, hybrid |
+| `canvas.getContent` | `canvas:read` | medium | Yes | frontend, hybrid |
+| `canvas.getCurrentDocument` | `canvas:read` | medium | Yes | frontend, hybrid |
+| `canvas.getDocument` | `canvas:read` | medium | Yes | frontend, hybrid |
+| `canvas.getSelection` | `canvas:read` | medium | Yes | frontend, hybrid |
+| `canvas.getVersions` | `canvas:read` | medium | Yes | frontend, hybrid |
+| `canvas.insertText` | `canvas:read` | medium | No | frontend, hybrid |
+| `canvas.listRecentCollaborationSessions` | `canvas:read` | medium | Yes | frontend, hybrid |
+| `canvas.onCanvasChange` | `canvas:read` | medium | No | frontend, hybrid |
+| `canvas.onContentChange` | `canvas:read` | medium | No | frontend, hybrid |
+| `canvas.openDocument` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.replaceSelection` | `canvas:read` | medium | No | frontend, hybrid |
+| `canvas.replyToComment` | `canvas:read` | medium | No | frontend, hybrid |
+| `canvas.resolveComment` | `canvas:read` | medium | No | frontend, hybrid |
+| `canvas.restoreVersion` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.saveVersion` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.setContent` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.setSelection` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.updateComment` | `canvas:write` | high | No | frontend, hybrid |
+| `canvas.updateDocument` | `canvas:write` | high | No | frontend, hybrid |
 
 ## `ctx.characterPacks`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `characterPacks.get` | None | low | Yes |
-| `characterPacks.listRegistered` | None | low | Yes |
-| `characterPacks.register` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `characterPacks.get` | None | low | Yes | frontend, hybrid |
+| `characterPacks.listRegistered` | None | low | Yes | frontend, hybrid |
+| `characterPacks.register` | None | low | No | frontend, hybrid |
 
 ## `ctx.chat`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `chat.addContextSelection` | `session:write` | low | No |
-| `chat.appendMessagePart` | `session:write` | low | No |
-| `chat.appendToComposer` | `session:write` | low | No |
-| `chat.stageIntent` | `session:write` | medium | No |
-| `chat.registerLinkMatcher` | `extension:ui` | medium | No |
-| `chat.use` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `chat.addContextSelection` | `session:write` | low | No | frontend, hybrid, python |
+| `chat.appendMessagePart` | `session:write` | low | No | frontend, hybrid, python |
+| `chat.appendToComposer` | `session:write` | low | No | frontend, hybrid, python |
+| `chat.stageIntent` | `session:write` | medium | No | frontend, hybrid, python |
+| `chat.registerLinkMatcher` | `extension:ui` | medium | No | frontend, hybrid, python |
+| `chat.use` | None | low | No | frontend, hybrid, python |
 
 ## `ctx.clipboard`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `clipboard.clear` | `clipboard:write` | high | No |
-| `clipboard.hasImage` | `clipboard:read` | medium | Yes |
-| `clipboard.hasText` | `clipboard:read` | medium | Yes |
-| `clipboard.readImage` | `clipboard:read` | medium | Yes |
-| `clipboard.readText` | `clipboard:read` | medium | Yes |
-| `clipboard.writeImage` | `clipboard:write` | high | No |
-| `clipboard.writeText` | `clipboard:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `clipboard.clear` | `clipboard:write` | high | No | frontend, hybrid |
+| `clipboard.hasImage` | `clipboard:read` | medium | Yes | frontend, hybrid |
+| `clipboard.hasText` | `clipboard:read` | medium | Yes | frontend, hybrid |
+| `clipboard.readImage` | `clipboard:read` | medium | Yes | frontend, hybrid |
+| `clipboard.readText` | `clipboard:read` | medium | Yes | frontend, hybrid |
+| `clipboard.writeImage` | `clipboard:write` | high | No | frontend, hybrid |
+| `clipboard.writeText` | `clipboard:write` | high | No | frontend, hybrid |
 
 ## `ctx.commands`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `commands.registerSlashCommand` | `commands:write` | medium | No |
-| `commands.unregisterSlashCommand` | `commands:write` | medium | Yes |
-| `commands.listSlashCommands` | `commands:read` | low | Yes |
-| `commands.listCustomCommands` | `commands:read` | low | Yes |
-| `commands.getCustomCommand` | `commands:read` | low | Yes |
-| `commands.saveCustomCommand` | `commands:write` | high | No |
-| `commands.deleteCustomCommand` | `commands:write` | high | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `commands.registerSlashCommand` | `commands:write` | medium | No | frontend, hybrid, python |
+| `commands.unregisterSlashCommand` | `commands:write` | medium | Yes | frontend, hybrid, python |
+| `commands.listSlashCommands` | `commands:read` | low | Yes | frontend, hybrid, python |
+| `commands.listCustomCommands` | `commands:read` | low | Yes | frontend, hybrid, python |
+| `commands.getCustomCommand` | `commands:read` | low | Yes | frontend, hybrid, python |
+| `commands.saveCustomCommand` | `commands:write` | high | No | frontend, hybrid, python |
+| `commands.deleteCustomCommand` | `commands:write` | high | Yes | frontend, hybrid, python |
 
 ## `ctx.companion`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `companion.getDevice` | `companion:read` | medium | Yes |
-| `companion.listDevices` | `companion:read` | medium | Yes |
-| `companion.listOpenGoals` | `companion:read` | medium | Yes |
-| `companion.pauseGoal` | `companion:control` | high | No |
-| `companion.resumeGoal` | `companion:control` | high | No |
-| `companion.revokeDevice` | `companion:control` | high | No |
-| `companion.serverStatus` | `companion:control` | high | No |
-| `companion.setRemoteControl` | `companion:control` | high | No |
-| `companion.stopGoal` | `companion:control` | high | No |
-| `companion.unrevokeDevice` | `companion:control` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `companion.getDevice` | `companion:read` | medium | Yes | frontend, hybrid |
+| `companion.listDevices` | `companion:read` | medium | Yes | frontend, hybrid |
+| `companion.listOpenGoals` | `companion:read` | medium | Yes | frontend, hybrid |
+| `companion.pauseGoal` | `companion:control` | high | No | frontend, hybrid |
+| `companion.resumeGoal` | `companion:control` | high | No | frontend, hybrid |
+| `companion.revokeDevice` | `companion:control` | high | No | frontend, hybrid |
+| `companion.serverStatus` | `companion:control` | high | No | frontend, hybrid |
+| `companion.setRemoteControl` | `companion:control` | high | No | frontend, hybrid |
+| `companion.stopGoal` | `companion:control` | high | No | frontend, hybrid |
+| `companion.unrevokeDevice` | `companion:control` | high | No | frontend, hybrid |
 
 ## `ctx.configuration`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `configuration.get` | `settings:read` | medium | Yes |
-| `configuration.getAll` | `settings:read` | medium | Yes |
-| `configuration.getOrDefault` | `settings:read` | medium | Yes |
-| `configuration.onChange` | `settings:read` | medium | No |
-| `configuration.update` | `settings:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `configuration.get` | `settings:read` | medium | Yes | frontend, hybrid |
+| `configuration.getAll` | `settings:read` | medium | Yes | frontend, hybrid |
+| `configuration.getOrDefault` | `settings:read` | medium | Yes | frontend, hybrid |
+| `configuration.onChange` | `settings:read` | medium | No | frontend, hybrid |
+| `configuration.update` | `settings:write` | high | No | frontend, hybrid |
 
 ## `ctx.connectors`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `connectors.addChatMembers` | `connectors:send` | high | No |
-| `connectors.addReaction` | `connectors:send` | high | No |
-| `connectors.bootstrapConversation` | `connectors:send` | high | No |
-| `connectors.createChat` | `connectors:send` | high | No |
-| `connectors.createInstance` | `connectors:manage` | medium | No |
-| `connectors.deleteEphemeralCard` | `connectors:send` | high | No |
-| `connectors.deleteInstance` | `connectors:manage` | medium | No |
-| `connectors.deleteMessage` | `connectors:send` | high | No |
-| `connectors.editMessage` | `connectors:send` | high | No |
-| `connectors.enqueueSend` | `connectors:send` | high | No |
-| `connectors.fetchHistory` | `connectors:send` | high | No |
-| `connectors.findSessionByConversation` | `connectors:read` | medium | Yes |
-| `connectors.forwardMessage` | `connectors:send` | high | No |
-| `connectors.getA2UICapabilityMatrix` | `connectors:read` | medium | Yes |
-| `connectors.getAdapter` | `connectors:read` | medium | Yes |
-| `connectors.getDispatchRules` | `connectors:read` | medium | Yes |
-| `connectors.getInstance` | `connectors:read` | medium | Yes |
-| `connectors.getOutboundJob` | `connectors:read` | medium | Yes |
-| `connectors.getReadReceipt` | `connectors:read` | medium | Yes |
-| `connectors.getRuntimeState` | `connectors:read` | medium | Yes |
-| `connectors.getSkillCapabilities` | `connectors:read` | medium | Yes |
-| `connectors.listAdapters` | `connectors:read` | medium | Yes |
-| `connectors.listEnabledInstances` | `connectors:read` | medium | Yes |
-| `connectors.listInstances` | `connectors:read` | medium | Yes |
-| `connectors.listInstancesByType` | `connectors:read` | medium | Yes |
-| `connectors.listRunningAdapters` | `connectors:read` | medium | Yes |
-| `connectors.listSessionsByConversation` | `connectors:read` | medium | Yes |
-| `connectors.listSiblingConversations` | `connectors:read` | medium | Yes |
-| `connectors.newIdempotencyKey` | `connectors:send` | high | No |
-| `connectors.onCallback` | `connectors:read` | medium | No |
-| `connectors.onInbound` | `connectors:read` | medium | No |
-| `connectors.pinMessage` | `connectors:send` | high | No |
-| `connectors.previewAtGate` | `connectors:send` | high | No |
-| `connectors.previewDispatchRules` | `connectors:send` | high | No |
-| `connectors.removeChatMembers` | `connectors:send` | high | No |
-| `connectors.removeReaction` | `connectors:send` | high | No |
-| `connectors.resolveContacts` | `connectors:send` | high | No |
-| `connectors.send` | `connectors:send` | high | No |
-| `connectors.sendText` | `connectors:send` | high | No |
-| `connectors.sendUrgent` | `connectors:send` | high | No |
-| `connectors.setDispatchRules` | `connectors:send` | high | No |
-| `connectors.setInstanceEnabled` | `connectors:send` | high | No |
-| `connectors.setTyping` | `connectors:send` | high | No |
-| `connectors.streamReply` | `connectors:send` | high | No |
-| `connectors.unpinMessage` | `connectors:send` | high | No |
-| `connectors.updateChat` | `connectors:send` | high | No |
-| `connectors.updateInstance` | `connectors:manage` | medium | No |
-| `connectors.uploadFile` | `connectors:send` | high | No |
-| `connectors.waitForDelivery` | `connectors:send` | high | No |
-| `connectors.a2ui.surface` | None | low | Yes |
-| `connectors.a2ui.segment` | None | low | Yes |
-| `connectors.a2ui.message` | None | low | Yes |
-| `connectors.a2ui.component.text` | None | low | Yes |
-| `connectors.a2ui.component.button` | None | low | Yes |
-| `connectors.a2ui.component.card` | None | low | Yes |
-| `connectors.a2ui.component.row` | None | low | Yes |
-| `connectors.a2ui.component.column` | None | low | Yes |
-| `connectors.a2ui.component.alert` | None | low | Yes |
-| `connectors.a2ui.component.image` | None | low | Yes |
-| `connectors.a2ui.component.link` | None | low | Yes |
-| `connectors.a2ui.component.select` | None | low | Yes |
-| `connectors.a2ui.component.textField` | None | low | Yes |
-| `connectors.a2ui.component.list` | None | low | Yes |
-| `connectors.a2ui.component.divider` | None | low | Yes |
-| `connectors.a2ui.component.badge` | None | low | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `connectors.addChatMembers` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.addReaction` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.bootstrapConversation` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.createChat` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.createInstance` | `connectors:manage` | medium | No | frontend, hybrid |
+| `connectors.deleteEphemeralCard` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.deleteInstance` | `connectors:manage` | medium | No | frontend, hybrid |
+| `connectors.deleteMessage` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.editMessage` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.enqueueSend` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.fetchHistory` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.findSessionByConversation` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.forwardMessage` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.getA2UICapabilityMatrix` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.getAdapter` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.getDispatchRules` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.getInstance` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.getOutboundJob` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.getReadReceipt` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.getRuntimeState` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.getSkillCapabilities` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.listAdapters` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.listEnabledInstances` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.listInstances` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.listInstancesByType` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.listRunningAdapters` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.listSessionsByConversation` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.listSiblingConversations` | `connectors:read` | medium | Yes | frontend, hybrid |
+| `connectors.newIdempotencyKey` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.onCallback` | `connectors:read` | medium | No | frontend, hybrid |
+| `connectors.onInbound` | `connectors:read` | medium | No | frontend, hybrid |
+| `connectors.pinMessage` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.previewAtGate` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.previewDispatchRules` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.removeChatMembers` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.removeReaction` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.resolveContacts` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.send` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.sendText` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.sendUrgent` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.setDispatchRules` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.setInstanceEnabled` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.setTyping` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.streamReply` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.unpinMessage` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.updateChat` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.updateInstance` | `connectors:manage` | medium | No | frontend, hybrid |
+| `connectors.uploadFile` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.waitForDelivery` | `connectors:send` | high | No | frontend, hybrid |
+| `connectors.a2ui.surface` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.segment` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.message` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.text` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.button` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.card` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.row` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.column` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.alert` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.image` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.link` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.select` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.textField` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.list` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.divider` | None | low | Yes | frontend, hybrid |
+| `connectors.a2ui.component.badge` | None | low | Yes | frontend, hybrid |
 
 ## `ctx.contextMenu`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `contextMenu.register` | None | low | No |
-| `contextMenu.registerMany` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `contextMenu.register` | None | low | No | frontend, hybrid |
+| `contextMenu.registerMany` | None | low | No | frontend, hybrid |
 
 ## `ctx.contextPanels`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `contextPanels.getActiveContext` | `extension:ui` | medium | Yes |
-| `contextPanels.getWorkbenchState` | `extension:ui` | medium | Yes |
-| `contextPanels.onDidChangeActiveContext` | `extension:ui` | medium | No |
-| `contextPanels.onDidChangeVisibility` | `extension:ui` | medium | No |
-| `contextPanels.onDidChangeWorkbenchState` | `extension:ui` | medium | No |
-| `contextPanels.register` | `extension:ui` | medium | No |
-| `contextPanels.reveal` | `extension:ui` | medium | No |
-| `contextPanels.setBadge` | `extension:ui` | medium | No |
-| `contextPanels.setMode` | `extension:ui` | medium | No |
-| `contextPanels.setPinned` | `extension:ui` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `contextPanels.getActiveContext` | `extension:ui` | medium | Yes | frontend, hybrid, python |
+| `contextPanels.getWorkbenchState` | `extension:ui` | medium | Yes | frontend, hybrid, python |
+| `contextPanels.onDidChangeActiveContext` | `extension:ui` | medium | No | frontend, hybrid, python |
+| `contextPanels.onDidChangeVisibility` | `extension:ui` | medium | No | frontend, hybrid, python |
+| `contextPanels.onDidChangeWorkbenchState` | `extension:ui` | medium | No | frontend, hybrid, python |
+| `contextPanels.register` | `extension:ui` | medium | No | frontend, hybrid, python |
+| `contextPanels.reveal` | `extension:ui` | medium | No | frontend, hybrid, python |
+| `contextPanels.setBadge` | `extension:ui` | medium | No | frontend, hybrid, python |
+| `contextPanels.setMode` | `extension:ui` | medium | No | frontend, hybrid, python |
+| `contextPanels.setPinned` | `extension:ui` | medium | No | frontend, hybrid, python |
 
 ## `ctx.db`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `db.createTable` | `database:write` | high | No |
-| `db.dropTable` | `database:write` | high | No |
-| `db.execute` | `database:write` | high | No |
-| `db.query` | `database:read` | medium | Yes |
-| `db.tableExists` | `database:read` | medium | Yes |
-| `db.transaction` | `database:read` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `db.createTable` | `database:write` | high | No | frontend, hybrid |
+| `db.dropTable` | `database:write` | high | No | frontend, hybrid |
+| `db.execute` | `database:write` | high | No | frontend, hybrid |
+| `db.query` | `database:read` | medium | Yes | frontend, hybrid |
+| `db.tableExists` | `database:read` | medium | Yes | frontend, hybrid |
+| `db.transaction` | `database:read` | medium | No | frontend, hybrid |
 
 ## `ctx.decisions`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `decisions.decide` | `decisions:run` | medium | Yes |
-| `decisions.getSelectedProviderId` | None | low | Yes |
-| `decisions.listProviders` | None | low | Yes |
-| `decisions.listRegistered` | None | low | Yes |
-| `decisions.registerProvider` | `decisions:provide` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `decisions.decide` | `decisions:run` | medium | Yes | frontend, hybrid, python |
+| `decisions.getSelectedProviderId` | None | low | Yes | frontend, hybrid, python |
+| `decisions.listProviders` | None | low | Yes | frontend, hybrid, python |
+| `decisions.listRegistered` | None | low | Yes | frontend, hybrid, python |
+| `decisions.registerProvider` | `decisions:provide` | medium | No | frontend, hybrid, python |
 
 ## `ctx.dexie`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `dexie.rawDb` | None | low | Yes |
-| `dexie.table` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `dexie.rawDb` | None | low | Yes | frontend, hybrid |
+| `dexie.table` | None | low | No | frontend, hybrid |
 
 ## `ctx.editor`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `editor.notify` | `editor:read` | medium | No |
-| `editor.onDidChangeActiveEditor` | `editor:read` | medium | No |
-| `editor.openFile` | `editor:write` | high | No |
-| `editor.readActive` | `editor:read` | medium | Yes |
-| `editor.reflectEdit` | `editor:write` | high | No |
-| `editor.revealInExplorer` | `editor:write` | high | No |
-| `editor.runInTerminal` | `editor:write` | high | No |
-| `editor.saveDirty` | `editor:write` | high | No |
-| `editor.showDiff` | `editor:read` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `editor.notify` | `editor:read` | medium | No | frontend, hybrid, python |
+| `editor.onDidChangeActiveEditor` | `editor:read` | medium | No | frontend, hybrid, python |
+| `editor.openFile` | `editor:write` | high | No | frontend, hybrid, python |
+| `editor.readActive` | `editor:read` | medium | Yes | frontend, hybrid, python |
+| `editor.reflectEdit` | `editor:write` | high | No | frontend, hybrid, python |
+| `editor.revealInExplorer` | `editor:write` | high | No | frontend, hybrid, python |
+| `editor.runInTerminal` | `editor:write` | high | No | frontend, hybrid, python |
+| `editor.saveDirty` | `editor:write` | high | No | frontend, hybrid, python |
+| `editor.showDiff` | `editor:read` | medium | Yes | frontend, hybrid, python |
 
 ## `ctx.eval`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `eval.getRun` | `tests:run`, `database:read` | medium | Yes |
-| `eval.listDatasets` | `tests:run`, `database:read` | medium | Yes |
-| `eval.runCalibration` | `tests:run`, `ai:chat`, `database:write` | high | No |
-| `eval.runDataset` | `tests:run`, `ai:chat`, `database:write` | high | No |
-| `eval.runProject` | `tests:run`, `ai:chat`, `database:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `eval.getRun` | `tests:run`, `database:read` | medium | Yes | frontend, hybrid |
+| `eval.listDatasets` | `tests:run`, `database:read` | medium | Yes | frontend, hybrid |
+| `eval.runCalibration` | `tests:run`, `ai:chat`, `database:write` | high | No | frontend, hybrid |
+| `eval.runDataset` | `tests:run`, `ai:chat`, `database:write` | high | No | frontend, hybrid |
+| `eval.runProject` | `tests:run`, `ai:chat`, `database:write` | high | No | frontend, hybrid |
 
 ## `ctx.events`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `events.bus.emit` | `events:publish` | low | No |
-| `events.bus.getHistory` | `events:subscribe` | low | Yes |
-| `events.bus.off` | None | low | No |
-| `events.bus.offAll` | None | low | No |
-| `events.bus.on` | `events:subscribe` | low | No |
-| `events.bus.once` | `events:subscribe` | low | No |
-| `events.emit` | None | low | No |
-| `events.ipc.broadcast` | `ipc:call` | low | No |
-| `events.ipc.call` | `ipc:call` | low | No |
-| `events.ipc.describeExposedMethods` | `ipc:call` | low | No |
-| `events.ipc.expose` | `ipc:expose` | low | No |
-| `events.ipc.getExposedMethods` | `ipc:call` | low | Yes |
-| `events.ipc.on` | None | low | No |
-| `events.ipc.send` | `ipc:call` | low | No |
-| `events.off` | None | low | No |
-| `events.on` | None | low | No |
-| `events.once` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `events.bus.emit` | `events:publish` | low | No | frontend, hybrid |
+| `events.bus.getHistory` | `events:subscribe` | low | Yes | frontend, hybrid |
+| `events.bus.off` | None | low | No | frontend, hybrid |
+| `events.bus.offAll` | None | low | No | frontend, hybrid |
+| `events.bus.on` | `events:subscribe` | low | No | frontend, hybrid |
+| `events.bus.once` | `events:subscribe` | low | No | frontend, hybrid |
+| `events.emit` | None | low | No | frontend, hybrid |
+| `events.ipc.broadcast` | `ipc:call` | low | No | frontend, hybrid |
+| `events.ipc.call` | `ipc:call` | low | No | frontend, hybrid, python |
+| `events.ipc.describeExposedMethods` | `ipc:call` | low | No | frontend, hybrid, python |
+| `events.ipc.expose` | `ipc:expose` | low | No | frontend, hybrid |
+| `events.ipc.getExposedMethods` | `ipc:call` | low | Yes | frontend, hybrid, python |
+| `events.ipc.on` | None | low | No | frontend, hybrid |
+| `events.ipc.send` | `ipc:call` | low | No | frontend, hybrid |
+| `events.off` | None | low | No | frontend, hybrid |
+| `events.on` | None | low | No | frontend, hybrid |
+| `events.once` | None | low | No | frontend, hybrid |
 
 ## `ctx.export`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `export.download` | `export:session` | medium | No |
-| `export.exportMessages` | `export:session` | medium | No |
-| `export.exportProject` | `export:project` | medium | No |
-| `export.exportSession` | `export:session` | medium | No |
-| `export.generateFilename` | `export:session` | medium | No |
-| `export.getAvailableFormats` | `export:session` | medium | Yes |
-| `export.getCustomExporters` | `export:session` | medium | Yes |
-| `export.registerExporter` | `export:session` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `export.download` | `export:session` | medium | No | frontend, hybrid |
+| `export.exportMessages` | `export:session` | medium | No | frontend, hybrid |
+| `export.exportProject` | `export:project` | medium | No | frontend, hybrid |
+| `export.exportSession` | `export:session` | medium | No | frontend, hybrid |
+| `export.generateFilename` | `export:session` | medium | No | frontend, hybrid |
+| `export.getAvailableFormats` | `export:session` | medium | Yes | frontend, hybrid |
+| `export.getCustomExporters` | `export:session` | medium | Yes | frontend, hybrid |
+| `export.registerExporter` | `export:session` | medium | No | frontend, hybrid |
 
 ## `ctx.extensions`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `extensions.getExtensions` | `extension:ui` | medium | Yes |
-| `extensions.hasExtensions` | `extension:ui` | medium | Yes |
-| `extensions.registerExtension` | `extension:ui` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `extensions.getExtensions` | `extension:ui` | medium | Yes | frontend, hybrid |
+| `extensions.hasExtensions` | `extension:ui` | medium | Yes | frontend, hybrid |
+| `extensions.registerExtension` | `extension:ui` | medium | No | frontend, hybrid |
 
 ## `ctx.externalAgents`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `externalAgents.list` | `agent:external:read` | medium | Yes |
-| `externalAgents.get` | `agent:external:read` | medium | Yes |
-| `externalAgents.getReadiness` | `agent:external:read` | medium | Yes |
-| `externalAgents.listPresets` | `agent:external:read` | low | Yes |
-| `externalAgents.listRuntimes` | `agent:external:read` | medium | Yes |
-| `externalAgents.getSettings` | `agent:external:read` | low | Yes |
-| `externalAgents.listDelegationRules` | `agent:external:read` | medium | Yes |
-| `externalAgents.onChange` | `agent:external:read` | medium | No |
-| `externalAgents.create` | `agent:external:manage` | high | No |
-| `externalAgents.createFromPreset` | `agent:external:manage` | high | No |
-| `externalAgents.update` | `agent:external:manage` | high | Yes |
-| `externalAgents.duplicate` | `agent:external:manage` | high | No |
-| `externalAgents.remove` | `agent:external:manage` | high | No |
-| `externalAgents.setEnabled` | `agent:external:manage` | high | Yes |
-| `externalAgents.connect` | `agent:external:manage` | high | No |
-| `externalAgents.disconnect` | `agent:external:manage` | medium | Yes |
-| `externalAgents.addDelegationRule` | `agent:external:manage` | high | No |
-| `externalAgents.updateDelegationRule` | `agent:external:manage` | high | Yes |
-| `externalAgents.removeDelegationRule` | `agent:external:manage` | high | No |
-| `externalAgents.reorderDelegationRules` | `agent:external:manage` | high | Yes |
-| `externalAgents.updateSettings` | `agent:external:manage` | high | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `externalAgents.list` | `agent:external:read` | medium | Yes | frontend, hybrid, python |
+| `externalAgents.get` | `agent:external:read` | medium | Yes | frontend, hybrid, python |
+| `externalAgents.getReadiness` | `agent:external:read` | medium | Yes | frontend, hybrid, python |
+| `externalAgents.listPresets` | `agent:external:read` | low | Yes | frontend, hybrid, python |
+| `externalAgents.listRuntimes` | `agent:external:read` | medium | Yes | frontend, hybrid, python |
+| `externalAgents.getSettings` | `agent:external:read` | low | Yes | frontend, hybrid, python |
+| `externalAgents.listDelegationRules` | `agent:external:read` | medium | Yes | frontend, hybrid, python |
+| `externalAgents.onChange` | `agent:external:read` | medium | No | frontend, hybrid, python |
+| `externalAgents.create` | `agent:external:manage` | high | No | frontend, hybrid, python |
+| `externalAgents.createFromPreset` | `agent:external:manage` | high | No | frontend, hybrid, python |
+| `externalAgents.update` | `agent:external:manage` | high | Yes | frontend, hybrid, python |
+| `externalAgents.duplicate` | `agent:external:manage` | high | No | frontend, hybrid, python |
+| `externalAgents.remove` | `agent:external:manage` | high | No | frontend, hybrid, python |
+| `externalAgents.setEnabled` | `agent:external:manage` | high | Yes | frontend, hybrid, python |
+| `externalAgents.connect` | `agent:external:manage` | high | No | frontend, hybrid, python |
+| `externalAgents.disconnect` | `agent:external:manage` | medium | Yes | frontend, hybrid, python |
+| `externalAgents.addDelegationRule` | `agent:external:manage` | high | No | frontend, hybrid, python |
+| `externalAgents.updateDelegationRule` | `agent:external:manage` | high | Yes | frontend, hybrid, python |
+| `externalAgents.removeDelegationRule` | `agent:external:manage` | high | No | frontend, hybrid, python |
+| `externalAgents.reorderDelegationRules` | `agent:external:manage` | high | Yes | frontend, hybrid, python |
+| `externalAgents.updateSettings` | `agent:external:manage` | high | Yes | frontend, hybrid, python |
 
 ## `ctx.fs`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `fs.appendText` | `filesystem:write` | high | No |
-| `fs.copy` | `filesystem:write` | high | No |
-| `fs.exists` | `filesystem:read` | medium | Yes |
-| `fs.getCacheDir` | `filesystem:read` | medium | Yes |
-| `fs.getDataDir` | `filesystem:read` | medium | Yes |
-| `fs.getTempDir` | `filesystem:read` | medium | Yes |
-| `fs.mkdir` | `filesystem:write` | high | No |
-| `fs.move` | `filesystem:write` | high | No |
-| `fs.readBinary` | `filesystem:read` | medium | Yes |
-| `fs.readDir` | `filesystem:read` | medium | Yes |
-| `fs.readJson` | `filesystem:read` | medium | Yes |
-| `fs.readText` | `filesystem:read` | medium | Yes |
-| `fs.remove` | `filesystem:write` | high | No |
-| `fs.stat` | `filesystem:read` | medium | No |
-| `fs.watch` | `filesystem:read` | medium | No |
-| `fs.writeBinary` | `filesystem:write` | high | No |
-| `fs.writeJson` | `filesystem:write` | high | No |
-| `fs.writeText` | `filesystem:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `fs.appendText` | `filesystem:write` | high | No | frontend, hybrid, python |
+| `fs.copy` | `filesystem:write` | high | No | frontend, hybrid, python |
+| `fs.exists` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `fs.getCacheDir` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `fs.getDataDir` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `fs.getTempDir` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `fs.mkdir` | `filesystem:write` | high | No | frontend, hybrid, python |
+| `fs.move` | `filesystem:write` | high | No | frontend, hybrid, python |
+| `fs.readBinary` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `fs.readDir` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `fs.readJson` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `fs.readText` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `fs.remove` | `filesystem:write` | high | No | frontend, hybrid, python |
+| `fs.stat` | `filesystem:read` | medium | No | frontend, hybrid, python |
+| `fs.watch` | `filesystem:read` | medium | No | frontend, hybrid, python |
+| `fs.writeBinary` | `filesystem:write` | high | No | frontend, hybrid, python |
+| `fs.writeJson` | `filesystem:write` | high | No | frontend, hybrid, python |
+| `fs.writeText` | `filesystem:write` | high | No | frontend, hybrid, python |
 
 ## `ctx.git`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `git.branches` | `git:read` | medium | Yes |
-| `git.checkoutBranch` | `git:write` | high | No |
-| `git.commit` | `git:write` | high | No |
-| `git.commitFiles` | `git:write` | high | No |
-| `git.conflicts` | `git:read` | medium | No |
-| `git.createBranch` | `git:write` | high | No |
-| `git.deleteBranch` | `git:write` | high | No |
-| `git.diffCommit` | `git:read` | medium | Yes |
-| `git.diffFile` | `git:read` | medium | Yes |
-| `git.discard` | `git:write` | high | No |
-| `git.discardAll` | `git:write` | high | No |
-| `git.fetch` | `git:write` | high | No |
-| `git.fileHistory` | `git:write` | high | No |
-| `git.getRoot` | `git:read` | medium | Yes |
-| `git.isRepo` | `git:read` | medium | Yes |
-| `git.log` | `git:read` | medium | Yes |
-| `git.mergeAbort` | `git:write` | high | No |
-| `git.onStatusChange` | `git:write` | high | No |
-| `git.pull` | `git:write` | high | No |
-| `git.push` | `git:write` | high | No |
-| `git.remotes` | `git:write` | high | No |
-| `git.renameBranch` | `git:write` | high | No |
-| `git.repoState` | `git:write` | high | No |
-| `git.resolveConflict` | `git:write` | high | No |
-| `git.stage` | `git:write` | high | No |
-| `git.stashApply` | `git:write` | high | No |
-| `git.stashDrop` | `git:write` | high | No |
-| `git.stashList` | `git:write` | high | No |
-| `git.stashPop` | `git:write` | high | No |
-| `git.stashPush` | `git:write` | high | No |
-| `git.status` | `git:read` | medium | Yes |
-| `git.sync` | `git:write` | high | No |
-| `git.unstage` | `git:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `git.branches` | `git:read` | medium | Yes | frontend, hybrid, python |
+| `git.checkoutBranch` | `git:write` | high | No | frontend, hybrid, python |
+| `git.commit` | `git:write` | high | No | frontend, hybrid, python |
+| `git.commitFiles` | `git:write` | high | No | frontend, hybrid, python |
+| `git.conflicts` | `git:read` | medium | No | frontend, hybrid, python |
+| `git.createBranch` | `git:write` | high | No | frontend, hybrid, python |
+| `git.deleteBranch` | `git:write` | high | No | frontend, hybrid, python |
+| `git.diffCommit` | `git:read` | medium | Yes | frontend, hybrid, python |
+| `git.diffFile` | `git:read` | medium | Yes | frontend, hybrid, python |
+| `git.discard` | `git:write` | high | No | frontend, hybrid, python |
+| `git.discardAll` | `git:write` | high | No | frontend, hybrid, python |
+| `git.fetch` | `git:write` | high | No | frontend, hybrid, python |
+| `git.fileHistory` | `git:write` | high | No | frontend, hybrid, python |
+| `git.getRoot` | `git:read` | medium | Yes | frontend, hybrid, python |
+| `git.isRepo` | `git:read` | medium | Yes | frontend, hybrid, python |
+| `git.log` | `git:read` | medium | Yes | frontend, hybrid, python |
+| `git.mergeAbort` | `git:write` | high | No | frontend, hybrid, python |
+| `git.onStatusChange` | `git:write` | high | No | frontend, hybrid, python |
+| `git.pull` | `git:write` | high | No | frontend, hybrid, python |
+| `git.push` | `git:write` | high | No | frontend, hybrid, python |
+| `git.remotes` | `git:write` | high | No | frontend, hybrid, python |
+| `git.renameBranch` | `git:write` | high | No | frontend, hybrid, python |
+| `git.repoState` | `git:write` | high | No | frontend, hybrid, python |
+| `git.resolveConflict` | `git:write` | high | No | frontend, hybrid, python |
+| `git.stage` | `git:write` | high | No | frontend, hybrid, python |
+| `git.stashApply` | `git:write` | high | No | frontend, hybrid, python |
+| `git.stashDrop` | `git:write` | high | No | frontend, hybrid, python |
+| `git.stashList` | `git:write` | high | No | frontend, hybrid, python |
+| `git.stashPop` | `git:write` | high | No | frontend, hybrid, python |
+| `git.stashPush` | `git:write` | high | No | frontend, hybrid, python |
+| `git.status` | `git:read` | medium | Yes | frontend, hybrid, python |
+| `git.sync` | `git:write` | high | No | frontend, hybrid, python |
+| `git.unstage` | `git:write` | high | No | frontend, hybrid, python |
 
 ## `ctx.glance`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `glance.register` | None | low | No |
-| `glance.update` | None | low | Yes |
-| `glance.onVisibilityChange` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `glance.register` | None | low | No | frontend, hybrid, python |
+| `glance.update` | None | low | Yes | frontend, hybrid, python |
+| `glance.onVisibilityChange` | None | low | No | frontend, hybrid, python |
 
 ## `ctx.goals`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `goals.clearSubgoals` | `goal:write` | high | No |
-| `goals.create` | `goal:write` | high | No |
-| `goals.decomposeSubgoals` | `goal:read` | medium | No |
-| `goals.delete` | `goal:write` | high | No |
-| `goals.get` | `goal:read` | medium | Yes |
-| `goals.getActiveForSession` | `goal:read` | medium | Yes |
-| `goals.getEvents` | `goal:read` | medium | Yes |
-| `goals.getOpenForSession` | `goal:read` | medium | Yes |
-| `goals.listAll` | `goal:read` | medium | Yes |
-| `goals.listBySession` | `goal:read` | medium | Yes |
-| `goals.pause` | `goal:write` | high | No |
-| `goals.preempt` | `goal:read` | medium | No |
-| `goals.resume` | `goal:write` | high | No |
-| `goals.stop` | `goal:write` | high | No |
-| `goals.toggleSubgoal` | `goal:read` | medium | No |
-| `goals.updateConfig` | `goal:write` | high | No |
-| `goals.updateObjective` | `goal:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `goals.clearSubgoals` | `goal:write` | high | No | frontend, hybrid |
+| `goals.create` | `goal:write` | high | No | frontend, hybrid |
+| `goals.decomposeSubgoals` | `goal:read` | medium | No | frontend, hybrid |
+| `goals.delete` | `goal:write` | high | No | frontend, hybrid |
+| `goals.get` | `goal:read` | medium | Yes | frontend, hybrid |
+| `goals.getActiveForSession` | `goal:read` | medium | Yes | frontend, hybrid |
+| `goals.getEvents` | `goal:read` | medium | Yes | frontend, hybrid |
+| `goals.getOpenForSession` | `goal:read` | medium | Yes | frontend, hybrid |
+| `goals.listAll` | `goal:read` | medium | Yes | frontend, hybrid |
+| `goals.listBySession` | `goal:read` | medium | Yes | frontend, hybrid |
+| `goals.pause` | `goal:write` | high | No | frontend, hybrid |
+| `goals.preempt` | `goal:read` | medium | No | frontend, hybrid |
+| `goals.resume` | `goal:write` | high | No | frontend, hybrid |
+| `goals.stop` | `goal:write` | high | No | frontend, hybrid |
+| `goals.toggleSubgoal` | `goal:read` | medium | No | frontend, hybrid |
+| `goals.updateConfig` | `goal:write` | high | No | frontend, hybrid |
+| `goals.updateObjective` | `goal:write` | high | No | frontend, hybrid |
 
 ## `ctx.issues`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `issues.assign` | `issue:write` | medium | No |
-| `issues.comment` | `issue:write` | medium | No |
-| `issues.create` | `issue:write` | high | No |
-| `issues.get` | `issue:read` | low | Yes |
-| `issues.label` | `issue:write` | medium | No |
-| `issues.list` | `issue:read` | low | Yes |
-| `issues.listEvents` | `issue:read` | low | Yes |
-| `issues.onEvent` | `issue:read` | low | No |
-| `issues.registerSyncProvider` | `issue:write` | high | No |
-| `issues.update` | `issue:write` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `issues.assign` | `issue:write` | medium | No | frontend, hybrid |
+| `issues.comment` | `issue:write` | medium | No | frontend, hybrid |
+| `issues.create` | `issue:write` | high | No | frontend, hybrid |
+| `issues.get` | `issue:read` | low | Yes | frontend, hybrid |
+| `issues.label` | `issue:write` | medium | No | frontend, hybrid |
+| `issues.list` | `issue:read` | low | Yes | frontend, hybrid |
+| `issues.listEvents` | `issue:read` | low | Yes | frontend, hybrid |
+| `issues.onEvent` | `issue:read` | low | No | frontend, hybrid |
+| `issues.registerSyncProvider` | `issue:write` | high | No | frontend, hybrid |
+| `issues.update` | `issue:write` | medium | No | frontend, hybrid |
 
 ## `ctx.i18n`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `i18n.formatDate` | None | low | No |
-| `i18n.formatNumber` | None | low | No |
-| `i18n.formatRelativeTime` | None | low | No |
-| `i18n.getAvailableLocales` | None | low | Yes |
-| `i18n.getCurrentLocale` | None | low | Yes |
-| `i18n.getLocale` | None | low | Yes |
-| `i18n.getLocaleName` | None | low | Yes |
-| `i18n.hasTranslation` | None | low | Yes |
-| `i18n.hasKey` | None | low | Yes |
-| `i18n.onLocaleChange` | None | low | No |
-| `i18n.registerTranslations` | None | low | No |
-| `i18n.t` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `i18n.formatDate` | None | low | No | frontend, hybrid, python |
+| `i18n.formatNumber` | None | low | No | frontend, hybrid, python |
+| `i18n.formatRelativeTime` | None | low | No | frontend, hybrid, python |
+| `i18n.getAvailableLocales` | None | low | Yes | frontend, hybrid, python |
+| `i18n.getCurrentLocale` | None | low | Yes | frontend, hybrid, python |
+| `i18n.getLocale` | None | low | Yes | frontend, hybrid, python |
+| `i18n.getLocaleName` | None | low | Yes | frontend, hybrid, python |
+| `i18n.hasTranslation` | None | low | Yes | frontend, hybrid, python |
+| `i18n.hasKey` | None | low | Yes | frontend, hybrid, python |
+| `i18n.onLocaleChange` | None | low | No | frontend, hybrid, python |
+| `i18n.registerTranslations` | None | low | No | frontend, hybrid, python |
+| `i18n.t` | None | low | No | frontend, hybrid, python |
 
 ## `ctx.import`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `import.getCustomImporters` | None | low | Yes |
-| `import.importContent` | None | low | No |
-| `import.registerChatImporter` | None | low | No |
-| `import.registerImporter` | None | low | No |
-| `import.registerSessionSource` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `import.getCustomImporters` | None | low | Yes | frontend, hybrid |
+| `import.importContent` | None | low | No | frontend, hybrid |
+| `import.registerChatImporter` | None | low | No | frontend, hybrid |
+| `import.registerImporter` | None | low | No | frontend, hybrid |
+| `import.registerSessionSource` | None | low | No | frontend, hybrid |
 
 ## `ctx.integrations`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `integrations.authenticatedRequest` | `integrations:execute` | high | No |
-| `integrations.cancelAction` | `integrations:execute` | high | No |
-| `integrations.checkAccountHealth` | `integrations:read` | low | Yes |
-| `integrations.createAccount` | `integrations:manage` | medium | No |
-| `integrations.createSubscription` | `integrations:manage` | medium | No |
-| `integrations.executeAction` | `integrations:execute` | high | No |
-| `integrations.getActionJob` | `integrations:read` | medium | Yes |
-| `integrations.getIngressDeadletter` | `integrations:read` | low | Yes |
-| `integrations.getIngressPublicUrl` | `integrations:read` | medium | Yes |
-| `integrations.listAccounts` | `integrations:read` | medium | Yes |
-| `integrations.listDefinitions` | `integrations:read` | medium | Yes |
-| `integrations.listIngressDeadletters` | `integrations:read` | low | Yes |
-| `integrations.listResources` | `integrations:read` | low | Yes |
-| `integrations.listSubscriptions` | `integrations:read` | medium | Yes |
-| `integrations.migrateLegacy` | `integrations:execute` | high | No |
-| `integrations.publishEvent` | `integrations:events` | medium | No |
-| `integrations.removeAccount` | `integrations:manage` | medium | No |
-| `integrations.removeSubscription` | `integrations:manage` | medium | No |
-| `integrations.requeueIngressDeadletter` | `integrations:manage` | medium | No |
-| `integrations.rollbackMigration` | `integrations:execute` | high | No |
-| `integrations.updateAccount` | `integrations:manage` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `integrations.authenticatedRequest` | `integrations:execute` | high | No | frontend, hybrid, python |
+| `integrations.cancelAction` | `integrations:execute` | high | No | frontend, hybrid, python |
+| `integrations.checkAccountHealth` | `integrations:read` | low | Yes | frontend, hybrid, python |
+| `integrations.createAccount` | `integrations:manage` | medium | No | frontend, hybrid, python |
+| `integrations.createSubscription` | `integrations:manage` | medium | No | frontend, hybrid, python |
+| `integrations.executeAction` | `integrations:execute` | high | No | frontend, hybrid, python |
+| `integrations.getActionJob` | `integrations:read` | medium | Yes | frontend, hybrid, python |
+| `integrations.getIngressDeadletter` | `integrations:read` | low | Yes | frontend, hybrid, python |
+| `integrations.getIngressPublicUrl` | `integrations:read` | medium | Yes | frontend, hybrid, python |
+| `integrations.listAccounts` | `integrations:read` | medium | Yes | frontend, hybrid, python |
+| `integrations.listDefinitions` | `integrations:read` | medium | Yes | frontend, hybrid, python |
+| `integrations.listIngressDeadletters` | `integrations:read` | low | Yes | frontend, hybrid, python |
+| `integrations.listResources` | `integrations:read` | low | Yes | frontend, hybrid, python |
+| `integrations.listSubscriptions` | `integrations:read` | medium | Yes | frontend, hybrid, python |
+| `integrations.migrateLegacy` | `integrations:execute` | high | No | frontend, hybrid, python |
+| `integrations.publishEvent` | `integrations:events` | medium | No | frontend, hybrid, python |
+| `integrations.removeAccount` | `integrations:manage` | medium | No | frontend, hybrid, python |
+| `integrations.removeSubscription` | `integrations:manage` | medium | No | frontend, hybrid, python |
+| `integrations.requeueIngressDeadletter` | `integrations:manage` | medium | No | frontend, hybrid, python |
+| `integrations.rollbackMigration` | `integrations:execute` | high | No | frontend, hybrid, python |
+| `integrations.updateAccount` | `integrations:manage` | medium | No | frontend, hybrid, python |
 
 ## `ctx.lifecycle`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `lifecycle.onDispose` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `lifecycle.onDispose` | None | low | No | frontend, hybrid |
 
 ## `ctx.logger`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `logger.child` | None | low | No |
-| `logger.debug` | None | low | No |
-| `logger.error` | None | low | No |
-| `logger.fatal` | None | low | No |
-| `logger.info` | None | low | No |
-| `logger.trace` | None | low | No |
-| `logger.warn` | None | low | No |
-| `logger.withContext` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `logger.child` | None | low | No | frontend, hybrid, python |
+| `logger.debug` | None | low | No | frontend, hybrid, python |
+| `logger.error` | None | low | No | frontend, hybrid, python |
+| `logger.fatal` | None | low | No | frontend, hybrid, python |
+| `logger.info` | None | low | No | frontend, hybrid, python |
+| `logger.trace` | None | low | No | frontend, hybrid, python |
+| `logger.warn` | None | low | No | frontend, hybrid, python |
+| `logger.withContext` | None | low | No | frontend, hybrid, python |
 
 ## `ctx.logs`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `logs.export` | `logs:read` | medium | Yes |
-| `logs.modules` | `logs:read` | medium | Yes |
-| `logs.query` | `logs:read` | medium | Yes |
-| `logs.stats` | `logs:read` | medium | Yes |
-| `logs.subscribe` | `logs:read` | medium | No |
-| `logs.traces.bySession` | `trace:read` | medium | Yes |
-| `logs.traces.list` | `trace:read` | medium | Yes |
-| `logs.traces.serialize` | `trace:read` | medium | Yes |
-| `logs.traces.spans` | `trace:read` | medium | Yes |
-| `logs.traces.stats` | `trace:read` | medium | Yes |
-| `logs.traces.subscribe` | `trace:read` | medium | No |
-| `logs.traces.timeline` | `trace:read` | medium | Yes |
-| `logs.traces.waterfall` | `trace:read` | medium | Yes |
-| `logs.transports` | `logs:read` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `logs.export` | `logs:read` | medium | Yes | frontend, hybrid |
+| `logs.modules` | `logs:read` | medium | Yes | frontend, hybrid |
+| `logs.query` | `logs:read` | medium | Yes | frontend, hybrid |
+| `logs.stats` | `logs:read` | medium | Yes | frontend, hybrid |
+| `logs.subscribe` | `logs:read` | medium | No | frontend, hybrid |
+| `logs.traces.bySession` | `trace:read` | medium | Yes | frontend, hybrid |
+| `logs.traces.list` | `trace:read` | medium | Yes | frontend, hybrid |
+| `logs.traces.serialize` | `trace:read` | medium | Yes | frontend, hybrid |
+| `logs.traces.spans` | `trace:read` | medium | Yes | frontend, hybrid |
+| `logs.traces.stats` | `trace:read` | medium | Yes | frontend, hybrid |
+| `logs.traces.subscribe` | `trace:read` | medium | No | frontend, hybrid |
+| `logs.traces.timeline` | `trace:read` | medium | Yes | frontend, hybrid |
+| `logs.traces.waterfall` | `trace:read` | medium | Yes | frontend, hybrid |
+| `logs.transports` | `logs:read` | medium | Yes | frontend, hybrid |
 
 ## `ctx.media`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `media.image.load` | None | low | No |
-| `media.image.save` | None | low | No |
-| `media.image.toDataUrl` | None | low | Yes |
-| `media.image.fromDataUrl` | None | low | Yes |
-| `media.image.resize` | None | low | No |
-| `media.image.transform` | None | low | No |
-| `media.image.adjust` | None | low | No |
-| `media.image.applyFilter` | None | low | No |
-| `media.image.getHistogram` | None | low | Yes |
-| `media.image.compare` | None | low | Yes |
-| `media.video.loadClip` | `media:video:read` | medium | No |
-| `media.video.getFrame` | `media:video:read` | medium | Yes |
-| `media.video.getMetadata` | `media:video:read` | medium | Yes |
-| `media.video.analyze` | `media:video:read` | medium | No |
-| `media.video.cleanupAnalysis` | `media:video:write` | high | No |
-| `media.video.trim` | `media:video:write` | high | No |
-| `media.video.concatenate` | `media:video:write` | high | No |
-| `media.video.applyEffect` | `media:video:write` | high | No |
-| `media.video.addTransition` | `media:video:write` | high | No |
-| `media.video.export` | `media:video:export` | high | No |
-| `media.filters.register` | None | low | No |
-| `media.filters.unregister` | None | low | No |
-| `media.filters.getAll` | None | low | Yes |
-| `media.filters.getById` | None | low | Yes |
-| `media.filters.getByCategory` | None | low | Yes |
-| `media.effects.register` | None | low | No |
-| `media.effects.unregister` | None | low | No |
-| `media.effects.getAll` | None | low | Yes |
-| `media.effects.getById` | None | low | Yes |
-| `media.transitions.register` | None | low | No |
-| `media.transitions.unregister` | None | low | No |
-| `media.transitions.getAll` | None | low | Yes |
-| `media.transitions.getById` | None | low | Yes |
-| `media.ai.generateImage` | `ai:chat` | high | No |
-| `media.ai.generateVideo` | `ai:chat` | high | No |
-| `media.ai.upscale` | `ai:chat` | high | No |
-| `media.ai.removeBackground` | `ai:chat` | high | No |
-| `media.ai.enhanceImage` | `ai:chat` | high | No |
-| `media.ai.generateVariation` | `ai:chat` | high | No |
-| `media.ai.inpaint` | `ai:chat` | high | No |
-| `media.utils.createCanvas` | None | low | Yes |
-| `media.utils.getImageDataFromCanvas` | None | low | Yes |
-| `media.utils.putImageDataToCanvas` | None | low | No |
-| `media.utils.blobToBase64` | None | low | Yes |
-| `media.utils.base64ToBlob` | None | low | Yes |
-| `media.utils.downloadFile` | None | low | No |
-| `media.utils.registerCatalogAsset` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `media.image.load` | None | low | No | frontend, hybrid |
+| `media.image.save` | None | low | No | frontend, hybrid |
+| `media.image.toDataUrl` | None | low | Yes | frontend, hybrid |
+| `media.image.fromDataUrl` | None | low | Yes | frontend, hybrid |
+| `media.image.resize` | None | low | No | frontend, hybrid |
+| `media.image.transform` | None | low | No | frontend, hybrid |
+| `media.image.adjust` | None | low | No | frontend, hybrid |
+| `media.image.applyFilter` | None | low | No | frontend, hybrid |
+| `media.image.getHistogram` | None | low | Yes | frontend, hybrid |
+| `media.image.compare` | None | low | Yes | frontend, hybrid |
+| `media.video.loadClip` | `media:video:read` | medium | No | frontend, hybrid |
+| `media.video.getFrame` | `media:video:read` | medium | Yes | frontend, hybrid |
+| `media.video.getMetadata` | `media:video:read` | medium | Yes | frontend, hybrid |
+| `media.video.analyze` | `media:video:read` | medium | No | frontend, hybrid |
+| `media.video.cleanupAnalysis` | `media:video:write` | high | No | frontend, hybrid |
+| `media.video.trim` | `media:video:write` | high | No | frontend, hybrid |
+| `media.video.concatenate` | `media:video:write` | high | No | frontend, hybrid |
+| `media.video.applyEffect` | `media:video:write` | high | No | frontend, hybrid |
+| `media.video.addTransition` | `media:video:write` | high | No | frontend, hybrid |
+| `media.video.export` | `media:video:export` | high | No | frontend, hybrid |
+| `media.filters.register` | None | low | No | frontend, hybrid |
+| `media.filters.unregister` | None | low | No | frontend, hybrid |
+| `media.filters.getAll` | None | low | Yes | frontend, hybrid |
+| `media.filters.getById` | None | low | Yes | frontend, hybrid |
+| `media.filters.getByCategory` | None | low | Yes | frontend, hybrid |
+| `media.effects.register` | None | low | No | frontend, hybrid |
+| `media.effects.unregister` | None | low | No | frontend, hybrid |
+| `media.effects.getAll` | None | low | Yes | frontend, hybrid |
+| `media.effects.getById` | None | low | Yes | frontend, hybrid |
+| `media.transitions.register` | None | low | No | frontend, hybrid |
+| `media.transitions.unregister` | None | low | No | frontend, hybrid |
+| `media.transitions.getAll` | None | low | Yes | frontend, hybrid |
+| `media.transitions.getById` | None | low | Yes | frontend, hybrid |
+| `media.ai.generateImage` | `ai:chat` | high | No | frontend, hybrid |
+| `media.ai.generateVideo` | `ai:chat` | high | No | frontend, hybrid |
+| `media.ai.upscale` | `ai:chat` | high | No | frontend, hybrid |
+| `media.ai.removeBackground` | `ai:chat` | high | No | frontend, hybrid |
+| `media.ai.enhanceImage` | `ai:chat` | high | No | frontend, hybrid |
+| `media.ai.generateVariation` | `ai:chat` | high | No | frontend, hybrid |
+| `media.ai.inpaint` | `ai:chat` | high | No | frontend, hybrid |
+| `media.utils.createCanvas` | None | low | Yes | frontend, hybrid |
+| `media.utils.getImageDataFromCanvas` | None | low | Yes | frontend, hybrid |
+| `media.utils.putImageDataToCanvas` | None | low | No | frontend, hybrid |
+| `media.utils.blobToBase64` | None | low | Yes | frontend, hybrid |
+| `media.utils.base64ToBlob` | None | low | Yes | frontend, hybrid |
+| `media.utils.downloadFile` | None | low | No | frontend, hybrid |
+| `media.utils.registerCatalogAsset` | None | low | No | frontend, hybrid |
 
 ## `ctx.memory`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `memory.count` | `memory:read` | medium | Yes |
-| `memory.forget` | `memory:write` | high | No |
-| `memory.get` | `memory:read` | medium | Yes |
-| `memory.list` | `memory:read` | medium | Yes |
-| `memory.search` | `memory:read` | medium | Yes |
-| `memory.store` | `memory:write` | high | No |
-| `memory.update` | `memory:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `memory.count` | `memory:read` | medium | Yes | frontend, hybrid |
+| `memory.forget` | `memory:write` | high | No | frontend, hybrid |
+| `memory.get` | `memory:read` | medium | Yes | frontend, hybrid |
+| `memory.list` | `memory:read` | medium | Yes | frontend, hybrid |
+| `memory.search` | `memory:read` | medium | Yes | frontend, hybrid |
+| `memory.store` | `memory:write` | high | No | frontend, hybrid |
+| `memory.update` | `memory:write` | high | No | frontend, hybrid |
 
 ## `ctx.messagePart`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `messagePart.registerPartRenderer` | `extension:ui` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `messagePart.registerPartRenderer` | `extension:ui` | medium | No | frontend, hybrid |
 
 ## `ctx.modal`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `modal.closeAll` | None | low | No |
-| `modal.openById` | None | low | No |
-| `modal.openModal` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `modal.closeAll` | None | low | No | frontend, hybrid |
+| `modal.openById` | None | low | No | frontend, hybrid |
+| `modal.openModal` | None | low | No | frontend, hybrid |
 
 ## `ctx.network`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `network.delete` | `network:fetch` | medium | No |
-| `network.download` | `network:fetch` | medium | No |
-| `network.fetch` | `network:fetch` | medium | No |
-| `network.get` | `network:fetch` | medium | Yes |
-| `network.patch` | `network:fetch` | medium | No |
-| `network.post` | `network:fetch` | medium | No |
-| `network.put` | `network:fetch` | medium | No |
-| `network.upload` | `network:upload` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `network.delete` | `network:fetch` | medium | No | frontend, hybrid |
+| `network.download` | `network:fetch` | medium | No | frontend, hybrid |
+| `network.fetch` | `network:fetch` | medium | No | frontend, hybrid |
+| `network.get` | `network:fetch` | medium | Yes | frontend, hybrid |
+| `network.patch` | `network:fetch` | medium | No | frontend, hybrid |
+| `network.post` | `network:fetch` | medium | No | frontend, hybrid |
+| `network.put` | `network:fetch` | medium | No | frontend, hybrid |
+| `network.upload` | `network:upload` | high | No | frontend, hybrid |
 
 ## `ctx.notifications`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `notifications.create` | None | low | No |
-| `notifications.createProgress` | None | low | No |
-| `notifications.dismiss` | None | low | No |
-| `notifications.dismissAll` | None | low | No |
-| `notifications.getAll` | None | low | Yes |
-| `notifications.onAction` | None | low | No |
-| `notifications.update` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `notifications.create` | None | low | No | frontend, hybrid, python |
+| `notifications.createProgress` | None | low | No | frontend, hybrid, python |
+| `notifications.dismiss` | None | low | No | frontend, hybrid, python |
+| `notifications.dismissAll` | None | low | No | frontend, hybrid, python |
+| `notifications.getAll` | None | low | Yes | frontend, hybrid, python |
+| `notifications.onAction` | None | low | No | frontend, hybrid, python |
+| `notifications.update` | None | low | No | frontend, hybrid, python |
 
 ## `ctx.ocr`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `ocr.extract` | `media:image:read`, `database:write` | high | No |
-| `ocr.extractFile` | `native:filesystem`, `media:image:read`, `database:write` | high | No |
-| `ocr.extractScreen` | `automation:screenshot`, `native:screen`, `media:image:read`, `database:write` | high | No |
-| `ocr.isReady` | None | low | Yes |
-| `ocr.listAvailableProviders` | None | low | Yes |
-| `ocr.listRegistered` | None | low | Yes |
-| `ocr.registerProvider` | None | low | No |
-| `ocr.runSlashCommand` | `native:filesystem`, `media:image:read`, `database:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `ocr.extract` | `media:image:read`, `database:write` | high | No | frontend, hybrid |
+| `ocr.extractFile` | `native:filesystem`, `media:image:read`, `database:write` | high | No | frontend, hybrid |
+| `ocr.extractScreen` | `automation:screenshot`, `native:screen`, `media:image:read`, `database:write` | high | No | frontend, hybrid |
+| `ocr.isReady` | None | low | Yes | frontend, hybrid |
+| `ocr.listAvailableProviders` | None | low | Yes | frontend, hybrid |
+| `ocr.listRegistered` | None | low | Yes | frontend, hybrid |
+| `ocr.registerProvider` | None | low | No | frontend, hybrid |
+| `ocr.runSlashCommand` | `native:filesystem`, `media:image:read`, `database:write` | high | No | frontend, hybrid |
 
 ## `ctx.perf`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `perf.hotspots` | `perf:read` | medium | Yes |
-| `perf.listTraces` | `perf:read` | medium | Yes |
-| `perf.snapshot` | `perf:read` | medium | Yes |
-| `perf.subscribe` | `perf:read` | medium | No |
-| `perf.systemDetails` | `perf:read` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `perf.hotspots` | `perf:read` | medium | Yes | frontend, hybrid |
+| `perf.listTraces` | `perf:read` | medium | Yes | frontend, hybrid |
+| `perf.snapshot` | `perf:read` | medium | Yes | frontend, hybrid |
+| `perf.subscribe` | `perf:read` | medium | No | frontend, hybrid |
+| `perf.systemDetails` | `perf:read` | medium | Yes | frontend, hybrid |
 
 ## `ctx.permissions`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `permissions.getGrantedPermissions` | None | low | Yes |
-| `permissions.hasAllPermissions` | None | low | Yes |
-| `permissions.hasAnyPermission` | None | low | Yes |
-| `permissions.hasPermission` | None | low | Yes |
-| `permissions.requestPermission` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `permissions.getGrantedPermissions` | None | low | Yes | frontend, hybrid |
+| `permissions.hasAllPermissions` | None | low | Yes | frontend, hybrid |
+| `permissions.hasAnyPermission` | None | low | Yes | frontend, hybrid |
+| `permissions.hasPermission` | None | low | Yes | frontend, hybrid |
+| `permissions.requestPermission` | None | low | No | frontend, hybrid |
 
 ## `ctx.pet`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `pet.emitEvent` | `pet:interact` | medium | No |
-| `pet.getAvailability` | `pet:read` | medium | Yes |
-| `pet.getRemainingBudget` | `pet:read` | medium | Yes |
-| `pet.getSummary` | `pet:read` | medium | Yes |
-| `pet.getView` | `pet:read` | medium | Yes |
-| `pet.interact` | `pet:interact` | medium | No |
-| `pet.onEvent` | `pet:read` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `pet.emitEvent` | `pet:interact` | medium | No | frontend, hybrid |
+| `pet.getAvailability` | `pet:read` | medium | Yes | frontend, hybrid |
+| `pet.getRemainingBudget` | `pet:read` | medium | Yes | frontend, hybrid |
+| `pet.getSummary` | `pet:read` | medium | Yes | frontend, hybrid |
+| `pet.getView` | `pet:read` | medium | Yes | frontend, hybrid |
+| `pet.interact` | `pet:interact` | medium | No | frontend, hybrid |
+| `pet.onEvent` | `pet:read` | medium | No | frontend, hybrid |
 
 ## `ctx.project`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `project.addKnowledgeFile` | `project:write` | high | No |
-| `project.addTag` | `project:write` | high | No |
-| `project.archiveProject` | `project:read` | medium | No |
-| `project.createProject` | `project:write` | high | No |
-| `project.deleteProject` | `project:delete` | high | No |
-| `project.getCurrentProject` | `project:read` | medium | Yes |
-| `project.getCurrentProjectId` | `project:read` | medium | Yes |
-| `project.getKnowledgeFiles` | `project:read` | medium | Yes |
-| `project.getProject` | `project:read` | medium | Yes |
-| `project.getProjectSessions` | `project:read` | medium | Yes |
-| `project.linkSession` | `project:read` | medium | No |
-| `project.listKnowledgeDocuments` | `project:read` | medium | Yes |
-| `project.listProjects` | `project:read` | medium | Yes |
-| `project.locateKnowledgeDocument` | `project:read` | medium | Yes |
-| `project.onProjectChange` | `project:read` | medium | No |
-| `project.readKnowledgeOutline` | `project:read` | medium | Yes |
-| `project.readKnowledgeRange` | `project:read` | medium | Yes |
-| `project.removeKnowledgeFile` | `project:delete` | high | No |
-| `project.removeTag` | `project:delete` | high | No |
-| `project.setActiveProject` | `project:write` | high | No |
-| `project.unarchiveProject` | `project:read` | medium | No |
-| `project.unlinkSession` | `project:read` | medium | No |
-| `project.updateKnowledgeFile` | `project:write` | high | No |
-| `project.updateProject` | `project:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `project.addKnowledgeFile` | `project:write` | high | No | frontend, hybrid |
+| `project.addTag` | `project:write` | high | No | frontend, hybrid |
+| `project.archiveProject` | `project:read` | medium | No | frontend, hybrid |
+| `project.createProject` | `project:write` | high | No | frontend, hybrid |
+| `project.deleteProject` | `project:delete` | high | No | frontend, hybrid |
+| `project.getCurrentProject` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.getCurrentProjectId` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.getKnowledgeFiles` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.getProject` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.getProjectSessions` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.linkSession` | `project:read` | medium | No | frontend, hybrid |
+| `project.listKnowledgeDocuments` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.listProjects` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.locateKnowledgeDocument` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.onProjectChange` | `project:read` | medium | No | frontend, hybrid |
+| `project.readKnowledgeOutline` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.readKnowledgeRange` | `project:read` | medium | Yes | frontend, hybrid |
+| `project.removeKnowledgeFile` | `project:delete` | high | No | frontend, hybrid |
+| `project.removeTag` | `project:delete` | high | No | frontend, hybrid |
+| `project.setActiveProject` | `project:write` | high | No | frontend, hybrid |
+| `project.unarchiveProject` | `project:read` | medium | No | frontend, hybrid |
+| `project.unlinkSession` | `project:read` | medium | No | frontend, hybrid |
+| `project.updateKnowledgeFile` | `project:write` | high | No | frontend, hybrid |
+| `project.updateProject` | `project:write` | high | No | frontend, hybrid |
 
 ## `ctx.python`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `python.call` | None | low | No |
-| `python.eval` | None | low | No |
-| `python.import` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `python.call` | None | low | No | frontend, hybrid |
+| `python.eval` | None | low | No | frontend, hybrid |
+| `python.import` | None | low | No | frontend, hybrid |
 
 ## `ctx.quickActions`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `quickActions.register` | None | low | No |
-| `quickActions.registerMany` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `quickActions.register` | None | low | No | frontend, hybrid |
+| `quickActions.registerMany` | None | low | No | frontend, hybrid |
 
 ## `ctx.resources`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `resources.listAdapterInstances` | `database:read` | medium | Yes |
-| `resources.listCharacters` | `database:read` | medium | Yes |
-| `resources.listTeams` | `database:read` | medium | Yes |
-| `resources.listMcpServers` | `database:read` | medium | Yes |
-| `resources.listPlugins` | `database:read` | medium | Yes |
-| `resources.listSkills` | `database:read` | medium | Yes |
-| `resources.listTwins` | `database:read` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `resources.listAdapterInstances` | `database:read` | medium | Yes | frontend, hybrid |
+| `resources.listCharacters` | `database:read` | medium | Yes | frontend, hybrid |
+| `resources.listTeams` | `database:read` | medium | Yes | frontend, hybrid |
+| `resources.listMcpServers` | `database:read` | medium | Yes | frontend, hybrid |
+| `resources.listPlugins` | `database:read` | medium | Yes | frontend, hybrid |
+| `resources.listSkills` | `database:read` | medium | Yes | frontend, hybrid |
+| `resources.listTwins` | `database:read` | medium | Yes | frontend, hybrid |
 
 ## `ctx.recorder`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `recorder.deleteBundle` | `media:image:write` | high | No |
-| `recorder.getAvailability` | None | low | Yes |
-| `recorder.interrupt` | `native:input` | high | No |
-| `recorder.listCaptureTargets` | `native:screen` | medium | Yes |
-| `recorder.listRecoverable` | `media:image:read` | medium | Yes |
-| `recorder.loadBundle` | `media:image:read` | medium | Yes |
-| `recorder.onEvent` | `native:input` | medium | No |
-| `recorder.open` | None | low | No |
-| `recorder.pause` | `native:input` | high | No |
-| `recorder.preflight` | `native:input`, `native:screen` | medium | Yes |
-| `recorder.publishAvailability` | None | low | No |
-| `recorder.readAsset` | `media:image:read` | medium | Yes |
-| `recorder.resume` | `native:input` | high | No |
-| `recorder.start` | `native:input`, `native:screen`, `media:image:write` | high | No |
-| `recorder.status` | `native:input` | medium | Yes |
-| `recorder.statusSnapshot` | None | low | Yes |
-| `recorder.stop` | `native:input`, `media:image:write` | high | No |
-| `recorder.subscribeAvailability` | None | low | No |
-| `recorder.undoLast` | `native:input`, `media:image:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `recorder.deleteBundle` | `media:image:write` | high | No | frontend, hybrid |
+| `recorder.getAvailability` | None | low | Yes | frontend, hybrid |
+| `recorder.interrupt` | `native:input` | high | No | frontend, hybrid |
+| `recorder.listCaptureTargets` | `native:screen` | medium | Yes | frontend, hybrid |
+| `recorder.listRecoverable` | `media:image:read` | medium | Yes | frontend, hybrid |
+| `recorder.loadBundle` | `media:image:read` | medium | Yes | frontend, hybrid |
+| `recorder.onEvent` | `native:input` | medium | No | frontend, hybrid |
+| `recorder.open` | None | low | No | frontend, hybrid |
+| `recorder.pause` | `native:input` | high | No | frontend, hybrid |
+| `recorder.preflight` | `native:input`, `native:screen` | medium | Yes | frontend, hybrid |
+| `recorder.publishAvailability` | None | low | No | frontend, hybrid |
+| `recorder.readAsset` | `media:image:read` | medium | Yes | frontend, hybrid |
+| `recorder.resume` | `native:input` | high | No | frontend, hybrid |
+| `recorder.start` | `native:input`, `native:screen`, `media:image:write` | high | No | frontend, hybrid |
+| `recorder.status` | `native:input` | medium | Yes | frontend, hybrid |
+| `recorder.statusSnapshot` | None | low | Yes | frontend, hybrid |
+| `recorder.stop` | `native:input`, `media:image:write` | high | No | frontend, hybrid |
+| `recorder.subscribeAvailability` | None | low | No | frontend, hybrid |
+| `recorder.undoLast` | `native:input`, `media:image:write` | high | No | frontend, hybrid |
 
 ## `ctx.sandbox`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `sandbox.activeRefForSession` | `session:read` | medium | Yes |
-| `sandbox.assertWritablePath` | `native:filesystem` | medium | Yes |
-| `sandbox.clampRequest` | `native:process` | medium | Yes |
-| `sandbox.decorateComputerUseContext` | `native:input`, `session:read` | high | Yes |
-| `sandbox.execute` | `native:process` | high | No |
-| `sandbox.registerMicrovmAdapter` | `native:process` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `sandbox.activeRefForSession` | `session:read` | medium | Yes | frontend, hybrid |
+| `sandbox.assertWritablePath` | `native:filesystem` | medium | Yes | frontend, hybrid |
+| `sandbox.clampRequest` | `native:process` | medium | Yes | frontend, hybrid |
+| `sandbox.decorateComputerUseContext` | `native:input`, `session:read` | high | Yes | frontend, hybrid |
+| `sandbox.execute` | `native:process` | high | No | frontend, hybrid |
+| `sandbox.registerMicrovmAdapter` | `native:process` | high | No | frontend, hybrid |
 
 ## `ctx.scheduler`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `scheduler.cancelExecution` | None | medium | No |
-| `scheduler.createTask` | None | medium | No |
-| `scheduler.deleteTask` | None | medium | No |
-| `scheduler.emitEvent` | None | medium | No |
-| `scheduler.getExecution` | None | low | Yes |
-| `scheduler.getExecutions` | None | low | Yes |
-| `scheduler.getHandlers` | None | low | Yes |
-| `scheduler.getLatestExecution` | None | low | Yes |
-| `scheduler.getStatistics` | None | low | Yes |
-| `scheduler.getTask` | None | low | Yes |
-| `scheduler.hasHandler` | None | low | Yes |
-| `scheduler.listTasks` | None | low | Yes |
-| `scheduler.onExecution` | None | low | No |
-| `scheduler.pauseTask` | None | low | No |
-| `scheduler.previewTrigger` | None | low | Yes |
-| `scheduler.registerHandler` | None | low | No |
-| `scheduler.resumeTask` | None | low | No |
-| `scheduler.runTaskNow` | None | medium | No |
-| `scheduler.unregisterHandler` | None | low | No |
-| `scheduler.updateTask` | None | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `scheduler.cancelExecution` | None | medium | No | frontend, hybrid |
+| `scheduler.createTask` | None | medium | No | frontend, hybrid |
+| `scheduler.deleteTask` | None | medium | No | frontend, hybrid |
+| `scheduler.emitEvent` | None | medium | No | frontend, hybrid |
+| `scheduler.getExecution` | None | low | Yes | frontend, hybrid |
+| `scheduler.getExecutions` | None | low | Yes | frontend, hybrid |
+| `scheduler.getHandlers` | None | low | Yes | frontend, hybrid |
+| `scheduler.getLatestExecution` | None | low | Yes | frontend, hybrid |
+| `scheduler.getStatistics` | None | low | Yes | frontend, hybrid |
+| `scheduler.getTask` | None | low | Yes | frontend, hybrid |
+| `scheduler.hasHandler` | None | low | Yes | frontend, hybrid |
+| `scheduler.listTasks` | None | low | Yes | frontend, hybrid |
+| `scheduler.onExecution` | None | low | No | frontend, hybrid |
+| `scheduler.pauseTask` | None | low | No | frontend, hybrid |
+| `scheduler.previewTrigger` | None | low | Yes | frontend, hybrid |
+| `scheduler.registerHandler` | None | low | No | frontend, hybrid |
+| `scheduler.resumeTask` | None | low | No | frontend, hybrid |
+| `scheduler.runTaskNow` | None | medium | No | frontend, hybrid |
+| `scheduler.unregisterHandler` | None | low | No | frontend, hybrid |
+| `scheduler.updateTask` | None | medium | No | frontend, hybrid |
 
 ## `ctx.secrets`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `secrets.delete` | `secrets:write` | high | No |
-| `secrets.get` | `secrets:read` | medium | Yes |
-| `secrets.has` | `secrets:read` | medium | Yes |
-| `secrets.keys` | `secrets:read` | medium | Yes |
-| `secrets.onDidChange` | `secrets:write` | high | No |
-| `secrets.store` | `secrets:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `secrets.delete` | `secrets:write` | high | No | frontend, hybrid, python |
+| `secrets.get` | `secrets:read` | medium | Yes | frontend, hybrid, python |
+| `secrets.has` | `secrets:read` | medium | Yes | frontend, hybrid, python |
+| `secrets.keys` | `secrets:read` | medium | Yes | frontend, hybrid, python |
+| `secrets.onDidChange` | `secrets:write` | high | No | frontend, hybrid, python |
+| `secrets.store` | `secrets:write` | high | No | frontend, hybrid, python |
 
 ## `ctx.services`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `services.getProvider` | None | low | Yes |
-| `services.isAvailable` | None | low | Yes |
-| `services.onOptionalServiceChange` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `services.getProvider` | None | low | Yes | frontend, hybrid |
+| `services.isAvailable` | None | low | Yes | frontend, hybrid |
+| `services.onOptionalServiceChange` | None | low | No | frontend, hybrid |
 
 ## `ctx.securityScans`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `securityScans.registerRunController` | `terminal:kill` | high | No |
-| `securityScans.syncExecutionRun` | `database:write` | high | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `securityScans.registerRunController` | `terminal:kill` | high | No | frontend, hybrid |
+| `securityScans.syncExecutionRun` | `database:write` | high | Yes | frontend, hybrid |
 
 ## `ctx.session`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `session.addMessage` | `session:write` | high | No |
-| `session.createSession` | `session:write` | high | No |
-| `session.startSeededSession` | `session:write` | high | No |
-| `session.deleteMessage` | `session:delete` | high | No |
-| `session.deleteSession` | `session:delete` | high | No |
-| `session.getCurrentSession` | `session:read` | medium | Yes |
-| `session.getCurrentSessionId` | `session:read` | medium | Yes |
-| `session.getMessages` | `session:read` | medium | Yes |
-| `session.getSession` | `session:read` | medium | Yes |
-| `session.getSessionStats` | `session:read` | medium | Yes |
-| `session.listSessions` | `session:read` | medium | Yes |
-| `session.onMessagesChange` | `session:read` | medium | No |
-| `session.onSessionChange` | `session:read` | medium | No |
-| `session.switchSession` | `session:read` | medium | No |
-| `session.updateMessage` | `session:write` | high | No |
-| `session.updateSession` | `session:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `session.addMessage` | `session:write` | high | No | frontend, hybrid |
+| `session.createSession` | `session:write` | high | No | frontend, hybrid |
+| `session.startSeededSession` | `session:write` | high | No | frontend, hybrid |
+| `session.deleteMessage` | `session:delete` | high | No | frontend, hybrid |
+| `session.deleteSession` | `session:delete` | high | No | frontend, hybrid |
+| `session.getCurrentSession` | `session:read` | medium | Yes | frontend, hybrid |
+| `session.getCurrentSessionId` | `session:read` | medium | Yes | frontend, hybrid |
+| `session.getMessages` | `session:read` | medium | Yes | frontend, hybrid |
+| `session.getSession` | `session:read` | medium | Yes | frontend, hybrid |
+| `session.getSessionStats` | `session:read` | medium | Yes | frontend, hybrid |
+| `session.listSessions` | `session:read` | medium | Yes | frontend, hybrid |
+| `session.onMessagesChange` | `session:read` | medium | No | frontend, hybrid |
+| `session.onSessionChange` | `session:read` | medium | No | frontend, hybrid |
+| `session.switchSession` | `session:read` | medium | No | frontend, hybrid |
+| `session.updateMessage` | `session:write` | high | No | frontend, hybrid |
+| `session.updateSession` | `session:write` | high | No | frontend, hybrid |
 
 ## `ctx.settings`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `settings.get` | None | low | Yes |
-| `settings.onChange` | None | low | No |
-| `settings.set` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `settings.get` | None | low | Yes | frontend, hybrid |
+| `settings.onChange` | None | low | No | frontend, hybrid |
+| `settings.set` | None | low | No | frontend, hybrid |
 
 ## `ctx.share`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `share.create` | `share:create` | high | No |
-| `share.delete` | `share:create` | high | No |
-| `share.getByCode` | `share:read` | medium | Yes |
-| `share.getStats` | `share:read` | medium | Yes |
-| `share.list` | `share:read` | medium | Yes |
-| `share.revoke` | `share:create` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `share.create` | `share:create` | high | No | frontend, hybrid |
+| `share.delete` | `share:create` | high | No | frontend, hybrid |
+| `share.getByCode` | `share:read` | medium | Yes | frontend, hybrid |
+| `share.getStats` | `share:read` | medium | Yes | frontend, hybrid |
+| `share.list` | `share:read` | medium | Yes | frontend, hybrid |
+| `share.revoke` | `share:create` | high | No | frontend, hybrid |
 
 ## `ctx.shell`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `shell.execute` | `shell:execute` | high | No |
-| `shell.open` | `shell:execute` | high | No |
-| `shell.showInFolder` | `shell:execute` | high | Yes |
-| `shell.spawn` | `process:spawn` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `shell.execute` | `shell:execute` | high | No | frontend, hybrid |
+| `shell.open` | `shell:execute` | high | No | frontend, hybrid |
+| `shell.showInFolder` | `shell:execute` | high | Yes | frontend, hybrid |
+| `shell.spawn` | `process:spawn` | high | No | frontend, hybrid |
 
 ## `ctx.shortcuts`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `shortcuts.getRegistered` | None | low | Yes |
-| `shortcuts.isAvailable` | None | low | Yes |
-| `shortcuts.register` | None | low | No |
-| `shortcuts.registerMany` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `shortcuts.getRegistered` | None | low | Yes | frontend, hybrid |
+| `shortcuts.isAvailable` | None | low | Yes | frontend, hybrid |
+| `shortcuts.register` | None | low | No | frontend, hybrid |
+| `shortcuts.registerMany` | None | low | No | frontend, hybrid |
 
 ## `ctx.sites`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `sites.getProductionUrl` | `database:read` | medium | Yes |
-| `sites.listDeployments` | `database:read` | medium | Yes |
-| `sites.listOperations` | `database:read` | medium | Yes |
-| `sites.listSites` | `database:read` | medium | Yes |
-| `sites.listVersions` | `database:read` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `sites.getProductionUrl` | `database:read` | medium | Yes | frontend, hybrid |
+| `sites.listDeployments` | `database:read` | medium | Yes | frontend, hybrid |
+| `sites.listOperations` | `database:read` | medium | Yes | frontend, hybrid |
+| `sites.listSites` | `database:read` | medium | Yes | frontend, hybrid |
+| `sites.listVersions` | `database:read` | medium | Yes | frontend, hybrid |
 
 ## `ctx.storage`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `storage.clear` | None | low | No |
-| `storage.delete` | None | low | No |
-| `storage.get` | None | low | Yes |
-| `storage.getOrDefault` | None | low | Yes |
-| `storage.getSecure` | None | low | Yes |
-| `storage.getUsage` | None | low | Yes |
-| `storage.has` | None | low | Yes |
-| `storage.isEncrypted` | None | low | Yes |
-| `storage.keys` | None | low | Yes |
-| `storage.remove` | None | low | No |
-| `storage.set` | None | low | No |
-| `storage.setSecure` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `storage.clear` | None | low | No | frontend, hybrid, python |
+| `storage.delete` | None | low | No | frontend, hybrid, python |
+| `storage.get` | None | low | Yes | frontend, hybrid, python |
+| `storage.getOrDefault` | None | low | Yes | frontend, hybrid, python |
+| `storage.getSecure` | None | low | Yes | frontend, hybrid, python |
+| `storage.getUsage` | None | low | Yes | frontend, hybrid, python |
+| `storage.has` | None | low | Yes | frontend, hybrid, python |
+| `storage.isEncrypted` | None | low | Yes | frontend, hybrid, python |
+| `storage.keys` | None | low | Yes | frontend, hybrid, python |
+| `storage.remove` | None | low | No | frontend, hybrid, python |
+| `storage.set` | None | low | No | frontend, hybrid, python |
+| `storage.setSecure` | None | low | No | frontend, hybrid, python |
 
 ## `ctx.subscription`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `subscription.getActiveAccountId` | `subscription:read` | medium | Yes |
-| `subscription.getActiveAccountSummary` | `subscription:read` | medium | Yes |
-| `subscription.getLatestUsage` | `subscription:read` | medium | Yes |
-| `subscription.getUsage` | `subscription:read` | medium | Yes |
-| `subscription.listAccounts` | `subscription:read` | medium | Yes |
-| `subscription.onUsageUpdate` | `subscription:read` | medium | No |
-| `subscription.providers` | `subscription:read` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `subscription.getActiveAccountId` | `subscription:read` | medium | Yes | frontend, hybrid |
+| `subscription.getActiveAccountSummary` | `subscription:read` | medium | Yes | frontend, hybrid |
+| `subscription.getLatestUsage` | `subscription:read` | medium | Yes | frontend, hybrid |
+| `subscription.getUsage` | `subscription:read` | medium | Yes | frontend, hybrid |
+| `subscription.listAccounts` | `subscription:read` | medium | Yes | frontend, hybrid |
+| `subscription.onUsageUpdate` | `subscription:read` | medium | No | frontend, hybrid |
+| `subscription.providers` | `subscription:read` | medium | Yes | frontend, hybrid |
 
 ## `ctx.team`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `team.addComment` | `team:write` | high | No |
-| `team.addTeammate` | `team:write` | high | No |
-| `team.assignTask` | `team:write` | high | No |
-| `team.attachTaskFile` | `team:write` | high | No |
-| `team.createTask` | `team:write` | high | No |
-| `team.getExecutionReport` | `team:read` | medium | Yes |
-| `team.getRunStatus` | `team:read` | medium | Yes |
-| `team.getTeam` | `team:read` | medium | Yes |
-| `team.getTeammate` | `team:read` | medium | Yes |
-| `team.listCheckpoints` | `team:read` | medium | Yes |
-| `team.listEvents` | `team:read` | medium | Yes |
-| `team.listTasks` | `team:read` | medium | Yes |
-| `team.listTeammates` | `team:read` | medium | Yes |
-| `team.listTeams` | `team:read` | medium | Yes |
-| `team.moveTask` | `team:write` | high | No |
-| `team.removeTeammate` | `team:write` | high | No |
-| `team.reorderTask` | `team:write` | high | No |
-| `team.subscribe` | `team:write` | high | No |
-| `team.updateTask` | `team:write` | high | No |
-| `team.updateTeamConfig` | `team:write` | high | No |
-| `team.updateTeammate` | `team:write` | high | No |
-| `team.instantiateTemplate` | `team:write` | high | No |
-| `team.createTeam` | `team:write` | high | No |
-| `team.deleteTeam` | `team:write` | high | No |
-| `team.duplicateTeam` | `team:write` | high | No |
-| `team.saveAsTemplate` | `team:write` | high | No |
-| `team.start` | `agent:dispatch` | medium | No |
-| `team.pause` | `agent:control` | medium | Yes |
-| `team.resume` | `agent:control` | medium | Yes |
-| `team.stop` | `agent:control` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `team.addComment` | `team:write` | high | No | frontend, hybrid, python |
+| `team.addTeammate` | `team:write` | high | No | frontend, hybrid, python |
+| `team.assignTask` | `team:write` | high | No | frontend, hybrid, python |
+| `team.attachTaskFile` | `team:write` | high | No | frontend, hybrid, python |
+| `team.createTask` | `team:write` | high | No | frontend, hybrid, python |
+| `team.getExecutionReport` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.getRunStatus` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.getTeam` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.getTeammate` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.listCheckpoints` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.listEvents` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.listTasks` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.listTeammates` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.listTeams` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.moveTask` | `team:write` | high | No | frontend, hybrid, python |
+| `team.removeTeammate` | `team:write` | high | No | frontend, hybrid, python |
+| `team.reorderTask` | `team:write` | high | No | frontend, hybrid, python |
+| `team.subscribe` | `team:write` | high | No | frontend, hybrid, python |
+| `team.updateTask` | `team:write` | high | No | frontend, hybrid, python |
+| `team.updateTeamConfig` | `team:write` | high | No | frontend, hybrid, python |
+| `team.updateTeammate` | `team:write` | high | No | frontend, hybrid, python |
+| `team.instantiateTemplate` | `team:write` | high | No | frontend, hybrid, python |
+| `team.createTeam` | `team:write` | high | No | frontend, hybrid, python |
+| `team.deleteTeam` | `team:write` | high | No | frontend, hybrid, python |
+| `team.duplicateTeam` | `team:write` | high | No | frontend, hybrid, python |
+| `team.saveAsTemplate` | `team:write` | high | No | frontend, hybrid, python |
+| `team.start` | `agent:dispatch` | medium | No | frontend, hybrid, python |
+| `team.pause` | `agent:control` | medium | Yes | frontend, hybrid, python |
+| `team.resume` | `agent:control` | medium | Yes | frontend, hybrid, python |
+| `team.stop` | `agent:control` | medium | Yes | frontend, hybrid, python |
 
 ## `ctx.templates`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `templates.register` | `templates:contribute` | medium | No |
-| `templates.registerMany` | `templates:contribute` | medium | No |
-| `templates.query` | `templates:read` | medium | Yes |
-| `templates.get` | `templates:read` | medium | Yes |
-| `templates.list` | `templates:read` | medium | Yes |
-| `templates.getRevision` | `templates:read` | medium | Yes |
-| `templates.subscribe` | `templates:read` | medium | No |
-| `templates.validate` | `templates:read` | medium | Yes |
-| `templates.createDraft` | `templates:library:write` | high | No |
-| `templates.preflight` | `templates:read` | medium | Yes |
-| `templates.instantiate` | `templates:instantiate` | high | No |
-| `templates.saveDraft` | `templates:library:write` | high | No |
-| `templates.publish` | `templates:library:write` | high | No |
-| `templates.fork` | `templates:library:write` | high | No |
-| `templates.deprecate` | `templates:library:write` | high | No |
-| `templates.deleteDraft` | `templates:library:write` | high | No |
-| `templates.exportPackage` | `templates:library:write` | high | No |
-| `templates.importPackage` | `templates:library:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `templates.register` | `templates:contribute` | medium | No | frontend, hybrid, python |
+| `templates.registerMany` | `templates:contribute` | medium | No | frontend, hybrid, python |
+| `templates.query` | `templates:read` | medium | Yes | frontend, hybrid, python |
+| `templates.get` | `templates:read` | medium | Yes | frontend, hybrid, python |
+| `templates.list` | `templates:read` | medium | Yes | frontend, hybrid, python |
+| `templates.getRevision` | `templates:read` | medium | Yes | frontend, hybrid, python |
+| `templates.subscribe` | `templates:read` | medium | No | frontend, hybrid, python |
+| `templates.validate` | `templates:read` | medium | Yes | frontend, hybrid, python |
+| `templates.createDraft` | `templates:library:write` | high | No | frontend, hybrid, python |
+| `templates.preflight` | `templates:read` | medium | Yes | frontend, hybrid, python |
+| `templates.instantiate` | `templates:instantiate` | high | No | frontend, hybrid, python |
+| `templates.saveDraft` | `templates:library:write` | high | No | frontend, hybrid, python |
+| `templates.publish` | `templates:library:write` | high | No | frontend, hybrid, python |
+| `templates.fork` | `templates:library:write` | high | No | frontend, hybrid, python |
+| `templates.deprecate` | `templates:library:write` | high | No | frontend, hybrid, python |
+| `templates.deleteDraft` | `templates:library:write` | high | No | frontend, hybrid, python |
+| `templates.exportPackage` | `templates:library:write` | high | No | frontend, hybrid, python |
+| `templates.importPackage` | `templates:library:write` | high | No | frontend, hybrid, python |
 
 ## `ctx.terminal`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `terminal.classifyCommand` | `terminal:safety` | medium | Yes |
-| `terminal.detectScriptType` | `terminal:spawn` | high | Yes |
-| `terminal.kill` | `terminal:kill` | medium | No |
-| `terminal.list` | `terminal:spawn` | high | Yes |
-| `terminal.onData` | `terminal:spawn` | high | No |
-| `terminal.readRecent` | `terminal:spawn` | high | Yes |
-| `terminal.registerCommandSafetyRule` | `terminal:safety` | medium | No |
-| `terminal.registerCompletionProvider` | `terminal:completion` | medium | No |
-| `terminal.runScript` | `terminal:spawn` | high | No |
-| `terminal.spawn` | `terminal:spawn` | high | No |
-| `terminal.write` | `terminal:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `terminal.classifyCommand` | `terminal:safety` | medium | Yes | frontend, hybrid |
+| `terminal.detectScriptType` | `terminal:spawn` | high | Yes | frontend, hybrid |
+| `terminal.kill` | `terminal:kill` | medium | No | frontend, hybrid |
+| `terminal.list` | `terminal:spawn` | high | Yes | frontend, hybrid |
+| `terminal.onData` | `terminal:spawn` | high | No | frontend, hybrid |
+| `terminal.readRecent` | `terminal:spawn` | high | Yes | frontend, hybrid |
+| `terminal.registerCommandSafetyRule` | `terminal:safety` | medium | No | frontend, hybrid |
+| `terminal.registerCompletionProvider` | `terminal:completion` | medium | No | frontend, hybrid |
+| `terminal.runScript` | `terminal:spawn` | high | No | frontend, hybrid |
+| `terminal.spawn` | `terminal:spawn` | high | No | frontend, hybrid |
+| `terminal.write` | `terminal:write` | high | No | frontend, hybrid |
 
 ## `ctx.theme`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `theme.activateCustomTheme` | `theme:write` | high | No |
-| `theme.activateRegisteredTheme` | `theme:write` | high | No |
-| `theme.applyScopedColors` | `theme:write` | high | No |
-| `theme.deleteCustomTheme` | `theme:write` | high | No |
-| `theme.getAvailablePresets` | `theme:read` | medium | Yes |
-| `theme.getColorPreset` | `theme:read` | medium | Yes |
-| `theme.getColors` | `theme:read` | medium | Yes |
-| `theme.getCustomThemes` | `theme:read` | medium | Yes |
-| `theme.getMode` | `theme:read` | medium | Yes |
-| `theme.getResolvedMode` | `theme:read` | medium | Yes |
-| `theme.getTheme` | `theme:read` | medium | Yes |
-| `theme.onThemeChange` | `theme:read` | medium | No |
-| `theme.registerCustomTheme` | `theme:write` | high | No |
-| `theme.setColorPreset` | `theme:write` | high | No |
-| `theme.setMode` | `theme:write` | high | No |
-| `theme.updateCustomTheme` | `theme:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `theme.activateCustomTheme` | `theme:write` | high | No | frontend, hybrid |
+| `theme.activateRegisteredTheme` | `theme:write` | high | No | frontend, hybrid |
+| `theme.applyScopedColors` | `theme:write` | high | No | frontend, hybrid |
+| `theme.deleteCustomTheme` | `theme:write` | high | No | frontend, hybrid |
+| `theme.getAvailablePresets` | `theme:read` | medium | Yes | frontend, hybrid |
+| `theme.getColorPreset` | `theme:read` | medium | Yes | frontend, hybrid |
+| `theme.getColors` | `theme:read` | medium | Yes | frontend, hybrid |
+| `theme.getCustomThemes` | `theme:read` | medium | Yes | frontend, hybrid |
+| `theme.getMode` | `theme:read` | medium | Yes | frontend, hybrid |
+| `theme.getResolvedMode` | `theme:read` | medium | Yes | frontend, hybrid |
+| `theme.getTheme` | `theme:read` | medium | Yes | frontend, hybrid |
+| `theme.onThemeChange` | `theme:read` | medium | No | frontend, hybrid |
+| `theme.registerCustomTheme` | `theme:write` | high | No | frontend, hybrid |
+| `theme.setColorPreset` | `theme:write` | high | No | frontend, hybrid |
+| `theme.setMode` | `theme:write` | high | No | frontend, hybrid |
+| `theme.updateCustomTheme` | `theme:write` | high | No | frontend, hybrid |
 
 ## `ctx.toolResult`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `toolResult.registerToolResultRenderer` | `extension:ui` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `toolResult.registerToolResultRenderer` | `extension:ui` | medium | No | frontend, hybrid |
 
 ## `ctx.tray`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `tray.register` | None | low | No |
-| `tray.registerMany` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `tray.register` | None | low | No | frontend, hybrid |
+| `tray.registerMany` | None | low | No | frontend, hybrid |
 
 ## `ctx.ui`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `ui.showConfirmDialog` | None | low | Yes |
-| `ui.showDialog` | None | low | Yes |
-| `ui.showInputDialog` | None | low | Yes |
-| `ui.showNotification` | None | low | Yes |
-| `ui.showToast` | None | low | Yes |
-| `ui.navigate` | None | low | Yes |
-| `ui.openViewContainer` | `extension:ui` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `ui.showConfirmDialog` | None | low | Yes | frontend, hybrid, python |
+| `ui.showDialog` | None | low | Yes | frontend, hybrid, python |
+| `ui.showInputDialog` | None | low | Yes | frontend, hybrid, python |
+| `ui.showNotification` | None | low | Yes | frontend, hybrid, python |
+| `ui.showToast` | None | low | Yes | frontend, hybrid, python |
+| `ui.navigate` | None | low | Yes | frontend, hybrid, python |
+| `ui.openViewContainer` | `extension:ui` | medium | Yes | frontend, hybrid, python |
 
 ## `ctx.userScheduler`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `userScheduler.cancelExecution` | `agent:control`, `database:write` | high | No |
-| `userScheduler.createTask` | `database:write`, `settings:read` | high | No |
-| `userScheduler.deleteTask` | `database:write` | high | No |
-| `userScheduler.getExecution` | `database:read` | medium | Yes |
-| `userScheduler.getPolicy` | `settings:read` | medium | Yes |
-| `userScheduler.getTask` | `database:read` | medium | Yes |
-| `userScheduler.getUpcoming` | `database:read` | medium | Yes |
-| `userScheduler.listExecutions` | `database:read` | medium | Yes |
-| `userScheduler.listTasks` | `database:read` | medium | Yes |
-| `userScheduler.pauseTask` | `database:write` | high | No |
-| `userScheduler.resumeTask` | `database:write` | high | No |
-| `userScheduler.runTaskNow` | `agent:control`, `database:write` | high | No |
-| `userScheduler.updateTask` | `database:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `userScheduler.cancelExecution` | `agent:control`, `database:write` | high | No | frontend, hybrid, python |
+| `userScheduler.createTask` | `database:write`, `settings:read` | high | No | frontend, hybrid, python |
+| `userScheduler.deleteTask` | `database:write` | high | No | frontend, hybrid, python |
+| `userScheduler.getExecution` | `database:read` | medium | Yes | frontend, hybrid, python |
+| `userScheduler.getPolicy` | `settings:read` | medium | Yes | frontend, hybrid, python |
+| `userScheduler.getTask` | `database:read` | medium | Yes | frontend, hybrid, python |
+| `userScheduler.getUpcoming` | `database:read` | medium | Yes | frontend, hybrid, python |
+| `userScheduler.listExecutions` | `database:read` | medium | Yes | frontend, hybrid, python |
+| `userScheduler.listTasks` | `database:read` | medium | Yes | frontend, hybrid, python |
+| `userScheduler.pauseTask` | `database:write` | high | No | frontend, hybrid, python |
+| `userScheduler.resumeTask` | `database:write` | high | No | frontend, hybrid, python |
+| `userScheduler.runTaskNow` | `agent:control`, `database:write` | high | No | frontend, hybrid, python |
+| `userScheduler.updateTask` | `database:write` | high | No | frontend, hybrid, python |
 
 ## `ctx.uri`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `uri.registerHandler` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `uri.registerHandler` | None | low | No | frontend, hybrid |
 
 ## `ctx.vector`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `vector.addDocuments` | `vector:write` | high | No |
-| `vector.clearCollection` | `vector:write` | high | No |
-| `vector.createCollection` | `vector:write` | high | No |
-| `vector.deleteCollection` | `vector:write` | high | No |
-| `vector.deleteDocuments` | `vector:write` | high | No |
-| `vector.embed` | `vector:read` | medium | No |
-| `vector.embedBatch` | `vector:read` | medium | No |
-| `vector.getCollectionInfo` | `vector:read` | medium | Yes |
-| `vector.getDocumentCount` | `vector:read` | medium | Yes |
-| `vector.listCollections` | `vector:read` | medium | Yes |
-| `vector.search` | `vector:read` | medium | Yes |
-| `vector.searchByEmbedding` | `vector:read` | medium | Yes |
-| `vector.updateDocuments` | `vector:write` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `vector.addDocuments` | `vector:write` | high | No | frontend, hybrid |
+| `vector.clearCollection` | `vector:write` | high | No | frontend, hybrid |
+| `vector.createCollection` | `vector:write` | high | No | frontend, hybrid |
+| `vector.deleteCollection` | `vector:write` | high | No | frontend, hybrid |
+| `vector.deleteDocuments` | `vector:write` | high | No | frontend, hybrid |
+| `vector.embed` | `vector:read` | medium | No | frontend, hybrid |
+| `vector.embedBatch` | `vector:read` | medium | No | frontend, hybrid |
+| `vector.getCollectionInfo` | `vector:read` | medium | Yes | frontend, hybrid |
+| `vector.getDocumentCount` | `vector:read` | medium | Yes | frontend, hybrid |
+| `vector.listCollections` | `vector:read` | medium | Yes | frontend, hybrid |
+| `vector.search` | `vector:read` | medium | Yes | frontend, hybrid |
+| `vector.searchByEmbedding` | `vector:read` | medium | Yes | frontend, hybrid |
+| `vector.updateDocuments` | `vector:write` | high | No | frontend, hybrid |
 
 ## `ctx.webview`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `webview.create` | None | low | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `webview.create` | None | low | No | frontend, hybrid |
 
 ## `ctx.window`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `window.create` | None | low | No |
-| `window.focus` | None | low | No |
-| `window.getAll` | None | low | Yes |
-| `window.getMain` | None | low | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `window.create` | None | low | No | frontend, hybrid |
+| `window.focus` | None | low | No | frontend, hybrid |
+| `window.getAll` | None | low | Yes | frontend, hybrid |
+| `window.getMain` | None | low | Yes | frontend, hybrid |
 
 ## `ctx.workflow`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `workflow.approvalActorScope` | None | low | Yes |
-| `workflow.autoLayoutEditor` | `canvas:write` | medium | No |
-| `workflow.buildApprovalSurface` | None | low | Yes |
-| `workflow.emitTriggerEvent` | None | low | No |
-| `workflow.emitWaitEvent` | `canvas:run` | high | No |
-| `workflow.executeRunWorkflowTyped` | `canvas:run` | high | No |
-| `workflow.explainEditorLastRun` | `workflow:read` | low | Yes |
-| `workflow.explainEditorValidation` | `workflow:read` | low | Yes |
-| `workflow.findWorkflowById` | `workflow:read` | low | Yes |
-| `workflow.findWorkflowByName` | `workflow:read` | low | Yes |
-| `workflow.getNodeCatalogEntry` | `workflow:read` | low | Yes |
-| `workflow.getRunnerToolDefinition` | `workflow:read` | low | Yes |
-| `workflow.listCopilotTemplates` | `workflow:read` | low | Yes |
-| `workflow.listNodeCatalog` | `workflow:read` | low | Yes |
-| `workflow.listWorkflowSummaries` | `workflow:read` | low | Yes |
-| `workflow.materializeCopilotTemplate` | `workflow:read` | low | Yes |
-| `workflow.mutateEditor` | `canvas:write` | medium | No |
-| `workflow.recordCallbackBinding` | `connectors:send` | high | No |
-| `workflow.refreshTemplateWarnings` | None | low | Yes |
-| `workflow.registerNode` | None | low | No |
-| `workflow.registerTrigger` | None | low | No |
-| `workflow.resolveEditor` | `workflow:read` | low | Yes |
-| `workflow.resolveTriggerOrigin` | `session:read` | medium | Yes |
-| `workflow.runWorkflow` | `canvas:run` | high | No |
-| `workflow.stageProposal` | `canvas:write` | medium | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `workflow.approvalActorScope` | None | low | Yes | frontend, hybrid |
+| `workflow.autoLayoutEditor` | `canvas:write` | medium | No | frontend, hybrid |
+| `workflow.buildApprovalSurface` | None | low | Yes | frontend, hybrid |
+| `workflow.emitTriggerEvent` | None | low | No | frontend, hybrid |
+| `workflow.emitWaitEvent` | `canvas:run` | high | No | frontend, hybrid |
+| `workflow.executeRunWorkflowTyped` | `canvas:run` | high | No | frontend, hybrid |
+| `workflow.explainEditorLastRun` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.explainEditorValidation` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.findWorkflowById` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.findWorkflowByName` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.getNodeCatalogEntry` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.getRunnerToolDefinition` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.listCopilotTemplates` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.listNodeCatalog` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.listWorkflowSummaries` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.materializeCopilotTemplate` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.mutateEditor` | `canvas:write` | medium | No | frontend, hybrid |
+| `workflow.recordCallbackBinding` | `connectors:send` | high | No | frontend, hybrid |
+| `workflow.refreshTemplateWarnings` | None | low | Yes | frontend, hybrid |
+| `workflow.registerNode` | None | low | No | frontend, hybrid |
+| `workflow.registerTrigger` | None | low | No | frontend, hybrid |
+| `workflow.resolveEditor` | `workflow:read` | low | Yes | frontend, hybrid |
+| `workflow.resolveTriggerOrigin` | `session:read` | medium | Yes | frontend, hybrid |
+| `workflow.runWorkflow` | `canvas:run` | high | No | frontend, hybrid |
+| `workflow.stageProposal` | `canvas:write` | medium | No | frontend, hybrid |
 
 ## `ctx.workspace`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `workspace.acquire` | `filesystem:read`, `network:fetch` | high | No |
-| `workspace.changedSince` | `git:read` | low | Yes |
-| `workspace.getActiveRoot` | `filesystem:read` | medium | Yes |
-| `workspace.getBackend` | None | low | Yes |
-| `workspace.listRegistered` | None | low | Yes |
-| `workspace.publish` | `filesystem:write`, `git:write`, `integrations:execute` | high | Yes |
-| `workspace.read` | `filesystem:read` | medium | Yes |
-| `workspace.registerBackend` | None | low | No |
-| `workspace.release` | `filesystem:write` | medium | Yes |
-| `workspace.snapshot` | `filesystem:read`, `git:read` | medium | Yes |
-| `workspace.walk` | `filesystem:read` | medium | Yes |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `workspace.acquire` | `filesystem:read`, `network:fetch` | high | No | frontend, hybrid, python |
+| `workspace.changedSince` | `git:read` | low | Yes | frontend, hybrid, python |
+| `workspace.getActiveRoot` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `workspace.getBackend` | None | low | Yes | frontend, hybrid, python |
+| `workspace.listRegistered` | None | low | Yes | frontend, hybrid, python |
+| `workspace.publish` | `filesystem:write`, `git:write`, `integrations:execute` | high | Yes | frontend, hybrid, python |
+| `workspace.read` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
+| `workspace.registerBackend` | None | low | No | frontend, hybrid, python |
+| `workspace.release` | `filesystem:write` | medium | Yes | frontend, hybrid, python |
+| `workspace.snapshot` | `filesystem:read`, `git:read` | medium | Yes | frontend, hybrid, python |
+| `workspace.walk` | `filesystem:read` | medium | Yes | frontend, hybrid, python |
 
 ## `ctx.nodeRuntime`
 
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `nodeRuntime.status` | `filesystem:read` | low | Yes |
-| `nodeRuntime.prepare` | `filesystem:read`, `filesystem:write`, `shell:execute`, `network:fetch` | high | No |
-| `nodeRuntime.cancel` | `filesystem:read`, `filesystem:write`, `shell:execute` | high | No |
-| `nodeRuntime.probe` | `filesystem:read`, `filesystem:write`, `shell:execute` | high | No |
-| `nodeRuntime.remove` | `filesystem:read`, `filesystem:write`, `shell:execute` | high | No |
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `nodeRuntime.status` | `filesystem:read` | low | Yes | frontend, hybrid, python |
+| `nodeRuntime.prepare` | `filesystem:read`, `filesystem:write`, `shell:execute`, `network:fetch` | high | No | frontend, hybrid, python |
+| `nodeRuntime.cancel` | `filesystem:read`, `filesystem:write`, `shell:execute` | high | No | frontend, hybrid, python |
+| `nodeRuntime.probe` | `filesystem:read`, `filesystem:write`, `shell:execute` | high | No | frontend, hybrid, python |
+| `nodeRuntime.remove` | `filesystem:read`, `filesystem:write`, `shell:execute` | high | No | frontend, hybrid, python |
+
+## `ctx.libraries`
+
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `libraries.importModule` | `ipc:call` | medium | No | frontend, hybrid |

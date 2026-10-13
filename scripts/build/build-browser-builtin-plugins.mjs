@@ -96,7 +96,7 @@ async function buildPlugin(directory, { root, publicRoot, pdfWorkerUrl, bundle }
         sharedModules: result.sharedModules,
         resourcesUrl: `/_cognia/builtin-plugins/${manifest.id}/resources/`,
         entryHashes: Object.fromEntries(
-          [...result.files].filter(([name]) => name.endsWith(".js")).map(([name, bytes]) => [name, sha256(bytes)])
+          [...result.files].filter(([name]) => /\.[cm]?js$/.test(name)).map(([name, bytes]) => [name, sha256(bytes)])
         ),
       },
     },

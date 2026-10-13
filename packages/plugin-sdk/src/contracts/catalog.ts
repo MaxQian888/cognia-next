@@ -94,6 +94,8 @@ export type PluginApiResourceEffect =
   | { kind: "host-owned" }
 
 export interface PluginApiMethodContract {
+  /** Optional runtime restriction; omission inherits the namespace. */
+  runtimes?: readonly string[]
   id: string
   name: string
   requiredPermissions: readonly string[]

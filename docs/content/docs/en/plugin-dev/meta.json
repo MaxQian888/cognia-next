@@ -6,6 +6,7 @@
     "extension-points-v2",
     "glance-modules",
     "inter-plugin-communication",
+    "library-plugins",
     "native-anthropic-tools",
     "pet",
     "pi-packages",

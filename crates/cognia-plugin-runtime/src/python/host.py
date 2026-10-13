@@ -432,12 +432,11 @@ async def _host_call(method, params=None):
 
 
 class _HostNamespace:
-    """Attribute proxy for one `ctx.<namespace>`.
+    """Callable dotted-path proxy; the guarded host owns runtime validation.
 
-    Deliberately untyped: the host owns the method table, and pinning it here
-    would mean a second copy to drift. The typed, documented surface lives in
-    the SDK (`plugin-sdk/python/src/cognia/ctx/`), which calls straight through
-    this proxy.
+    A proxy can be a group (``events.ipc``) or a leaf (``events.ipc.call``).
+    Resolving only at invocation supports nested APIs without duplicating the
+    generated catalog in the embedded script.
     """
 
     __slots__ = ("_namespace",)
@@ -446,16 +445,12 @@ class _HostNamespace:
         self._namespace = namespace
 
     def __getattr__(self, method):
-        if method.startswith("_"):
+        if method.startswith("_") or method in ("prototype", "constructor"):
             raise AttributeError(method)
-        namespace = self._namespace
+        return _HostNamespace(f"{self._namespace}.{method}")
 
-        async def call(*args, **kwargs):
-            return await _host_call(f"{namespace}.{method}", _pack_params(args, kwargs))
-
-        call.__name__ = method
-        call.__qualname__ = f"cognia.ctx.{namespace}.{method}"
-        return call
+    async def __call__(self, *args, **kwargs):
+        return await _host_call(self._namespace, _pack_params(args, kwargs))
 
     def __repr__(self):
         return f"<cognia.ctx.{self._namespace}>"
@@ -604,6 +599,13 @@ async def _handle_import_main(params):
     info["contributions"] = [
         {"id": cid, "methods": sorted(methods.keys())} for cid, methods in _CONTRIBUTIONS.items()
     ]
+    # The host validates manifest-declared library handlers against this actual
+    # imported surface before publishing RPC methods. Do not execute handlers
+    # for discovery; startup may legitimately install module-level functions.
+    info["callable_functions"] = sorted(
+        name for name, value in vars(_MAIN_MODULE).items()
+        if not name.startswith("_") and callable(value)
+    )
     return info
 
 

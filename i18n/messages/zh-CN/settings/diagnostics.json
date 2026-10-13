@@ -19,6 +19,14 @@
     "title": "Inbox 遥测"
   },
   "pluginMessaging": {
+    "libraryVersion": "库版本 {version}",
+    "requiredPermissions": "所需权限：{permissions}",
+    "noAdditionalPermissions": "无",
+    "risk": {
+      "read": "只读",
+      "write": "写入数据",
+      "destructive": "破坏性操作"
+    },
     "degradedTitle": "降级的 RPC 端点",
     "description": "实时插件间通信——IPC 与事件总线单例上暴露的 RPC 方法、活动通道及熔断器健康状态。",
     "exposedEmpty": "尚无插件暴露任何 RPC 方法。",
@@ -31,7 +39,21 @@
       "ipcMessages": "IPC 消息",
       "ipcSubscriptions": "IPC 订阅"
     },
-    "title": "插件通信"
+    "title": "插件通信",
+    "audit": {
+      "title": "最近的库 RPC 调用",
+      "empty": "尚无库 RPC 调用记录。",
+      "caller": "调用方",
+      "provider": "库",
+      "method": "方法",
+      "version": "版本",
+      "risk": "风险",
+      "outcome": "结果",
+      "duration": "耗时",
+      "success": "成功",
+      "failure": "失败",
+      "durationValue": "{duration} 毫秒"
+    }
   },
   "sandboxAudit": {
     "description": "最近的 sandbox_exec 调用：allow / deny / error、命令、耗时。镜像自内存审计环。",

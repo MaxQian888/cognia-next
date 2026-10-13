@@ -10,6 +10,7 @@ import type { Plugin, PluginManifest, PluginDefinition } from "@/types/plugin"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 import * as builtinRegistry from "./browser-builtin-registry"
 import * as sharedModules from "./shared-modules"
+import { evaluatePluginBundle } from "./evaluate-plugin-bundle"
 
 jest.mock("./shared-modules", () => ({
   __esModule: true,
@@ -103,6 +104,27 @@ const deactivateContext = createTestPluginContext().ctx
 
 describe("PluginLoader", () => {
   let loader: PluginLoader
+
+  it("freshly evaluates dedicated library bundles without using cached main exports", async () => {
+    const importer = jest.fn(async () =>
+      evaluatePluginBundle("let count = 0; exports.next = () => ++count", "utils.cjs")
+    )
+    const libraryLoader = new PluginLoader({ frontendImporter: importer })
+    const plugin = {
+      manifest: { id: "library", main: "main.cjs" },
+      path: "/plugins/library",
+    } as Plugin
+    const first = await libraryLoader.importLibraryEntry(plugin, "utils.cjs")
+    const second = await libraryLoader.importLibraryEntry(plugin, "utils.cjs")
+    expect((first.next as () => number)()).toBe(1)
+    expect((second.next as () => number)()).toBe(1)
+    expect(importer).toHaveBeenCalledTimes(2)
+    await expect(libraryLoader.importLibraryEntry(plugin, "main.cjs")).rejects.toThrow("dedicated")
+    await expect(libraryLoader.importLibraryEntry(plugin, "utils.mjs")).rejects.toThrow("dedicated")
+    await expect(libraryLoader.importLibraryEntry(plugin, "../escape.cjs")).rejects.toThrow(
+      "Unsafe"
+    )
+  })
 
   beforeEach(() => {
     loader = new PluginLoader()

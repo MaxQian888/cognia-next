@@ -4,6 +4,7 @@
  * Resolves plugin dependencies with version constraint support.
  */
 
+import { compare, coerce, satisfies, valid, validRange } from "semver"
 import type { PluginManifest } from "@/types/plugin"
 
 // =============================================================================
@@ -68,17 +69,10 @@ export function parseVersion(version: string): number[] {
 }
 
 export function compareVersions(a: string, b: string): number {
-  const aParts = parseVersion(a)
-  const bParts = parseVersion(b)
-
-  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-    const aVal = aParts[i] || 0
-    const bVal = bParts[i] || 0
-    if (aVal > bVal) return 1
-    if (aVal < bVal) return -1
-  }
-
-  return 0
+  const normalizedA = valid(a) ?? coerce(a)?.version
+  const normalizedB = valid(b) ?? coerce(b)?.version
+  if (!normalizedA || !normalizedB) throw new TypeError("Cannot compare invalid plugin versions")
+  return compare(normalizedA, normalizedB)
 }
 
 export function parseConstraint(constraint: string): VersionConstraint {
@@ -95,7 +89,12 @@ export function parseConstraint(constraint: string): VersionConstraint {
     return {
       type: "caret",
       min: version,
-      max: `${major + 1}.0.0`,
+      max:
+        major > 0
+          ? `${major + 1}.0.0`
+          : (parts[1] || 0) > 0
+            ? `0.${parts[1] + 1}.0`
+            : `0.0.${(parts[2] || 0) + 1}`,
     }
   }
 
@@ -151,30 +150,9 @@ export function parseConstraint(constraint: string): VersionConstraint {
 }
 
 export function satisfiesConstraint(version: string, constraint: string): boolean {
-  const parsed = parseConstraint(constraint)
-
-  switch (parsed.type) {
-    case "any":
-      return true
-
-    case "exact":
-      return compareVersions(version, parsed.exact!) === 0
-
-    case "caret":
-    case "tilde":
-    case "range": {
-      if (parsed.min && compareVersions(version, parsed.min) < 0) {
-        return false
-      }
-      if (parsed.max && compareVersions(version, parsed.max) >= 0) {
-        return false
-      }
-      return true
-    }
-
-    default:
-      return false
-  }
+  // Keep the historical marketplace alias, while using complete npm semver semantics.
+  const range = constraint.trim() === "latest" ? "*" : constraint
+  return valid(version) !== null && validRange(range) !== null && satisfies(version, range)
 }
 
 // =============================================================================
@@ -260,11 +238,35 @@ export class DependencyResolver {
     visiting: Set<string>,
     path: string[]
   ): Promise<void> {
-    if (visited.has(pluginId)) return
+    if (visited.has(pluginId)) {
+      const existing = result.resolved.find((entry) => entry.id === pluginId)
+      if (
+        existing &&
+        versionConstraint &&
+        !satisfiesConstraint(existing.version, versionConstraint)
+      ) {
+        result.conflicts.push({
+          dependencyId: pluginId,
+          requiredBy: [
+            { pluginId: path[path.length - 1] || "root", constraint: versionConstraint },
+          ],
+          reason: `Resolved version ${existing.version} does not satisfy ${versionConstraint}`,
+        })
+      }
+      return
+    }
 
     // Circular dependency detection
     if (visiting.has(pluginId)) {
-      result.warnings.push(`Circular dependency detected: ${[...path, pluginId].join(" -> ")}`)
+      const reason = `Circular dependency detected: ${[...path, pluginId].join(" -> ")}`
+      result.warnings.push(reason)
+      result.conflicts.push({
+        dependencyId: pluginId,
+        requiredBy: [
+          { pluginId: path[path.length - 1] || "root", constraint: versionConstraint || "*" },
+        ],
+        reason,
+      })
       return
     }
 
@@ -330,6 +332,17 @@ export class DependencyResolver {
               result.resolved[result.resolved.length - 1].version = satisfyingVersion
               result.resolved[result.resolved.length - 1].satisfies = true
             }
+          }
+
+          const resolved = result.resolved[result.resolved.length - 1]
+          if (!resolved.satisfies) {
+            result.conflicts.push({
+              dependencyId: pluginId,
+              requiredBy: [
+                { pluginId: path[path.length - 2] || "root", constraint: versionConstraint || "*" },
+              ],
+              reason: `Available version ${resolved.version} does not satisfy ${versionConstraint}`,
+            })
           }
 
           // Resolve transitive dependencies

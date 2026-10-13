@@ -162,6 +162,46 @@ describe("routePythonHostRequest", () => {
     if (!missingMethod.ok) expect(missingMethod.error).toContain("is not a function")
   })
 
+  it.each(["events.ipc.call", "events.ipc.getExposedMethods", "events.ipc.describeExposedMethods"])(
+    "routes the Python RPC surface %s",
+    async (method) => {
+      const fn = jest.fn().mockResolvedValue({ value: 2 })
+      const leaf = method.split(".").at(-1)!
+      const outcome = await routePythonHostRequest(
+        frame(method, { args: ["library", "add", [1]] }),
+        {
+          getContext: () => contextWith({ events: { ipc: { [leaf]: fn } } }),
+        }
+      )
+      expect(outcome).toEqual({ ok: true, result: { value: 2 } })
+      expect(fn).toHaveBeenCalledWith("library", "add", [1])
+    }
+  )
+
+  it.each([
+    "events.ipc.expose",
+    "events.ipc.expose.call",
+    "events.bus.on",
+    "events.bus.getHistory.apply",
+    "events.emit",
+    "libraries.importModule",
+    "db.query",
+  ])("rejects raw requests for non-Python method %s before touching context", async (method) => {
+    const getContext = jest.fn()
+    const outcome = await routePythonHostRequest(frame(method), { getContext })
+    expect(outcome).toEqual({ ok: false, error: expect.stringContaining("unavailable to python") })
+    expect(getContext).not.toHaveBeenCalled()
+  })
+
+  it("rejects raw callback registration even in Python-enabled namespaces", async () => {
+    const register = jest.fn()
+    const outcome = await routePythonHostRequest(frame("agent.context.registerProvider"), {
+      getContext: () => contextWith({ agent: { context: { registerProvider: register } } }),
+    })
+    expect(outcome).toEqual({ ok: false, error: expect.stringContaining("host-side callback") })
+    expect(register).not.toHaveBeenCalled()
+  })
+
   it("normalizes undefined to null because the wire has no undefined", async () => {
     const outcome = await routePythonHostRequest(frame("ui.showToast"), {
       getContext: () => contextWith({ ui: { showToast: () => undefined } }),

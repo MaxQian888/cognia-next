@@ -109,6 +109,152 @@ describe("Plugin Validation", () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    describe("runtime library declarations", () => {
+      const libraryManifest = (): PluginManifest => ({
+        ...createValidManifest(),
+        capabilities: ["library"],
+        engines: { cognia: ">=0.2.0" },
+        permissions: ["ipc:expose", "filesystem:read"],
+        library: {
+          rpc: {
+            read: {
+              description: "Read a value",
+              risk: "read",
+              requiredPermissions: ["filesystem:read"],
+              inputSchema: {
+                type: "array",
+                items: [{ type: "string" }],
+                minItems: 1,
+                additionalItems: false,
+              },
+              outputSchema: { type: "string" },
+            },
+          },
+          modules: {
+            utils: {
+              entry: "dist/utils.cjs",
+              description: "Local utilities",
+              risk: "read",
+              requiredPermissions: [],
+            },
+          },
+        },
+      })
+
+      it("accepts independently installable libraries and required semver dependencies", () => {
+        expect(validatePluginManifest(libraryManifest()).errors).toEqual([])
+        expect(
+          validatePluginManifest({
+            ...createValidManifest(),
+            dependencies: { library: ">=1.0.0 <2.0.0 || ^3.0.0" },
+          }).valid
+        ).toBe(true)
+      })
+
+      it.each([null, {}, { rpc: [] }, { rpc: { constructor: {} } }, { unknown: {} }])(
+        "rejects malformed library maps: %p",
+        (library) => {
+          expect(validatePluginManifest({ ...libraryManifest(), library }).valid).toBe(false)
+        }
+      )
+
+      it.each([
+        { description: "" },
+        { risk: "unknown" },
+        { requiredPermissions: ["network:fetch"] },
+        { requiredPermissions: ["filesystem:read", "filesystem:read"] },
+        { requiredPermissions: undefined },
+        { inputSchema: { typo: true } },
+        { outputSchema: { $ref: "https://example.com/schema" } },
+        { handler: "read" },
+        { allowedCallers: ["*"] },
+      ])("rejects invalid RPC declaration fields: %p", (override) => {
+        const manifest = libraryManifest()
+        Object.assign(manifest.library!.rpc!.read, override)
+        expect(validatePluginManifest(manifest).valid).toBe(false)
+      })
+
+      it("requires exposure permission and a supported minimum host version", () => {
+        const manifest = libraryManifest()
+        manifest.permissions = ["filesystem:read"]
+        expect(validatePluginManifest(manifest).valid).toBe(false)
+        expect(
+          validatePluginManifest({ ...libraryManifest(), engines: { cognia: ">=0.1.0" } }).valid
+        ).toBe(false)
+        expect(validatePluginManifest({ ...libraryManifest(), engines: undefined }).valid).toBe(
+          false
+        )
+      })
+
+      it.each([
+        "../escape.cjs",
+        "/absolute.cjs",
+        "index.js",
+        "./index.js",
+        "utils.py",
+        "",
+        "%2e%2e/x.cjs",
+      ])("rejects unsafe, unsupported or shared main entries: %s", (entry) => {
+        const manifest = libraryManifest()
+        manifest.library!.modules!.utils.entry = entry
+        expect(validatePluginManifest(manifest).valid).toBe(false)
+      })
+
+      it("requires Python public handlers and rejects Python JS modules", () => {
+        const manifest = libraryManifest()
+        manifest.type = "python"
+        manifest.main = "main.py"
+        manifest.pythonMain = "main.py"
+        delete manifest.library!.modules
+        manifest.library!.rpc!.read.handler = "read_value"
+        expect(validatePluginManifest(manifest).errors).toEqual([])
+        for (const handler of [undefined, "_private", "module.fn", "bad-name"]) {
+          manifest.library!.rpc!.read.handler = handler
+          expect(validatePluginManifest(manifest).valid).toBe(false)
+        }
+        expect(
+          validatePluginManifest({ ...libraryManifest(), type: "python", main: "main.py" }).valid
+        ).toBe(false)
+      })
+
+      it("rejects isolated Node and WASM library providers", () => {
+        expect(
+          validatePluginManifest({
+            ...libraryManifest(),
+            engines: { node: ">=20", cognia: ">=0.2.0" },
+          }).valid
+        ).toBe(false)
+        expect(
+          validatePluginManifest({
+            ...libraryManifest(),
+            runtimeCompatibility: { tauri: { entrypoint: "node" } },
+          }).valid
+        ).toBe(false)
+        expect(validatePluginManifest({ ...libraryManifest(), type: "wasm" }).valid).toBe(false)
+      })
+
+      it.each([
+        null,
+        [],
+        { library: "bad range" },
+        { library: "" },
+        { "test-plugin": "*" },
+        { "bad/id": "*" },
+      ])("rejects malformed required or optional dependency maps: %p", (dependencies) => {
+        for (const field of ["dependencies", "optionalDependencies"]) {
+          expect(
+            validatePluginManifest({ ...createValidManifest(), [field]: dependencies }).valid
+          ).toBe(false)
+        }
+      })
+
+      it("accepts complete semver provider versions including numeric prereleases and build metadata", () => {
+        expect(
+          validatePluginManifest({ ...libraryManifest(), version: "1.0.0-rc.2+build.1" }).valid
+        ).toBe(true)
+      })
+    })
+
     describe("workspaceCloneHosts", () => {
       it("accepts enterprise hosts only with the declared clone permission", () => {
         const manifest: PluginManifest = {

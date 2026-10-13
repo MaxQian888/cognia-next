@@ -191,6 +191,42 @@ describe("plugin contract generator", () => {
     assert.throws(() => validateApiSurfaceCompatibility(shrunk, baseline), /removed runtime/)
   })
 
+  test("enforces effective method runtimes and documents inherited availability", () => {
+    const changed = structuredClone(catalog)
+    const events = changed.apiNamespaces.find((entry) => entry.id === "events")
+    const call = events.methods.find((entry) => entry.name === "ipc.call")
+    assert.ok(events.runtimes.includes("python"))
+    assert.equal(call.runtimes, undefined)
+    assert.deepEqual(events.methods.find((entry) => entry.name === "ipc.expose").runtimes, [
+      "frontend",
+      "hybrid",
+    ])
+    assert.doesNotThrow(() => validateInterfaceCatalog(changed))
+    call.runtimes = ["wasm"]
+    assert.throws(() => validateInterfaceCatalog(changed), /nonempty subset/)
+    call.runtimes = []
+    assert.throws(() => validateInterfaceCatalog(changed), /nonempty subset/)
+    call.runtimes = ["frontend"]
+    assert.throws(
+      () =>
+        validateApiSurfaceCompatibility(changed, {
+          namespaces: [
+            {
+              id: "events",
+              authorPath: "ctx.events",
+              runtimes: ["frontend", "hybrid"],
+              platforms: [],
+              methods: ["events.ipc.call"],
+            },
+          ],
+        }),
+      /removed runtime hybrid from method events.ipc.call/
+    )
+    const docs = renderApiReference(catalog)
+    assert.match(docs, /events\.ipc\.call`[^\n]+frontend, hybrid, python/)
+    assert.match(docs, /events\.ipc\.expose`[^\n]+frontend, hybrid \|/)
+  })
+
   test("is deterministic", () => {
     assert.equal(renderRustContract(catalog), renderRustContract(catalog))
     assert.equal(renderPythonContract(catalog), renderPythonContract(catalog))

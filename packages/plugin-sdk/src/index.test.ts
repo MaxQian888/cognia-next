@@ -1,5 +1,10 @@
 import * as sdk from "./index"
-import type { PluginManifest } from "./index"
+import type {
+  PluginManifest,
+  PluginLibraryMethod,
+  PluginLibraryModuleFactory,
+  PluginLibrariesAPI,
+} from "./index"
 
 const rootBarrel = sdk as Record<string, unknown>
 
@@ -375,7 +380,10 @@ describe("plugin-sdk root barrel", () => {
   })
 
   it("exposes the author manifest contract", () => {
-    const assertSdkTypes = <_T extends PluginManifest>(): void => undefined
+    const assertSdkTypes = <
+      _T extends
+        PluginManifest | PluginLibraryMethod | PluginLibraryModuleFactory | PluginLibrariesAPI,
+    >(): void => undefined
 
     expect(assertSdkTypes).toBeDefined()
   })

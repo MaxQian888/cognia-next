@@ -1012,6 +1012,22 @@ export class PluginLoader {
     )) as Record<string, unknown>
   }
 
+  /** Dedicated CJS entries are freshly evaluated; never reuse the provider's main exports. */
+  async importLibraryEntry(plugin: Plugin, entry: string): Promise<Record<string, unknown>> {
+    const relative = normalizePluginRelativePath(entry)
+    if (
+      !relative.endsWith(".cjs") ||
+      (plugin.manifest.main && relative === normalizePluginRelativePath(plugin.manifest.main))
+    ) {
+      throw new Error("Library modules require a dedicated bundled .cjs entry")
+    }
+    return this.importEntry(
+      resolvePluginPath(plugin.path, relative),
+      plugin.manifest.id,
+      plugin.path
+    )
+  }
+
   /**
    * Get loaded plugin definition
    */

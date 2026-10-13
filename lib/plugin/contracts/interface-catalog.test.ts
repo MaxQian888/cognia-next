@@ -14,7 +14,7 @@ describe("plugin interface catalog", () => {
   it("indexes the canonical ctx method surface", () => {
     // A canary, not a fact worth memorising: any catalog edit lands here so
     // the method surface cannot grow or shrink without someone noticing.
-    expect(listPluginApiMethodContracts()).toHaveLength(889)
+    expect(listPluginApiMethodContracts()).toHaveLength(890)
     for (const method of [
       "listKnowledgeDocuments",
       "readKnowledgeOutline",
@@ -112,6 +112,21 @@ describe("plugin interface catalog", () => {
       name: "traces.timeline",
       requiredPermissions: ["trace:read"],
     })
+  })
+
+  it("allows Python IPC calls but enforces JS-only method overrides", () => {
+    const evaluate = (methodId: string) =>
+      evaluatePluginApiCall({
+        methodId,
+        runtime: "python",
+        platform: "desktop",
+        hasPermission: () => true,
+      })
+    expect(evaluate("events.ipc.call")).toMatchObject({ allowed: true })
+    expect(evaluate("events.ipc.describeExposedMethods")).toMatchObject({ allowed: true })
+    expect(evaluate("events.ipc.expose")).toMatchObject({ allowed: false, reason: "runtime" })
+    expect(evaluate("events.bus.on")).toMatchObject({ allowed: false, reason: "runtime" })
+    expect(evaluate("libraries.importModule")).toMatchObject({ allowed: false, reason: "runtime" })
   })
 
   it("fails closed for unmapped calls and reports missing permissions", () => {

@@ -441,6 +441,9 @@ importers:
       jsonc-parser:
         specifier: 3.3.1
         version: 3.3.1
+      jsonschema:
+        specifier: ^1.5.0
+        version: 1.5.0
       jspdf:
         specifier: ^4.2.1
         version: 4.2.1
@@ -537,6 +540,9 @@ importers:
       remark-math:
         specifier: ^6.0.0
         version: 6.0.0(supports-color@8.1.1)
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
       serwist:
         specifier: ^9.5.13
         version: 9.5.13(browserslist@4.29.3)(typescript@6.0.3)
@@ -685,6 +691,9 @@ importers:
       '@types/react-dom':
         specifier: 19.3.0
         version: 19.3.0(@types/react@19.3.0)
+      '@types/semver':
+        specifier: ^7.8.0
+        version: 7.8.0
       '@types/three':
         specifier: ^0.186.0
         version: 0.186.0
@@ -11575,6 +11584,9 @@ packages:
 
   jsonfile@6.2.1:
     resolution: {integrity: sha512-zwOTdL3rFQ/lRdBnntKVOX6k5cKJwEc1HdilT71BWEu7J41gXIB2MRp+vxduPSwZJPWBxEzv4yH1wYLJGUHX4Q==}
+
+  jsonschema@1.5.0:
+    resolution: {integrity: sha512-K+A9hhqbn0f3pJX17Q/7H6yQfD/5OXgdrR5UE12gMXCiN9D5Xq2o5mddV2QEcX/bjla99ASsAAQUyMCCRWAEhw==}
 
   jspdf@4.2.1:
     resolution: {integrity: sha512-YyAXyvnmjTbR4bHQRLzex3CuINCDlQnBqoSYyjJwTP2x9jDLuKDzy7aKUl0hgx3uhcl7xzg32agn5vlie6HIlQ==}
@@ -26314,6 +26326,8 @@ snapshots:
       universalify: 2.0.1
     optionalDependencies:
       graceful-fs: 4.2.11
+
+  jsonschema@1.5.0: {}
 
   jspdf@4.2.1:
     dependencies:

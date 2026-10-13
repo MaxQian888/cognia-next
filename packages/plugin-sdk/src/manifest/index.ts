@@ -244,3 +244,14 @@ export {
 } from "@/lib/plugin/core/manifest-parity"
 
 export type { PluginManifestParityIssue } from "@/lib/plugin/core/manifest-parity"
+
+export type {
+  PluginLibrarySchema,
+  PluginLibraryRisk,
+  PluginLibraryMethod,
+  PluginLibraryModule,
+  PluginLibraryContract,
+  PluginLibrariesAPI,
+  PluginLibraryModuleInstance,
+  PluginLibraryModuleFactory,
+} from "@/types/plugin/plugin-library"

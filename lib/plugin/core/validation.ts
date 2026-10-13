@@ -1,3 +1,5 @@
+import { subset, valid, validRange } from "semver"
+import { validateLibrarySchema } from "@/lib/plugin/library/schema"
 import { validateSubscriptionProvider } from "@/types/subscription/provider-definition"
 import { isValidSubscriptionProviderId } from "@/types/subscription/credential"
 import type { PluginSubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
@@ -165,7 +167,7 @@ export function isValidPluginId(id: string): boolean {
 
 /** The manifest `version` rule, for code that validates plugin versions outside a manifest. */
 export function isValidPluginVersion(version: string): boolean {
-  return VERSION_PATTERN.test(version)
+  return /^\d/.test(version) && version === version.trim() && valid(version) !== null
 }
 
 // Shared validators for the ADR-0026 lazy-factory manifest fields.
@@ -231,11 +233,13 @@ function contributionExecutionSplit(
   manifest: Record<string, unknown>,
   contract: (typeof PLUGIN_MANIFEST_CONTRIBUTIONS)[number]
 ): ContributionExecutionSplit {
-  const contribution = manifest[contract.field]
+  const contribution = nestedContributionValue(manifest, contract.field)
   const entries = Array.isArray(contribution)
     ? contribution
     : isPlainObject(contribution)
-      ? [contribution]
+      ? contract.field.startsWith("library.")
+        ? Object.values(contribution)
+        : [contribution]
       : []
   if (entries.length === 0) return { requiresJavascript: false, pythonBackedExperimental: false }
 
@@ -297,6 +301,13 @@ function collectCatalogPathValues(
     return output
   }
   if (!isPlainObject(value)) return output
+
+  if (segment === "*") {
+    for (const [key, entry] of Object.entries(value)) {
+      collectCatalogPathValues(entry, rest, [...concreteSegments, key], output)
+    }
+    return output
+  }
 
   const arrayField = segment.endsWith("[]") ? segment.slice(0, -2) : undefined
   if (arrayField !== undefined) {
@@ -1344,6 +1355,120 @@ function validateNativeLucideIcons(
 // Manifest Validation
 // =============================================================================
 
+function validateLibraryContract(
+  manifest: Record<string, unknown>,
+  pushError: (field: string, code: string, message: string) => void
+): void {
+  if (manifest.library === undefined) return
+  const fail = (field: string, message: string) =>
+    pushError(field, "manifest.library.invalid", message)
+  const library = manifest.library
+  if (!isPlainObject(library)) {
+    fail("library", "Library must be an object containing rpc and/or modules")
+    return
+  }
+  const engines = isPlainObject(manifest.engines) ? manifest.engines : {}
+  if (
+    typeof engines.cognia !== "string" ||
+    validRange(engines.cognia) === null ||
+    !subset(engines.cognia, ">=0.2.0")
+  ) {
+    fail("engines.cognia", "Library plugins must require Cognia >=0.2.0")
+  }
+  const compatibility = isPlainObject(manifest.runtimeCompatibility)
+    ? manifest.runtimeCompatibility
+    : {}
+  const tauri = isPlainObject(compatibility.tauri) ? compatibility.tauri : {}
+  if (
+    !["frontend", "hybrid", "python"].includes(String(manifest.type)) ||
+    engines.node ||
+    tauri.entrypoint === "node"
+  ) {
+    fail(
+      "library",
+      "Libraries require ordinary frontend/hybrid JavaScript or Python; isolated Node and WASM are unsupported"
+    )
+  }
+  if (Object.keys(library).some((key) => key !== "rpc" && key !== "modules"))
+    fail("library", "Unknown library declaration field")
+  let count = 0
+  const permissions = new Set(Array.isArray(manifest.permissions) ? manifest.permissions : [])
+  for (const group of ["rpc", "modules"] as const) {
+    if (library[group] === undefined) continue
+    const entries = library[group]
+    if (!isPlainObject(entries)) {
+      fail(`library.${group}`, "Library declarations must be a map of public names")
+      continue
+    }
+    if (group === "modules" && manifest.type === "python")
+      fail("library.modules", "Python libraries cannot provide JavaScript modules")
+    for (const [name, entry] of Object.entries(entries)) {
+      count++
+      const field = `library.${group}.${name}`
+      if (
+        !/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/.test(name) ||
+        ["constructor", "prototype", "__proto__"].includes(name)
+      ) {
+        fail(field, "Library public names must be simple identifiers, never prototype paths")
+      }
+      if (!isPlainObject(entry)) {
+        fail(field, "Library declarations must be objects")
+        continue
+      }
+      const allowedFields =
+        group === "rpc"
+          ? ["description", "risk", "requiredPermissions", "inputSchema", "outputSchema", "handler"]
+          : ["description", "risk", "requiredPermissions", "entry"]
+      if (Object.keys(entry).some((key) => !allowedFields.includes(key)))
+        fail(field, "Unknown library contract field")
+      if (typeof entry.description !== "string" || !entry.description.trim())
+        fail(`${field}.description`, "Library declarations require a nonempty description")
+      if (!["read", "write", "destructive"].includes(String(entry.risk)))
+        fail(`${field}.risk`, "Library risk must be read, write, or destructive")
+      if (
+        !Array.isArray(entry.requiredPermissions) ||
+        entry.requiredPermissions.some(
+          (permission) => !VALID_PERMISSIONS.includes(permission) || !permissions.has(permission)
+        ) ||
+        new Set(entry.requiredPermissions).size !== entry.requiredPermissions.length
+      ) {
+        fail(
+          `${field}.requiredPermissions`,
+          "Library permissions must be unique known permissions declared in provider permissions"
+        )
+      }
+      if (group === "rpc") {
+        if (!permissions.has("ipc:expose")) fail(field, "RPC libraries must declare ipc:expose")
+        for (const schema of ["inputSchema", "outputSchema"] as const) {
+          const error = validateLibrarySchema(entry[schema])
+          if (error) fail(`${field}.${schema}`, error)
+        }
+        if (manifest.type === "python") {
+          if (typeof entry.handler !== "string" || !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(entry.handler))
+            fail(`${field}.handler`, "Python methods require a public module-level handler name")
+        } else if (entry.handler !== undefined)
+          fail(
+            `${field}.handler`,
+            "Only Python libraries declare handler names; JavaScript uses IPC expose"
+          )
+      } else if (
+        typeof entry.entry !== "string" ||
+        !entry.entry.trim() ||
+        getPluginPathViolations(entry.entry).length > 0 ||
+        !/\.cjs$/.test(entry.entry) ||
+        normalizePluginRelativePath(entry.entry) ===
+          normalizePluginRelativePath(String(manifest.main ?? ""))
+      ) {
+        fail(
+          `${field}.entry`,
+          "Library modules require a confined, dedicated bundled .cjs entry distinct from main"
+        )
+      }
+    }
+  }
+  if (!count) fail("library", "Library must provide at least one method or module")
+}
+
 export function validatePluginManifest(
   manifest: unknown,
   options: ManifestValidationOptions = {}
@@ -1375,6 +1500,35 @@ export function validatePluginManifest(
     diagnostics.push({ severity: "warning", field, code, message, hint })
   }
 
+  validateLibraryContract(m, pushError)
+  for (const field of ["dependencies", "optionalDependencies"] as const) {
+    const dependencies = m[field]
+    if (dependencies === undefined) continue
+    if (!isPlainObject(dependencies)) {
+      pushError(
+        field,
+        "manifest.dependencies.invalid",
+        "Plugin dependencies must map plugin IDs to semver ranges"
+      )
+      continue
+    }
+    for (const [id, range] of Object.entries(dependencies)) {
+      if (
+        !isValidPluginId(id) ||
+        id === m.id ||
+        typeof range !== "string" ||
+        !range.trim() ||
+        validRange(range) === null
+      ) {
+        pushError(
+          `${field}.${id}`,
+          "manifest.dependencies.invalid",
+          "Dependencies require another valid plugin ID and a valid semver range"
+        )
+      }
+    }
+  }
+
   if (m.icon !== undefined && (typeof m.icon !== "string" || !m.icon.trim())) {
     pushError(
       "icon",
@@ -1402,7 +1556,7 @@ export function validatePluginManifest(
 
   if (!m.version || typeof m.version !== "string") {
     pushError("version", "manifest.version.missing", 'Missing or invalid "version" field')
-  } else if (!VERSION_PATTERN.test(m.version)) {
+  } else if (!isValidPluginVersion(m.version)) {
     pushError(
       "version",
       "manifest.version.invalid_format",
@@ -1475,7 +1629,12 @@ export function validatePluginManifest(
     // satisfied if ANY of its capabilities is declared.
     const declaredSet = new Set(declaredCapabilities)
     const hasField = (field: string): boolean => {
-      const value = (m as unknown as Record<string, unknown>)[field]
+      const value = nestedContributionValue(m, field)
+      if (field === "library" && isPlainObject(value))
+        return Object.values(value).some(
+          (group) => isPlainObject(group) && Object.keys(group).length > 0
+        )
+      if (field.startsWith("library.") && isPlainObject(value)) return Object.keys(value).length > 0
       if (Array.isArray(value)) return value.length > 0
       // `workflows` is an object block (PluginManifestWorkflowsBlock), not an
       // array contribution — it counts as populated when it carries nodes
