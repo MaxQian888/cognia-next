@@ -935,6 +935,18 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
         })
       }
       await reportSessionModels(run, manager)
+      // The manager reports a turn the agent could not run (not connected,
+      // refused, crashed mid-turn) as a result, not a throw. Settling that as
+      // completed handed the client an empty reply and no error at all.
+      const verdict = result as { success?: boolean; error?: string; errorCode?: string } | null
+      if (verdict && verdict.success === false) {
+        await settle(
+          run,
+          "failed",
+          verdict.error?.trim() || verdict.errorCode || "The agent could not run this turn."
+        )
+        return
+      }
       await settle(run, "completed")
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)

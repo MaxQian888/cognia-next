@@ -60,7 +60,8 @@ interface Harness {
   }
   /** Drives the turn the manager is "running". */
   emit: (event: ExternalAgentEvent) => void
-  finish: () => void
+  /** Ends the turn, optionally with the result the manager returns. */
+  finish: (result?: unknown) => void
   fail: (message: string) => void
 }
 
@@ -80,7 +81,7 @@ function setup(
   const frames: RemoteRunFrame[] = []
   const released: string[] = []
   let onEvent: ((event: ExternalAgentEvent) => void) | undefined
-  let resolveTurn: (() => void) | undefined
+  let resolveTurn: ((result?: unknown) => void) | undefined
   let rejectTurn: ((error: Error) => void) | undefined
 
   const manager = {
@@ -110,7 +111,7 @@ function setup(
     ) {
       onEvent = options?.onEvent
       manager.executed.push({ ...(options as Record<string, unknown>) })
-      return new Promise<void>((res, rej) => {
+      return new Promise<unknown>((res, rej) => {
         resolveTurn = res
         rejectTurn = rej
       })
@@ -148,7 +149,7 @@ function setup(
     released,
     manager,
     emit: (event) => onEvent?.(event),
-    finish: () => resolveTurn?.(),
+    finish: (result) => resolveTurn?.(result),
     fail: (message) => rejectTurn?.(new Error(message)),
   }
 }
@@ -621,6 +622,30 @@ describe("streaming", () => {
     const terminal = h.frames.filter((f) => f.terminal)
     expect(terminal).toHaveLength(1)
     expect(terminal[0]).toMatchObject({ terminal: "failed", error: "spawn failed" })
+  })
+
+  it("reports a turn the agent could not run as failed, with its reason", async () => {
+    h.finish({ success: false, error: "Kimi Code is not connected", sessionId: "" })
+    await flush()
+    const terminal = h.frames.filter((f) => f.terminal)
+    expect(terminal).toHaveLength(1)
+    expect(terminal[0]).toMatchObject({ terminal: "failed", error: "Kimi Code is not connected" })
+    expect(h.released).toEqual(["run-1"])
+  })
+
+  it("names a failed turn by its code, or generically, when the agent gave no message", async () => {
+    h.finish({ success: false, error: "  ", errorCode: "AGENT_OFFLINE" })
+    await flush()
+    expect(h.frames.find((f) => f.terminal)).toMatchObject({
+      terminal: "failed",
+      error: "AGENT_OFFLINE",
+    })
+  })
+
+  it("still completes a successful result", async () => {
+    h.finish({ success: true, finalResponse: "391", sessionId: "s" })
+    await flush()
+    expect(h.frames.find((f) => f.terminal)).toMatchObject({ terminal: "completed" })
   })
 
   it("drops events emitted after the run settled", async () => {
