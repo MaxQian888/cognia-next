@@ -1,9 +1,6 @@
 name: Server image benchmark
 
 on:
-  # Temporary bootstrap trigger for validating this workflow before merge.
-  push:
-    branches: [codex/ci-server-build-phase1]
   workflow_dispatch:
     inputs:
       cache_run:
@@ -97,7 +94,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.bench.outputs.image }}-full
-          cache-from: type=registry,ref=${{ steps.bench.outputs.cache_from }}
+          cache-from: ${{ inputs.cache_run != '' && format('type=registry,ref={0}', steps.bench.outputs.cache_from) || '' }}
           cache-to: type=registry,ref=${{ steps.bench.outputs.cache }}-${{ github.run_id }},mode=max,compression=${{ steps.bench.outputs.compression }}${{ steps.bench.outputs.compression == 'zstd' && ',compression-level=3' || '' }}
 
       - name: Build slim image using the same builder
