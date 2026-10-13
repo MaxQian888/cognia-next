@@ -1249,6 +1249,40 @@ describe("createLarkAdapter", () => {
     expect(events.map((event) => event.messageId)).toEqual(["om-wanted"])
   })
 
+  it("fetchHistory() keeps a private chat's thread replies in the chat's one conversation", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-p2p-history")
+      const item = (message_id: string, thread_id?: string) => ({
+        message_id,
+        chat_id: "oc_p2p_001",
+        chat_type: "p2p",
+        msg_type: "text",
+        body: { content: JSON.stringify({ text: message_id }) },
+        create_time: "1714900000000",
+        thread_id,
+        deleted: false,
+        sender: { id: "ou_hist_001", id_type: "open_id", sender_type: "user" },
+      })
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          code: 0,
+          data: { items: [item("om-first"), item("om-in-thread", "omt-1")], has_more: false },
+        }),
+      }
+    })
+
+    const events = []
+    for await (const evt of makeAdapter().fetchHistory!("lark:lark-1:oc_p2p_001", { max: 50 })) {
+      events.push(evt)
+    }
+    expect(events.map((event) => event.messageId)).toEqual(["om-first", "om-in-thread"])
+  })
+
   it("fetchHistoryPage() uses the persisted target and preserves its timestamp page token", async () => {
     mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "connectors_keyring_get") return null

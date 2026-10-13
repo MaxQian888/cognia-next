@@ -53,6 +53,26 @@ const directTarget = {
   },
 }
 
+/** A group chat answered in the main chat: where the thinking timeline still runs. */
+const groupTarget = {
+  ...topicTarget,
+  conversationKey: "opaque-group-key",
+  deliveryTarget: {
+    ...topicTarget.deliveryTarget,
+    address: {
+      ...topicTarget.deliveryTarget.address,
+      conversationKey: "opaque-group-key",
+      scopeKind: "group" as const,
+      topicId: undefined,
+    },
+    conversationRef: {
+      platform: "lark" as const,
+      adapterId: "lark-1",
+      channelId: "chat-1",
+    },
+  },
+}
+
 const snapshot = (
   revision: number,
   status: RunProjectionSnapshot["status"] = "running"
@@ -527,7 +547,7 @@ describe("Lark run presentation driver", () => {
       return { data: {} }
     })
 
-    const ref = await driver.open(topicTarget, snapshot(1))
+    const ref = await driver.open(directTarget, snapshot(1))
     const updated = await driver.update(ref, { ...snapshot(2), elapsedMs: 6_000 })
     await driver.finish(updated, snapshot(3, "completed"))
 
@@ -535,7 +555,8 @@ describe("Lark run presentation driver", () => {
       ["POST", "/im/v1/message_cot?receive_id_type=chat_id"],
       ["PUT", "/im/v1/message_cot"],
       ["POST", "/cardkit/v1/cards"],
-      ["POST", "/im/v1/messages/om-anchor/reply"],
+      ["POST", "/im/v1/messages?receive_id_type=chat_id"],
+      ["POST", "/im/v1/messages/msg-1/push_follow_up"],
       ["PUT", "/cardkit/v1/cards/card-1/elements/run_summary/content"],
       ["PUT", "/cardkit/v1/cards/card-1/elements/run_actions"],
       ["PUT", "/im/v1/message_cot"],
@@ -545,19 +566,19 @@ describe("Lark run presentation driver", () => {
       expect.objectContaining({ cot_id: "cot-1", message_id: "om-cot-1" })
     )
     expect(calls[3].body).toEqual(
-      expect.objectContaining({ reply_in_thread: true, uuid: expect.any(String) })
+      expect.objectContaining({ receive_id: "chat-1", uuid: expect.any(String) })
     )
     expect(calls[2].body).toEqual(expect.objectContaining({ uuid: expect.any(String) }))
-    expect((calls[4].body as { sequence: number }).sequence).toBe(1)
-    expect((calls[5].body as { sequence: number }).sequence).toBe(2)
-    expect((calls[7].body as { sequence: number }).sequence).toBe(3)
+    expect((calls[5].body as { sequence: number }).sequence).toBe(1)
+    expect((calls[6].body as { sequence: number }).sequence).toBe(2)
+    expect((calls[8].body as { sequence: number }).sequence).toBe(3)
     // With a live COT the timeline rows live in that message; the card keeps
     // the summary element (same id) plus a pointer line.
-    expect(JSON.stringify(calls[4].body)).toContain("Process shown in the thinking timeline above")
-    expect(JSON.stringify(calls[4].body)).not.toContain("│")
+    expect(JSON.stringify(calls[5].body)).toContain("Process shown in the thinking timeline above")
+    expect(JSON.stringify(calls[5].body)).not.toContain("│")
     expect(JSON.stringify(calls[1].body)).toContain("src/release.ts")
-    expect(typeof (calls[5].body as { element: unknown }).element).toBe("string")
-    expect(JSON.parse((calls[5].body as { element: string }).element)).toEqual(
+    expect(typeof (calls[6].body as { element: unknown }).element).toBe("string")
+    expect(JSON.parse((calls[6].body as { element: string }).element)).toEqual(
       expect.objectContaining({
         tag: "column_set",
         element_id: "run_actions",
@@ -576,7 +597,7 @@ describe("Lark run presentation driver", () => {
       element_id: "run_summary",
     })
     expect(JSON.stringify(initialCard)).not.toContain("collapsible_panel")
-    const finalCard = JSON.parse((calls[7].body as { card: { data: string } }).card.data) as {
+    const finalCard = JSON.parse((calls[8].body as { card: { data: string } }).card.data) as {
       config: { streaming_mode: boolean }
     }
     expect(finalCard.config.streaming_mode).toBe(false)
@@ -590,6 +611,43 @@ describe("Lark run presentation driver", () => {
       expect.objectContaining({ status: "active", cotId: "cot-1", messageId: "om-cot-1" })
     )
     expect(updated.opaqueState?.presentedCot).toBe(true)
+  })
+
+  it.each([
+    ["a topic", topicTarget],
+    [
+      "a private chat answering in threads",
+      {
+        ...directTarget,
+        deliveryTarget: {
+          ...directTarget.deliveryTarget,
+          conversationRef: {
+            ...directTarget.deliveryTarget.conversationRef,
+            replyInThread: true,
+            threadRootMessageId: "om-user-anchor",
+          },
+        },
+      },
+    ],
+  ])("keeps the whole run inside the thread of %s", async (_label, target) => {
+    const calls: Array<{ method: string; path: string; body: unknown }> = []
+    const driver = createLarkRunPresentationDriver(async (method, path, body) => {
+      calls.push({ method, path, body })
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-1" } }
+      if (path.startsWith("/im/v1/messages")) return { data: { message_id: "msg-1" } }
+      return { data: {} }
+    })
+    const ref = await driver.open(target as RunPresentationTarget, snapshot(1))
+
+    // No thinking-timeline message: it has no thread form and would sit in the
+    // main chat. The card carries the timeline, and replies into the thread.
+    expect(calls.some((call) => call.path.includes("message_cot"))).toBe(false)
+    expect(ref.opaqueState?.cot).toEqual({ status: "disabled", reason: "thread" })
+    const send = calls.find((call) => call.path.endsWith("/reply"))
+    expect(send?.path).toBe(`/im/v1/messages/${target.sourceMessageId}/reply`)
+    expect(send?.body).toEqual(expect.objectContaining({ reply_in_thread: true }))
+    expect(calls.some((call) => call.path.includes("receive_id_type=chat_id"))).toBe(false)
+    expect(JSON.stringify(calls)).not.toContain("Process shown in the thinking timeline above")
   })
 
   it("trims oversized card bodies below the CardKit 30KB limit", async () => {
@@ -1150,14 +1208,14 @@ describe("Lark COT presentation", () => {
       now: () => 1_000,
     })
 
-    const ref = await driver.open(topicTarget, snapshot(1))
+    const ref = await driver.open(groupTarget, snapshot(1))
 
     expect(calls.map((call) => [call.method, call.path])).toEqual([
       ["POST", "/im/v1/messages/om-anchor/reactions"],
       ["POST", "/im/v1/message_cot?receive_id_type=chat_id"],
       ["PUT", "/im/v1/message_cot"],
       ["POST", "/cardkit/v1/cards"],
-      ["POST", "/im/v1/messages/om-anchor/reply"],
+      ["POST", "/im/v1/messages?receive_id_type=chat_id"],
     ])
     expect(calls[1].body).toEqual({ receive_id: "chat-1", origin_message_id: "om-anchor" })
     expect(calls[2].body).toEqual(
@@ -1193,7 +1251,7 @@ describe("Lark COT presentation", () => {
   it("updates COT-backed waiting status without reopening the stream or replacing approval controls", async () => {
     const calls: CotCall[] = []
     const driver = createLarkRunPresentationDriver(cotAwareMock(calls))
-    let ref = await driver.open(topicTarget, snapshot(1))
+    let ref = await driver.open(groupTarget, snapshot(1))
     const waiting = { ...snapshot(2, "waiting"), allowedActions: ["approve", "deny"] as const }
     ref = await driver.update(ref, { ...waiting, allowedActions: [...waiting.allowedActions] })
     calls.length = 0
@@ -1219,7 +1277,7 @@ describe("Lark COT presentation", () => {
       { sleep: async () => undefined }
     )
 
-    const ref = await driver.open(topicTarget, snapshot(1))
+    const ref = await driver.open(groupTarget, snapshot(1))
 
     expect(ref.platformMessageId).toBe("msg-noc")
     expect(ref.opaqueState?.cot).toEqual({ status: "disabled", reason: "unsupported" })
@@ -1241,7 +1299,7 @@ describe("Lark COT presentation", () => {
       },
       { sleep: async () => undefined }
     )
-    const second = await secondDriver.open(topicTarget, snapshot(1))
+    const second = await secondDriver.open(groupTarget, snapshot(1))
     expect(calls.some((call) => call.path.includes("message_cot"))).toBe(false)
     expect(second.opaqueState?.cot).toEqual({ status: "disabled", reason: "unsupported" })
     expect(second.platformMessageId).toBe("msg-noc-2")
@@ -1254,7 +1312,7 @@ describe("Lark COT presentation", () => {
       cotAwareMock(calls, (events) => writes.push(events)),
       { sleep: async () => undefined }
     )
-    const ref = await driver.open(topicTarget, snapshot(1))
+    const ref = await driver.open(groupTarget, snapshot(1))
 
     const next = snapshot(2)
     next.activities = [
@@ -1290,7 +1348,7 @@ describe("Lark COT presentation", () => {
       cotAwareMock(calls, (events) => writes.push(...events)),
       { sleep: async () => undefined }
     )
-    const ref = await driver.open(topicTarget, snapshot(1))
+    const ref = await driver.open(groupTarget, snapshot(1))
 
     await driver.finish(ref, snapshot(3, "failed"))
 
@@ -1331,7 +1389,7 @@ describe("Lark COT presentation", () => {
       },
       { sleep: async () => undefined }
     )
-    const ref = await driver.open(topicTarget, snapshot(1))
+    const ref = await driver.open(groupTarget, snapshot(1))
 
     const next = snapshot(2)
     next.activities = [
@@ -1370,7 +1428,7 @@ describe("Lark COT presentation", () => {
     )
   })
 
-  it("skips COT on a topic target without a reply anchor", async () => {
+  it("checkpoints the thread COT skip before a topic target without a reply anchor fails", async () => {
     const calls: string[] = []
     const checkpoints: RunPresentationRef[] = []
     const driver = createLarkRunPresentationDriver(async (_method, path) => {
@@ -1399,8 +1457,7 @@ describe("Lark COT presentation", () => {
     expect(calls.some((path) => path.includes("message_cot"))).toBe(false)
     expect(
       checkpoints.some(
-        (ref) =>
-          (ref.opaqueState?.cot as { reason?: string } | undefined)?.reason === "no_topic_anchor"
+        (ref) => (ref.opaqueState?.cot as { reason?: string } | undefined)?.reason === "thread"
       )
     ).toBe(true)
   })

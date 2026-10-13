@@ -17,6 +17,7 @@ function makeReq(opts: {
   channelId: string
   threadTs?: string
   threadRootMessageId?: string
+  replyInThread?: boolean
   text?: string
 }): OutboundRequest {
   return {
@@ -26,6 +27,7 @@ function makeReq(opts: {
       channelId: opts.channelId,
       ...(opts.threadTs ? { threadTs: opts.threadTs } : {}),
       ...(opts.threadRootMessageId ? { threadRootMessageId: opts.threadRootMessageId } : {}),
+      ...(opts.replyInThread ? { replyInThread: true } : {}),
     },
     segments: [{ type: "text", text: opts.text ?? "hello" }],
     metadata: { idempotencyKey: "k1" },
@@ -94,6 +96,19 @@ describe("serializeSend", () => {
     expect(call.payload["uuid"]).toBe("k1")
     expect(call.payload["receive_id"]).toBeUndefined()
     expect(call.payload["parent_id"]).toBeUndefined()
+  })
+
+  it("answers a private chat in its anchor message's thread", () => {
+    const call = serializeSend(
+      makeReq({ channelId: "oc_dm_001", threadRootMessageId: "om_dm_1", replyInThread: true })
+    )
+    expect(call.url).toContain("/im/v1/messages/om_dm_1/reply")
+    expect(call.payload).toMatchObject({ reply_in_thread: true, uuid: "k1" })
+    expect(call.payload["receive_id"]).toBeUndefined()
+    // Without the flag the same anchor is only a thread hint for topics.
+    expect(
+      serializeSend(makeReq({ channelId: "oc_dm_001", threadRootMessageId: "om_dm_1" })).url
+    ).toContain("receive_id_type=")
   })
 
   it("rejects a legacy thread ref without an anchor instead of leaking into the parent chat", () => {
@@ -220,6 +235,24 @@ describe("serializeOutboundAsync (explicit recipient routing)", () => {
     expect(call.method).toBe("POST")
     expect(call.url).toContain("receive_id_type=email")
     expect(call.payload["receive_id"]).toBe("alice@example.com")
+  })
+
+  it("answers a private chat in its anchor message's thread on the production path", async () => {
+    const call = await serializeOutboundAsync(
+      makeReq({ channelId: "oc_dm_001", threadRootMessageId: "om_dm_1", replyInThread: true }),
+      ADAPTER
+    )
+    expect(call.url).toContain("/im/v1/messages/om_dm_1/reply")
+    expect(call.payload).toMatchObject({ reply_in_thread: true })
+    const replying = await serializeOutboundAsync(
+      {
+        ...makeReq({ channelId: "oc_dm_001", threadRootMessageId: "om_dm_1", replyInThread: true }),
+        replyTo: { messageId: "om_quoted" },
+      } as OutboundRequest,
+      ADAPTER
+    )
+    expect(replying.url).toContain("/im/v1/messages/om_quoted/reply")
+    expect(replying.payload["reply_in_thread"]).toBe(true)
   })
 
   it("infers user_id from ref.userId instead of collapsing to chat_id", async () => {

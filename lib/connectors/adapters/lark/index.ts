@@ -971,7 +971,9 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         },
       }
       const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope, {
-        replyInThread: managedThread,
+        // A private chat's thread replies belong to the chat's one
+        // conversation when the bot answers in threads, as they do live.
+        replyInThread: managedThread || (raw.chat_type === "p2p" && opts.replyInThread !== false),
       })
       if (event?.conversationKey !== conversationKey) continue
       if (topicId) {

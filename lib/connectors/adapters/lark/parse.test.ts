@@ -991,12 +991,45 @@ describe("default reply threads", () => {
         .conversationKey
     ).not.toBe(first.conversationKey)
   })
-  it("keeps private chats unthreaded", () => {
-    expect(
-      parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, dmTextFixture as LarkEventEnvelope, {
-        replyInThread: true,
-      })!.channel.kind
-    ).toBe("private")
+  it("keeps a private chat one conversation, answering in each message's thread", () => {
+    const dm = structuredClone(dmTextFixture) as LarkEventEnvelope
+    const first = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, dm, {
+      replyInThread: true,
+    })!
+    expect(first.channel.kind).toBe("private")
+    expect(first.conversationRef).toMatchObject({
+      replyInThread: true,
+      threadRootMessageId: dm.event.message!.message_id,
+    })
+    expect(first.conversationRef.threadTs).toBeUndefined()
+    expect(first.conversationAddress?.topicId).toBeUndefined()
+
+    // A reply typed inside one of the bot's threads continues the same chat,
+    // and is answered in that thread.
+    const inThread = structuredClone(dm)
+    inThread.event.message!.message_id = "om_dm_in_thread"
+    inThread.event.message!.root_id = dm.event.message!.message_id
+    inThread.event.message!.thread_id = "omt_dm_thread"
+    const followup = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, inThread, {
+      replyInThread: true,
+    })!
+    expect(followup.channel.kind).toBe("private")
+    expect(followup.conversationKey).toBe(first.conversationKey)
+    expect(followup.conversationRef).toMatchObject({
+      replyInThread: true,
+      threadRootMessageId: "om_dm_in_thread",
+    })
+  })
+
+  it("leaves a private chat as it was when threaded replies are off", () => {
+    const parsed = parseLarkEventEnvelope(
+      ADAPTER_ID,
+      SELF_BOT_OPEN_ID,
+      dmTextFixture as LarkEventEnvelope,
+      { replyInThread: false }
+    )!
+    expect(parsed.channel.kind).toBe("private")
+    expect(parsed.conversationRef.replyInThread).toBeUndefined()
   })
 })
 

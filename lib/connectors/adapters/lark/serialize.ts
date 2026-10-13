@@ -6,6 +6,7 @@
  */
 
 import { sha256 } from "@noble/hashes/sha2.js"
+import { privateThreadReplyAnchor } from "./private-threads"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
@@ -150,7 +151,7 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
       content: body.content,
       uuid: messageUuid(req.metadata.idempotencyKey),
     }
-    if (threadId) payload["reply_in_thread"] = true
+    if (threadId || privateThreadReplyAnchor(req.conversationRef)) payload["reply_in_thread"] = true
     return {
       method: "POST",
       url: `${LARK_API_BASE}/im/v1/messages/${replyTargetId}/reply`,
@@ -178,6 +179,21 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
       }
     }
     throw new Error("Cannot deliver a Lark topic message without a persisted thread reply anchor")
+  }
+
+  // A private chat replying in threads answers in its anchor message's thread.
+  const privateAnchor = privateThreadReplyAnchor(req.conversationRef)
+  if (privateAnchor) {
+    return {
+      method: "POST",
+      url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(privateAnchor)}/reply`,
+      payload: {
+        msg_type: body.msg_type,
+        content: body.content,
+        reply_in_thread: true,
+        uuid: messageUuid(req.metadata.idempotencyKey),
+      },
+    }
   }
 
   const payload: Record<string, unknown> = {
@@ -401,7 +417,7 @@ export async function serializeOutboundAsync(
       content: body.content,
       uuid: messageUuid(req.metadata.idempotencyKey),
     }
-    if (threadId) payload["reply_in_thread"] = true
+    if (threadId || privateThreadReplyAnchor(req.conversationRef)) payload["reply_in_thread"] = true
     return {
       method: "POST",
       url: `${LARK_API_BASE}/im/v1/messages/${replyTargetId}/reply`,
@@ -427,6 +443,21 @@ export async function serializeOutboundAsync(
       }
     }
     throw new Error("Cannot deliver a Lark topic message without a persisted thread reply anchor")
+  }
+
+  // A private chat replying in threads answers in its anchor message's thread.
+  const privateAnchor = privateThreadReplyAnchor(req.conversationRef)
+  if (privateAnchor) {
+    return {
+      method: "POST",
+      url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(privateAnchor)}/reply`,
+      payload: {
+        msg_type: body.msg_type,
+        content: body.content,
+        reply_in_thread: true,
+        uuid: messageUuid(req.metadata.idempotencyKey),
+      },
+    }
   }
 
   const payload: Record<string, unknown> = {

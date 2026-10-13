@@ -10,6 +10,7 @@ import {
   type LarkCardPresentation,
 } from "@/lib/connectors/adapters/lark/card-presentation"
 import type { MessageSegment } from "@/types/connectors/segment"
+import { privateThreadReplyAnchor } from "@/lib/connectors/adapters/lark/private-threads"
 import { buildRunDetailsUrl } from "@/lib/connectors/entry/deep-links"
 import type {
   RunControlAction,
@@ -678,6 +679,14 @@ function errorCode(error: unknown): number | undefined {
   return typeof code === "number" ? code : undefined
 }
 
+/** A topic conversation, or a private chat that answers in its messages' threads. */
+function presentsInThread(delivery: ConversationDeliveryTarget): boolean {
+  return (
+    Boolean(delivery.address.topicId) ||
+    privateThreadReplyAnchor(delivery.conversationRef) !== undefined
+  )
+}
+
 function sendTarget(target: RunPresentationTarget): ConversationDeliveryTarget {
   if (!target.deliveryTarget) {
     throw new Error("Lark run presentation requires a persisted delivery target")
@@ -794,7 +803,7 @@ export function createLarkRunPresentationDriver(
     const uuid = deterministicUuid(
       `card-send:${snapshot.runId}:${delivery.address.conversationKey}`
     )
-    if (delivery.address.topicId) {
+    if (presentsInThread(delivery)) {
       const anchor = delivery.sourceMessageId ?? target.sourceMessageId
       if (!anchor) throw new Error("Lark topic presentation has no valid reply anchor")
       const sent = (await request("POST", `/im/v1/messages/${encodeURIComponent(anchor)}/reply`, {
@@ -905,8 +914,11 @@ export function createLarkRunPresentationDriver(
     const delivery = target.deliveryTarget
     const chatId = delivery?.address.containerId
     if (!delivery || !chatId) return ref
+    // message_cot has no reply_in_thread: in a thread it could only sit in the
+    // main chat as a quote, which is the clutter threads exist to remove. The
+    // card's own timeline carries the process there instead.
+    if (presentsInThread(delivery)) return disable("thread")
     const anchor = target.sourceMessageId ?? delivery.sourceMessageId
-    if (delivery.address.topicId && !anchor) return disable("no_topic_anchor")
     let handle: { cotId: string; messageId: string }
     try {
       handle = await cot.create({ chatId, ...(anchor ? { originMessageId: anchor } : {}) })
@@ -942,7 +954,12 @@ export function createLarkRunPresentationDriver(
     checkpoint?: (ref: RunPresentationRef) => Promise<void>
   ): Promise<RunPresentationRef> {
     const platformMessageId = ref.platformMessageId
-    if (platformMessageId && target.deliveryTarget?.address.scopeKind === "thread") {
+    if (
+      platformMessageId &&
+      target.deliveryTarget &&
+      (target.deliveryTarget.address.scopeKind === "thread" ||
+        presentsInThread(target.deliveryTarget))
+    ) {
       const next = {
         ...ref,
         opaqueState: {

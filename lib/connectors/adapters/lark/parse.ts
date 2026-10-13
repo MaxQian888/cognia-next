@@ -19,6 +19,7 @@
  */
 
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
+import { LARK_PRIVATE_THREAD_REPLY } from "./private-threads"
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
@@ -677,11 +678,16 @@ export function parseLarkEventEnvelope(
     options.replyInThread === true &&
     message.chat_type !== "p2p" &&
     (!message.thread_id || !!message.root_id || !message.parent_id)
+  // A private chat stays one conversation, its threads included; with
+  // threaded replies on, only where the bot answers moves (private-threads.ts).
+  const threadedPrivate = options.replyInThread === true && message.chat_type === "p2p"
   const threadId = managedThread
     ? message.thread_id
       ? message.root_id || message.message_id
       : message.message_id
-    : (message.thread_id ?? undefined)
+    : threadedPrivate
+      ? undefined
+      : (message.thread_id ?? undefined)
 
   const conversationKey = buildConversationKey("lark", adapterId, chatId, threadId)
   const senderIdentity = {
@@ -718,6 +724,11 @@ export function parseLarkEventEnvelope(
       // (`reply_in_thread: true` lands the reply in that message's thread),
       // so carry the id of the message we just parsed.
       ...(threadId ? { threadRootMessageId: message.message_id } : {}),
+      // The bot answers in this message's thread; any message in a thread
+      // anchors a reply there, so a reply typed inside one stays in it.
+      ...(threadedPrivate
+        ? { [LARK_PRIVATE_THREAD_REPLY]: true, threadRootMessageId: message.message_id }
+        : {}),
     },
     conversationKey,
     conversationAddress: {
