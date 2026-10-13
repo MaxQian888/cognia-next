@@ -176,7 +176,10 @@ function larkOutboundError(err: unknown): OutboundError {
 const LARK_CONFIG_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
   type: "object",
-  required: ["appId", "appSecret", "verificationToken", "transport"],
+  // The verification token only checks inbound webhook calls.
+  required: ["appId", "appSecret", "transport"],
+  if: { properties: { transport: { const: "webhook" } } },
+  then: { required: ["verificationToken"] },
   properties: {
     appId: { type: "string", title: "App ID (cli_...)" },
     appSecret: { type: "string", title: "App Secret" },

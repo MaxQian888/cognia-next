@@ -301,6 +301,35 @@ describe("LarkConfigDialog — create new", () => {
     })
   })
 
+  it("creates a long connection without a verification token", async () => {
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_lc" } })
+    fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_lc" } })
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }))
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({ transportMode: "gateway" })
+      )
+    })
+    expect(mockToastError).not.toHaveBeenCalled()
+  })
+
+  it("still requires the verification token for webhook delivery", async () => {
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_wh" } })
+    fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_wh" } })
+    fireEvent.click(screen.getByRole("combobox"))
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /webhook/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("option", { name: /webhook/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }))
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("Verification Token"))
+    })
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+  })
+
   it("creates with webhook transport when Webhook selected", async () => {
     render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
 

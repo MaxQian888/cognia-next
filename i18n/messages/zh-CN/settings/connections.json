@@ -1021,6 +1021,7 @@
     "unknownApp": "unknown app",
     "unknownAppShort": "unknown",
     "verificationTokenHelp": "来自飞书应用 > 事件订阅 > Verification Token。",
+    "verificationTokenLongConnectionHelp": "仅 Webhook 投递需要。长连接通过 App ID 和 App Secret 认证。",
     "verificationTokenLabel": "Verification Token",
     "verificationTokenPlaceholder": "Verification token…",
     "verificationTokenRequired": "Verification Token 不能为空。",

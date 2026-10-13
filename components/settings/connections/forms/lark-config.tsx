@@ -157,7 +157,16 @@ interface LarkConfigDialogProps {
 // disabled in the Lark app). The user tokens below are OAuth output —
 // presence only, never a field.
 const LARK_CREDENTIALS = ["appId", "appSecret", "verificationToken", "encryptKey"] as const
-const LARK_REQUIRED_CREDENTIALS = ["appId", "appSecret", "verificationToken"] as const
+/**
+ * The verification token only checks inbound webhook calls
+ * (`crates/cognia-connectors/src/axum_app.rs`); a long connection is
+ * authenticated by the app credentials, so it needs none.
+ */
+export function larkRequiredCredentials(transport: TransportMode) {
+  return transport === "webhook"
+    ? (["appId", "appSecret", "verificationToken"] as const)
+    : (["appId", "appSecret"] as const)
+}
 const LARK_DERIVED_CREDENTIALS = ["user_token", "user_refresh_token"] as const
 
 /**
@@ -381,7 +390,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
       toast.error(t("displayNameRequired"))
       return
     }
-    const missing = credentials.missingRequired(LARK_REQUIRED_CREDENTIALS)
+    const missing = credentials.missingRequired(larkRequiredCredentials(transport))
     if (missing.length > 0) {
       toast.error(
         t(
@@ -526,6 +535,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         openConsoleUrl={openConsoleUrl}
         reach={reach}
         saving={saving}
+        webhook={transport === "webhook"}
       />
     ),
   }
@@ -830,6 +840,8 @@ interface IdentityFieldsProps {
   openConsoleUrl: string
   reach: ConnectorControlReach
   saving: boolean
+  /** Whether events arrive by webhook, the only path that checks the verification token. */
+  webhook: boolean
 }
 
 function IdentityFields(p: IdentityFieldsProps) {
@@ -902,8 +914,8 @@ function IdentityFields(p: IdentityFieldsProps) {
         <FieldRow
           id="lk-verification-token"
           label={t("verificationTokenLabel")}
-          required
-          help={t("verificationTokenHelp")}
+          required={p.webhook}
+          help={t(p.webhook ? "verificationTokenHelp" : "verificationTokenLongConnectionHelp")}
         >
           <CredentialInput
             id="lk-verification-token"

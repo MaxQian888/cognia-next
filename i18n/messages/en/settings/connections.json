@@ -1021,6 +1021,7 @@
     "unknownApp": "unknown app",
     "unknownAppShort": "unknown",
     "verificationTokenHelp": "From Lark App > Event subscriptions > Verification Token.",
+    "verificationTokenLongConnectionHelp": "Only needed for webhook delivery. A long connection is authenticated by the App ID and secret.",
     "verificationTokenLabel": "Verification Token",
     "verificationTokenPlaceholder": "Verification token…",
     "verificationTokenRequired": "Verification Token is required.",

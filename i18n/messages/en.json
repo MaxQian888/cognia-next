@@ -45299,6 +45299,7 @@
         "unknownAppShort": "unknown",
         "verificationTokenHelp": "From Lark App > Event subscriptions > Verification Token.",
         "verificationTokenLabel": "Verification Token",
+        "verificationTokenLongConnectionHelp": "Only needed for webhook delivery. A long connection is authenticated by the App ID and secret.",
         "verificationTokenPlaceholder": "Verification token…",
         "verificationTokenRequired": "Verification Token is required.",
         "webSessions": {
