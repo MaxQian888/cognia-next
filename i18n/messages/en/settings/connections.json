@@ -821,7 +821,8 @@
       "options": {
         "always": "Always respond to every message",
         "directOnly": "Direct messages only — never respond in groups",
-        "mentionOnly": "Mention only — require @bot in groups (default)"
+        "mentionActivates": "Mention once per thread — an @bot in a thread activates follow-ups there without another @",
+        "mentionEach": "Mention each time — every group message needs an @bot (default)"
       },
       "readiness": {
         "help": "Whether the adapter can verify every message delivery.",

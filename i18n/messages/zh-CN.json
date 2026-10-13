@@ -44920,7 +44920,8 @@
           "options": {
             "always": "始终响应每一条消息",
             "directOnly": "仅私聊 — 群聊永不回应",
-            "mentionOnly": "仅 @ 机器人 — 群聊中需要被 @（默认）"
+            "mentionActivates": "话题内 @ 一次 — 在话题中 @ 机器人后，后续消息无需再 @",
+            "mentionEach": "每次 @ — 群聊中每条消息都需要 @ 机器人（默认）"
           },
           "readiness": {
             "help": "适配器是否能验证每条消息的投递。",
