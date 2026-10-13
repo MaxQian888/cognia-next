@@ -28,6 +28,7 @@ export type DeviceSectionId =
   | "always-on"
   | "host-secrets"
   | "host-updates"
+  | "host-system"
   | "ssh"
   | "files"
   | "access"
@@ -79,6 +80,7 @@ const WIDE: Record<DeviceSectionId, boolean> = {
   "always-on": true,
   "host-secrets": true,
   "host-updates": true,
+  "host-system": false,
   ssh: true,
   files: true,
   access: true,
@@ -141,6 +143,7 @@ const ORDER: Record<DeviceKind, readonly DeviceSectionId[]> = {
     "routing",
     "shell-tiers",
     "identity",
+    "host-system",
     "presence",
     "event-plane",
     "capabilities",
@@ -184,6 +187,8 @@ function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
     // A6, A10), which reaches a store host and the connected `/pair` Host.
     case "host-secrets":
     case "host-updates":
+    // The Host's own system details travel the same channel.
+    case "host-system":
       return Boolean(managementRefOf(row))
     case "ssh":
     case "files":

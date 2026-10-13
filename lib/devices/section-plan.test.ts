@@ -119,8 +119,8 @@ describe("planDeviceSections", () => {
         },
       })
     )
-    // `presence` would sit alone above the wide capability matrix, so the
-    // placement card, the only remaining half, is pulled up beside it.
+    // The halves already pair (routing with identity, the Host's system with
+    // presence), so placement keeps its place after the wide cards.
     expect(ids(plan.sections)).toEqual([
       "always-on",
       "host-secrets",
@@ -128,10 +128,11 @@ describe("planDeviceSections", () => {
       "workspaces",
       "routing",
       "identity",
+      "host-system",
       "presence",
-      "placement",
       "capabilities",
       "dispatch",
+      "placement",
     ])
     expect(plan.notApplicable.map((entry) => entry.reasonKey)).toEqual([
       "access.notApplicable.remote-host",
@@ -149,6 +150,8 @@ describe("planDeviceSections", () => {
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-secrets")
     // Nor its updates, for the same reason.
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-updates")
+    // Nor read its system details.
+    expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-system")
     const routed = { ...pairHost, runtime: { ...pairHost.runtime, isRoutingTarget: true } }
     expect(ids(planDeviceSections(routed).sections)).toContain("routing")
   })
@@ -161,6 +164,7 @@ describe("planDeviceSections", () => {
     const sections = ids(planDeviceSections(routed).sections)
     expect(sections).toContain("host-secrets")
     expect(sections).toContain("host-updates")
+    expect(sections).toContain("host-system")
     // Still nothing to move: a client paired to it already runs everything there.
     expect(sections).not.toContain("always-on")
     // A store host is managed by its store id, routed or not.

@@ -684,6 +684,13 @@
       "saving": "Sealing…"
     }
   },
+  "hostSystem": {
+    "loading": "Reading the Host's system details…",
+    "memory": "{used} in use of {total}",
+    "refresh": "Read the system details again",
+    "title": "System",
+    "unreachable": "Could not read the Host's system details: {error}"
+  },
   "hostUpdates": {
     "title": "Host updates",
     "loading": "Reading the host's update state…",

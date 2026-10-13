@@ -74,24 +74,8 @@ export async function dispatchPerformanceHostCommand(
         // The Node-host half of the perf pair. Every desktop-only case above
         // throws "unsupported on Node/headless hosts"; this is the branch that
         // answers, and the import is lazy, so no renderer bundle evaluates it.
-        // static-export-exempt: Node-host only, lazy import
-        const os = await import("node:os")
-        return {
-          os: os.platform(),
-          osVersion: os.release(),
-          kernelVersion: os.version(),
-          arch: os.arch(),
-          family: "node",
-          hostname: os.hostname(),
-          cpu: os.cpus().at(0)?.model ?? null,
-          cpuCount: os.cpus().length,
-          totalMemoryBytes: os.totalmem(),
-          usedMemoryBytes: os.totalmem() - os.freemem(),
-          appVersion: process.env.npm_package_version ?? "unknown",
-          tauriVersion: "unsupported",
-          profile: process.env.NODE_ENV ?? "development",
-          enabledFeatures: ["node-headless", "performance.observe"],
-        }
+        const { nodeSystemDetails } = await import("./node-system-details")
+        return nodeSystemDetails()
       }
     }
   }

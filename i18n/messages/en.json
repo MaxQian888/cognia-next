@@ -14490,6 +14490,13 @@
       "title": "Secrets on this host",
       "tooOld": "{host} is too old to keep secrets for this device. Update it first."
     },
+    "hostSystem": {
+      "loading": "Reading the Host's system details…",
+      "memory": "{used} in use of {total}",
+      "refresh": "Read the system details again",
+      "title": "System",
+      "unreachable": "Could not read the Host's system details: {error}"
+    },
     "hostUnreachableBody": "This host could not be asked, so lifecycle state and the exact capabilities behind each grant come from the local mirror. A device suspended elsewhere may still read as active.",
     "hostUnreachableTitle": "Showing the local record",
     "hostUpdates": {

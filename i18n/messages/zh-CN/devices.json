@@ -684,6 +684,13 @@
       "saving": "正在密封保存…"
     }
   },
+  "hostSystem": {
+    "loading": "正在读取 Host 的系统信息…",
+    "memory": "已用 {used} / 共 {total}",
+    "refresh": "重新读取系统信息",
+    "title": "系统",
+    "unreachable": "无法读取 Host 的系统信息：{error}"
+  },
   "hostUpdates": {
     "title": "主机更新",
     "loading": "正在读取主机的更新状态…",

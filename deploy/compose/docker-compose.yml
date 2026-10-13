@@ -243,6 +243,13 @@ services:
       COGNIA_WEB_ORIGIN: ${COGNIA_WEB_ORIGIN:-}
     volumes:
       - cognia_data:/data
+      # The Host's distribution and machine name, for the system details its
+      # paired apps show (`lib/perf/node-system-details.ts`): a container only
+      # sees its own. Point these at /etc/os-release and /etc/hostname on a
+      # Linux host; the /dev/null default (an empty file) keeps the
+      # container's own where the Host has no such files (Docker Desktop).
+      - ${COGNIA_HOST_OS_RELEASE:-/dev/null}:/run/host/os-release:ro
+      - ${COGNIA_HOST_HOSTNAME_FILE:-/dev/null}:/run/host/hostname:ro
     ports:
       # Published for Capacitor direct-connect (fingerprint-pinned). Browsers go
       # through Caddy. 27890 tracks the companion DEFAULT_PORT — 7890 is the

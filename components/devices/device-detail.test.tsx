@@ -39,6 +39,9 @@ jest.mock("./sections/wan-section", () => ({ WanSection: marker("wan") }))
 jest.mock("./host-secrets/host-secrets-section", () => ({
   HostSecretsSection: marker("host-secrets"),
 }))
+jest.mock("./host-system/host-system-section", () => ({
+  HostSystemSection: marker("host-system"),
+}))
 jest.mock("./always-on/always-on-section", () => ({ AlwaysOnSection: marker("always-on") }))
 jest.mock("./sections/files-section", () => ({ FilesSection: marker("files") }))
 jest.mock("./ssh-host-controls", () => ({
