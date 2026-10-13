@@ -116,6 +116,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.bench.outputs.image }}-slim
+          cache-from: type=registry,ref=${{ steps.bench.outputs.cache }}-${{ github.run_id }}
 
       - name: Export Cargo timings
         uses: docker/build-push-action@v7
