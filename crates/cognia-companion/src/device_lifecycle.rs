@@ -348,6 +348,18 @@ pub fn sweep_revoked_device_secrets(tenant_id: &str) -> usize {
     swept
 }
 
+/// [`sweep_revoked_device_secrets`] against this host's own tenant.
+///
+/// Host secrets, and the devices that wrote them, belong to the host, so the
+/// device registry to consult is the bound tenant's whoever triggers the
+/// sweep. A caller's tenant is the account claim of its token, and the brain's
+/// service token carries its local account id (`headless/brain.rs`), not a
+/// tenant: a sweep run on that found none of the paired devices and forgot
+/// every secret a live phone had set, its connector credentials included.
+pub fn sweep_revoked_host_device_secrets() -> usize {
+    sweep_revoked_device_secrets(&super::host_identity::current_tenant_or_unbound())
+}
+
 fn clear_signaling_registration(device_id: &str) -> Result<(), LifecycleError> {
     let key_ref = match super::signaling::registration_store::installed() {
         Some(registrations) => registrations
@@ -438,15 +450,25 @@ mod tests {
     }
 
     fn store_with_owners(devices: &[&str]) -> Arc<SecurityStore> {
+        store_with_owners_in(TENANT, devices)
+    }
+
+    fn store_with_owners_in(tenant: &str, devices: &[&str]) -> Arc<SecurityStore> {
         let store = SecurityStore::in_memory().expect("in-memory store");
+        register_owners(&store, tenant, devices);
+        install_security_store(Some(store.clone()));
+        store
+    }
+
+    fn register_owners(store: &SecurityStore, tenant: &str, devices: &[&str]) {
         for device in devices {
-            let challenge = store.issue_challenge(TENANT, NOW, 600).expect("challenge");
+            let challenge = store.issue_challenge(tenant, NOW, 600).expect("challenge");
             let invitation = store
-                .create_owner_invitation(TENANT, "trust-root", NOW, 600)
+                .create_owner_invitation(tenant, "trust-root", NOW, 600)
                 .expect("invitation");
             store
                 .register_owner_device(
-                    TENANT,
+                    tenant,
                     &invitation,
                     &challenge.id,
                     &challenge.nonce,
@@ -458,8 +480,6 @@ mod tests {
                 )
                 .expect("register");
         }
-        install_security_store(Some(store.clone()));
-        store
     }
 
     fn lifecycle_context() -> LifecycleContext {
@@ -624,6 +644,46 @@ mod tests {
             .is_some());
     }
 
+
+    /// The brain sweeps when it loads provider keys, holding a token whose
+    /// tenant is its local account id. The host sweep consults the host's own
+    /// registry instead, so a live phone keeps the connector credentials it
+    /// set, while sweeping by that foreign id would have taken them.
+    #[test]
+    fn the_host_sweep_keeps_a_live_devices_secrets_whoever_asks() {
+        use cognia_secrets::host_secrets::{self, HostSecretKind, SecretWriter};
+        let _scope = store_scope();
+        // The host's tenant is the installed store's, so read it after.
+        let store = store_with_owners(&[]);
+        let host_tenant = crate::host_identity::current_tenant_or_unbound();
+        assert_ne!(host_tenant, "local_acct_a");
+        register_owners(&store, &host_tenant, &["owner-keep", "hsw-phone"]);
+        host_secrets::set(
+            HostSecretKind::Connector,
+            "hsw-bot:appSecret",
+            "s",
+            Some(SecretWriter {
+                device_id: "hsw-phone".to_string(),
+                label: None,
+            }),
+            1,
+        )
+        .unwrap();
+
+        sweep_revoked_host_device_secrets();
+        assert!(
+            host_secrets::get(HostSecretKind::Connector, "hsw-bot:appSecret")
+                .unwrap()
+                .is_some()
+        );
+
+        // What the brain's own tenant claim used to sweep against.
+        sweep_revoked_device_secrets("local_acct_a");
+        assert_eq!(
+            host_secrets::get(HostSecretKind::Connector, "hsw-bot:appSecret").unwrap(),
+            None
+        );
+    }
 
     /// just an in-process cache the canonical auth plane never reads.
     #[test]

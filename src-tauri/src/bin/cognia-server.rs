@@ -1155,9 +1155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // one made by this binary's `devices revoke-device` while the server was
     // down or beside it (ADR-0224 A6).
     if matches!(&cli.command, CliCommand::Serve { .. }) {
-        let swept = app_lib::companion_api::device_lifecycle::sweep_revoked_device_secrets(
-            &resolve_tenant(None),
-        );
+        let swept = app_lib::companion_api::device_lifecycle::sweep_revoked_host_device_secrets();
         if swept > 0 {
             log::info!("removed the host secrets of {swept} revoked device(s)");
         }

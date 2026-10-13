@@ -1192,9 +1192,8 @@ pub(super) async fn dispatch(
         "host_secret_list" => {
             // The store answers its whole (sorted) list; the page walks it.
             let page = page_request(&args)?;
-            let tenant = secret_tenant(tenant_id);
             let (swept, entries) = tokio::task::spawn_blocking(move || {
-                let swept = sweep_revoked_writers(&tenant);
+                let swept = sweep_revoked_writers();
                 cognia_secrets::host_secrets::list().map(|entries| (swept, entries))
             })
             .await
@@ -1243,10 +1242,9 @@ pub(super) async fn dispatch(
         }
 
         "host_provider_credentials_load" => {
-            let tenant = secret_tenant(tenant_id);
             let keys = tokio::task::spawn_blocking(move || {
                 // No announcement: the caller is the runtime that would reload.
-                sweep_revoked_writers(&tenant);
+                sweep_revoked_writers();
                 cognia_secrets::host_secrets::provider_keys()
             })
             .await
@@ -1986,17 +1984,13 @@ fn host_secret_target(
     }
 }
 
-fn secret_tenant(tenant_id: Option<&str>) -> String {
-    tenant_id
-        .map(str::to_string)
-        .unwrap_or_else(crate::companion_api::host_identity::current_tenant_or_unbound)
-}
-
 /// Drop the secrets of devices revoked behind this process's back (the
 /// `cognia-server devices` CLI beside a running server) before answering with
-/// what is stored. Blocking: run it off the async executor.
-fn sweep_revoked_writers(tenant: &str) -> usize {
-    crate::companion_api::device_lifecycle::sweep_revoked_device_secrets(tenant)
+/// what is stored. Always against the host's own device registry, never the
+/// caller's tenant claim (see `sweep_revoked_host_device_secrets`). Blocking:
+/// run it off the async executor.
+fn sweep_revoked_writers() -> usize {
+    crate::companion_api::device_lifecycle::sweep_revoked_host_device_secrets()
 }
 
 /// Tell the runtime its provider keys may have changed.
