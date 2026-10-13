@@ -397,6 +397,7 @@
     "reconnect": "Reconnect",
     "rename": "Rename",
     "renameLabel": "Host name",
+    "renameFailed": "Couldn't rename this host. Try again.",
     "repair": "Pair again",
     "save": "Save",
     "cancel": "Cancel",

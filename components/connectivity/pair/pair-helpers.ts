@@ -70,11 +70,6 @@ export function classifyPairNetworkError(
   return "unknown"
 }
 
-export function getDeviceLabel(): string {
-  if (typeof navigator === "undefined") return "unknown-device"
-  return navigator.userAgent || "unknown-device"
-}
-
 export function getDevicePlatform(): string {
   if (typeof window === "undefined") return "unknown"
   const cap = (window as { Capacitor?: { getPlatform?: () => string } }).Capacitor

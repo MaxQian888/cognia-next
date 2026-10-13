@@ -14409,6 +14409,7 @@
       "removeBody": "{label} 及其保存的凭据将被遗忘。需要重新配对才能再次连接。",
       "removeTitle": "移除这台主机？",
       "rename": "重命名",
+      "renameFailed": "未能重命名这台主机，请重试。",
       "renameLabel": "主机名称",
       "repair": "重新配对",
       "save": "保存",

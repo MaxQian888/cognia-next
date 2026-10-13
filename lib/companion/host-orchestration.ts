@@ -139,6 +139,68 @@ export function switchCompanionHost(
   return next
 }
 
+export interface RenameCompanionHostInput {
+  accountId: string
+  hostId: string
+  label: string
+}
+
+/** Longest Host name kept, in characters. */
+const HOST_LABEL_MAX_CHARS = 64
+
+/** Fired after a paired Host's name changes, so lists showing it re-read. */
+export const COMPANION_HOST_LABEL_EVENT = "cognia:companion-host-label-changed"
+
+/** Subscribe to Host name changes. Inert outside a browser. */
+export function subscribeCompanionHostLabels(onChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {}
+  window.addEventListener(COMPANION_HOST_LABEL_EVENT, onChange)
+  return () => window.removeEventListener(COMPANION_HOST_LABEL_EVENT, onChange)
+}
+
+/**
+ * Rename a paired Host. The label is the user's: a re-pair keeps it, and the
+ * name the Host reports only fills it in for a new pairing. Runs on the same
+ * queue as a switch, so it cannot interleave with one rewriting the record.
+ * Updates the runtime target too, which is what the Host picker reads.
+ */
+export function renameCompanionHost(
+  input: RenameCompanionHostInput,
+  dependencies?: Pick<HostOrchestrationDependencies, "book" | "registry">
+): Promise<CompanionHostRecord> {
+  const run = async () => {
+    const label = Array.from(input.label.replace(/\s+/g, " ").trim())
+      .slice(0, HOST_LABEL_MAX_CHARS)
+      .join("")
+      .trim()
+    if (!label) throw new Error("A Host name cannot be empty.")
+    const ownedRegistry = dependencies ? null : new RuntimeTargetRegistry()
+    const deps = dependencies ?? { book: companionCredentialBook(), registry: ownedRegistry! }
+    try {
+      const record = await deps.book.get({
+        accountNamespace: input.accountId,
+        hostId: input.hostId,
+      })
+      if (!record) throw new Error(`Companion Host ${input.hostId} is not paired.`)
+      if (record.label === label) return record
+      const saved = await deps.book.upsert({ ...record, label })
+      const targets = await deps.registry.listTargets(input.accountId)
+      if (targets.some((target) => target.id === saved.hostId)) {
+        await deps.registry.upsertCompanionTarget(runtimeTargetInput(saved))
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event(COMPANION_HOST_LABEL_EVENT))
+      }
+      return saved
+    } finally {
+      ownedRegistry?.close()
+    }
+  }
+  const next = transitionTail.then(run, run)
+  transitionTail = next.catch(() => undefined)
+  return next
+}
+
 /** Persist a newly registered device identity, then activate its stable Host. */
 export async function pairAndActivateCompanionHost(
   input: PairAndActivateCompanionHostInput,

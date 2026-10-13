@@ -90,7 +90,9 @@ export function companionHostDraftFromConfig(
     hostId: legacyHostId(config),
     accountNamespace,
     tenantId: config.tenantId ?? existing?.tenantId ?? config.accountId,
-    label: existing?.label ?? legacyLabel(config),
+    // A re-pair keeps the user's name for the Host; a new one takes the name
+    // the Host reported, and only then its address.
+    label: existing?.label ?? config.hostName ?? legacyLabel(config),
     endpoints: {
       baseUrl: config.baseUrl,
       lanBaseUrl: config.lanBaseUrl,

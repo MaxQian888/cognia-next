@@ -43,6 +43,7 @@ import { devicePresence } from "@/lib/companion/device-presence-registry"
 import { listExecutionWorkers } from "@/lib/fleet/execution-workers"
 import { listUsers } from "@/lib/db/identity"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
+import { subscribeCompanionHostLabels } from "@/lib/companion/host-orchestration"
 import { readHostPerson } from "@/lib/identity/host-person"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { detectLocalCapabilities } from "@/lib/platform/capabilities"
@@ -348,10 +349,13 @@ export function useDeviceRows(): UseDeviceRowsResult {
     }
     run()
     const timer = setInterval(run, DEVICE_POLL_INTERVAL_MS)
+    // A rename shows at once, not on the next poll.
+    const stopLabels = subscribeCompanionHostLabels(run)
     return () => {
       cancelled = true
       refreshGeneration.current += 1
       clearInterval(timer)
+      stopLabels()
     }
   }, [refresh])
 

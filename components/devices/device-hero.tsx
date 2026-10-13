@@ -27,12 +27,15 @@
 
 import { useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 
 import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { useInlineRename } from "@/hooks/ui/use-inline-rename"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
+import { renameCompanionHost } from "@/lib/companion/host-orchestration"
 import { buildDeviceStats } from "@/lib/devices/device-stats"
 import type { DeviceRow } from "@/lib/devices/types"
 import { cn } from "@/lib/utils"
@@ -112,10 +115,16 @@ export function DeviceHero({ row, actions, onRepairHost, children }: DeviceHeroP
   const relative = useDeviceRelativeTime()
   const updateHostLabel = useRemoteHostStore((state) => state.updateHostLabel)
 
-  // Only a store-managed host can be renamed from here; a `/pair` host's
-  // label belongs to its pairing record.
+  // A store-managed host is renamed in the remote-host store; a `/pair` host
+  // in its pairing record, which is where its label lives.
+  // A `/pair` row carries no store id: its Host id is the one in its ref.
+  const pairedHost = isPairedCompanionHost(row)
   const renamableHostId =
-    row.kind === "remote-host" && row.hostId && !isPairedCompanionHost(row) ? row.hostId : null
+    row.kind !== "remote-host"
+      ? null
+      : pairedHost
+        ? row.ref.slice("companion:".length) || null
+        : (row.hostId ?? null)
 
   const [renaming, setRenaming] = useState(false)
   // Switching devices mid-rename abandons it: the draft named the old device.
@@ -129,8 +138,17 @@ export function DeviceHero({ row, actions, onRepairHost, children }: DeviceHeroP
     active: renaming,
     initial: row.label,
     onCommit: (next) => {
-      if (renamableHostId) updateHostLabel(renamableHostId, next)
       setRenaming(false)
+      if (!renamableHostId) return
+      if (!pairedHost) {
+        updateHostLabel(renamableHostId, next)
+        return
+      }
+      void renameCompanionHost({
+        accountId: getActiveAccountId(),
+        hostId: renamableHostId,
+        label: next,
+      }).catch(() => toast.error(t("host.renameFailed")))
     },
     onCancel: () => setRenaming(false),
   })

@@ -262,6 +262,27 @@ describe("CredentialBookCompanionStorage", () => {
     expect((await book.get(key))?.label).toBe("My Studio")
   })
 
+  it("names a new pairing after the Host, and only then after its address", async () => {
+    const named = companionHostDraftFromConfig(
+      config({ baseUrl: "https://127.0.0.1:27890", hostName: "Cloud box" }),
+      "acct_a"
+    )
+    expect(named.label).toBe("Cloud box")
+    const unnamed = companionHostDraftFromConfig(
+      config({ baseUrl: "https://127.0.0.1:27890" }),
+      "acct_a"
+    )
+    expect(unnamed.label).toBe("127.0.0.1")
+
+    // A re-pair keeps whatever the user called it, even when the Host has a name.
+    const { book, storage } = harness()
+    await storage.save(config())
+    const key = { hostId: "dev-1", accountNamespace: "acct_a" }
+    await book.upsert({ ...(await book.get(key))!, label: "My Studio" })
+    await storage.save(config({ hostName: "Studio Mac" }))
+    expect((await book.get(key))?.label).toBe("My Studio")
+  })
+
   it("removes a newly-written private key when the public upsert fails", async () => {
     const stable = createCredentialBook({
       records: memoryRecords(),

@@ -23,7 +23,9 @@ jest.mock("@/lib/logto/capacitor-drivers", () => ({
 }))
 let capacitorShell = false
 jest.mock("@/lib/platform/detect", () => ({ isCapacitor: () => capacitorShell }))
-jest.mock("./pair-helpers", () => ({ getDeviceLabel: () => "Test phone" }))
+jest.mock("@/lib/device/device-identity", () => ({
+  getLocalDeviceConsoleLabel: async () => "Test phone",
+}))
 
 const register = registerCompanionDevice as jest.MockedFunction<typeof registerCompanionDevice>
 const activeSession = getActiveLogtoSession as jest.MockedFunction<typeof getActiveLogtoSession>

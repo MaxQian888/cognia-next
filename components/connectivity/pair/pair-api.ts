@@ -1,6 +1,5 @@
 "use client"
 
-import { getDeviceLabel } from "./pair-helpers"
 import { decodePairPayload, type DecodeOutcome, type PairPayload } from "@/lib/qr/pair-payload"
 import {
   authConfigIssuerKind,
@@ -22,6 +21,7 @@ import {
   type OidcIssuerKind,
 } from "@/lib/logto/client"
 import { isCapacitor } from "@/lib/platform/detect"
+import { getLocalDeviceConsoleLabel } from "@/lib/device/device-identity"
 
 // The direct-first path choice is shared with `cognia-agent host login`.
 export { DIRECT_PAIR_PROBE_TIMEOUT_MS, type PairPath } from "@/lib/companion/pair-path"
@@ -91,7 +91,9 @@ export async function registerDecodedPairPayload(
         invitation: payload.invitation,
         hostId: payload.hostId,
         tenantId: payload.tenantId,
-        displayName: getDeviceLabel(),
+        // What the Host owner sees in their device list: the phone's model,
+        // or a generic shell name, never the raw user agent.
+        displayName: await getLocalDeviceConsoleLabel(),
         serverVersion: payload.serverVersion,
         serverFingerprint: payload.fingerprint || undefined,
         ...(oidc ? { oidc } : {}),

@@ -51,6 +51,11 @@ export interface CompanionConfig {
   /** Server semver, captured at pair time. Diagnostics only. */
   serverVersion: string
   /**
+   * The name the Host reported for itself at pair time (`hostName`, auth
+   * config version 5). Names a new pairing; the stored label is the user's.
+   */
+  hostName?: string
+  /**
    * SHA-256 fingerprint (lower-case hex) of the desktop server's TLS
    * SubjectPublicKeyInfo at pair time. The transport layer pins this and
    * refuses to talk to a peer whose presented cert doesn't match. Wave

@@ -24,6 +24,13 @@ const mockHostState = () => ({
   removeHost,
   updateHostLabel,
 })
+const renameCompanionHost = jest.fn()
+jest.mock("@/lib/companion/host-orchestration", () => ({
+  renameCompanionHost: (...args: unknown[]) => renameCompanionHost(...args),
+}))
+jest.mock("@/lib/accounts/active-account-id", () => ({ getActiveAccountId: () => "acct_x" }))
+const toastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => toastError(...args) } }))
 jest.mock("@/stores/remote-host/remote-host-store", () => ({
   useRemoteHostStore: Object.assign(
     (selector: (state: unknown) => unknown) => selector(mockHostState()),
@@ -228,5 +235,39 @@ describe("DeviceHero — renaming a host in its own title", () => {
     const user = await startRename()
     await user.type(screen.getByTestId("host-rename-input"), "x{Escape}")
     expect(updateHostLabel).not.toHaveBeenCalled()
+  })
+})
+
+describe("DeviceHero — renaming a paired Host", () => {
+  // A `/pair` Host is named in its pairing record, not the remote-host store.
+  const paired = () => row({ ref: "companion:h9", kind: "remote-host", label: "127.0.0.1" })
+
+  async function renameTo(label: string) {
+    const user = userEvent.setup()
+    render(<DeviceHero row={paired()} />)
+    await user.click(screen.getByTestId("host-rename"))
+    const input = screen.getByTestId("host-rename-input")
+    await user.clear(input)
+    await user.type(input, label)
+    await user.click(screen.getByTestId("host-rename-save"))
+  }
+
+  it("renames it in the pairing record", async () => {
+    renameCompanionHost.mockResolvedValue({})
+    await renameTo("Cloud box")
+    expect(renameCompanionHost).toHaveBeenCalledWith({
+      accountId: "acct_x",
+      hostId: "h9",
+      label: "Cloud box",
+    })
+    expect(updateHostLabel).not.toHaveBeenCalled()
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("says so when the rename fails", async () => {
+    renameCompanionHost.mockRejectedValue(new Error("locked"))
+    await renameTo("Cloud box")
+    await screen.findByRole("heading", { name: "127.0.0.1" })
+    expect(toastError).toHaveBeenCalledWith("Couldn't rename this host. Try again.")
   })
 })

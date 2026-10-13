@@ -1,7 +1,12 @@
+/** @jest-environment jsdom */
+
 import type { CompanionCredentialBook, CompanionHostRecord } from "./credential-book"
 import type { RuntimeTargetRecord } from "@/lib/runtime/target-registry"
 import {
+  COMPANION_HOST_LABEL_EVENT,
   pairAndActivateCompanionHost,
+  renameCompanionHost,
+  subscribeCompanionHostLabels,
   switchCompanionHost,
   type HostOrchestrationDependencies,
 } from "./host-orchestration"
@@ -443,4 +448,79 @@ it("restores the previous runtime target when a re-pair of the same Host fails",
       serverVersion: "1.0.0",
     })
   )
+})
+
+describe("renameCompanionHost", () => {
+  function renameHarness(options: { withTarget?: boolean } = {}) {
+    const records = new Map([["host-a", host("host-a")]])
+    const upsert = jest.fn(async (draft: CompanionHostRecord) => {
+      const saved = { ...draft, updatedAt: 2 }
+      records.set(draft.hostId, saved)
+      return saved
+    })
+    const book = {
+      get: async ({ hostId }: { hostId: string }) => records.get(hostId) ?? null,
+      upsert,
+    } as unknown as CompanionCredentialBook
+    const upsertCompanionTarget = jest.fn(async (input: { id: string }) => target(input.id))
+    const registry = {
+      listTargets: async () => (options.withTarget === false ? [] : [target("host-a")]),
+      upsertCompanionTarget,
+    } as unknown as HostOrchestrationDependencies["registry"]
+    return { deps: { book, registry }, records, upsert, upsertCompanionTarget }
+  }
+
+  it("files the new name in the pairing record and the Host picker's target, and says so", async () => {
+    const { deps, records, upsertCompanionTarget } = renameHarness()
+    const heard = jest.fn()
+    const stop = subscribeCompanionHostLabels(heard)
+    const saved = await renameCompanionHost(
+      { accountId, hostId: "host-a", label: "  Cloud \n box  " },
+      deps
+    )
+    stop()
+    expect(saved.label).toBe("Cloud box")
+    expect(records.get("host-a")?.label).toBe("Cloud box")
+    // Everything else about the pairing is untouched.
+    expect(records.get("host-a")).toMatchObject({
+      deviceId: "device-host-a",
+      tlsPin: "pin-host-a",
+      endpoints: { baseUrl: "https://host-a.local:7890" },
+    })
+    expect(upsertCompanionTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "host-a", label: "Cloud box" })
+    )
+    expect(heard).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not create a runtime target the Host never had", async () => {
+    const { deps, upsertCompanionTarget } = renameHarness({ withTarget: false })
+    await renameCompanionHost({ accountId, hostId: "host-a", label: "Cloud box" }, deps)
+    expect(upsertCompanionTarget).not.toHaveBeenCalled()
+  })
+
+  it("writes nothing for the same name, an empty one, or a Host that is not paired", async () => {
+    const { deps, upsert } = renameHarness()
+    const heard = jest.fn()
+    window.addEventListener(COMPANION_HOST_LABEL_EVENT, heard)
+    await renameCompanionHost({ accountId, hostId: "host-a", label: "Host host-a" }, deps)
+    await expect(
+      renameCompanionHost({ accountId, hostId: "host-a", label: " \t " }, deps)
+    ).rejects.toThrow("cannot be empty")
+    await expect(
+      renameCompanionHost({ accountId, hostId: "host-z", label: "Cloud box" }, deps)
+    ).rejects.toThrow("not paired")
+    window.removeEventListener(COMPANION_HOST_LABEL_EVENT, heard)
+    expect(upsert).not.toHaveBeenCalled()
+    expect(heard).not.toHaveBeenCalled()
+  })
+
+  it("keeps at most 64 characters", async () => {
+    const { deps } = renameHarness()
+    const saved = await renameCompanionHost(
+      { accountId, hostId: "host-a", label: "名".repeat(80) },
+      deps
+    )
+    expect(Array.from(saved.label)).toHaveLength(64)
+  })
 })

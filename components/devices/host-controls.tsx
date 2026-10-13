@@ -124,6 +124,11 @@ export function HostControls({ row, onRepair, onRename }: HostControlsProps) {
         <Button size="sm" variant="outline" asChild>
           <Link href="/pair">{t("host.managePairing")}</Link>
         </Button>
+        {onRename ? (
+          <Button size="sm" variant="ghost" onClick={onRename} data-testid="host-rename">
+            {t("host.rename")}
+          </Button>
+        ) : null}
       </div>
     )
   }

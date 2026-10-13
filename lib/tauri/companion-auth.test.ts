@@ -13,6 +13,7 @@ import {
   parseCompanionAuthConfig,
   registerCompanionDevice,
   registerCompanionWorker,
+  reportedHostName,
   type AuthFetcher,
 } from "./companion-auth"
 import { __resetHostContractsForTests, hostContractVerdict } from "./companion-contract"
@@ -204,6 +205,8 @@ describe("companion auth lifecycle", () => {
           deploymentMode: "single-user",
           hostId,
           tenantId,
+          // Version 5: the name the pairing is filed under, cleaned.
+          hostName: "  Cloud\n\tbox ",
           signaling: {
             url: "wss://host.test/signaling",
             iceServers: [{ urls: ["stun:stun.example:3478"] }],
@@ -279,6 +282,7 @@ describe("companion auth lifecycle", () => {
       signalingUrl: "wss://host.test/signaling",
       iceServers: [{ urls: ["stun:stun.example:3478"] }],
       signalingPrivateKeyJwk: expect.objectContaining({ d: expect.any(String) }),
+      hostName: "Cloud box",
     })
     expect(fetcher).toHaveBeenCalledTimes(5)
     // The token is the device handshake: the Host named this client's
@@ -639,6 +643,17 @@ describe("auth config version 2 (additive discovery)", () => {
     expect(authConfigCollaborationServiceUrl(config)).toBeNull()
     // Every deployment before version 4 is Logto.
     expect(authConfigIssuerKind(config)).toBe("logto")
+  })
+})
+
+describe("auth config version 5 (host name)", () => {
+  it("keeps one short printable line of what the Host calls itself", () => {
+    expect(reportedHostName("Studio Mac")).toBe("Studio Mac")
+    expect(reportedHostName(" Max's\u0007\nStudio\t ")).toBe("Max's Studio")
+    expect(reportedHostName("名".repeat(80))).toBe("名".repeat(64))
+    for (const absent of [undefined, null, 42, "", " \n\u0000 "]) {
+      expect(reportedHostName(absent)).toBeUndefined()
+    }
   })
 })
 

@@ -397,6 +397,7 @@
     "reconnect": "重新连接",
     "rename": "重命名",
     "renameLabel": "主机名称",
+    "renameFailed": "未能重命名这台主机，请重试。",
     "repair": "重新配对",
     "save": "保存",
     "cancel": "取消",

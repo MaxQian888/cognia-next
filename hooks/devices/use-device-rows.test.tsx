@@ -13,6 +13,7 @@ import { resetWanWakeOverridesForTests, wakeDeviceForWan } from "@/lib/signaling
 
 import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 
+import { COMPANION_HOST_LABEL_EVENT } from "@/lib/companion/host-orchestration"
 import { useDeviceRows } from "./use-device-rows"
 
 const pairedRows: unknown[] = []
@@ -494,6 +495,18 @@ describe("browser Companion Host inventory", () => {
       "absent"
     )
     expect(result.current.rows[0].runtime.isRoutingTarget).toBe(false)
+  })
+
+  it("shows a paired Host's new name as soon as it is renamed", async () => {
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.rows).toHaveLength(2))
+    companionHost = { ...(companionHost as object), label: "Cloud box" }
+    act(() => {
+      window.dispatchEvent(new Event(COMPANION_HOST_LABEL_EVENT))
+    })
+    await waitFor(() =>
+      expect(result.current.rows.find((row) => row.kind === "remote-host")?.label).toBe("Cloud box")
+    )
   })
 
   it("keeps a failed report unknown and exposes the failure", async () => {

@@ -48,6 +48,11 @@ export interface CompanionAuthConfig {
     url: string
     iceServers: RTCIceServer[]
   }
+  /**
+   * Version 5. The Host's own name (operator-set, else its machine name), so
+   * a client need not name it by an address it may not even dial directly.
+   */
+  hostName?: string
   /** Version 2. Present when the deployment enrols accounts on a collaboration server. */
   collaboration?: {
     serviceUrl: string
@@ -277,8 +282,25 @@ export async function registerCompanionDevice(
     signalingUrl: authConfig.signaling.url,
     iceServers: authConfig.signaling.iceServers,
   }
+  const hostName = reportedHostName(authConfig.hostName)
+  if (hostName) config.hostName = hostName
   await refreshAccessToken(config, fetcher)
   return config
+}
+
+/** Longest Host name kept, in characters. The Host already caps it; a peer might not. */
+const HOST_NAME_MAX_CHARS = 64
+
+/**
+ * The Host's self-reported name as one short printable line, or undefined.
+ * It is a label the Host chose, so it is cleaned the way any remote text
+ * shown in the device list is: no control characters, no line breaks.
+ */
+export function reportedHostName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const line = value.replace(/[\u0000-\u001f\u007f\s]+/g, " ").trim()
+  const name = Array.from(line).slice(0, HOST_NAME_MAX_CHARS).join("").trim()
+  return name || undefined
 }
 
 /** Register a least-privilege execution worker from a one-time Owner-issued enrollment. */
