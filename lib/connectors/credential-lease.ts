@@ -45,8 +45,15 @@ export type CredentialLeaseState =
   /** The host declined, or could not be asked. The call will be refused. */
   | "unavailable"
 
-/** Operations one credential lease covers. */
-export const CREDENTIAL_LEASE_OPERATIONS: readonly string[] = DEVICE_PLANE_CONNECTOR_COMMANDS
+/**
+ * Operations one credential lease covers: the keychain arms, and the Host-side
+ * write of the instance those credentials belong to (ADR-0224), so saving a
+ * connection from a phone asks for consent once, not twice.
+ */
+export const CREDENTIAL_LEASE_OPERATIONS: readonly string[] = Object.freeze([
+  ...DEVICE_PLANE_CONNECTOR_COMMANDS,
+  "adapter_instance_mutate",
+])
 
 /** Renew this far before expiry so a lease cannot lapse mid-form. */
 const EXPIRY_SKEW_MS = 30_000

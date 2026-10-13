@@ -14,6 +14,11 @@ import {
   deleteAdapterInstance,
   setAdapterInstanceOwner,
 } from "./adapter-instances"
+import {
+  completeAdapterInstanceCreate,
+  setAdapterInstanceRemoteWriter,
+  type AdapterInstanceRemoteWriter,
+} from "./adapter-instance-remote-writer"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 
@@ -232,5 +237,98 @@ describe("adapter-instances", () => {
       const row = await createAdapterInstance({ ...baseInput(), owner: moved } as never)
       expect("owner" in row).toBe(false)
     })
+  })
+})
+
+describe("on a shell whose connections live on a Host (ADR-0224)", () => {
+  function hostWriter(applies = true) {
+    const writer = {
+      applies: jest.fn(() => applies),
+      create: jest.fn(async (row: { id: string }) => ({
+        id: row.id,
+        enabled: false,
+        updatedAt: 7,
+      })),
+      configure: jest.fn(async () => undefined),
+      remove: jest.fn(async () => undefined),
+      completeCreate: jest.fn(async () => undefined),
+    }
+    const restore = setAdapterInstanceRemoteWriter(writer as unknown as AdapterInstanceRemoteWriter)
+    return { writer, restore }
+  }
+
+  it("creates on the Host and mirrors what the Host stored", async () => {
+    const { writer, restore } = hostWriter()
+    try {
+      const row = await createAdapterInstance(baseInput())
+      expect(writer.create).toHaveBeenCalledWith(
+        expect.objectContaining({ id: row.id, type: "telegram" })
+      )
+      expect(row).toMatchObject({ enabled: false, updatedAt: 7, displayName: "My Bot" })
+      expect(await getAdapterInstance(row.id)).toEqual(row)
+
+      await completeAdapterInstanceCreate(row.id)
+      expect(writer.completeCreate).toHaveBeenCalledWith(row.id)
+    } finally {
+      restore()
+    }
+  })
+
+  it("edits on the Host and keeps the mirror in step", async () => {
+    const local = await createAdapterInstance(baseInput())
+    const { writer, restore } = hostWriter()
+    try {
+      await updateAdapterInstance(local.id, { displayName: "Renamed" })
+      expect(writer.configure).toHaveBeenLastCalledWith(local.id, { displayName: "Renamed" })
+
+      await updateAdapterConfigSection(local.id, "behavior", { muted: true })
+      expect(writer.configure).toHaveBeenLastCalledWith(local.id, { muted: true })
+      // The Host keeps the audit trail; the mirror writes none.
+      expect(await getDb().connectorAudit.where("adapterId").equals(local.id).count()).toBe(0)
+
+      await patchAdapterInstanceSettings(local.id, { extra: 1 })
+      expect(writer.configure).toHaveBeenLastCalledWith(local.id, {
+        settings: { token: "redacted", extra: 1 },
+      })
+      expect(await getAdapterInstance(local.id)).toMatchObject({
+        displayName: "Renamed",
+        muted: true,
+        settings: { token: "redacted", extra: 1 },
+      })
+
+      await deleteAdapterInstance(local.id)
+      expect(writer.remove).toHaveBeenCalledWith(local.id)
+      expect(await getAdapterInstance(local.id)).toBeUndefined()
+    } finally {
+      restore()
+    }
+  })
+
+  it("leaves a write local when the writer does not apply", async () => {
+    const { writer, restore } = hostWriter(false)
+    try {
+      const row = await createAdapterInstance(baseInput())
+      await updateAdapterInstance(row.id, { displayName: "Local" })
+      await completeAdapterInstanceCreate(row.id)
+      await deleteAdapterInstance(row.id)
+      expect(writer.create).not.toHaveBeenCalled()
+      expect(writer.configure).not.toHaveBeenCalled()
+      expect(writer.completeCreate).not.toHaveBeenCalled()
+      expect(writer.remove).not.toHaveBeenCalled()
+      expect(row.enabled).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it("does not write locally when the Host refuses", async () => {
+    const { writer, restore } = hostWriter()
+    writer.create.mockRejectedValueOnce(new Error("refused"))
+    try {
+      await expect(createAdapterInstance(baseInput())).rejects.toThrow("refused")
+      expect(await listAdapterInstances()).toHaveLength(0)
+    } finally {
+      restore()
+    }
   })
 })

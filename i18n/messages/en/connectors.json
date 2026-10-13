@@ -62,12 +62,12 @@
   "control": {
     "block": {
       "no-runtime": "This browser is not paired with anything that runs bots, so there is no connector to configure.",
-      "runs-on-host": "This bot runs on the host you paired with. These controls talk to that runtime directly, and a browser has no route to it — replying, approving drafts and per-conversation settings do reach it, and keep working here.",
+      "runs-on-host": "This bot runs on the host you paired with. These controls talk to that runtime directly, and a browser has no route to it — setting up or editing a connection, replying, approving drafts and per-conversation settings do reach it, and keep working here.",
       "needs-desktop-shell": "This one needs the desktop app itself, not just a running bot."
     },
     "nextStep": {
       "no-runtime": "Open Cognia on your desktop, or pair this browser with a host that is running one.",
-      "runs-on-host": "Open Cognia on the host running this bot to change it.",
+      "runs-on-host": "Open Cognia on the host running this bot for these controls.",
       "needs-desktop-shell": "Open Cognia on your desktop to use it."
     }
   },

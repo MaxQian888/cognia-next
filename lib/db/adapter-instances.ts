@@ -11,6 +11,7 @@ import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { getDb } from "./schema"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import { assertRunsHere, isOwnedElsewhere } from "@/lib/placement/ownership"
+import { hostAdapterInstanceWriter as hostWriter } from "./adapter-instance-remote-writer"
 import type { ItemOwner } from "@/types/placement/item-owner"
 
 function newId(): string {
@@ -49,6 +50,12 @@ export async function createAdapterInstance(
     mediaModelPolicy: input.mediaModelPolicy ?? "local_extract_only",
     createdAt: now,
     updatedAt: now,
+  }
+  const host = hostWriter()
+  if (host) {
+    const stored: AdapterInstanceRow = { ...row, ...(await host.create(row)) }
+    await getDb().adapterInstances.put(stored)
+    return stored
   }
   await getDb().adapterInstances.add(row)
   return row
@@ -162,6 +169,12 @@ export async function updateAdapterInstance(
   patch: AdapterInstancePatch
 ): Promise<void> {
   const db = getDb()
+  const host = hostWriter()
+  if (host) {
+    await host.configure(id, patch)
+    await db.adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
+    return
+  }
   await db.transaction("rw", db.adapterInstances, async () => {
     await assertInstanceRunsHere(id)
     await db.adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
@@ -240,6 +253,13 @@ export async function updateAdapterConfigSection(
   const db = getDb()
   const changedKeys = Object.keys(patch).sort()
   if (changedKeys.length === 0) return
+  const host = hostWriter()
+  if (host) {
+    // The Host writes the audit breadcrumb with the change it applies.
+    await host.configure(id, patch)
+    await db.adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
+    return
+  }
   await db.transaction("rw", db.adapterInstances, db.connectorAudit, async () => {
     await assertInstanceRunsHere(id)
     const updated = await db.adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
@@ -266,6 +286,17 @@ export async function patchAdapterInstanceSettings(
   patch: Record<string, unknown>
 ): Promise<void> {
   const db = getDb()
+  const host = hostWriter()
+  if (host) {
+    // Merged against the mirror, the freshest copy this shell has; the Host
+    // replaces `settings` whole.
+    const current = await db.adapterInstances.get(id)
+    if (!current) return
+    const settings = { ...(current.settings ?? {}), ...patch }
+    await host.configure(id, { settings })
+    await db.adapterInstances.update(id, { settings, updatedAt: Date.now() })
+    return
+  }
   await db.transaction("rw", db.adapterInstances, async () => {
     const current = await db.adapterInstances.get(id)
     if (!current) return
@@ -279,6 +310,14 @@ export async function patchAdapterInstanceSettings(
 
 export async function deleteAdapterInstance(id: string): Promise<void> {
   const db = getDb()
+  const host = hostWriter()
+  if (host) {
+    // The Host removes the row, its secrets and its tombstone; the mirror only
+    // drops its copy.
+    await host.remove(id)
+    await db.adapterInstances.delete(id)
+    return
+  }
   await db.transaction("rw", db.adapterInstances, db.syncTombstones, async () => {
     await db.adapterInstances.delete(id)
     // Paired clients mirror `adapterInstances` and hear about a removed

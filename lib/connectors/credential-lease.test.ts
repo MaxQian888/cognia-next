@@ -68,8 +68,10 @@ describe("ensureCredentialLease", () => {
       "connectors_keyring_get",
       "connectors_keyring_delete",
       "connectors_keyring_list",
+      // The instance write a phone's connection form makes on the Host.
+      "adapter_instance_mutate",
     ])
-    expect(CREDENTIAL_LEASE_OPERATIONS).toHaveLength(4)
+    expect(CREDENTIAL_LEASE_OPERATIONS).toHaveLength(5)
   })
 
   it("reuses a live lease instead of prompting again", async () => {

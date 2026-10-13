@@ -56,6 +56,7 @@ import {
   credentialConsentCode,
   ensureCredentialLease,
 } from "@/lib/connectors/credential-lease"
+import { completeAdapterInstanceCreate } from "@/lib/db/adapter-instance-remote-writer"
 import { subscribeToHostConsent } from "@/lib/host-consent/client"
 import { useCapability } from "@/hooks/use-host-profile"
 // Type-only: the hook produces exactly the states the field renders, and
@@ -367,6 +368,8 @@ export function useAdapterCredentials({
         if (decision === "set") await connectorsKeyringSet(targetId, name, typed[name].trim())
         else if (decision === "clear") await connectorsKeyringDelete(targetId, name)
       }
+      // A connection just created on a Host waits, stopped, for these.
+      await completeAdapterInstanceCreate(targetId)
     },
     [accountList, intentFor, typed]
   )

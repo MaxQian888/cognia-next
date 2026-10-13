@@ -20,6 +20,9 @@ jest.mock("./remote-host-liveness-initializer", () => ({
 jest.mock("./host-update-channel-initializer", () => ({
   HostUpdateChannelInitializer: () => <span data-boot="host-update-channel" />,
 }))
+jest.mock("./connector-host-writes-initializer", () => ({
+  ConnectorHostWritesInitializer: () => <span data-boot="connector-host-writes" />,
+}))
 jest.mock("./remote-host-keys-initializer", () => ({
   RemoteHostKeysInitializer: () => <span data-boot="remote-host-keys" />,
 }))
@@ -74,6 +77,7 @@ describe("DeferredBootInitializersImpl", () => {
       "remote-host-liveness",
       "host-update-channel",
       "remote-host-keys",
+      "connector-host-writes",
       "project-repository",
       "gateway",
       "code-adoption",

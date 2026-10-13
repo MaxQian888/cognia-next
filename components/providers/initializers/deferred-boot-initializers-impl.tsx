@@ -15,6 +15,7 @@ import { HostUpdateChannelInitializer } from "./host-update-channel-initializer"
 import { ProjectRepositoryInitializer } from "./project-repository-initializer"
 import { RemoteHostLivenessInitializer } from "./remote-host-liveness-initializer"
 import { RemoteHostKeysInitializer } from "./remote-host-keys-initializer"
+import { ConnectorHostWritesInitializer } from "./connector-host-writes-initializer"
 import { UpdateCenterInitializer } from "./update-center-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
@@ -94,6 +95,11 @@ export function DeferredBootInitializersImpl() {
         (ADR-0224 A6). Every shell; reads nothing while no such Host is driven.
       */}
       <RemoteHostKeysInitializer />
+      {/*
+        Sends a phone's or paired browser's connection writes to the Host it
+        drives, where the connector runtime is (ADR-0224). Order-independent.
+      */}
+      <ConnectorHostWritesInitializer />
       {/*
         Records each workspace's repository from its checkout, so an
         always-on host without the folder can clone it (ADR-0224 A11).
