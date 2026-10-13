@@ -14,6 +14,10 @@ import { getModelDisplayName } from "@/lib/ai/icons"
 import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
 import { customProviderModelIds } from "@cognia/provider-routing/model-option-source"
 import { isBuiltInProviderId } from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  remoteHostKeyedProviders,
+  withRemoteHostKeyedProviders,
+} from "@/lib/host-secrets/remote-host-keys"
 
 /**
  * The synced OpenRouter live-models catalog (Dexie v93), as the synchronous
@@ -329,13 +333,19 @@ export function resolveDefaultModelForProvider(
  * the sidecar runtime authenticates via API key or subscription OAuth
  * (ADR-0025) and needs no provider config, so subscription-reuse users must
  * still get a model list. An explicit `enabled: false` entry opts out.
+ *
+ * A provider the driven `/pair` Host holds a sealed key for (`hostKeyed`,
+ * ADR-0224 A6) is listed too when this device has no key of its own for it:
+ * the Host fills its key into the turn.
  */
 export function collectModelOptions(
   providerSettings: Record<string, UserProviderSettings> | undefined,
-  customProviders: CustomProviderSettings[] | undefined
+  customProviders: CustomProviderSettings[] | undefined,
+  hostKeyed: ReadonlySet<string> = remoteHostKeyedProviders()
 ): ModelOption[] {
   const catalog = getAllProviders()
   const out: ModelOption[] = []
+  providerSettings = withRemoteHostKeyedProviders(providerSettings, hostKeyed)
   const entries = Object.entries(providerSettings ?? {})
   if (!entries.some(([id]) => id === "anthropic")) {
     entries.unshift(["anthropic", { providerId: "anthropic" } as UserProviderSettings])

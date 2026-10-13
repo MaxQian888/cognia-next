@@ -20,6 +20,7 @@ import {
   resolveModelMeta,
 } from "@/lib/ai/model-options"
 import { getModelContextWindow } from "./usage"
+import { hasOwnKey, isRemoteHostKeyedProvider } from "@/lib/host-secrets/remote-host-keys"
 
 export interface ProviderAttemptOptions {
   providerCredentials?: SendOptions["providerCredentials"]
@@ -223,6 +224,9 @@ export async function resolveSubscriptionProviderCredential(
   }
 }
 
+/** Stands in for a key the driven Host holds; never leaves this module. */
+const HOST_KEY_PLACEHOLDER = "cognia-host-sealed-key"
+
 /**
  * Resolve credentials and protocol metadata for one concrete provider
  * attempt. The result is intentionally separate from RoutingPlan so secrets
@@ -245,9 +249,29 @@ export async function resolveProviderAttemptOptions(
   const hasApiSubscription =
     !!subscriptionDefinition && subscriptionDefinition.authMode !== "anthropic-oauth"
   const preferSubscriptionAccount = preferSelectedAccount && hasApiSubscription
+  // ADR-0224 A6: the `/pair` Host this device drives holds a key for this
+  // built-in provider and this device has none. The turn names the provider
+  // and its endpoint; the Host fills the key (`fill_host_provider_key`), which
+  // never comes here. The placeholder only lets the resolver answer with the
+  // endpoint, and is removed below before anything is sent.
+  const hostKeyed =
+    isRemoteHostKeyedProvider(providerId) &&
+    !hasOwnKey(appSettings.providerSettings?.[providerId]) &&
+    !appSettings.customProviders?.some((provider) => provider.id === providerId) &&
+    !preferSubscriptionAccount
+  const resolvableProviderSettings = hostKeyed
+    ? {
+        ...appSettings.providerSettings,
+        [providerId]: {
+          ...(appSettings.providerSettings?.[providerId] ?? { providerId }),
+          enabled: true,
+          apiKey: HOST_KEY_PLACEHOLDER,
+        },
+      }
+    : appSettings.providerSettings
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: appSettings.defaultProvider,
-    providerSettings: appSettings.providerSettings as
+    providerSettings: resolvableProviderSettings as
       Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry> | undefined,
     customProviders: appSettings.customProviders as
       import("@/lib/ai/provider-consumption").RichCustomProviderEntry[] | undefined,
@@ -302,6 +326,18 @@ export async function resolveProviderAttemptOptions(
     // resolver already folded them into `resolution.headers`. Vault-issued
     // relay headers (Codex) are merged on top below and win on collision.
     if (resolution.headers) providerCredentials.headers = { ...resolution.headers }
+
+    if (hostKeyed) {
+      delete providerCredentials.apiKey
+      return {
+        providerCredentials,
+        protocolAdapterSpec: await resolveProtocolAdapterSpec(
+          providerCredentials.protocol ?? resolution.protocol
+        ),
+        ...(modelParams ? { modelParams } : {}),
+        ...(resolution.model ? { defaultModel: resolution.model } : {}),
+      }
+    }
 
     if (providerConfig?.apiKeyRotationEnabled && !preferSubscriptionAccount) {
       const selection = selectApiKey(providerConfig)

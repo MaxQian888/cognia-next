@@ -19,6 +19,7 @@ import {
 } from "@/lib/remote-host/management-channel"
 import { issueHostAdminLease, type HostAdminLease } from "@/lib/tauri/admin-lease"
 import { collectPages, type Page } from "@/lib/tauri/companion-paging"
+import { refreshRemoteHostKeys } from "@/lib/host-secrets/remote-host-keys"
 
 export type HostSecretKind = "provider" | "git" | "connector"
 
@@ -131,7 +132,11 @@ export function setHostSecret(
     hostId,
     (lease) => lease.transport.call<{ kind: "provider" | "git"; name: string }>(command, args),
     deps.channel
-  )
+  ).then((stored) => {
+    // The picker lists what the driven Host keys; it changed.
+    if (write.kind === "provider") refreshRemoteHostKeys()
+    return stored
+  })
 }
 
 export function deleteHostSecret(
@@ -151,5 +156,7 @@ export function deleteHostSecret(
     hostId,
     (lease) => lease.transport.call<void>(command, args),
     deps.channel
-  )
+  ).then(() => {
+    if (entry.kind === "provider") refreshRemoteHostKeys()
+  })
 }

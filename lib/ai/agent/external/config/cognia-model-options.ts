@@ -28,6 +28,7 @@ import { getAllProviders } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings, UserProviderSettings } from "@cognia/provider-types/provider"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { collectModelOptions, resolveModelMeta, type ModelOption } from "@/lib/ai/model-options"
+import { overlayHostProviderKeys } from "@/lib/host-secrets/provider-key-store"
 import { listSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
 import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
 
@@ -118,7 +119,12 @@ function findSubscription(
  */
 export function filterCogniaGatewayModels(input: CogniaGatewayModelFilterInput): ModelOption[] {
   const { providerSettings, customProviders } = input
-  const scopedSettings = input.scopedProviderSettings ?? providerSettings
+  // Keys a paired owner sealed on this host serve the gateway too (ADR-0224
+  // A6): the run resolves them through the same overlay. Only ids and model
+  // facts leave this function, never a key.
+  const scopedSettings = overlayHostProviderKeys({
+    ...(input.scopedProviderSettings ?? providerSettings),
+  })
   const scopedCustomProviders = input.scopedCustomProviders ?? customProviders
   const subscriptions = input.subscriptions ?? listSubscriptionProviders(customProviders ?? [])
   const catalog = getAllProviders()
@@ -138,7 +144,9 @@ export function filterCogniaGatewayModels(input: CogniaGatewayModelFilterInput):
       scopedCustomProviders
     )
     const settings = custom ?? providerSettings?.[model.providerId]
-    const hasManualKey = !!(settings?.apiKey || settings?.apiKeys?.some((key) => key.trim()))
+    const hasManualKey =
+      !!(settings?.apiKey || settings?.apiKeys?.some((key) => key.trim())) ||
+      (!custom && !!scopedSettings[model.providerId]?.apiKey?.trim())
     return (
       (protocol === "openai" || protocol === "anthropic") &&
       metadata.supportsTools !== false &&

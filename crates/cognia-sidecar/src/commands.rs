@@ -225,6 +225,38 @@ impl SendOptions {
         }
         Ok(())
     }
+
+    /// Fill the API key of a turn that names a provider but carries no key of
+    /// its own, from `key_for` (ADR-0224 A6: keys a paired owner device sealed
+    /// on this Host, which a phone driving the Host cannot hold). A key the
+    /// turn carries always wins, and Bedrock is left alone: its credentials
+    /// are an auth mode and a region, not one key. Returns whether it filled.
+    pub fn fill_missing_provider_key(
+        &mut self,
+        key_for: impl FnOnce(&str) -> Option<String>,
+    ) -> bool {
+        let Some(provider) = self.provider.as_deref().filter(|id| !id.is_empty()) else {
+            return false;
+        };
+        if provider == "bedrock" {
+            return false;
+        }
+        let carried = self
+            .provider_credentials
+            .as_ref()
+            .and_then(|creds| creds.api_key.as_deref())
+            .is_some_and(|key| !key.trim().is_empty());
+        if carried {
+            return false;
+        }
+        let Some(key) = key_for(provider).filter(|key| !key.trim().is_empty()) else {
+            return false;
+        };
+        self.provider_credentials
+            .get_or_insert_with(ProviderCredentials::default)
+            .api_key = Some(key);
+        true
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1670,6 +1702,75 @@ mod tests {
         );
         let err = opts.validate().expect_err("bad protocol should fail");
         assert!(err.contains("protocol"));
+    }
+
+    #[test]
+    fn a_turn_without_a_key_takes_the_hosts_key_for_its_provider() {
+        let mut opts = parse(
+            r#"{
+                "provider": "deepseek",
+                "providerCredentials": {
+                    "baseURL": "https://api.deepseek.com/v1",
+                    "protocol": "openai"
+                }
+            }"#,
+        );
+        let mut asked = None;
+        assert!(opts.fill_missing_provider_key(|provider| {
+            asked = Some(provider.to_string());
+            Some("sealed-key".into())
+        }));
+        assert_eq!(asked.as_deref(), Some("deepseek"));
+        let json = serde_json::to_value(&opts).expect("serialise");
+        assert_eq!(json["providerCredentials"]["apiKey"], "sealed-key");
+        assert_eq!(
+            json["providerCredentials"]["baseURL"],
+            "https://api.deepseek.com/v1"
+        );
+
+        // No credentials at all still gets the key.
+        let mut bare = parse(r#"{ "provider": "deepseek" }"#);
+        assert!(bare.fill_missing_provider_key(|_| Some("sealed-key".into())));
+        assert_eq!(
+            bare.provider_credentials
+                .and_then(|creds| creds.api_key)
+                .as_deref(),
+            Some("sealed-key")
+        );
+    }
+
+    #[test]
+    fn a_key_the_turn_carries_wins_over_the_hosts() {
+        for carried in [r#""own-key""#, r#""  ""#] {
+            let mut opts = parse(&format!(
+                r#"{{ "provider": "deepseek", "providerCredentials": {{ "apiKey": {carried} }} }}"#
+            ));
+            let filled = opts.fill_missing_provider_key(|_| Some("sealed-key".into()));
+            let key = opts.provider_credentials.and_then(|creds| creds.api_key);
+            if carried == r#""own-key""# {
+                assert!(!filled);
+                assert_eq!(key.as_deref(), Some("own-key"));
+            } else {
+                // A blank key is no key.
+                assert!(filled);
+                assert_eq!(key.as_deref(), Some("sealed-key"));
+            }
+        }
+    }
+
+    #[test]
+    fn no_provider_bedrock_or_no_sealed_key_fills_nothing() {
+        let mut unnamed = parse(r#"{ "model": "claude-sonnet-5" }"#);
+        assert!(!unnamed.fill_missing_provider_key(|_| panic!("no provider to look up")));
+        assert!(unnamed.provider_credentials.is_none());
+
+        let mut bedrock = parse(r#"{ "provider": "bedrock" }"#);
+        assert!(!bedrock.fill_missing_provider_key(|_| panic!("bedrock is not one key")));
+
+        let mut unsealed = parse(r#"{ "provider": "deepseek" }"#);
+        assert!(!unsealed.fill_missing_provider_key(|_| None));
+        assert!(!unsealed.fill_missing_provider_key(|_| Some(" ".into())));
+        assert!(unsealed.provider_credentials.is_none());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import type { RemoteHostTarget } from "@/lib/remote-host/target-transport"
 import { closeManagementChannel } from "@/lib/remote-host/management-channel"
+import { REMOTE_HOST_KEYS_REFRESH_EVENT } from "@/lib/host-secrets/remote-host-keys"
 
 import {
   HOST_SECRET_LEASE_OPERATIONS,
@@ -116,5 +117,23 @@ describe("host secrets over the management channel", () => {
       deleteHostSecret(HOST, { kind: "connector", name: "cai_1:botToken" }, "lease", deps())
     ).rejects.toThrow(/with their connection/)
     expect(isManagedHere("connector")).toBe(false)
+  })
+
+  it("asks the model picker to re-read the Host's keys after a provider key changes", async () => {
+    const refreshed = jest.fn()
+    window.addEventListener(REMOTE_HOST_KEYS_REFRESH_EVENT, refreshed)
+    try {
+      call.mockResolvedValue({ kind: "provider", name: "deepseek" })
+      await setHostSecret(HOST, { kind: "provider", name: "deepseek", value: "k" }, "l", deps())
+      expect(refreshed).toHaveBeenCalledTimes(1)
+      await deleteHostSecret(HOST, { kind: "provider", name: "deepseek" }, "l", deps())
+      expect(refreshed).toHaveBeenCalledTimes(2)
+      call.mockResolvedValue({ kind: "git", name: "github.com" })
+      await setHostSecret(HOST, { kind: "git", name: "github.com", value: "t" }, "l", deps())
+      await deleteHostSecret(HOST, { kind: "git", name: "github.com" }, "l", deps())
+      expect(refreshed).toHaveBeenCalledTimes(2)
+    } finally {
+      window.removeEventListener(REMOTE_HOST_KEYS_REFRESH_EVENT, refreshed)
+    }
   })
 })

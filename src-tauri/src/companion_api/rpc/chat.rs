@@ -721,6 +721,32 @@ async fn abandon_paired_turn(state: &SharedState, submission_id: &str, error_cod
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Give a turn that names a provider but carries no key the key an owner
+/// device sealed on this Host for it (ADR-0224 A6). A phone keeps its provider
+/// keys to itself and cannot read the Host's, so without this a paired phone
+/// could not chat on a key it sealed. Only a caller that may manage the Host's
+/// secrets runs on them: a member device granted chat must not spend the
+/// owner's key. The Host's own service principal already resolved its keys.
+fn fill_host_provider_key(options: &mut claude_commands::SendOptions, caller: SendCaller<'_>) {
+    options.fill_missing_provider_key(|provider| {
+        if caller.scope == Some("service")
+            || !super::canonical_device_has_capability(caller.device_id, "secret.manage")
+        {
+            return None;
+        }
+        match cognia_secrets::host_secrets::get(
+            cognia_secrets::host_secrets::HostSecretKind::Provider,
+            provider,
+        ) {
+            Ok(key) => key,
+            Err(error) => {
+                tracing::warn!(provider, %error, "could not read a provider key sealed on this host");
+                None
+            }
+        }
+    });
+}
+
 async fn send_arm(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
@@ -760,6 +786,7 @@ async fn send_arm(
                 .map_err(RpcError::internal)?;
             send_options.cwd = Some(run.execution_root);
         }
+        fill_host_provider_key(send_options, caller);
     }
     // Last before the handoff, so no refusal above can strand an admission.
     let admission = admit_paired_turn(
@@ -799,6 +826,40 @@ mod tests {
         assert!(!super::COMMANDS.contains(&"claude_feature_call"));
     }
     use super::*;
+
+    /// A sealed key is the owner's: a device that may not manage this Host's
+    /// secrets, and the Host's own service principal (which resolved its keys
+    /// before sending), get nothing filled in.
+    #[test]
+    fn only_a_device_that_manages_host_secrets_runs_on_them() {
+        use cognia_secrets::host_secrets::{self, HostSecretKind};
+        host_secrets::set(
+            HostSecretKind::Provider,
+            "chat-fill-gate",
+            "sealed-key",
+            None,
+            1,
+        )
+        .expect("seal a key");
+        let unfilled = |caller: SendCaller<'_>| {
+            let mut options: claude_commands::SendOptions =
+                serde_json::from_value(serde_json::json!({ "provider": "chat-fill-gate" }))
+                    .expect("options");
+            fill_host_provider_key(&mut options, caller);
+            options.provider_credentials.is_none()
+        };
+        assert!(unfilled(SendCaller {
+            device_id: "device-without-secret-manage",
+            tenant_id: None,
+            scope: None,
+        }));
+        assert!(unfilled(SendCaller {
+            device_id: "service",
+            tenant_id: None,
+            scope: Some("service"),
+        }));
+        host_secrets::delete(HostSecretKind::Provider, "chat-fill-gate").expect("clean up");
+    }
 
     /// ADR-0090 names `agent_*` canonical and `claude_*` deprecated. The four
     /// canonical control verbs were nonetheless stranded on `target: client` /

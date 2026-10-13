@@ -48,6 +48,7 @@ import {
 import { subscribeSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
 import { useSettingsStore } from "@/stores/settings"
 import { collectModelOptions, compactModelLabel, type ModelOption } from "@/lib/ai/model-options"
+import { useRemoteHostKeyedProviders } from "@/hooks/remote-host/use-remote-host-keyed-providers"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import type { PopoverContent } from "@/components/ui/popover"
@@ -275,16 +276,18 @@ export function groupByProvider(options: ModelOption[]): ModelProviderGroup[] {
 export function useModelOptions(): { options: ModelOption[]; groups: ModelProviderGroup[] } {
   const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
   const customProviders = useSettingsStore((s) => s.settings?.customProviders)
+  // Providers the driven Host keys for this device (ADR-0224 A6).
+  const hostKeyed = useRemoteHostKeyedProviders()
   const [registryRevision, setRegistryRevision] = useState(0)
   useEffect(
     () => subscribeSubscriptionProviders(() => setRegistryRevision((value) => value + 1)),
     []
   )
   const options = useMemo(
-    () => collectModelOptions(providerSettings, customProviders),
+    () => collectModelOptions(providerSettings, customProviders, hostKeyed),
     // The registry is external mutable state, independent of settings.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [providerSettings, customProviders, registryRevision]
+    [providerSettings, customProviders, hostKeyed, registryRevision]
   )
   const groups = useMemo(() => groupByProvider(options), [options])
   return { options, groups }

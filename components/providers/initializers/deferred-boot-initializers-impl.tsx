@@ -14,6 +14,7 @@ import { RemoteNotificationInitializer } from "./remote-notification-initializer
 import { HostUpdateChannelInitializer } from "./host-update-channel-initializer"
 import { ProjectRepositoryInitializer } from "./project-repository-initializer"
 import { RemoteHostLivenessInitializer } from "./remote-host-liveness-initializer"
+import { RemoteHostKeysInitializer } from "./remote-host-keys-initializer"
 import { UpdateCenterInitializer } from "./update-center-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
@@ -87,6 +88,12 @@ export function DeferredBootInitializersImpl() {
         inside.
       */}
       <HostUpdateChannelInitializer />
+      {/*
+        Lists the providers the driven `/pair` Host holds a sealed key for, so
+        the model picker offers them and a turn can name them without a key
+        (ADR-0224 A6). Every shell; reads nothing while no such Host is driven.
+      */}
+      <RemoteHostKeysInitializer />
       {/*
         Records each workspace's repository from its checkout, so an
         always-on host without the folder can clone it (ADR-0224 A11).

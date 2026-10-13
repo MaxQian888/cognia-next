@@ -3,6 +3,10 @@ import {
   applyProviderAttemptLimits,
   resolveProviderAttemptOptions,
 } from "./provider-attempt-options"
+import {
+  resetRemoteHostKeysForTests,
+  setRemoteHostKeyedProviders,
+} from "@/lib/host-secrets/remote-host-keys"
 
 const mockResolveFeatureProvider = jest.fn()
 const mockBuildModelInferenceParams = jest.fn()
@@ -108,6 +112,52 @@ beforeEach(() => {
   })
   mockSelectApiKey.mockReturnValue({ apiKey: "sk-rotated", index: 1 })
   mockRecordKeyUse.mockReturnValue({ apiKeyRotationCursor: 1 })
+})
+
+describe("a provider the driven Host keys (ADR-0224 A6)", () => {
+  afterEach(() => resetRemoteHostKeysForTests())
+
+  it("sends its endpoint without a key, for the Host to fill", async () => {
+    setRemoteHostKeyedProviders("host-1", ["deepseek"])
+    mockResolveFeatureProvider.mockReturnValue(
+      resolved({
+        apiKey: "stand-in",
+        baseURL: "https://api.deepseek.com/v1",
+        model: "deepseek-chat",
+      })
+    )
+    const result = await resolveProviderAttemptOptions("deepseek", {
+      defaultProvider: "anthropic",
+      providerSettings: { deepseek: { providerId: "deepseek", enabled: false } },
+    } as unknown as AppSettings)
+
+    const snapshot = mockResolveFeatureProvider.mock.calls[0][1] as {
+      providerSettings: Record<string, { enabled?: boolean; apiKey?: string }>
+    }
+    expect(snapshot.providerSettings.deepseek).toMatchObject({ enabled: true })
+    expect(snapshot.providerSettings.deepseek.apiKey).toBeTruthy()
+    expect(result.providerCredentials).toEqual({
+      baseURL: "https://api.deepseek.com/v1",
+      protocol: "openai",
+    })
+    expect(result.defaultModel).toBe("deepseek-chat")
+    expect(mockSelectApiKey).not.toHaveBeenCalled()
+    expect(mockRecordKeyUse).not.toHaveBeenCalled()
+  })
+
+  it("keeps this device's own key, and ignores a Host that keys another provider", async () => {
+    setRemoteHostKeyedProviders("host-1", ["deepseek"])
+    const own = settings("deepseek")
+    await expect(resolveProviderAttemptOptions("deepseek", own)).resolves.toMatchObject({
+      providerCredentials: { apiKey: "sk-attempt" },
+    })
+    expect(mockResolveFeatureProvider.mock.calls[0][1]).toMatchObject({
+      providerSettings: own.providerSettings,
+    })
+
+    const other = await resolveProviderAttemptOptions("openai", settings())
+    expect(other.providerCredentials?.apiKey).toBe("sk-attempt")
+  })
 })
 
 describe("resolveProviderAttemptOptions", () => {

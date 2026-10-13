@@ -5,6 +5,7 @@ jest.mock("@/lib/subscription/core/provider-registry", () => ({
 }))
 
 import { listSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
+import { replaceHostProviderKeys } from "@/lib/host-secrets/provider-key-store"
 import {
   filterCogniaGatewayModels,
   isCogniaGatewayModelCatalog,
@@ -64,6 +65,22 @@ describe("filterCogniaGatewayModels", () => {
     expect(ids).not.toContain("deepseek/deepseek-chat")
     // Anthropic is always enumerated by the catalog, and has no key here.
     expect(ids.some((id) => id.startsWith("anthropic/"))).toBe(false)
+  })
+
+  it("serves a provider on a key a paired owner sealed on this host, without exposing it", () => {
+    replaceHostProviderKeys([["deepseek", SECRET]])
+    try {
+      const models = filterCogniaGatewayModels({
+        ...(settings() as object),
+        subscriptions: [],
+      } as never)
+      expect(models.map((model) => `${model.providerId}/${model.modelId}`)).toContain(
+        "deepseek/deepseek-chat"
+      )
+      expect(JSON.stringify(models)).not.toContain(SECRET)
+    } finally {
+      replaceHostProviderKeys([])
+    }
   })
 
   it("drops a model explicitly lacking tools or streaming, and a non-OpenAI/Anthropic protocol", () => {

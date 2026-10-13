@@ -96,6 +96,27 @@ describe("collectModelOptions", () => {
     )
   })
 
+  it("lists a provider the driven Host keys when this device has no key for it", () => {
+    const keyed = new Set(["deepseek"])
+    const listed = collectModelOptions(
+      { deepseek: { providerId: "deepseek", enabled: false } as never },
+      undefined,
+      keyed
+    )
+    expect(listed.some((o) => o.providerId === "deepseek")).toBe(true)
+    expect(
+      collectModelOptions(undefined, undefined, keyed).some((o) => o.providerId === "deepseek")
+    ).toBe(true)
+    // Without the Host, a keyless disabled provider stays hidden.
+    expect(
+      collectModelOptions(
+        { deepseek: { providerId: "deepseek", enabled: false } as never },
+        undefined,
+        new Set()
+      ).some((o) => o.providerId === "deepseek")
+    ).toBe(false)
+  })
+
   it("appends enabled custom providers after the built-ins", () => {
     const out = collectModelOptions(undefined, [
       {
