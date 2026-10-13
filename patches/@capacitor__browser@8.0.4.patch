@@ -1,0 +1,33 @@
+diff --git a/android/src/main/java/com/capacitorjs/plugins/browser/BrowserControllerActivity.java b/android/src/main/java/com/capacitorjs/plugins/browser/BrowserControllerActivity.java
+index 74fd599c106a85308f36d0d09fa3c9a86d8a3d1d..955de8d32eb74a35265c4caefb2eccbb1ac3b902 100644
+--- a/android/src/main/java/com/capacitorjs/plugins/browser/BrowserControllerActivity.java
++++ b/android/src/main/java/com/capacitorjs/plugins/browser/BrowserControllerActivity.java
+@@ -15,6 +15,19 @@ public class BrowserControllerActivity extends Activity {
+         super.onCreate(savedInstanceState);
+         isCustomTabsOpen = false;
+ 
++        /*
++         * Cognia patch: BrowserPlugin.close() starts this activity with "close".
++         * When the person already dismissed the Custom Tab, the old controller is
++         * finishing but not yet destroyed, so that start creates a NEW instance;
++         * only onNewIntent honoured "close", and the new, translucent controller
++         * stayed on top forever, swallowing every touch on the app. Finish it here
++         * too, without touching the listener a live open() may have installed.
++         */
++        if (getIntent() != null && getIntent().hasExtra("close")) {
++            finish();
++            return;
++        }
++
+         if (BrowserPlugin.browserControllerListener != null) {
+             BrowserPlugin.browserControllerListener.onControllerReady(this);
+         }
+@@ -47,6 +60,8 @@ public class BrowserControllerActivity extends Activity {
+     protected void onDestroy() {
+         super.onDestroy();
+         isCustomTabsOpen = false;
++        // A close-only instance never owned the listener (see onCreate).
++        if (getIntent() != null && getIntent().hasExtra("close")) return;
+         BrowserPlugin.setBrowserControllerListener(null);
+     }
+ }

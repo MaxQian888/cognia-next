@@ -47,6 +47,7 @@ overrides:
 
 patchedDependencies:
   '@capacitor/android@8.5.2': cce19b741c91883bf98e0e9cceee92700f1653c3ab9aa3abac56ff8444557a6a
+  '@capacitor/browser@8.0.4': 2118f366da52a2ea51b214aef8812f86d13917eecc9b6f094cbc61eae2d3c6e7
   '@capacitor/push-notifications@8.1.2': 00d217d65aac2798c675558ccb7e6ecfe1c85053928891323572af9395c7a70c
   '@capgo/capacitor-native-biometric@8.7.0': 8aed032e94ffe6e4edf67ccaf6954431b9e53afa3a5bd309f3146a26948e9e5a
   '@sinonjs/fake-timers@15.4.0': 989a2bbf216c35c0a239565777e46732670f0ee40c085e03622285b8f541e78e
@@ -984,7 +985,7 @@ importers:
         version: 8.1.2(@capacitor/core@8.5.2)
       '@capacitor/browser':
         specifier: ^8.0.4
-        version: 8.0.4(@capacitor/core@8.5.2)
+        version: 8.0.4(patch_hash=2118f366da52a2ea51b214aef8812f86d13917eecc9b6f094cbc61eae2d3c6e7)(@capacitor/core@8.5.2)
       '@capacitor/camera':
         specifier: ^8.2.4
         version: 8.2.4(@capacitor/core@8.5.2)
@@ -16659,7 +16660,7 @@ snapshots:
     dependencies:
       '@capacitor/core': 8.5.2
 
-  '@capacitor/browser@8.0.4(@capacitor/core@8.5.2)':
+  '@capacitor/browser@8.0.4(patch_hash=2118f366da52a2ea51b214aef8812f86d13917eecc9b6f094cbc61eae2d3c6e7)(@capacitor/core@8.5.2)':
     dependencies:
       '@capacitor/core': 8.5.2
 

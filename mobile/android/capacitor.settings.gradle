@@ -6,10 +6,10 @@ include ':capacitor-mlkit-barcode-scanning'
 project(':capacitor-mlkit-barcode-scanning').projectDir = new File('../../node_modules/.pnpm/@capacitor-mlkit+barcode-scanning@8.2.1_@capacitor+core@8.5.2/node_modules/@capacitor-mlkit/barcode-scanning/android')
 
 include ':capacitor-app'
-project(':capacitor-app').projectDir = new File('../../node_modules/.pnpm/@capacitor+app@8.1.1_@capacitor+core@8.5.2/node_modules/@capacitor/app/android')
+project(':capacitor-app').projectDir = new File('../../node_modules/.pnpm/@capacitor+app@8.1.2_@capacitor+core@8.5.2/node_modules/@capacitor/app/android')
 
 include ':capacitor-browser'
-project(':capacitor-browser').projectDir = new File('../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.5.2/node_modules/@capacitor/browser/android')
+project(':capacitor-browser').projectDir = new File('../../node_modules/.pnpm/@capacitor+browser@8.0.4_patch_hash=2118f366da52a2ea51b214aef8812f86d13917eecc9b6f094cb_b4eabcbe10eb4f3d9530b88b7b212ee1/node_modules/@capacitor/browser/android')
 
 include ':capacitor-camera'
 project(':capacitor-camera').projectDir = new File('../../node_modules/.pnpm/@capacitor+camera@8.2.4_@capacitor+core@8.5.2/node_modules/@capacitor/camera/android')
@@ -24,7 +24,7 @@ include ':capacitor-dialog'
 project(':capacitor-dialog').projectDir = new File('../../node_modules/.pnpm/@capacitor+dialog@8.0.1_@capacitor+core@8.5.2/node_modules/@capacitor/dialog/android')
 
 include ':capacitor-filesystem'
-project(':capacitor-filesystem').projectDir = new File('../../node_modules/.pnpm/@capacitor+filesystem@8.1.3_@capacitor+core@8.5.2/node_modules/@capacitor/filesystem/android')
+project(':capacitor-filesystem').projectDir = new File('../../node_modules/.pnpm/@capacitor+filesystem@8.1.4_@capacitor+core@8.5.2/node_modules/@capacitor/filesystem/android')
 
 include ':capacitor-geolocation'
 project(':capacitor-geolocation').projectDir = new File('../../node_modules/.pnpm/@capacitor+geolocation@8.2.2_@capacitor+core@8.5.2/node_modules/@capacitor/geolocation/android')
@@ -33,7 +33,7 @@ include ':capacitor-haptics'
 project(':capacitor-haptics').projectDir = new File('../../node_modules/.pnpm/@capacitor+haptics@8.0.2_@capacitor+core@8.5.2/node_modules/@capacitor/haptics/android')
 
 include ':capacitor-keyboard'
-project(':capacitor-keyboard').projectDir = new File('../../node_modules/.pnpm/@capacitor+keyboard@8.0.5_@capacitor+core@8.5.2/node_modules/@capacitor/keyboard/android')
+project(':capacitor-keyboard').projectDir = new File('../../node_modules/.pnpm/@capacitor+keyboard@8.0.6_@capacitor+core@8.5.2/node_modules/@capacitor/keyboard/android')
 
 include ':capacitor-local-notifications'
 project(':capacitor-local-notifications').projectDir = new File('../../node_modules/.pnpm/@capacitor+local-notifications@8.3.1_@capacitor+core@8.5.2/node_modules/@capacitor/local-notifications/android')
@@ -72,7 +72,7 @@ include ':capacitor-secure-storage-plugin'
 project(':capacitor-secure-storage-plugin').projectDir = new File('../../node_modules/.pnpm/capacitor-secure-storage-plugin@0.13.0_patch_hash=107761618a151e09b442053f6e7c72f39a0ab_d6242a0209018884186a99f7ad63edd2/node_modules/capacitor-secure-storage-plugin/android')
 
 include ':capacitor-voice-recorder'
-project(':capacitor-voice-recorder').projectDir = new File('../../node_modules/.pnpm/capacitor-voice-recorder@7.0.6_@capacitor+core@8.5.2_@capacitor+filesystem@8.1.3_@capacitor+core@8.5.2_/node_modules/capacitor-voice-recorder/android')
+project(':capacitor-voice-recorder').projectDir = new File('../../node_modules/.pnpm/capacitor-voice-recorder@7.0.6_@capacitor+core@8.5.2_@capacitor+filesystem@8.1.4_@capacitor+core@8.5.2_/node_modules/capacitor-voice-recorder/android')
 
 include ':capacitor-zeroconf'
 project(':capacitor-zeroconf').projectDir = new File('../../node_modules/.pnpm/capacitor-zeroconf@4.0.0_patch_hash=472276832121f694fe881bbe774aa66e3c4f6adca8189066e0d_302228fe4ee7d40d8584b2ba398e4ea7/node_modules/capacitor-zeroconf/android')

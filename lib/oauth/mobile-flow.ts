@@ -174,12 +174,18 @@ export async function runOAuth(opts: RunOAuthOptions): Promise<CallbackOutcome> 
   const owner = Symbol("oauth-browser")
   let openRequested = false
   let finished = false
+  let dismissed = false
   const closeOwnedBrowser = () => {
-    if (activeBrowserOwner === owner) void closeBrowser()
+    // A sheet the person already closed must not be closed again. On Android
+    // `Browser.close()` restarts the browser's controller activity, and when
+    // the dismissed one has not been destroyed yet that start creates a fresh,
+    // transparent controller that never finishes and swallows every touch.
+    if (activeBrowserOwner === owner && !dismissed) void closeBrowser()
   }
   try {
     // Both listeners must be installed before a fast native redirect can fire.
     const closeReady = onClose(() => {
+      dismissed = true
       // Manual-code flows need to leave the browser to paste into the app.
       if (!opts.manualPaste) wait.settle({ kind: "cancelled" })
     }).then((remove) => {

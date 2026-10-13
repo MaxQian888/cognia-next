@@ -197,6 +197,9 @@ describe("runOAuth native browser lifecycle", () => {
     })
     expect(removeLink).toHaveBeenCalledTimes(1)
     expect(removeClose).toHaveBeenCalledTimes(1)
+    // Closing an already-dismissed sheet restarts Android's browser
+    // controller, which can leave an invisible activity over the app.
+    expect(browser.close).not.toHaveBeenCalled()
   })
   it("captures a callback fired while open is resolving", async () => {
     browser.open.mockImplementation(async () => {
