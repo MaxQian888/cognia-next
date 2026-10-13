@@ -454,17 +454,6 @@
       "reason": "Regression fixture sets the persisted Codex credential accountId (ChatGPT workspace routing claim). The serde field retains the provider contract and tests reject disagreement with the signed workspace claim."
     },
     {
-      "file": "hooks/chat/use-claude-chat-controller.ts",
-      "rule": "bareAccountId",
-      "scope": "provider-account",
-      "field": "ExternalAgentCogniaModelAxisInput.accountId",
-      "contract": "lib/ai/agent/external/session/session-models.ts",
-      "test": "hooks/chat/use-claude-chat-controller.test.ts",
-      "source": "accountId: session?.accountId ?? undefined,",
-      "occurrences": 2,
-      "reason": "External chat launch carries the persisted session provider account binding into the shared model-axis resolver without rewriting saved sessions."
-    },
-    {
       "file": "lib/accounts/content-cipher.ts",
       "rule": "bareAccountId",
       "scope": "local-profile",
@@ -551,39 +540,6 @@
       "source": "const pepper = await deriveDevicePepper(args.accountId)",
       "occurrences": 2,
       "reason": "Desktop quick-unlock commands and browser vault enrollment exchange this existing local-profile key; preserve credential and IPC compatibility."
-    },
-    {
-      "file": "lib/ai/agent/external/manager.ts",
-      "rule": "bareAccountId",
-      "scope": "provider-account",
-      "field": "ExternalAgentCogniaModelBinding.accountId",
-      "contract": "packages/agent-contracts/src/external-agent.ts",
-      "test": "lib/ai/agent/external/manager.test.ts",
-      "source": "(binding.accountId !== undefined && binding.accountId !== previous.binding.accountId)",
-      "occurrences": 3,
-      "reason": "External-agent Cognia model bindings persist and send the selected provider login under this validated key; internal local variables are scoped separately."
-    },
-    {
-      "file": "lib/ai/agent/external/session/session-models.ts",
-      "rule": "bareAccountId",
-      "scope": "provider-account",
-      "field": "ExternalAgentCogniaModelBinding.accountId",
-      "contract": "packages/agent-contracts/src/external-agent.ts",
-      "test": "lib/ai/agent/external/session/session-models.test.ts",
-      "source": "...(input.accountId !== undefined ? { accountId: input.accountId } : {}),",
-      "occurrences": 3,
-      "reason": "External-agent Cognia model bindings persist and send the selected provider login under this validated key; internal local variables are scoped separately."
-    },
-    {
-      "file": "lib/ai/agent/external/session/session-models.ts",
-      "rule": "bareAccountId",
-      "scope": "provider-account",
-      "field": "ExternalAgentCogniaModelBinding.accountId",
-      "contract": "packages/agent-contracts/src/external-agent.ts",
-      "test": "lib/ai/agent/external/session/session-models.test.ts",
-      "source": "input: ExternalAgentModelAxisInput & { accountId?: string | null }",
-      "occurrences": 1,
-      "reason": "External-agent Cognia model bindings persist and send the selected provider login under this validated key; internal local variables are scoped separately."
     },
     {
       "file": "lib/ai/operations/handlers/account.ts",
@@ -1077,7 +1033,7 @@
       "contract": "lib/platform/host-feature-manifest.ts",
       "test": "lib/db/mobile-outbound-queue.test.ts",
       "source": ".filter((row) => row.accountId === scope.accountId && row.targetId === scope.targetId)",
-      "occurrences": 2,
+      "occurrences": 4,
       "reason": "Host RPC manifests, consent and queued actions share the existing local-profile scope key; preserve account isolation and compatibility across desktop, companion and persisted queues."
     },
     {
@@ -1110,7 +1066,7 @@
       "contract": "lib/platform/host-feature-manifest.ts",
       "test": "lib/db/mobile-outbound-queue.test.ts",
       "source": "accountId: local.accountId,",
-      "occurrences": 4,
+      "occurrences": 6,
       "reason": "Host RPC manifests, consent and queued actions share the existing local-profile scope key; preserve account isolation and compatibility across desktop, companion and persisted queues."
     },
     {
@@ -1275,7 +1231,7 @@
       "contract": "packages/agent-contracts/src/external-agent.ts",
       "test": "lib/gateway/mint-session-ticket.test.ts",
       "source": "accountId: providerAccountId ?? null,",
-      "occurrences": 1,
+      "occurrences": 2,
       "reason": "External-agent gateway requests and returned model bindings carry the existing provider-login selection key, including explicit null for manual credentials."
     },
     {
@@ -2001,17 +1957,6 @@
       "contract": "packages/agent-contracts/src/external-agent.ts",
       "test": "lib/ai/agent/external/session/session-models.test.ts",
       "source": "Object.keys(binding).some((key) => ![\"providerId\", \"modelId\", \"accountId\"].includes(key)) ||",
-      "occurrences": 1,
-      "reason": "External-agent Cognia model bindings persist and send the selected provider login under this validated key; internal local variables are scoped separately."
-    },
-    {
-      "file": "packages/agent-contracts/src/external-agent.ts",
-      "rule": "bareAccountId",
-      "scope": "provider-account",
-      "field": "ExternalAgentCogniaModelBinding.accountId",
-      "contract": "packages/agent-contracts/src/external-agent.ts",
-      "test": "lib/ai/agent/external/session/session-models.test.ts",
-      "source": "accountId?: string | null",
       "occurrences": 1,
       "reason": "External-agent Cognia model bindings persist and send the selected provider login under this validated key; internal local variables are scoped separately."
     },
