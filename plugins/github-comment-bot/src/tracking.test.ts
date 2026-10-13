@@ -83,6 +83,44 @@ it("moves forward only, edits by marker, and never fails the answer over a track
   expect(record?.phase).toBe("completed")
 })
 
+it("lets a retried run resume a failed comment and finish it, writing each failure afresh", async () => {
+  const f = fixture()
+  await startTracking(f.context, f.run, f.config, input)
+  const update = (kind: "completed" | "failed", step: string) =>
+    updateTracking(f.context, f.run, f.config, {
+      resourceId: input.resourceId,
+      phase: { kind } as never,
+      step,
+      idempotencyKey: `k-${step}`,
+      trigger: TRIGGER,
+    })
+  const bodies = () =>
+    f.mocks.action.mock.calls.map(
+      (call) => (call[0] as { input: { body?: string } }).input.body ?? ""
+    )
+  const record = () =>
+    f.context.storage.get<TrackingRecord>(trackingKey("install", input.resourceId))
+
+  await update("failed", "tracking-failed")
+  expect(await record()).toMatchObject({ phase: "failed", failures: 1 })
+  // The host retries the run: the comment says it is working again.
+  await startTracking(f.context, f.run, f.config, input)
+  expect(bodies().at(-1)).toContain("working on it")
+  expect(await record()).toMatchObject({ phase: "running", failures: 1 })
+  // A second failure is its own step, so it is written rather than replayed.
+  await update("failed", "tracking-failed")
+  expect(bodies().at(-1)).toContain("failed")
+  expect(await record()).toMatchObject({ phase: "failed", failures: 2 })
+  await startTracking(f.context, f.run, f.config, input)
+  await update("completed", "tracking-completed")
+  expect(bodies().at(-1)).toContain("answered")
+  expect(await record()).toMatchObject({ phase: "completed" })
+  const steps = f.mocks.action.mock.calls.map(
+    (call) => (call[0] as unknown as { idempotencyKey: string }).idempotencyKey
+  )
+  expect(new Set(steps).size).toBe(steps.length)
+})
+
 it("lets the host park a run waiting for a tracking decision", async () => {
   const f = fixture()
   await startTracking(f.context, f.run, f.config, input)

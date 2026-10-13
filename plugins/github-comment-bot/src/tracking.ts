@@ -5,7 +5,13 @@
  * nothing else. Its id is kept with the installation so a later phase, or a
  * cancellation handled by another run, edits the same comment; the Delivery
  * action refuses to edit any comment that does not carry its marker. Phases
- * only move forward: once terminal, an older run's update is dropped.
+ * only move forward: once final, an older run's update is dropped.
+ *
+ * `failed` is not final. A run that throws is retried by the host, and the
+ * plugin cannot tell its last attempt from an earlier one, so the comment
+ * says "failed" until a retry resumes it ("working on it") or finishes it.
+ * Each failure is its own step, so a second failure after a resume is written
+ * again instead of being replayed from the first one's memo.
  */
 
 import type { BotRunContextV1, PluginContext } from "@cognia/plugin-sdk"
@@ -25,9 +31,11 @@ export interface TrackingRecord {
   ref: string
   repository: string
   phase: TrackingPhase["kind"]
+  /** How many times a run has marked it failed; names each failure's step. */
+  failures?: number
 }
 
-const TERMINAL = new Set<TrackingPhase["kind"]>(["completed", "blocked", "failed", "cancelled"])
+const FINAL = new Set<TrackingPhase["kind"]>(["completed", "blocked", "cancelled"])
 
 export const trackingKey = (installationId: string, resourceId: string) =>
   `tracking:v1:${installationId}:${resourceId}`
@@ -49,7 +57,20 @@ export async function startTracking(
   const key = trackingKey(run.installationId, input.resourceId)
   const markerId = `t-${input.ref}-${input.rev}`
   const existing = await ctx.storage.get<TrackingRecord>(key)
-  if (existing?.markerId === markerId) return existing
+  if (existing?.markerId === markerId) {
+    // A retry of a run that failed: say it is working again.
+    if (existing.phase === "failed") {
+      const n = existing.failures ?? 1
+      await updateTracking(ctx, run, config, {
+        resourceId: input.resourceId,
+        phase: { kind: "running" },
+        step: `tracking-resumed-${n}`,
+        idempotencyKey: `${input.eventId}:tracking-resumed-${n}`,
+        trigger: input.trigger,
+      })
+    }
+    return existing
+  }
   const marker = renderOutputMarker(MARKER_NAMESPACE, markerId)
   const body = renderBotComment(trackingText(ctx.i18n.t, input.ref, { kind: "running" }), {
     namespace: MARKER_NAMESPACE,
@@ -106,7 +127,10 @@ export async function updateTracking(
 ): Promise<void> {
   const key = trackingKey(run.installationId, input.resourceId)
   const record = await ctx.storage.get<TrackingRecord>(key)
-  if (!record || TERMINAL.has(record.phase) || record.repository !== config.repository) return
+  if (!record || FINAL.has(record.phase) || record.repository !== config.repository) return
+  const failure = input.phase.kind === "failed" ? (record.failures ?? 0) + 1 : undefined
+  const step = failure ? `${input.step}-${failure}` : input.step
+  const idempotencyKey = failure ? `${input.idempotencyKey}-${failure}` : input.idempotencyKey
   try {
     const body = renderBotComment(trackingText(ctx.i18n.t, record.ref, input.phase), {
       namespace: MARKER_NAMESPACE,
@@ -114,7 +138,7 @@ export async function updateTracking(
       mention: input.trigger,
     })
     const write = {
-      step: input.step,
+      step,
       actionId: "updateComment" as const,
       input: {
         repoFullName: config.repository,
@@ -123,7 +147,7 @@ export async function updateTracking(
         body,
         marker: record.marker,
       },
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey,
       title: ctx.i18n.t("approval.tracking.title"),
       message: ctx.i18n.t("approval.tracking.message"),
       detail: { taskRef: record.ref, phase: input.phase.kind },
@@ -132,8 +156,12 @@ export async function updateTracking(
     if (decision.outcome !== "approved") return
     await executeWrite(ctx, run, write, decision)
     const latest = await ctx.storage.get<TrackingRecord>(key)
-    if (latest && !TERMINAL.has(latest.phase))
-      await ctx.storage.set(key, { ...latest, phase: input.phase.kind })
+    if (latest && !FINAL.has(latest.phase))
+      await ctx.storage.set(key, {
+        ...latest,
+        phase: input.phase.kind,
+        ...(failure ? { failures: failure } : {}),
+      })
   } catch (error) {
     if (isRunControlFlow(error, run.signal)) throw error
     run.log("warn", "Tracking comment update failed", {

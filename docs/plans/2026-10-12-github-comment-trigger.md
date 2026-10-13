@@ -2,7 +2,7 @@
 
 | 项目       | 内容                                                                                                                                                                                                                                                                                        |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 状态       | 修订版 r3：实现中（WP0–WP7 已合入）；尚未启用或批准上线                                                                                                                                                                                                                                     |
+| 状态       | 修订版 r3：WP0–WP8 已合入（模拟验收）；真实仓库与真实 Host 冒烟待做，尚未启用或批准上线；尚未启用或批准上线                                                                                                                                                                                 |
 | 作者与日期 | Codex 初稿 2026-10-12；r2 源码核查与决策修订 2026-10-12；Asia/Shanghai                                                                                                                                                                                                                      |
 | 诉求       | 支持评论指令、权限校验、上下文收集、任务执行、结果回写与 Headless                                                                                                                                                                                                                           |
 | 范围       | 插件/共享包、Bot 运行时、Integration 事件投影、bot-run 工作区、外部 Agent、网关计量、多账号和部署                                                                                                                                                                                           |
@@ -576,6 +576,38 @@ WP0–WP4 互不依赖，可以并行。新增或修改的模块都须有同位�
 | A26  | 人工模式                                     | 无进度评论；回答与 status 回复进入人工审批     |
 
 第二阶段：A11（Host 检查/快照/批准 → 准确草稿 PR，不 force/merge）、A12（模型声称通过但 Host 失败、目标变化 → 不发布）、A18（fork → 准确 pull-ref，不推未绑定 fork，保留 fix）。
+
+**WP8 覆盖（2026-10-13）。**端到端用例在 `lib/integrations/github-comment-bot-vertical.test.ts`：webhook 正文经 GitHub Delivery 归一化，由 Integration 平面落库与投影，再由 Bot 平面路由与 drain，交给真实插件处理器；`ctx.bots`、`ctx.integrations`、policy 审批、动作代理与 Delivery 写动作全部是真实实现。只有三样是替身：fetch 层的假 GitHub、检出、外部 Agent 进程。用例断言模型调用次数和远端写入次数。
+
+| 编号 | 证据                                                                                                                           |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------ |
+| A1   | 端到端 A1；`receive.test`（自身输出/机器账号/未提及）、`command.test`（代码、引用、句中提及）                                  |
+| A2   | 端到端 A2：一次模型调用、默认分支精确 SHA 检出、跟踪评论终态指向回答、写入只用绑定账号令牌、结果含来源/提交/上下文             |
+| A3   | `context.test`（PR 行级线程、精确 head、fork）、`reply.test`（回到行级线程）、`execute.test`（COMMENT 评审，只在 diff 行内联） |
+| A4   | 端到端 A4（白名单外、read 权限，静默）；`recheck.test`（按 id 匹配，无法确认时不猜）                                           |
+| A5   | 端到端 A5（开始前撤权不调模型；回答期间撤权不发布，跟踪评论改为已取消）                                                        |
+| A6   | 端到端 A6（处理器未注册时的事件经投影恢复只回答一次；GitHub 重投为重复）；WP0 `events.test`                                    |
+| A7   | `execute.test`（`recovery_required` 不重发提示词）；WP4 平台核查                                                               |
+| A8   | 端到端 A8（响应丢失 → 动作任务 `retry_wait` → Delivery 按标记找回原评论，只发一次）                                            |
+| A9   | 端到端 A9（删除撤回、编辑替换旧版本）；`receive.test`（他人编辑被拒）                                                          |
+| A10  | 端到端 A10（等待发布决定时 cancel：待决审批撤销，事后批准被拒，不发布）；`receive.test`                                        |
+| A13  | WP2 `bot-run.test`、`acquire.test` 与 `cargo test -p cognia-git`                                                               |
+| A14  | 端到端 A14（Agent 回答后 Host 中断：重试不重发提示词，记忆化步骤恢复，跟踪评论从“失败”恢复并结束于“已回答”）                   |
+| A15  | `bot-integration-binding.test`（按账号与仓库限定）；路由按 `integrationAccountId` 匹配                                         |
+| A16  | `external-agent-api.test`（Host 脱敏与 PII gate）；WP4 网关出网核查                                                            |
+| A17  | `handler.test`（限流退避并记录）、`poll.test`（ETag、分页上限）                                                                |
+| A19  | `index.test`（默认关闭，只能评论）；`readiness.test`（Host 未给出就绪事实时只告警不猜）                                        |
+| A20  | 端到端 A20（禁用后已排队任务不启动、不写入）                                                                                   |
+| A21  | `handler.test`（`polling_only` 就绪、游标只在成功后前移）、`readiness.test`                                                    |
+| A22  | 端到端 A22（超时效不执行，自动模式回复过期模板）                                                                               |
+| A23  | WP1 `delivery-runner.test`（`maxConcurrentRuns` 超限保持排队，不计 attempt）                                                   |
+| A24  | WP1 `run-cost.test`；`execute.test`（`budget_exceeded` 阻断且不重试）                                                          |
+| A25  | 端到端 A25（工作区被改 → `readonly_violation`，不发布）                                                                        |
+| A26  | 端到端 A26（人工模式无进度评论；人批准后经 run-control 恢复，只发一次）                                                        |
+
+端到端测试发现并修复一处缺陷：意外错误把跟踪评论标为“失败”后，Host 重试成功，但评论因“只前进”规则停在“失败”。插件无法区分最后一次尝试，因此“失败”不再是终态：重试时改回“处理中”，每次失败用独立步骤名写入。
+
+**未做：**真实 GitHub 公/私仓库验收、Tauri Desktop 与 Headless 真实进程冒烟、配对端审批的真实链路。这些需要已授权的临时仓库与 GitHub App/PAT，以及可用的模型凭据，须由维护者安排。
 
 单元测试放在同位置，模拟 HTTP、时间与 Host 身份。不确定结果与凭据交接，用真实本地 socket、存储和进程中断来证明。断言模型调用次数与远端写入次数，不能只看 UI。
 

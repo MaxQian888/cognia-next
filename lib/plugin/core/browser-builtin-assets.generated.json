@@ -9131,14 +9131,14 @@
       "path": "builtin://github-comment-bot",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/github-comment-bot/c81f95e574d6d0ed282a06b8c13a82b9462c7111a39b93849213c68e6686417d.cjs",
-        "sha256": "c81f95e574d6d0ed282a06b8c13a82b9462c7111a39b93849213c68e6686417d",
+        "url": "/_cognia/builtin-plugins/github-comment-bot/80ede98b56e299e82119fbfa6375bede4412435b2d5592ad1bd395920cd7823d.cjs",
+        "sha256": "80ede98b56e299e82119fbfa6375bede4412435b2d5592ad1bd395920cd7823d",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/github-comment-bot/resources/",
         "entryHashes": {
-          "dist/index.js": "c81f95e574d6d0ed282a06b8c13a82b9462c7111a39b93849213c68e6686417d"
+          "dist/index.js": "80ede98b56e299e82119fbfa6375bede4412435b2d5592ad1bd395920cd7823d"
         }
       }
     },
