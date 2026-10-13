@@ -51,6 +51,13 @@ Access tokens for the sync API (`resource=https://sync.cognia.cn`) are ES256
 - After a 7-day cooling-off period the hourly cron purges the person: tokens, consents, sessions, linked accounts and the user. The `account_deletion` row stays as the record.
 - First the person's sync space is deleted through the `SYNC_ADMIN` service binding (the sync Worker's `SyncAdmin` entrypoint, `services/sync-server`). Staging and production both bind it. Without the binding no hook runs.
 
+**App returns.**
+
+- A phone sign-in with Feishu runs in the Feishu app, which may refuse to open `cn.cognia.app:/auth/callback`. The person then switches back by hand, and the app never got its code.
+- So the native client's authorize request records `sha256(state) → code_challenge`. The redirect to the app attaches the code (migration `0004`).
+- `POST /api/app-return/claim` with `{ state, code_verifier }` hands the code over once, only for the matching verifier. Everything else gets the same `404`.
+- Codes wait 3 minutes and pending requests 15. The cron drops expired rows.
+
 **Rate limits.** Better Auth's limiter, counted in D1, per `cf-connecting-ip`.
 
 ## Develop

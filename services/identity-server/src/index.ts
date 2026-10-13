@@ -4,7 +4,8 @@
  *   /sign-in, /consent, /error, /signed-out   hosted pages
  *   /api/auth/*                               Better Auth, behind the route allowlist
  *   /api/account/deletion                     account deletion (src/deletion/)
- *   cron                                      purge accounts past their cooling-off period
+ *   /api/app-return/claim                     the app claiming a code another app kept (src/app-return.ts)
+ *   cron                                      purge accounts past their cooling-off period and stale app returns
  *
  * One Better Auth instance per isolate: constructing it seeds the sync
  * resource into D1, which must not happen on every request.
@@ -13,6 +14,13 @@
 import { waitUntil } from "cloudflare:workers"
 import type { JSONWebKeySet } from "jose"
 
+import {
+  APP_RETURN_CLAIM_PATH,
+  handleAppReturnClaim,
+  purgeExpiredAppReturns,
+  recordAppAuthorize,
+  recordAppReturn,
+} from "./app-return"
 import { createAuth, type Auth } from "./auth"
 import { ConfigError, readConfig, type IdentityConfig } from "./config"
 import { ACCOUNT_DELETION_PATH, isCorsPath, preflightResponse, withCors } from "./cors"
@@ -96,11 +104,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return withCors(response, request, config.webOrigins)
   }
 
+  // The app finishing a sign-in another app ran (src/app-return.ts).
+  if (pathname === APP_RETURN_CLAIM_PATH) return handleAppReturnClaim(request, env.DB, Date.now())
+
   if (!isAllowedAuthRoute(method, pathname)) return notFound()
   await reconcileWebClient(env.DB, config.webOrigins)
+  await recordAppAuthorize(env.DB, request, Date.now())
   const auth = await authFor(config, env)
   const handled = await auth.handler(request)
   const location = handled.headers.get("location")
+  if (isNativeAppRedirect(location)) await recordAppReturn(env.DB, location, Date.now())
   // A browser navigation bound for the native app gets a page to land on
   // (pages/return-to-app.ts). API callers still see the plain redirect.
   if (
@@ -116,6 +129,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 }
 
 export async function runScheduled(env: Env, now: Date = new Date()) {
+  await purgeExpiredAppReturns(env.DB, now.getTime())
   const config = readConfig(env)
   const auth = await authFor(config, env)
   const context = await auth.$context
