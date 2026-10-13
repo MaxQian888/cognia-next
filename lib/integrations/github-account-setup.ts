@@ -61,7 +61,7 @@ async function connect(input: z.infer<typeof inputSchema>): Promise<SetupResult>
     await store.save(key, JSON.stringify(staging))
   }
   const credential = await provider.resolveRequestCredential(staging.authSessionId, {
-    accountId: staging.accountId ?? `setup:${input.operationId}`,
+    connectorAccountId: staging.accountId ?? `setup:${input.operationId}`,
     origin: "https://api.github.com",
   })
   const response = await proxyFetch("https://api.github.com/user", {

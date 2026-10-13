@@ -19,6 +19,7 @@ describe("account theme mirror", () => {
     writeAccountTheme("alpha", "dark")
     writeAccountTheme("beta", "light")
     writeAccountTheme("gamma", "system")
+    expect(localStorage.getItem("cognia-account-alpha:theme")).toBe("dark")
     expect(readAccountTheme("alpha")).toBe("dark")
     expect(readAccountTheme("beta")).toBe("light")
     expect(readAccountTheme("gamma")).toBe("system")

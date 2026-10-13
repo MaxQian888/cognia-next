@@ -147,7 +147,12 @@ describe("runGithubWriteback", () => {
     const approve = jest.fn()
     await expect(
       runGithubWriteback(
-        { target, accountId: "shown", action: { kind: "close" }, approval: "user-confirmed" },
+        {
+          target,
+          connectorAccountId: "shown",
+          action: { kind: "close" },
+          approval: "user-confirmed",
+        },
         { resolveAccount: async () => account({ id: "different" }), execute, approve }
       )
     ).rejects.toMatchObject({ code: "no-account" })

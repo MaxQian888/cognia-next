@@ -166,6 +166,10 @@ describe("github config + token", () => {
         sessionId: "s2",
       })
     ).toBe("installation-token")
+    expect(resolveRequestCredential).toHaveBeenCalledWith("s2", {
+      connectorAccountId: "b",
+      origin: "https://api.github.com",
+    })
     expect(
       await getGithubBackupToken({
         kind: "auth-session",

@@ -37,6 +37,8 @@ describe("account sync table policies", () => {
     expect(TABLE_POLICIES.settings.fields.knowledgeReading).toBe("local")
     expect(syncedFields(TABLE_POLICIES.sessions)).not.toContain("knowledgeReading")
     expect(syncedFields(TABLE_POLICIES.characters)).not.toContain("knowledgeReading")
+    expect(TABLE_POLICIES.sessions.fields.accountId).toBe("local")
+    expect(syncedFields(TABLE_POLICIES.sessions)).not.toContain("accountId")
     expect(TABLE_POLICIES.sessions.fields.workingDir).toBe("local")
     expect(TABLE_POLICIES.sessions.fields.sdkSessionId).toBe("local")
     expect(TABLE_POLICIES.sessions.fields.platformBinding).toBe("local")

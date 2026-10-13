@@ -14,7 +14,7 @@ jest.mock("@/lib/capacitor/_shared", () => ({
 }))
 
 const prompt = { title: "Unlock", reason: "Unlock account", negativeButtonText: "Cancel" }
-const accountId = "account-one"
+const localAccountId = "account-one"
 const keyId = "cognia.account-biometric.v1:account-one:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
 const secret = `biometric:${"ab".repeat(32)}`
 function plugin() {
@@ -36,7 +36,7 @@ it("protects a random account secret and proves secure retrieval before committi
   const native = plugin()
   const commit = jest.fn(async () => {})
   expect(
-    await enrollNativeBiometric({ accountId, prompt, commit, loader: async () => native })
+    await enrollNativeBiometric({ localAccountId, prompt, commit, loader: async () => native })
   ).toEqual({ ok: true })
   expect(native.setData).toHaveBeenCalledWith(
     expect.objectContaining({ accessControl: 1, authValidityDuration: 0 })
@@ -46,7 +46,7 @@ it("protects a random account secret and proves secure retrieval before committi
   expect(native.getSecureData).toHaveBeenCalledWith(
     expect.objectContaining({ fallbackTitle: "", reason: prompt.reason })
   )
-  expect(commit).toHaveBeenCalledWith(stored.value, expect.stringContaining(`:${accountId}:`))
+  expect(commit).toHaveBeenCalledWith(stored.value, expect.stringContaining(`:${localAccountId}:`))
 })
 
 it("does not store or enroll for weak-only biometrics", async () => {
@@ -54,7 +54,7 @@ it("does not store or enroll for weak-only biometrics", async () => {
   native.isAvailable.mockResolvedValue({ isAvailable: true, strongBiometryIsAvailable: false })
   const commit = jest.fn()
   expect(
-    await enrollNativeBiometric({ accountId, prompt, commit, loader: async () => native })
+    await enrollNativeBiometric({ localAccountId, prompt, commit, loader: async () => native })
   ).toEqual({ ok: false, reason: "unavailable" })
   expect(native.setData).not.toHaveBeenCalled()
   expect(commit).not.toHaveBeenCalled()
@@ -65,7 +65,7 @@ it("removes a candidate key after cancellation without committing", async () => 
   native.getSecureData.mockRejectedValueOnce({ code: "16", message: "用户取消" })
   const commit = jest.fn()
   expect(
-    await enrollNativeBiometric({ accountId, prompt, commit, loader: async () => native })
+    await enrollNativeBiometric({ localAccountId, prompt, commit, loader: async () => native })
   ).toEqual({ ok: false, reason: "cancelled" })
   expect(commit).not.toHaveBeenCalled()
   expect(native.deleteData).toHaveBeenCalledTimes(1)
@@ -75,7 +75,7 @@ it("cleans candidate storage when committing the vault wrap fails", async () => 
   const native = plugin()
   expect(
     await enrollNativeBiometric({
-      accountId,
+      localAccountId,
       prompt,
       commit: async () => {
         throw new Error("bad password")
@@ -90,7 +90,7 @@ it("reads the same secret only through authenticated storage", async () => {
   const native = plugin()
   native.getSecureData.mockResolvedValue({ value: secret })
   expect(
-    await readNativeBiometricSecret({ accountId, keyId, prompt, loader: async () => native })
+    await readNativeBiometricSecret({ localAccountId, keyId, prompt, loader: async () => native })
   ).toEqual({ ok: true, value: secret })
   expect(native.getSecureData).toHaveBeenCalledWith(expect.objectContaining({ key: keyId }))
 })
@@ -102,7 +102,7 @@ it.each([
   const native = plugin()
   native.getSecureData.mockRejectedValue(error)
   expect(
-    await readNativeBiometricSecret({ accountId, keyId, prompt, loader: async () => native })
+    await readNativeBiometricSecret({ localAccountId, keyId, prompt, loader: async () => native })
   ).toEqual({ ok: false, reason: "unavailable" })
 })
 
@@ -110,13 +110,15 @@ it.each([2, 4, 11, 16, 21])("does not return a secret after native failure %s", 
   const native = plugin()
   native.getSecureData.mockRejectedValue({ code, message: "认证失败" })
   expect(
-    await readNativeBiometricSecret({ accountId, keyId, prompt, loader: async () => native })
+    await readNativeBiometricSecret({ localAccountId, keyId, prompt, loader: async () => native })
   ).toMatchObject({ ok: false })
 })
 
 it("rejects another account's key before reaching the bridge", async () => {
   const loader = jest.fn()
-  expect(await readNativeBiometricSecret({ accountId: "other", keyId, prompt, loader })).toEqual({
+  expect(
+    await readNativeBiometricSecret({ localAccountId: "other", keyId, prompt, loader })
+  ).toEqual({
     ok: false,
     reason: "unavailable",
   })
@@ -128,14 +130,16 @@ it("rejects malformed returned key material", async () => {
   const native = plugin()
   native.getSecureData.mockResolvedValue({ value: "verified" })
   expect(
-    await readNativeBiometricSecret({ accountId, keyId, prompt, loader: async () => native })
+    await readNativeBiometricSecret({ localAccountId, keyId, prompt, loader: async () => native })
   ).toEqual({ ok: false, reason: "failed" })
 })
 
 it("does not use web storage or load a native plugin off mobile", async () => {
   mobile = false
   const loader = jest.fn()
-  expect(await enrollNativeBiometric({ accountId, prompt, commit: jest.fn(), loader })).toEqual({
+  expect(
+    await enrollNativeBiometric({ localAccountId, prompt, commit: jest.fn(), loader })
+  ).toEqual({
     ok: false,
     reason: "unavailable",
   })
@@ -152,7 +156,7 @@ it("cleans the candidate and never commits a result arriving after cancellation"
   const commit = jest.fn()
   expect(
     await enrollNativeBiometric({
-      accountId,
+      localAccountId,
       prompt,
       commit,
       signal: controller.signal,
@@ -172,7 +176,7 @@ it("discards a valid secret if its caller was cancelled during the prompt", asyn
   })
   expect(
     await readNativeBiometricSecret({
-      accountId,
+      localAccountId,
       keyId,
       prompt,
       signal: controller.signal,

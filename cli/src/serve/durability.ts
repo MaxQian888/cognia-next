@@ -111,10 +111,10 @@ export function installWriteFlush(
  */
 export function resolveDurabilityBackend(
   home: string,
-  accountId: string,
+  localAccountId: string,
   env: Record<string, string | undefined> = process.env
 ): DurabilityBackendId {
-  const root = durabilityRoot(home, accountId)
+  const root = durabilityRoot(home, localAccountId)
   if (fs.existsSync(manifestFile(root))) {
     try {
       return readManifest(root).activeBackend
@@ -132,8 +132,8 @@ export function resolveDurabilityBackend(
 }
 
 /** The `snapshot-v3` file name for an account, shared by the snapshot rung and the import. */
-function snapshotFileName(accountId: string): string {
-  return `db-${accountId}.json`
+function snapshotFileName(localAccountId: string): string {
+  return `db-${localAccountId}.json`
 }
 
 export interface DurabilityOptions {

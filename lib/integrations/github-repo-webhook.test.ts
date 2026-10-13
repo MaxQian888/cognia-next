@@ -4,6 +4,10 @@ jest.mock("@/lib/network/proxy-fetch", () => ({ proxyFetch: jest.fn() }))
 jest.mock("@/lib/plugin/auth/auth-provider-registry", () => ({ getProvider: jest.fn() }))
 jest.mock("./action-runner", () => ({ integrationApiBaseUrl: jest.fn() }))
 
+import { createKeyringStore } from "@/lib/credentials/keyring-store"
+import { getProvider } from "@/lib/plugin/auth/auth-provider-registry"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
+import { integrationApiBaseUrl } from "./action-runner"
 import type { IntegrationAccount } from "@/types/plugin/plugin-integration"
 import {
   configureGithubRepoWebhook,
@@ -210,5 +214,35 @@ describe("configureGithubRepoWebhook", () => {
       )
     ).resolves.toEqual({ status: "skipped", reason: "no-repository-events" })
     expect(d.request).not.toHaveBeenCalled()
+  })
+})
+
+it("resolves webhook credentials with a qualified connector identity", async () => {
+  const resolveRequestCredential = jest.fn(async () => ({ accessToken: "scoped-token" }))
+  jest.mocked(getProvider).mockReturnValue({ resolveRequestCredential } as never)
+  jest.mocked(integrationApiBaseUrl).mockResolvedValue("https://api.github.com")
+  jest.mocked(createKeyringStore).mockReturnValue({ load: async () => "secret" } as never)
+  jest
+    .mocked(proxyFetch)
+    .mockResolvedValueOnce({
+      status: 200,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => [],
+    } as never)
+    .mockResolvedValueOnce({
+      status: 201,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => ({ id: 42 }),
+    } as never)
+
+  await configureGithubRepoWebhook({
+    account: account(),
+    repoFullName: "acme/app",
+    webhookUrl: URL,
+    eventTypes: ["issues.closed"],
+  })
+  expect(resolveRequestCredential).toHaveBeenCalledWith("s", {
+    connectorAccountId: "acc",
+    origin: "https://api.github.com",
   })
 })

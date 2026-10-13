@@ -96,15 +96,15 @@ function key(): Promise<CryptoKey> {
       )
     )
   }
-  let pending = accountKeys.get(vault.accountId)
+  let pending = accountKeys.get(vault.localAccountId)
   if (!pending) {
     pending = loadAccountKey(vault)
-    accountKeys.set(vault.accountId, pending)
+    accountKeys.set(vault.localAccountId, pending)
     // A failed load is not remembered: the next request tries again.
     const loading = pending
-    const accountId = vault.accountId
+    const localAccountId = vault.localAccountId
     loading.catch(() => {
-      if (accountKeys.get(accountId) === loading) accountKeys.delete(accountId)
+      if (accountKeys.get(localAccountId) === loading) accountKeys.delete(localAccountId)
     })
   }
   return pending

@@ -76,6 +76,7 @@ it("sends commands to the service and releases only the UI subscription on unmou
   await act(async () => {
     await result.current.start({ id: "project-1" } as EvalProject)
   })
+  expect(result.current.scopeKey).toBe(`${JSON.stringify(scope)}:${accountRevision}`)
   expect(runtime.start).toHaveBeenCalledWith({ id: "project-1" })
   expect(result.current.experimentId).toBe("exp-1")
   await act(async () => {

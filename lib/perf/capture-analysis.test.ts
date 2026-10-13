@@ -227,7 +227,7 @@ describe("capture analysis", () => {
     const db = { performanceCaptures: { get } } as never
     readFramesMock.mockResolvedValue([frame(0, 60)])
     readMetadataMock.mockResolvedValue(null)
-    const input = { db, accountId: "acc", targetDatabase: "db", key: new Uint8Array(32) }
+    const input = { db, localAccountId: "acc", targetDatabase: "db", key: new Uint8Array(32) }
     await expect(readDecodedCapture({ ...input, captureId: "a" })).resolves.toEqual({
       row: stored,
       frames: [frame(0, 60)],

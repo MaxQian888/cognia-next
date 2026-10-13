@@ -74,7 +74,7 @@ pub fn require() -> FileShareResult<Arc<FileShareService>> {
 
 #[derive(Clone)]
 pub(crate) struct Active {
-    pub account_id: String,
+    pub local_account_id: String,
     pub store: Arc<Store>,
     pub policy: Arc<RwLock<PolicySnapshot>>,
 }
@@ -160,7 +160,8 @@ pub enum AuthFailure {
 #[serde(rename_all = "camelCase")]
 pub struct FileShareStatus {
     pub active: bool,
-    pub account_id: Option<String>,
+    #[serde(rename = "accountId")]
+    pub local_account_id: Option<String>,
     pub policy: PolicySnapshot,
     pub listener: ListenerStatus,
     pub sftpgo: SftpgoStatus,
@@ -247,7 +248,7 @@ impl FileShareService {
     pub fn for_tests(store: Store, policy: PolicySnapshot, root_validator: RootValidator) -> Arc<Self> {
         let service = Self::new(std::env::temp_dir(), root_validator);
         *service.active.write() = Some(Active {
-            account_id: "test".into(),
+            local_account_id: "test".into(),
             store: Arc::new(store),
             policy: Arc::new(RwLock::new(policy)),
         });
@@ -257,10 +258,10 @@ impl FileShareService {
     /// [`Self::for_tests`] under its own account id, for tests that touch the
     /// process-global secret store and must not share keys.
     #[cfg(test)]
-    pub(crate) fn for_tests_account(store: Store, policy: PolicySnapshot, account_id: &str) -> Arc<Self> {
+    pub(crate) fn for_tests_account(store: Store, policy: PolicySnapshot, local_account_id: &str) -> Arc<Self> {
         let service = Self::new(std::env::temp_dir(), tests::validator());
         *service.active.write() = Some(Active {
-            account_id: account_id.into(),
+            local_account_id: local_account_id.into(),
             store: Arc::new(store),
             policy: Arc::new(RwLock::new(policy)),
         });
@@ -324,11 +325,11 @@ impl FileShareService {
         }
     }
 
-    fn store_path(&self, account_id: &str) -> PathBuf {
+    fn store_path(&self, local_account_id: &str) -> PathBuf {
         self.data_dir
             .join("cognia")
             .join("accounts")
-            .join(account_id)
+            .join(local_account_id)
             .join("file-share.sqlite")
     }
 
@@ -345,9 +346,9 @@ impl FileShareService {
     /// unlocked account served.
     pub fn bind_account(
         self: &Arc<Self>,
-        account_id: Option<String>,
+        local_account_id: Option<String>,
     ) -> impl std::future::Future<Output = ()> + Send + 'static {
-        *self.bound_account.write() = Some(account_id.clone());
+        *self.bound_account.write() = Some(local_account_id.clone());
         let generation = self.bind_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let service = self.clone();
         async move {
@@ -355,33 +356,33 @@ impl FileShareService {
             if service.bind_generation.load(Ordering::SeqCst) != generation {
                 return;
             }
-            if let Err(error) = service.apply_account(account_id).await {
+            if let Err(error) = service.apply_account(local_account_id).await {
                 log::warn!("file-share: account binding failed: {error}");
             }
         }
     }
 
-    /// Serve `account_id`'s store, or nothing (`None`: locked or signed out).
+    /// Serve `local_account_id`'s store, or nothing (`None`: locked or signed out).
     /// Once the host bound an account ([`Self::bind_account`]) this only
     /// confirms it: a different account is refused.
-    pub async fn activate(self: &Arc<Self>, account_id: Option<String>) -> FileShareResult<FileShareStatus> {
+    pub async fn activate(self: &Arc<Self>, local_account_id: Option<String>) -> FileShareResult<FileShareStatus> {
         if let Some(bound) = self.bound_account.read().clone() {
-            if bound != account_id {
+            if bound != local_account_id {
                 return Err(FileShareError::new(
                     "file_share_locked",
                     "that is not the account this host has unlocked",
                 ));
             }
         }
-        self.apply_account(account_id).await?;
+        self.apply_account(local_account_id).await?;
         Ok(self.status().await)
     }
 
-    async fn apply_account(self: &Arc<Self>, account_id: Option<String>) -> FileShareResult<()> {
+    async fn apply_account(self: &Arc<Self>, local_account_id: Option<String>) -> FileShareResult<()> {
         let changed = {
             let _lifecycle = self.lifecycle.lock().await;
-            let current = self.active.read().as_ref().map(|active| active.account_id.clone());
-            if current == account_id {
+            let current = self.active.read().as_ref().map(|active| active.local_account_id.clone());
+            if current == local_account_id {
                 false
             } else {
                 self.runtime.lock().await.stop();
@@ -392,7 +393,7 @@ impl FileShareService {
                 self.collab.stop_all();
                 self.live.disconnect_all();
                 self.verified.clear();
-                if let Some(id) = account_id.as_deref() {
+                if let Some(id) = local_account_id.as_deref() {
                     if !valid_account_id(id) {
                         return Err(FileShareError::invalid("not an account id"));
                     }
@@ -403,7 +404,7 @@ impl FileShareService {
                     let snapshot: PolicySnapshot =
                         store.setting(policy::SETTINGS_KEY)?.unwrap_or_default();
                     *self.active.write() = Some(Active {
-                        account_id: id.to_string(),
+                        local_account_id: id.to_string(),
                         store: Arc::new(store),
                         policy: Arc::new(RwLock::new(snapshot)),
                     });
@@ -413,7 +414,7 @@ impl FileShareService {
         };
         // A confirmation of the account already served leaves the listener
         // and its connections alone.
-        if changed && account_id.is_some() {
+        if changed && local_account_id.is_some() {
             self.restart_listener().await;
             self.start_maintenance();
             crate::collab::spawn_sync(self);
@@ -1210,7 +1211,7 @@ impl FileShareService {
         let Ok(active) = self.active() else {
             return FileShareStatus {
                 active: false,
-                account_id: None,
+                local_account_id: None,
                 policy: PolicySnapshot::default(),
                 listener,
                 sftpgo: SftpgoStatus::default(),
@@ -1224,7 +1225,7 @@ impl FileShareService {
         let policy = active.policy.read().clone();
         FileShareStatus {
             active: true,
-            account_id: Some(active.account_id.clone()),
+            local_account_id: Some(active.local_account_id.clone()),
             policy,
             listener,
             sftpgo: self.sftpgo_status(&active, false).await,
@@ -1290,6 +1291,11 @@ pub(crate) mod tests {
         assert_eq!(service.list_grants(None, &PageRequest::default()).unwrap_err().code, "file_share_locked");
         let status = service.activate(Some("acct_a".into())).await.unwrap();
         assert!(status.active);
+        let wire_status = serde_json::to_value(&status).unwrap();
+        assert_eq!(wire_status["accountId"], "acct_a");
+        assert!(wire_status.get("localAccountId").is_none());
+        let decoded: FileShareStatus = serde_json::from_value(wire_status).unwrap();
+        assert_eq!(decoded.local_account_id.as_deref(), Some("acct_a"));
         assert!(dir.path().join("cognia/accounts/acct_a/file-share.sqlite").is_file());
         let status = service.activate(None).await.unwrap();
         assert!(!status.active);
@@ -1308,7 +1314,7 @@ pub(crate) mod tests {
         unlock_b.await;
         lock.await;
         unlock.await;
-        assert_eq!(service.status().await.account_id.as_deref(), Some("acct_b"));
+        assert_eq!(service.status().await.local_account_id.as_deref(), Some("acct_b"));
         // The app may confirm the bound account, never choose another.
         assert!(service.activate(Some("acct_b".into())).await.unwrap().active);
         assert_eq!(

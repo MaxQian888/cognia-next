@@ -77,6 +77,7 @@ describe("SettingsSyncProvider", () => {
     rerender(<SettingsSyncProvider>child</SettingsSyncProvider>)
     expect(readAccountTheme("acct_alpha")).toBe("dark")
     expect(readAccountTheme("acct_beta")).toBe("system")
+    expect(localStorage.getItem("cognia-account-acct_beta:theme")).toBe("system")
   })
 
   it("does not cache unscoped settings as an account preference", () => {

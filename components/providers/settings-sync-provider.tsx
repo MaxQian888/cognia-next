@@ -32,7 +32,7 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
   const { setTheme } = useTheme()
   const settings = useSettingsStore((s) => s.settings)
   const loaded = useSettingsStore((s) => s.loaded)
-  const accountId = useAccountStore((s) => s.unlockedAccountId)
+  const localAccountId = useAccountStore((s) => s.unlockedAccountId)
   // Flattened to scalars so the effect's deps cover exactly the four fields it
   // applies — keying on the whole `settings` object re-fired every write on
   // any unrelated save, and each re-fire ended in a Tauri `setZoom` IPC that
@@ -76,7 +76,7 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
 
     // next-themes' shared key may describe a different account. Keep this
     // account's canonical choice readable before the next unlock.
-    if (ownsWindowTheme && accountId) writeAccountTheme(accountId, theme)
+    if (ownsWindowTheme && localAccountId) writeAccountTheme(localAccountId, theme)
 
     if (ownsWindowTheme && theme !== lastTheme.current) {
       lastTheme.current = theme
@@ -103,7 +103,7 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
       lastZoom.current = webviewZoom
       void applyZoom(webviewZoom)
     }
-  }, [ready, accountId, theme, fontScale, reduceMotion, webviewZoom])
+  }, [ready, localAccountId, theme, fontScale, reduceMotion, webviewZoom])
 
   return <>{children}</>
 }

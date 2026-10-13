@@ -673,6 +673,34 @@ describe("getDb", () => {
     expect(first.isOpen()).toBe(false)
   })
 
+  it("binds the selected database cipher from the real unlocked local profile", async () => {
+    const vault = await import("@/lib/runtime/browser-vault")
+    const content = await import("@/lib/accounts/content-cipher")
+    vault.__resetBrowserVaultForTesting()
+    vault.__setBrowserVaultArgon2ParametersForTesting(32)
+    await Dexie.delete(vault.BROWSER_VAULT_DB_NAME)
+    try {
+      await vault.provisionBrowserVault("acct_cipher_default", "password")
+      activateAccountDatabase("acct_cipher_default", "web-standalone")
+      const databaseName = "cognia-account-acct_cipher_default-target-web-standalone-encrypted-v1"
+      const cipher = content.getActiveAccountContentCipher(databaseName)
+      expect(cipher).not.toBeNull()
+      const envelope = await cipher!.encrypt("messages", "m1", "parts", 1, "private")
+      expect(envelope.accountId).toBe("acct_cipher_default")
+      await expect(cipher!.decrypt("messages", "m1", "parts", 1, envelope)).resolves.toBe("private")
+      activateAccountDatabase("acct_other", "web-standalone")
+      expect(
+        content.getActiveAccountContentCipher(
+          "cognia-account-acct_other-target-web-standalone-encrypted-v1"
+        )
+      ).toBeNull()
+    } finally {
+      content.lockAccountContentCipher()
+      vault.__resetBrowserVaultForTesting()
+      await Dexie.delete(vault.BROWSER_VAULT_DB_NAME)
+    }
+  })
+
   it("opens a physically isolated database for an account runtime target", () => {
     activateAccountDatabase("acct_one", "web-standalone")
 

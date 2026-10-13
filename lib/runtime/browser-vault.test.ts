@@ -43,7 +43,7 @@ describe("legacy PBKDF2 (v1) vaults", () => {
 
     const session = await BrowserVaultSession.unlockWithPassword(record, "correct horse")
 
-    expect(session.accountId).toBe(ACCOUNT_ID)
+    expect(session.localAccountId).toBe(ACCOUNT_ID)
     expect(session.isUnlocked()).toBe(true)
   })
 
@@ -59,7 +59,7 @@ describe("legacy PBKDF2 (v1) vaults", () => {
     )
 
     await expect(unlockBrowserVault(ACCOUNT_ID, "correct horse")).resolves.toBeUndefined()
-    expect(getActiveBrowserVault()?.accountId).toBe(ACCOUNT_ID)
+    expect(getActiveBrowserVault()?.localAccountId).toBe(ACCOUNT_ID)
 
     await changeBrowserVaultPassword(ACCOUNT_ID, "correct horse", "next horse")
     const rotated = await new BrowserVaultRepository().get(ACCOUNT_ID)
@@ -179,7 +179,7 @@ it("stores multiple named secret envelopes in the Vault database and removes the
 
 it("keeps only the active account master key in the process singleton", async () => {
   await provisionBrowserVault(ACCOUNT_ID, "correct horse")
-  expect(getActiveBrowserVault()?.accountId).toBe(ACCOUNT_ID)
+  expect(getActiveBrowserVault()?.localAccountId).toBe(ACCOUNT_ID)
 
   lockBrowserVault()
   expect(getActiveBrowserVault()).toBeNull()
@@ -193,7 +193,7 @@ it("can provision a secondary account without replacing the active account key",
 
   await provisionBrowserVault("acct_secondary", "other password", false)
 
-  expect(getActiveBrowserVault()?.accountId).toBe(ACCOUNT_ID)
+  expect(getActiveBrowserVault()?.localAccountId).toBe(ACCOUNT_ID)
   await expect(unlockBrowserVault("acct_secondary", "other password")).resolves.toBeUndefined()
 })
 
@@ -260,7 +260,7 @@ describe("resetBrowserVaultPasswordWithRecoveryKey", () => {
     await resetBrowserVaultPasswordWithRecoveryKey(ACCOUNT_ID, recoveryKey, "brand new phrase")
 
     const session = getActiveBrowserVault()
-    expect(session?.accountId).toBe(ACCOUNT_ID)
+    expect(session?.localAccountId).toBe(ACCOUNT_ID)
     await expect(session!.loadSecret("provider:anthropic")).resolves.toBe("sk-secret")
   })
 

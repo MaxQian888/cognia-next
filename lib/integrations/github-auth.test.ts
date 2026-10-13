@@ -76,12 +76,12 @@ describe("host-owned GitHub Integration authentication", () => {
       )!
       await expect(
         provider.resolveRequestCredential!(session!.id, {
-          accountId: "account-1",
+          connectorAccountId: "account-1",
           origin: "https://api.github.com",
         })
       ).resolves.toMatchObject({ accessToken: "installation-token" })
       await provider.resolveRequestCredential!(session!.id, {
-        accountId: "account-1",
+        connectorAccountId: "account-1",
         origin: "https://api.github.com",
       })
 
@@ -134,7 +134,7 @@ describe("host-owned GitHub Integration authentication", () => {
         "github-app"
       )!
       await provider.resolveRequestCredential!(session!.id, {
-        accountId: "a",
+        connectorAccountId: "a",
         origin: "https://ghe.example.com",
       })
 
@@ -214,7 +214,7 @@ describe("host-owned GitHub Integration authentication", () => {
       )!
       await expect(
         provider.resolveRequestCredential!(session!.id, {
-          accountId: "account-1",
+          connectorAccountId: "account-1",
           origin: "https://api.github.com",
         })
       ).resolves.toEqual({ accessToken: "github-pat-secret" })

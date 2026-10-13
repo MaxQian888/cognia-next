@@ -53,14 +53,14 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 export interface MobileSubmitDeps {
   readMobile?: typeof readMobileCrashReport
   recordMobileReceipt?: typeof recordMobileCrashReceipt
-  loadIdentity?: (accountId: string) => Promise<InstallationIdentity | null>
+  loadIdentity?: (localAccountId: string) => Promise<InstallationIdentity | null>
   exchangeGrant?: typeof exchangeAnonymousGrant
   digest?: (bytes: Uint8Array) => Promise<string>
 }
 
 export interface MobileSubmitInput {
   connection: StoredDiagnosticConnection
-  accountId: string
+  localAccountId: string
   /** The plugin's incident id. */
   incidentId: string
   /** The incident's capture source, sent as the exception label. */
@@ -83,9 +83,9 @@ export async function submitMobileCrashReport(
   input: MobileSubmitInput,
   deps: MobileSubmitDeps = {}
 ): Promise<MobileSubmitResult> {
-  const { connection, accountId, fetchImpl } = input
+  const { connection, localAccountId, fetchImpl } = input
   const digest = deps.digest ?? sha256Hex
-  const identity = await (deps.loadIdentity ?? loadOrCreateInstallationIdentity)(accountId)
+  const identity = await (deps.loadIdentity ?? loadOrCreateInstallationIdentity)(localAccountId)
   if (!identity) {
     // Honest capability report rather than an opaque signature failure: this
     // WebView is too old for Ed25519.

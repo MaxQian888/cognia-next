@@ -3,7 +3,7 @@
  * videos workflow jobs generate (ADR-0205) and the composer's FFmpeg staging
  * copies.
  *
- * Each is laid out `<dir>/<accountId>/<databaseName>/…`. The account level lets
+ * Each is laid out `<dir>/<localAccountId>/<databaseName>/…`. The account level lets
  * account deletion remove everything an account left on disk without opening
  * its database (a locked account's database is encrypted). The database level
  * lets "clear all data" remove what the one database it drops pointed at, and
@@ -51,13 +51,13 @@ function hasAppData(): boolean {
   return detectHostProfile() === "desktop"
 }
 
-/** `<dir>/<accountId>/<databaseName>`, relative to AppData. */
+/** `<dir>/<localAccountId>/<databaseName>`, relative to AppData. */
 export function databaseAppDataDir(
   dir: AccountAppDataDir,
-  accountId: string,
+  localAccountId: string,
   databaseName: string
 ): string {
-  return `${dir}/${assertAccountId(accountId)}/${assertDatabaseName(databaseName)}`
+  return `${dir}/${assertAccountId(localAccountId)}/${assertDatabaseName(databaseName)}`
 }
 
 /** The directory of the database this runtime is serving. */
@@ -84,18 +84,23 @@ async function removeEach(paths: readonly string[]): Promise<void> {
  * Remove everything an account keeps under AppData, across all its databases.
  * Tries every directory before throwing the failures.
  */
-export async function purgeAccountAppData(accountId: string): Promise<void> {
-  assertAccountId(accountId)
+export async function purgeAccountAppData(localAccountId: string): Promise<void> {
+  assertAccountId(localAccountId)
   if (!hasAppData()) return
-  await removeEach(ACCOUNT_APP_DATA_DIRS.map((dir) => `${dir}/${accountId}`))
+  await removeEach(ACCOUNT_APP_DATA_DIRS.map((dir) => `${dir}/${localAccountId}`))
 }
 
 /**
  * Remove what one of an account's databases keeps under AppData. Tries every
  * directory before throwing the failures.
  */
-export async function purgeDatabaseAppData(accountId: string, databaseName: string): Promise<void> {
-  const paths = ACCOUNT_APP_DATA_DIRS.map((dir) => databaseAppDataDir(dir, accountId, databaseName))
+export async function purgeDatabaseAppData(
+  localAccountId: string,
+  databaseName: string
+): Promise<void> {
+  const paths = ACCOUNT_APP_DATA_DIRS.map((dir) =>
+    databaseAppDataDir(dir, localAccountId, databaseName)
+  )
   if (!hasAppData()) return
   await removeEach(paths)
 }

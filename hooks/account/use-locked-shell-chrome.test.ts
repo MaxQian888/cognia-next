@@ -92,3 +92,14 @@ it("does not paint after unmounting mid-registration", async () => {
   await new Promise((resolve) => setTimeout(resolve, 0))
   expect(mockStatusBar).not.toHaveBeenCalled()
 })
+
+it("restores the newly selected local profile's saved theme", () => {
+  writeAccountTheme("alpha", "light")
+  writeAccountTheme("beta", "system")
+  const { rerender } = renderHook(({ localAccountId }) => useLockedAccountTheme(localAccountId), {
+    initialProps: { localAccountId: "alpha" },
+  })
+  expect(mockSetTheme).toHaveBeenLastCalledWith("light")
+  rerender({ localAccountId: "beta" })
+  expect(mockSetTheme).toHaveBeenLastCalledWith("system")
+})

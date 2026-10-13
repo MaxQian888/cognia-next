@@ -34,14 +34,14 @@ const defaultLoader = makeDefaultLoader<ProtectedBiometricStorage>(
 export type NativeBiometricFailure = "unavailable" | "cancelled" | "lockout" | "failed"
 type Result<T> = { ok: true; value: T } | { ok: false; reason: NativeBiometricFailure }
 
-function keyPrefix(accountId: string): string {
-  return `cognia.account-biometric.v1:${encodeURIComponent(accountId)}:`
+function keyPrefix(localAccountId: string): string {
+  return `cognia.account-biometric.v1:${encodeURIComponent(localAccountId)}:`
 }
 
-function ownsKey(accountId: string, keyId: string): boolean {
+function ownsKey(localAccountId: string, keyId: string): boolean {
   return (
-    keyId.startsWith(keyPrefix(accountId)) &&
-    /^[a-f0-9-]{36}$/.test(keyId.slice(keyPrefix(accountId).length))
+    keyId.startsWith(keyPrefix(localAccountId)) &&
+    /^[a-f0-9-]{36}$/.test(keyId.slice(keyPrefix(localAccountId).length))
   )
 }
 
@@ -67,7 +67,7 @@ function checkAbort(signal?: AbortSignal): void {
 
 /** Store a fresh candidate, prove authenticated access, then persist its vault wrap/reference. */
 export async function enrollNativeBiometric(args: {
-  accountId: string
+  localAccountId: string
   prompt: NativeBiometricPrompt
   commit: (canonicalSecret: string, keyId: string) => Promise<void>
   loader?: Loader
@@ -83,7 +83,7 @@ export async function enrollNativeBiometric(args: {
       // Android's per-operation Keystore authentication requires Class 3.
       if (!availability.isAvailable || !availability.strongBiometryIsAvailable)
         return { ok: false as const, reason: "unavailable" as const }
-      const keyId = `${keyPrefix(args.accountId)}${crypto.randomUUID()}`
+      const keyId = `${keyPrefix(args.localAccountId)}${crypto.randomUUID()}`
       const bytes = crypto.getRandomValues(new Uint8Array(32))
       const secret = `biometric:${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`
       bytes.fill(0)
@@ -115,13 +115,13 @@ export async function enrollNativeBiometric(args: {
 }
 
 export async function readNativeBiometricSecret(args: {
-  accountId: string
+  localAccountId: string
   keyId: string
   prompt: NativeBiometricPrompt
   loader?: Loader
   signal?: AbortSignal
 }): Promise<Result<string>> {
-  if (!isMobile() || !ownsKey(args.accountId, args.keyId))
+  if (!isMobile() || !ownsKey(args.localAccountId, args.keyId))
     return { ok: false, reason: "unavailable" }
   try {
     return await withBiometricPromptLock(async () => {
@@ -145,11 +145,12 @@ export async function readNativeBiometricSecret(args: {
 }
 
 export async function removeNativeBiometricSecret(
-  accountId: string,
+  localAccountId: string,
   keyId: string,
   loader: Loader = defaultLoader
 ): Promise<void> {
-  if (!ownsKey(accountId, keyId)) throw new Error("Biometric key does not belong to this account")
+  if (!ownsKey(localAccountId, keyId))
+    throw new Error("Biometric key does not belong to this account")
   if (!isMobile()) return
   await (await loader()).deleteData({ key: keyId })
 }

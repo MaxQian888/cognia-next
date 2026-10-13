@@ -34,13 +34,13 @@ pub const ABANDON: &str = "paired_turn_abandon";
 /// The turn's options are never part of the request: they may carry a key.
 pub fn admission_args(
     scope: Option<&str>,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     session_id: &str,
     prompt: &Value,
     message_id: Option<&str>,
     request_id: &str,
 ) -> Option<Value> {
-    if scope == Some("service") || account_id.is_none() {
+    if scope == Some("service") || tenant_id.is_none() {
         return None;
     }
     let mut args = serde_json::json!({

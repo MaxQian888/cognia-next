@@ -150,7 +150,7 @@ export async function getGithubBackupToken(
   if (!session) return null
   if (credential.providerId === "github-app" && provider.resolveRequestCredential) {
     const resolved = await provider.resolveRequestCredential(session.id, {
-      accountId: session.account.id,
+      connectorAccountId: session.account.id,
       origin: "https://api.github.com",
     })
     return resolved.accessToken

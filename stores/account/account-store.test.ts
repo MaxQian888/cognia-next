@@ -154,7 +154,7 @@ jest.mock("@/lib/runtime/browser-vault", () => ({
   getActiveBrowserVault: () =>
     mockActiveBrowserVaultAccountId
       ? {
-          accountId: mockActiveBrowserVaultAccountId,
+          localAccountId: mockActiveBrowserVaultAccountId,
           createContentCipher: (databaseName: string) => ({ databaseName, lock: jest.fn() }),
         }
       : null,
@@ -286,7 +286,7 @@ describe("native biometric enrollment persistence", () => {
     failedAttempts: 0,
   }
   const enrollmentArgs = {
-    accountId: "acct_alpha",
+    localAccountId: "acct_alpha",
     method: "biometric" as const,
     canonicalSecret: `biometric:${"a".repeat(64)}`,
     password: "pw",

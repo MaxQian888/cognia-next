@@ -1,3 +1,20 @@
+jest.mock("@/lib/ai/agent/agent-executor", () => ({ executeAgent: jest.fn() }))
+jest.mock("@/lib/db/integrations", () => ({
+  getIntegrationAccount: jest.fn(),
+  getIntegrationActionJob: jest.fn(),
+  updateIntegrationActionJob: jest.fn(),
+}))
+jest.mock("@/lib/github/workspace", () => ({
+  cloneToWorkspace: jest.fn(),
+  commitAndPush: jest.fn(),
+  removeWorkspace: jest.fn(),
+}))
+jest.mock("@/lib/plugin/auth/auth-provider-registry", () => ({ getProvider: jest.fn() }))
+
+import { executeAgent } from "@/lib/ai/agent/agent-executor"
+import { getIntegrationAccount, getIntegrationActionJob } from "@/lib/db/integrations"
+import { cloneToWorkspace, commitAndPush, removeWorkspace } from "@/lib/github/workspace"
+import { getProvider } from "@/lib/plugin/auth/auth-provider-registry"
 import type { IntegrationActionHandlerContext } from "@/types/plugin/plugin-integration"
 import { runGithubIssueLoop, type GithubIssueLoopDependencies } from "./github-issue-loop"
 
@@ -51,6 +68,50 @@ const input = {
 }
 
 describe("runGithubIssueLoop", () => {
+  it("resolves the selected connector account through the host provider on its existing origin", async () => {
+    const deps = dependencies()
+    const resolveRequestCredential = jest.fn(async () => ({ accessToken: "selected-token" }))
+    jest.mocked(getIntegrationActionJob).mockResolvedValue(undefined)
+    jest.mocked(getIntegrationAccount).mockResolvedValue({
+      id: "account-1",
+      enabled: true,
+      providerId: "github-app",
+      authSessionId: "selected-session",
+    } as never)
+    jest.mocked(getProvider).mockReturnValue({
+      getSessions: async () => [
+        { id: "other-session", accessToken: "wrong-token" },
+        { id: "selected-session", accessToken: "host-resolved" },
+      ],
+      resolveRequestCredential,
+    } as never)
+    jest.mocked(cloneToWorkspace).mockImplementation(deps.clone)
+    jest.mocked(executeAgent).mockResolvedValue({ text: "done" } as never)
+    jest.mocked(commitAndPush).mockResolvedValue("deadbeef")
+    jest.mocked(removeWorkspace).mockResolvedValue(true)
+
+    await expect(
+      runGithubIssueLoop(input, {
+        ...context,
+        apiBaseUrl: "https://ghe.acme.io/api/v3",
+        authenticatedRequest: deps.request,
+      })
+    ).resolves.toMatchObject({ pullRequestNumber: 11, commitSha: "deadbeef" })
+
+    expect(getIntegrationAccount).toHaveBeenCalledWith("github-delivery", "account-1")
+    expect(resolveRequestCredential).toHaveBeenCalledWith("selected-session", {
+      connectorAccountId: "account-1",
+      origin: "https://ghe.acme.io",
+    })
+    expect(cloneToWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: "selected-token",
+        hostUrl: "https://ghe.acme.io",
+      })
+    )
+    expect(commitAndPush).toHaveBeenCalledWith(expect.objectContaining({ token: "selected-token" }))
+  })
+
   it("runs the guarded issue-to-branch-to-PR path and cleans the workspace", async () => {
     const deps = dependencies()
 

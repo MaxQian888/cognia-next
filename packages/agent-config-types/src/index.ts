@@ -4666,7 +4666,7 @@ export interface AppSettings {
   customLimitsSources?: import("@/types/subscription").CustomLimitsSource[]
   /**
    * Account-scoped opt-ins for outbound quota/balance requests. Keys are
-   * produced by `limitsQueryAccountKey(provider, accountId)`; missing means no
+   * produced by `limitsQueryAccountKey(provider, providerAccountId)`; missing means no
    * vault account may be queried automatically.
    */
   limitsQueryEnabledAccounts?: string[]

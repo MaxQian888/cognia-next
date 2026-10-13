@@ -46,7 +46,7 @@ async function defaultResolveToken(
   const provider = getProvider(account.providerId)
   if (!provider?.resolveRequestCredential) return null
   const credential = await provider.resolveRequestCredential(account.authSessionId, {
-    accountId: account.id,
+    connectorAccountId: account.id,
     origin: new URL(host.apiBaseUrl).origin,
   })
   return credential.accessToken || null

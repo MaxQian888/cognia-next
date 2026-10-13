@@ -691,7 +691,7 @@ export class ConnectorBus {
         openId: event.sender.remoteUserId,
         identityScope: resolveInput.identityScope,
         fallbackAppId: adapterRow.lastWhoamiResult?.appId,
-        accountId: resolveInput.activeAccountId,
+        localAccountId: resolveInput.activeAccountId,
         conversationKey: event.conversationKey,
       }).catch(() => ({ status: "skipped" as const }))
       if (selfBound.status === "bound") {

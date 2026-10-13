@@ -1,3 +1,6 @@
+jest.mock("@/lib/runtime/browser-vault", () => ({ getActiveBrowserVault: jest.fn() }))
+
+import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 import { AccountContentCipher } from "@/lib/accounts/content-cipher"
 
 import { RouterFusionInfrastructureError } from "../gate/faults"
@@ -49,4 +52,26 @@ describe("fusion content codec", () => {
       codec.open("fusionArtifacts", "a1", "content", { content: "planted", encryptedContent: null })
     ).rejects.toMatchObject({ code: "internal" })
   })
+})
+
+it("uses the unlocked local profile for the default vault boundary", async () => {
+  const cipher = await AccountContentCipher.createForTesting(ACCOUNT, FUSION_NAME)
+  const vault = {
+    localAccountId: ACCOUNT,
+    isUnlocked: () => true,
+    createContentCipher: jest.fn(() => cipher),
+  }
+  jest.mocked(getActiveBrowserVault).mockReturnValue(vault as never)
+  try {
+    const codec = fusionContentCodec(FUSION_NAME)
+    const sealed = await codec.seal("fusionArtifacts", "a1", "content", "private")
+    expect(vault.createContentCipher).toHaveBeenCalledWith(FUSION_NAME)
+    expect(sealed.encryptedContent).toMatchObject({ accountId: ACCOUNT })
+    vault.localAccountId = "acct_someone_else"
+    await expect(codec.open("fusionArtifacts", "a1", "content", sealed)).rejects.toMatchObject({
+      code: "cipher_locked",
+    })
+  } finally {
+    jest.mocked(getActiveBrowserVault).mockReset()
+  }
 })

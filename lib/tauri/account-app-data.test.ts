@@ -79,10 +79,15 @@ describe("purges", () => {
   })
 
   it("removes one database's directories and leaves the account's others", async () => {
-    mkdirs("generated-videos/acct_alpha/db-one", "generated-videos/acct_alpha/db-two")
+    mkdirs(
+      "generated-videos/acct_alpha/db-one",
+      "generated-videos/acct_alpha/db-two",
+      "generated-videos/acct_beta/db-one"
+    )
     await purgeDatabaseAppData("acct_alpha", "db-one")
     expect(tree.has("generated-videos/acct_alpha/db-one")).toBe(false)
     expect(tree.has("generated-videos/acct_alpha/db-two")).toBe(true)
+    expect(tree.has("generated-videos/acct_beta/db-one")).toBe(true)
   })
 
   it("tries every directory before reporting the ones that failed", async () => {

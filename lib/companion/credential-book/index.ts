@@ -58,7 +58,9 @@ export * from "./stores"
  * reports no pairing rather than guessing one.
  */
 export function activeAccountNamespace(): string | null {
-  return getActiveRuntimeTargetContext()?.accountId ?? getActiveBrowserVault()?.accountId ?? null
+  return (
+    getActiveRuntimeTargetContext()?.accountId ?? getActiveBrowserVault()?.localAccountId ?? null
+  )
 }
 
 function pickRecordStore(): HostRecordStore {

@@ -54,7 +54,8 @@ fn wire(error: FileShareError) -> CommandError {
 #[tauri::command]
 pub async fn file_share_activate(account_id: Option<String>) -> Result<FileShareStatus, CommandError> {
     let service = service::require().map_err(wire)?;
-    service.activate(account_id).await.map_err(wire)
+    let local_account_id = account_id;
+    service.activate(local_account_id).await.map_err(wire)
 }
 
 #[tauri::command]

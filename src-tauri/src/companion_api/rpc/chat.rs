@@ -51,10 +51,10 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let _ = (state, host, device_id, account_id, scope);
+    let _ = (state, host, device_id, tenant_id, scope);
     let result = match name {
         // ── Chat session ─────────────────────────────────────────────────────
 
@@ -74,7 +74,7 @@ pub(super) async fn dispatch(
             let options: Option<claude_commands::SendOptions> = optional(&args, "options")?;
             let caller = SendCaller {
                 device_id,
-                account_id,
+                tenant_id,
                 scope,
             };
             send_arm(state, host, caller, session_id, prompt, options, None, None).await
@@ -100,7 +100,7 @@ pub(super) async fn dispatch(
             }
             let caller = SendCaller {
                 device_id,
-                account_id,
+                tenant_id,
                 scope,
             };
             send_arm(
@@ -656,7 +656,7 @@ fn authorize_approval(
 #[derive(Clone, Copy)]
 struct SendCaller<'a> {
     device_id: &'a str,
-    account_id: Option<&'a str>,
+    tenant_id: Option<&'a str>,
     scope: Option<&'a str>,
 }
 
@@ -673,7 +673,7 @@ async fn admit_paired_turn(
 ) -> Result<Option<String>, (StatusCode, Json<RpcError>)> {
     let Some(args) = super::super::paired_turn::admission_args(
         caller.scope,
-        caller.account_id,
+        caller.tenant_id,
         session_id,
         prompt,
         message_id,
@@ -683,7 +683,7 @@ async fn admit_paired_turn(
     };
     // Same binding HostState uses: the account and Host id come from the
     // authenticated request, overwriting anything a client could send.
-    let args = super::host_state::bind_authority(args, state, caller.account_id, caller.device_id)?;
+    let args = super::host_state::bind_authority(args, state, caller.tenant_id, caller.device_id)?;
     let transport = super::super::ws_bridge::resolve_bridge_transport(state)
         .map_err(RpcError::service_unavailable)?;
     let result = std::sync::Arc::clone(&state.desktop_writes_bridge)

@@ -155,7 +155,7 @@ async function defaultAuthenticatedRequest<T>(
   const requestAuth = strategy.requestAuth ?? { type: "bearer" as const }
   const credential = provider.resolveRequestCredential
     ? await provider.resolveRequestCredential(session.id, {
-        accountId: connectorAccountId,
+        connectorAccountId,
         origin: url.origin,
       })
     : { accessToken: session.accessToken }

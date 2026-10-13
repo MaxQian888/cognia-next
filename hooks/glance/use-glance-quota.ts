@@ -58,7 +58,7 @@ export function isQuotaCapable(summary: Pick<AccountSummary, "variant" | "authMo
 
 interface VaultEntry {
   provider: string
-  accountId: string
+  providerAccountId: string
   accountLabel: string | null
   quotaCapable: boolean
 }
@@ -71,7 +71,7 @@ async function listVault(): Promise<VaultEntry[]> {
     for (const summary of summaries) {
       out.push({
         provider,
-        accountId: summary.id,
+        providerAccountId: summary.id,
         accountLabel: summary.label ?? summary.email ?? null,
         quotaCapable: isQuotaCapable(summary),
       })
@@ -114,7 +114,7 @@ export interface UseGlanceQuotaResult {
   /** Re-query one source by its slice key. */
   refreshOne: (key: string) => Promise<boolean>
   /** Turn quota queries on for one vault account, then query it. */
-  enable: (provider: string, accountId: string) => Promise<boolean>
+  enable: (provider: string, providerAccountId: string) => Promise<boolean>
 }
 
 export interface UseGlanceQuotaOptions {
@@ -248,7 +248,7 @@ export function useGlanceQuota(
 
   const refreshOne = useCallback(
     async (key: string): Promise<boolean> => {
-      const entry = vault.find((v) => quotaKey(v.provider, v.accountId) === key)
+      const entry = vault.find((v) => quotaKey(v.provider, v.providerAccountId) === key)
       if (!entry || !isTauri()) {
         // Custom sources have no per-source entry point; re-run them all.
         if (key.startsWith("custom:")) {
@@ -257,14 +257,20 @@ export function useGlanceQuota(
         }
         return false
       }
-      if (!isLimitsQueryEnabled(enabledAccounts, entry.provider as ProviderId, entry.accountId)) {
+      if (
+        !isLimitsQueryEnabled(
+          enabledAccounts,
+          entry.provider as ProviderId,
+          entry.providerAccountId
+        )
+      ) {
         return false
       }
       markRefreshing(key, true)
       try {
         const result = await queryAccountLimitsCoalesced(
           entry.provider as ProviderId,
-          entry.accountId,
+          entry.providerAccountId,
           { force: true }
         )
         if (result) await recordLimitsSnapshot(result)
@@ -278,31 +284,39 @@ export function useGlanceQuota(
 
   const refreshAll = useCallback(async () => {
     const keys = vault
-      .filter((v) => isLimitsQueryEnabled(enabledAccounts, v.provider as ProviderId, v.accountId))
-      .map((v) => quotaKey(v.provider, v.accountId))
+      .filter((v) =>
+        isLimitsQueryEnabled(enabledAccounts, v.provider as ProviderId, v.providerAccountId)
+      )
+      .map((v) => quotaKey(v.provider, v.providerAccountId))
     await Promise.all(keys.map((key) => refreshOne(key)))
     if ((customSources ?? []).some((source) => source.enabled)) await refreshConfigured()
   }, [vault, enabledAccounts, customSources, refreshOne, refreshConfigured])
 
   const enable = useCallback(
-    async (provider: string, accountId: string): Promise<boolean> => {
-      const entry = vault.find((v) => v.provider === provider && v.accountId === accountId)
+    async (provider: string, providerAccountId: string): Promise<boolean> => {
+      const entry = vault.find(
+        (v) => v.provider === provider && v.providerAccountId === providerAccountId
+      )
       if (!entry) return false
       const current = useSettingsStore.getState().settings?.limitsQueryEnabledAccounts
       await useSettingsStore.getState().save({
         limitsQueryEnabledAccounts: setLimitsQueryEnabled(
           current,
           provider as ProviderId,
-          accountId,
+          providerAccountId,
           true
         ),
       })
-      const key = quotaKey(provider, accountId)
+      const key = quotaKey(provider, providerAccountId)
       markRefreshing(key, true)
       try {
-        const result = await queryAccountLimitsCoalesced(provider as ProviderId, accountId, {
-          force: true,
-        })
+        const result = await queryAccountLimitsCoalesced(
+          provider as ProviderId,
+          providerAccountId,
+          {
+            force: true,
+          }
+        )
         if (result) await recordLimitsSnapshot(result)
       } finally {
         markRefreshing(key, false)
@@ -317,9 +331,13 @@ export function useGlanceQuota(
     const { latest, lastGood, custom } = foldReadings(rows)
     const accounts: GlanceVaultAccount[] = vault.map((v) => ({
       provider: v.provider,
-      accountId: v.accountId,
+      providerAccountId: v.providerAccountId,
       accountLabel: v.accountLabel,
-      queryEnabled: isLimitsQueryEnabled(enabledAccounts, v.provider as ProviderId, v.accountId),
+      queryEnabled: isLimitsQueryEnabled(
+        enabledAccounts,
+        v.provider as ProviderId,
+        v.providerAccountId
+      ),
       quotaCapable: v.quotaCapable,
     }))
     const enabledCustom = new Set(

@@ -3954,7 +3954,7 @@ export function useClaudeChat() {
         // Which models this agent runs this turn on: its own, or a Cognia
         // provider/model through the gateway. The conversation's explicit
         // per-agent choice (`externalAgentModels`), never the built-in lane's
-        // `model` / `providerOverride` / `accountId`. Reading those as a
+        // the built-in model, provider and provider-account fields. Reading those as a
         // binding is what sent a Kimi turn through a Claude model left over
         // from a built-in turn. Resolved once, for both executors.
         //

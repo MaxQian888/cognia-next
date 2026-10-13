@@ -107,7 +107,7 @@ const EMPTY_ATTACHMENTS: PerformanceCaptureAttachmentRow[] = []
 
 /**
  * The lookup key for a thrown capture error. Codes can carry a suffix
- * (`account-locked:<accountId>`); the prefix is what is translated.
+ * (`account-locked:<localAccountId>`); the prefix is what is translated.
  */
 export function captureErrorCode(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
@@ -138,7 +138,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
     captureState,
     captureState
   )
-  const accountId = useAccountStore((value) => value.unlockedAccountId)
+  const localAccountId = useAccountStore((value) => value.unlockedAccountId)
   const [sourceKind, setSourceKind] = useState<PerfSourceKind>("renderer")
   const [cadenceMs, setCadenceMs] = useState(1000)
   const [durationMs, setDurationMs] = useState(PERFORMANCE_CAPTURE_DEFAULT_DURATION_MS)
@@ -203,19 +203,19 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
 
   const loadCapture = useCallback(
     async (captureId: string) => {
-      if (!accountId) throw new Error("performance-capture-account-locked")
-      const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
-      return readDecodedCapture({ db, accountId, targetDatabase: db.name, captureId, key })
+      if (!localAccountId) throw new Error("performance-capture-account-locked")
+      const key = await loadOrCreateAccountArtifactKey(localAccountId, "performance")
+      return readDecodedCapture({ db, localAccountId, targetDatabase: db.name, captureId, key })
     },
-    [accountId, db]
+    [localAccountId, db]
   )
 
   const budgetStore = useMemo<PerfBudgetStore | null>(() => {
-    if (!accountId) return null
+    if (!localAccountId) return null
     const withService = async <T,>(
       operation: (service: PerformanceBudgetService, key: Uint8Array) => Promise<T>
     ) => {
-      const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
+      const key = await loadOrCreateAccountArtifactKey(localAccountId, "performance")
       const service = new PerformanceBudgetService()
       try {
         return await operation(service, key)
@@ -224,10 +224,10 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
       }
     }
     return {
-      list: () => withService((service, key) => service.list(accountId, key)),
-      create: (input) => withService((service, key) => service.create(accountId, key, input)),
+      list: () => withService((service, key) => service.list(localAccountId, key)),
+      create: (input) => withService((service, key) => service.create(localAccountId, key, input)),
     }
-  }, [accountId])
+  }, [localAccountId])
 
   const start = () =>
     run(async () => {
@@ -244,13 +244,13 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
 
   const remove = (captureId: string) =>
     run(async () => {
-      if (!accountId) throw new Error("performance-capture-account-locked")
+      if (!localAccountId) throw new Error("performance-capture-account-locked")
       const quota = new PerformanceQuotaManager()
       try {
         await deletePerformanceCapture({
           db,
           quota,
-          accountId,
+          accountId: localAccountId,
           targetDatabase: db.name,
           captureId,
         })
@@ -263,11 +263,11 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
 
   const exportCapture = (captureId: string) =>
     run(async () => {
-      if (!accountId) throw new Error("performance-capture-account-locked")
-      const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
+      if (!localAccountId) throw new Error("performance-capture-account-locked")
+      const key = await loadOrCreateAccountArtifactKey(localAccountId, "performance")
       const bytes = await exportPerformanceCapture({
         db,
-        accountId,
+        localAccountId,
         targetDatabase: db.name,
         captureId,
         key,
@@ -280,16 +280,16 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
 
   const exportRawCapture = () =>
     run(async () => {
-      if (!accountId || !rawCaptureId) throw new Error("performance-capture-account-locked")
+      if (!localAccountId || !rawCaptureId) throw new Error("performance-capture-account-locked")
       const prepared = await preparePerformanceRawExport({
         db,
         captureId: rawCaptureId,
         attachmentIds: rawAttachmentIds,
       })
-      const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
+      const key = await loadOrCreateAccountArtifactKey(localAccountId, "performance")
       const bytes = await exportPerformanceCapture({
         db,
-        accountId,
+        localAccountId,
         targetDatabase: db.name,
         captureId: rawCaptureId,
         key,
@@ -306,14 +306,14 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
 
   const importFile = (file: File) =>
     run(async () => {
-      if (!accountId) throw new Error("performance-capture-account-locked")
-      const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
+      if (!localAccountId) throw new Error("performance-capture-account-locked")
+      const key = await loadOrCreateAccountArtifactKey(localAccountId, "performance")
       const quota = new PerformanceQuotaManager()
       try {
         await importPerformanceCapture({
           db,
           quota,
-          accountId,
+          localAccountId,
           targetDatabase: db.name,
           targetId: scope?.targetId ?? "web-standalone",
           key,
@@ -428,7 +428,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
             ) : (
               <Button
                 onClick={start}
-                disabled={busy || !accountId}
+                disabled={busy || !localAccountId}
                 data-testid="perf-capture-start"
               >
                 <PlayIcon />
@@ -453,7 +453,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
               data-testid="perf-capture-progress"
             />
           ) : null}
-          {!accountId ? (
+          {!localAccountId ? (
             <p
               className="flex items-center gap-2 text-sm text-muted-foreground"
               data-testid="perf-capture-locked"
@@ -501,7 +501,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
               variant="outline"
               size="sm"
               onClick={() => fileRef.current?.click()}
-              disabled={busy || !accountId}
+              disabled={busy || !localAccountId}
             >
               <UploadIcon />
               {t("controls.import")}
@@ -523,7 +523,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
                   captures={comparePair}
                   loadCapture={loadCapture}
                   describeError={describeError}
-                  disabled={busy || !accountId}
+                  disabled={busy || !localAccountId}
                 />
               ) : null}
               <ul className="divide-y border-y" data-testid="perf-capture-library">
@@ -604,7 +604,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
                             setRawCaptureId(capture.id)
                             setRawAttachmentIds([])
                           }}
-                          disabled={busy || !accountId || capture.status !== "ready"}
+                          disabled={busy || !localAccountId || capture.status !== "ready"}
                         >
                           <ShieldAlertIcon />
                         </Button>

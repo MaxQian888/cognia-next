@@ -351,6 +351,7 @@ describe("clearAll", () => {
     const name = getDb().name
     purgeAppData.mockReset().mockResolvedValue(undefined)
     await clearAll()
+    expect(purgeAppData).toHaveBeenCalledTimes(1)
     expect(purgeAppData).toHaveBeenCalledWith(getActiveAccountId(), name)
   })
 

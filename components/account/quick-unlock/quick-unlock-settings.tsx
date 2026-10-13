@@ -57,7 +57,7 @@ import { PatternGrid } from "./pattern-grid"
 export interface QuickUnlockSettingsProps {
   account: LocalAccountRecord
   onEnroll: (args: {
-    accountId: string
+    localAccountId: string
     method: QuickUnlockMethod
     canonicalSecret: string
     password: string
@@ -137,7 +137,7 @@ function AccountQuickUnlockSettings({
     setBusy(true)
     setError(null)
     try {
-      await onEnroll({ accountId: account.id, method, canonicalSecret, password, verifier })
+      await onEnroll({ localAccountId: account.id, method, canonicalSecret, password, verifier })
       setPassword("")
       reset()
     } catch (caught) {
@@ -219,7 +219,7 @@ function AccountQuickUnlockSettings({
     setError(null)
     try {
       const result = await enrollNativeBiometric({
-        accountId: account.id,
+        localAccountId: account.id,
         signal: controller.signal,
         prompt: {
           title: t("biometricTitle"),
@@ -229,7 +229,7 @@ function AccountQuickUnlockSettings({
         commit: async (canonicalSecret, nativeKeyId) => {
           if (controller.signal.aborted) throw new Error("Biometric enrollment cancelled")
           await onEnroll({
-            accountId: account.id,
+            localAccountId: account.id,
             method: "biometric",
             canonicalSecret,
             password,

@@ -180,7 +180,7 @@ function AccountQuickUnlockPanel({
     setError(null)
     try {
       const result = await readNativeBiometricSecret({
-        accountId: localAccountId,
+        localAccountId: localAccountId,
         keyId: active.verifier.nativeKeyId,
         signal: controller.signal,
         prompt: {

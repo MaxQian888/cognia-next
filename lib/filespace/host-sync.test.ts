@@ -87,6 +87,12 @@ describe("createFileShareHostSync", () => {
     expect(names(call)[1]).toBe("file_share_activate")
   })
 
+  it("reactivates the selected local profile when status belongs to another profile", async () => {
+    const { call, sync } = setup("acct-2")
+    await sync.refresh()
+    expect(call.mock.calls[1]).toEqual(["file_share_activate", { accountId: "acct-2" }])
+  })
+
   it("does nothing on refresh while locked", async () => {
     const { call, sync } = setup(null)
     await sync.refresh()

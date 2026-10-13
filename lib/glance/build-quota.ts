@@ -40,7 +40,7 @@ const ERROR_MAX = 160
 
 export interface GlanceVaultAccount {
   provider: string
-  accountId: string
+  providerAccountId: string
   accountLabel: string | null
   /** Quota queries are on for this account (`limitsQueryEnabledAccounts`). */
   queryEnabled: boolean
@@ -50,7 +50,7 @@ export interface GlanceVaultAccount {
 
 export interface BuildQuotaSliceInput {
   accounts: readonly GlanceVaultAccount[]
-  /** Newest reading per `${provider}:${accountId}`, errored or not. */
+  /** Newest reading per `${provider}:${providerAccountId}`, errored or not. */
   latest: ReadonlyMap<string, ProviderLimits>
   /** Newest reading WITHOUT an error per key, for the meters behind an error. */
   lastGood: ReadonlyMap<string, ProviderLimits>
@@ -64,8 +64,8 @@ export interface BuildQuotaSliceInput {
   now: number
 }
 
-export function quotaKey(provider: string, accountId: string | null | undefined): string {
-  return `${provider}:${accountId ?? ""}`
+export function quotaKey(provider: string, providerAccountId: string | null | undefined): string {
+  return `${provider}:${providerAccountId ?? ""}`
 }
 
 function severityOf(status: LimitsMeterStatus): GlanceQuotaWindow["severity"] {
@@ -102,7 +102,7 @@ function safeError(message: string): string {
 function fromReading(
   key: string,
   provider: string,
-  accountId: string | null,
+  providerAccountId: string | null,
   accountLabel: string | null,
   latest: ProviderLimits | undefined,
   lastGood: ProviderLimits | undefined,
@@ -113,7 +113,7 @@ function fromReading(
     return {
       key,
       provider,
-      accountId,
+      accountId: providerAccountId,
       accountLabel,
       state: "refreshing",
       windows: [],
@@ -126,7 +126,7 @@ function fromReading(
     return {
       key,
       provider,
-      accountId,
+      accountId: providerAccountId,
       accountLabel: accountLabel ?? latest.accountLabel ?? null,
       state: refreshing && !good ? "refreshing" : "error",
       windows: (good?.meters ?? []).map(windowOf),
@@ -139,7 +139,7 @@ function fromReading(
   return {
     key,
     provider,
-    accountId,
+    accountId: providerAccountId,
     accountLabel: accountLabel ?? latest.accountLabel ?? null,
     state: stale ? "stale" : stateOfMeters(windows),
     windows,
@@ -163,13 +163,13 @@ export function buildQuotaSlice(input: BuildQuotaSliceInput): GlanceQuotaSlice {
   const sources: GlanceQuotaSource[] = []
 
   for (const account of input.accounts) {
-    const key = quotaKey(account.provider, account.accountId)
+    const key = quotaKey(account.provider, account.providerAccountId)
     if (!account.queryEnabled) {
       if (!account.quotaCapable && !input.lastGood.has(key)) continue
       sources.push({
         key,
         provider: account.provider,
-        accountId: account.accountId,
+        accountId: account.providerAccountId,
         accountLabel: account.accountLabel,
         state: "disabled",
         windows: [],
@@ -187,7 +187,7 @@ export function buildQuotaSlice(input: BuildQuotaSliceInput): GlanceQuotaSlice {
       fromReading(
         key,
         account.provider,
-        account.accountId,
+        account.providerAccountId,
         account.accountLabel,
         latest,
         input.lastGood.get(key),

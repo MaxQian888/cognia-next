@@ -183,7 +183,7 @@ export class BrowserVaultSession {
   private masterKey: CryptoKey | null
 
   constructor(
-    readonly accountId: string,
+    readonly localAccountId: string,
     masterKey: CryptoKey
   ) {
     this.masterKey = masterKey
@@ -298,7 +298,7 @@ export class BrowserVaultSession {
   }
 
   createContentCipher(databaseName: string): AccountContentCipher {
-    return new AccountContentCipher(this.accountId, databaseName, this.requireMasterKey())
+    return new AccountContentCipher(this.localAccountId, databaseName, this.requireMasterKey())
   }
 
   lock(): void {
@@ -312,7 +312,7 @@ export class BrowserVaultSession {
       {
         name: "AES-GCM",
         iv: toBufferSource(iv),
-        additionalData: toBufferSource(secretAad(this.accountId, name)),
+        additionalData: toBufferSource(secretAad(this.localAccountId, name)),
       },
       key,
       toBufferSource(new TextEncoder().encode(value))
@@ -330,7 +330,7 @@ export class BrowserVaultSession {
       {
         name: "AES-GCM",
         iv: toBufferSource(decodeBase64Url(secret.iv)),
-        additionalData: toBufferSource(secretAad(this.accountId, name)),
+        additionalData: toBufferSource(secretAad(this.localAccountId, name)),
       },
       key,
       toBufferSource(decodeBase64Url(secret.ciphertext))
@@ -341,7 +341,7 @@ export class BrowserVaultSession {
   async storeSecret(name: string, value: string, now = Date.now()): Promise<void> {
     const normalized = assertSecretName(name)
     await repository().putSecret({
-      accountId: this.accountId,
+      accountId: this.localAccountId,
       name: normalized,
       secret: await this.encryptSecret(normalized, value),
       updatedAt: now,
@@ -350,12 +350,12 @@ export class BrowserVaultSession {
 
   async loadSecret(name: string): Promise<string | null> {
     const normalized = assertSecretName(name)
-    const record = await repository().getSecret(this.accountId, normalized)
+    const record = await repository().getSecret(this.localAccountId, normalized)
     return record ? this.decryptSecret(normalized, record.secret) : null
   }
 
   async deleteSecret(name: string): Promise<void> {
-    await repository().deleteSecret(this.accountId, assertSecretName(name))
+    await repository().deleteSecret(this.localAccountId, assertSecretName(name))
   }
 
   private requireMasterKey(): CryptoKey {
@@ -715,7 +715,7 @@ export function lockBrowserVault(): void {
 }
 
 export async function deleteBrowserVault(localAccountId: string): Promise<void> {
-  if (activeBrowserVaultSession?.accountId === localAccountId) lockBrowserVault()
+  if (activeBrowserVaultSession?.localAccountId === localAccountId) lockBrowserVault()
   await repository().delete(localAccountId)
 }
 

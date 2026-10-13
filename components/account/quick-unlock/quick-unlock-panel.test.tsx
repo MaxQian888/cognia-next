@@ -203,7 +203,7 @@ describe("QuickUnlockPanel", () => {
     fireEvent.click(screen.getByTestId("quick-unlock-biometric"))
     await flush()
     expect(mockReadNative).toHaveBeenCalledWith({
-      accountId: "acct-001",
+      localAccountId: "acct-001",
       keyId: "account-key",
       signal: expect.any(AbortSignal),
       prompt: {

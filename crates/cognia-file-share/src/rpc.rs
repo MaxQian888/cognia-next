@@ -73,7 +73,8 @@ pub const READ_ONLY_COMMANDS: &[&str] = &[
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ActivateArgs {
-    account_id: Option<String>,
+    #[serde(rename = "accountId")]
+    local_account_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -169,7 +170,7 @@ pub async fn dispatch(
     match name {
         "file_share_activate" => {
             let args: ActivateArgs = parse(args)?;
-            to_value(service.activate(args.account_id).await?)
+            to_value(service.activate(args.local_account_id).await?)
         }
         "file_space_sync" => {
             let args: SyncArgs = parse(args)?;
@@ -247,6 +248,14 @@ mod tests {
 
     fn service() -> (Arc<FileShareService>, tempfile::TempDir) {
         crate::service::tests::service_with(vec![Permission::Read], vec![])
+    }
+
+    #[test]
+    fn activation_reads_the_established_local_profile_wire_key() {
+        let args: ActivateArgs = serde_json::from_value(json!({ "accountId": "acct_a" })).unwrap();
+        assert_eq!(args.local_account_id.as_deref(), Some("acct_a"));
+        let locked: ActivateArgs = serde_json::from_value(json!({ "accountId": null })).unwrap();
+        assert!(locked.local_account_id.is_none());
     }
 
     #[test]

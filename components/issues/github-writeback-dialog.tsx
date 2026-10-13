@@ -126,7 +126,7 @@ export function GithubWritebackDialog({
       await runGithubWriteback({
         target,
         action: buildAction(),
-        accountId: account?.id,
+        connectorAccountId: account?.id,
         approval: "user-confirmed",
       })
       toast.success(t("writeback.success"))

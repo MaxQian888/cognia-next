@@ -77,8 +77,8 @@ const MAX_BACKOFF: Duration = Duration::from_secs(60);
 const MAX_LABEL_CHARS: usize = 120;
 
 /// The secret-store account holding one conversation's host token.
-pub fn token_account(account_id: &str, session_id: &str) -> String {
-    format!("collab-host:{account_id}:{session_id}")
+pub fn token_account(local_account_id: &str, session_id: &str) -> String {
+    format!("collab-host:{local_account_id}:{session_id}")
 }
 
 // ── Configuration ───────────────────────────────────────────────────────────
@@ -804,7 +804,7 @@ async fn answer(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LoopKey {
-    account_id: String,
+    local_account_id: String,
     record: CollabHostRecord,
 }
 
@@ -880,8 +880,8 @@ impl Responders {
 // The keychain can block (a locked keychain, a slow Secret Service), so its
 // calls run on the blocking pool, never on the runtime's workers.
 
-async fn read_token(account_id: &str, session_id: &str) -> Option<String> {
-    let account = token_account(account_id, session_id);
+async fn read_token(local_account_id: &str, session_id: &str) -> Option<String> {
+    let account = token_account(local_account_id, session_id);
     tokio::task::spawn_blocking(move || {
         cognia_secrets::secret_store::get(SECRET_SERVICE, &account)
             .ok()
@@ -893,16 +893,16 @@ async fn read_token(account_id: &str, session_id: &str) -> Option<String> {
     .flatten()
 }
 
-async fn write_token(account_id: &str, session_id: &str, token: &str) -> FileShareResult<()> {
-    let (account, token) = (token_account(account_id, session_id), token.to_string());
+async fn write_token(local_account_id: &str, session_id: &str, token: &str) -> FileShareResult<()> {
+    let (account, token) = (token_account(local_account_id, session_id), token.to_string());
     tokio::task::spawn_blocking(move || cognia_secrets::secret_store::set(SECRET_SERVICE, &account, &token))
         .await
         .map_err(|error| FileShareError::new("secret_store_unavailable", error.to_string()))?
         .map_err(|error| FileShareError::new("secret_store_unavailable", error))
 }
 
-async fn delete_token(account_id: &str, session_id: &str) {
-    let account = token_account(account_id, session_id);
+async fn delete_token(local_account_id: &str, session_id: &str) {
+    let account = token_account(local_account_id, session_id);
     let outcome =
         tokio::task::spawn_blocking(move || cognia_secrets::secret_store::delete(SECRET_SERVICE, &account)).await;
     match outcome {
@@ -920,7 +920,7 @@ async fn wanted_loops(service: &Arc<FileShareService>, active: &Active) -> HashM
         if state == Some(SessionState::Deleted) {
             continue;
         }
-        let Some(token) = read_token(&active.account_id, &record.session_id).await else {
+        let Some(token) = read_token(&active.local_account_id, &record.session_id).await else {
             service.collab.failed(&record.session_id, "host_token_missing");
             continue;
         };
@@ -928,7 +928,7 @@ async fn wanted_loops(service: &Arc<FileShareService>, active: &Active) -> HashM
             record.session_id.clone(),
             (
                 LoopKey {
-                    account_id: active.account_id.clone(),
+                    local_account_id: active.local_account_id.clone(),
                     record,
                 },
                 token,
@@ -938,14 +938,14 @@ async fn wanted_loops(service: &Arc<FileShareService>, active: &Active) -> HashM
     wanted
 }
 
-/// Run the `wanted` loops of `account_id` and stop the rest.
+/// Run the `wanted` loops of `local_account_id` and stop the rest.
 ///
 /// The account is checked again under the loops' lock: a sync that began
 /// before the account was locked or switched must not start loops for it
 /// afterwards. The switch clears the served account before it stops the
 /// loops, so either this sees the change and starts nothing, or its loops
 /// are in the map when they are stopped.
-fn reconcile(service: &Arc<FileShareService>, account_id: &str, wanted: HashMap<String, (LoopKey, String)>) {
+fn reconcile(service: &Arc<FileShareService>, local_account_id: &str, wanted: HashMap<String, (LoopKey, String)>) {
     let responders = &service.collab;
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         return;
@@ -953,7 +953,7 @@ fn reconcile(service: &Arc<FileShareService>, account_id: &str, wanted: HashMap<
     let mut loops = responders.loops.lock();
     let still_served = service
         .active()
-        .is_ok_and(|active| active.account_id == account_id);
+        .is_ok_and(|active| active.local_account_id == local_account_id);
     if !still_served {
         for (_, running) in loops.drain() {
             running.cancel.cancel();
@@ -1073,7 +1073,7 @@ async fn end_registration(
 ) {
     service.collab.stop(session_id);
     let had = active.store.delete_collab_host(session_id).unwrap_or(false);
-    delete_token(&active.account_id, session_id).await;
+    delete_token(&active.local_account_id, session_id).await;
     let mut effects = Effects::default();
     for grant in active.store.list_grants(Some(session_id)).unwrap_or_default() {
         if !grant.audience.is_collab() || grant.status.is_terminal() {
@@ -1157,7 +1157,7 @@ async fn change_registration(
             if active.store.collab_host(session_id)?.is_some() {
                 end_registration(service, &active, session_id, "replaced", principal).await;
             }
-            write_token(&active.account_id, session_id, input.host_token.trim()).await?;
+            write_token(&active.local_account_id, session_id, input.host_token.trim()).await?;
             active.store.put_collab_host(&record)?;
             service.collab.health.lock().remove(session_id);
             audit::record(
@@ -1174,7 +1174,7 @@ async fn change_registration(
         }
         None => {
             if let Some(record) = active.store.collab_host(session_id)? {
-                if let Some(token) = read_token(&active.account_id, session_id).await {
+                if let Some(token) = read_token(&active.local_account_id, session_id).await {
                     if let Ok(client) = Client::new(&record, token) {
                         match client.unregister().await {
                             Ok(()) | Err(ServerError::HostGone) => {}
@@ -1204,7 +1204,7 @@ pub(crate) async fn status(service: &Arc<FileShareService>, session_id: &str) ->
         .count();
     Ok(CollabHostStatus {
         session_id: session_id.to_string(),
-        token_present: registration.is_some() && read_token(&active.account_id, session_id).await.is_some(),
+        token_present: registration.is_some() && read_token(&active.local_account_id, session_id).await.is_some(),
         running: service.collab.is_running(session_id),
         registration,
         last_contact_at: health.last_contact_at,
@@ -1231,7 +1231,7 @@ async fn push_mirrors(service: &Arc<FileShareService>, active: &Active) {
             if !clients.contains_key(&grant.session_id) {
                 let record = active.store.collab_host(&grant.session_id).ok().flatten();
                 let client = match record {
-                    Some(record) => read_token(&active.account_id, &grant.session_id)
+                    Some(record) => read_token(&active.local_account_id, &grant.session_id)
                         .await
                         .and_then(|token| Client::new(&record, token).ok().map(|client| (record, client))),
                     None => None,
@@ -1310,7 +1310,7 @@ async fn unregister_deleted(service: &Arc<FileShareService>, active: &Active) {
         if active.store.collab_host(&record.session_id).ok().flatten().as_ref() != Some(&record) {
             continue;
         }
-        if let Some(token) = read_token(&active.account_id, &record.session_id).await {
+        if let Some(token) = read_token(&active.local_account_id, &record.session_id).await {
             if let Ok(client) = Client::new(&record, token) {
                 match client.unregister().await {
                     Ok(()) | Err(ServerError::HostGone) => {}
@@ -1342,7 +1342,7 @@ async fn sync_now(service: &Arc<FileShareService>) {
     push_mirrors(service, &active).await;
     unregister_deleted(service, &active).await;
     let wanted = wanted_loops(service, &active).await;
-    reconcile(service, &active.account_id, wanted);
+    reconcile(service, &active.local_account_id, wanted);
 }
 
 /// [`sync`] in the background, so a command that changed a grant answers
@@ -2014,7 +2014,7 @@ mod tests {
         let record = input(&url).record("s1", now_ms()).unwrap();
         let cancel = CancellationToken::new();
         let key = LoopKey {
-            account_id: "ended".into(),
+            local_account_id: "ended".into(),
             record,
         };
         run(Arc::downgrade(&service), key, TOKEN.into(), cancel.clone()).await;

@@ -63,7 +63,7 @@ function receipt(code: string): SubmitIncidentResult {
 
 function input(over: Partial<RunAutoSubmitInput> = {}): RunAutoSubmitInput {
   return {
-    accountId: "account-a",
+    localAccountId: "account-a",
     connection,
     incidents: [report()],
     submit: jest.fn(async () => receipt("SUP-1")),

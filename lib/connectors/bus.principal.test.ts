@@ -315,6 +315,7 @@ describe("bus inbound Step 2.5 — principal resolution", () => {
     expect(handled).toHaveLength(1)
     expect(await ownerPrincipal()).toMatchObject({
       cogniaUserId: "usr_owner",
+      cogniaAccountId: getActiveRuntimeAccountId(),
       unionId: "on_owner",
       logtoSubject: "sub_owner",
       status: "active",

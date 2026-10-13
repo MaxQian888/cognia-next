@@ -70,7 +70,7 @@ function harness(overrides: Partial<MobileSubmitDeps> = {}) {
 function input(fetchImpl: jest.Mock, description = "") {
   return {
     connection,
-    accountId: "account-a",
+    localAccountId: "account-a",
     incidentId: "crash-mobile",
     exception: "ios-kscrash",
     description,

@@ -73,7 +73,7 @@ export interface SubmitIncidentResult {
 export interface SubmitIncidentInput {
   connection: StoredDiagnosticConnection
   /** Required on mobile, whose grant comes from the account's installation identity. */
-  accountId: string | null
+  localAccountId: string | null
   incident: SubmittableIncident
   consent: IncidentConsentDecision
   fetchImpl: DiagnosticFetch
@@ -104,13 +104,13 @@ export async function submitIncidentReport(
   input: SubmitIncidentInput,
   deps: SubmitIncidentDeps = {}
 ): Promise<SubmitIncidentResult> {
-  const { connection, accountId, incident, consent, fetchImpl } = input
+  const { connection, localAccountId, incident, consent, fetchImpl } = input
   if (incident.runtime === "mobile") {
-    if (!accountId) throw new SubmissionCodeError("not_configured")
+    if (!localAccountId) throw new SubmissionCodeError("not_configured")
     return submitMobileCrashReport(
       {
         connection,
-        accountId,
+        localAccountId,
         incidentId: incident.id,
         exception: incident.source,
         description: consent.description,

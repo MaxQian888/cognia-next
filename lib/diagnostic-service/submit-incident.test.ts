@@ -63,7 +63,7 @@ describe("submitIncidentReport", () => {
     const result = await submitIncidentReport(
       {
         connection,
-        accountId: "account-a",
+        localAccountId: "account-a",
         incident: { id: "stem-1", runtime: "desktop", source: "panic" },
         consent: { includeMinidump: true, includeScreenshot: false, description: "  export  " },
         fetchImpl,
@@ -92,7 +92,7 @@ describe("submitIncidentReport", () => {
     await submitIncidentReport(
       {
         connection,
-        accountId: null,
+        localAccountId: null,
         incident: { id: "stem-1", runtime: "desktop", source: "native" },
         consent: DEFAULT_SUBMISSION_CONSENT,
         fetchImpl,
@@ -112,7 +112,7 @@ describe("submitIncidentReport", () => {
     })
     const result = await submitIncidentReport({
       connection,
-      accountId: "account-a",
+      localAccountId: "account-a",
       incident: { id: "m-1", runtime: "mobile", source: "ios-kscrash" },
       consent: { includeMinidump: false, includeScreenshot: false, description: "hi" },
       fetchImpl,
@@ -120,7 +120,7 @@ describe("submitIncidentReport", () => {
     expect(submitMobileMock).toHaveBeenCalledWith(
       {
         connection,
-        accountId: "account-a",
+        localAccountId: "account-a",
         incidentId: "m-1",
         exception: "ios-kscrash",
         description: "hi",
@@ -135,7 +135,7 @@ describe("submitIncidentReport", () => {
     await expect(
       submitIncidentReport({
         connection,
-        accountId: null,
+        localAccountId: null,
         incident: { id: "m-1", runtime: "mobile", source: "ios-kscrash" },
         consent: DEFAULT_SUBMISSION_CONSENT,
         fetchImpl,

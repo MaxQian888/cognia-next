@@ -339,7 +339,7 @@ export function AccountGate({ children, guestView }: AccountGateProps) {
     const credentialStoreBlocked =
       visibleError !== null && classifySecretStoreError(visibleError) !== null
     return (
-      <GateShell footer={readShareAsGuestAction} accountId={targetAccount.id}>
+      <GateShell footer={readShareAsGuestAction} localAccountId={targetAccount.id}>
         <section
           className="flex w-full max-w-sm flex-col gap-4"
           data-testid="account-device-workspace"
@@ -415,13 +415,13 @@ async function resetRefusedLocalDatabase(): Promise<void> {
 function GateShell({
   children,
   footer,
-  accountId = null,
+  localAccountId = null,
 }: {
   children: ReactNode
   footer?: ReactNode
-  accountId?: string | null
+  localAccountId?: string | null
 }) {
-  useLockedAccountTheme(accountId)
+  useLockedAccountTheme(localAccountId)
   useLockedShellChrome()
   return (
     <main

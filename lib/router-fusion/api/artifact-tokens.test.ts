@@ -6,7 +6,7 @@
 const mockVaultSecrets = new Map<string, string>()
 const mockVault = {
   current: null as null | {
-    accountId: string
+    localAccountId: string
     unlocked: boolean
     isUnlocked(): boolean
     loadSecret(name: string): Promise<string | null>
@@ -17,18 +17,18 @@ jest.mock("@/lib/runtime/browser-vault", () => ({
   getActiveBrowserVault: () => mockVault.current,
 }))
 
-function openVault(accountId: string) {
+function openVault(localAccountId: string) {
   const vault = {
-    accountId,
+    localAccountId,
     unlocked: true,
     isUnlocked() {
       return this.unlocked
     },
     loadSecret: jest.fn(
-      async (name: string) => mockVaultSecrets.get(`${accountId}/${name}`) ?? null
+      async (name: string) => mockVaultSecrets.get(`${localAccountId}/${name}`) ?? null
     ),
     storeSecret: jest.fn(async (name: string, value: string) => {
-      mockVaultSecrets.set(`${accountId}/${name}`, value)
+      mockVaultSecrets.set(`${localAccountId}/${name}`, value)
     }),
   }
   mockVault.current = vault

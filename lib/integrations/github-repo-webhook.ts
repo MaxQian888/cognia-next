@@ -56,7 +56,7 @@ async function hostRequest<T>(
   }
   const base = (await integrationApiBaseUrl(account)) ?? "https://api.github.com"
   const credential = await provider.resolveRequestCredential(account.authSessionId, {
-    accountId: account.id,
+    connectorAccountId: account.id,
     origin: new URL(base).origin,
   })
   const response = await proxyFetch(`${base}${path}`, {

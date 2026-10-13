@@ -49,12 +49,12 @@ const emptyView = (key: string | null): View => ({
 
 /** A UI subscription to the scoped runtime. Unmounting never owns execution teardown. */
 export function useEvalExecution() {
-  const accountId = useAccountStore((state) => state.unlockedAccountId)
+  const localAccountId = useAccountStore((state) => state.unlockedAccountId)
   const locked = useAccountStore((state) => state.locked)
   const accountRevision = useAccountStore((state) => state.accountRevision)
   const contextKey = useSyncExternalStore(subscribeRuntimeTargetContext, scopeSnapshot, serverScope)
   const scopeKey =
-    !locked && contextKey && JSON.parse(contextKey).accountId === accountId
+    !locked && contextKey && JSON.parse(contextKey).accountId === localAccountId
       ? `${contextKey}:${accountRevision}`
       : null
   const [binding, setBinding] = useState<{

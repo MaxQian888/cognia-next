@@ -100,7 +100,7 @@ async function migrateEncryptedRuntimeTarget(input: {
   targetId: string
 }): Promise<{ stage: "verified"; tables: unknown[] }> {
   const vault = getActiveBrowserVault()
-  if (!vault || vault.accountId !== input.accountId) {
+  if (!vault || vault.localAccountId !== input.accountId) {
     throw new Error("Browser Vault must be unlocked before account content migration.")
   }
   const targetDbName = encryptedRuntimeTargetDatabaseName(input.accountId, input.targetId)
@@ -285,7 +285,7 @@ export async function switchAccountRuntimeTarget(
     assertCredentialAvailable: async (target) => {
       if (target.kind !== "companion") return
       const vault = getActiveBrowserVault()
-      if (!vault || vault.accountId !== target.accountId) {
+      if (!vault || vault.localAccountId !== target.accountId) {
         throw new Error("Browser Vault must be unlocked before switching to a Companion target.")
       }
       if (!target.credentialRef || !(await vault.loadSecret(target.credentialRef))) {

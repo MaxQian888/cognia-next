@@ -101,7 +101,7 @@ it("passes the confirmation through as the approval — nothing else may", async
     target: TARGET,
     action: { kind: "comment", body: "looks good" },
     approval: "user-confirmed",
-    accountId: "acct-1",
+    connectorAccountId: "acct-1",
   })
   expect(mockToastSuccess).toHaveBeenCalledWith("writeback.success")
   expect(onCompleted).toHaveBeenCalledTimes(1)

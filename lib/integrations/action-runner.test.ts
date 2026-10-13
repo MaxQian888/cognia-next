@@ -467,7 +467,7 @@ describe("Integration action runner", () => {
       )
 
       expect(resolveRequestCredential).toHaveBeenCalledWith("app-session", {
-        accountId: account.id,
+        connectorAccountId: account.id,
         origin: "https://api.example.test",
       })
       const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers

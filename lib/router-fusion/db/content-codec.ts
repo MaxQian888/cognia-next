@@ -46,7 +46,7 @@ const defaultDeps: ContentCodecDeps = {
   cipherFor(databaseName) {
     const vault = getActiveBrowserVault()
     if (!vault || !vault.isUnlocked()) return null
-    if (!databaseName.startsWith(`${ACCOUNT_DB_PREFIX}${vault.accountId}`)) return null
+    if (!databaseName.startsWith(`${ACCOUNT_DB_PREFIX}${vault.localAccountId}`)) return null
     return vault.createContentCipher(databaseName)
   },
 }

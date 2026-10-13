@@ -347,6 +347,7 @@ describe("useGlanceQuota", () => {
         state: "ok",
         fetchedAt: NOW - 1_000,
       })
+      expect(slice?.sources[0]).not.toHaveProperty("providerAccountId")
       expect(slice?.sources[0].windows[0]).toMatchObject({
         id: "session",
         usedPct: 40,

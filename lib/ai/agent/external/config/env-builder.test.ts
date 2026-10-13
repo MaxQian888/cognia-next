@@ -270,6 +270,7 @@ describe("buildAgentEnv — codex autoRefreshNearExpiry", () => {
 
     const env = await buildAgentEnv(codexConfig({ subscriptionAccountId: "work-account" }))
 
+    expect(mGetAccount).toHaveBeenCalledWith("codex", "work-account")
     expect(env).toEqual({ CODEX_ACCESS_TOKEN: "work" })
     expect(mGetAccountEnv).toHaveBeenCalledWith("codex", "work-account")
     expect(mGetActive).not.toHaveBeenCalled()

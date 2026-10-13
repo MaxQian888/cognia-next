@@ -132,7 +132,7 @@ interface BrowserSignalingKeyStore {
 }
 
 interface BrowserVaultSecretAdapter {
-  accountId: string
+  localAccountId: string
   encryptSecret(name: string, value: string): Promise<EncryptedVaultSecret>
   decryptSecret(name: string, secret: EncryptedVaultSecret): Promise<string>
   storeSecret(name: string, value: string): Promise<void>
@@ -223,13 +223,13 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
       const vault = this.vaultProvider()
       if (!vault) return null
       const scope = getActiveRuntimeTargetContext()
-      const targetId = scope?.accountId === vault.accountId ? scope.targetId : null
+      const targetId = scope?.accountId === vault.localAccountId ? scope.targetId : null
       const book = readBrowserTargetBook()
       const accountTargets = Object.entries(book.targets)
-        .filter(([key]) => key.startsWith(`${vault.accountId}:`))
+        .filter(([key]) => key.startsWith(`${vault.localAccountId}:`))
         .map(([, value]) => value)
       const publicConfig = targetId
-        ? book.targets[browserTargetKey(vault.accountId, targetId)]
+        ? book.targets[browserTargetKey(vault.localAccountId, targetId)]
         : accountTargets.length === 1
           ? accountTargets[0]
           : undefined
@@ -278,7 +278,7 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
     delete (publicConfig as Partial<CompanionConfig>).signalingPrivateKey
     delete (publicConfig as Partial<CompanionConfig>).signalingPrivateKeyJwk
     const book = readBrowserTargetBook()
-    book.targets[browserTargetKey(vault.accountId, targetId)] = {
+    book.targets[browserTargetKey(vault.localAccountId, targetId)] = {
       ...publicConfig,
       targetId,
     }
@@ -293,19 +293,19 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
     if (vault) {
       const book = readBrowserTargetBook()
       const accountKeys = Object.keys(book.targets).filter((key) =>
-        key.startsWith(`${vault.accountId}:`)
+        key.startsWith(`${vault.localAccountId}:`)
       )
       const targetId =
-        scope?.accountId === vault.accountId
+        scope?.accountId === vault.localAccountId
           ? scope.targetId
           : accountKeys.length === 1
-            ? accountKeys[0].slice(vault.accountId.length + 1)
+            ? accountKeys[0].slice(vault.localAccountId.length + 1)
             : null
       if (!targetId) {
         window.localStorage.removeItem(CONFIG_KEY)
         return
       }
-      const key = browserTargetKey(vault.accountId, targetId)
+      const key = browserTargetKey(vault.localAccountId, targetId)
       const existing = book.targets[key]
       if (existing) {
         const cleanup: Array<Promise<void>> = [

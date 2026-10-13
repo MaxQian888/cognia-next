@@ -60,7 +60,7 @@ function input(overrides: Partial<SelfBindInput> = {}): SelfBindInput {
     transportModes: ["gateway"],
     openId: "ou_ada_app2",
     identityScope: SCOPE,
-    accountId: "acct_a",
+    localAccountId: "acct_a",
     conversationKey: "lark:lark-2:oc_1",
     ...overrides,
   }
@@ -116,6 +116,8 @@ describe("selfBindSignedInOwner", () => {
     expect(await findUserIdByExternalIdentity("lark", "ou_ada_app2", "tk_a/cli_2")).toBe("usr_ada")
     const bound = rows.find((row) => row.kind === "principal.bound")
     expect(bound?.reason).toBe("signed_in_owner")
+    expect(bound?.fields).toMatchObject({ accountId: "acct_a" })
+    expect(overrides.binding).toHaveBeenCalledWith("acct_a")
     expect(JSON.stringify(rows)).not.toContain("ou_ada_app2")
     expect(JSON.stringify(rows)).not.toContain("on_ada")
   })

@@ -153,7 +153,7 @@ export interface GlanceQuotaWindow {
 }
 
 export interface GlanceQuotaSource {
-  /** `${provider}:${accountId}` for vault accounts, `discovered:${provider}` otherwise. */
+  /** `${provider}:${providerAccountId}` for vault accounts, `discovered:${provider}` otherwise. */
   key: string
   provider: string
   accountId: string | null

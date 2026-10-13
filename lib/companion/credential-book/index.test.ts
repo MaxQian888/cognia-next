@@ -120,12 +120,12 @@ describe("activeAccountNamespace", () => {
       accountId: "acct_target",
       targetId: "t1",
     })
-    browserVault.getActiveBrowserVault.mockReturnValue({ accountId: "acct_vault" })
+    browserVault.getActiveBrowserVault.mockReturnValue({ localAccountId: "acct_vault" })
     expect(activeAccountNamespace()).toBe("acct_target")
   })
 
   it("falls back to the unlocked Vault", () => {
-    browserVault.getActiveBrowserVault.mockReturnValue({ accountId: "acct_vault" })
+    browserVault.getActiveBrowserVault.mockReturnValue({ localAccountId: "acct_vault" })
     expect(activeAccountNamespace()).toBe("acct_vault")
   })
 

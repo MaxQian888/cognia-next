@@ -112,7 +112,7 @@ describe("QuickUnlockSettings", () => {
     await flush()
     expect(mockNativeEnrollment).toHaveBeenCalledWith(
       expect.objectContaining({
-        accountId: "acct-001",
+        localAccountId: "acct-001",
         prompt: expect.objectContaining({
           title: expect.any(String),
           reason: expect.any(String),
@@ -121,7 +121,7 @@ describe("QuickUnlockSettings", () => {
       })
     )
     expect(onEnroll).toHaveBeenCalledWith({
-      accountId: "acct-001",
+      localAccountId: "acct-001",
       method: "biometric",
       canonicalSecret: "biometric:protected-secret",
       password: "account-password",

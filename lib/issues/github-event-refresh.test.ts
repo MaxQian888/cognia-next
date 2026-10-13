@@ -90,6 +90,7 @@ describe("GithubEventIssueRefresher.handle", () => {
   it("refreshes the event's repository once per burst, after the debounce window", async () => {
     const { deps, timers, fire, refresher } = setup()
     await refresher.handle(event())
+    expect(deps.accountHostId).toHaveBeenCalledWith("github-delivery", "acc")
     await refresher.handle(event({ id: "d2:issues.labeled", eventType: "issues.labeled" }))
     expect(timers.filter((t) => !t.cleared)).toHaveLength(1)
     expect(timers[0].ms).toBe(GITHUB_EVENT_REFRESH_DEBOUNCE_MS)

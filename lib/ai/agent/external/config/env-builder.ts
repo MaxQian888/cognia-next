@@ -134,28 +134,28 @@ async function codexEnvOverlay(
  * account is exactly the identity mix-up the binding exists to rule out.
  */
 async function boundAccountOverlay(
-  accountId: string,
+  providerAccountId: string,
   settings: CodexSubscriptionSettings
 ): Promise<Record<string, string>> {
-  const account = await getAccount("codex", accountId)
+  const account = await getAccount("codex", providerAccountId)
   if (!account) {
     throw new ExternalAgentLifecycleError(
       "credential_missing",
-      `the Codex account this agent is bound to (${accountId}) no longer exists`,
+      `the Codex account this agent is bound to (${providerAccountId}) no longer exists`,
       { slot: "subscriptionAccount" }
     )
   }
   assertCodexAccountLifecycleReady(account)
   if (settings.autoRefreshNearExpiry) {
     try {
-      await refreshCodexAccountIfStale(accountId)
+      await refreshCodexAccountIfStale(providerAccountId)
     } catch (err) {
       const lifecycleError = normalizeCodexLifecycleError(err)
       if (lifecycleError instanceof CodexReauthenticationRequiredError) throw lifecycleError
       console.warn("env-builder: codex auto-refresh failed:", err)
     }
   }
-  const snapshot = await getAccountEnv("codex", accountId)
+  const snapshot = await getAccountEnv("codex", providerAccountId)
   return pairsToRecord(snapshot.env)
 }
 
@@ -181,13 +181,13 @@ function pairsToRecord(pairs: Array<[string, string]>): Record<string, string> {
  * refresh happened (fresh, api-key mode, or any failure — caller keeps the
  * stale env, which the agent can still attempt with).
  */
-async function maybeRefreshActiveCodex(accountId: string): Promise<ActiveSnapshot | null> {
+async function maybeRefreshActiveCodex(providerAccountId: string): Promise<ActiveSnapshot | null> {
   try {
     // Staleness check, refresh exchange and vault write-back are shared with the
     // chat path (`lib/subscription/codex/refresh.ts`) so the two can't drift.
     // `reactivate: true` re-runs set-active, which rebuilds the in-process env
     // cache with the new bearer — the part only this path needs.
-    const fresh = await refreshCodexAccountIfStale(accountId, { reactivate: true })
+    const fresh = await refreshCodexAccountIfStale(providerAccountId, { reactivate: true })
     if (!fresh) return null
     return await getActiveAccount("codex")
   } catch (err) {

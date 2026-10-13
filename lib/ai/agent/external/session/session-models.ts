@@ -318,7 +318,7 @@ export interface ExternalAgentModelSelection {
  * 5. the agent configuration's default binding;
  * 6. native, on the agent's own default model.
  *
- * It never reads `session.model` / `providerOverride` / `accountId` as a
+ * It never reads the built-in model, provider or provider-account fields as a
  * binding. Those are the built-in lane's pick, and treating them as a Cognia
  * selection is what routed a Kimi turn through a Claude model left over from
  * a built-in turn.

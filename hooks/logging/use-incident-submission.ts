@@ -199,7 +199,7 @@ export function useIncidentSubmission(
         // The same funnel automatic submission uses, so the two paths cannot
         // drift on what a desktop or a mobile report sends.
         const result = await submitIncidentReport(
-          { connection, accountId, incident, consent, fetchImpl },
+          { connection, localAccountId: accountId, incident, consent, fetchImpl },
           deps
         )
         return {

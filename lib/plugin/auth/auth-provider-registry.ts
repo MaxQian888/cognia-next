@@ -89,7 +89,7 @@ export interface AuthSessionOptions {
 }
 
 export interface AuthRequestCredentialContext {
-  accountId: string
+  connectorAccountId: string
   origin: string
 }
 

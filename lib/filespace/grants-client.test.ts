@@ -65,6 +65,12 @@ describe("fileShareTransport", () => {
 })
 
 describe("command shapes", () => {
+  it("preserves the activation wire key when locking the local profile", async () => {
+    const t = fake()
+    await activateFileShare(null, { transport: t })
+    expect(t.call).toHaveBeenCalledWith("file_share_activate", { accountId: null })
+  })
+
   it("sends each command's arguments the way the Rust arms read them", async () => {
     const t = fake()
     const target = { transport: t }

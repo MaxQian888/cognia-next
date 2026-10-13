@@ -219,7 +219,7 @@ export interface AccountStoreState {
   ) => Promise<QuickUnlockOutcome>
   /** Add a quick-unlock method. Requires the account password. */
   enrollQuickUnlockMethod: (args: {
-    accountId: string
+    localAccountId: string
     method: QuickUnlockMethod
     canonicalSecret: string
     password: string
@@ -369,7 +369,7 @@ export function createAccountStore(
     },
     activateContentCipher: (localAccountId, databaseName) => {
       const vault = getActiveBrowserVault()
-      if (!vault || vault.accountId !== localAccountId) {
+      if (!vault || vault.localAccountId !== localAccountId) {
         throw new AccountUnlockError(
           "vault-not-provisioned",
           "The account content key is not unlocked."
@@ -1240,7 +1240,7 @@ export function createAccountStore(
       },
 
       enrollQuickUnlockMethod: async ({
-        accountId: localAccountId,
+        localAccountId,
         method,
         canonicalSecret,
         password,

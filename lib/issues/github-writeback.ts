@@ -67,7 +67,7 @@ export class GithubWritebackError extends Error {
  */
 export async function resolveGithubWritebackAccount(
   repoFullName = "",
-  accountId?: string
+  connectorAccountId?: string
 ): Promise<IntegrationAccount | null> {
   const accounts = await githubReadAccountsFor(repoFullName, GITHUB_DOT_COM, {
     listAccounts: () => listIntegrationAccounts(GITHUB_DELIVERY_PLUGIN_ID, GITHUB_INTEGRATION_ID),
@@ -76,7 +76,11 @@ export async function resolveGithubWritebackAccount(
       return githubHostForSession(sessionId)
     },
   })
-  return accounts.find((account) => accountId === undefined || account.id === accountId) ?? null
+  return (
+    accounts.find(
+      (account) => connectorAccountId === undefined || account.id === connectorAccountId
+    ) ?? null
+  )
 }
 
 /** Action id + payload for the underlying integration action. */
@@ -102,7 +106,7 @@ export interface RunGithubWritebackInput {
   target: GithubWritebackTarget
   action: GithubWritebackAction
   /** The account shown in the confirmation dialog, when there is one. */
-  accountId?: string
+  connectorAccountId?: string
   /**
    * Present ONLY when a human has confirmed this exact write in a dialog that
    * showed them the payload. Omitting it leaves the job parked in
@@ -127,8 +131,11 @@ export async function runGithubWriteback(
   const execute = deps.execute ?? executeIntegrationAction
   const approve = deps.approve ?? approveIntegrationActionJob
 
-  const account = await resolveAccount(input.target.repoFullName, input.accountId)
-  if (!account || (input.accountId !== undefined && account.id !== input.accountId)) {
+  const account = await resolveAccount(input.target.repoFullName, input.connectorAccountId)
+  if (
+    !account ||
+    (input.connectorAccountId !== undefined && account.id !== input.connectorAccountId)
+  ) {
     throw new GithubWritebackError(
       "no-account",
       "No enabled GitHub account is connected; connect one in Settings → Connections."

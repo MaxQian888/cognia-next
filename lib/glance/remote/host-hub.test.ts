@@ -237,10 +237,12 @@ describe("GlanceRemoteHub", () => {
   })
 
   describe("executor", () => {
-    it("installs and uninstalls an executor", () => {
+    it("installs and uninstalls an executor", async () => {
       const ex = executor()
       const uninstall = hub.setExecutor(ex)
       expect(hub.getExecutor()).toBe(ex)
+      await hub.getExecutor()!.quotaEnable("anthropic", "provider-work")
+      expect(ex.quotaEnable).toHaveBeenCalledWith("anthropic", "provider-work")
       uninstall()
       expect(hub.getExecutor()).toBeNull()
     })

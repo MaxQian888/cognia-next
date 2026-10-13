@@ -29,7 +29,7 @@ function ownedBuffer(value: Uint8Array): ArrayBuffer {
 
 export async function readPerformanceCaptureFrames(input: {
   db: CogniaDB
-  accountId: string
+  localAccountId: string
   targetDatabase: string
   captureId: string
   key: Uint8Array
@@ -50,7 +50,7 @@ export async function readPerformanceCaptureFrames(input: {
         ciphertext: bytes(chunk.ciphertext),
       },
       {
-        accountId: input.accountId,
+        accountId: input.localAccountId,
         targetDatabase: input.targetDatabase,
         captureId: input.captureId,
         ordinal: chunk.ordinal,
@@ -83,7 +83,7 @@ export interface PerformanceCaptureMetadata {
  */
 export async function readPerformanceCaptureMetadata(input: {
   db: CogniaDB
-  accountId: string
+  localAccountId: string
   targetDatabase: string
   captureId: string
   key: Uint8Array
@@ -107,7 +107,7 @@ export async function readPerformanceCaptureMetadata(input: {
       ciphertext: bytes(capture.metadataCiphertext),
     },
     {
-      accountId: input.accountId,
+      accountId: input.localAccountId,
       targetDatabase: input.targetDatabase,
       captureId: capture.id,
       ordinal: -1,
@@ -143,7 +143,7 @@ async function sha256(value: Uint8Array): Promise<string> {
 
 export async function exportPerformanceCapture(input: {
   db: CogniaDB
-  accountId: string
+  localAccountId: string
   targetDatabase: string
   captureId: string
   key: Uint8Array
@@ -188,7 +188,7 @@ export async function exportPerformanceCapture(input: {
         ciphertext: bytes(capture.metadataCiphertext),
       },
       {
-        accountId: input.accountId,
+        accountId: input.localAccountId,
         targetDatabase: input.targetDatabase,
         captureId: capture.id,
         ordinal: -1,
@@ -222,7 +222,7 @@ export async function exportPerformanceCapture(input: {
         ciphertext: bytes(chunk.ciphertext),
       },
       {
-        accountId: input.accountId,
+        accountId: input.localAccountId,
         targetDatabase: input.targetDatabase,
         captureId: capture.id,
         ordinal: chunk.ordinal,
@@ -257,7 +257,7 @@ export async function exportPerformanceCapture(input: {
         ciphertext: bytes(attachment.ciphertext),
       },
       {
-        accountId: input.accountId,
+        accountId: input.localAccountId,
         targetDatabase: input.targetDatabase,
         captureId: capture.id,
         ordinal: attachment.ordinal,
@@ -354,7 +354,7 @@ export async function preparePerformanceRawExport(input: {
 export async function importPerformanceCapture(input: {
   db: CogniaDB
   quota: PerformanceQuotaManager
-  accountId: string
+  localAccountId: string
   targetDatabase: string
   targetId: string
   key: Uint8Array
@@ -385,7 +385,7 @@ export async function importPerformanceCapture(input: {
     0
   )
   const reservation = await input.quota.reserve({
-    accountId: input.accountId,
+    accountId: input.localAccountId,
     targetDatabase: input.targetDatabase,
     captureId: id,
     worstCaseBytes:
@@ -412,7 +412,7 @@ export async function importPerformanceCapture(input: {
         input.key,
         metadataPlain,
         {
-          accountId: input.accountId,
+          accountId: input.localAccountId,
           targetDatabase: input.targetDatabase,
           captureId: id,
           ordinal: -1,
@@ -436,7 +436,7 @@ export async function importPerformanceCapture(input: {
         input.key,
         plain,
         {
-          accountId: input.accountId,
+          accountId: input.localAccountId,
           targetDatabase: input.targetDatabase,
           captureId: id,
           ordinal: index,
@@ -468,7 +468,7 @@ export async function importPerformanceCapture(input: {
         input.key,
         plain,
         {
-          accountId: input.accountId,
+          accountId: input.localAccountId,
           targetDatabase: input.targetDatabase,
           captureId: id,
           ordinal,

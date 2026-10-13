@@ -741,10 +741,13 @@ describe("device-managed workspace screen", () => {
   }
 
   it("restores the device account's saved dark mode before opening it", () => {
+    localStorage.setItem("cognia-account-other-profile:theme", "system")
     localStorage.setItem("cognia-account-acct_desktop_local_workspace:theme", "dark")
     setGateState({ accounts: [device], activeAccountId: device.id, locked: true })
     renderGate()
     expect(mockSetTheme).toHaveBeenCalledWith("dark")
+    expect(mockSetTheme).not.toHaveBeenCalledWith("system")
+    localStorage.removeItem("cognia-account-other-profile:theme")
     localStorage.removeItem("cognia-account-acct_desktop_local_workspace:theme")
   })
 

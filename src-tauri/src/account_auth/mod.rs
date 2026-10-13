@@ -1228,7 +1228,7 @@ mod tests {
         session.activate("acct-a", "digest".into());
         let served = tauri::async_runtime::block_on(async {
             for _ in 0..50 {
-                if service.status().await.account_id.as_deref() == Some("acct-a") {
+                if service.status().await.local_account_id.as_deref() == Some("acct-a") {
                     return true;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;

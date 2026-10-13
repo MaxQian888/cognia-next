@@ -1,5 +1,14 @@
 /** @jest-environment node */
 
+import "fake-indexeddb/auto"
+import Dexie from "dexie"
+import {
+  BROWSER_VAULT_DB_NAME,
+  __resetBrowserVaultForTesting,
+  __setBrowserVaultArgon2ParametersForTesting,
+  provisionBrowserVault,
+} from "@/lib/runtime/browser-vault"
+
 import {
   decryptAccountArtifactBytes,
   decryptEvalArtifact,
@@ -44,7 +53,7 @@ describe("evaluation artifact encryption", () => {
 
   it("stores the web data key inside the unlocked browser vault", async () => {
     const vault = {
-      accountId: "account-web",
+      localAccountId: "account-web",
       loadSecret: jest.fn<Promise<string | null>, [string]>().mockResolvedValue(null),
       storeSecret: jest.fn<Promise<void>, [string, string]>().mockResolvedValue(),
     }
@@ -89,7 +98,7 @@ describe("evaluation artifact encryption", () => {
 
   it("uses a separate account-scoped performance domain key without changing eval v1", async () => {
     const vault = {
-      accountId: "account-web",
+      localAccountId: "account-web",
       loadSecret: jest.fn<Promise<string | null>, [string]>().mockResolvedValue(null),
       storeSecret: jest.fn<Promise<void>, [string, string]>().mockResolvedValue(),
     }
@@ -102,7 +111,7 @@ describe("evaluation artifact encryption", () => {
 
   it("keeps Human Input values under a dedicated account-scoped domain key", async () => {
     const vault = {
-      accountId: "account-web",
+      localAccountId: "account-web",
       loadSecret: jest.fn<Promise<string | null>, [string]>().mockResolvedValue(null),
       storeSecret: jest.fn<Promise<void>, [string, string]>().mockResolvedValue(),
     }
@@ -133,7 +142,7 @@ it.each(["workflow-knowledge", "workflow-feedback", "workflow-annotation"] as co
     expect(await loadOrCreateAccountArtifactKey("account-b", domain, deps)).not.toEqual(key)
 
     const vault = {
-      accountId: "account-web",
+      localAccountId: "account-web",
       loadSecret: jest.fn(async (_name: string): Promise<string | null> => null),
       storeSecret: jest.fn(async (_name: string, _value: string): Promise<void> => {}),
     }
@@ -147,3 +156,30 @@ it.each(["workflow-knowledge", "workflow-feedback", "workflow-annotation"] as co
     )
   }
 )
+
+it("uses the real active vault through the default artifact-key provider", async () => {
+  __resetBrowserVaultForTesting()
+  __setBrowserVaultArgon2ParametersForTesting(32)
+  await Dexie.delete(BROWSER_VAULT_DB_NAME)
+  try {
+    await provisionBrowserVault("acct_artifact_default", "password")
+    const evalKey = await loadOrCreateEvalArtifactKey("acct_artifact_default", { platform: "web" })
+    const performanceKey = await loadOrCreateAccountArtifactKey(
+      "acct_artifact_default",
+      "performance",
+      { platform: "web" }
+    )
+    expect(evalKey).toHaveLength(32)
+    expect(performanceKey).toHaveLength(32)
+    expect(performanceKey).not.toEqual(evalKey)
+    await expect(
+      loadOrCreateEvalArtifactKey("acct_artifact_default", { platform: "web" })
+    ).resolves.toEqual(evalKey)
+    await expect(
+      loadOrCreateAccountArtifactKey("acct_other", "performance", { platform: "web" })
+    ).rejects.toThrow("unlocked account vault")
+  } finally {
+    __resetBrowserVaultForTesting()
+    await Dexie.delete(BROWSER_VAULT_DB_NAME)
+  }
+})

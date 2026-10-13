@@ -25,9 +25,9 @@ import { registerNativePlugins } from "@/lib/capacitor/register-plugins"
 import { syncWithTheme as syncStatusBar } from "@/lib/capacitor/status-bar"
 
 /** Restore the selected account's mode before its database can be opened. */
-export function useLockedAccountTheme(accountId: string | null): void {
+export function useLockedAccountTheme(localAccountId: string | null): void {
   const { theme, setTheme } = useTheme()
-  const savedTheme = readAccountTheme(accountId)
+  const savedTheme = readAccountTheme(localAccountId)
   useIsomorphicLayoutEffect(() => {
     if (savedTheme && savedTheme !== theme) setTheme(savedTheme)
   }, [savedTheme, theme, setTheme])

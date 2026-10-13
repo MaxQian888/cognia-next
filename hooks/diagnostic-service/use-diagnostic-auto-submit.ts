@@ -49,14 +49,14 @@ export type DiagnosticAutoSubmitStatus = "idle" | "running" | "done"
 /** Seams for the tests; production passes nothing. */
 export interface DiagnosticAutoSubmitDeps {
   /** Overrides the unlocked account from the account store. */
-  accountId?: string | null
-  loadConnection?: (accountId: string) => StoredDiagnosticConnection | null
-  saveConnection?: (accountId: string, connection: StoredDiagnosticConnection) => void
+  localAccountId?: string | null
+  loadConnection?: (localAccountId: string) => StoredDiagnosticConnection | null
+  saveConnection?: (localAccountId: string, connection: StoredDiagnosticConnection) => void
   resolveRuntime?: () => Promise<DiagnosticSubmissionRuntime | null>
   listIncidents?: () => Promise<AutoSubmitIncident[]>
   submit?: (input: {
     connection: StoredDiagnosticConnection
-    accountId: string
+    localAccountId: string
     incident: AutoSubmitIncident
     consent: IncidentConsentDecision
     fetchImpl: DiagnosticFetch
@@ -77,7 +77,7 @@ export function useDiagnosticAutoSubmit(
 ): DiagnosticAutoSubmitStatus {
   const { deps = {} } = options
   const storeAccountId = useAccountStore((state) => state.unlockedAccountId)
-  const accountId = deps.accountId !== undefined ? deps.accountId : storeAccountId
+  const localAccountId = deps.localAccountId !== undefined ? deps.localAccountId : storeAccountId
   const [status, setStatus] = useState<DiagnosticAutoSubmitStatus>("idle")
 
   // The latest callback and seams, read by the once-per-account pass without
@@ -89,11 +89,11 @@ export function useDiagnosticAutoSubmit(
   })
 
   useEffect(() => {
-    if (!accountId) return
+    if (!localAccountId) return
     let active = true
     const { deps: current } = latest.current
     const loadConnection = current.loadConnection ?? ((id: string) => loadDiagnosticConnection(id))
-    const connection = loadConnection(accountId)
+    const connection = loadConnection(localAccountId)
     if (!connection?.autoSubmit) return
 
     // Every state write lands in the promise continuation, never in the
@@ -107,14 +107,14 @@ export function useDiagnosticAutoSubmit(
         const fetchImpl = current.fetchImpl ?? createPlatformFetch()
         const submit = current.submit ?? ((input) => submitIncidentReport(input))
         return runAutoSubmitOnce({
-          accountId,
+          localAccountId,
           connection,
           incidents,
           submit: (incident, consent) =>
-            submit({ connection, accountId, incident, consent: { ...consent }, fetchImpl }),
+            submit({ connection, localAccountId, incident, consent: { ...consent }, fetchImpl }),
           saveConnection: (next) =>
             (current.saveConnection ?? ((id, record) => void saveDiagnosticConnection(id, record)))(
-              accountId,
+              localAccountId,
               next
             ),
           now: current.now,
@@ -137,7 +137,7 @@ export function useDiagnosticAutoSubmit(
     return () => {
       active = false
     }
-  }, [accountId])
+  }, [localAccountId])
 
   return status
 }

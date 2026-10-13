@@ -184,7 +184,7 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
 export async function clearAll(): Promise<void> {
   const db = getDb()
   const mainName = db.name
-  const accountId = getActiveAccountId()
+  const localAccountId = getActiveAccountId()
   const fusionName = fusionDatabaseName(mainName)
   await db.delete()
   clearTemporarySessionAssets()
@@ -202,7 +202,7 @@ export async function clearAll(): Promise<void> {
     })
   }
   try {
-    await purgeDatabaseAppData(accountId, mainName)
+    await purgeDatabaseAppData(localAccountId, mainName)
   } catch (error) {
     loggers.store.warn("clear all: generated video files were not all removed", {
       error: String(error),

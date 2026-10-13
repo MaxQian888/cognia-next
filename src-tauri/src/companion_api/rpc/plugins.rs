@@ -121,11 +121,11 @@ pub(super) async fn dispatch(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
     device_id: &str,
-    account_id: Option<&str>,
+    tenant_id: Option<&str>,
     scope: Option<&str>,
     plane: super::super::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let _ = (state, host, device_id, account_id, scope);
+    let _ = (state, host, device_id, tenant_id, scope);
     let result = match name {
         // ── Plugins ──────────────────────────────────────────────────────────
         // Native install/uninstall manage the on-disk plugin dir + Rust
@@ -185,7 +185,7 @@ pub(super) async fn dispatch(
                     serde_json::json!({
                         "action": "installed",
                         "pluginId": snapshot.plugin_id,
-                        "accountId": account_id,
+                        "accountId": tenant_id,
                     }),
                 );
                 return to_json(snapshot);
@@ -221,7 +221,7 @@ pub(super) async fn dispatch(
                         serde_json::json!({
                             "action": "installed",
                             "pluginId": result.manifest.get("id").and_then(Value::as_str),
-                            "accountId": account_id,
+                            "accountId": tenant_id,
                         }),
                     );
                 }
@@ -254,7 +254,7 @@ pub(super) async fn dispatch(
                     serde_json::json!({
                         "action": "uninstalled",
                         "pluginId": plugin_id,
-                        "accountId": account_id,
+                        "accountId": tenant_id,
                     }),
                 );
                 return Ok(Value::Null);
@@ -344,7 +344,7 @@ pub(super) async fn dispatch(
                         serde_json::json!({
                             "action": "installed",
                             "pluginId": installed.plugin_id,
-                            "accountId": account_id,
+                            "accountId": tenant_id,
                         }),
                     );
                 }
@@ -404,7 +404,7 @@ pub(super) async fn dispatch(
                     serde_json::json!({
                         "action": "updated",
                         "pluginId": plugin_id,
-                        "accountId": account_id,
+                        "accountId": tenant_id,
                     }),
                 );
                 return to_json(committed);
@@ -495,7 +495,7 @@ pub(super) async fn dispatch(
                     serde_json::json!({
                         "action": "restored",
                         "pluginId": plugin_id,
-                        "accountId": account_id,
+                        "accountId": tenant_id,
                     }),
                 );
                 return Ok(Value::Null);

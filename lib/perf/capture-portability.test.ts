@@ -77,7 +77,7 @@ it("imports through an invisible row and exposes only the final ready provenance
   const id = await importPerformanceCapture({
     db,
     quota,
-    accountId: "account-a",
+    localAccountId: "account-a",
     targetDatabase: db.name,
     targetId: "destination-target",
     key: crypto.getRandomValues(new Uint8Array(32)),
@@ -127,7 +127,7 @@ it("rejects malformed frame payloads before exposing any capture row", async () 
     importPerformanceCapture({
       db,
       quota,
-      accountId: "account-b",
+      localAccountId: "account-b",
       targetDatabase: db.name,
       targetId: "destination-target",
       key: crypto.getRandomValues(new Uint8Array(32)),
@@ -254,7 +254,7 @@ describe("readPerformanceCaptureMetadata", () => {
     await expect(
       readPerformanceCaptureMetadata({
         db,
-        accountId: "account-a",
+        localAccountId: "account-a",
         targetDatabase: db.name,
         captureId: "capture-1",
         key,
@@ -272,7 +272,7 @@ describe("readPerformanceCaptureMetadata", () => {
     await expect(
       readPerformanceCaptureMetadata({
         db: missing.db,
-        accountId: "account-a",
+        localAccountId: "account-a",
         targetDatabase: missing.db.name,
         captureId: "capture-1",
         key: missing.key,
@@ -283,7 +283,7 @@ describe("readPerformanceCaptureMetadata", () => {
     await expect(
       readPerformanceCaptureMetadata({
         db: malformed.db,
-        accountId: "account-a",
+        localAccountId: "account-a",
         targetDatabase: malformed.db.name,
         captureId: "capture-1",
         key: malformed.key,

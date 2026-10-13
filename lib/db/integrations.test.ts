@@ -4,6 +4,10 @@ import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "./schema"
 import {
+  registerExternalServices,
+  unregisterExternalServicesByPlugin,
+} from "@/lib/external-services/catalog"
+import {
   appendIntegrationAudit,
   createIntegrationAccount,
   createIntegrationSubscription,
@@ -55,6 +59,40 @@ describe("Integration persistence", () => {
     await expect(listIntegrationSubscriptions("gitlab-delivery", github.id)).resolves.toHaveLength(
       0
     )
+  })
+
+  it("persists the integration account wire key in projected service connections", async () => {
+    registerExternalServices("github-delivery", [
+      {
+        id: "issues",
+        label: "Issues",
+        fallbackPolicy: "never",
+        providers: [
+          {
+            id: "github",
+            kind: "integration",
+            contributionId: "github",
+            priority: 1,
+            surfaces: ["chat"],
+          },
+        ],
+      },
+    ])
+    try {
+      const account = await createIntegrationAccount("github-delivery", {
+        integrationId: "github",
+        providerId: "github-pat",
+        authSessionId: "opaque",
+        remoteAccountId: "octocat",
+        label: "Octocat",
+      })
+      const connection = await getDb().serviceConnections.get(
+        `integration:${account.id}:issues:github`
+      )
+      expect(connection?.providerRef).toEqual({ kind: "integration", accountId: account.id })
+    } finally {
+      unregisterExternalServicesByPlugin("github-delivery")
+    }
   })
 
   it("lists accounts across plugins, narrowed by integration", async () => {
@@ -167,9 +205,13 @@ describe("Integration persistence", () => {
       payload: { issue: 42 },
     }
 
-    await expect(insertIntegrationEvent(event)).resolves.toEqual({ inserted: true })
+    await expect(insertIntegrationEvent(event)).resolves.toEqual({
+      inserted: true,
+      row: expect.objectContaining(event),
+    })
     await expect(insertIntegrationEvent({ ...event, id: "evt-2" })).resolves.toEqual({
       inserted: false,
+      row: expect.objectContaining(event),
     })
   })
 

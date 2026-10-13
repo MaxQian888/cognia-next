@@ -305,7 +305,7 @@ export function CharacterEditor({
     () =>
       Object.entries(subscriptionAccounts).flatMap(([provider, state]) =>
         state.accounts.map((account) => ({
-          accountId: account.id,
+          providerAccountId: account.id,
           provider: subscriptionProviders.find((entry) => entry.id === provider)?.name ?? provider,
           label: account.label ?? account.email ?? account.id.slice(0, 8),
         }))
@@ -994,7 +994,7 @@ export function CharacterEditor({
             <SelectContent>
               <SelectItem value="inherit">{tAccount("inherit")}</SelectItem>
               {accountOptions.map((opt) => (
-                <SelectItem key={opt.accountId} value={opt.accountId}>
+                <SelectItem key={opt.providerAccountId} value={opt.providerAccountId}>
                   {tAccount("optionLabel", {
                     provider: opt.provider,
                     label: opt.label,

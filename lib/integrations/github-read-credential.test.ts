@@ -1,3 +1,10 @@
+jest.mock("@/lib/db/integrations", () => ({ listAllIntegrationAccounts: jest.fn() }))
+jest.mock("@/lib/plugin/auth/auth-provider-registry", () => ({ getProvider: jest.fn() }))
+jest.mock("./github-auth", () => ({ githubHostForSession: jest.fn() }))
+
+import { listAllIntegrationAccounts } from "@/lib/db/integrations"
+import { getProvider } from "@/lib/plugin/auth/auth-provider-registry"
+import { githubHostForSession } from "./github-auth"
 import { GITHUB_DOT_COM, parseGithubHost, type GithubHost } from "@/lib/github/host"
 import type { IntegrationAccount } from "@/types/plugin/plugin-integration"
 import {
@@ -165,5 +172,20 @@ describe("resolveGithubAccountGitAccess", () => {
     await expect(
       resolveGithubAccountGitAccess(account({ providerId: "gitlab-pat" }), deps([], hosts))
     ).rejects.toThrow("not a GitHub account")
+  })
+})
+
+it("passes the connector identity and deployment to the host credential resolver", async () => {
+  const resolveRequestCredential = jest.fn(async () => ({ accessToken: "scoped-token" }))
+  jest
+    .mocked(listAllIntegrationAccounts)
+    .mockResolvedValue([account({ id: "work", authSessionId: "work-session" })])
+  jest.mocked(githubHostForSession).mockResolvedValue(GHES)
+  jest.mocked(getProvider).mockReturnValue({ resolveRequestCredential } as never)
+
+  expect(await resolveGithubReadToken("acme/app", GHES)).toBe("scoped-token")
+  expect(resolveRequestCredential).toHaveBeenCalledWith("work-session", {
+    connectorAccountId: "work",
+    origin: "https://ghe.acme.io",
   })
 })

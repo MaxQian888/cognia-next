@@ -2,6 +2,15 @@
  * @jest-environment jsdom
  */
 
+import "fake-indexeddb/auto"
+import Dexie from "dexie"
+import {
+  BROWSER_VAULT_DB_NAME,
+  __resetBrowserVaultForTesting,
+  __setBrowserVaultArgon2ParametersForTesting,
+  provisionBrowserVault,
+} from "@/lib/runtime/browser-vault"
+
 import {
   CompanionConfig,
   LocalStorageCompanionStorage,
@@ -41,7 +50,7 @@ afterEach(() => {
 describe("LocalStorageCompanionStorage", () => {
   const vaultSecrets = new Map<string, string>()
   const vault = {
-    accountId: "acct_test",
+    localAccountId: "acct_test",
     async encryptSecret(name: string, value: string) {
       vaultSecrets.set(name, value)
       return { version: 1 as const, iv: `iv-${name}`, ciphertext: `sealed-${name}` }
@@ -350,4 +359,23 @@ describe("pickCompanionStorage / companionStorage", () => {
     // Different instance after reset, even though both are LocalStorage.
     expect(a).not.toBe(b)
   })
+})
+
+it("round-trips the default storage through the real active vault's local profile", async () => {
+  __resetBrowserVaultForTesting()
+  __setBrowserVaultArgon2ParametersForTesting(32)
+  await Dexie.delete(BROWSER_VAULT_DB_NAME)
+  try {
+    await provisionBrowserVault("acct_storage_default", "password")
+    const storage = new LocalStorageCompanionStorage()
+    await storage.save(MOCK)
+    const book = JSON.parse(localStorage.getItem("cognia.companion.targets.v2")!)
+    expect(Object.keys(book.targets)).toEqual(["acct_storage_default:companion-studio"])
+    await expect(storage.load()).resolves.toEqual(MOCK)
+    await provisionBrowserVault("acct_storage_other", "password")
+    await expect(storage.load()).resolves.toBeNull()
+  } finally {
+    __resetBrowserVaultForTesting()
+    await Dexie.delete(BROWSER_VAULT_DB_NAME)
+  }
 })

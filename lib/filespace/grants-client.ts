@@ -124,12 +124,12 @@ function via(target: FileShareTarget | undefined): Transport {
 
 // ── Host-owned state (the app pushes it; devices cannot) ───────────────────
 
-/** Serve `accountId`'s grants on this host, or nothing with `null`. */
+/** Serve `localAccountId`'s grants on this host, or nothing with `null`. */
 export function activateFileShare(
-  accountId: string | null,
+  localAccountId: string | null,
   target?: FileShareTarget
 ): Promise<FileShareStatus> {
-  return via(target).call<FileShareStatus>("file_share_activate", { accountId })
+  return via(target).call<FileShareStatus>("file_share_activate", { accountId: localAccountId })
 }
 
 /** Push the mount tables of these conversations. */

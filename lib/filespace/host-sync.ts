@@ -110,9 +110,9 @@ export function createFileShareHostSync(deps: FileShareHostSyncDeps): FileShareH
   }
 
   const activate = async () => {
-    const accountId = deps.accountId()
-    const status = await activateFileShare(accountId, deps.target)
-    if (!accountId) return status
+    const localAccountId = deps.accountId()
+    const status = await activateFileShare(localAccountId, deps.target)
+    if (!localAccountId) return status
     await pushPolicy()
     await syncSessions(status.sessionsWithGrants)
     return status
@@ -121,7 +121,8 @@ export function createFileShareHostSync(deps: FileShareHostSyncDeps): FileShareH
   const refresh = async () => {
     if (!deps.accountId()) return
     const status = await getFileShareStatus(deps.target)
-    if (!status.active || status.accountId !== deps.accountId()) {
+    const { accountId: hostLocalAccountId } = status
+    if (!status.active || hostLocalAccountId !== deps.accountId()) {
       // The host restarted or lost the account: serve it again.
       await activate()
       return
@@ -133,7 +134,8 @@ export function createFileShareHostSync(deps: FileShareHostSyncDeps): FileShareH
   const sessionsChanged = async (sessionIds: readonly string[]) => {
     if (!deps.accountId() || sessionIds.length === 0) return
     const status = await getFileShareStatus(deps.target)
-    if (!status.active || status.accountId !== deps.accountId()) return
+    const { accountId: hostLocalAccountId } = status
+    if (!status.active || hostLocalAccountId !== deps.accountId()) return
     const granted = new Set(status.sessionsWithGrants)
     await syncSessions(sessionIds.filter((sessionId) => granted.has(sessionId)))
   }

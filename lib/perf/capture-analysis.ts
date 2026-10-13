@@ -40,7 +40,7 @@ export interface DecodedCapture {
 /** Decrypt one stored capture's frames and metadata for analysis. */
 export async function readDecodedCapture(input: {
   db: CogniaDB
-  accountId: string
+  localAccountId: string
   targetDatabase: string
   captureId: string
   key: Uint8Array

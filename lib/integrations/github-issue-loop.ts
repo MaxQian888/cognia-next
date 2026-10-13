@@ -66,18 +66,20 @@ export interface GithubIssueLoopDependencies {
 
 async function resolveCredential(
   pluginId: string,
-  accountId: string,
+  connectorAccountId: string,
   origin: string
 ): Promise<string> {
-  const account = await getIntegrationAccount(pluginId, accountId)
-  if (!account?.enabled) throw new Error(`Integration account "${accountId}" is disabled`)
+  const account = await getIntegrationAccount(pluginId, connectorAccountId)
+  if (!account?.enabled) throw new Error(`Integration account "${connectorAccountId}" is disabled`)
   const provider = getProvider(account.providerId)
   if (!provider) throw new Error(`Auth provider "${account.providerId}" is not registered`)
   const sessions = await provider.getSessions(undefined, { silent: true })
   const session = sessions.find((candidate) => candidate.id === account.authSessionId)
-  if (!session) throw new Error(`Credential handle for account "${accountId}" is unavailable`)
+  if (!session)
+    throw new Error(`Credential handle for account "${connectorAccountId}" is unavailable`)
   return provider.resolveRequestCredential
-    ? (await provider.resolveRequestCredential(session.id, { accountId, origin })).accessToken
+    ? (await provider.resolveRequestCredential(session.id, { connectorAccountId, origin }))
+        .accessToken
     : session.accessToken
 }
 

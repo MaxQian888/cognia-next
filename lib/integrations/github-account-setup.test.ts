@@ -67,6 +67,10 @@ it("consumes only the encrypted reference, verifies identity, checkpoints and sc
   expect(result).toEqual({ accountId: "account", login: "MaxQian888", health: "healthy" })
   expect(createKeyringStore).toHaveBeenCalledWith("integration-github-credentials")
   expect(store.load).toHaveBeenCalledWith(key)
+  expect(resolve).toHaveBeenCalledWith("session", {
+    connectorAccountId: `setup:${input.operationId}`,
+    origin: "https://api.github.com",
+  })
   expect(getSession).toHaveBeenCalledWith(
     "github-pat",
     ["repo"],

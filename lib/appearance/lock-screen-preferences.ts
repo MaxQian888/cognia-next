@@ -36,21 +36,21 @@ import type { AppTheme } from "@cognia/agent-config-types"
 const STORAGE_KEY = "cognia.lock-screen.appearance.v1"
 
 /** Only the non-secret mode is cached; the account database stays locked. */
-export function readAccountTheme(accountId: string | null): AppTheme | null {
-  if (!accountId || typeof window === "undefined") return null
+export function readAccountTheme(localAccountId: string | null): AppTheme | null {
+  if (!localAccountId || typeof window === "undefined") return null
   try {
-    const value = window.localStorage.getItem(`cognia-account-${accountId}:theme`)
+    const value = window.localStorage.getItem(`cognia-account-${localAccountId}:theme`)
     return value === "light" || value === "dark" || value === "system" ? value : null
   } catch {
     return null
   }
 }
 
-export function writeAccountTheme(accountId: string, theme: AppTheme): void {
-  if (!accountId || typeof window === "undefined") return
+export function writeAccountTheme(localAccountId: string, theme: AppTheme): void {
+  if (!localAccountId || typeof window === "undefined") return
   try {
     // The existing account-data purge removes this account-prefixed key.
-    window.localStorage.setItem(`cognia-account-${accountId}:theme`, theme)
+    window.localStorage.setItem(`cognia-account-${localAccountId}:theme`, theme)
   } catch {
     // A disabled/full cache must not prevent opening the account.
   }

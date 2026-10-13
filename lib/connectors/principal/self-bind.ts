@@ -75,7 +75,7 @@ export interface SelfBindInput {
   /** The envelope's app id may be absent; the adapter's whoami knows its own. */
   fallbackAppId?: string
   /** The LocalProfile this runtime serves. */
-  accountId: string
+  localAccountId: string
   conversationKey?: string
 }
 
@@ -120,13 +120,13 @@ export async function isForgeResistantTransport(
 
 function confirmsOwner(
   principal: FeishuPrincipalRow,
-  accountId: string,
+  localAccountId: string,
   ownerIds: ReadonlySet<string>
 ): boolean {
   return (
     principal.status === "active" &&
     principal.ownerConfirmedAt !== undefined &&
-    principal.cogniaAccountId === accountId &&
+    principal.cogniaAccountId === localAccountId &&
     ownerIds.has(principal.cogniaUserId)
   )
 }
@@ -147,16 +147,16 @@ export async function selfBindSignedInOwner(
 
   const tenant = await getFeishuTenant(tenantKey, appId)
   if (!tenant || tenant.status !== "active") return { status: "skipped", reason: "tenant_unknown" }
-  if (tenant.cogniaAccountId !== input.accountId) {
+  if (tenant.cogniaAccountId !== input.localAccountId) {
     return { status: "skipped", reason: "tenant_foreign" }
   }
 
-  const binding = await deps.binding(input.accountId)
+  const binding = await deps.binding(input.localAccountId)
   if (!binding) return { status: "skipped", reason: "profile_unbound" }
   const ownerIds = new Set([binding.userId, ...(binding.legacyUserIds ?? [])])
 
   const confirmed = (await listFeishuPrincipalsByUnionId(tenantKey, unionId)).some((principal) =>
-    confirmsOwner(principal, input.accountId, ownerIds)
+    confirmsOwner(principal, input.localAccountId, ownerIds)
   )
   if (!confirmed) return { status: "skipped", reason: "not_confirmed" }
 
@@ -169,7 +169,7 @@ export async function selfBindSignedInOwner(
     if (existing.status !== "unlinked" || existing.selfBoundAt === undefined) {
       return { status: "skipped", reason: "already_bound" }
     }
-    if (!ownerIds.has(existing.cogniaUserId) || existing.cogniaAccountId !== input.accountId) {
+    if (!ownerIds.has(existing.cogniaUserId) || existing.cogniaAccountId !== input.localAccountId) {
       return { status: "skipped", reason: "already_bound" }
     }
     await setFeishuPrincipalStatus(existing.id, "active", now)
@@ -181,7 +181,7 @@ export async function selfBindSignedInOwner(
         appId,
         openId: input.openId,
         unionId,
-        cogniaAccountId: input.accountId,
+        cogniaAccountId: input.localAccountId,
         cogniaUserId: binding.userId,
         logtoSubject: binding.logtoSubject,
         selfBoundAt: now,
@@ -222,7 +222,7 @@ export async function selfBindSignedInOwner(
         tenantKey,
         appId,
         openIdHash: await hashOpenId(input.openId),
-        accountId: input.accountId,
+        accountId: input.localAccountId,
       },
     })
   } catch {

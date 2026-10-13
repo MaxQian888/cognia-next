@@ -296,7 +296,7 @@ export async function loadOrCreateDesktopEvalKey(
 }
 
 interface EvalBrowserVault {
-  accountId: string
+  localAccountId: string
   loadSecret(name: string): Promise<string | null>
   storeSecret(name: string, value: string): Promise<void>
 }
@@ -326,7 +326,7 @@ export async function loadOrCreateAccountArtifactKey(
     return created
   }
   const vault = (dependencies.getBrowserVault ?? getActiveBrowserVault)()
-  if (!vault || vault.accountId !== accountId) {
+  if (!vault || vault.localAccountId !== accountId) {
     throw new Error(`An unlocked account vault is required for ${domain} encryption`)
   }
   const existing = await vault.loadSecret(location.vaultSecretName)
@@ -356,7 +356,7 @@ export async function loadOrCreateEvalArtifactKey(
   }
 
   const vault = (dependencies.getBrowserVault ?? getActiveBrowserVault)()
-  if (!vault || vault.accountId !== accountId) {
+  if (!vault || vault.localAccountId !== accountId) {
     throw new Error("An unlocked account vault is required for evaluation encryption")
   }
   const existing = await vault.loadSecret(WEB_DATA_KEY_SECRET)

@@ -376,6 +376,17 @@ describe("resolveDurabilityBackend", () => {
     ).toBe("sqlite-v5")
   })
 
+  it("does not apply another local profile's manifest", () => {
+    writeManifest(durabilityRoot(home, "acct_other"), {
+      manifestFormat: 1,
+      activeBackend: "journal-v4",
+      shadowBackend: null,
+      rollbackWatermark: null,
+      updatedAt: 0,
+    })
+    expect(resolveDurabilityBackend(home, "acct", {})).toBe("sqlite-v5")
+  })
+
   it("falls back to the gate when the manifest is unreadable", () => {
     const root = durabilityRoot(home, "acct")
     fs.mkdirSync(root, { recursive: true })

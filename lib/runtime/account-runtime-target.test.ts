@@ -29,8 +29,11 @@ jest.mock("./target-registry", () => {
   }
 })
 
-let mockVault: null | { accountId: string; createContentCipher: jest.Mock; loadSecret: jest.Mock } =
-  null
+let mockVault: null | {
+  localAccountId: string
+  createContentCipher: jest.Mock
+  loadSecret: jest.Mock
+} = null
 const mockMigrate = jest.fn(async (_input: unknown) => ({ stage: "verified" as const, tables: [] }))
 const mockMarkCompleted = jest.fn(async () => undefined)
 const mockActivateCipher = jest.fn()
@@ -654,7 +657,7 @@ describe("default runtime lifecycle boundaries", () => {
       existingDatabases.delete(name)
     })
     mockVault = {
-      accountId: "acct_runtime",
+      localAccountId: "acct_runtime",
       createContentCipher: jest.fn(() => ({})),
       loadSecret: jest.fn(async () => "key"),
     }
@@ -710,7 +713,7 @@ describe("default runtime lifecycle boundaries", () => {
   it.each([null, "acct_other"])(
     "refuses migration when the unlocked Vault belongs to %s",
     async (accountId) => {
-      mockVault = accountId ? { ...mockVault!, accountId } : null
+      mockVault = accountId ? { ...mockVault!, localAccountId: accountId } : null
       await expect(prepareAccountRuntimeTarget("acct_runtime")).rejects.toThrow(
         "Vault must be unlocked"
       )
@@ -755,7 +758,7 @@ describe("default runtime lifecycle boundaries", () => {
     async (kind) => {
       mockRegistry.getActiveTarget.mockResolvedValue(standalone)
       if (kind === "locked") mockVault = null
-      if (kind === "wrong-account") mockVault!.accountId = "acct_other"
+      if (kind === "wrong-account") mockVault!.localAccountId = "acct_other"
       if (kind === "missing-reference")
         mockRegistry.listTargets.mockResolvedValue([
           standalone,

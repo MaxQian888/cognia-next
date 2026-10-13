@@ -38,7 +38,7 @@ function account(
 ): GlanceVaultAccount {
   return {
     provider,
-    accountId,
+    providerAccountId: accountId,
     accountLabel: `${provider} ${accountId}`,
     queryEnabled: true,
     quotaCapable: true,
@@ -148,12 +148,13 @@ describe("buildQuotaSlice", () => {
       })
     })
 
-    it("carries identity, the reading's fetchedAt and no error", () => {
+    it("preserves the serialized provider account key from the internal vault identity", () => {
       const r = reading("p", "a", [meter("ok")])
       const [src] = build({
         accounts: [account("p", "a", { accountLabel: "Work" })],
         latest: mapOf(r),
       }).sources
+      expect(src).not.toHaveProperty("providerAccountId")
       expect(src).toMatchObject({
         key: "p:a",
         provider: "p",
@@ -432,7 +433,7 @@ describe("buildQuotaSlice", () => {
 
     it("keeps enumeration order for ties", () => {
       const accounts = ["z", "a", "m"].map((id) => account("p", id))
-      const latest = mapOf(...accounts.map((a) => reading("p", a.accountId, [meter("ok")])))
+      const latest = mapOf(...accounts.map((a) => reading("p", a.providerAccountId, [meter("ok")])))
       const out = build({ accounts, latest })
       expect(out.sources.map((s) => s.accountId)).toEqual(["z", "a", "m"])
     })

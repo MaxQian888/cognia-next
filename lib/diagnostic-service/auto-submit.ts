@@ -88,8 +88,8 @@ export interface AutoSubmitStoreDeps {
   local?: Pick<Storage, "getItem" | "setItem" | "removeItem">
 }
 
-function ledgerKey(accountId: string): string {
-  return `${LEDGER_KEY_PREFIX}.${accountId}`
+function ledgerKey(localAccountId: string): string {
+  return `${LEDGER_KEY_PREFIX}.${localAccountId}`
 }
 
 function localStore(deps: AutoSubmitStoreDeps): AutoSubmitStoreDeps["local"] | null {
@@ -116,12 +116,12 @@ function isLedgerEntry(value: unknown): value is AutoSubmitLedgerEntry {
 
 /** Read the ledger; an unreadable blob is discarded rather than trusted. */
 export function loadAutoSubmitLedger(
-  accountId: string,
+  localAccountId: string,
   deps: AutoSubmitStoreDeps = {}
 ): AutoSubmitLedger {
   const store = localStore(deps)
   if (!store) return {}
-  const raw = store.getItem(ledgerKey(accountId))
+  const raw = store.getItem(ledgerKey(localAccountId))
   if (!raw) return {}
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -134,21 +134,21 @@ export function loadAutoSubmitLedger(
     }
     return ledger
   } catch {
-    store.removeItem(ledgerKey(accountId))
+    store.removeItem(ledgerKey(localAccountId))
     return {}
   }
 }
 
 /** Persist the ledger, keeping the newest `AUTO_SUBMIT_LEDGER_LIMIT` entries. */
 export function saveAutoSubmitLedger(
-  accountId: string,
+  localAccountId: string,
   ledger: AutoSubmitLedger,
   deps: AutoSubmitStoreDeps = {}
 ): void {
   const entries = Object.entries(ledger)
     .sort(([, left], [, right]) => right.lastAttemptAt.localeCompare(left.lastAttemptAt))
     .slice(0, AUTO_SUBMIT_LEDGER_LIMIT)
-  localStore(deps)?.setItem(ledgerKey(accountId), JSON.stringify(Object.fromEntries(entries)))
+  localStore(deps)?.setItem(ledgerKey(localAccountId), JSON.stringify(Object.fromEntries(entries)))
 }
 
 function isActionable(state: string): boolean {
@@ -203,7 +203,7 @@ export function autoSubmitErrorCode(cause: unknown): string {
 }
 
 export interface RunAutoSubmitInput {
-  accountId: string
+  localAccountId: string
   connection: StoredDiagnosticConnection
   incidents: readonly AutoSubmitIncident[]
   /** Send one report with the given consent. */
@@ -225,7 +225,7 @@ export interface RunAutoSubmitInput {
  * against its report and returned as an outcome.
  */
 export async function runAutoSubmit(input: RunAutoSubmitInput): Promise<AutoSubmitOutcome[]> {
-  const { accountId, connection, incidents, submit, saveConnection, store = {} } = input
+  const { localAccountId, connection, incidents, submit, saveConnection, store = {} } = input
   const now = input.now ?? (() => new Date())
   if (!connection.autoSubmit) return []
   if (!connection.autoSubmitSince) {
@@ -234,7 +234,7 @@ export async function runAutoSubmit(input: RunAutoSubmitInput): Promise<AutoSubm
     return []
   }
 
-  const ledger = loadAutoSubmitLedger(accountId, store)
+  const ledger = loadAutoSubmitLedger(localAccountId, store)
   const candidates = selectAutoSubmitCandidates({ connection, incidents, ledger })
   const outcomes: AutoSubmitOutcome[] = []
 
@@ -248,7 +248,7 @@ export async function runAutoSubmit(input: RunAutoSubmitInput): Promise<AutoSubm
       supportCode: null,
       errorCode: null,
     }
-    saveAutoSubmitLedger(accountId, ledger, store)
+    saveAutoSubmitLedger(localAccountId, ledger, store)
     try {
       const receipt = await submit(incident, DEFAULT_SUBMISSION_CONSENT)
       ledger[key] = { ...ledger[key], supportCode: receipt.supportCode, errorCode: null }
@@ -263,7 +263,7 @@ export async function runAutoSubmit(input: RunAutoSubmitInput): Promise<AutoSubm
         willRetry: ledgerAllows(ledger[key]),
       })
     }
-    saveAutoSubmitLedger(accountId, ledger, store)
+    saveAutoSubmitLedger(localAccountId, ledger, store)
   }
   return outcomes
 }
@@ -278,11 +278,11 @@ export async function runAutoSubmit(input: RunAutoSubmitInput): Promise<AutoSubm
 const inFlight = new Map<string, Promise<AutoSubmitOutcome[]>>()
 
 export function runAutoSubmitOnce(input: RunAutoSubmitInput): Promise<AutoSubmitOutcome[]> {
-  const existing = inFlight.get(input.accountId)
+  const existing = inFlight.get(input.localAccountId)
   if (existing) return existing
   const run = runAutoSubmit(input).finally(() => {
-    inFlight.delete(input.accountId)
+    inFlight.delete(input.localAccountId)
   })
-  inFlight.set(input.accountId, run)
+  inFlight.set(input.localAccountId, run)
   return run
 }

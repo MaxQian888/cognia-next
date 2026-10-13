@@ -2306,7 +2306,7 @@ export function activateAccountDatabase(accountId: string, targetId?: string): v
     ? encryptedRuntimeTargetDatabaseName(accountId, targetId)
     : encryptedAccountDatabaseName(accountId)
   const vault = getActiveBrowserVault()
-  if (vault?.accountId === accountId) {
+  if (vault?.localAccountId === accountId) {
     activateAccountContentCipher(vault.createContentCipher(nextName))
   }
   // Prime the notification scope identity synchronously — the Run Journal's

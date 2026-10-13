@@ -35,7 +35,7 @@ export interface GlanceRemoteLease {
 export interface GlanceRemoteExecutor {
   refresh: () => Promise<string | null>
   quotaRefresh: (key: string) => Promise<string | null>
-  quotaEnable: (provider: string, accountId: string) => Promise<string | null>
+  quotaEnable: (provider: string, providerAccountId: string) => Promise<string | null>
 }
 
 export class GlanceRemoteHub {

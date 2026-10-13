@@ -341,6 +341,23 @@ describe("setBotExecutionRoute", () => {
     expect(cancelLiveBotInstallation).toHaveBeenCalledWith(row.id)
   })
 
+  it.each(["provider-login", null])(
+    "preserves the provider wire key when saving %s",
+    async (providerAccountId) => {
+      const row = await installed()
+      const route = {
+        mode: "gateway" as const,
+        providerId: "openai",
+        modelId: "gpt-5",
+        accountId: providerAccountId,
+      }
+      await setBotExecutionRoute(row.id, route)
+      const stored = await getDb().botInstallations.get(row.id)
+      expect(stored?.executionRoute).toEqual(route)
+      expect(stored?.executionRoute).not.toHaveProperty("providerAccountId")
+    }
+  )
+
   it("clears a route with null", async () => {
     const row = await installed()
     await setBotExecutionRoute(row.id, { mode: "native" })

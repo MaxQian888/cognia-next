@@ -53,7 +53,7 @@ const REFRESHING_PREFIXES = ["issues.", "issue_comment."] as const
 const DEPARTED = new Set(["issues.transferred", "issues.deleted"])
 
 export interface GithubEventRefreshDeps {
-  accountHostId: (pluginId: string, accountId: string) => Promise<string | undefined>
+  accountHostId: (pluginId: string, connectorAccountId: string) => Promise<string | undefined>
   mirrorBindings: () => Promise<WorkspaceGithubBinding[]>
   importBindings: () => Promise<IssueSyncBinding[]>
   refreshMirror: (binding: WorkspaceGithubBinding) => Promise<unknown>
@@ -66,9 +66,9 @@ export interface GithubEventRefreshDeps {
 
 async function defaultAccountHostId(
   pluginId: string,
-  accountId: string
+  connectorAccountId: string
 ): Promise<string | undefined> {
-  const account = await getIntegrationAccount(pluginId, accountId)
+  const account = await getIntegrationAccount(pluginId, connectorAccountId)
   if (!account) return undefined
   const base = await integrationApiBaseUrl(account)
   // Not host-aware (or unresolvable) means the plugin's default: github.com.

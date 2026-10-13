@@ -532,9 +532,15 @@ it("includes registry-backed accounts in the character subscription picker", asy
   mockSubscriptionAccounts = {
     "custom-service": { accounts: [{ id: "cc-character", label: "Custom work" }] },
   }
-  renderEditor(baseInitial())
+  const { onSave } = renderEditor(baseInitial())
   fireEvent.click(screen.getByTestId("character-account-override"))
-  expect(await screen.findByRole("option", { name: "optionLabel" })).toBeInTheDocument()
+  fireEvent.click(await screen.findByRole("option", { name: "optionLabel" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await waitFor(() =>
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ accountIdOverride: "cc-character" })
+    )
+  )
 })
 
 describe("CharacterEditor — advanced overrides", () => {

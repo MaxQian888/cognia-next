@@ -137,7 +137,7 @@ export class BrowserVaultLockedError extends Error {
 }
 
 interface VaultSecretAdapter {
-  accountId: string
+  localAccountId: string
   storeSecret(name: string, value: string): Promise<void>
   loadSecret(name: string): Promise<string | null>
   deleteSecret(name: string): Promise<void>
@@ -210,9 +210,9 @@ export class VaultHostCredentialStore implements HostCredentialStore {
   private requireVault(key: CompanionHostKey): VaultSecretAdapter {
     const vault = this.vaultProvider()
     if (!vault) throw new BrowserVaultLockedError()
-    if (vault.accountId !== key.accountNamespace) {
+    if (vault.localAccountId !== key.accountNamespace) {
       throw new Error(
-        `Companion credential for account ${key.accountNamespace} cannot be reached from the ${vault.accountId} Vault.`
+        `Companion credential for account ${key.accountNamespace} cannot be reached from the ${vault.localAccountId} Vault.`
       )
     }
     return vault

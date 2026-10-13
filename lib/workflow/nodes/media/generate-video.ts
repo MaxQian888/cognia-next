@@ -5,7 +5,7 @@
  * An adapter over the video job engine, like the chat tool and `/video`: the
  * node starts a durable job (origin `workflow`), waits on its row, and the
  * renderer's job host writes the finished video under AppData
- * (`generated-videos/<accountId>/<database>/<jobId>.<ext>`). The output's
+ * (`generated-videos/<localAccountId>/<database>/<jobId>.<ext>`). The output's
  * `outputPath` is what `action.media.probe`, `frame`, `trim` and `concat` read.
  * Like their temp-root outputs it is outside every workspace root, so an
  * `action.fs.*` node cannot read it. A succeeded job's file is removed with its

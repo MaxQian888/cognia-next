@@ -75,7 +75,7 @@ describe("useDiagnosticAutoSubmit", () => {
     await waitFor(() => expect(result.current).toBe("done"))
     expect(seams.submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        accountId: "account-a",
+        localAccountId: "account-a",
         connection,
         incident: report,
         consent: { includeMinidump: false, includeScreenshot: false, description: "" },
@@ -108,7 +108,7 @@ describe("useDiagnosticAutoSubmit", () => {
   it("stays inert without an unlocked account", async () => {
     const seams = deps()
     const { result } = renderHook(() =>
-      useDiagnosticAutoSubmit({ onOutcomes: jest.fn(), deps: { ...seams, accountId: null } })
+      useDiagnosticAutoSubmit({ onOutcomes: jest.fn(), deps: { ...seams, localAccountId: null } })
     )
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(result.current).toBe("idle")

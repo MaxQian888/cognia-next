@@ -154,7 +154,9 @@ describe("PerfCapturesTab", () => {
     expect(deleteMock).not.toHaveBeenCalled()
     fireEvent.click(await screen.findByTestId("perf-capture-delete-confirm"))
     await waitFor(() =>
-      expect(deleteMock).toHaveBeenCalledWith(expect.objectContaining({ captureId: "capture-1" }))
+      expect(deleteMock).toHaveBeenCalledWith(
+        expect.objectContaining({ captureId: "capture-1", accountId: "account" })
+      )
     )
     await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Capture deleted."))
   })

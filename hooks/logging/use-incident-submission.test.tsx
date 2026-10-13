@@ -362,6 +362,7 @@ describe("useIncidentSubmission", () => {
       expect(result.current.stateFor(mobileIncident).errorCode).toBeNull()
       // `markReceipt` had no production caller before this: the mobile
       // lifecycle could never advance past `detected` either.
+      expect(deps.loadIdentity).toHaveBeenCalledWith("account-a")
       expect(deps.recordMobileReceipt).toHaveBeenCalledWith("crash-mobile", "MOB-1", "processing")
       expect(result.current.stateFor(mobileIncident).lastOutcome).toEqual({
         uploadedParts: 1,

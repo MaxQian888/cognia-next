@@ -1,6 +1,15 @@
 /**
  * @jest-environment jsdom
  */
+import "fake-indexeddb/auto"
+import Dexie from "dexie"
+import {
+  BROWSER_VAULT_DB_NAME,
+  __resetBrowserVaultForTesting,
+  __setBrowserVaultArgon2ParametersForTesting,
+  provisionBrowserVault,
+} from "@/lib/runtime/browser-vault"
+
 import {
   ACTIVE_HOST_KEY,
   HOST_BOOK_KEY,
@@ -99,11 +108,11 @@ describe("LocalStorageHostRecordStore", () => {
 })
 
 describe("VaultHostCredentialStore", () => {
-  function vault(accountId = "acct_a") {
+  function vault(localAccountId = "acct_a") {
     const secrets = new Map<string, string>()
     return {
       secrets,
-      accountId,
+      localAccountId,
       async storeSecret(name: string, value: string) {
         secrets.set(name, value)
       },
@@ -290,4 +299,24 @@ describe("SecureStorage stores", () => {
     await store.write(book())
     expect(native.values.get(HOST_BOOK_KEY)).not.toContain("jwt")
   })
+})
+
+it("uses the real active vault for the default host credential provider", async () => {
+  __resetBrowserVaultForTesting()
+  __setBrowserVaultArgon2ParametersForTesting(32)
+  await Dexie.delete(BROWSER_VAULT_DB_NAME)
+  try {
+    await provisionBrowserVault(KEY.accountNamespace, "password")
+    const store = new VaultHostCredentialStore()
+    await store.save(KEY, { devicePrivateKeyJwk: DEVICE_KEY })
+    await expect(store.load(KEY)).resolves.toEqual({ devicePrivateKeyJwk: DEVICE_KEY })
+    await expect(store.load({ ...KEY, accountNamespace: "acct_other" })).rejects.toThrow(
+      "cannot be reached"
+    )
+    await store.remove(KEY)
+    await expect(store.load(KEY)).resolves.toBeNull()
+  } finally {
+    __resetBrowserVaultForTesting()
+    await Dexie.delete(BROWSER_VAULT_DB_NAME)
+  }
 })
