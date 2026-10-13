@@ -670,16 +670,27 @@ async function createConnectorInstance(
   item: LoadedConnectorInstance,
   context: TransferContext
 ): Promise<void> {
-  const { portableAdapterInstance } = await import("@/lib/connectors/instance-transfer")
+  const { instanceCreatePayload } = await import("@/lib/connectors/instance-transfer")
   const { connectorsKeyringGet } = await import("@/lib/connectors/tauri/commands")
+  const { instance, remainder } = instanceCreatePayload(item.row, { enabled: false })
   await context.transport.call("adapter_instance_mutate", {
     operation: "create",
     operationId: context.operationId,
     id: item.row.id,
-    instance: { ...portableAdapterInstance(item.row), enabled: false },
+    instance,
     sourceLabel: context.sourceLabel,
     adminLease: context.adminLease,
   })
+  // The create's contract admits only the core; the rest follows here.
+  if (remainder) {
+    await context.transport.call("adapter_instance_mutate", {
+      operation: "configure",
+      operationId: crypto.randomUUID(),
+      id: item.row.id,
+      patch: remainder,
+      adminLease: context.adminLease,
+    })
+  }
   // Secrets go to the host's keychain over the paired channel, one name at a
   // time; the instance row only ever names them.
   for (const credential of item.row.credentialsRef?.accounts ?? []) {

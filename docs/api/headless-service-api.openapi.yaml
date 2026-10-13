@@ -362,16 +362,17 @@ paths:
             application/json:
               schema:
                 type: object
-                description: "The connector instance as this host now holds it: portable configuration, ownership and provenance; never
-                  a secret or runtime state."
+                description: "create and configure: the connector instance as this host now holds it (portable configuration, ownership
+                  and provenance; never a secret or runtime state). remove: the id and removed: true."
                 required:
                   - id
-                  - type
                 properties:
                   id:
                     type: string
                   type:
                     type: string
+                  removed:
+                    type: boolean
                 additionalProperties: true
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.

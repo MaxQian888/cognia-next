@@ -584,10 +584,9 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "description": "The connector instance as this host now holds it: portable configuration, ownership and provenance; never a secret or runtime state.",
+        "description": "create and configure: the connector instance as this host now holds it (portable configuration, ownership and provenance; never a secret or runtime state). remove: the id and removed: true.",
         "required": [
-          "id",
-          "type"
+          "id"
         ],
         "properties": {
           "id": {
@@ -595,6 +594,9 @@
           },
           "type": {
             "type": "string"
+          },
+          "removed": {
+            "type": "boolean"
           }
         },
         "additionalProperties": true
@@ -79330,5 +79332,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "4a05fb59c2217213775e3245272926c84b81efd0f9f3b36529e66dd532f936f1"
+  "catalogHash": "a7700b1e04087b63edbf7ecc9a658ec3cdfad6ee3f3ff2f339168157e11ad1c3"
 }

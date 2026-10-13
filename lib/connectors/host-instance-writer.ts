@@ -27,10 +27,7 @@ import {
   type CredentialLeaseState,
 } from "@/lib/connectors/credential-lease"
 import { connectorCommandsNeedTransport, connectorDeviceLease } from "@/lib/connectors/device-plane"
-import {
-  PORTABLE_ADAPTER_FIELDS,
-  portableAdapterInstance,
-} from "@/lib/connectors/instance-transfer"
+import { PORTABLE_ADAPTER_FIELDS, instanceCreatePayload } from "@/lib/connectors/instance-transfer"
 
 /** The Host command every write travels as. */
 export const ADAPTER_INSTANCE_MUTATE = "adapter_instance_mutate"
@@ -114,12 +111,14 @@ export function createHostAdapterInstanceWriter(
     applies: () => deps.applies(),
 
     async create(row: AdapterInstanceRow) {
-      const instance = { ...portableAdapterInstance(row), enabled: false }
+      const { instance, remainder } = instanceCreatePayload(row, { enabled: false })
       const stored = await mutate<Partial<AdapterInstanceRow>>({
         operation: "create",
         id: row.id,
         instance,
       })
+      // The create's contract admits only the core; the rest follows here.
+      if (remainder) await mutate({ operation: "configure", id: row.id, patch: remainder })
       if (row.enabled) pending.add(row.id)
       return { ...stored, id: row.id, enabled: false }
     },

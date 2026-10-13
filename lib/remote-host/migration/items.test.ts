@@ -309,10 +309,8 @@ describe("createOnHost", () => {
     mockKeyringGet.mockImplementation(async (_id, name) => (name === "botToken" ? "s3cret" : null))
     const call = fakeTransport()
     await createOnHost(loadedConnector(), context(call))
-    expect(call.mock.calls.map(([name]) => name)).toEqual([
-      "adapter_instance_mutate",
-      "connectors_keyring_set",
-    ])
+    const names = call.mock.calls.map(([name]) => name)
+    expect(names.at(-1)).toBe("connectors_keyring_set")
     expect(call.mock.calls[0]![1]).toMatchObject({
       operation: "create",
       operationId: OP,
@@ -320,7 +318,13 @@ describe("createOnHost", () => {
       instance: { enabled: false, type: "telegram" },
       adminLease: "lease",
     })
-    expect(call.mock.calls[1]![1]).toEqual({
+    // The create's contract admits only the core fields; anything else the
+    // row configures follows as a configure before the secrets.
+    for (const [name, args] of call.mock.calls.slice(1, -1)) {
+      expect(name).toBe("adapter_instance_mutate")
+      expect(args).toMatchObject({ operation: "configure", id: "cai_1", adminLease: "lease" })
+    }
+    expect(call.mock.calls.at(-1)![1]).toEqual({
       adapterId: "cai_1",
       credential: "botToken",
       value: "s3cret",

@@ -12,7 +12,10 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 
+import requestSchemas from "@/protocol/companion-request-schemas.json"
+
 import {
+  instanceCreatePayload,
   LOCAL_ADAPTER_FIELDS,
   mutateAdapterInstanceOnHost,
   PORTABLE_ADAPTER_FIELDS,
@@ -76,6 +79,46 @@ describe("portableAdapterInstance", () => {
   it("classifies every field exactly once", () => {
     const portable = new Set<string>(PORTABLE_ADAPTER_FIELDS)
     for (const field of LOCAL_ADAPTER_FIELDS) expect(portable.has(field)).toBe(false)
+  })
+})
+
+describe("instanceCreatePayload", () => {
+  const contract = (
+    requestSchemas as unknown as {
+      commands: Record<
+        string,
+        { properties: { instance: { properties: Record<string, unknown>; required: string[] } } }
+      >
+    }
+  ).commands.adapter_instance_mutate.properties.instance
+
+  it("creates with exactly what the wire contract admits, and configures the rest", () => {
+    const { instance, remainder } = instanceCreatePayload(
+      localRow({ muted: true, defaultModel: "deepseek-v4-flash" }),
+      { enabled: false }
+    )
+    expect(Object.keys(instance).sort()).toEqual(Object.keys(contract.properties).sort())
+    for (const field of contract.required) expect(instance).toHaveProperty(field)
+    expect(instance).toMatchObject({ type: "telegram", enabled: false, transportMode: "longpoll" })
+    expect(remainder).toEqual({
+      mediaModelPolicy: "local_extract_only",
+      muted: true,
+      defaultModel: "deepseek-v4-flash",
+    })
+    // Runtime state and this machine's address go nowhere.
+    expect(remainder).not.toHaveProperty("publicUrl")
+    expect(remainder).not.toHaveProperty("lastWhoamiAt")
+  })
+
+  it("fills the open objects a sparse row leaves out, and has no remainder when there is none", () => {
+    const sparse = localRow({
+      mediaModelPolicy: undefined,
+      settings: undefined,
+      trigger: undefined,
+    })
+    const { instance, remainder } = instanceCreatePayload(sparse)
+    expect(instance).toMatchObject({ settings: {}, trigger: {}, enabled: true })
+    expect(remainder).toBeNull()
   })
 })
 

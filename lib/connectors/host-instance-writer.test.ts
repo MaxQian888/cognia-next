@@ -55,9 +55,18 @@ describe("createHostAdapterInstanceWriter", () => {
       instance: expect.objectContaining({ type: "lark", enabled: false, transportMode: "gateway" }),
     })
     const instance = (call.mock.calls[0][1] as { instance: Record<string, unknown> }).instance
-    // Runtime state and identity stay behind.
+    // Runtime state and identity stay behind, and so does what the create's
+    // contract does not admit: it follows as a configure.
     expect(instance).not.toHaveProperty("lastWhoamiAt")
     expect(instance).not.toHaveProperty("id")
+    expect(instance).not.toHaveProperty("mediaModelPolicy")
+    expect(call).toHaveBeenNthCalledWith(2, ADAPTER_INSTANCE_MUTATE, {
+      operation: "configure",
+      id: "lark-1",
+      patch: { mediaModelPolicy: "local_extract_only" },
+      operationId: "op-2",
+      adminLease: "lease-1",
+    })
     expect(stored).toMatchObject({ id: "lark-1", enabled: false, createdAt: 5 })
     expect([...writer.pendingStarts()]).toEqual(["lark-1"])
 
@@ -66,7 +75,7 @@ describe("createHostAdapterInstanceWriter", () => {
       operation: "configure",
       id: "lark-1",
       patch: { enabled: true },
-      operationId: "op-2",
+      operationId: "op-3",
       adminLease: "lease-1",
     })
     expect(markStarted).toHaveBeenCalledWith("lark-1")
@@ -74,14 +83,15 @@ describe("createHostAdapterInstanceWriter", () => {
 
     // Nothing pending: completing again sends nothing.
     await writer.completeCreate("lark-1")
-    expect(call).toHaveBeenCalledTimes(2)
+    expect(call).toHaveBeenCalledTimes(3)
   })
 
   it("never starts an instance the form created disabled", async () => {
     const { writer, call } = setup()
     await writer.create({ ...row, enabled: false })
     await writer.completeCreate("lark-1")
-    expect(call).toHaveBeenCalledTimes(1)
+    // The create and the remainder's configure; no start.
+    expect(call).toHaveBeenCalledTimes(2)
   })
 
   it("sends only portable fields, and holds a pending start back until the credentials land", async () => {

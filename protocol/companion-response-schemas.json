@@ -11926,14 +11926,17 @@
     },
     "adapter_instance_mutate": {
       "type": "object",
-      "description": "The connector instance as this host now holds it: portable configuration, ownership and provenance; never a secret or runtime state.",
-      "required": ["id", "type"],
+      "description": "create and configure: the connector instance as this host now holds it (portable configuration, ownership and provenance; never a secret or runtime state). remove: the id and removed: true.",
+      "required": ["id"],
       "properties": {
         "id": {
           "type": "string"
         },
         "type": {
           "type": "string"
+        },
+        "removed": {
+          "type": "boolean"
         }
       },
       "additionalProperties": true

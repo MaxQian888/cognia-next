@@ -140,6 +140,51 @@ export function portableAdapterInstance(row: AdapterInstanceRow): PortableAdapte
   return out as PortableAdapterInstance
 }
 
+/**
+ * The fields `adapter_instance_mutate`'s `create` carries. Its wire contract
+ * (`protocol/companion-request-schemas.json`) admits exactly these in
+ * `instance` and refuses the request otherwise, so a create sends the core
+ * and the rest of the portable configuration follows in a `configure`, whose
+ * patch is open.
+ */
+export const CREATE_INSTANCE_FIELDS = [
+  "displayName",
+  "enabled",
+  "transportMode",
+  "settings",
+  "credentialsRef",
+  "trigger",
+  "defaultMode",
+] as const satisfies readonly PortableAdapterField[]
+
+export interface InstanceCreatePayload {
+  instance: Record<string, unknown>
+  /** Every other portable field the row sets, or null when there is none. */
+  remainder: Record<string, unknown> | null
+}
+
+/** Split a row into a `create` the wire contract admits and the `configure` that completes it. */
+export function instanceCreatePayload(
+  row: AdapterInstanceRow,
+  overrides: { enabled?: boolean } = {}
+): InstanceCreatePayload {
+  const portable = { ...portableAdapterInstance(row), ...overrides } as Record<string, unknown>
+  const instance: Record<string, unknown> = {
+    type: row.type,
+    settings: {},
+    trigger: {},
+  }
+  for (const field of CREATE_INSTANCE_FIELDS) {
+    if (portable[field] !== undefined) instance[field] = portable[field]
+  }
+  const remainder: Record<string, unknown> = {}
+  for (const [field, value] of Object.entries(portable)) {
+    if (field === "type" || (CREATE_INSTANCE_FIELDS as readonly string[]).includes(field)) continue
+    remainder[field] = value
+  }
+  return { instance, remainder: Object.keys(remainder).length > 0 ? remainder : null }
+}
+
 function pickPortable(
   value: Record<string, unknown>
 ): Partial<Record<PortableAdapterField, unknown>> {
