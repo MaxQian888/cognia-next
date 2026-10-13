@@ -142,8 +142,14 @@ jobs:
             export COGNIA_SERVER_IMAGE="$IMAGE-$variant"
             docker pull "$COGNIA_SERVER_IMAGE"
             docker run --rm "$COGNIA_SERVER_IMAGE" --help
+            docker run --rm "$COGNIA_SERVER_IMAGE" init
             docker run --rm --entrypoint cognia "$COGNIA_SERVER_IMAGE" --help
             docker run --rm --entrypoint cognia-bootstrap "$COGNIA_SERVER_IMAGE" --help
+            node --input-type=module -e 'import { nativeHostFileNames } from "./scripts/build/native-host-files.mjs"; console.log(nativeHostFileNames().join("\n"))' |
+              while IFS= read -r helper; do
+                docker run --rm --entrypoint test "$COGNIA_SERVER_IMAGE" -x "/app/brain/$helper"
+              done
+            docker run --rm --entrypoint /app/brain/cognia-sandbox-exec "$COGNIA_SERVER_IMAGE" --health
             docker compose -f deploy/compose/docker-compose.yml --profile server up -d --wait
             node scripts/smoke/compose-smoke.mjs --tier server
             docker compose -f deploy/compose/docker-compose.yml --profile server down -v
