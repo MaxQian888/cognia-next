@@ -3632,6 +3632,80 @@ describe("WAN tier activation lifecycle", () => {
     transport.disableWebRtcTier()
     expect(transport.reconnectRtc()).toBe("no-tier")
   })
+
+  const otherHost: CompanionConfig = {
+    ...wanConfig,
+    targetId: "host-other",
+    deviceId: "device-other",
+    rendezvousId: "room-other",
+    signalingRoomDescriptor: { ...wanConfig.signalingRoomDescriptor!, roomId: "room-other" },
+  }
+
+  /** The TransportRtc each connect() ran on, with a way to finish it. */
+  function pendingConnects() {
+    const pending: Array<{ instance: TransportRtc; finish: () => void }> = []
+    connect.mockImplementation(function (this: TransportRtc) {
+      return new Promise<void>((resolve) => {
+        pending.push({ instance: this, finish: resolve })
+      })
+    })
+    return pending
+  }
+
+  it("leaves the old Host's rendezvous and joins the new one after a switch", async () => {
+    transport = new CompanionTransport()
+    await transport.enableWanTier(options)
+    const first = connect.mock.contexts[0] as TransportRtc
+
+    await transport.enableWanTier({ ...options, configOverride: otherHost })
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(close.mock.contexts).toContain(first)
+    expect(connect.mock.contexts[1]).not.toBe(first)
+
+    // The same Host again is the existing tier, not a third handshake.
+    await transport.enableWanTier({ ...options, configOverride: otherHost })
+    expect(connect).toHaveBeenCalledTimes(2)
+    // A switch keeps the reconnect path armed for the new Host.
+    expect(transport.reconnectRtc()).toBe("ok")
+  })
+
+  it("closes a handshake torn down mid-negotiation and never installs it", async () => {
+    transport = new CompanionTransport()
+    const pending = pendingConnects()
+    const handler = jest.fn()
+    transport.subscribe("task:changed", handler)
+    const enabling = transport.enableWanTier(options)
+    expect(pending).toHaveLength(1)
+
+    transport.disableWebRtcTier()
+    expect(close.mock.contexts).toContain(pending[0]!.instance)
+
+    pending[0]!.finish()
+    await enabling
+    // Not installed: nothing mirrored onto it, and no tier to reconnect.
+    expect(subscribe).not.toHaveBeenCalled()
+    expect(transport.reconnectRtc()).toBe("no-tier")
+  })
+
+  it("replaces a handshake still negotiating with the old Host", async () => {
+    transport = new CompanionTransport()
+    const pending = pendingConnects()
+    const handler = jest.fn()
+    transport.subscribe("task:changed", handler)
+    const toOld = transport.enableWanTier(options)
+    const toNew = transport.enableWanTier({ ...options, configOverride: otherHost })
+    expect(pending).toHaveLength(2)
+    expect(close.mock.contexts).toContain(pending[0]!.instance)
+
+    // The stale handshake finishing late must not displace the new one.
+    pending[0]!.finish()
+    await toOld
+    expect(subscribe).not.toHaveBeenCalled()
+    pending[1]!.finish()
+    await toNew
+    expect(subscribe).toHaveBeenCalledTimes(1)
+    expect(subscribe.mock.contexts[0]).toBe(pending[1]!.instance)
+  })
 })
 
 describe("remote binary and catalog refusal boundaries", () => {
@@ -3943,6 +4017,38 @@ describe("relay-only route when the native stack cannot pin", () => {
     expect((error as CompanionError).code).toBe("native_spki_pinning_unavailable")
     expect((error as CompanionError).retryable).toBe(false)
     expect(connect).not.toHaveBeenCalled()
+    expect(nativeRequest).not.toHaveBeenCalled()
+  })
+
+  it("carries calls over the new Host's relay when a switch replaces an attempt that never opens", async () => {
+    installCapacitor(unimplemented)
+    await setConfig(relayConfig)
+    transport = new CompanionTransport()
+    // The previous Host is offline: its rendezvous never gains a peer.
+    connect.mockImplementationOnce(() => new Promise<void>(() => undefined))
+    const waiting = transport.call("claude_sidecar_status")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(connect).toHaveBeenCalledTimes(1)
+    const stale = connect.mock.contexts[0] as TransportRtc
+
+    // The switch: another Host becomes the paired target.
+    await setConfig({
+      ...relayConfig,
+      targetId: "host-new",
+      deviceId: "device-new",
+      rendezvousId: "room-new",
+      signalingRoomDescriptor: { ...relayConfig.signalingRoomDescriptor!, roomId: "room-new" },
+    })
+    await expect(transport.call("host_feature_manifest")).resolves.toEqual({ via: "relay" })
+    expect(connect).toHaveBeenCalledTimes(2)
+    const fresh = connect.mock.contexts[1] as TransportRtc
+    expect(fresh).not.toBe(stale)
+    expect(TransportRtc.prototype.close).toHaveBeenCalled()
+
+    // The call that was waiting on the replaced attempt rides the new tier
+    // instead of waiting out its deadline.
+    await expect(waiting).resolves.toEqual({ via: "relay" })
+    expect(rtcCall.mock.contexts.every((instance) => instance === fresh)).toBe(true)
     expect(nativeRequest).not.toHaveBeenCalled()
   })
 

@@ -92,6 +92,17 @@ export function getCompanionConfigGeneration(): number {
   return configGeneration
 }
 
+/**
+ * The relay session a WAN tier holds: this device's identity in one Host's
+ * rendezvous. Other config fields (account scope, addresses, pins) can be
+ * filled in or refreshed for the same session, so they are not part of it.
+ */
+function wanTargetKey(config: CompanionConfig): string {
+  return [config.deviceId, config.rendezvousId ?? ""]
+    .map((part) => encodeURIComponent(part))
+    .join(":")
+}
+
 /** Compare pairing identity while allowing addresses and pins to be refreshed. */
 export function isSameCompanionTarget(
   left: CompanionConfig,
@@ -707,6 +718,19 @@ export class CompanionTransport implements Transport {
   private rtcConnecting: Promise<void> | null = null
   /** Unsubscribe handle for the rtc state listener. */
   private rtcDetach: (() => void) | null = null
+  /**
+   * The pairing the open or negotiating tier was built for. A tier sits in
+   * ONE Host's rendezvous; after a switch or a new pairing the same transport
+   * serves another Host, and reusing the old tier sends every call to a room
+   * the new Host is not in (they time out, and the switch rolls back).
+   */
+  private rtcTargetKey: string | null = null
+  /**
+   * Waiters in `untilRtcOpen` re-evaluate when a new attempt starts or a tier
+   * is installed, so one bound to an attempt a switch replaced follows the
+   * replacement at once. Not fired on teardown: a switch tears down first.
+   */
+  private readonly rtcChangeListeners = new Set<() => void>()
   /**
    * Last options passed to `enableWebRtcTier`, retained so `reconnectRtc()`
    * can re-establish the tier after it dropped to `failed`/`closed` (which
@@ -1377,6 +1401,13 @@ export class CompanionTransport implements Transport {
     // this particular call short-circuits — the tier may already be open, but
     // a future failure still needs the config to rebuild.
     this.lastEnableOptions = options
+    const config = options.configOverride ?? this.config()
+    if (config && (this.rtc || this.rtcConnecting) && this.rtcTargetKey !== wanTargetKey(config)) {
+      // Another Host is active now. Leave the old rendezvous before joining
+      // the new one; the teardown drops the retained options, so keep them.
+      this.disableWebRtcTier()
+      this.lastEnableOptions = options
+    }
     if (this.rtc) {
       this.rtc.updateRtcConfiguration(options.rtcConfiguration)
       return
@@ -1385,7 +1416,6 @@ export class CompanionTransport implements Transport {
       this.rtcConnectingInstance?.updateRtcConfiguration(options.rtcConfiguration)
       return this.rtcConnecting
     }
-    const config = options.configOverride ?? this.config()
     if (!config) {
       console.warn("CompanionTransport.enableWebRtcTier: companion not paired")
       return
@@ -1408,8 +1438,9 @@ export class CompanionTransport implements Transport {
       signalingClientFactory: options.signalingClientFactory,
     })
     this.rtcConnectingInstance = rtc
+    this.rtcTargetKey = wanTargetKey(config)
 
-    this.rtcDetach = rtc.onStateChange((state) => {
+    const detach = rtc.onStateChange((state) => {
       if (state === "closed" || state === "failed") {
         // Drop our reference so call() / subscribe() stop routing through it.
         if (this.rtc === rtc) {
@@ -1426,12 +1457,28 @@ export class CompanionTransport implements Transport {
       // closed → ws-* / offline). Re-run classification.
       void this.recomputeTier()
     })
+    this.rtcDetach = detach
 
-    this.rtcConnecting = (async () => {
+    // Assigned before the body below can reach its `finally` (the first await).
+    let connecting: Promise<void> | null = null
+    connecting = (async () => {
       try {
         await rtc.connect()
+        if (this.rtcConnectingInstance !== rtc) {
+          // Torn down or replaced while negotiating. Installing it now would
+          // put a second session in the rendezvous, and the relay evicts the
+          // older one (`session_replaced`) back and forth between the two.
+          detach()
+          try {
+            rtc.close()
+          } catch {
+            // ignored
+          }
+          return
+        }
         this.rtc = rtc
         this.mirrorAllHandlersOnRtc()
+        this.notifyRtcChange()
         // Promote to rtc-* — recomputeTier will inspect candidate stats.
         void this.recomputeTier()
       } catch (err) {
@@ -1441,20 +1488,25 @@ export class CompanionTransport implements Transport {
         } catch {
           // ignored
         }
-        if (this.rtcDetach) {
-          this.rtcDetach()
-          this.rtcDetach = null
-        }
+        detach()
+        if (this.rtcDetach === detach) this.rtcDetach = null
         // Failed upgrade — tier drops back to whatever the WS path says.
         void this.recomputeTier()
       } finally {
         if (this.rtcConnectingInstance === rtc) {
           this.rtcConnectingInstance = null
+          if (!this.rtc) this.rtcTargetKey = null
         }
-        this.rtcConnecting = null
+        if (this.rtcConnecting === connecting) this.rtcConnecting = null
       }
     })()
-    return this.rtcConnecting
+    this.rtcConnecting = connecting
+    this.notifyRtcChange()
+    return connecting
+  }
+
+  private notifyRtcChange(): void {
+    for (const listener of [...this.rtcChangeListeners]) listener()
   }
 
   /**
@@ -1523,8 +1575,19 @@ export class CompanionTransport implements Transport {
       }
       this.rtc = null
     }
+    // A handshake still in flight is closed too: dropping only the reference
+    // left its signaling client in the rendezvous, retrying on its own.
+    const negotiating = this.rtcConnectingInstance
+    if (negotiating) {
+      try {
+        negotiating.close()
+      } catch {
+        // ignored
+      }
+    }
     this.rtcConnecting = null
     this.rtcConnectingInstance = null
+    this.rtcTargetKey = null
     this.rtcCandidateKind = "unknown"
     // An explicit teardown (settings toggle off, LAN reachable, destroy) is
     // NOT a candidate for `reconnectRtc()`'s silent re-establish — drop the
@@ -1633,7 +1696,8 @@ export class CompanionTransport implements Transport {
    * configuration of the peer this starts, so its TURN servers still apply.
    */
   private openRelayRoute(config: CompanionConfig): void {
-    if (this.rtc || this.rtcConnecting) return
+    // A tier for another Host (a switch in progress) is not this call's route.
+    if ((this.rtc || this.rtcConnecting) && this.rtcTargetKey === wanTargetKey(config)) return
     if (!config.rendezvousId || !config.signalingRoomDescriptor || !config.signalingPrivateKey) {
       return
     }
@@ -1705,20 +1769,40 @@ export class CompanionTransport implements Transport {
       const onAbort = () => finish(null)
       signal.addEventListener("abort", onAbort, { once: true })
       cleanups.push(() => signal.removeEventListener("abort", onAbort))
-      const connecting = this.rtcConnecting
-      if (connecting) {
-        void connecting.then(() => finish(current()))
-      } else if (this.rtc) {
-        // A live peer recovering on its own: wait for it to reopen or give up.
-        cleanups.push(
-          this.rtc.onStateChange((state) => {
+      // The attempt or peer being waited on can be replaced while we wait (a
+      // Host switch rebuilds the tier in the new Host's rendezvous). Its end
+      // then means "follow the replacement", not "the route did not open".
+      const followCurrent = () => {
+        if (settled) return
+        const open = current()
+        if (open) return finish(open)
+        const connecting = this.rtcConnecting
+        if (connecting) {
+          // Never rejects, and clears `rtcConnecting` before it settles.
+          void connecting.then(followCurrent)
+          return
+        }
+        const live = this.rtc
+        if (live) {
+          // A live peer recovering on its own: wait for it to reopen or give up.
+          const detach = live.onStateChange((state) => {
             if (state === "open") finish(current())
-            else if (state === "closed" || state === "failed") finish(null)
+            else if (state === "closed" || state === "failed") {
+              detach()
+              if (this.rtc && this.rtc !== live) followCurrent()
+              else if (this.rtcConnecting) followCurrent()
+              else finish(null)
+            }
           })
-        )
-      } else {
+          cleanups.push(detach)
+          return
+        }
         finish(null)
       }
+      const onChange = () => followCurrent()
+      this.rtcChangeListeners.add(onChange)
+      cleanups.push(() => this.rtcChangeListeners.delete(onChange))
+      followCurrent()
     })
   }
 
