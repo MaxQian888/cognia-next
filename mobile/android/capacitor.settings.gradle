@@ -75,4 +75,4 @@ include ':capacitor-voice-recorder'
 project(':capacitor-voice-recorder').projectDir = new File('../../node_modules/.pnpm/capacitor-voice-recorder@7.0.6_@capacitor+core@8.5.2_@capacitor+filesystem@8.1.4_@capacitor+core@8.5.2_/node_modules/capacitor-voice-recorder/android')
 
 include ':capacitor-zeroconf'
-project(':capacitor-zeroconf').projectDir = new File('../../node_modules/.pnpm/capacitor-zeroconf@4.0.0_patch_hash=472276832121f694fe881bbe774aa66e3c4f6adca8189066e0d_302228fe4ee7d40d8584b2ba398e4ea7/node_modules/capacitor-zeroconf/android')
+project(':capacitor-zeroconf').projectDir = new File('../../node_modules/.pnpm/capacitor-zeroconf@4.0.0_patch_hash=dbd964283925c2c43e48d6cfcd77864f990874b602d48c25b88_4035c6175d8395d5d7ba9ca005e66857/node_modules/capacitor-zeroconf/android')

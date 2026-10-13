@@ -52,7 +52,7 @@ patchedDependencies:
   '@capgo/capacitor-native-biometric@8.7.0': 8aed032e94ffe6e4edf67ccaf6954431b9e53afa3a5bd309f3146a26948e9e5a
   '@sinonjs/fake-timers@15.4.0': 989a2bbf216c35c0a239565777e46732670f0ee40c085e03622285b8f541e78e
   capacitor-secure-storage-plugin@0.13.0: 107761618a151e09b442053f6e7c72f39a0abfc7b9e23f5d4ccdd9cc2893e196
-  capacitor-zeroconf@4.0.0: 472276832121f694fe881bbe774aa66e3c4f6adca8189066e0de1aab9770b5de
+  capacitor-zeroconf@4.0.0: dbd964283925c2c43e48d6cfcd77864f990874b602d48c25b88d1b154d1c3fc0
 
 importers:
 
@@ -1054,7 +1054,7 @@ importers:
         version: 7.0.6(@capacitor/core@8.5.2)(@capacitor/filesystem@8.1.4(@capacitor/core@8.5.2))
       capacitor-zeroconf:
         specifier: ^4.0.0
-        version: 4.0.0(patch_hash=472276832121f694fe881bbe774aa66e3c4f6adca8189066e0de1aab9770b5de)(@capacitor/core@8.5.2)(bonjour@3.5.1)
+        version: 4.0.0(patch_hash=dbd964283925c2c43e48d6cfcd77864f990874b602d48c25b88d1b154d1c3fc0)(@capacitor/core@8.5.2)(bonjour@3.5.1)
     devDependencies:
       '@capacitor/cli':
         specifier: ^8.5.2
@@ -23011,7 +23011,7 @@ snapshots:
     transitivePeerDependencies:
       - '@capacitor/filesystem'
 
-  capacitor-zeroconf@4.0.0(patch_hash=472276832121f694fe881bbe774aa66e3c4f6adca8189066e0de1aab9770b5de)(@capacitor/core@8.5.2)(bonjour@3.5.1):
+  capacitor-zeroconf@4.0.0(patch_hash=dbd964283925c2c43e48d6cfcd77864f990874b602d48c25b88d1b154d1c3fc0)(@capacitor/core@8.5.2)(bonjour@3.5.1):
     dependencies:
       '@capacitor/core': 8.5.2
       bonjour: 3.5.1
