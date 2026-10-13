@@ -13,6 +13,7 @@ import {
 import { TimeoutError } from "@cognia/primitives"
 import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
 import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
+import catalog from "@/packages/plugin-sdk/contract/catalog.json"
 
 jest.mock("../contracts/diagnostics-store", () => ({
   recordSilentFailure: jest.fn(),
@@ -582,6 +583,50 @@ describe("createIPCAPI", () => {
   })
 
   describe("permission gate", () => {
+    it.each([
+      ["send", "ipc:call"],
+      ["broadcast", "ipc:call"],
+      ["call", "ipc:call"],
+      ["describeExposedMethods", "ipc:call"],
+      ["getExposedMethods", "ipc:call"],
+      ["expose", "ipc:expose"],
+      ["on", null],
+    ] as const)(
+      "keeps catalog permissions aligned with the %s runtime gate",
+      async (method, permission) => {
+        const contract = catalog.apiNamespaces
+          .find((namespace) => namespace.id === "events")
+          ?.methods.find((entry) => entry.id === `events.ipc.${method}`)
+        expect(contract?.requiredPermissions).toEqual(permission ? [permission] : [])
+
+        getPluginIPC().expose("plugin-b", { ping: () => "pong" })
+        const api = createIPCAPI("plugin-a")
+        const invoke: Record<keyof typeof api, () => unknown> = {
+          send: () => api.send("plugin-b", "test", {}),
+          broadcast: () => api.broadcast("test", {}),
+          call: () => api.call("plugin-b", "ping"),
+          describeExposedMethods: () => api.describeExposedMethods("plugin-b"),
+          getExposedMethods: () => api.getExposedMethods("plugin-b"),
+          expose: () => api.expose({ ping: () => "pong" }),
+          on: () => api.on("test", jest.fn()),
+        }
+
+        mockHasPerm.mockClear()
+        mockHasPerm.mockReturnValue(false)
+        const denied = Promise.resolve().then(invoke[method])
+        if (permission) {
+          await expect(denied).rejects.toThrow(permission)
+          expect(mockHasPerm).toHaveBeenCalledWith("plugin-a", permission)
+        } else {
+          await denied
+          expect(mockHasPerm).not.toHaveBeenCalled()
+        }
+
+        mockHasPerm.mockImplementation((_id, requested) => requested === permission)
+        await Promise.resolve().then(invoke[method])
+      }
+    )
+
     it("rejects call/send/broadcast without ipc:call", async () => {
       mockHasPerm.mockImplementation((_id, perm) => perm !== "ipc:call")
       const api = createIPCAPI("plugin-a")

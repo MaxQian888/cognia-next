@@ -14,6 +14,7 @@ import {
   type BusEvent,
 } from "./message-bus"
 import { PLUGIN_MESSAGE_HISTORY_MAX, PLUGIN_MESSAGE_MAX_BYTES } from "./constants"
+import catalog from "@/packages/plugin-sdk/contract/catalog.json"
 import {
   initializePluginPermissions,
   revokePluginPermissions,
@@ -324,6 +325,43 @@ describe("createEventAPI", () => {
     expect(api.offAll).toBeDefined()
     expect(api.getHistory).toBeDefined()
   })
+
+  it.each([
+    ["emit", "events:publish"],
+    ["on", "events:subscribe"],
+    ["once", "events:subscribe"],
+    ["getHistory", "events:subscribe"],
+    ["off", null],
+    ["offAll", null],
+  ] as const)(
+    "keeps catalog permissions aligned with the %s runtime gate",
+    (method, permission) => {
+      const contract = catalog.apiNamespaces
+        .find((namespace) => namespace.id === "events")
+        ?.methods.find((entry) => entry.id === `events.bus.${method}`)
+      expect(contract?.requiredPermissions).toEqual(permission ? [permission] : [])
+
+      initializePluginPermissions("ungated-plugin", [])
+      const api = createEventAPI("ungated-plugin")
+      const invoke: Record<keyof typeof api, () => unknown> = {
+        emit: () => api.emit("test", {}),
+        on: () => api.on("test", jest.fn()),
+        once: () => api.once("test", jest.fn()),
+        getHistory: () => api.getHistory(),
+        off: () => api.off("missing-subscription"),
+        offAll: () => api.offAll(),
+      }
+
+      if (permission) {
+        expect(invoke[method]).toThrow(permission)
+      } else {
+        expect(invoke[method]).not.toThrow()
+      }
+
+      initializePluginPermissions("ungated-plugin", permission ? [permission] : [])
+      expect(invoke[method]).not.toThrow()
+    }
+  )
 
   it("should emit events with correct source", () => {
     const api = createEventAPI("my-plugin")

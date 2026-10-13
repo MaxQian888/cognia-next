@@ -8573,7 +8573,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.bus.emit",
                 "name": "bus.emit",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "events:publish",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": False,
@@ -8585,7 +8587,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.bus.getHistory",
                 "name": "bus.getHistory",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "events:subscribe",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": True,
@@ -8621,7 +8625,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.bus.on",
                 "name": "bus.on",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "events:subscribe",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": False,
@@ -8633,7 +8639,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.bus.once",
                 "name": "bus.once",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "events:subscribe",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": False,
@@ -8657,7 +8665,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.ipc.broadcast",
                 "name": "ipc.broadcast",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "ipc:call",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": False,
@@ -8669,7 +8679,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.ipc.call",
                 "name": "ipc.call",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "ipc:call",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": False,
@@ -8681,7 +8693,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.ipc.describeExposedMethods",
                 "name": "ipc.describeExposedMethods",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "ipc:call",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": False,
@@ -8693,7 +8707,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.ipc.expose",
                 "name": "ipc.expose",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "ipc:expose",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": False,
@@ -8705,7 +8721,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.ipc.getExposedMethods",
                 "name": "ipc.getExposedMethods",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "ipc:call",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": True,
@@ -8729,7 +8747,9 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "events.ipc.send",
                 "name": "ipc.send",
-                "requiredPermissions": [],
+                "requiredPermissions": [
+                    "ipc:call",
+                ],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": False,

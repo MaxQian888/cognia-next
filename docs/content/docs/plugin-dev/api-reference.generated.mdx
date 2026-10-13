@@ -36,7 +36,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.dexie` | 2 | None | frontend, hybrid | internal |
 | `ctx.editor` | 9 | `editor:read`, `editor:write` | frontend, hybrid, python | internal |
 | `ctx.eval` | 5 | `tests:run`, `database:read`, `ai:chat`, `database:write` | frontend, hybrid | sensitive |
-| `ctx.events` | 17 | None | frontend, hybrid | internal |
+| `ctx.events` | 17 | `events:publish`, `events:subscribe`, `ipc:call`, `ipc:expose` | frontend, hybrid | internal |
 | `ctx.export` | 8 | `export:session`, `export:project` | frontend, hybrid | internal |
 | `ctx.extensions` | 3 | `extension:ui` | frontend, hybrid | internal |
 | `ctx.externalAgents` | 21 | `agent:external:read`, `agent:external:manage` | frontend, hybrid, python | sensitive |
@@ -527,20 +527,20 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
-| `events.bus.emit` | None | low | No |
-| `events.bus.getHistory` | None | low | Yes |
+| `events.bus.emit` | `events:publish` | low | No |
+| `events.bus.getHistory` | `events:subscribe` | low | Yes |
 | `events.bus.off` | None | low | No |
 | `events.bus.offAll` | None | low | No |
-| `events.bus.on` | None | low | No |
-| `events.bus.once` | None | low | No |
+| `events.bus.on` | `events:subscribe` | low | No |
+| `events.bus.once` | `events:subscribe` | low | No |
 | `events.emit` | None | low | No |
-| `events.ipc.broadcast` | None | low | No |
-| `events.ipc.call` | None | low | No |
-| `events.ipc.describeExposedMethods` | None | low | No |
-| `events.ipc.expose` | None | low | No |
-| `events.ipc.getExposedMethods` | None | low | Yes |
+| `events.ipc.broadcast` | `ipc:call` | low | No |
+| `events.ipc.call` | `ipc:call` | low | No |
+| `events.ipc.describeExposedMethods` | `ipc:call` | low | No |
+| `events.ipc.expose` | `ipc:expose` | low | No |
+| `events.ipc.getExposedMethods` | `ipc:call` | low | Yes |
 | `events.ipc.on` | None | low | No |
-| `events.ipc.send` | None | low | No |
+| `events.ipc.send` | `ipc:call` | low | No |
 | `events.off` | None | low | No |
 | `events.on` | None | low | No |
 | `events.once` | None | low | No |
