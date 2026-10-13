@@ -8,7 +8,8 @@ import {
 } from "./build-browser-builtin-plugins.mjs"
 
 test("curates every builtin as an independent asset", () => {
-  assert.equal(BROWSER_BUILTIN_PLUGIN_IDS.length, 52)
+  assert.equal(BROWSER_BUILTIN_PLUGIN_IDS.length, 54)
+  assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("github-comment-bot"))
   assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("clipboard-tools"))
   assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("ui-surface-reference"))
   assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("cognia-pdf"))
