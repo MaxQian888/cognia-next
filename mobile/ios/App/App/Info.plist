@@ -85,6 +85,11 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- canOpenURL probe for CogniaAppHandoff: a Feishu sign-in runs in the Feishu app when installed. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>lark</string>
+	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

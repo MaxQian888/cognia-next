@@ -159,7 +159,29 @@ export interface RunOAuthOptions {
   manualPaste?: () => Promise<{ code: string; state: string | null }>
   timeoutMs?: number
   signal?: AbortSignal
+  /**
+   * Run the authorization in another app instead of the in-app browser
+   * (`lib/oauth/app-handoff.ts`). Falls back to the browser when that app
+   * cannot take it.
+   */
+  appHandoff?: AppHandoff
 }
+
+/** Another app that can run the authorize request and deep-link back. */
+export interface AppHandoff {
+  /** Hand the request over. False when the app is missing or refused it. */
+  open(): Promise<boolean>
+  /** Calls `handler` each time this app comes back to the foreground. */
+  onReturn(handler: () => void): Promise<() => void>
+}
+
+/**
+ * How long a return to the foreground waits for the callback that may ride
+ * in with it. The deep link that brings the app back is delivered around the
+ * same `resume`, in either order, so a return only means "gave up" once this
+ * much time passes without one.
+ */
+export const APP_RETURN_GRACE_MS = 2_000
 
 /**
  * Open the authorize URL in an in-app browser and return the callback
@@ -170,6 +192,10 @@ let activeBrowserOwner: symbol | undefined
 
 export async function runOAuth(opts: RunOAuthOptions): Promise<CallbackOutcome> {
   const wait = createCallbackWait(opts)
+  if (opts.appHandoff) {
+    const handedOff = await runInApp(opts.appHandoff, wait)
+    if (handedOff) return handedOff
+  }
   let removeClose: (() => void) | undefined
   const owner = Symbol("oauth-browser")
   let openRequested = false
@@ -215,6 +241,47 @@ export async function runOAuth(opts: RunOAuthOptions): Promise<CallbackOutcome> 
     wait.settle({ kind: "cancelled" })
     removeClose?.()
     if (openRequested) closeOwnedBrowser()
+  }
+}
+
+/**
+ * Wait for the callback while another app runs the authorization. There is
+ * no sheet to close here: the person leaving that app and coming back is the
+ * cancel, once the grace for a callback arriving with the return has passed.
+ * Null when the app did not take the request, with the callback wait still
+ * running for the browser that replaces it.
+ */
+async function runInApp(
+  handoff: AppHandoff,
+  wait: ReturnType<typeof createCallbackWait>
+): Promise<CallbackOutcome | null> {
+  // The callback listener must be live before the other app can answer.
+  await Promise.race([wait.ready, wait.outcome])
+  if (wait.isSettled()) return wait.outcome
+  let grace: ReturnType<typeof setTimeout> | undefined
+  let removeReturn: (() => void) | undefined
+  try {
+    const remove = await handoff
+      .onReturn(() => {
+        clearTimeout(grace)
+        grace = setTimeout(() => wait.settle({ kind: "cancelled" }), APP_RETURN_GRACE_MS)
+      })
+      .catch(() => undefined)
+    if (wait.isSettled()) {
+      remove?.()
+      return wait.outcome
+    }
+    removeReturn = remove
+    const opened = await Promise.race([
+      handoff.open().catch(() => false),
+      wait.outcome.then(() => true),
+    ])
+    if (wait.isSettled()) return wait.outcome
+    if (!opened) return null
+    return await wait.outcome
+  } finally {
+    clearTimeout(grace)
+    removeReturn?.()
   }
 }
 

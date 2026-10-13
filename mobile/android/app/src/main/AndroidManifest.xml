@@ -97,6 +97,12 @@
 
     <!-- Permissions -->
 
+    <!-- Package visibility (Android 11+) for CogniaAppHandoffPlugin: sign-in
+         hands a Feishu request to the Feishu app when it is installed. -->
+    <queries>
+        <package android:name="com.ss.android.lark" />
+    </queries>
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />

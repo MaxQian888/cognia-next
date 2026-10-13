@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { awaitCallback, runOAuth } from "./mobile-flow"
+import { APP_RETURN_GRACE_MS, awaitCallback, runOAuth } from "./mobile-flow"
 
 jest.mock("@/lib/capacitor/browser", () => ({
   open: jest.fn(),
@@ -351,4 +351,132 @@ it("times out even if native listener registration never resolves", async () => 
   await Promise.resolve()
   expect(remove).toHaveBeenCalledTimes(1)
   expect(browser.open).not.toHaveBeenCalled()
+})
+
+describe("runOAuth app handoff", () => {
+  const browser = jest.requireMock("@/lib/capacitor/browser")
+  const deeplink = jest.requireMock("@/lib/capacitor/deeplink")
+  let callback: (route: unknown) => void
+  let comeBack: () => void
+  const removeLink = jest.fn()
+  const removeReturn = jest.fn()
+  const route = { kind: "oauth_callback", provider: "logto", code: "code", state: "state" }
+
+  function handoff(open: () => Promise<boolean>) {
+    return {
+      open: jest.fn(open),
+      onReturn: jest.fn(async (handler: () => void) => {
+        comeBack = handler
+        return removeReturn
+      }),
+    }
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    browser.open.mockResolvedValue({ kind: "ok" })
+    browser.close.mockResolvedValue({ kind: "ok" })
+    browser.onClose.mockImplementation(async () => jest.fn())
+    deeplink.subscribe.mockImplementation(async (handler: (route: unknown) => void) => {
+      callback = handler
+      return removeLink
+    })
+  })
+  afterEach(() => jest.useRealTimers())
+
+  it("runs the authorization in the app and settles on its deep link, without a browser", async () => {
+    const app = handoff(async () => {
+      callback(route)
+      return true
+    })
+    expect(
+      await runOAuth({ provider: "logto", authorizeUrl: "https://login.example", appHandoff: app })
+    ).toMatchObject({ kind: "ok", result: { code: "code", via: "deeplink" } })
+    expect(app.onReturn.mock.invocationCallOrder[0]).toBeLessThan(
+      app.open.mock.invocationCallOrder[0]!
+    )
+    expect(browser.open).not.toHaveBeenCalled()
+    expect(browser.close).not.toHaveBeenCalled()
+    expect(removeReturn).toHaveBeenCalledTimes(1)
+    expect(removeLink).toHaveBeenCalledTimes(1)
+  })
+
+  it("cancels when the person comes back without a callback, after the grace", async () => {
+    jest.useFakeTimers()
+    const app = handoff(async () => true)
+    const pending = runOAuth({
+      provider: "logto",
+      authorizeUrl: "https://login.example",
+      appHandoff: app,
+    })
+    await jest.advanceTimersByTimeAsync(0)
+    comeBack()
+    await jest.advanceTimersByTimeAsync(APP_RETURN_GRACE_MS - 1)
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    await jest.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(false)
+    await jest.advanceTimersByTimeAsync(1)
+    expect(await pending).toEqual({ kind: "cancelled" })
+    expect(removeReturn).toHaveBeenCalledTimes(1)
+    expect(browser.open).not.toHaveBeenCalled()
+  })
+
+  it("keeps the callback that arrives just after the return", async () => {
+    jest.useFakeTimers()
+    const app = handoff(async () => true)
+    const pending = runOAuth({
+      provider: "logto",
+      authorizeUrl: "https://login.example",
+      appHandoff: app,
+    })
+    await jest.advanceTimersByTimeAsync(0)
+    comeBack()
+    await jest.advanceTimersByTimeAsync(300)
+    callback(route)
+    expect(await pending).toMatchObject({ kind: "ok", result: { code: "code" } })
+  })
+
+  it("falls back to the in-app browser when the app does not take the request", async () => {
+    browser.open.mockImplementation(async () => {
+      callback(route)
+      return { kind: "ok" }
+    })
+    for (const open of [async () => false, async () => Promise.reject(new Error("no activity"))]) {
+      jest.clearAllMocks()
+      const app = handoff(open)
+      expect(
+        await runOAuth({
+          provider: "logto",
+          authorizeUrl: "https://login.example",
+          appHandoff: app,
+        })
+      ).toMatchObject({ kind: "ok", result: { code: "code" } })
+      expect(browser.open).toHaveBeenCalledWith(
+        expect.objectContaining({ url: "https://login.example" })
+      )
+      // The return listener goes before the browser opens: closing the sheet
+      // also resumes the activity, and the sheet has its own cancel.
+      expect(removeReturn.mock.invocationCallOrder[0]).toBeLessThan(
+        browser.open.mock.invocationCallOrder[0]!
+      )
+    }
+  })
+
+  it("does not hand off a request that was aborted before it started", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const app = handoff(async () => true)
+    expect(
+      await runOAuth({
+        provider: "logto",
+        authorizeUrl: "https://login.example",
+        appHandoff: app,
+        signal: controller.signal,
+      })
+    ).toEqual({ kind: "cancelled" })
+    expect(app.open).not.toHaveBeenCalled()
+  })
 })

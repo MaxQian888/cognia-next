@@ -10,10 +10,14 @@
  * that path, with the redirect URI registered on the native Logto application.
  *
  * `openUrl` only remembers the URL. `runOAuth` opens the browser itself, and
- * opening it twice would leave one sheet under another.
+ * opening it twice would leave one sheet under another. A request naming a
+ * provider whose app is installed (Feishu) is handed to that app instead.
  */
 
-import { runOAuth as defaultRunOAuth } from "@/lib/oauth/mobile-flow"
+import { isAppHandoffAvailable, openInApp } from "@/lib/capacitor/app-handoff"
+import { subscribeResume } from "@/lib/capacitor/app"
+import { appHandoffFor } from "@/lib/oauth/app-handoff"
+import { runOAuth as defaultRunOAuth, type AppHandoff } from "@/lib/oauth/mobile-flow"
 
 import type { LogtoDrivers } from "./client"
 
@@ -30,6 +34,23 @@ export interface LogtoCapacitorDriverDeps {
   /** Override the in-app browser timeout. Defaults to the flow's five minutes. */
   timeoutMs?: number
   fetchImpl?: typeof fetch
+  /** The provider app that can run this authorize request, if any. Tests swap it. */
+  appHandoff?: (authorizeUrl: string) => AppHandoff | undefined
+}
+
+/**
+ * A sign-in that names a provider whose app is on this phone (Feishu) runs
+ * in that app, where the person is already signed in; any other runs in the
+ * in-app browser. See `lib/oauth/app-handoff.ts`.
+ */
+export function providerAppHandoff(authorizeUrl: string): AppHandoff | undefined {
+  const handoff = appHandoffFor(authorizeUrl)
+  if (!handoff) return undefined
+  return {
+    open: async () =>
+      (await isAppHandoffAvailable(handoff.target)) && openInApp(handoff.target, handoff.url),
+    onReturn: (handler) => subscribeResume(handler),
+  }
 }
 
 export function createLogtoCapacitorDrivers(deps: LogtoCapacitorDriverDeps = {}): LogtoDrivers {
@@ -45,6 +66,7 @@ export function createLogtoCapacitorDrivers(deps: LogtoCapacitorDriverDeps = {})
         authorizeUrl,
         provider: "logto",
         timeoutMs: deps.timeoutMs,
+        appHandoff: (deps.appHandoff ?? providerAppHandoff)(authorizeUrl),
         accept: (route) => {
           if (route.kind !== "logto_callback") return null
           if (route.state !== state) return "mismatch"

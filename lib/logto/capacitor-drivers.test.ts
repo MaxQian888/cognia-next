@@ -1,8 +1,23 @@
 /** @jest-environment jsdom */
 
-import { LogtoSignInCancelled, createLogtoCapacitorDrivers } from "./capacitor-drivers"
+import {
+  LogtoSignInCancelled,
+  createLogtoCapacitorDrivers,
+  providerAppHandoff,
+} from "./capacitor-drivers"
 
 import type { CallbackOutcome, RunOAuthOptions } from "@/lib/oauth/mobile-flow"
+
+jest.mock("@/lib/capacitor/app-handoff", () => ({
+  isAppHandoffAvailable: jest.fn(),
+  openInApp: jest.fn(),
+}))
+jest.mock("@/lib/capacitor/app", () => ({ subscribeResume: jest.fn() }))
+
+const nativeHandoff = jest.requireMock("@/lib/capacitor/app-handoff")
+const nativeApp = jest.requireMock("@/lib/capacitor/app")
+const feishuAuthorize =
+  "https://id.cognia.cn/api/auth/oauth2/authorize?client_id=cognia-app&state=st&provider=feishu"
 
 function driversWith(outcome: CallbackOutcome) {
   const runOAuth = jest.fn(async (_opts: RunOAuthOptions) => outcome)
@@ -69,10 +84,57 @@ describe("createLogtoCapacitorDrivers", () => {
     }
   })
 
+  it("hands a request naming the provider's app to that app", async () => {
+    const handoff = { open: jest.fn(), onReturn: jest.fn() }
+    const appHandoff = jest.fn(() => handoff)
+    const runOAuth = jest.fn(async (_opts: RunOAuthOptions) => ({
+      kind: "ok" as const,
+      result: { code: "c", state: "st", via: "deeplink" as const },
+    }))
+    const drivers = createLogtoCapacitorDrivers({ runOAuth, appHandoff })
+    await drivers.openUrl(feishuAuthorize)
+    await drivers.waitForCode({ state: "st", redirectUri: "x" })
+    expect(appHandoff).toHaveBeenCalledWith(feishuAuthorize)
+    expect(runOAuth).toHaveBeenCalledWith(expect.objectContaining({ appHandoff: handoff }))
+  })
+
   it("refuses to wait for a URL that was never opened", async () => {
     const { drivers } = driversWith({ kind: "cancelled" })
     await expect(drivers.waitForCode({ state: "st", redirectUri: "x" })).rejects.toThrow(
       "never opened"
     )
+  })
+})
+
+describe("providerAppHandoff", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("has nothing to hand off for a request without a provider app", () => {
+    expect(
+      providerAppHandoff("https://id.cognia.cn/api/auth/oauth2/authorize?provider=github")
+    ).toBeUndefined()
+  })
+
+  it("opens the Feishu Applink only once the Feishu app answers the probe", async () => {
+    const handoff = providerAppHandoff(feishuAuthorize)!
+    nativeHandoff.isAppHandoffAvailable.mockResolvedValue(true)
+    nativeHandoff.openInApp.mockResolvedValue(true)
+    await expect(handoff.open()).resolves.toBe(true)
+    const [target, link] = nativeHandoff.openInApp.mock.calls[0]
+    expect(target).toBe("feishu")
+    expect(new URL(link).searchParams.get("url")).toBe(feishuAuthorize)
+
+    nativeHandoff.openInApp.mockClear()
+    nativeHandoff.isAppHandoffAvailable.mockResolvedValue(false)
+    await expect(handoff.open()).resolves.toBe(false)
+    expect(nativeHandoff.openInApp).not.toHaveBeenCalled()
+  })
+
+  it("treats this app's resume as the return", async () => {
+    const remove = jest.fn()
+    nativeApp.subscribeResume.mockResolvedValue(remove)
+    const handler = jest.fn()
+    await expect(providerAppHandoff(feishuAuthorize)!.onReturn(handler)).resolves.toBe(remove)
+    expect(nativeApp.subscribeResume).toHaveBeenCalledWith(handler)
   })
 })

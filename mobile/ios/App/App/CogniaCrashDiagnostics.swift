@@ -350,5 +350,6 @@ public final class CogniaCrashPlugin: CAPPlugin, CAPBridgedPlugin {
 public final class CogniaBridgeViewController: CAPBridgeViewController {
     public override func capacitorDidLoad() {
         bridge?.registerPluginInstance(CogniaCrashPlugin())
+        bridge?.registerPluginInstance(CogniaAppHandoffPlugin())
     }
 }
