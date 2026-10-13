@@ -7,6 +7,10 @@ on:
         description: "Prior cold benchmark run ID; empty starts an isolated cold build"
         type: string
         default: ""
+      cache_source_run:
+        description: "Optional warm run ID to replay its exact cache; defaults to cache_run"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -31,17 +35,23 @@ jobs:
         env:
           VARIANT: ${{ matrix.variant }}
           CACHE_RUN: ${{ inputs.cache_run }}
+          CACHE_SOURCE_RUN: ${{ inputs.cache_source_run }}
         run: |
           set -euo pipefail
           if [[ -n "$CACHE_RUN" && ! "$CACHE_RUN" =~ ^[0-9]+$ ]]; then
             echo 'cache_run must be a numeric workflow run ID' >&2
             exit 1
           fi
+          if [[ -n "$CACHE_SOURCE_RUN" && ( ! "$CACHE_SOURCE_RUN" =~ ^[0-9]+$ || -z "$CACHE_RUN" ) ]]; then
+            echo 'cache_source_run must be numeric and requires cache_run' >&2
+            exit 1
+          fi
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           cache_run="${CACHE_RUN:-$GITHUB_RUN_ID}"
+          cache_source_run="${CACHE_SOURCE_RUN:-$cache_run}"
           {
             echo "cache=ghcr.io/$owner/cognia-server:bench-$cache_run-$VARIANT-cache"
-            echo "cache_from=ghcr.io/$owner/cognia-server:bench-$cache_run-$VARIANT-cache-$cache_run"
+            echo "cache_from=ghcr.io/$owner/cognia-server:bench-$cache_run-$VARIANT-cache-$cache_source_run"
             echo "image=ghcr.io/$owner/cognia-server:bench-$GITHUB_RUN_ID-$VARIANT"
           } >> "$GITHUB_OUTPUT"
           compression=gzip
