@@ -54,6 +54,20 @@ describe("fleetRemoteStore", () => {
     unsub()
   })
 
+  it("ignores a frame that is not a snapshot", async () => {
+    const notify = jest.fn()
+    const unsub = fleetRemoteStore.subscribe(notify)
+    await flush()
+    handler!({ sessions: [], generatedAt: 20 })
+    notify.mockClear()
+    for (const frame of [null, "x", {}, { generatedAt: 30 }, { sessions: [], generatedAt: "30" }]) {
+      handler!(frame)
+    }
+    expect(fleetRemoteStore.getSnapshot()).toEqual({ sessions: [], generatedAt: 20 })
+    expect(notify).not.toHaveBeenCalled()
+    unsub()
+  })
+
   it("backfills via fleet_get_snapshot after subscribing", async () => {
     callMock.mockResolvedValue({ sessions: [{ sessionId: "bf" }], generatedAt: 3 })
     const unsub = fleetRemoteStore.subscribe(jest.fn())

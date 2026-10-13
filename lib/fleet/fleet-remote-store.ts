@@ -26,7 +26,24 @@ const emit = () => {
   for (const fn of listeners) fn()
 }
 
-const applyIfNewer = (next: FleetSnapshot) => {
+/**
+ * Whether a frame is a snapshot at all. It crosses a network from a Host that
+ * may be another version or mid-restart, and every Fleet surface (the phone's
+ * app bar included) reads `sessions` unguarded, so one malformed frame used
+ * to take the whole app down.
+ */
+function isFleetSnapshot(value: unknown): value is FleetSnapshot {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as Partial<FleetSnapshot>
+  return (
+    Array.isArray(candidate.sessions) &&
+    typeof candidate.generatedAt === "number" &&
+    Number.isFinite(candidate.generatedAt)
+  )
+}
+
+const applyIfNewer = (next: unknown) => {
+  if (!isFleetSnapshot(next)) return
   // Monotonic guard: identical to fleet-stream-store's applyBackfill.
   if (next.generatedAt < snapshot.generatedAt) return
   if (Object.is(next, snapshot)) return
