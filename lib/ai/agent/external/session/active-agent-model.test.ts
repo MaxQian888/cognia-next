@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useSettingsStore } from "@/stores/settings"
-import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 import { activeAgentModelFor, agentModelSelectionInput } from "./active-agent-model"
 import type { ExternalAgentModelSurface } from "./session-models"
 
@@ -26,8 +26,14 @@ describe("agentModelSelectionInput", () => {
       agents: {
         pi: {
           id: "pi",
+          name: "Pi",
+          protocol: "pi-rpc",
+          transport: "stdio",
+          enabled: true,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
           cogniaModel: { providerId: "openai", modelId: "gpt-5" },
-        } as ExternalAgentConfig,
+        } satisfies StoredExternalAgentConfig,
       },
     })
     expect(agentModelSelectionInput("pi", null).agentDefault).toEqual({

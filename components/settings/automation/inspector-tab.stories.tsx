@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { InspectorTab } from "./inspector-tab"
+import { InspectorTab, type InspectorTabProps } from "./inspector-tab"
 
 // Tauri-branching: the app-session Inspector talks to the canonical automation
 // core through Rust. Storybook reaches the desktop-runtime-required branch.
@@ -15,7 +15,7 @@ const meta = {
       </div>
     ),
   ],
-} satisfies Meta<typeof InspectorTab>
+} satisfies Meta<InspectorTabProps>
 
 export default meta
 type Story = StoryObj<typeof meta>

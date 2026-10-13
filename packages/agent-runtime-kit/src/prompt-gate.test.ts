@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto"
 
 import type { ExternalAgentMessage } from "@cognia/agent-contracts/external-agent"
+import type { AgentOutboundGate } from "@cognia/agent-contracts/host"
 
 import { promptInputPassesGate } from "./prompt-gate"
 
@@ -55,7 +56,7 @@ describe("promptInputPassesGate", () => {
   })
 
   it("hands the gate the message, its metadata and the decoded text in one payload", () => {
-    const gate = jest.fn(() => true)
+    const gate = jest.fn<ReturnType<AgentOutboundGate>, Parameters<AgentOutboundGate>>(() => true)
     const prompt = message([
       { type: "text", text: "hi" },
       {
@@ -85,7 +86,7 @@ describe("promptInputPassesGate", () => {
   })
 
   it("hands a message with no base64 payload over as it is", () => {
-    const gate = jest.fn(() => true)
+    const gate = jest.fn<ReturnType<AgentOutboundGate>, Parameters<AgentOutboundGate>>(() => true)
     const prompt = message([{ type: "text", text: "hi" }])
     promptInputPassesGate(prompt, gate)
     expect(gate.mock.calls[0]?.[0]).toMatchObject({ message: prompt })
@@ -116,7 +117,7 @@ describe("promptInputPassesGate", () => {
   })
 
   it("replaces every base64 transport field, leaving the original message untouched", () => {
-    const gate = jest.fn(() => true)
+    const gate = jest.fn<ReturnType<AgentOutboundGate>, Parameters<AgentOutboundGate>>(() => true)
     const prompt = message([
       { type: "image", source: { type: "base64", mediaType: "image/png", data: "AAAA" } },
       { type: "image", source: { type: "url", mediaType: "image/png", url: "https://x/y.png" } },

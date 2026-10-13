@@ -503,7 +503,8 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
     supportsSteering: () => true,
     steerSession: (...args: unknown[]) => steerExternalSessionMock(...args),
     getConnectedAgents: () => getConnectedAgentsMock(),
-    resolvePromptAttachments: (...args: unknown[]) => resolvePromptAttachmentsMock(...args),
+    resolvePromptAttachments: (...args: Parameters<typeof resolvePromptAttachmentsMock>) =>
+      resolvePromptAttachmentsMock(...args),
     getAgentCapabilityProfile: () => ({
       effective: {
         mcp: { level: externalMcpLevelMock.value },

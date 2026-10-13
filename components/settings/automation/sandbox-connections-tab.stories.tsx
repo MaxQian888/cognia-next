@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { SandboxConnectionsTab } from "./sandbox-connections-tab"
+import { SandboxConnectionsTab, type SandboxConnectionsTabProps } from "./sandbox-connections-tab"
 import { clearDb, seedDb } from "@/lib/storybook/seed-db"
 import { createSandboxConnectionRow } from "@/lib/db/sandbox-connections"
 
@@ -25,7 +25,7 @@ const meta = {
       </div>
     ),
   ],
-} satisfies Meta<typeof SandboxConnectionsTab>
+} satisfies Meta<SandboxConnectionsTabProps>
 
 export default meta
 type Story = StoryObj<typeof meta>
