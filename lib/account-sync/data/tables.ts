@@ -111,6 +111,8 @@ const SESSION_FIELDS = {
   folderId: "local",
   activePresetId: "local",
   accountId: "local",
+  // Unattended turn ownership names this host's plugin or Bot installation.
+  agentTurnOwner: "local",
   projectRole: "local",
   projectThread: "local",
   // An agent draft names this device's MCP servers, knowledge bases and

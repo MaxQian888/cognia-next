@@ -57,6 +57,11 @@ describe("account sync table policies", () => {
     ])
   })
 
+  it("keep host-stamped plugin and bot turn ownership on the device", () => {
+    expect(TABLE_POLICIES.sessions.fields.agentTurnOwner).toBe("local")
+    expect(syncedFields(TABLE_POLICIES.sessions)).not.toContain("agentTurnOwner")
+  })
+
   it("sync exactly the settings keys cleared as shared", () => {
     const shared = Object.entries(SETTINGS_SYNC)
       .filter(([, entry]) => entry.category === "shared")
