@@ -296,6 +296,43 @@ describe("createLarkAdapter", () => {
     await adapter.stop()
   })
 
+  it("registers Feishu's slash commands at start unless larkNativeSlash is off", async () => {
+    const slashCalls = () =>
+      mockInvoke.mock.calls.filter(
+        ([cmd, args]: [string, { req?: { url?: string; method?: string } }]) =>
+          cmd === "connectors_http_request" &&
+          args.req?.url?.includes("/application/v7/app_slash_commands")
+      )
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-slash")
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({ code: 0, data: { items: [], command_id: "c" } }),
+      }
+    })
+    const drain = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+    mockGetAdapterInstance.mockResolvedValue({ id: "lark-1", settings: { larkNativeSlash: false } })
+    const off = makeAdapter()
+    await off.start(makeCtx().ctx)
+    await drain()
+    expect(slashCalls()).toHaveLength(0)
+    await off.stop()
+
+    mockGetAdapterInstance.mockResolvedValue({ id: "lark-1", settings: {} })
+    const on = makeAdapter()
+    await on.start(makeCtx().ctx)
+    for (let i = 0; i < 20 && slashCalls().length < 2; i++) await drain()
+    const [list, create] = slashCalls()
+    expect(list[1].req.method).toBe("GET")
+    expect(create[1].req.method).toBe("POST")
+    await on.stop()
+  })
+
   it("skips registry seeding when the adapter row is missing", async () => {
     mockGetAdapterInstance.mockResolvedValue(undefined)
     const adapter = makeAdapter()

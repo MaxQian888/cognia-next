@@ -11,59 +11,65 @@
 import type { ControlCommandName } from "./parse"
 import type { DispatchRule } from "@/lib/db/connector-types"
 
-/** A control command and its one-line bilingual description, for `/help`. */
-const COMMAND_HELP: Array<{ name: ControlCommandName; usage: string; desc: string }> = [
-  { name: "commands", usage: "/commands", desc: "显示此命令列表 / show this list" },
-  { name: "status", usage: "/status", desc: "查看当前会话设置 / show current settings" },
-  { name: "sessions", usage: "/sessions", desc: "列出本会话的所有子会话 / list sessions" },
-  { name: "new", usage: "/new", desc: "新建并切换到新会话 / start a new session" },
-  { name: "switch", usage: "/switch <id|标题>", desc: "切换到指定会话 / switch session" },
-  { name: "model", usage: "/model <名称>", desc: "切换模型 / switch model" },
-  {
-    name: "mode",
-    usage: "/mode assistant|delegate|draft|silent|yolo|prompt",
-    desc: "切换行为/审批模式 / behaviour or approval mode",
+/**
+ * Every control command's one-line description, zh and en apart, so a surface
+ * that localizes on its own (Feishu's `/` panel, `adapters/lark/slash-commands`)
+ * can take one language and `/commands` can print both.
+ */
+export const COMMAND_DESCRIPTIONS: Record<ControlCommandName, { zh: string; en: string }> = {
+  help: { zh: "查看帮助与快捷入口", en: "show help and shortcuts" },
+  commands: { zh: "显示此命令列表", en: "show this list" },
+  status: { zh: "查看当前会话设置", en: "show current settings" },
+  sessions: { zh: "列出本会话的所有子会话", en: "list sessions" },
+  dir: { zh: "查看工作目录上下文", en: "working-dir context" },
+  new: { zh: "新建并切换到新会话", en: "start a new session" },
+  switch: { zh: "切换到指定会话", en: "switch session" },
+  resume: { zh: "恢复之前的会话", en: "resume an earlier session" },
+  mode: { zh: "切换行为/审批模式", en: "behaviour or approval mode" },
+  model: { zh: "切换模型", en: "switch model" },
+  reasoning: { zh: "思考强度", en: "effort" },
+  character: { zh: "切换角色", en: "switch character" },
+  team: { zh: "绑定/解绑 Agent 团队", en: "bind a team" },
+  workflow: { zh: "绑定/解绑可视化工作流", en: "bind a workflow" },
+  agent: {
+    zh: "查看/关闭话题激活或启动免 @ 探测",
+    en: "topic activation and delivery probe",
   },
-  { name: "reasoning", usage: "/reasoning low|medium|high|xhigh|max", desc: "思考强度 / effort" },
-  { name: "character", usage: "/character <id|名称>", desc: "切换角色 / switch character" },
-  { name: "team", usage: "/team <名称|off>", desc: "绑定/解绑 Agent 团队 / bind a team" },
-  {
-    name: "delegate",
-    usage: "/delegate [标题]",
-    desc: "把进行中的任务转为委派 / promote a running task to a delegation",
-  },
-  {
-    name: "handoff",
-    usage: "/handoff [姓名] | back [备注]",
-    desc: "把委派任务交给人 / hand a delegated task to a person",
-  },
-  {
-    name: "workflow",
-    usage: "/workflow <名称|id|off>",
-    desc: "绑定/解绑可视化工作流 / bind a workflow",
-  },
-  {
-    name: "goal",
-    usage: "/goal <目标|status|pause|resume|stop>",
-    desc: "启动/管理持续目标 / start or manage a goal",
-  },
-  {
-    name: "agent",
-    usage: "/agent status|off|verify",
-    desc: "查看/关闭话题激活或启动免 @ 探测 / topic activation and delivery probe",
-  },
-  { name: "tasks", usage: "/tasks", desc: "列出本会话定时任务 / list scheduled tasks" },
-  {
-    name: "schedule",
-    usage: "/schedule <间隔> <提示词> | cron <表达式> <提示词> | off <n|id>",
-    desc: "创建或关闭定时任务 / create or stop a scheduled task",
-  },
-  { name: "dir", usage: "/dir", desc: "查看工作目录上下文 / working-dir context" },
+  goal: { zh: "启动/管理持续目标", en: "start or manage a goal" },
+  tasks: { zh: "列出本会话定时任务", en: "list scheduled tasks" },
+  schedule: { zh: "创建或关闭定时任务", en: "create or stop a scheduled task" },
+  handoff: { zh: "把委派任务交给人", en: "hand a delegated task to a person" },
+  delegate: { zh: "把进行中的任务转为委派", en: "promote a running task to a delegation" },
+}
+
+/** The commands `/commands` lists, in its order, with their usage. */
+const COMMAND_HELP: Array<{ name: ControlCommandName; usage: string }> = [
+  { name: "commands", usage: "/commands" },
+  { name: "status", usage: "/status" },
+  { name: "sessions", usage: "/sessions" },
+  { name: "new", usage: "/new" },
+  { name: "switch", usage: "/switch <id|标题>" },
+  { name: "model", usage: "/model <名称>" },
+  { name: "mode", usage: "/mode assistant|delegate|draft|silent|yolo|prompt" },
+  { name: "reasoning", usage: "/reasoning low|medium|high|xhigh|max" },
+  { name: "character", usage: "/character <id|名称>" },
+  { name: "team", usage: "/team <名称|off>" },
+  { name: "delegate", usage: "/delegate [标题]" },
+  { name: "handoff", usage: "/handoff [姓名] | back [备注]" },
+  { name: "workflow", usage: "/workflow <名称|id|off>" },
+  { name: "goal", usage: "/goal <目标|status|pause|resume|stop>" },
+  { name: "agent", usage: "/agent status|off|verify" },
+  { name: "tasks", usage: "/tasks" },
+  { name: "schedule", usage: "/schedule <间隔> <提示词> | cron <表达式> <提示词> | off <n|id>" },
+  { name: "dir", usage: "/dir" },
 ]
 
 export function renderHelp(): string {
   const lines = ["可用命令 / Available commands:"]
-  for (const c of COMMAND_HELP) lines.push(`• ${c.usage} — ${c.desc}`)
+  for (const c of COMMAND_HELP) {
+    const desc = COMMAND_DESCRIPTIONS[c.name]
+    lines.push(`• ${c.usage} — ${desc.zh} / ${desc.en}`)
+  }
   return lines.join("\n")
 }
 

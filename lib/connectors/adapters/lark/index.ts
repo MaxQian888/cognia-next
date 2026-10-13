@@ -67,6 +67,7 @@ import { isLarkResultTemplatePayload } from "./result-card"
 import { createLarkEphemeral } from "./ephemeral"
 import { enrichLarkInboundMedia } from "./inbound-media"
 import { createLarkPresence } from "./presence"
+import { syncLarkSlashCommands } from "./slash-commands"
 import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
@@ -453,6 +454,32 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           id: opts.id,
           error: err instanceof Error ? err.message : String(err),
         })
+    )
+
+    // Feishu's `/` panel lists what `slash-commands.ts` registers. Same
+    // fire-and-forget contract: an app without the slash-command scopes keeps
+    // working, typed commands included, and says why once in the log.
+    void (async () => {
+      const row = await getAdapterInstance(opts.id).catch(() => undefined)
+      if (!isLarkFeatureEnabled("larkNativeSlash", row)) return
+      const result = await syncLarkSlashCommands((method, path, body) =>
+        doRequest(method, path, body)
+      )
+      const changed = result.created.length + result.updated.length
+      if (changed > 0 || result.failed.length > 0) {
+        loggers.network.info("[lark] slash commands synced", {
+          id: opts.id,
+          created: result.created.length,
+          updated: result.updated.length,
+          unchanged: result.unchanged.length,
+          failed: result.failed,
+        })
+      }
+    })().catch((err) =>
+      loggers.network.warn("[lark] slash commands not registered", {
+        id: opts.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
     )
 
     // Registry seeding (plan 2026-07-24 P1.1). Runs before the first inbound
