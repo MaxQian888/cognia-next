@@ -551,6 +551,23 @@ describe("readMessagesPage", () => {
     expect(page.next_offset).toBeUndefined()
   })
 
+  it("keeps the host's syncRevision clock off the wire rows", async () => {
+    await getDb().messages.put({
+      id: "m1",
+      sessionId: "s1",
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+      createdAt: 10,
+    } as never)
+    const stored = (await getDb().messages.get("m1")) as unknown as Record<string, unknown>
+    expect(typeof stored.syncRevision).toBe("number")
+
+    const page = await readMessagesPage("s1")
+    expect(page.rows).toHaveLength(1)
+    expect(page.rows[0]).not.toHaveProperty("syncRevision")
+    expect(page.rows[0]).toMatchObject({ id: "m1", parts: [{ type: "text", text: "hello" }] })
+  })
+
   it("paginates with limit + offset and reports next_offset", async () => {
     const db = getDb()
     const rows = Array.from({ length: 5 }, (_, i) => ({

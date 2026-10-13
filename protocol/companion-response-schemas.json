@@ -707,6 +707,14 @@
         "platformMessageId": {
           "type": "string"
         },
+        "collaboration": {
+          "type": "object",
+          "x-cognia-opaque-reason": "MessageCollaborationMetadata (ADR-0177) is the room's own author record; StoredMessage owns its shape."
+        },
+        "workingSetSnapshot": {
+          "type": "object",
+          "x-cognia-opaque-reason": "SessionWorkingSetV1 is a versioned working-set snapshot; StoredMessage owns its shape."
+        },
         "metadata": {
           "x-cognia-opaque-reason": "StoredMessage metadata is an extensible application-owned record."
         },

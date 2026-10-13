@@ -671,12 +671,29 @@ export async function readMessagesPage(
   // Compatibility path for clients predating transcript/media V1. Capable
   // clients never call this full-message API; legacy clients cannot resolve a
   // content-addressed ref, so expand only this bounded wire page.
-  const rows = await Promise.all(candidates.slice(0, pageSize).map(expandLegacyMediaRefs))
+  const rows = await Promise.all(
+    candidates.slice(0, pageSize).map((row) => expandLegacyMediaRefs(toWireMessage(row)))
+  )
   const end = start + rows.length
   return {
     rows,
     next_offset: hasMore ? end : undefined,
   }
+}
+
+/**
+ * A stored row as the `StoredMessage` the wire carries, without this host's
+ * sync clock. The message middleware (`lib/db/message-sync-revision.ts`)
+ * stamps `syncRevision` on every row as the host's own pull cursor: it is not
+ * part of `StoredMessage`, means nothing to a client's store, and the page's
+ * row schema (`BridgeMessageRow`) is closed, so leaving it on made every page
+ * a `contract_output_violation` on a headless host.
+ */
+function toWireMessage(row: StoredMessage): StoredMessage {
+  const { syncRevision: _hostSyncClock, ...message } = row as StoredMessage & {
+    syncRevision?: number
+  }
+  return message
 }
 
 const TRANSCRIPT_SCAN_CHUNK = 200
