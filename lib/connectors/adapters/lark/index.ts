@@ -121,6 +121,16 @@ export interface LarkAdapterOptions {
 const LARK_API_BASE = "https://open.feishu.cn/open-apis"
 
 /**
+ * Events Feishu pushes that carry nothing for the bus: opening the bot's chat
+ * and read receipts. They parse into no event by design, so they are not the
+ * unexpected shape the warn below exists to surface.
+ */
+const LARK_INFORMATIONAL_EVENTS: ReadonlySet<string> = new Set([
+  "im.chat.access_event.bot_p2p_chat_entered_v1",
+  "im.message.message_read_v1",
+])
+
+/**
  * Map a send/edit/forward failure onto the OutboundError contract
  * (`types/connectors/outbound.ts`). Previously every failure became
  * `platform_5xx / retryable:true`, so 4xx business errors (invalid
@@ -606,10 +616,13 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         replyInThread: opts.replyInThread !== false,
       })
       if (!event) {
-        loggers.network.warn("[lark] inbound envelope not parsed into an event", {
-          id: opts.id,
-          eventType: envelope.header?.event_type,
-        })
+        const eventType = envelope.header?.event_type
+        const fields = { id: opts.id, eventType }
+        if (LARK_INFORMATIONAL_EVENTS.has(eventType ?? "")) {
+          loggers.network.debug("[lark] inbound envelope not parsed into an event", fields)
+        } else {
+          loggers.network.warn("[lark] inbound envelope not parsed into an event", fields)
+        }
         return
       }
       // v45 (im-refactored-crayon) — gate inbound `create` messages on

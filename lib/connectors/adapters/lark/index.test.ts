@@ -497,6 +497,42 @@ describe("createLarkAdapter", () => {
     }
   })
 
+  it("logs a user opening the bot chat at debug, an unknown event at warn", async () => {
+    const session = createFakeLongConnSession()
+    mockListen.mockImplementation(session.listenImpl)
+    mockInvoke.mockImplementation(async (cmd: string) =>
+      cmd === "connectors_lark_ws_open" ? "lark-ws-info" : undefined
+    )
+    const { loggers } = await import("@cognia/logging")
+    const warn = jest.spyOn(loggers.network, "warn").mockImplementation(() => {})
+    const debug = jest.spyOn(loggers.network, "debug").mockImplementation(() => {})
+    const adapter = makeAdapter()
+    await adapter.start(makeCtx().ctx)
+    await session.waitForListeners()
+
+    for (const [eventId, eventType] of [
+      ["evt_enter", "im.chat.access_event.bot_p2p_chat_entered_v1"],
+      ["evt_odd", "im.something.new_v1"],
+    ]) {
+      session.push({
+        schema: "2.0",
+        header: { event_id: eventId, event_type: eventType },
+        event: {},
+      })
+    }
+    await new Promise((r) => setTimeout(r, 30))
+    await adapter.stop()
+
+    const unparsed = (spy: jest.SpyInstance) =>
+      spy.mock.calls
+        .filter(([message]) => message === "[lark] inbound envelope not parsed into an event")
+        .map(([, fields]) => (fields as { eventType: string }).eventType)
+    expect(unparsed(debug)).toEqual(["im.chat.access_event.bot_p2p_chat_entered_v1"])
+    expect(unparsed(warn)).toEqual(["im.something.new_v1"])
+    warn.mockRestore()
+    debug.mockRestore()
+  })
+
   it("start() is idempotent (second call is no-op)", async () => {
     const adapter = makeAdapter()
     const { ctx } = makeCtx()
