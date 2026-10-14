@@ -1,5 +1,32 @@
 import * as R from "./render"
 
+describe("private thread session replies", () => {
+  it("explains thread-local rotation and independent top-level conversations in both languages", () => {
+    const text = R.confirmNewSession("Thread", "abc123", true)
+    expect(text).toContain("当前话题")
+    expect(text).toContain("New session in this thread: Thread (abc123)")
+    expect(text).toContain("每条新的顶层消息都会新建独立会话")
+    expect(text).toContain("each new top-level message starts a separate conversation")
+    expect(R.confirmSwitched("Legacy", "old123", true)).toBe(
+      "当前话题已切换会话 / This thread switched to: Legacy (old123)"
+    )
+  })
+
+  it("labels the chat-wide session list while preserving other platforms' wording", () => {
+    const sessions = [{ title: "First", idPrefix: "abc123", active: true }]
+    expect(R.renderSessions(sessions, "chat")).toContain(
+      "本私聊的会话 / Sessions in this private chat:"
+    )
+    expect(R.renderSessions(sessions, "chat")).toContain("First (abc123)  ← 当前 / active")
+    expect(R.renderSessions([], "chat")).toContain("No sessions in this private chat yet")
+    expect(R.renderSessions(sessions)).toContain("会话列表 / Sessions:")
+    expect(R.confirmNewSession("Flat", "flat123")).toBe(
+      "已新建并切换会话 / New session: Flat (flat123)"
+    )
+    expect(R.confirmSwitched("Flat", "flat123")).toBe("已切换会话 / Switched to: Flat (flat123)")
+  })
+})
+
 describe("renderStatus", () => {
   it("renders every line including the provider row (W1)", () => {
     const text = R.renderStatus({

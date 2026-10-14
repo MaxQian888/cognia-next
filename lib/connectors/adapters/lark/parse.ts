@@ -98,6 +98,12 @@ export interface LarkMessage {
   root_id?: string | null
 }
 
+/** Resolve the stable root before Lark allocates its native thread id. */
+function managedThreadId(message: LarkMessage): string | undefined {
+  if (message.thread_id && !message.root_id && message.parent_id) return undefined
+  return message.thread_id ? message.root_id || message.message_id : message.message_id
+}
+
 export interface LarkEventHeader {
   event_id: string
   event_type: string
@@ -690,20 +696,11 @@ export function parseLarkEventEnvelope(
   // The root message exists before Feishu allocates an omt_ thread id. Using
   // that stable root for managed threads keeps the first turn and every reply
   // on one durable session, including after a host restart.
-  const managedThread =
-    options.replyInThread === true &&
-    message.chat_type !== "p2p" &&
-    (!message.thread_id || !!message.root_id || !message.parent_id)
-  // A private chat stays one conversation, its threads included; with
-  // threaded replies on, only where the bot answers moves (private-threads.ts).
+  const managedThread = options.replyInThread === true ? managedThreadId(message) : undefined
   const threadedPrivate = options.replyInThread === true && message.chat_type === "p2p"
-  const threadId = managedThread
-    ? message.thread_id
-      ? message.root_id || message.message_id
-      : message.message_id
-    : threadedPrivate
-      ? undefined
-      : (message.thread_id ?? undefined)
+  const threadId =
+    managedThread ??
+    (message.chat_type === "p2p" && !threadedPrivate ? undefined : (message.thread_id ?? undefined))
 
   const conversationKey = buildConversationKey("lark", adapterId, chatId, threadId)
   const senderIdentity = {
@@ -718,7 +715,7 @@ export function parseLarkEventEnvelope(
   const plainText = segmentsToPlainText(segments)
 
   const channelKind: "private" | "group" | "thread" =
-    threadId !== undefined ? "thread" : message.chat_type === "p2p" ? "private" : "group"
+    message.chat_type === "p2p" ? "private" : threadId !== undefined ? "thread" : "group"
 
   const createTimeMs = message.create_time ? parseInt(message.create_time, 10) : Date.now()
   const identityScope = identityScopeOf(envelope, sender.sender_id?.union_id)
@@ -733,6 +730,7 @@ export function parseLarkEventEnvelope(
       adapterId,
       channelId: chatId,
       threadTs: threadId,
+      ...(message.chat_type === "p2p" ? { channelKind: "private" } : {}),
       // Reply anchor for thread sends: Lark's create-message endpoint has
       // no thread parameter, so `serialize.ts` must route thread sends
       // through POST /im/v1/messages/:id/reply — which needs an om_ message
@@ -790,6 +788,7 @@ export interface LarkBotMenuEvent {
   operator?: { operator_id?: LarkSenderId }
   event_key?: string
   timestamp?: string
+  chat_id?: string
 }
 
 /**
@@ -810,6 +809,7 @@ export type LarkBotMenuOutcome =
       openId: string
       eventKey: string
       eventId: string
+      chatId?: string
       identityScope?: { tenantKey?: string; appId?: string; unionId?: string }
     }
   | {
@@ -819,6 +819,7 @@ export type LarkBotMenuOutcome =
       openId: string
       eventKey: string
       eventId: string
+      chatId?: string
       identityScope?: { tenantKey?: string; appId?: string; unionId?: string }
     }
   | {
@@ -826,6 +827,7 @@ export type LarkBotMenuOutcome =
       openId: string
       eventKey: string
       eventId: string
+      chatId?: string
       identityScope?: { tenantKey?: string; appId?: string; unionId?: string }
     }
 
@@ -833,10 +835,10 @@ export type LarkBotMenuOutcome =
  * Project an `application.bot.menu_v6` envelope (a bot-menu / 快捷指令 click)
  * into a `LarkBotMenuOutcome`.
  *
- * The menu event carries the operator's `open_id` but no `chat_id`, so
- * replies target the operator's p2p chat: `conversationRef.channelId` is set
- * to the `ou_…` open_id, which `serialize.ts:serializeOutboundAsync` resolves
- * to `receive_id_type=open_id`.
+ * Prefer a supplied `chat_id`; when absent, replies target the operator's
+ * `open_id`, which the serializer resolves to `receive_id_type=open_id`.
+ * A menu click has no thread root, so threaded mode starts a fresh synthetic
+ * conversation for each click and delivers its first response to the chat.
  *
  * Returns null for non-menu events or when operator / event_key are absent.
  */
@@ -844,7 +846,8 @@ export function parseLarkBotMenuEvent(
   adapterId: string,
   selfBotOpenId: string,
   envelope: LarkEventEnvelope,
-  quickCommands: LarkQuickCommand[] | undefined
+  quickCommands: LarkQuickCommand[] | undefined,
+  options: { replyInThread?: boolean } = {}
 ): LarkBotMenuOutcome | null {
   if (envelope.header?.event_type !== "application.bot.menu_v6") return null
   const event = envelope.event as unknown as LarkBotMenuEvent
@@ -853,6 +856,7 @@ export function parseLarkBotMenuEvent(
   if (!openId || !eventKey) return null
 
   const eventId = envelope.header.event_id ?? ""
+  const chatId = event.chat_id || undefined
   const identityScope = identityScopeOf(envelope, event.operator?.operator_id?.union_id)
   // Adapter-configured rows first; the reserved cognia.* built-ins fill in
   // behind them. Which source matched is part of the outcome — the dispatch
@@ -867,6 +871,7 @@ export function parseLarkBotMenuEvent(
       openId,
       eventKey,
       eventId,
+      ...(chatId ? { chatId } : {}),
       ...(identityScope ? { identityScope } : {}),
     }
   }
@@ -878,12 +883,19 @@ export function parseLarkBotMenuEvent(
       openId,
       eventKey,
       eventId,
+      ...(chatId ? { chatId } : {}),
       ...(identityScope ? { identityScope } : {}),
     }
   }
 
   const text = mapped.action.value
-  const conversationKey = buildConversationKey("lark", adapterId, openId)
+  const channelId = chatId ?? openId
+  const conversationKey = buildConversationKey(
+    "lark",
+    adapterId,
+    channelId,
+    options.replyInThread ? `menu-${eventId}` : undefined
+  )
 
   return {
     kind: "mapped",
@@ -891,23 +903,33 @@ export function parseLarkBotMenuEvent(
     openId,
     eventKey,
     eventId,
+    ...(chatId ? { chatId } : {}),
     ...(identityScope ? { identityScope } : {}),
     event: {
       platform: "lark",
       adapterId,
       selfId: selfBotOpenId,
       messageId: `lark.menu:${eventId}`,
+      canReplyToMessage: false,
       conversationRef: {
         platform: "lark",
         adapterId,
-        channelId: openId,
+        channelId,
+        channelKind: "private",
       },
       conversationKey,
+      conversationAddress: {
+        conversationKey,
+        platform: "lark",
+        adapterId,
+        scopeKind: "private",
+        containerId: channelId,
+      },
       sender: buildPlatformIdentity(adapterId, openId),
       channel: {
         id: conversationKey,
         kind: "private",
-        platformChannelId: openId,
+        platformChannelId: channelId,
       },
       segments: [{ type: "text", text }],
       plainText: text,
@@ -915,7 +937,14 @@ export function parseLarkBotMenuEvent(
       timestamp: Date.now(),
       raw: envelope,
       kind: "create",
-      ...(identityScope ? { channelData: { identityScope } } : {}),
+      ...(identityScope || options.replyInThread
+        ? {
+            channelData: {
+              ...(identityScope ? { identityScope } : {}),
+              ...(options.replyInThread ? { larkMenuConversation: true } : {}),
+            },
+          }
+        : {}),
     },
   }
 }

@@ -8,6 +8,7 @@ import type { NormalizedInboundEvent, ChannelKind } from "@/types/connectors/eve
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type { ResolvedBinding } from "../policy-resolve"
 import type { ChatSession } from "@cognia/agent-config-types"
+import { parseLarkEventEnvelope } from "../adapters/lark/parse"
 import {
   grantSessionBypass,
   hasSessionBypass,
@@ -35,6 +36,28 @@ function makeEvent(over: Partial<NormalizedInboundEvent> = {}): NormalizedInboun
 
 function makeAdapter(over: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
   return { id: "tg-1", controlCommands: undefined, ...over } as AdapterInstanceRow
+}
+
+function privateThreadEvent(text: string, rootId?: string): NormalizedInboundEvent {
+  return parseLarkEventEnvelope(
+    "lark-1",
+    "bot",
+    {
+      header: { event_type: "im.message.receive_v1", event_id: "evt-command" },
+      event: {
+        sender: { sender_id: { open_id: "u1" }, sender_type: "user" },
+        message: {
+          message_id: "om-command",
+          chat_id: "oc-private",
+          chat_type: "p2p",
+          message_type: "text",
+          content: JSON.stringify({ text }),
+          ...(rootId ? { thread_id: "omt-thread", root_id: rootId, parent_id: rootId } : {}),
+        },
+      },
+    },
+    { replyInThread: true }
+  )!
 }
 
 const RESOLVED: ResolvedBinding = {
@@ -177,6 +200,17 @@ describe("isCommandAllowed", () => {
   })
   it("defaults to private-only when no policy given", () => {
     expect(isCommandAllowed(makeEvent(), undefined)).toBe(true)
+  })
+
+  it("allows private Lark thread commands without allowing group threads", () => {
+    const event = privateThreadEvent("/new", "om-root")
+    expect(isCommandAllowed(event, undefined)).toBe(true)
+    event.channel.kind = "thread"
+    expect(isCommandAllowed(event, undefined)).toBe(true)
+    event.conversationAddress!.scopeKind = "thread"
+    delete event.conversationRef.channelKind
+    expect(isCommandAllowed(event, undefined)).toBe(false)
+    expect(isCommandAllowed(event, { mode: "allowlist" })).toBe(false)
   })
 })
 
@@ -658,6 +692,115 @@ describe("maybeHandleControlCommand", () => {
     expect(h.patches[0].patch).toEqual({ activeSessionId: h.created[0].id })
     expect(h.enqueued[0].text).toMatch(/New session/)
   })
+
+  it.each([undefined, "om-root"])(
+    "/new binds a fresh session to its private thread (root %s)",
+    async (rootId) => {
+      const h = harness()
+      const event = privateThreadEvent("/new", rootId)
+      const create = jest.fn(h.deps.createSession!)
+      const patch = jest.fn(h.deps.patchOverride!)
+      await maybeHandleControlCommand(event, makeAdapter(), undefined, RESOLVED, {
+        ...h.deps,
+        createSession: create,
+        patchOverride: patch,
+      })
+      expect(event.conversationKey).toBe(`lark:lark-1:oc-private:${rootId ?? "om-command"}`)
+      expect(create).toHaveBeenCalledWith(event, undefined)
+      expect(patch).toHaveBeenCalledWith(
+        event.conversationKey,
+        { activeSessionId: h.created[0].id },
+        h.created[0].id
+      )
+      expect(h.enqueued[0].text).toContain("当前话题")
+      expect(h.enqueued[0].text).toContain("每条新的顶层消息都会新建独立会话")
+    }
+  )
+
+  it("/sessions in a private thread lists the chat's threads and legacy sessions", async () => {
+    const current = session("current1", "Current thread")
+    const h = harness({ active: current })
+    const exact = jest.fn(h.deps.listSessions!)
+    const chat = jest.fn(async () => [
+      current,
+      session("other1", "Other thread"),
+      session("legacy1", "Legacy"),
+    ])
+    const event = privateThreadEvent("/sessions", "om-root")
+    await maybeHandleControlCommand(event, makeAdapter(), undefined, RESOLVED, {
+      ...h.deps,
+      listSessions: exact,
+      listChatSessions: chat,
+    })
+    expect(chat).toHaveBeenCalledWith(event.conversationKey)
+    expect(exact).not.toHaveBeenCalled()
+    expect(h.enqueued[0].text).toContain("本私聊的会话")
+    expect(h.enqueued[0].text).toContain("Current thread")
+    expect(h.enqueued[0].text).toContain("Other thread")
+    expect(h.enqueued[0].text).toContain("Legacy")
+    expect(h.enqueued[0].text).toContain("当前")
+  })
+
+  it.each(["switch", "resume"])(
+    "/%s in a private thread refreshes and binds the selected same-chat session",
+    async (command) => {
+      const target = session("legacy123", "Legacy")
+      const h = harness()
+      const event = privateThreadEvent(`/${command} legacy`, "om-root")
+      const refresh = jest.fn(async () => target)
+      const patch = jest.fn(h.deps.patchOverride!)
+      await maybeHandleControlCommand(event, makeAdapter(), undefined, RESOLVED, {
+        ...h.deps,
+        listChatSessions: async () => [target],
+        refreshSession: refresh,
+        patchOverride: patch,
+      })
+      expect(refresh).toHaveBeenCalledWith(target, event)
+      expect(patch).toHaveBeenCalledWith(
+        event.conversationKey,
+        { activeSessionId: target.id },
+        target.id
+      )
+      expect(refresh.mock.invocationCallOrder[0]).toBeLessThan(patch.mock.invocationCallOrder[0])
+      expect(h.enqueued[0].text).toContain("当前话题已切换会话")
+      expect(h.created).toHaveLength(0)
+    }
+  )
+
+  it("/sessions from a fresh private menu conversation queries the same chat", async () => {
+    const h = harness()
+    const chat = jest.fn(async () => [session("old1", "Previous thread")])
+    const event = makeEvent({
+      platform: "lark",
+      conversationKey: "lark:lark-1:oc-private:menu-evt1",
+      plainText: "/sessions",
+      channelData: { larkMenuConversation: true },
+    })
+    await maybeHandleControlCommand(event, makeAdapter(), undefined, RESOLVED, {
+      ...h.deps,
+      listChatSessions: chat,
+    })
+    expect(chat).toHaveBeenCalledWith(event.conversationKey)
+    expect(h.enqueued[0].text).toContain("Previous thread")
+  })
+
+  it.each(["telegram", "lark"] as const)(
+    "%s flat private commands keep exact-conversation session lookup",
+    async (platform) => {
+      const h = harness({ sessions: [session("flat1", "Flat session")] })
+      const exact = jest.fn(h.deps.listSessions!)
+      const chat = jest.fn(async () => [])
+      const event = makeEvent({ platform, plainText: "/sessions" })
+      await maybeHandleControlCommand(event, makeAdapter(), undefined, RESOLVED, {
+        ...h.deps,
+        listSessions: exact,
+        listChatSessions: chat,
+      })
+      expect(exact).toHaveBeenCalledWith(event.conversationKey)
+      expect(chat).not.toHaveBeenCalled()
+      expect(h.enqueued[0].text).toContain("Flat session")
+    }
+  )
 
   it("/switch <id-prefix> sets the active session", async () => {
     const h = harness({ sessions: [session("abc12345", "Old"), session("def67890", "Newer")] })

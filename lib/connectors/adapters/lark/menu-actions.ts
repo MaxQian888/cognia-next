@@ -4,9 +4,10 @@
  * plus a `menu.unknown_key` audit, and `link` commands reply with a URL
  * resolved against the configured web entry base.
  *
- * Both replies address the operator's p2p chat by open_id (the menu event
- * carries no chat_id) and are deduped per event_id via the outbound
- * idempotency key, so transport redeliveries never double-post.
+ * These terminal replies do not create agent sessions. They address chat_id
+ * when supplied, otherwise the operator's open_id, without guessing a chat
+ * from the user id. Mapped commands start their own conversation in parse.ts.
+ * Replies are deduped per event_id so transport redeliveries never double-post.
  */
 
 import { isLarkFeatureEnabled, type LarkFlagAdapterSettings } from "@/lib/connectors/feature-flags"
@@ -20,6 +21,7 @@ import {
 import { hashOpenId, resolveConnectorPrincipal } from "@/lib/connectors/principal/resolve"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
+import { listSessionsByConversationChat } from "@/lib/connectors/session-bindings"
 import type { LarkBotMenuOutcome } from "./parse"
 
 export interface MenuActionDependencies {
@@ -27,6 +29,7 @@ export interface MenuActionDependencies {
   audit: typeof appendAudit
   resolvePrincipal: typeof resolveConnectorPrincipal
   buildConversationLink: typeof buildAuthorizedConversationLink
+  listChatSessions: typeof listSessionsByConversationChat
   now: () => number
 }
 
@@ -36,6 +39,7 @@ function withDefaults(overrides: Partial<MenuActionDependencies>): MenuActionDep
     audit: appendAudit,
     resolvePrincipal: resolveConnectorPrincipal,
     buildConversationLink: buildAuthorizedConversationLink,
+    listChatSessions: listSessionsByConversationChat,
     now: Date.now,
     ...overrides,
   }
@@ -59,18 +63,17 @@ const LINK_BASE_MISSING_REPLY = [
 
 function p2pReply(
   adapterId: string,
-  openId: string,
-  eventId: string,
+  outcome: { openId: string; eventId: string; chatId?: string },
   slot: string,
   text: string
 ): Parameters<typeof enqueueOutbound>[0] {
   return {
     adapterId,
-    conversationKey: `lark:${adapterId}:${openId}`,
+    conversationKey: `lark:${adapterId}:${outcome.chatId ?? outcome.openId}`,
     request: {
-      conversationRef: { platform: "lark", adapterId, channelId: openId },
+      conversationRef: { platform: "lark", adapterId, channelId: outcome.chatId ?? outcome.openId },
       segments: [{ type: "text", text }],
-      metadata: { idempotencyKey: `${slot}:${adapterId}:${eventId}` },
+      metadata: { idempotencyKey: `${slot}:${adapterId}:${outcome.eventId}` },
     },
     source: "ai-run",
   }
@@ -93,7 +96,7 @@ export async function handleMenuUnknownKey(
     adapterId,
     kind: "menu.unknown_key",
     at: now,
-    conversationKey: `lark:${adapterId}:${outcome.openId}`,
+    conversationKey: `lark:${adapterId}:${outcome.chatId ?? outcome.openId}`,
     reason: "unmapped_event_key",
     fields: {
       eventKey: outcome.eventKey,
@@ -101,9 +104,7 @@ export async function handleMenuUnknownKey(
       ...(outcome.identityScope?.tenantKey ? { tenantKey: outcome.identityScope.tenantKey } : {}),
     },
   })
-  await deps.enqueue(
-    p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-unknown", UNKNOWN_KEY_REPLY)
-  )
+  await deps.enqueue(p2pReply(adapterId, outcome, "menu-unknown", UNKNOWN_KEY_REPLY))
 }
 
 /**
@@ -113,13 +114,11 @@ export async function handleMenuUnknownKey(
  */
 export async function handleMenuDisabledKey(
   adapterId: string,
-  outcome: { openId: string; eventId: string },
+  outcome: { openId: string; eventId: string; chatId?: string },
   overrides: Partial<MenuActionDependencies> = {}
 ): Promise<void> {
   const deps = withDefaults(overrides)
-  await deps.enqueue(
-    p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-disabled", DISABLED_KEY_REPLY)
-  )
+  await deps.enqueue(p2pReply(adapterId, outcome, "menu-disabled", DISABLED_KEY_REPLY))
 }
 
 /**
@@ -140,9 +139,7 @@ export async function handleMenuLink(
   const base = resolveWebEntryBase(adapterRow)
   const path = outcome.command.action.value
   if (!base) {
-    await deps.enqueue(
-      p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-link", LINK_BASE_MISSING_REPLY)
-    )
+    await deps.enqueue(p2pReply(adapterId, outcome, "menu-link", LINK_BASE_MISSING_REPLY))
     return
   }
 
@@ -157,8 +154,7 @@ export async function handleMenuLink(
     await deps.enqueue(
       p2pReply(
         adapterId,
-        outcome.openId,
-        outcome.eventId,
+        outcome,
         "menu-link",
         workbenchUrl ? `${outcome.command.label ?? path}\n${workbenchUrl}` : LINK_BASE_MISSING_REPLY
       )
@@ -179,21 +175,35 @@ export async function handleMenuLink(
     })
     .catch(() => ({ status: "legacy" as const }))
   if (resolution.status === "resolved") {
-    url = await deps
-      .buildConversationLink({
-        adapterRow,
-        adapterId,
-        principalId: resolution.principal.id,
-        accountId: resolution.accountId,
-        openId: outcome.openId,
-        tenantKey: resolution.principal.tenantKey,
-        appId: resolution.principal.appId,
-        entryType: "bot_menu",
-        conversationKey: `lark:${adapterId}:${outcome.openId}`,
-      })
-      .catch(() => null)
+    const baseKey = `lark:${adapterId}:${outcome.chatId ?? outcome.openId}`
+    const threadedChat = !!outcome.chatId && adapterRow?.settings?.replyInThread !== false
+    // Menu links have no thread of their own. Open the latest known session
+    // in this chat (legacy base sessions included), or the ordinary app URL
+    // before first contact. Never guess a chat id from an operator's open_id.
+    const session = threadedChat
+      ? (await deps.listChatSessions(baseKey).catch(() => [])).find(
+          (candidate) => candidate.platformBinding?.conversationKey
+        )
+      : undefined
+    const conversationKey = threadedChat ? session?.platformBinding?.conversationKey : baseKey
+    if (conversationKey) {
+      url = await deps
+        .buildConversationLink({
+          adapterRow,
+          adapterId,
+          principalId: resolution.principal.id,
+          accountId: resolution.accountId,
+          openId: outcome.openId,
+          tenantKey: resolution.principal.tenantKey,
+          appId: resolution.principal.appId,
+          entryType: "bot_menu",
+          conversationKey,
+          ...(session ? { sessionId: session.id } : {}),
+        })
+        .catch(() => null)
+    }
   }
   url ??= `${base}${path === "/" ? "" : path}`
   const text = `${outcome.command.label ?? path}\n${url}`
-  await deps.enqueue(p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-link", text))
+  await deps.enqueue(p2pReply(adapterId, outcome, "menu-link", text))
 }

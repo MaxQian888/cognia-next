@@ -30,8 +30,10 @@ import {
 } from "@/lib/db/conversation-overrides"
 import {
   listSessionsByConversationKey,
+  listSessionsByConversationChat,
   findActiveSessionForConversation,
   createPlatformSession,
+  refreshPlatformSessionBinding,
 } from "@/lib/connectors/session-bindings"
 import { getCharacter, listCharacters } from "@/lib/db/characters"
 import { resolveTeamByNameOrId } from "@/lib/connectors/team-dispatch"
@@ -92,8 +94,10 @@ export interface ControlCommandDeps {
   now?: () => number
   patchOverride?: typeof patchConversationOverride
   listSessions?: typeof listSessionsByConversationKey
+  listChatSessions?: typeof listSessionsByConversationChat
   findActiveSession?: typeof findActiveSessionForConversation
   createSession?: typeof createPlatformSession
+  refreshSession?: typeof refreshPlatformSessionBinding
   getCharacterById?: typeof getCharacter
   listAllCharacters?: typeof listCharacters
   resolveTeam?: typeof resolveTeamByNameOrId
@@ -162,6 +166,16 @@ function idPrefix(id: string): string {
   return id.slice(0, 8)
 }
 
+function isLarkPrivateConversation(event: NormalizedInboundEvent): boolean {
+  return (
+    event.platform === "lark" &&
+    (event.channel.kind === "private" ||
+      event.conversationAddress?.scopeKind === "private" ||
+      event.conversationRef.channelKind === "private" ||
+      event.conversationRef.scopeKind === "private")
+  )
+}
+
 /**
  * Decide whether `sender` may run a state-changing command in this channel,
  * per the adapter's `controlCommands` policy. Read-only commands never reach
@@ -177,7 +191,7 @@ export function isCommandAllowed(
   const inAllowlist = allow.includes(event.sender.id) || allow.includes(event.sender.remoteUserId)
   if (mode === "allowlist") return inAllowlist
   // private-only: allow in 1:1 DMs, else require the allowlist.
-  return event.channel.kind === "private" || inAllowlist
+  return event.channel.kind === "private" || isLarkPrivateConversation(event) || inAllowlist
 }
 
 /** Strict allowlist membership used by high-impact control-plane writes. */
@@ -214,9 +228,17 @@ export async function maybeHandleControlCommand(
   const audit = deps.audit ?? appendAudit
   const at = (deps.now ?? Date.now)()
   const patchOverride = deps.patchOverride ?? patchConversationOverride
-  const listSessions = deps.listSessions ?? listSessionsByConversationKey
+  const privateThread =
+    isLarkPrivateConversation(event) && event.conversationRef.replyInThread === true
+  const chatSessions =
+    privateThread ||
+    (isLarkPrivateConversation(event) && event.channelData?.larkMenuConversation === true)
+  const listSessions = chatSessions
+    ? (deps.listChatSessions ?? listSessionsByConversationChat)
+    : (deps.listSessions ?? listSessionsByConversationKey)
   const findActiveSession = deps.findActiveSession ?? findActiveSessionForConversation
   const createSession = deps.createSession ?? createPlatformSession
+  const refreshSession = deps.refreshSession ?? refreshPlatformSessionBinding
   const getCharacterById = deps.getCharacterById ?? getCharacter
   const listAllCharacters = deps.listAllCharacters ?? listCharacters
   const resolveTeam = deps.resolveTeam ?? resolveTeamByNameOrId
@@ -427,7 +449,8 @@ export async function maybeHandleControlCommand(
             title: s.title,
             idPrefix: idPrefix(s.id),
             active: s.id === activeId,
-          }))
+          })),
+          chatSessions ? "chat" : "conversation"
         ),
         "applied"
       )
@@ -443,6 +466,9 @@ export async function maybeHandleControlCommand(
     }
 
     case "new": {
+      // A top-level /new is itself a thread root, so create its session just
+      // like an in-thread /new. The next top-level message gets its own key;
+      // only replies inside this command's thread continue the new session.
       const prior = active
       const created = await createSession(event, resolved.characterId)
       active = created
@@ -451,7 +477,10 @@ export async function maybeHandleControlCommand(
       // bypasses granted on the session we rotated away from, per the
       // approval-registry contract (a grant must not outlive its rotation).
       if (prior && prior.id !== created.id) clearSessionBypass(prior.id)
-      await reply(R.confirmNewSession(created.title, idPrefix(created.id)), "applied")
+      await reply(
+        R.confirmNewSession(created.title, idPrefix(created.id), privateThread),
+        "applied"
+      )
       return true
     }
 
@@ -469,11 +498,15 @@ export async function maybeHandleControlCommand(
         await reply(R.renderUsage("switch"), "applied")
         return true
       }
+      // Preserve the session's origin key while refreshing its delivery and
+      // private-chat metadata. The current thread's override selects it on
+      // subsequent turns, including sessions created under the legacy base key.
+      if (chatSessions) await refreshSession(target, event)
       await patchOverride(event.conversationKey, { activeSessionId: target.id }, target.id)
       // Session rotation — same bypass-drop contract as `/new` above.
       if (active && active.id !== target.id) clearSessionBypass(active.id)
       active = target
-      await reply(R.confirmSwitched(target.title, idPrefix(target.id)), "applied")
+      await reply(R.confirmSwitched(target.title, idPrefix(target.id), privateThread), "applied")
       return true
     }
 

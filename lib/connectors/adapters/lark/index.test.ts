@@ -102,7 +102,10 @@ function makeCtx(): { ctx: AdapterContext; emitted: NormalizedInboundEvent[] } {
   return { ctx, emitted }
 }
 
-function makeAdapter(transport: "webhook" | "long-connection" = "long-connection") {
+function makeAdapter(
+  transport: "webhook" | "long-connection" = "long-connection",
+  replyInThread?: boolean
+) {
   return createLarkAdapter({
     id: "lark-1",
     displayName: "My Lark Bot",
@@ -111,6 +114,7 @@ function makeAdapter(transport: "webhook" | "long-connection" = "long-connection
     verificationToken: async () => "verify-token-001",
     selfBotOpenId: "ou_bot_self_001",
     transport,
+    replyInThread,
   })
 }
 
@@ -925,6 +929,8 @@ describe("createLarkAdapter", () => {
     expect(emitted.length).toBeGreaterThanOrEqual(1)
     expect(emitted[0].plainText).toBe("/agenda today")
     expect(emitted[0].conversationRef.channelId).toBe("ou_user_777")
+    expect(emitted[0].conversationKey).toBe("lark:lark-menu:ou_user_777:menu-evt_menu_1")
+    expect(emitted[0].canReplyToMessage).toBe(false)
   }, 15000)
 
   it("routes an unmapped bot-menu click to the terminal unknown handler, not the bus", async () => {
@@ -1570,13 +1576,13 @@ describe("createLarkAdapter", () => {
     expect(events.map((event) => event.messageId)).toEqual(["om-wanted"])
   })
 
-  it("fetchHistory() keeps a private chat's thread replies in the chat's one conversation", async () => {
+  it("fetchHistory() keeps each private thread in its own root conversation", async () => {
     mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "connectors_keyring_get") return null
       if (cmd !== "connectors_http_request") return undefined
       const url = (args as { req: { url: string } }).req.url
       if (url.includes("tenant_access_token")) return makeTatOkResp("t-p2p-history")
-      const item = (message_id: string, thread_id?: string) => ({
+      const item = (message_id: string, thread_id?: string, root_id?: string) => ({
         message_id,
         chat_id: "oc_p2p_001",
         chat_type: "p2p",
@@ -1584,7 +1590,111 @@ describe("createLarkAdapter", () => {
         body: { content: JSON.stringify({ text: message_id }) },
         create_time: "1714900000000",
         thread_id,
+        root_id,
+        ...(root_id ? { parent_id: root_id } : {}),
         deleted: false,
+        sender: { id: "ou_hist_001", id_type: "open_id", sender_type: "user" },
+      })
+      const isRootFetch = url.endsWith("/im/v1/messages/om_first")
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          code: 0,
+          data: {
+            items: isRootFetch
+              ? [item("om_first", "omt_1")]
+              : [
+                  item("om_first", "omt_1"),
+                  item("om_in_thread", "omt_1", "om_first"),
+                  item("om_other", "omt_2"),
+                  item("om_other_reply", "omt_2", "om_other"),
+                ],
+            has_more: false,
+          },
+        }),
+      }
+    })
+
+    const events = []
+    for await (const evt of makeAdapter().fetchHistory!("lark:lark-1:oc_p2p_001:om_first", {
+      max: 50,
+    })) {
+      events.push(evt)
+    }
+    expect(events.map((event) => event.messageId)).toEqual(["om_first", "om_in_thread"])
+    expect(
+      events.every((event) => event.conversationKey === "lark:lark-1:oc_p2p_001:om_first")
+    ).toBe(true)
+    expect(events[1].conversationRef).toMatchObject({
+      replyInThread: true,
+      threadTs: "om_first",
+      threadRootMessageId: "om_in_thread",
+      channelKind: "private",
+    })
+  })
+
+  it("fetchHistoryPage() preserves private scope when history omits chat_type", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-p2p-root")
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          code: 0,
+          data: {
+            items: [
+              {
+                message_id: "om_first",
+                chat_id: "oc_p2p_001",
+                msg_type: "text",
+                body: { content: JSON.stringify({ text: "private root" }) },
+                create_time: "1714900000000",
+                sender: { id: "ou_hist_001", id_type: "open_id", sender_type: "user" },
+              },
+            ],
+          },
+        }),
+      }
+    })
+    const page = await makeAdapter().fetchHistoryPage!(
+      {
+        address: {
+          conversationKey: "lark:lark-1:oc_p2p_001:om_first",
+          platform: "lark",
+          adapterId: "lark-1",
+          scopeKind: "private",
+          containerId: "oc_p2p_001",
+          topicId: "om_first",
+        },
+        conversationRef: { platform: "lark", adapterId: "lark-1", channelId: "oc_p2p_001" },
+        refreshedAt: 1,
+      },
+      undefined,
+      { max: 50 }
+    )
+    expect(page.events).toHaveLength(1)
+    expect(page.events[0].channel.kind).toBe("private")
+    expect(page.events[0].conversationRef.replyInThread).toBe(true)
+  })
+
+  it("fetchHistory() retains one flat private conversation with threaded replies off", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-p2p-flat")
+      const item = (message_id: string, root_id?: string) => ({
+        message_id,
+        chat_id: "oc_p2p_001",
+        chat_type: "p2p",
+        msg_type: "text",
+        body: { content: JSON.stringify({ text: message_id }) },
+        create_time: "1714900000000",
+        ...(root_id ? { root_id, thread_id: "omt_1", parent_id: root_id } : {}),
         sender: { id: "ou_hist_001", id_type: "open_id", sender_type: "user" },
       })
       return {
@@ -1592,16 +1702,19 @@ describe("createLarkAdapter", () => {
         headers: {},
         body: JSON.stringify({
           code: 0,
-          data: { items: [item("om-first"), item("om-in-thread", "omt-1")], has_more: false },
+          data: { items: [item("om_first"), item("om_reply", "om_first")], has_more: false },
         }),
       }
     })
-
     const events = []
-    for await (const evt of makeAdapter().fetchHistory!("lark:lark-1:oc_p2p_001", { max: 50 })) {
-      events.push(evt)
+    for await (const event of makeAdapter("long-connection", false).fetchHistory!(
+      "lark:lark-1:oc_p2p_001",
+      { max: 50 }
+    )) {
+      events.push(event)
     }
-    expect(events.map((event) => event.messageId)).toEqual(["om-first", "om-in-thread"])
+    expect(events.map((event) => event.messageId)).toEqual(["om_first", "om_reply"])
+    expect(events.every((event) => event.conversationKey === "lark:lark-1:oc_p2p_001")).toBe(true)
   })
 
   it("fetchHistoryPage() uses the persisted target and preserves its timestamp page token", async () => {

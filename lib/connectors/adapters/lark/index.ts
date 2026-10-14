@@ -637,7 +637,8 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           opts.id,
           opts.selfBotOpenId,
           envelope,
-          opts.quickCommands
+          opts.quickCommands,
+          { replyInThread: opts.replyInThread !== false }
         )
         if (!outcome) return
         lastActivityAt = Date.now()
@@ -660,6 +661,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           await handleMenuDisabledKey(opts.id, {
             openId: outcome.openId,
             eventId: outcome.eventId,
+            ...(outcome.chatId ? { chatId: outcome.chatId } : {}),
           })
           return
         }
@@ -1073,7 +1075,14 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       const normalizedMessage = {
         message_id: raw.message_id ?? "",
         chat_id: raw.chat_id ?? chatId,
-        chat_type: raw.chat_type ?? (chatId.startsWith("oc_") ? "group" : "p2p"),
+        chat_type:
+          raw.chat_type ??
+          (target.address.scopeKind === "private" ||
+          target.conversationRef.channelKind === "private"
+            ? "p2p"
+            : chatId.startsWith("oc_")
+              ? "group"
+              : "p2p"),
         message_type: raw.msg_type ?? "",
         content: raw.body?.content ?? "",
         mentions: raw.mentions,
@@ -1094,9 +1103,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         },
       }
       const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope, {
-        // A private chat's thread replies belong to the chat's one
-        // conversation when the bot answers in threads, as they do live.
-        replyInThread: managedThread || (raw.chat_type === "p2p" && opts.replyInThread !== false),
+        // Re-project private history through the same root-key rule as live
+        // messages; the exact-key filter below excludes other threads.
+        replyInThread:
+          managedThread || (normalizedMessage.chat_type === "p2p" && opts.replyInThread !== false),
       })
       if (event?.conversationKey !== conversationKey) continue
       if (topicId) {

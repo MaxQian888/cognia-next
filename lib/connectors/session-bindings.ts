@@ -20,7 +20,11 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import { deliveryTargetFromEvent, type NormalizedInboundEvent } from "@/types/connectors/event"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
-import { parseConversationKey } from "@/types/connectors/event"
+import {
+  buildConversationKey,
+  CONVERSATION_KEY_SEP,
+  parseConversationKey,
+} from "@/types/connectors/event"
 import { getDb } from "@/lib/db/schema"
 
 /**
@@ -68,6 +72,33 @@ export async function listSessionsByConversationKey(
   return all
     .filter((s) => s.platformBinding?.conversationKey === conversationKey)
     .sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/**
+ * List a Lark chat's sessions across its thread keys, including the legacy
+ * base-chat binding. Private-chat commands opt into this enumeration; other
+ * platforms retain their exact-conversation lookup.
+ */
+export async function listSessionsByConversationChat(
+  conversationKey: string
+): Promise<ChatSession[]> {
+  let parsed
+  try {
+    parsed = parseConversationKey(conversationKey)
+  } catch {
+    return listSessionsByConversationKey(conversationKey)
+  }
+  if (parsed.platform !== "lark") return listSessionsByConversationKey(conversationKey)
+  const baseKey = buildConversationKey(parsed.platform, parsed.adapterId, parsed.remoteChatId)
+  const threadPrefix = `${baseKey}${CONVERSATION_KEY_SEP}`
+  const db = getDb()
+  const [base, threads] = await Promise.all([
+    // Keep pre-v85 base sessions readable even after new indexed threads
+    // exist: the exact-key helper owns the legacy backfill fallback.
+    listSessionsByConversationKey(baseKey),
+    db.sessions.where("platformConversationKey").startsWith(threadPrefix).toArray(),
+  ])
+  return [...base, ...threads].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /** A conversation bound to the same remote chat through ANOTHER adapter. */
@@ -125,8 +156,9 @@ export async function listSiblingConversations(
 /**
  * Resolve the active ChatSession for a conversation: the one pointed to by
  * `override.activeSessionId` (set by `/new` / `/switch`) when it still exists
- * and is bound to this conversation, otherwise the most-recently-updated bound
- * session, otherwise `undefined` (caller creates one). Never creates a row.
+ * and is bound to this conversation, or explicitly selected from another
+ * private Lark thread in the same chat. Otherwise use the most-recently-updated
+ * bound session, or `undefined` (caller creates one). Never creates a row.
  */
 export async function findActiveSessionForConversation(
   conversationKey: string,
@@ -136,8 +168,36 @@ export async function findActiveSessionForConversation(
   if (override?.activeSessionId) {
     const active = bound.find((s) => s.id === override.activeSessionId)
     if (active) return active
+    const selected = await getDb().sessions.get(override.activeSessionId)
+    if (selected && isPrivateLarkChatSession(conversationKey, selected)) return selected
   }
   return bound[0]
+}
+
+function isPrivateLarkChatSession(conversationKey: string, session: ChatSession): boolean {
+  const binding = session.platformBinding
+  if (!binding || binding.platform !== "lark") return false
+  const ref = binding.conversationRef
+  if (
+    ref.channelKind !== "private" &&
+    ref.scopeKind !== "private" &&
+    ref.replyInThread !== true &&
+    binding.deliveryTarget?.address.scopeKind !== "private"
+  ) {
+    return false
+  }
+  try {
+    const current = parseConversationKey(conversationKey)
+    const selected = parseConversationKey(binding.conversationKey)
+    return (
+      current.platform === "lark" &&
+      selected.platform === "lark" &&
+      current.adapterId === selected.adapterId &&
+      current.remoteChatId === selected.remoteChatId
+    )
+  } catch {
+    return false
+  }
 }
 
 /** Resolve an old Inbox link without changing the remote conversation's active session. */

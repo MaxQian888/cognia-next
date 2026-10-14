@@ -8,6 +8,7 @@ import {
   resolveConversationLinkSession,
   findSessionByConversationKey,
   listSessionsByConversationKey,
+  listSessionsByConversationChat,
   findActiveSessionForConversation,
   createPlatformSession,
   refreshPlatformSessionBinding,
@@ -136,6 +137,63 @@ describe("session-bindings", () => {
     expect(list.map((s) => s.id)).toEqual(["s-b", "s-c", "s-a"])
   })
 
+  it("lists Lark chat sessions across thread keys including the legacy base key", async () => {
+    const chatKey = "lark:lk-1:oc-1"
+    await getDb().sessions.bulkAdd([
+      imSession("legacy", 100, chatKey),
+      imSession("thread-a-old", 200, `${chatKey}:om-a`),
+      imSession("thread-a-new", 400, `${chatKey}:om-a`),
+      imSession("thread-b", 300, `${chatKey}:om-b`),
+      imSession("other-chat", 900, "lark:lk-1:oc-10:om-c"),
+      imSession("other-adapter", 900, "lark:lk-2:oc-1:om-c"),
+      imSession("other-platform", 900, "telegram:lk-1:oc-1:om-c"),
+    ])
+
+    for (const key of [chatKey, `${chatKey}:om-a`]) {
+      expect((await listSessionsByConversationChat(key)).map((s) => s.id)).toEqual([
+        "thread-a-new",
+        "thread-b",
+        "thread-a-old",
+        "legacy",
+      ])
+    }
+  })
+
+  it("keeps chat enumeration exact-key scoped for other platforms", async () => {
+    await getDb().sessions.bulkAdd([
+      imSession("base", 100),
+      imSession("thread", 200, `${KEY}:topic`),
+    ])
+
+    expect((await listSessionsByConversationChat(KEY)).map((s) => s.id)).toEqual(["base"])
+    expect((await listSessionsByConversationChat(`${KEY}:topic`)).map((s) => s.id)).toEqual([
+      "thread",
+    ])
+  })
+
+  it("finds legacy unindexed Lark bindings when the chat index has no entries", async () => {
+    const legacy = imSession("legacy", 100, "lark:lk-1:oc-1")
+    delete legacy.platformConversationKey
+    await getDb().sessions.add(legacy)
+
+    expect((await listSessionsByConversationChat("lark:lk-1:oc-1:om-a"))[0]?.id).toBe("legacy")
+    expect(await listSessionsByConversationChat("lark:lk-1:missing")).toEqual([])
+  })
+
+  it("keeps a legacy unindexed base session visible after indexed threads are created", async () => {
+    const legacy = imSession("legacy", 100, "lark:lk-1:oc-1")
+    delete legacy.platformConversationKey
+    await getDb().sessions.bulkAdd([
+      legacy,
+      imSession("thread", 200, "lark:lk-1:oc-1:om-new"),
+      imSession("other", 300, "lark:lk-1:oc-10:om-other"),
+    ])
+
+    expect(
+      (await listSessionsByConversationChat("lark:lk-1:oc-1:om-new")).map((s) => s.id)
+    ).toEqual(["thread", "legacy"])
+  })
+
   it("findActiveSessionForConversation honors activeSessionId", async () => {
     await getDb().sessions.bulkAdd([imSession("s-a", 300), imSession("s-b", 100)])
     const active = await findActiveSessionForConversation(KEY, { activeSessionId: "s-b" })
@@ -157,7 +215,102 @@ describe("session-bindings", () => {
   it("findActiveSessionForConversation returns undefined when nothing bound", async () => {
     expect(await findActiveSessionForConversation(KEY, undefined)).toBeUndefined()
   })
+
+  it("only shares a private Lark thread session after an explicit same-chat switch", async () => {
+    const first = larkPrivateEvent("om-a")
+    const second = larkPrivateEvent("om-b")
+    const selected = await createPlatformSession(first, undefined)
+
+    expect(await findActiveSessionForConversation(second.conversationKey)).toBeUndefined()
+    const switched = await findActiveSessionForConversation(second.conversationKey, {
+      activeSessionId: selected.id,
+    })
+    expect(switched?.id).toBe(selected.id)
+
+    const refreshed = await refreshPlatformSessionBinding(switched!, second)
+    expect(refreshed.platformConversationKey).toBe(first.conversationKey)
+    expect(refreshed.platformBinding?.conversationKey).toBe(first.conversationKey)
+    expect(refreshed.platformBinding?.conversationRef.threadRootMessageId).toBe("om-b")
+    expect(refreshed.platformBinding?.deliveryTarget?.address.conversationKey).toBe(
+      second.conversationKey
+    )
+    expect(refreshed.platformBinding?.deliveryTarget?.sourceMessageId).toBe("om-b")
+  })
+
+  it("allows a refreshed legacy base session to be selected from a private thread", async () => {
+    const legacyKey = "lark:lk-1:oc-1"
+    const legacy = imSession("legacy", 100, legacyKey)
+    legacy.platformBinding = {
+      platform: "lark",
+      adapterId: "lk-1",
+      conversationKey: legacyKey,
+      conversationRef: { platform: "lark", adapterId: "lk-1", channelId: "oc-1" },
+    }
+    await getDb().sessions.add(legacy)
+    const next = larkPrivateEvent("om-new")
+    await refreshPlatformSessionBinding(legacy, next)
+
+    const active = await findActiveSessionForConversation(next.conversationKey, {
+      activeSessionId: legacy.id,
+    })
+    expect(active?.id).toBe(legacy.id)
+    expect(active?.platformBinding?.conversationKey).toBe(legacyKey)
+  })
+
+  it.each(["lark:lk-1:oc-10:om-b", "lark:lk-2:oc-1:om-b", "telegram:lk-1:oc-1:om-b", "invalid"])(
+    "does not honor a private thread override from another scope: %s",
+    async (key) => {
+      const selected = await createPlatformSession(larkPrivateEvent("om-a"), undefined)
+      await getDb().sessions.add(imSession("local", 100, key))
+
+      expect(
+        (await findActiveSessionForConversation(key, { activeSessionId: selected.id }))?.id
+      ).toBe("local")
+    }
+  )
+
+  it("does not select a sibling group thread via a private-thread override", async () => {
+    const group = larkPrivateEvent("om-a")
+    group.channel.kind = "thread"
+    group.conversationRef.channelKind = "group"
+    group.conversationAddress!.scopeKind = "thread"
+    const selected = await createPlatformSession(group, undefined)
+
+    expect(
+      await findActiveSessionForConversation("lark:lk-1:oc-1:om-b", {
+        activeSessionId: selected.id,
+      })
+    ).toBeUndefined()
+  })
 })
+
+function larkPrivateEvent(rootId: string): NormalizedInboundEvent {
+  const conversationKey = `lark:lk-1:oc-1:${rootId}`
+  return {
+    ...makeEvent(),
+    platform: "lark",
+    adapterId: "lk-1",
+    conversationKey,
+    messageId: rootId,
+    conversationRef: {
+      platform: "lark",
+      adapterId: "lk-1",
+      channelId: "oc-1",
+      channelKind: "private",
+      threadTs: rootId,
+      threadRootMessageId: rootId,
+    },
+    conversationAddress: {
+      conversationKey,
+      platform: "lark",
+      adapterId: "lk-1",
+      scopeKind: "private",
+      containerId: "oc-1",
+      topicId: rootId,
+    },
+    channel: { id: conversationKey, kind: "private", platformChannelId: "oc-1" },
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // listSiblingConversations (W5 multi-bot same-group collaboration)

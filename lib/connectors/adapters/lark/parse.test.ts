@@ -7,6 +7,7 @@ import {
 } from "./parse"
 import type { LarkEventEnvelope } from "./parse"
 import type { LarkQuickCommand } from "./quick-commands"
+import { deliveryTargetFromEvent } from "@/types/connectors/event"
 
 import dmTextFixture from "./fixtures/dm-text.json"
 import groupMentionFixture from "./fixtures/group-mention.json"
@@ -666,6 +667,53 @@ describe("parseLarkBotMenuEvent — application.bot.menu_v6", () => {
     expect(r.event.messageId).toBe("lark.menu:evt_menu_1")
   })
 
+  it.each([undefined, "oc_dm_chat_001"])(
+    "starts an isolated menu conversation using chat id %s when available",
+    (chatId) => {
+      const envelope = menuEnvelope("agenda", "ou_user_001")
+      if (chatId) envelope.event.chat_id = chatId
+      const first = parseLarkBotMenuEvent(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope, QUICK_COMMANDS, {
+        replyInThread: true,
+      })
+      const next = structuredClone(envelope)
+      next.header.event_id = "evt_menu_2"
+      const second = parseLarkBotMenuEvent(ADAPTER_ID, SELF_BOT_OPEN_ID, next, QUICK_COMMANDS, {
+        replyInThread: true,
+      })
+      if (first?.kind !== "mapped" || second?.kind !== "mapped") {
+        throw new Error("expected mapped outcomes")
+      }
+      const channelId = chatId ?? "ou_user_001"
+      expect(first.event.conversationKey).toBe(`lark:${ADAPTER_ID}:${channelId}:menu-evt_menu_1`)
+      expect(second.event.conversationKey).not.toBe(first.event.conversationKey)
+      expect(first.event.conversationRef).toMatchObject({
+        channelId,
+        channelKind: "private",
+      })
+      expect(first.event.canReplyToMessage).toBe(false)
+      expect(deliveryTargetFromEvent(first.event).sourceMessageId).toBeUndefined()
+      expect(first.event.channelData).toMatchObject({ larkMenuConversation: true })
+      expect(first.event.conversationRef.threadTs).toBeUndefined()
+      expect(first.event.conversationRef.threadRootMessageId).toBeUndefined()
+      expect(first.event.conversationAddress).toMatchObject({
+        scopeKind: "private",
+        containerId: channelId,
+      })
+      expect(first.chatId).toBe(chatId)
+    }
+  )
+
+  it.each(["unknown_key", "cognia.open_workbench"])(
+    "preserves an explicit chat id for terminal menu key %s",
+    (eventKey) => {
+      const envelope = menuEnvelope(eventKey, "ou_user_001")
+      envelope.event.chat_id = "oc_dm_chat_001"
+      expect(
+        parseLarkBotMenuEvent(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope, QUICK_COMMANDS)
+      ).toMatchObject({ chatId: "oc_dm_chat_001" })
+    }
+  )
+
   it("classifies an unmapped event_key as unknown — it must never become model input", () => {
     const r = parseLarkBotMenuEvent(
       ADAPTER_ID,
@@ -1014,24 +1062,26 @@ describe("default reply threads", () => {
         .conversationKey
     ).not.toBe(first.conversationKey)
   })
-  it("keeps a private chat one conversation, answering in each message's thread", () => {
+  it("keeps each private thread on its own root key while answering in that thread", () => {
     const dm = structuredClone(dmTextFixture) as LarkEventEnvelope
     const first = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, dm, {
       replyInThread: true,
     })!
     expect(first.channel.kind).toBe("private")
     expect(first.conversationRef).toMatchObject({
+      channelKind: "private",
       replyInThread: true,
       threadRootMessageId: dm.event.message!.message_id,
     })
-    expect(first.conversationRef.threadTs).toBeUndefined()
-    expect(first.conversationAddress?.topicId).toBeUndefined()
+    expect(first.conversationKey).toBe(`lark:${ADAPTER_ID}:oc_dm_chat_001:om_dm_001`)
+    expect(first.conversationRef.threadTs).toBe("om_dm_001")
+    expect(first.conversationAddress).toMatchObject({ scopeKind: "private", topicId: "om_dm_001" })
 
-    // A reply typed inside one of the bot's threads continues the same chat,
-    // and is answered in that thread.
+    // A reply under a user's root continues that session without a mention.
     const inThread = structuredClone(dm)
     inThread.event.message!.message_id = "om_dm_in_thread"
     inThread.event.message!.root_id = dm.event.message!.message_id
+    inThread.event.message!.parent_id = dm.event.message!.message_id
     inThread.event.message!.thread_id = "omt_dm_thread"
     const followup = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, inThread, {
       replyInThread: true,
@@ -1041,7 +1091,25 @@ describe("default reply threads", () => {
     expect(followup.conversationRef).toMatchObject({
       replyInThread: true,
       threadRootMessageId: "om_dm_in_thread",
+      threadTs: "om_dm_001",
     })
+    expect(followup.mentions.selfMentioned).toBe(false)
+    expect(followup.channelData).toMatchObject({ larkManagedThread: true })
+
+    const other = structuredClone(dm)
+    other.event.message!.message_id = "om_dm_other"
+    const otherThread = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, other, {
+      replyInThread: true,
+    })!
+    expect(otherThread.conversationKey).toBe(`lark:${ADAPTER_ID}:oc_dm_chat_001:om_dm_other`)
+    expect(otherThread.conversationKey).not.toBe(first.conversationKey)
+
+    const historyRoot = structuredClone(dm)
+    historyRoot.event.message!.thread_id = "omt_dm_thread"
+    expect(
+      parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, historyRoot, { replyInThread: true })!
+        .conversationKey
+    ).toBe(first.conversationKey)
   })
 
   it("leaves a private chat as it was when threaded replies are off", () => {
@@ -1052,7 +1120,18 @@ describe("default reply threads", () => {
       { replyInThread: false }
     )!
     expect(parsed.channel.kind).toBe("private")
+    expect(parsed.conversationKey).toBe(`lark:${ADAPTER_ID}:oc_dm_chat_001`)
     expect(parsed.conversationRef.replyInThread).toBeUndefined()
+    const followup = structuredClone(dmTextFixture) as LarkEventEnvelope
+    followup.event.message!.message_id = "om_dm_in_thread"
+    followup.event.message!.root_id = "om_dm_001"
+    followup.event.message!.thread_id = "omt_dm_thread"
+    const flat = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, followup, {
+      replyInThread: false,
+    })!
+    expect(flat.conversationKey).toBe(parsed.conversationKey)
+    expect(flat.conversationRef.threadTs).toBeUndefined()
+    expect(flat.conversationRef.threadRootMessageId).toBeUndefined()
   })
 })
 

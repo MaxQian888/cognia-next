@@ -154,6 +154,154 @@ describe("importLarkMessages", () => {
     expect(sessions).toHaveLength(1)
   })
 
+  it("imports private roots and follow-ups into separate thread sessions and replays the selection", async () => {
+    const deps = makeDeps({
+      tenantRequest: jest.fn(async (_c: unknown, _m: string, path: string) => {
+        const id = decodeURIComponent(path.split("/").pop() ?? "")
+        const rootId = id === "om_reply_a" ? "om_root_a" : id
+        return {
+          data: {
+            items: [
+              rawMessage(id, {
+                chat_type: "p2p",
+                sender: { id: "ou_sender", id_type: "open_id", sender_type: "user" },
+                thread_id: rootId === "om_root_a" ? "omt_a" : "omt_b",
+                ...(id === "om_reply_a" ? { root_id: rootId, parent_id: rootId } : {}),
+              }),
+            ],
+          },
+        }
+      }),
+    })
+    const input = {
+      adapterId: ADAPTER_ID,
+      chatId: CHAT_ID,
+      messageIds: ["om_root_a", "om_reply_a", "om_root_b"],
+      verifiedIdentity: IDENTITY,
+    }
+    const first = await importLarkMessages(input, deps)
+    if (!first.ok) throw new Error(`expected ok, got ${first.error}`)
+    expect(first).toMatchObject({
+      conversationKey: `lark:${ADAPTER_ID}:${CHAT_ID}:om_root_a`,
+      imported: 3,
+      replay: false,
+    })
+    const sessions = await getDb().sessions.toArray()
+    expect(sessions).toHaveLength(2)
+    const byKey = new Map(sessions.map((session) => [session.platformConversationKey, session]))
+    const firstThread = byKey.get(`lark:${ADAPTER_ID}:${CHAT_ID}:om_root_a`)!
+    const secondThread = byKey.get(`lark:${ADAPTER_ID}:${CHAT_ID}:om_root_b`)!
+    expect(firstThread.id).toBe(first.sessionId)
+    expect(firstThread.platformBinding?.conversationRef).toMatchObject({
+      threadTs: "om_root_a",
+      channelKind: "private",
+      replyInThread: true,
+    })
+    const firstMessages = await getDb().messages.where("sessionId").equals(firstThread.id).toArray()
+    const secondMessages = await getDb()
+      .messages.where("sessionId")
+      .equals(secondThread.id)
+      .toArray()
+    expect(firstMessages).toHaveLength(1)
+    expect(secondMessages).toHaveLength(1)
+    const firstText = (firstMessages[0].parts[0] as { text: string }).text
+    const secondText = (secondMessages[0].parts[0] as { text: string }).text
+    expect(firstText).toContain("hello from om_root_a")
+    expect(firstText).toContain("hello from om_reply_a")
+    expect(firstText).not.toContain("hello from om_root_b")
+    expect(secondText).toContain("hello from om_root_b")
+    expect(secondText).not.toContain("hello from om_root_a")
+    expect(secondText).not.toContain("hello from om_reply_a")
+
+    const replay = await importLarkMessages(
+      { ...input, messageIds: [...input.messageIds].reverse() },
+      deps
+    )
+    expect(replay).toMatchObject({ ...first, replay: true })
+    expect(await getDb().sessions.count()).toBe(2)
+    expect(await getDb().messages.count()).toBe(2)
+  })
+
+  it("keeps private imports flat when threaded replies are disabled", async () => {
+    const deps = makeDeps({
+      getAdapter: jest.fn(async () => adapterRow({ replyInThread: false })),
+      tenantRequest: jest.fn(async (_c: unknown, _m: string, path: string) => {
+        const id = decodeURIComponent(path.split("/").pop() ?? "")
+        return {
+          data: {
+            items: [
+              rawMessage(id, {
+                chat_type: "p2p",
+                thread_id: "omt_a",
+                ...(id === "om_reply" ? { root_id: "om_root", parent_id: "om_root" } : {}),
+              }),
+            ],
+          },
+        }
+      }),
+    })
+    const result = await importLarkMessages(
+      {
+        adapterId: ADAPTER_ID,
+        chatId: CHAT_ID,
+        messageIds: ["om_root", "om_reply"],
+        verifiedIdentity: IDENTITY,
+      },
+      deps
+    )
+    expect(result).toMatchObject({ ok: true, conversationKey: `lark:${ADAPTER_ID}:${CHAT_ID}` })
+    expect(await getDb().sessions.count()).toBe(1)
+    expect(await getDb().messages.count()).toBe(1)
+  })
+
+  it("rolls back every private thread if one partition cannot be written", async () => {
+    const deps = makeDeps({
+      tenantRequest: jest.fn(async (_c: unknown, _m: string, path: string) => {
+        const id = decodeURIComponent(path.split("/").pop() ?? "")
+        return { data: { items: [rawMessage(id, { chat_type: "p2p" })] } }
+      }),
+    })
+    const input = {
+      adapterId: ADAPTER_ID,
+      chatId: CHAT_ID,
+      messageIds: ["om_root_a", "om_root_b"],
+      verifiedIdentity: IDENTITY,
+    }
+    let writes = 0
+    const failSecondWrite = () => {
+      if (++writes === 2) throw new Error("partition write failed")
+    }
+    getDb().messages.hook("creating", failSecondWrite)
+    try {
+      await expect(importLarkMessages(input, deps)).rejects.toThrow("partition write failed")
+    } finally {
+      getDb().messages.hook("creating").unsubscribe(failSecondWrite)
+    }
+    expect(await getDb().sessions.count()).toBe(0)
+    expect(await getDb().messages.count()).toBe(0)
+    expect(await getDb().larkMessageImports.count()).toBe(0)
+    expect(await importLarkMessages(input, deps)).toMatchObject({ ok: true, imported: 2 })
+    expect(await getDb().sessions.count()).toBe(2)
+  })
+
+  it("converges simultaneous imports on one committed selection", async () => {
+    const input = {
+      adapterId: ADAPTER_ID,
+      chatId: CHAT_ID,
+      messageIds: ["om_1"],
+      verifiedIdentity: IDENTITY,
+    }
+    const [first, second] = await Promise.all([
+      importLarkMessages(input, makeDeps()),
+      importLarkMessages(input, makeDeps()),
+    ])
+    if (!first.ok || !second.ok) throw new Error("expected successful imports")
+    expect(first.sessionId).toBe(second.sessionId)
+    expect([first.replay, second.replay].sort()).toEqual([false, true])
+    expect(await getDb().sessions.count()).toBe(1)
+    expect(await getDb().messages.count()).toBe(1)
+  })
+
   it("skips smuggled, recalled, and empty messages with reasons", async () => {
     const deps = makeDeps({
       tenantRequest: jest.fn(async (_c: unknown, _m: string, path: string) => {

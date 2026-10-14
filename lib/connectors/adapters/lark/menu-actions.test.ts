@@ -14,16 +14,38 @@ function deps() {
     audit: jest.fn(async (_entry: unknown) => undefined),
     resolvePrincipal: jest.fn(async () => ({ status: "legacy" as const })),
     buildConversationLink: jest.fn(async () => null),
+    listChatSessions: jest.fn(async () => []),
     now: () => 1_700_000_000_000,
   } as unknown as Partial<MenuActionDependencies> & {
     enqueue: jest.Mock
     audit: jest.Mock
     resolvePrincipal: jest.Mock
     buildConversationLink: jest.Mock
+    listChatSessions: jest.Mock
   }
 }
 
 describe("handleMenuUnknownKey", () => {
+  it("uses the event's chat id for the notice and audit when supplied", async () => {
+    const d = deps()
+    await handleMenuUnknownKey(
+      ADAPTER_ID,
+      {
+        kind: "unknown",
+        openId: "ou_user_1",
+        chatId: "oc_private",
+        eventKey: "mystery",
+        eventId: "evt_chat",
+      },
+      d
+    )
+    expect(d.enqueue.mock.calls[0][0]).toMatchObject({
+      conversationKey: `lark:${ADAPTER_ID}:oc_private`,
+      request: { conversationRef: { channelId: "oc_private" } },
+    })
+    expect(d.audit.mock.calls[0][0].conversationKey).toBe(`lark:${ADAPTER_ID}:oc_private`)
+  })
+
   it("audits the hashed operator and replies with the fixed bilingual notice", async () => {
     const d = deps()
     await handleMenuUnknownKey(
@@ -72,6 +94,20 @@ describe("handleMenuUnknownKey", () => {
 })
 
 describe("handleMenuDisabledKey", () => {
+  it("addresses a supplied chat id without inventing a thread anchor", async () => {
+    const d = deps()
+    await handleMenuDisabledKey(
+      ADAPTER_ID,
+      { openId: "ou_user_1", chatId: "oc_private", eventId: "evt_disabled" },
+      d
+    )
+    expect(d.enqueue.mock.calls[0][0].request.conversationRef).toEqual({
+      platform: "lark",
+      adapterId: ADAPTER_ID,
+      channelId: "oc_private",
+    })
+  })
+
   it("replies without recording an unmapped-key audit", async () => {
     const d = deps()
     await handleMenuDisabledKey(ADAPTER_ID, { openId: "ou_user_1", eventId: "evt_disabled" }, d)
@@ -98,6 +134,103 @@ describe("handleMenuLink", () => {
     eventId: "evt_2",
   }
 
+  it.each(["om_latest", undefined])(
+    "opens the latest chat session for a supplied chat id (thread %s), including legacy bindings",
+    async (threadId) => {
+      const d = deps()
+      d.resolvePrincipal.mockResolvedValue({
+        status: "resolved",
+        principal: { id: "fp_1", tenantKey: "tk_1", appId: "cli_1" },
+        accountId: "acct_1",
+      })
+      const baseKey = `lark:${ADAPTER_ID}:oc_private`
+      const latestKey = threadId ? `${baseKey}:${threadId}` : baseKey
+      d.listChatSessions.mockResolvedValue([
+        { id: "latest", platformBinding: { conversationKey: latestKey } },
+        { id: "older", platformBinding: { conversationKey: `${baseKey}:om_older` } },
+      ])
+      d.buildConversationLink.mockResolvedValue("https://cognia.example/lark/entry?entry=chat")
+      await handleMenuLink(
+        ADAPTER_ID,
+        {
+          settings: { webEntryBaseUrl: "https://cognia.example", larkWorkbenchMode: "disabled" },
+        },
+        { ...outcome, chatId: "oc_private" },
+        d
+      )
+      expect(d.buildConversationLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationKey: latestKey,
+          sessionId: "latest",
+          openId: "ou_user_2",
+        })
+      )
+      expect(d.listChatSessions).toHaveBeenCalledWith(baseKey)
+      expect(d.enqueue.mock.calls[0][0]).toMatchObject({
+        conversationKey: `lark:${ADAPTER_ID}:oc_private`,
+        request: { conversationRef: { channelId: "oc_private" } },
+      })
+    }
+  )
+
+  it("preserves the supplied base-chat link when threaded replies are disabled", async () => {
+    const d = deps()
+    d.resolvePrincipal.mockResolvedValue({
+      status: "resolved",
+      principal: { id: "fp_1", tenantKey: "tk_1", appId: "cli_1" },
+      accountId: "acct_1",
+    })
+    await handleMenuLink(
+      ADAPTER_ID,
+      {
+        settings: {
+          webEntryBaseUrl: "https://cognia.example",
+          larkWorkbenchMode: "disabled",
+          replyInThread: false,
+        },
+      },
+      { ...outcome, chatId: "oc_private" },
+      d
+    )
+    expect(d.listChatSessions).not.toHaveBeenCalled()
+    expect(d.buildConversationLink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: `lark:${ADAPTER_ID}:oc_private`,
+        openId: "ou_user_2",
+      })
+    )
+    expect(d.buildConversationLink.mock.calls[0][0]).not.toHaveProperty("sessionId")
+  })
+
+  it.each(["empty", "unavailable"])(
+    "uses the ordinary app link when the chat session list is %s",
+    async (state) => {
+      const d = deps()
+      d.resolvePrincipal.mockResolvedValue({
+        status: "resolved",
+        principal: { id: "fp_1", tenantKey: "tk_1", appId: "cli_1" },
+        accountId: "acct_1",
+      })
+      if (state === "unavailable")
+        d.listChatSessions.mockRejectedValue(new Error("database unavailable"))
+      await handleMenuLink(
+        ADAPTER_ID,
+        { settings: { webEntryBaseUrl: "https://cognia.example", larkWorkbenchMode: "disabled" } },
+        {
+          ...outcome,
+          chatId: "oc_private",
+          command: { ...outcome.command, action: { type: "link", value: "/memory" } },
+        },
+        d
+      )
+      expect(d.listChatSessions).toHaveBeenCalledWith(`lark:${ADAPTER_ID}:oc_private`)
+      expect(d.buildConversationLink).not.toHaveBeenCalled()
+      expect(d.enqueue.mock.calls[0][0].request.segments[0].text).toContain(
+        "https://cognia.example/memory"
+      )
+    }
+  )
+
   it.each(["personal", "team", "both"])(
     "opens the stable workbench entry for %s mode with event deduplication",
     async (mode) => {
@@ -109,8 +242,8 @@ describe("handleMenuLink", () => {
           larkWebSso: true,
         },
       }
-      await handleMenuLink(ADAPTER_ID, row, outcome, d)
-      await handleMenuLink(ADAPTER_ID, row, outcome, d)
+      await handleMenuLink(ADAPTER_ID, row, { ...outcome, chatId: "oc_private" }, d)
+      await handleMenuLink(ADAPTER_ID, row, { ...outcome, chatId: "oc_private" }, d)
       const first = d.enqueue.mock.calls[0][0]
       expect(first.request.segments[0].text).toBe(
         `Open workbench / 打开工作台\nhttps://cognia.example/deploy/lark/workbench?adapter_id=${ADAPTER_ID}`
@@ -121,6 +254,7 @@ describe("handleMenuLink", () => {
       )
       expect(d.resolvePrincipal).not.toHaveBeenCalled()
       expect(d.buildConversationLink).not.toHaveBeenCalled()
+      expect(d.listChatSessions).not.toHaveBeenCalled()
     }
   )
 
@@ -252,6 +386,8 @@ describe("handleMenuLink", () => {
       entryType: "bot_menu",
       conversationKey: `lark:${ADAPTER_ID}:ou_user_2`,
     })
+    expect(d.listChatSessions).not.toHaveBeenCalled()
+    expect(minted).not.toHaveProperty("sessionId")
     const job = d.enqueue.mock.calls[0][0] as { request: { segments: Array<{ text: string }> } }
     expect(job.request.segments[0].text).toContain("entry=tok.xyz")
   })

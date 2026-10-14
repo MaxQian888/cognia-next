@@ -30,6 +30,26 @@ describe("chineseHalf", () => {
 })
 
 describe("buildLarkCommandReply", () => {
+  it("preserves private-thread session guidance in command cards", () => {
+    const card = payload(
+      buildLarkCommandReply("new", R.confirmNewSession("Thread", "abc123", true), "applied")
+    )
+    const text = JSON.stringify(card.body)
+    expect(text).toContain("当前话题")
+    expect(text).toContain("Thread")
+    expect(text).toContain("abc123")
+    expect(text).toContain("每条新的顶层消息都会新建独立会话")
+    const sessions = payload(
+      buildLarkCommandReply(
+        "sessions",
+        R.renderSessions([{ title: "Legacy", idPrefix: "old123", active: false }], "chat"),
+        "applied"
+      )
+    )
+    expect(JSON.stringify(sessions.body)).toContain("本私聊的会话")
+    expect(JSON.stringify(sessions.body)).toContain("Legacy")
+  })
+
   it("reads the sessions list into a numbered list that tags the current one", () => {
     const card = payload(
       buildLarkCommandReply(

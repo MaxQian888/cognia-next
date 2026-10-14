@@ -10,10 +10,11 @@
  *   4. re-fetches EVERY message by id from the platform and drops any whose
  *      `chat_id` differs from the claimed chat (id smuggling), any recalled/
  *      deleted message, and any without recoverable content,
- *   5. writes ONE delimited quoted block into a fresh platform-bound session
- *      — marked as an import in message metadata, never impersonating an
- *      organic user turn. Model calls happen later through the normal send
- *      path, so the existing PII gate is unchanged.
+ *   5. writes one delimited quoted block per private thread into separate
+ *      platform-bound sessions (one chat session when threads are disabled),
+ *      marked as imports in metadata, never impersonating organic user turns.
+ *      Model calls happen later through the normal send path, so the existing
+ *      PII gate is unchanged.
  */
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
@@ -92,6 +93,8 @@ interface RawLarkHistoryItem {
   mentions?: unknown
   create_time?: string
   thread_id?: string | null
+  root_id?: string | null
+  parent_id?: string | null
   deleted?: boolean
 }
 
@@ -106,7 +109,8 @@ async function fetchVerifiedMessage(
   creds: LarkCredentials,
   adapterId: string,
   chatId: string,
-  messageId: string
+  messageId: string,
+  replyInThread: boolean
 ): Promise<{ event: NormalizedInboundEvent } | { skip: string }> {
   let raw: RawLarkHistoryItem | undefined
   try {
@@ -140,10 +144,14 @@ async function fetchVerifiedMessage(
         mentions: raw.mentions as never,
         create_time: raw.create_time,
         thread_id: raw.thread_id ?? null,
+        root_id: raw.root_id ?? null,
+        parent_id: raw.parent_id ?? null,
       },
     },
   }
-  const event = parseLarkEventEnvelope(adapterId, "", envelope)
+  const event = parseLarkEventEnvelope(adapterId, "", envelope, {
+    replyInThread: raw.chat_type === "p2p" && replyInThread,
+  })
   if (!event || !event.plainText.trim()) return { skip: "unsupported" }
   return { event }
 }
@@ -255,77 +263,132 @@ export async function importLarkMessages(
 
   const events: NormalizedInboundEvent[] = []
   const skipped: Array<{ messageId: string; reason: string }> = []
+  const replyInThread = adapterRow?.settings.replyInThread !== false
   for (const messageId of ids) {
-    const result = await fetchVerifiedMessage(deps, creds, input.adapterId, input.chatId, messageId)
+    const result = await fetchVerifiedMessage(
+      deps,
+      creds,
+      input.adapterId,
+      input.chatId,
+      messageId,
+      replyInThread
+    )
     if ("event" in result) events.push(result.event)
     else skipped.push({ messageId, reason: result.skip })
   }
   if (events.length === 0) return deny("no_importable_messages")
 
-  const conversationKey = buildConversationKey("lark", input.adapterId, input.chatId)
-  const sessionSeed: NormalizedInboundEvent = {
-    ...events[0],
-    adapterId: input.adapterId,
-    conversationKey,
-    channel: { ...events[0].channel, id: conversationKey },
+  const baseKey = buildConversationKey("lark", input.adapterId, input.chatId)
+  const conversations = new Map<string, NormalizedInboundEvent[]>()
+  for (const event of events) {
+    const key = event.channel.kind === "private" && replyInThread ? event.conversationKey : baseKey
+    const partition = conversations.get(key) ?? []
+    partition.push(event)
+    conversations.set(key, partition)
   }
-  const session = await createPlatformSession(sessionSeed, undefined)
 
-  const block = buildImportedContextBlock(events, { chatId: input.chatId, importedAt: now })
-  const message: StoredMessage = {
-    id: crypto.randomUUID(),
-    sessionId: session.id,
-    role: "user",
-    parts: [{ type: "text", text: block }],
-    metadata: {
-      larkImport: {
+  const db = getDb()
+  const createdSessionIds: string[] = []
+  // Commit every partition and the replay ledger together. A failed write
+  // leaves no partial sessions; the in-transaction replay check also makes
+  // simultaneous imports of the same selection converge on the original.
+  const outcome = await db.transaction(
+    "rw",
+    db.sessions,
+    db.messages,
+    db.larkMessageImports,
+    async (): Promise<Extract<ImportMessagesOutcome, { ok: true }>> => {
+      const replay = await findImportBySourceHash(sourceHash)
+      if (replay) {
+        return {
+          ok: true,
+          sessionId: replay.sessionId,
+          conversationKey: replay.conversationKey,
+          imported: replay.messageIds.length,
+          skipped: replay.skipped ?? [],
+          replay: true,
+        }
+      }
+
+      let primary: { sessionId: string; conversationKey: string } | undefined
+      for (const [conversationKey, partition] of conversations) {
+        const seed = partition[0]
+        const sessionSeed: NormalizedInboundEvent = {
+          ...seed,
+          adapterId: input.adapterId,
+          conversationKey,
+          channel: { ...seed.channel, id: conversationKey },
+        }
+        const session = await createPlatformSession(sessionSeed, undefined)
+        const block = buildImportedContextBlock(partition, {
+          chatId: input.chatId,
+          importedAt: now,
+        })
+        const message: StoredMessage = {
+          id: crypto.randomUUID(),
+          sessionId: session.id,
+          role: "user",
+          parts: [{ type: "text", text: block }],
+          metadata: {
+            larkImport: {
+              sourceHash,
+              chatId: input.chatId,
+              messageIds: partition.map((event) => event.messageId),
+              ...(input.triggerId ? { triggerId: input.triggerId } : {}),
+              importedAt: now,
+            },
+          },
+          createdAt: now,
+        }
+        await db.messages.add(message)
+        await stampSessionLastMessage(session.id, message)
+        createdSessionIds.push(session.id)
+        primary ??= { sessionId: session.id, conversationKey }
+      }
+      // The existing shortcut opens one session. Open the first imported
+      // thread; the other isolated threads remain available through /sessions.
+      const { sessionId, conversationKey } = primary!
+      await recordMessageImport({
         sourceHash,
+        adapterId: input.adapterId,
         chatId: input.chatId,
-        messageIds: ids,
-        ...(input.triggerId ? { triggerId: input.triggerId } : {}),
-        importedAt: now,
-      },
-    },
-    createdAt: now,
+        conversationKey,
+        sessionId,
+        messageIds: events.map((event) => event.messageId),
+        skipped: skipped.length > 0 ? skipped : undefined,
+        now,
+      })
+      return {
+        ok: true,
+        sessionId,
+        conversationKey,
+        imported: events.length,
+        skipped,
+        replay: false,
+      }
+    }
+  )
+  if (outcome.replay) return outcome
+  for (const sessionId of createdSessionIds) {
+    markSessionDirty(sessionId)
+    invalidatePersistSnapshot(sessionId)
   }
-  await getDb().messages.add(message)
-  await stampSessionLastMessage(session.id, message)
-  markSessionDirty(session.id)
-  invalidatePersistSnapshot(session.id)
-
-  await recordMessageImport({
-    sourceHash,
-    adapterId: input.adapterId,
-    chatId: input.chatId,
-    conversationKey,
-    sessionId: session.id,
-    messageIds: events.map((event) => event.messageId),
-    skipped: skipped.length > 0 ? skipped : undefined,
-    now,
-  })
   deps.metric("lark_message_imports_total")
   await deps
     .audit({
       adapterId: input.adapterId,
       kind: "shortcut.import",
       at: now,
-      conversationKey,
+      conversationKey: outcome.conversationKey,
       fields: {
         chatId: input.chatId,
         openIdHash,
         imported: events.length,
         skipped: skipped.length,
-        sessionId: session.id,
+        sessionId: outcome.sessionId,
       },
     })
     .catch(() => undefined)
 
-  return {
-    ok: true,
-    sessionId: session.id,
-    conversationKey,
-    imported: events.length,
-    skipped,
-    replay: false,
-  }
+  return outcome
 }

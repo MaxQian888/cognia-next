@@ -252,9 +252,18 @@ export interface SessionLine {
   active: boolean
 }
 
-export function renderSessions(lines: SessionLine[]): string {
-  if (lines.length === 0) return "本会话暂无子会话 / No sessions yet"
-  const out = ["会话列表 / Sessions:"]
+export function renderSessions(
+  lines: SessionLine[],
+  scope: "conversation" | "chat" = "conversation"
+): string {
+  if (lines.length === 0) {
+    return scope === "chat"
+      ? "本私聊暂无会话 / No sessions in this private chat yet"
+      : "本会话暂无子会话 / No sessions yet"
+  }
+  const out = [
+    scope === "chat" ? "本私聊的会话 / Sessions in this private chat:" : "会话列表 / Sessions:",
+  ]
   lines.forEach((s, i) => {
     out.push(`${i + 1}. ${s.title} (${s.idPrefix})${s.active ? "  ← 当前 / active" : ""}`)
   })
@@ -341,10 +350,19 @@ export function renderWorkflowAmbiguous(candidates: Array<{ id: string; name: st
   for (const c of candidates) out.push(`• ${c.name} (${c.id.slice(0, 8)})`)
   return out.join("\n")
 }
-export function confirmNewSession(title: string, idPrefix: string): string {
+export function confirmNewSession(title: string, idPrefix: string, inThread = false): string {
+  if (inThread) {
+    return [
+      `已在当前话题新建并切换会话 / New session in this thread: ${title} (${idPrefix})`,
+      "在此话题内回复可继续；每条新的顶层消息都会新建独立会话。 / Reply in this thread to continue; each new top-level message starts a separate conversation.",
+    ].join("\n")
+  }
   return `已新建并切换会话 / New session: ${title} (${idPrefix})`
 }
-export function confirmSwitched(title: string, idPrefix: string): string {
+export function confirmSwitched(title: string, idPrefix: string, inThread = false): string {
+  if (inThread) {
+    return `当前话题已切换会话 / This thread switched to: ${title} (${idPrefix})`
+  }
   return `已切换会话 / Switched to: ${title} (${idPrefix})`
 }
 

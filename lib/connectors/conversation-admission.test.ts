@@ -65,6 +65,20 @@ function event(options: {
   } satisfies NormalizedInboundEvent
 }
 
+function privateThreadEvent(
+  metadata: "channelKind" | "scopeKind" | "address"
+): NormalizedInboundEvent {
+  const followup: NormalizedInboundEvent = event({
+    mentioned: false,
+    thread: true,
+    replyParentSenderId: "ou-user-root",
+  })
+  if (metadata === "address") followup.conversationAddress!.scopeKind = "private"
+  else followup.conversationRef[metadata] = "private"
+  followup.channelData = { larkManagedThread: true }
+  return followup
+}
+
 describe("conversation admission", () => {
   beforeEach(async () => {
     await getDb().delete()
@@ -100,6 +114,27 @@ describe("conversation admission", () => {
     expect(resolveActivationTtlMs({ activationTtlMs: 30 })).toBe(30)
     expect(resolveActivationTtlMs({})).toBe(DEFAULT_TOPIC_ACTIVATION_TTL_MS)
   })
+
+  it.each(["channelKind", "scopeKind", "address"] as const)(
+    "admits unmentioned private thread replies to user roots using %s metadata",
+    async (metadata) => {
+      const followup = privateThreadEvent(metadata)
+      const adapter = {
+        id: "lk-1",
+        type: "lark",
+        settings: { replyInThread: true },
+        inboundActivationPolicy: "mention_each",
+        deliveryReadiness: "mentions_only",
+      } as unknown as AdapterInstanceRow
+
+      expect(await getDb().sessions.count()).toBe(0)
+      await expect(admitConversationEvent(followup, adapter)).resolves.toEqual({
+        allowed: true,
+        activated: false,
+      })
+      expect(await getConnectorConversationState(followup.conversationKey)).toBeUndefined()
+    }
+  )
 
   it("activates a verified topic on mention and accepts direct follow-ups until expiry", async () => {
     const adapter = await createAdapterInstance({
@@ -224,6 +259,23 @@ describe("evaluateAdmissionPolicy", () => {
       })
     ).toEqual({ kind: "allow" })
   })
+
+  it.each(["channelKind", "scopeKind", "address"] as const)(
+    "treats private thread %s metadata as a DM for every activation policy",
+    (metadata) => {
+      const followup = privateThreadEvent(metadata)
+      for (const policy of [
+        "always",
+        "mention_each",
+        "mention_activates",
+        "direct_only",
+      ] as const) {
+        const adapter = row({ inboundActivationPolicy: policy, deliveryReadiness: "mentions_only" })
+        expect(evaluateAdmissionPolicy({ event: followup, adapter })).toEqual({ kind: "allow" })
+        expect(shouldRespondToMessage(followup, adapter)).toEqual({ allowed: true })
+      }
+    }
+  )
 
   it("names activation state as its own outcome rather than guessing", () => {
     // This is the whole reason the function exists: a pure caller cannot see

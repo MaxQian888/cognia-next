@@ -92,6 +92,16 @@ export function addressesUs(event: NormalizedInboundEvent): boolean {
   return event.mentions.selfMentioned || isReplyToSelf(event)
 }
 
+function isPrivateConversation(event: NormalizedInboundEvent): boolean {
+  return (
+    event.channel.kind === "private" ||
+    (event.platform === "lark" &&
+      (event.conversationAddress?.scopeKind === "private" ||
+        event.conversationRef.channelKind === "private" ||
+        event.conversationRef.scopeKind === "private"))
+  )
+}
+
 /**
  * Apply conversation-aware admission after transport/chat-list validation.
  * Mention activation is intentionally limited to explicit thread scopes;
@@ -136,7 +146,7 @@ export function evaluateAdmissionPolicy(input: {
   roomReplyMode?: RoomReplyMode | null
 }): AdmissionPolicyOutcome {
   const { event, adapter } = input
-  if (event.channel.kind === "private") return { kind: "allow" }
+  if (isPrivateConversation(event)) return { kind: "allow" }
 
   if (input.roomReplyMode === "asleep") return { kind: "deny", reason: "room_asleep" }
   const policy =
@@ -203,7 +213,7 @@ export async function admitConversationEvent(
   } = {}
 ): Promise<ConversationAdmissionDecision> {
   if (event.kind && event.kind !== "create") return { allowed: true, activated: false }
-  if (event.channel.kind === "private") return { allowed: true, activated: false }
+  if (isPrivateConversation(event)) return { allowed: true, activated: false }
 
   const override =
     options.override === undefined

@@ -1,13 +1,11 @@
 /**
  * Feishu private chats with threaded replies.
  *
- * A private chat is one conversation: every message in it, and every reply in
- * any of its threads (话题), continues the same session. With the adapter's
- * `replyInThread` on, what the bot says about a message (its run card, the
- * answer, any notice) is posted into that message's thread instead of the
- * main chat, so the chat itself keeps only what the person wrote. The address
- * stays the whole chat (history, routing and the session key are unchanged);
- * only the delivery anchor moves, carried on the conversation reference.
+ * With `replyInThread` on, each top-level message starts its own conversation;
+ * replies inside that thread continue it. The stable root message id selects
+ * the session, while the latest inbound message id anchors the bot's replies
+ * (run cards, answers and notices) inside the same thread. Private scope is
+ * preserved so these threads never require an @mention.
  */
 
 /** Set on a private chat's conversation reference when its replies go into threads. */
