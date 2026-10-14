@@ -99,6 +99,55 @@ describe("run presentation refresh scheduling", () => {
 })
 
 describe("execution run presentation projection", () => {
+  it.each([
+    { native: true, runLocale: "zh-CN", expectedLocale: "zh-CN" },
+    { native: true, runLocale: undefined, expectedLocale: "en" },
+    { native: false, runLocale: "zh-CN", expectedLocale: "zh-CN" },
+    { native: false, runLocale: undefined, expectedLocale: "en" },
+  ])(
+    "projects locale $expectedLocale from run locale $runLocale with native delivery $native",
+    async ({ native, runLocale, expectedLocale }) => {
+      const driver: RunPresentationDriver = {
+        capabilities: { interactiveControls: true },
+        open: jest.fn(async () => ({ platformMessageId: "localized-message" })),
+        update: jest.fn(),
+        finish: jest.fn(),
+      }
+      const deliverFallback = jest.fn(async () => ({
+        ref: { platformMessageId: "localized-fallback" },
+        deliveryMode: "card-edit" as const,
+        delivered: true,
+      }))
+
+      await projectExecutionRunBinding(
+        { ...binding, locale: "en" },
+        { ...snapshot, locale: runLocale },
+        {
+          resolveDriver: () => driver,
+          deliverFallback,
+          saveBinding: jest.fn(async () => undefined),
+          recordDegraded: jest.fn(),
+          nativeEnabled: () => native,
+        }
+      )
+
+      if (native) {
+        expect(driver.open).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ locale: expectedLocale }),
+          expect.anything()
+        )
+        expect(deliverFallback).not.toHaveBeenCalled()
+      } else {
+        expect(deliverFallback).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ locale: expectedLocale })
+        )
+        expect(driver.open).not.toHaveBeenCalled()
+      }
+    }
+  )
+
   it("falls back to the command channel when no replyable Slack message exists", async () => {
     const request = jest.fn()
     const driver = createSlackRunPresentationDriver(request)
@@ -284,8 +333,8 @@ describe("execution run presentation projection", () => {
     const deliverMilestone = jest.fn(async () => undefined)
 
     await projectExecutionRunBinding(
-      { ...binding, platformMessageId: "message-1" },
-      { ...snapshot, kind: "workflow", status: "completed", revision: 3 },
+      { ...binding, platformMessageId: "message-1", locale: "en" },
+      { ...snapshot, kind: "workflow", status: "completed", revision: 3, locale: "zh-CN" },
       {
         resolveDriver: () => driver,
         deliverFallback: jest.fn(),
@@ -297,6 +346,15 @@ describe("execution run presentation projection", () => {
     )
 
     expect(deliverMilestone).toHaveBeenCalledTimes(1)
+    expect(deliverMilestone).toHaveBeenCalledWith(
+      expect.objectContaining({ locale: "en" }),
+      expect.objectContaining({ locale: "zh-CN" })
+    )
+    expect(driver.finish).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ locale: "zh-CN" }),
+      expect.anything()
+    )
   })
 
   it("does not project an already committed or disabled binding", async () => {
@@ -430,6 +488,70 @@ describe("execution run presentation projection", () => {
     expect(serialized).not.toContain("private.person@example.com")
     expect(serialized).not.toContain("secret graph payload")
     expect(serialized).not.toContain("token=secret")
+  })
+
+  it("preserves safe tool metadata and journal counts while sanitizing untrusted details", async () => {
+    let received: RunProjectionSnapshot | undefined
+    const driver: RunPresentationDriver = {
+      capabilities: { interactiveControls: true },
+      open: jest.fn(async (_target, projected) => {
+        received = projected
+        return { platformMessageId: "tool-metadata" }
+      }),
+      update: jest.fn(),
+      finish: jest.fn(),
+    }
+    const recordDegraded = jest.fn()
+    await projectExecutionRunBinding(
+      binding,
+      {
+        ...snapshot,
+        toolCount: 17,
+        failedToolCount: 3,
+        pendingInterrupt: {
+          id: "tool-interrupt:long-run-id:request",
+          requestId: "private.person@example.com",
+          title: "Approval required",
+        },
+        activities: [
+          {
+            id: "tool:issue-list",
+            kind: "tool",
+            category: "integration",
+            status: "failed",
+            label: "List issues",
+            toolName: "mcp__server__issue_list",
+            approval: { requestId: "private.person@example.com", status: "denied" },
+            failureReason: "Access denied for private.person@example.com",
+            startedAt: 1,
+            endedAt: 2,
+            ...{ input: { token: "private-tool-argument" } },
+          },
+        ],
+        activityCount: 17,
+        omittedActivityCount: 16,
+      },
+      {
+        resolveDriver: () => driver,
+        deliverFallback: jest.fn(),
+        saveBinding: jest.fn(async () => undefined),
+        recordDegraded,
+        nativeEnabled: () => true,
+      }
+    )
+
+    expect(received).toMatchObject({ toolCount: 17, failedToolCount: 3 })
+    expect(received?.pendingInterrupt?.requestId).toMatch(/^opaque-/)
+    expect(received?.activities).toEqual([
+      expect.objectContaining({
+        toolName: "issue_list",
+        approval: { requestId: expect.stringMatching(/^opaque-/), status: "denied" },
+        failureReason: "Access denied for <EMAIL_001>",
+      }),
+    ])
+    expect(recordDegraded).toHaveBeenCalledWith(binding, "pii_gate_blocked")
+    expect(JSON.stringify(received)).not.toContain("private.person@example.com")
+    expect(JSON.stringify(received)).not.toContain("private-tool-argument")
   })
 
   it("selects fallback delivery from real edit capability and append policy", () => {
@@ -637,7 +759,7 @@ describe("execution run presentation projection", () => {
       title: "Agent run",
       status: "running",
       currentRevision: snapshot.revision,
-      latestSnapshot: snapshot,
+      latestSnapshot: { ...snapshot, locale: "zh-CN" },
       startedAt: 1,
       updatedAt: 2,
     })
@@ -646,10 +768,16 @@ describe("execution run presentation projection", () => {
       adapterId: adapter.id,
       platformMessageId: "message-heartbeat",
       lastProjectedRevision: snapshot.revision,
+      locale: "en",
     })
 
     const heartbeat = heartbeatExecutionRunBinding(binding.id)
     await updateStarted
+    expect(driver.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ locale: "zh-CN" }),
+      expect.anything()
+    )
     const terminalSnapshot: RunProjectionSnapshot = {
       ...snapshot,
       status: "completed",

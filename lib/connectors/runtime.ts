@@ -99,6 +99,7 @@ import {
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
 import { AgentRunEventProducer } from "@/lib/execution/sources/agent-turn"
+import { sanitizeActivityLabel } from "@/lib/execution/run-activity"
 import { registerAgentRunController } from "@/lib/execution/control-handlers"
 import type { ConnectorLiveSteerCoordinator } from "./live-steer"
 import { sessionExecutionRootPath } from "@/lib/workspace/session-root"
@@ -1718,6 +1719,16 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           !requireAcceptance &&
           outboundTarget.adapterId === event.adapterId &&
           outboundTarget.conversationKey === event.conversationKey
+        // Persist one locale for the complete turn, including replay without
+        // an IM binding and the terminal result card.
+        const runLocale =
+          event.platform === "lark"
+            ? larkReplyLocale(event.plainText, appSettings?.language)
+            : appSettings?.language
+        const presentationTitle =
+          event.platform === "lark"
+            ? sanitizeActivityLabel(event.plainText.split(/\r?\n/, 1)[0], "Agent run")
+            : runTitle
         await createExecutionRun({
           id: executionRunId,
           ...(recoveryParentRunId ? { parentRunId: recoveryParentRunId } : {}),
@@ -1725,7 +1736,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           sourceId: storedMsg.id,
           sessionId: session.id,
           projectId: session.projectId,
-          title: runTitle,
+          title: presentationTitle,
           status: "queued",
           initiator: {
             platformIdentityId: event.sender.id,
@@ -1753,10 +1764,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             deliveryMode: "native",
             // A Feishu card answers in the language its reader wrote in,
             // not the host's own UI language.
-            locale:
-              event.platform === "lark"
-                ? larkReplyLocale(event.plainText, appSettings?.language)
-                : appSettings?.language,
+            locale: runLocale,
             sourceMessageId: event.canReplyToMessage === false ? undefined : event.messageId,
             deliveryTarget: deliveryTargetFromEvent(event),
             recipientUserId: event.sender.remoteUserId,
@@ -1781,7 +1789,11 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         })
         // Wall-clock turn start — also the result-card footer's elapsed base.
         const turnStartedAt = Date.now()
-        await runProducer.start(turnStartedAt, { recoveryAnchor })
+        await runProducer.start(turnStartedAt, {
+          recoveryAnchor,
+          locale: runLocale,
+          ...(event.platform === "lark" ? { title: presentationTitle, safeTitle: true } : {}),
+        })
         // Abort propagation: thread the per-adapter teardown signal (aborted
         // by the install teardown and by a lifecycle requeue/stop) into the
         // capture, so tearing the runtime down halts an in-flight turn instead
@@ -2193,7 +2205,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               /^ou_[A-Za-z0-9]+$/.test(event.sender.remoteUserId)
                 ? event.sender.remoteUserId
                 : undefined,
-            locale: larkReplyLocale(event.plainText, appSettings?.language),
+            locale: runLocale,
             detailsUrl:
               buildRunDetailsUrl(executionRunId, resolveWebEntryBase(adapterRow)) ?? undefined,
             fallbackAnswer: recoveredText,

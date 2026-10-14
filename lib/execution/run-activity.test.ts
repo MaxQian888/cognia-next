@@ -1,10 +1,87 @@
 import {
   safeActivityTarget,
   safeStableActivityId,
+  safeStepActivityId,
   safeToolActivityMetadata,
   sanitizeActivityCommentary,
   sanitizeActivityLabel,
+  safeToolActivityLabel,
+  activityApprovalRequestId,
+  foldToolApprovals,
 } from "./run-activity"
+import type { RunActivitySnapshot } from "@/types/execution/run"
+
+describe("tool approval projection", () => {
+  const tool: RunActivitySnapshot = {
+    id: "tool:call-1",
+    kind: "tool",
+    category: "integration",
+    status: "running",
+    toolName: "issue_list",
+    label: "Issue list",
+    startedAt: 1,
+  }
+  const approval: RunActivitySnapshot = {
+    id: "approval:action-review:request-1",
+    kind: "approval",
+    category: "approval",
+    status: "blocked",
+    toolName: "issue_list",
+    label: "Approval required",
+    startedAt: 2,
+  }
+
+  it("normalizes known aliases and humanizes bare tool names", () => {
+    expect(activityApprovalRequestId("action-review:request-1", "run-1")).toBe("request-1")
+    expect(activityApprovalRequestId("tool-interrupt:run-1:request-1", "run-1")).toBe("request-1")
+    expect(activityApprovalRequestId("tool-interrupt:other:request-1", "run-1")).toBe(
+      "tool-interrupt:other:request-1"
+    )
+    expect(safeToolActivityLabel("mcp__issues__issue_list_projects")).toBe("Issue list projects")
+    expect(safeToolActivityLabel("mcp__issues_____")).toBe("___")
+    expect(safeToolActivityLabel("___")).toBe("___")
+    expect(safeToolActivityLabel("tool")).toBe("Tool")
+  })
+
+  it("folds a matching approval and settles it from either duplicate bridge", () => {
+    expect(
+      foldToolApprovals(
+        [
+          tool,
+          approval,
+          {
+            ...approval,
+            id: "approval:tool-interrupt:run-1:request-1",
+            status: "completed",
+            endedAt: 3,
+          },
+        ],
+        "run-1"
+      )
+    ).toEqual([{ ...tool, approval: { requestId: "request-1", status: "approved" } }])
+  })
+
+  it("keeps unnamed and ambiguous concurrent approvals standalone", () => {
+    const unnamed = { ...approval, toolName: undefined }
+    expect(foldToolApprovals([tool, unnamed], "run-1")).toHaveLength(2)
+    const concurrent = { ...tool, id: "tool:call-2" }
+    const rows = foldToolApprovals([tool, concurrent, approval], "run-1")
+    expect(rows).toHaveLength(3)
+    expect(rows.filter((row) => row.kind === "tool").every((row) => !row.approval)).toBe(true)
+  })
+
+  it("uses request identity ahead of ambiguous tool names and matches the active sequential call", () => {
+    const concurrent = { ...tool, id: "tool:request-1" }
+    const direct = foldToolApprovals([tool, concurrent, approval], "run-1")
+    expect(direct.find((row) => row.id === concurrent.id)?.approval?.status).toBe("pending")
+    const later = { ...tool, id: "tool:later", startedAt: 4 }
+    const sequential = foldToolApprovals(
+      [{ ...tool, endedAt: 3, status: "completed" }, later, { ...approval, startedAt: 5 }],
+      "run-1"
+    )
+    expect(sequential.find((row) => row.id === later.id)?.approval?.status).toBe("pending")
+  })
+})
 
 describe("safeStableActivityId", () => {
   it("preserves ordinary generated ids but hashes PII-shaped or malformed ids", () => {
@@ -12,6 +89,18 @@ describe("safeStableActivityId", () => {
     expect(safeStableActivityId("13800138000")).toMatch(/^opaque-[0-9a-f]{8}$/)
     expect(safeStableActivityId("private.person@example.com")).toMatch(/^opaque-[0-9a-f]{8}$/)
     expect(safeStableActivityId("../../private")).toMatch(/^opaque-[0-9a-f]{8}$/)
+  })
+
+  it("retains semantic step prefixes across repeated sanitization", () => {
+    for (const id of [
+      "tool:" + "a".repeat(93),
+      "tool:" + "a".repeat(120),
+      "commentary:../../private",
+    ]) {
+      const safe = safeStepActivityId(id)
+      expect(safe).toMatch(/^(tool|commentary):/)
+      expect(safeStepActivityId(safe)).toBe(safe)
+    }
   })
 })
 

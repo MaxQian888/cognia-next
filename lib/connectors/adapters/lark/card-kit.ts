@@ -140,7 +140,7 @@ export interface LarkCardInput {
   elements: Record<string, unknown>[]
   /** Chat-list and notification preview. Defaults to the title. */
   summary?: string
-  widthMode?: "compact" | "fill"
+  widthMode?: "default" | "compact" | "fill"
 }
 
 /** A whole Card 2.0 payload in the shared frame. */

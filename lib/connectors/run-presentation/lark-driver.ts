@@ -22,6 +22,7 @@ import type {
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
 import {
   runActivitiesForPresentation,
+  runMilestonesForPresentation,
   runTitleForPresentation,
 } from "@/lib/connectors/activity/activity-to-a2ui"
 import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
@@ -61,7 +62,7 @@ const CARD_CREATED_AT_KEY = "cardCreatedAt"
 const SUMMARY_ELEMENT_ID = "run_summary"
 const STATUS_ELEMENT_ID = "run_status"
 const ACTIONS_ELEMENT_ID = "run_actions"
-const CARD_LAYOUT_VERSION = 3
+const CARD_LAYOUT_VERSION = 4
 const MAX_MUTATION_ATTEMPTS = 3
 const MUTATION_SAFETY_VERSION = 1
 
@@ -383,13 +384,11 @@ function cardJson(
         print_strategy: "fast",
       },
     },
-    // The state is the headline; what is running is the subtitle, left out
-    // when it is only the generic kind ("Agent"). In a thread the question it
-    // answers sits right above the card already.
+    // The state is the headline; the request or localized kind is the subtitle.
     header: {
       ...larkCardHeader({
         title: statusLabel,
-        ...(title !== i18n.runKind(snapshot.kind) ? { subtitle: clamp(title, 120) } : {}),
+        subtitle: clamp(title, 120),
         icon: look.icon,
         tone: look.tone,
       }),
@@ -533,14 +532,31 @@ function statusContent(
   const safeLabel = (value: unknown, fallback: string) =>
     escapeLarkCardText(sanitizeActivityLabel(value, fallback))
   // The header names the state; this line only measures it.
+  const hasPlan =
+    snapshot.kind === "workflow" ||
+    snapshot.kind === "plan" ||
+    snapshot.planVersion !== undefined ||
+    runMilestonesForPresentation(snapshot) !== undefined
+  const tools = runActivitiesForPresentation(snapshot).filter(
+    (activity) => activity.kind === "tool"
+  )
+  const toolCount = snapshot.toolCount ?? tools.length
+  const failedToolCount =
+    snapshot.failedToolCount ??
+    tools.filter(
+      (activity) =>
+        activity.status === "failed" ||
+        activity.approval?.status === "denied" ||
+        activity.approval?.status === "expired"
+    ).length
   const measures = [
-    presentation.showElapsed
-      ? `${i18n.elapsedLabel} ${i18n.elapsed(Math.max(0, Math.round(snapshot.elapsedMs / 1000)))}`
-      : undefined,
+    presentation.showElapsed ? i18n.runElapsed(snapshot.elapsedMs / 1000) : undefined,
     presentation.showProgress
-      ? snapshot.progress.trustworthy && snapshot.progress.total > 0
-        ? `${i18n.progressLabel} ${snapshot.progress.completed}/${snapshot.progress.total}`
-        : i18n.completedActivities(snapshot.progress.completed)
+      ? !hasPlan
+        ? i18n.toolSummary(toolCount, failedToolCount)
+        : snapshot.progress.trustworthy && snapshot.progress.total > 0
+          ? `${i18n.progressLabel} ${snapshot.progress.completed}/${snapshot.progress.total}`
+          : i18n.completedActivities(snapshot.progress.completed)
       : undefined,
   ].filter(Boolean)
   const overview = measures.length ? larkGreyText(measures.join(" · ")) : undefined

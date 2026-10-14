@@ -34,6 +34,47 @@ function activity(overrides: Partial<RunActivitySnapshot> = {}): RunActivitySnap
   }
 }
 
+it.each(["en", "zh-CN"])(
+  "shows folded approval states and safe failures in %s tool rows",
+  (locale) => {
+    const i18n = resolveActivityI18n(locale)
+    for (const status of ["pending", "approved", "denied", "expired"] as const) {
+      const text = formatLarkRunTimeline(
+        {
+          ...snapshot,
+          activities: [
+            activity({
+              label: "mcp__issues__issue_list",
+              status: "running",
+              endedAt: undefined,
+              approval: { requestId: "request", status },
+            }),
+          ],
+        },
+        i18n
+      )
+      expect(text).toContain("Issue list")
+      expect(text).toContain(
+        status === "approved" ? i18n.activityStatus("running") : i18n.approvalStatus(status)
+      )
+    }
+    const text = formatLarkRunTimeline(
+      {
+        ...snapshot,
+        activities: [
+          activity({
+            status: "failed",
+            failureReason: "Request timed out",
+            target: { kind: "workspace_path", label: "src/index.ts" },
+          }),
+        ],
+      },
+      i18n
+    )
+    expect(text).toContain("<font color='grey'>· 1.2s · src/index.ts</font> — Request timed out")
+  }
+)
+
 it.each(["en", "zh-CN"])("renders one compact, entity-escaped row per step in %s", (locale) => {
   const text = formatLarkRunTimeline(
     {

@@ -50,6 +50,66 @@ function snapshot(kind: RunProjectionSnapshot["kind"]): RunProjectionSnapshot {
 }
 
 describe("Slack run presentation driver", () => {
+  it.each(["pending", "approved", "denied", "expired"] as const)(
+    "projects a folded %s approval into one Slack tool task",
+    async (status) => {
+      const calls: Record<string, unknown>[] = []
+      const driver = createSlackRunPresentationDriver(async (_method, _path, body) => {
+        calls.push(body as Record<string, unknown>)
+        return { ok: true, ts: "1" }
+      })
+      await driver.open(
+        {
+          adapterId: "slack-1",
+          conversationKey: "slack:slack-1:C1",
+          sourceMessageId: "0.1",
+          deliveryTarget,
+        },
+        {
+          ...snapshot("agent-turn"),
+          activities: [
+            {
+              id: "start",
+              kind: "lifecycle",
+              category: "status",
+              status: "completed",
+              label: "Run started",
+              startedAt: 0,
+            },
+            {
+              id: "tool:call",
+              kind: "tool",
+              category: "integration",
+              status: "running",
+              toolName: "issue_list",
+              label: "issue_list",
+              startedAt: 1,
+            },
+            {
+              id: "approval:request",
+              kind: "approval",
+              category: "approval",
+              status: "blocked",
+              toolName: "issue_list",
+              label: "Approval required",
+              approval: { requestId: "request", status },
+              startedAt: 2,
+            },
+          ],
+        }
+      )
+      expect(calls[0].chunks).toEqual([
+        expect.objectContaining({ type: "plan_update" }),
+        expect.objectContaining({
+          type: "task_update",
+          id: "tool:call",
+          title: "Issue list",
+          status: status === "denied" || status === "expired" ? "error" : "in_progress",
+        }),
+      ])
+      if (status === "pending") expect(JSON.stringify(calls)).toContain("Waiting for approval")
+    }
+  )
   it("uses plan mode for workflows and clamps task chunks to 256 characters", async () => {
     const calls: Array<{ path: string; body: Record<string, unknown> }> = []
     const driver = createSlackRunPresentationDriver(async (_method, path, body) => {

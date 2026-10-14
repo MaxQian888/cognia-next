@@ -8,6 +8,8 @@ import type { RunEvent } from "@/types/execution/run"
 import type { RunActivityCategory } from "@/types/execution/run"
 import {
   sanitizeActivityCommentary,
+  sanitizeActivityLabel,
+  safeToolActivityLabel,
   safeToolActivityMetadata,
   type SafeToolActivityMetadata,
 } from "@/lib/execution/run-activity"
@@ -18,6 +20,33 @@ import {
 import { parseVerificationOutput } from "@/lib/execution/verification/parse"
 
 type Append = (runId: string, input: AppendRunEventInput) => Promise<RunEvent>
+
+function toolFailureReason(result: unknown): string | undefined {
+  let reason: unknown = result
+  let content: unknown = Array.isArray(result) ? result : undefined
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const row = result as Record<string, unknown>
+    const error = row.error
+    reason =
+      typeof error === "string"
+        ? error
+        : error && typeof error === "object"
+          ? (error as Record<string, unknown>).message
+          : (row.message ?? row.text)
+    content = row.content
+  }
+  if (typeof reason !== "string" && Array.isArray(content)) {
+    reason = content
+      .filter(
+        (item) =>
+          item && typeof item === "object" && item.type === "text" && typeof item.text === "string"
+      )
+      .map((item) => item.text)
+      .join("\n")
+  }
+  if (typeof reason !== "string" || !reason.trim()) return undefined
+  return sanitizeActivityLabel(reason.trim().split(/\r?\n/)[0], "Tool failed")
+}
 
 function safeToolSummary(category: RunActivityCategory): {
   running: string
@@ -124,7 +153,10 @@ export class AgentRunEventProducer {
       const stepId = `tool:${toolCallId}`
       const metadata = safeToolActivityMetadata(event.toolName, event.input, this.options)
       const summary = safeToolSummary(metadata.category)
-      const label = summary.running
+      const label =
+        metadata.category === "integration"
+          ? safeToolActivityLabel(metadata.toolName)
+          : summary.running
       this.stepByToolCall.set(toolCallId, stepId)
       this.metadataByToolCall.set(toolCallId, metadata)
       await this.append(
@@ -169,8 +201,12 @@ export class AgentRunEventProducer {
       const metadata =
         this.metadataByToolCall.get(toolCallId) ?? safeToolActivityMetadata(event.toolName)
       const summary = safeToolSummary(metadata.category)
-      const label = summary.running
+      const label =
+        metadata.category === "integration"
+          ? safeToolActivityLabel(metadata.toolName)
+          : summary.running
       const failed = event.isError === true
+      const failureReason = failed ? toolFailureReason(event.result) : undefined
       await this.append(
         this.runId,
         semanticRunEvent(
@@ -180,6 +216,7 @@ export class AgentRunEventProducer {
             toolName: metadata.toolName,
             category: metadata.category,
             summary: failed ? "Tool failed" : summary.completed,
+            ...(failureReason ? { failureReason, safeFailureReason: true } : {}),
             ...(metadata.target ? { target: metadata.target } : {}),
           },
           { ts }

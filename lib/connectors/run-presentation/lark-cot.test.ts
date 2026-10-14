@@ -10,6 +10,7 @@ import {
 } from "./lark-cot"
 import type { LarkCotEvent, LarkCotProjectionState } from "./lark-cot"
 import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
+import { safeStableActivityId } from "@/lib/execution/run-activity"
 import type { RunProjectionSnapshot } from "@/types/execution/run"
 
 const i18n = resolveActivityI18n("en")
@@ -143,6 +144,177 @@ describe("projectLarkCotEvents", () => {
     expect(JSON.stringify(events)).not.toContain("TOOL_CALL_ARGS")
   })
 
+  it.each([
+    ["Permission denied", "Permission denied"],
+    ["curl https://private.example.com?token=secret", "Tool failed"],
+  ])("renders only the safe failure reason from %s", (failureReason, expected) => {
+    const { events } = projectLarkCotEvents(
+      createLarkCotProjectionState(),
+      base({
+        activities: [
+          {
+            id: "tool:integration",
+            kind: "tool",
+            category: "integration",
+            label: "List issues",
+            status: "failed",
+            failureReason,
+            startedAt: 1,
+            endedAt: 2,
+          },
+        ],
+      }),
+      i18n,
+      1_000
+    )
+    const result = content(events.find((event) => event.event_type === "TOOL_CALL_RESULT")!)
+    expect(JSON.parse(result.content as string)).toEqual({ type: "text", text: expected })
+  })
+
+  it("keeps an approval on its tool row through pending, approval, and completion", () => {
+    const snapshot = base({
+      status: "waiting",
+      pendingInterrupt: { id: "tool-interrupt:run-1:approval-1", title: "Approval required" },
+      activeSteps: [{ id: "tool:call-1", title: "Using an integration", status: "in_progress" }],
+      activities: [
+        {
+          id: "tool:call-1",
+          kind: "tool",
+          category: "integration",
+          status: "running",
+          label: "issue_list",
+          toolName: "mcp__issues__issue_list",
+          startedAt: 1,
+        },
+        ...["action-review:approval-1", "tool-interrupt:run-1:approval-1"].map((id) => ({
+          id: `approval:${id}`,
+          kind: "approval" as const,
+          category: "approval" as const,
+          status: "running" as const,
+          label: "Approval required",
+          toolName: "mcp__issues__issue_list",
+          approval: { requestId: "approval-1", status: "pending" as const },
+          startedAt: 2,
+        })),
+      ],
+    })
+    const first = projectLarkCotEvents(
+      createLarkCotProjectionState(),
+      snapshot,
+      resolveActivityI18n("zh"),
+      1_000
+    )
+    expect(types(first.events)).toEqual(["RUN_STARTED", "TOOL_CALL_START", "TOOL_CALL_RESULT"])
+    const pending = content(first.events[2]!)
+    expect(pending.toolCallId).toBe("tool:call-1")
+    expect(JSON.parse(pending.content as string)).toEqual({ type: "text", text: "等待审批" })
+    expect(first.state.openTools).toEqual(["tool:call-1"])
+    expect(first.state.openSteps).toEqual({})
+    const duplicate = projectLarkCotEvents(first.state, snapshot, resolveActivityI18n("zh"), 1_500)
+    expect(duplicate.events).toEqual([])
+    expect(duplicate.state).toBe(first.state)
+
+    const approved = base({
+      revision: 2,
+      activities: [
+        {
+          ...snapshot.activities![0]!,
+          approval: { requestId: "approval-1", status: "approved" },
+        },
+      ],
+    })
+    const resumed = projectLarkCotEvents(first.state, approved, resolveActivityI18n("zh"), 2_000)
+    expect(types(resumed.events)).toEqual(["TOOL_CALL_RESULT"])
+    const resumedResult = content(resumed.events[0]!)
+    expect(resumedResult.messageId).toBe(pending.messageId)
+    expect(JSON.parse(resumedResult.content as string)).toEqual({ type: "text", text: "进行中" })
+    const done = projectLarkCotEvents(
+      resumed.state,
+      base({
+        activities: [{ ...approved.activities![0]!, status: "completed", endedAt: 3 }],
+      }),
+      resolveActivityI18n("zh"),
+      3_000
+    )
+    expect(types(done.events)).toEqual(["TOOL_CALL_END", "TOOL_CALL_RESULT"])
+    expect(done.state.toolResults).toEqual({})
+    expect(first.state.toolResults).toEqual({ "tool:call-1": "等待审批" })
+  })
+
+  it.each([
+    ["denied", "Denied"],
+    ["expired", "Expired"],
+  ] as const)("shows a %s approval inside the gated tool row", (status, expected) => {
+    const { events, state } = projectLarkCotEvents(
+      createLarkCotProjectionState(),
+      base({
+        activities: [
+          {
+            id: "tool:read",
+            kind: "tool",
+            category: "read",
+            status: "running",
+            label: "Read",
+            approval: { requestId: "request-1", status },
+            startedAt: 1,
+          },
+        ],
+      }),
+      i18n,
+      1_000
+    )
+    expect(types(events)).toEqual([
+      "RUN_STARTED",
+      "TOOL_CALL_START",
+      "TOOL_CALL_END",
+      "TOOL_CALL_RESULT",
+    ])
+    const result = content(events[3]!)
+    expect(JSON.parse(result.content as string)).toEqual({ type: "text", text: expected })
+    expect(state.openTools).toEqual([])
+    expect(state.settled).toContain("tool:read")
+  })
+
+  it.each([false, true])(
+    "keeps a long interrupt identity attached to its tool when run id is hashed: %s",
+    (hashRunId) => {
+      const runId =
+        "execution:agent:00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-000000000002:attempt:a1"
+      const requestId = "00000000-0000-4000-8000-000000000003"
+      const interruptId = safeStableActivityId(`tool-interrupt:${runId}:${requestId}`)
+      expect(interruptId).toMatch(/^opaque-/)
+      expect(safeStableActivityId(runId)).toMatch(/^opaque-/)
+      const { events, state } = projectLarkCotEvents(
+        createLarkCotProjectionState(),
+        base({
+          runId: hashRunId ? safeStableActivityId(runId) : runId,
+          status: "waiting",
+          pendingInterrupt: {
+            id: interruptId,
+            requestId,
+            title: "Approval required",
+          },
+          activities: [
+            {
+              id: "tool:call-1",
+              kind: "tool",
+              category: "integration",
+              status: "running",
+              label: "List issues",
+              approval: { requestId, status: "pending" },
+              startedAt: 1,
+            },
+          ],
+        }),
+        i18n,
+        1_000
+      )
+      expect(types(events)).toEqual(["RUN_STARTED", "TOOL_CALL_START", "TOOL_CALL_RESULT"])
+      expect(state.waitingInterruptId).toBeUndefined()
+      expect(state.openSteps).toEqual({})
+    }
+  )
+
   it("extends a growing commentary label with only the suffix delta", () => {
     const snap = (label: string) =>
       base({
@@ -237,6 +409,57 @@ describe("projectLarkCotEvents", () => {
     expect(resumed.state.waitingInterruptId).toBeUndefined()
   })
 
+  it.each([
+    ["denied", "Denied"],
+    ["expired", "Expired"],
+  ] as const)("keeps an unmatched approval visible when it becomes %s", (status, label) => {
+    const snapshot = base({
+      status: "waiting",
+      pendingInterrupt: { id: "action-review:request-1", title: "Approval required" },
+      activities: [
+        {
+          id: "approval:request-1",
+          kind: "approval",
+          category: "approval",
+          status: "running",
+          label: "Approval required",
+          approval: { requestId: "request-1", status: "pending" },
+          startedAt: 1,
+        },
+      ],
+    })
+    const first = projectLarkCotEvents(createLarkCotProjectionState(), snapshot, i18n, 1_000)
+    expect(types(first.events)).toEqual(["RUN_STARTED", "STEP_STARTED"])
+    expect(content(first.events[1]!)).toEqual({
+      stepId: "approval:request-1",
+      stepName: "Approval required · Waiting for approval",
+    })
+    expect(first.state.waitingInterruptId).toBeUndefined()
+    const settled = base({
+      activities: [
+        {
+          ...snapshot.activities![0]!,
+          status: "failed",
+          approval: { requestId: "request-1", status },
+          endedAt: 2,
+        },
+      ],
+    })
+    const decision = projectLarkCotEvents(first.state, settled, i18n, 2_000)
+    expect(types(decision.events)).toEqual(["STEP_FINISHED"])
+    expect(content(decision.events[0]!)).toEqual({
+      stepId: "approval:request-1",
+      stepName: `Approval required · ${label}`,
+    })
+    expect(decision.state.openSteps).toEqual({})
+    expect(projectLarkCotEvents(decision.state, settled, i18n, 3_000).events).toEqual([])
+
+    const initial = projectLarkCotEvents(createLarkCotProjectionState(), settled, i18n, 4_000)
+    expect(types(initial.events)).toEqual(["RUN_STARTED", "STEP_STARTED", "STEP_FINISHED"])
+    expect(content(initial.events[1]!).stepName).toBe(`Approval required · ${label}`)
+    expect(content(initial.events[2]!).stepName).toBe(`Approval required · ${label}`)
+  })
+
   it("tracks plan milestones from activeSteps that have no activity row", () => {
     // An unrelated activity row keeps the legacy step-fallback off, so the
     // in-progress durable step reaches the milestone path.
@@ -296,7 +519,31 @@ describe("projectLarkCotEvents", () => {
     expect(types(events).filter((type) => type.startsWith("STEP_"))).toEqual([])
   })
 
-  it("emits START+FINISH for an artifact and ignores approval/lifecycle rows", () => {
+  it("never promotes tool steps missing from the activity window into plan milestones", () => {
+    const { events } = projectLarkCotEvents(
+      createLarkCotProjectionState(),
+      base({
+        activeSteps: [
+          { id: "tool:old-call", title: "Using an integration", status: "in_progress" },
+        ],
+        activities: [
+          {
+            id: "tool:current-call",
+            kind: "tool",
+            category: "read",
+            status: "running",
+            label: "Read",
+            startedAt: 1,
+          },
+        ],
+      }),
+      i18n,
+      1_000
+    )
+    expect(types(events)).toEqual(["RUN_STARTED", "TOOL_CALL_START"])
+  })
+
+  it("emits artifact and unmatched approval steps while ignoring lifecycle rows", () => {
     const snapshot = base({
       activities: [
         {
@@ -332,8 +579,12 @@ describe("projectLarkCotEvents", () => {
       i18n,
       1_000
     )
-    expect(types(events)).toEqual(["RUN_STARTED", "STEP_STARTED", "STEP_FINISHED"])
+    expect(types(events)).toEqual(["RUN_STARTED", "STEP_STARTED", "STEP_FINISHED", "STEP_STARTED"])
     expect(content(events[1]!)).toEqual({ stepId: "artifact:1", stepName: "Report" })
+    expect(content(events[3]!)).toEqual({
+      stepId: "approval:1",
+      stepName: "Approval required · Waiting for approval",
+    })
     expect(state.settled).toContain("artifact:1")
   })
 
@@ -502,6 +753,18 @@ describe("isLarkCotProjectionState", () => {
       false
     )
     expect(isLarkCotProjectionState({ ...createLarkCotProjectionState(), settled: [1] })).toBe(
+      false
+    )
+    expect(
+      isLarkCotProjectionState({
+        ...createLarkCotProjectionState(),
+        toolResults: { tool: "Waiting" },
+      })
+    ).toBe(true)
+    expect(
+      isLarkCotProjectionState({ ...createLarkCotProjectionState(), toolResults: { tool: 1 } })
+    ).toBe(false)
+    expect(isLarkCotProjectionState({ ...createLarkCotProjectionState(), toolResults: [] })).toBe(
       false
     )
     expect(isLarkCotProjectionState(undefined)).toBe(false)

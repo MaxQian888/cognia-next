@@ -21,11 +21,16 @@
  * `runActivitiesForPresentation` (already sanitized), sanitized step titles,
  * or fixed i18n strings. Raw tool args, raw errors, and reasoning text never
  * cross into a COT event — `TOOL_CALL_ARGS` is deliberately never sent (it is
- * invisible to clients anyway) and the failed-tool RESULT is a fixed label.
+ * invisible to clients anyway). Tool RESULT rows contain localized status
+ * or the activity's declared safe failure reason.
  */
 import { runActivitiesForPresentation } from "@/lib/connectors/activity/activity-to-a2ui"
 import type { ActivityI18n } from "@/lib/connectors/activity/i18n"
-import { safeStableActivityId, sanitizeActivityLabel } from "@/lib/execution/run-activity"
+import {
+  activityApprovalRequestId,
+  safeStableActivityId,
+  sanitizeActivityLabel,
+} from "@/lib/execution/run-activity"
 import type { RunActivityCategory, RunProjectionSnapshot } from "@/types/execution/run"
 import type { LarkRunRequest } from "./lark-driver"
 
@@ -55,6 +60,8 @@ export interface LarkCotProjectionState {
   openReasoning?: { sourceId: string; messageId: string; label: string }
   /** Activity ids with a TOOL_CALL_START not yet closed by TOOL_CALL_END. */
   openTools: string[]
+  /** Last visible status note for open tools; absent in older persisted states. */
+  toolResults?: Record<string, string>
   /** stepId → stepName for STEP_STARTED rows not yet STEP_FINISHED. */
   openSteps: Record<string, string>
   /** Ids fully emitted; never re-emit them when they linger in the window. */
@@ -104,6 +111,11 @@ export function isLarkCotProjectionState(value: unknown): value is LarkCotProjec
         typeof open.label === "string")) &&
     Array.isArray(state.openTools) &&
     state.openTools.every((id) => typeof id === "string") &&
+    (state.toolResults === undefined ||
+      (!!state.toolResults &&
+        typeof state.toolResults === "object" &&
+        !Array.isArray(state.toolResults) &&
+        Object.values(state.toolResults).every((text) => typeof text === "string"))) &&
     !!state.openSteps &&
     typeof state.openSteps === "object" &&
     !Array.isArray(state.openSteps) &&
@@ -173,8 +185,8 @@ const TOOL_CLOSED_STATUSES = new Set(["completed", "failed", "skipped", "blocked
  * Choreography mirrors the proven timeline writer: narrative status rows
  * become numbered REASONING segments (fresh `reasoning_N` per source so text
  * interleaves with tool rows instead of aggregating into one block), tools
- * become START/END rows with a RESULT row only on failure, durable steps and
- * pending interrupts become STEP rows, and a terminal status closes every
+ * become START/END rows with RESULT notes for approval state or failure,
+ * durable steps and unmatched pending interrupts become STEP rows, and a terminal status closes every
  * open row before RUN_FINISHED / RUN_ERROR. `parentMessageId` is never sent —
  * it has no layout effect on the client.
  *
@@ -197,6 +209,7 @@ export function projectLarkCotEvents(
       next = {
         ...state,
         openTools: [...state.openTools],
+        ...(state.toolResults ? { toolResults: { ...state.toolResults } } : {}),
         openSteps: { ...state.openSteps },
         settled: [...state.settled],
       }
@@ -229,6 +242,7 @@ export function projectLarkCotEvents(
     if (!next.openTools.includes(toolCallId)) return
     push("TOOL_CALL_END", { toolCallId })
     edit().openTools = next.openTools.filter((id) => id !== toolCallId)
+    if (next.toolResults) delete edit().toolResults![toolCallId]
   }
 
   if (!next.started) {
@@ -274,30 +288,62 @@ export function projectLarkCotEvents(
       continue
     }
     if (activity.kind === "tool") {
-      // A pending activity has not started; a blocked/ended one is over.
-      if (activity.status === "pending") continue
+      const approval = activity.approval?.status
+      // A pending approval still needs its gated tool row before execution starts.
+      if (activity.status === "pending" && !approval) continue
       if (!next.openTools.includes(activity.id)) {
+        const label = i18n.activityLabel(activity)
         push("TOOL_CALL_START", {
           toolCallId: activity.id,
-          toolCallName: activity.label,
-          title: activity.target ? `${activity.label} · ${activity.target.label}` : activity.label,
+          toolCallName: label,
+          title: activity.target ? `${label} · ${activity.target.label}` : label,
           icon: COT_TOOL_ICON[activity.category] ?? "default",
         })
         edit().openTools.push(activity.id)
       }
-      if (TOOL_CLOSED_STATUSES.has(activity.status)) {
-        endTool(activity.id)
-        if (activity.status === "failed") {
-          // RESULT is the only row that renders under a tool line; keep it for
-          // real failures. The payload is a fixed localized string, never the
-          // raw error.
-          push("TOOL_CALL_RESULT", {
-            messageId: `result_${activity.id}`,
-            toolCallId: activity.id,
-            role: "tool",
-            content: JSON.stringify({ type: "text", text: i18n.cotToolFailed }),
-          })
-        }
+      const previousResult = next.toolResults?.[activity.id]
+      const closed =
+        approval === "denied" ||
+        approval === "expired" ||
+        (approval !== "pending" && TOOL_CLOSED_STATUSES.has(activity.status))
+      const resultText =
+        approval === "pending" || approval === "denied" || approval === "expired"
+          ? [
+              i18n.approvalStatus(approval),
+              approval !== "pending" && activity.status === "failed"
+                ? activity.failureReason
+                : undefined,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : activity.status === "failed"
+            ? activity.failureReason || i18n.cotToolFailed
+            : previousResult
+              ? i18n.activityStatus(activity.status)
+              : undefined
+      if (closed) endTool(activity.id)
+      if (resultText && resultText !== previousResult) {
+        // A stable result id keeps approval updates attached to the gated tool.
+        push("TOOL_CALL_RESULT", {
+          messageId: `result_${activity.id}`,
+          toolCallId: activity.id,
+          role: "tool",
+          content: JSON.stringify({ type: "text", text: resultText }),
+        })
+        if (!closed) edit().toolResults = { ...next.toolResults, [activity.id]: resultText }
+      }
+      if (closed) settle(activity.id)
+      continue
+    }
+    if (activity.kind === "approval") {
+      const approval = activity.approval?.status ?? "pending"
+      const stepName = `${i18n.activityLabel(activity)} · ${i18n.approvalStatus(approval)}`
+      if (!(activity.id in next.openSteps)) {
+        push("STEP_STARTED", { stepId: activity.id, stepName })
+      }
+      if (next.openSteps[activity.id] !== stepName) edit().openSteps[activity.id] = stepName
+      if (approval !== "pending") {
+        finishStep(activity.id)
         settle(activity.id)
       }
       continue
@@ -321,7 +367,7 @@ export function projectLarkCotEvents(
       }
       continue
     }
-    // lifecycle + approval rows stay on the card; the COT ignores them.
+    // Lifecycle rows do not become process steps.
   }
 
   // Plan milestones: in-progress durable steps with no activity row of their
@@ -334,6 +380,7 @@ export function projectLarkCotEvents(
     if (activity.id.startsWith("legacy-step:")) represented.add(activity.id.slice(12))
   }
   for (const step of snapshot.activeSteps) {
+    if (step.id.startsWith("tool:")) continue
     if (step.status !== "in_progress") continue
     if (represented.has(step.id) || represented.has(safeStableActivityId(step.id))) continue
     const stepId = `step:${safeStableActivityId(step.id)}`
@@ -344,9 +391,21 @@ export function projectLarkCotEvents(
   }
 
   // A pending interrupt is a waiting STEP row — "任务进行中" until resolved.
-  const waitingKey = snapshot.pendingInterrupt
-    ? safeStableActivityId(snapshot.pendingInterrupt.id)
+  const pendingApprovalRequestId = snapshot.pendingInterrupt
+    ? safeStableActivityId(
+        snapshot.pendingInterrupt.requestId ??
+          activityApprovalRequestId(snapshot.pendingInterrupt.id, snapshot.runId)
+      )
     : undefined
+  const pendingApprovalRepresented = activities.some(
+    (activity) =>
+      (activity.kind === "tool" || activity.kind === "approval") &&
+      activity.approval?.requestId === pendingApprovalRequestId
+  )
+  const waitingKey =
+    snapshot.pendingInterrupt && !pendingApprovalRepresented
+      ? safeStableActivityId(snapshot.pendingInterrupt.id)
+      : undefined
   if (next.waitingInterruptId !== waitingKey) {
     if (next.waitingInterruptId !== undefined) {
       finishStep(`waiting:${next.waitingInterruptId}`)
@@ -368,7 +427,9 @@ export function projectLarkCotEvents(
     }
   }
   const activeStepIds = new Set(
-    snapshot.activeSteps.map((step) => `step:${safeStableActivityId(step.id)}`)
+    snapshot.activeSteps
+      .filter((step) => !step.id.startsWith("tool:"))
+      .map((step) => `step:${safeStableActivityId(step.id)}`)
   )
   for (const stepId of Object.keys(next.openSteps)) {
     if (stepId.startsWith("waiting:")) continue

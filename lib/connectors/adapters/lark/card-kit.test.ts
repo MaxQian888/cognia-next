@@ -64,6 +64,10 @@ describe("larkCardHeader", () => {
 })
 
 describe("larkCard", () => {
+  it.each(["default", "compact", "fill"] as const)("preserves explicit %s width", (widthMode) => {
+    expect(larkCard({ elements: [], widthMode }).config).toMatchObject({ width_mode: widthMode })
+  })
+
   it("is a shared Card 2.0 frame whose summary defaults to the title", () => {
     const card = larkCard({ header: { title: "新会话" }, elements: [] })
     expect(card).toMatchObject({

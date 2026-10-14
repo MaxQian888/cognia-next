@@ -274,9 +274,8 @@ function footerElements(input: LarkResultCardInput, text: ResultText): Record<st
  * Build the Card 2.0 result card payload.
  *
  * `done` omits the header entirely (the terminal card needs no state
- * banner); `error` and `interrupted` carry a coloured title bar, and
- * `interrupted` additionally prepends the 🛑 status line and compacts the
- * card width.
+ * banner); `error` and `interrupted` carry a coloured title bar. Every
+ * status uses the selected presentation width.
  */
 export function buildLarkResultCard(input: LarkResultCardInput): Record<string, unknown> {
   const presentation = normalizeLarkCardPresentation(input.presentation)
@@ -335,11 +334,8 @@ export function buildLarkResultCard(input: LarkResultCardInput): Record<string, 
     config: {
       update_multi: true,
       ...larkCardConfigStyle(presentation),
-      ...(presentation.width !== "default" ? { width_mode: presentation.width } : {}),
+      width_mode: presentation.width,
       summary: { content: summaryContent(input.answer, input.status, text) },
-      ...(input.status === "interrupted" && presentation.width === "default"
-        ? { width_mode: "compact" }
-        : {}),
     },
     body: { ...larkCardBodyStyle(presentation), elements },
   }

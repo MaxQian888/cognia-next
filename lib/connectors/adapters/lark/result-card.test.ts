@@ -51,6 +51,7 @@ it("builds a fixed-version template with a safe built-in fallback only on succes
   })
   expect(segment.card.payload.data.template_variable.answer).not.toContain("<at")
   expect(segment.card.payload.fallback.schema).toBe("2.0")
+  expect(segment.card.payload.fallback.config).toMatchObject({ width_mode: "fill" })
   for (const status of ["error", "interrupted"] as const) {
     const special = buildLarkResultCardSegment({ ...BASE, status, presentation })
     expect(special.type === "card" && isLarkResultTemplatePayload(special.card.payload)).toBe(false)
@@ -84,6 +85,18 @@ it("applies responsive answer text and header decorations without changing markd
 })
 
 describe("buildLarkResultCard — card shape", () => {
+  it.each(["done", "error", "interrupted"] as const)(
+    "uses fill by default and preserves selected widths for %s cards",
+    (status) => {
+      expect(buildLarkResultCard({ ...BASE, status }).config).toMatchObject({ width_mode: "fill" })
+      for (const width of ["default", "compact", "fill"] as const) {
+        expect(
+          buildLarkResultCard({ ...BASE, status, presentation: { width } }).config
+        ).toMatchObject({ width_mode: width })
+      }
+    }
+  )
+
   it("applies saved appearance and quote/footer visibility without dropping the answer", () => {
     const card = buildLarkResultCard({
       ...BASE,
@@ -114,7 +127,7 @@ describe("buildLarkResultCard — card shape", () => {
     const config = card.config as Record<string, unknown>
     expect(config.update_multi).toBe(true)
     expect((config.summary as { content: string }).content).toBe("All done.")
-    expect(config.width_mode).toBeUndefined()
+    expect(config.width_mode).toBe("fill")
   })
 
   it("omits the header for the terminal done card", () => {
@@ -136,14 +149,14 @@ describe("buildLarkResultCard — card shape", () => {
     ).toBe("Something went wrong")
   })
 
-  it("interrupted status gets an orange header with the stop icon and compact width", () => {
+  it("interrupted status gets an orange header with the stop icon and fill width", () => {
     const card = buildLarkResultCard({ ...BASE, status: "interrupted" })
     const header = card.header as Record<string, unknown>
     expect(header.template).toBe("orange")
     expect((header.title as { content: string }).content).toBe("任务已停止")
     expect(header.icon).toMatchObject({ token: "stop_outlined" })
     const config = card.config as Record<string, unknown>
-    expect(config.width_mode).toBe("compact")
+    expect(config.width_mode).toBe("fill")
     // The header says it stopped; the body does not repeat it above the answer.
     expect(elements(card)[0].element_id).toBe("answer")
   })

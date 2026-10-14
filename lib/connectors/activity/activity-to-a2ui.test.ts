@@ -70,6 +70,85 @@ function runSnapshot(overrides: Partial<RunProjectionSnapshot> = {}): RunProject
 }
 
 describe("durable run activity presentation", () => {
+  it("does not invent a plan from tool steps or render lifecycle rows", () => {
+    const snapshot = runSnapshot({
+      activeSteps: [{ id: "tool:call", title: "Using an integration", status: "in_progress" }],
+      activities: [
+        {
+          id: "start",
+          kind: "lifecycle",
+          category: "status",
+          status: "completed",
+          label: "Run started",
+          startedAt: 0,
+        },
+        ...runSnapshot().activities!,
+      ],
+    })
+    expect(formatRunMilestones(snapshot, i18n)).toBeUndefined()
+    expect(formatRunActivityTimeline(snapshot, i18n)).not.toContain("Run started")
+    expect(formatRunStoppedNote({ ...snapshot, status: "failed" }, i18n)).toBeUndefined()
+  })
+
+  it.each(["pending", "approved", "denied", "expired"] as const)(
+    "folds a structured %s approval and preserves safe details",
+    (status) => {
+      const value = runSnapshot({
+        activities: [
+          {
+            id: "tool:call",
+            kind: "tool",
+            category: "integration",
+            status: "running",
+            label: "mcp__issues__issue_list",
+            toolName: "issue_list",
+            startedAt: 1,
+          },
+          {
+            id: "approval:action-review:request",
+            kind: "approval",
+            category: "approval",
+            status: "blocked",
+            label: "Approval required",
+            toolName: "issue_list",
+            approval: { requestId: "request", status },
+            startedAt: 2,
+          },
+        ],
+      })
+      expect(runActivitiesForPresentation(value)).toEqual([
+        expect.objectContaining({
+          id: "tool:call",
+          label: "Issue list",
+          toolName: "issue_list",
+          approval: { requestId: "request", status },
+        }),
+      ])
+      const text = formatRunActivityTimeline(value, i18n)
+      expect(text).not.toContain("Approval required")
+      if (status !== "approved") expect(text).toContain(i18n.approvalStatus(status))
+    }
+  )
+
+  it("sanitizes safe failure details again at the presentation boundary", () => {
+    const activities = runActivitiesForPresentation(
+      runSnapshot({
+        activities: [
+          {
+            id: "tool:call",
+            kind: "tool",
+            category: "integration",
+            status: "failed",
+            label: "issue_list",
+            startedAt: 1,
+            failureReason: "curl https://private.example.com?token=secret",
+          },
+        ],
+      })
+    )
+    expect(activities[0].failureReason).toBe("Tool failed")
+    expect(JSON.stringify(activities)).not.toContain("private.example.com")
+  })
   it("sanitizes legacy step labels and never forwards legacy summaries", () => {
     const presented = runActivitiesForPresentation(
       runSnapshot({
@@ -96,7 +175,7 @@ describe("durable run activity presentation", () => {
     expect(text).toContain("**Agent** · Working · 5s")
     expect(text).toContain("… 2 earlier activities hidden")
     expect(text).toContain("Read · `src/index.ts`")
-    expect(text).toContain("WebSearch")
+    expect(text).toContain("Web Search")
     expect(text).not.toContain("│")
     expect(text).not.toContain("raw stack")
   })
@@ -234,7 +313,7 @@ describe("milestone block", () => {
     // deciding whether to intervene.
     const text = formatRunActivityTimeline(planned, i18n)
     const planIndex = text.indexOf("Write the migration")
-    const firstActivity = text.indexOf("WebSearch")
+    const firstActivity = text.indexOf("Web Search")
     expect(planIndex).toBeGreaterThan(-1)
     expect(firstActivity).toBeGreaterThan(-1)
     expect(planIndex).toBeLessThan(firstActivity)
@@ -305,6 +384,6 @@ it("keeps active workflow nodes visible and uses aggregate completion counts", (
 
 it("shows measured tool duration without guessing unfinished durations", () => {
   const text = formatRunActivityTimeline(runSnapshot(), i18n)
-  expect(text).toContain("WebSearch · 1s")
+  expect(text).toContain("Web Search · 1s")
   expect(text).not.toContain("Read · 4s")
 })

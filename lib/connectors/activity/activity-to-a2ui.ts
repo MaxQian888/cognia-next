@@ -18,9 +18,12 @@ import type {
   RunStepSnapshot,
 } from "@/types/execution/run"
 import type { ActivityI18n } from "./i18n"
+import { bareToolName } from "@/lib/chat/tool-summary"
 import {
+  foldToolApprovals,
   safeActivityTarget,
   safeStableActivityId,
+  safeToolActivityLabel,
   sanitizeActivityCommentary,
   sanitizeActivityLabel,
 } from "@/lib/execution/run-activity"
@@ -50,6 +53,15 @@ function markdownText(value: string): string {
   return value.replace(/([\\`*_[\]])/g, "\\$1")
 }
 
+export function activityStatusForPresentation(
+  activity: RunActivitySnapshot
+): RunActivitySnapshot["status"] {
+  if (activity.approval?.status === "pending") return "blocked"
+  if (activity.approval?.status === "denied" || activity.approval?.status === "expired")
+    return "failed"
+  return activity.status
+}
+
 function activityLine(activity: RunActivitySnapshot, i18n: ActivityI18n): string {
   const target = activity.target
     ? activity.target.kind === "workspace_path"
@@ -60,16 +72,24 @@ function activityLine(activity: RunActivitySnapshot, i18n: ActivityI18n): string
     activity.endedAt !== undefined && activity.endedAt >= activity.startedAt
       ? ` · ${i18n.elapsed(Math.round((activity.endedAt - activity.startedAt) / 1000))}`
       : ""
-  return `${ACTIVITY_STATUS_ICON[activity.status]} ${ACTIVITY_ICON[activity.category]} ${markdownText(i18n.activityLabel(activity))}${duration}${target}`
+  const approval =
+    activity.approval && activity.approval.status !== "approved"
+      ? ` · ${i18n.approvalStatus(activity.approval.status)}`
+      : ""
+  const failure =
+    activity.status === "failed" && activity.failureReason
+      ? ` · ${markdownText(activity.failureReason)}`
+      : ""
+  return `${ACTIVITY_STATUS_ICON[activityStatusForPresentation(activity)]} ${ACTIVITY_ICON[activity.category]} ${markdownText(i18n.activityLabel(activity))}${approval}${duration}${target}${failure}`
 }
 
 function stepActivity(step: RunStepSnapshot): RunActivitySnapshot {
   const status: RunActivitySnapshot["status"] =
     step.status === "in_progress" ? "running" : step.status === "blocked" ? "blocked" : step.status
   return {
-    id: `legacy-step:${step.id}`,
-    kind: "step",
-    category: "status",
+    id: step.id.startsWith("tool:") ? step.id : `legacy-step:${step.id}`,
+    kind: step.id.startsWith("tool:") ? "tool" : "step",
+    category: step.id.startsWith("tool:") ? "integration" : "status",
     status,
     label: step.title,
     startedAt: step.startedAt ?? step.completedAt ?? 0,
@@ -83,46 +103,71 @@ export function runActivitiesForPresentation(
 ): RunActivitySnapshot[] {
   const activities =
     snapshot.activities && snapshot.activities.length > 0
-      ? snapshot.activities.slice(0, 12)
+      ? snapshot.activities
       : [...snapshot.activeSteps, ...snapshot.recentSteps, ...snapshot.pendingSteps]
           .slice(0, 12)
           .map(stepActivity)
-  return activities.map((activity) => {
-    const target = safeActivityTarget(activity.target)
-    const kind: RunActivitySnapshot["kind"] = [
-      "lifecycle",
-      "tool",
-      "step",
-      "artifact",
-      "approval",
-    ].includes(activity.kind)
-      ? activity.kind
-      : "lifecycle"
-    const category: RunActivityCategory = Object.hasOwn(ACTIVITY_ICON, activity.category)
-      ? activity.category
-      : "status"
-    const status: RunActivitySnapshot["status"] = Object.hasOwn(
-      ACTIVITY_STATUS_ICON,
-      activity.status
-    )
-      ? activity.status
-      : "pending"
-    return {
-      id: safeStableActivityId(activity.id),
-      kind,
-      category,
-      status,
-      label:
-        kind === "step" && category === "status"
-          ? sanitizeActivityCommentary(activity.label, "Activity")
-          : sanitizeActivityLabel(activity.label, kind === "tool" ? "Tool" : "Activity"),
-      ...(target ? { target } : {}),
-      startedAt: Number.isFinite(activity.startedAt) ? activity.startedAt : 0,
-      ...(activity.endedAt !== undefined && Number.isFinite(activity.endedAt)
-        ? { endedAt: activity.endedAt }
-        : {}),
+  const safeActivities: RunActivitySnapshot[] = foldToolApprovals(activities, snapshot.runId).map(
+    (activity) => {
+      const target = safeActivityTarget(activity.target)
+      const kind: RunActivitySnapshot["kind"] = [
+        "lifecycle",
+        "tool",
+        "step",
+        "artifact",
+        "approval",
+      ].includes(activity.kind)
+        ? activity.kind
+        : "lifecycle"
+      const category: RunActivityCategory = Object.hasOwn(ACTIVITY_ICON, activity.category)
+        ? activity.category
+        : "status"
+      const status: RunActivitySnapshot["status"] = Object.hasOwn(
+        ACTIVITY_STATUS_ICON,
+        activity.status
+      )
+        ? activity.status
+        : "pending"
+      const toolName = activity.toolName
+        ? sanitizeActivityLabel(bareToolName(activity.toolName), "Tool")
+        : undefined
+      const rawLabel = sanitizeActivityLabel(activity.label, kind === "tool" ? "Tool" : "Activity")
+      const toolLabel =
+        kind === "tool" && (toolName || /^[\w.-]+$/.test(rawLabel))
+          ? safeToolActivityLabel(toolName ?? rawLabel)
+          : rawLabel
+      const approval =
+        activity.approval &&
+        ["pending", "approved", "denied", "expired"].includes(activity.approval.status) &&
+        typeof activity.approval.requestId === "string"
+          ? {
+              requestId: safeStableActivityId(activity.approval.requestId),
+              status: activity.approval.status,
+            }
+          : undefined
+      return {
+        id: safeStableActivityId(activity.id),
+        kind,
+        category,
+        status,
+        label:
+          kind === "step" && category === "status"
+            ? sanitizeActivityCommentary(activity.label, "Activity")
+            : toolLabel,
+        ...(toolName ? { toolName } : {}),
+        ...(approval ? { approval } : {}),
+        ...(activity.failureReason
+          ? { failureReason: sanitizeActivityLabel(activity.failureReason, "Tool failed") }
+          : {}),
+        ...(target ? { target } : {}),
+        startedAt: Number.isFinite(activity.startedAt) ? activity.startedAt : 0,
+        ...(activity.endedAt !== undefined && Number.isFinite(activity.endedAt)
+          ? { endedAt: activity.endedAt }
+          : {}),
+      }
     }
-  })
+  )
+  return safeActivities.filter((activity) => activity.kind !== "lifecycle").slice(0, 12)
 }
 
 export function runTitleForPresentation(
@@ -132,7 +177,11 @@ export function runTitleForPresentation(
   const safeName = sanitizeActivityLabel(snapshot.title, "Execution run")
   if (!i18n) return safeName
   const kind = i18n.runKind(snapshot.kind)
-  return safeName === "Execution run" || safeName === "Agent run" ? kind : `${kind} · ${safeName}`
+  return safeName === "Execution run" || safeName === "Agent run"
+    ? kind
+    : snapshot.kind === "agent-turn"
+      ? safeName
+      : `${kind} · ${safeName}`
 }
 
 const MILESTONE_STATUS_ICON: Record<RunStepSnapshot["status"], string> = {
@@ -169,7 +218,14 @@ export function runMilestonesForPresentation(
         ...snapshot.pendingSteps,
         ...snapshot.recentSteps,
       ]
-        .filter((step) => !excludedStepIds.has(step.id))
+        .filter(
+          (step) =>
+            !excludedStepIds.has(step.id) &&
+            !(
+              snapshot.kind === "agent-turn" &&
+              (step.id.startsWith("tool:") || step.id.startsWith("commentary:"))
+            )
+        )
         .map((step) => [step.id, step])
     ).values(),
   ]
@@ -259,7 +315,12 @@ export function formatRunStoppedNote(
         ? i18n.runStatus("recovery_required")
         : code
   const notRun = [...snapshot.activeSteps, ...snapshot.pendingSteps].filter(
-    (step) => step.status === "pending" || step.status === "in_progress"
+    (step) =>
+      !(
+        snapshot.kind === "agent-turn" &&
+        (step.id.startsWith("tool:") || step.id.startsWith("commentary:"))
+      ) &&
+      (step.status === "pending" || step.status === "in_progress")
   ).length
   const lines = [
     reason ? i18n.stoppedBecause(sanitizeActivityLabel(reason, "unknown")) : undefined,

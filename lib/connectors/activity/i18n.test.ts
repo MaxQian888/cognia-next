@@ -1,6 +1,29 @@
 import { resolveActivityI18n } from "./i18n"
 
 describe("resolveActivityI18n", () => {
+  it.each([
+    ["en", "2m 23s", "2 tools · 1 failed", "Waiting for approval", "Denied", "Expired"],
+    ["zh-CN", "用时 2分23秒", "2 个工具 · 1 个失败", "等待审批", "已拒绝", "已过期"],
+  ])(
+    "formats compact run summaries and approval states in %s",
+    (locale, elapsed, tools, pending, denied, expired) => {
+      const i18n = resolveActivityI18n(locale)
+      expect(i18n.runElapsed(143)).toBe(elapsed)
+      expect(i18n.toolSummary(2, 1)).toBe(tools)
+      expect(i18n.approvalStatus("pending")).toBe(pending)
+      expect(i18n.approvalStatus("denied")).toBe(denied)
+      expect(i18n.approvalStatus("expired")).toBe(expired)
+      expect(i18n.toolSummary(0, 0)).not.toContain(" · ")
+    }
+  )
+
+  it("handles subminute, hour, zero and invalid elapsed values", () => {
+    const en = resolveActivityI18n("en")
+    expect(en.runElapsed(59.6)).toBe("1m")
+    expect(en.runElapsed(3661)).toBe("1h 1m 1s")
+    expect(en.runElapsed(-5)).toBe("0s")
+    expect(en.runElapsed(Number.NaN)).toBe("0s")
+  })
   it.each(["en", "zh-CN"])("localizes Lark timeline tags and headings in %s", (locale) => {
     const i18n = resolveActivityI18n(locale)
     expect(i18n.activityHeading(5)).toBe(locale === "en" ? "Activity · 5 steps" : "执行过程 · 5 步")

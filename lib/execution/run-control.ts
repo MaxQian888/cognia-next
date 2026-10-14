@@ -8,6 +8,7 @@ import {
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
 import { reduceRunEvents } from "./run-reducer"
+import { safeToolActivityMetadata } from "./run-activity"
 import { getRunRetryHandler } from "./run-retry-registry"
 import { validateSquadReviewDecision } from "./squad-review-decision"
 import type {
@@ -146,6 +147,12 @@ export async function createRunInterrupt(
             title: interrupt.title,
             type: interrupt.type,
             expiresAt: interrupt.expiresAt,
+            ...(interrupt.toolName
+              ? {
+                  toolName: safeToolActivityMetadata(interrupt.toolName).toolName,
+                  safeToolName: true,
+                }
+              : {}),
           },
           { ts: interrupt.createdAt, sourceEventId: `interrupt:${interrupt.id}:requested` }
         )

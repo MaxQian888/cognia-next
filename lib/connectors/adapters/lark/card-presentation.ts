@@ -52,7 +52,7 @@ export interface LarkCardPresentation {
 export const DEFAULT_LARK_CARD_PRESENTATION: Readonly<LarkCardPresentation> = {
   theme: "status",
   density: "comfortable",
-  width: "default",
+  width: "fill",
   processMode: "auto",
   history: "auto",
   showElapsed: true,

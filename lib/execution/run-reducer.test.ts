@@ -102,6 +102,77 @@ describe("reduceRunEvents", () => {
     expect(snapshot.recentSteps[0]).toEqual(expect.objectContaining({ status: "completed" }))
   })
 
+  it("counts only real plan milestones when an agent also emits tools and commentary", () => {
+    const snapshot = reduceRunEvents({ ...baseRun, kind: "agent-turn" }, [
+      event({
+        type: "plan.created",
+        seq: 1,
+        payload: {
+          version: 1,
+          steps: [
+            { id: "research", title: "Research", safeTitle: true },
+            { id: "report", title: "Report", safeTitle: true },
+          ],
+        },
+      }),
+      event({ type: "step.completed", seq: 2, payload: { stepId: "research" } }),
+      event({
+        type: "step.completed",
+        seq: 3,
+        payload: { stepId: "tool:call-1", title: "Issue list", safeTitle: true },
+      }),
+      event({
+        type: "tool.completed",
+        seq: 4,
+        payload: { toolCallId: "call-1", toolName: "issue_list" },
+      }),
+      event({
+        type: "step.started",
+        seq: 5,
+        payload: {
+          stepId: "commentary:progress",
+          title: "Writing the report",
+          safeTitle: true,
+          category: "status",
+        },
+      }),
+    ])
+    expect(snapshot.progress).toEqual({ completed: 1, total: 2, ratio: 0.5, trustworthy: true })
+    expect(snapshot.recentSteps.map((step) => step.id)).toEqual(["research"])
+    expect(snapshot.pendingSteps.map((step) => step.id)).toEqual(["report"])
+    expect(snapshot.activeSteps).toEqual([])
+    expect(snapshot.activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "tool", id: "tool:call-1" }),
+        expect.objectContaining({ kind: "step", category: "status", label: "Writing the report" }),
+      ])
+    )
+  })
+
+  it("preserves semantic prefixes when unsafe or long tool and commentary ids are hashed", () => {
+    const longCallId = "call_" + "a".repeat(120)
+    const snapshot = reduceRunEvents({ ...baseRun, kind: "agent-turn" }, [
+      event({ type: "step.completed", seq: 1, payload: { stepId: `tool:${longCallId}` } }),
+      event({
+        type: "tool.completed",
+        seq: 2,
+        payload: { toolCallId: longCallId, toolName: "issue_list" },
+      }),
+      event({
+        type: "step.started",
+        seq: 3,
+        payload: { stepId: "commentary:../../private", category: "status" },
+      }),
+    ])
+    expect(snapshot.recentSteps[0].id).toMatch(/^tool:opaque-/)
+    expect(snapshot.activities?.find((activity) => activity.kind === "tool")?.id).toBe(
+      snapshot.recentSteps[0].id
+    )
+    expect(snapshot.activeSteps[0].id).toMatch(/^commentary:opaque-/)
+    expect(JSON.stringify(snapshot)).not.toContain("../../private")
+    expect(snapshot.progress).toEqual({ completed: 1, total: 2, trustworthy: false })
+  })
+
   it("keeps a terminal run terminal when later non-terminal events arrive", () => {
     const snapshot = reduceRunEvents(baseRun, [
       event({ type: "run.completed", seq: 1, payload: { summary: "Done" } }),
@@ -206,6 +277,7 @@ describe("reduceRunEvents", () => {
         category: "read",
         status: "completed",
         label: "Read",
+        toolName: "Read",
         target: { kind: "workspace_path", label: "src/index.ts" },
         startedAt: 1_003,
         endedAt: 1_004,
@@ -214,6 +286,183 @@ describe("reduceRunEvents", () => {
     expect(snapshot.activityCount).toBe(1)
     expect(snapshot.omittedActivityCount).toBe(0)
     expect(JSON.stringify(snapshot.activities)).not.toContain("must not be projected")
+  })
+
+  it.each(["approved", "denied", "expired"] as const)(
+    "folds bridge aliases into the gated tool and retains its %s decision",
+    (decision) => {
+      const events = [
+        event({
+          type: "tool.started",
+          seq: 1,
+          payload: { toolCallId: "call-1", toolName: "mcp__issues__issue_list" },
+        }),
+        event({
+          type: "interrupt.requested",
+          seq: 2,
+          payload: {
+            interruptId: "action-review:request-1",
+            toolName: "issue_list",
+            safeToolName: true,
+          },
+        }),
+        event({
+          type: "interrupt.requested",
+          seq: 3,
+          payload: {
+            interruptId: "tool-interrupt:run-1:request-1",
+            toolName: "issue_list",
+            safeToolName: true,
+          },
+        }),
+      ]
+      const waiting = reduceRunEvents({ ...baseRun, kind: "agent-turn" }, events)
+      expect(waiting.activities).toEqual([
+        expect.objectContaining({
+          kind: "tool",
+          label: "Issue list",
+          toolName: "issue_list",
+          status: "running",
+          approval: { requestId: "request-1", status: "pending" },
+        }),
+      ])
+      expect(waiting.activityCount).toBe(1)
+      expect(waiting.pendingInterrupt?.id).toBe("tool-interrupt:run-1:request-1")
+      events.push(
+        event({
+          type: decision === "expired" ? "interrupt.expired" : "interrupt.resolved",
+          seq: 4,
+          payload: {
+            interruptId: "action-review:request-1",
+            resolution: decision === "denied" ? "deny" : "approve",
+          },
+        })
+      )
+      const settled = reduceRunEvents({ ...baseRun, kind: "agent-turn" }, events)
+      expect(settled.activities).toEqual([
+        expect.objectContaining({
+          kind: "tool",
+          status: "running",
+          approval: { requestId: "request-1", status: decision },
+        }),
+      ])
+      expect(settled.pendingInterrupt).toBeUndefined()
+      expect(settled.failedToolCount).toBe(decision === "approved" ? 0 : 1)
+    }
+  )
+
+  it("deduplicates unnamed approvals without guessing their tool and ignores a delayed request alias", () => {
+    const snapshot = reduceRunEvents(baseRun, [
+      event({
+        type: "interrupt.requested",
+        seq: 1,
+        payload: { interruptId: "action-review:request-1" },
+      }),
+      event({
+        type: "interrupt.resolved",
+        seq: 2,
+        payload: { interruptId: "action-review:request-1", resolution: "deny" },
+      }),
+      event({
+        type: "interrupt.requested",
+        seq: 3,
+        payload: { interruptId: "tool-interrupt:run-1:request-1" },
+      }),
+    ])
+    expect(snapshot.activities).toEqual([
+      expect.objectContaining({
+        kind: "approval",
+        status: "failed",
+        approval: { requestId: "request-1", status: "denied" },
+      }),
+    ])
+    expect(snapshot.pendingInterrupt).toBeUndefined()
+    expect(snapshot.status).toBe("running")
+  })
+
+  it("retains another pending request when one approval resolves", () => {
+    const snapshot = reduceRunEvents(baseRun, [
+      event({ type: "interrupt.requested", seq: 1, payload: { interruptId: "first" } }),
+      event({ type: "interrupt.requested", seq: 2, payload: { interruptId: "second" } }),
+      event({
+        type: "interrupt.resolved",
+        seq: 3,
+        payload: { interruptId: "first", resolution: "approve" },
+      }),
+    ])
+    expect(snapshot.pendingInterrupt?.id).toBe("second")
+    expect(snapshot.status).toBe("waiting")
+  })
+
+  it("preserves the canonical pending request when its long interrupt id must be hashed", () => {
+    const runId =
+      "execution:agent:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222"
+    const requestId = "33333333-3333-4333-8333-333333333333"
+    const snapshot = reduceRunEvents({ ...baseRun, id: runId, kind: "agent-turn" }, [
+      event({
+        runId,
+        type: "tool.started",
+        seq: 1,
+        payload: { toolCallId: "call-1", toolName: "issue_list" },
+      }),
+      event({
+        runId,
+        type: "interrupt.requested",
+        seq: 2,
+        payload: {
+          interruptId: `tool-interrupt:${runId}:${requestId}`,
+          toolName: "issue_list",
+          safeToolName: true,
+        },
+      }),
+    ])
+    expect(snapshot.pendingInterrupt).toMatchObject({
+      id: expect.stringMatching(/^opaque-/),
+      requestId,
+    })
+    expect(snapshot.activities).toEqual([
+      expect.objectContaining({ kind: "tool", approval: { requestId, status: "pending" } }),
+    ])
+  })
+
+  it("retains only declared safe failure reasons and counts tools beyond the activity window", () => {
+    const snapshot = reduceRunEvents(
+      baseRun,
+      Array.from({ length: 15 }, (_, index) =>
+        event({
+          type: "tool.failed",
+          seq: index + 1,
+          payload: {
+            toolCallId: `call-${index}`,
+            toolName: "issue_list",
+            failureReason: index === 14 ? "Permission denied" : "raw secret",
+            ...(index === 14 ? { safeFailureReason: true } : {}),
+          },
+        })
+      )
+    )
+    expect(snapshot.toolCount).toBe(15)
+    expect(snapshot.failedToolCount).toBe(15)
+    expect(snapshot.activities).toHaveLength(12)
+    expect(snapshot.activities?.at(-1)?.failureReason).toBe("Permission denied")
+    expect(JSON.stringify(snapshot)).not.toContain("raw secret")
+  })
+
+  it("persists the opening locale and safe request title across later events", () => {
+    const snapshot = reduceRunEvents({ ...baseRun, kind: "agent-turn", title: "Agent run" }, [
+      event({
+        type: "run.started",
+        seq: 1,
+        payload: { locale: "zh-CN", title: "检查项目", safeTitle: true },
+      }),
+      event({
+        type: "run.started",
+        seq: 2,
+        payload: { locale: "en", title: "Changed", safeTitle: true },
+      }),
+      event({ type: "run.completed", seq: 3 }),
+    ])
+    expect(snapshot).toMatchObject({ locale: "zh-CN", title: "检查项目", status: "completed" })
   })
 
   it("keeps active activities plus the latest terminal activities and excludes private events", () => {
@@ -246,8 +495,8 @@ describe("reduceRunEvents", () => {
     expect(snapshot.activities?.some((activity) => activity.label === "Private artifact")).toBe(
       false
     )
-    expect(snapshot.activityCount).toBe(16)
-    expect(snapshot.omittedActivityCount).toBe(4)
+    expect(snapshot.activityCount).toBe(15)
+    expect(snapshot.omittedActivityCount).toBe(3)
   })
 
   it.each<ExecutionRunKind>(["agent-turn", "workflow", "plan", "goal", "team", "scheduled"])(

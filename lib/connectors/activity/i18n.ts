@@ -80,6 +80,9 @@ export interface ActivityI18n {
   activityHeading: (count: number) => string
   activityStatus: (status: import("@/types/execution/run").RunActivitySnapshot["status"]) => string
   elapsedLabel: string
+  runElapsed: (seconds: number) => string
+  toolSummary: (count: number, failed: number) => string
+  approvalStatus: (status: "pending" | "approved" | "denied" | "expired") => string
   progressLabel: string
   actionNeeded: string
   approvalHint: string
@@ -189,6 +192,16 @@ const EN: ActivityI18n = {
       skipped: "Skipped",
     })[status],
   elapsedLabel: "Elapsed",
+  runElapsed: (seconds) => humanElapsed(seconds, false),
+  toolSummary: (count, failed) =>
+    `${count} tool${count === 1 ? "" : "s"}${failed ? ` · ${failed} failed` : ""}`,
+  approvalStatus: (status) =>
+    ({
+      pending: "Waiting for approval",
+      approved: "Approved",
+      denied: "Denied",
+      expired: "Expired",
+    })[status],
   progressLabel: "Progress",
   actionNeeded: "Your action is needed",
   approvalHint: "Use the controls below to approve or deny before execution continues.",
@@ -292,6 +305,10 @@ const ZH: ActivityI18n = {
       skipped: "跳过",
     })[status],
   elapsedLabel: "用时",
+  runElapsed: (seconds) => `用时 ${humanElapsed(seconds, true)}`,
+  toolSummary: (count, failed) => `${count} 个工具${failed ? ` · ${failed} 个失败` : ""}`,
+  approvalStatus: (status) =>
+    ({ pending: "等待审批", approved: "已批准", denied: "已拒绝", expired: "已过期" })[status],
   progressLabel: "进度",
   actionNeeded: "需要你的操作",
   approvalHint: "请使用下方按钮批准或拒绝，再继续执行。",
@@ -300,6 +317,20 @@ const ZH: ActivityI18n = {
   workflowDependencies: (edges) => `依赖关系：${edges || "无节点间依赖"}`,
   workflowPartial: "仅展示部分节点与连线，请打开完整工作流。",
   fullWorkflow: "完整工作流",
+}
+
+function humanElapsed(seconds: number, zh: boolean): string {
+  const total = Number.isFinite(seconds) ? Math.max(0, Math.round(seconds)) : 0
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const remaining = total % 60
+  return [
+    hours ? `${hours}${zh ? "小时" : "h"}` : undefined,
+    minutes ? `${minutes}${zh ? "分" : "m"}` : undefined,
+    remaining || (!hours && !minutes) ? `${remaining}${zh ? "秒" : "s"}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(zh ? "" : " ")
 }
 
 const MAPS: Record<string, ActivityI18n> = {

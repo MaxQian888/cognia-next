@@ -2817,6 +2817,75 @@ describe("installRuntime — ai-run Lark result card", () => {
     return seg.card.payload as CardPayload
   }
 
+  it.each([true, false])(
+    "persists the request locale and safe first-line title with live activity %s",
+    async (liveActivity) => {
+      await seedLark()
+      await getDb().settings.put({ id: "singleton", language: "en" } as never)
+      const event = larkEvent({
+        plainText: "  帮我\t查看发布进度  \nInclude the full deployment log",
+      })
+      await upsertByConversationKey({
+        conversationKey: event.conversationKey,
+        sessionId: "ses_placeholder",
+        liveActivity,
+      })
+      jest.mocked(DEFAULT_RUN_AND_CAPTURE).mockImplementationOnce(async () => {
+        const [run] = await getDb().executionRuns.toArray()
+        expect(run.latestSnapshot).toMatchObject({
+          locale: "zh-CN",
+          title: "帮我 查看发布进度",
+        })
+        // A later inbound-text change must not switch a running card's language.
+        event.plainText = "Show the deployment log"
+        return { text: "Released", messageId: "locale-stable-reply" }
+      })
+
+      await callHandler(event, "ai-run")
+
+      const [run] = await getDb().executionRuns.toArray()
+      expect(run.title).toBe("帮我 查看发布进度")
+      expect(run.latestSnapshot).toMatchObject({
+        locale: "zh-CN",
+        title: "帮我 查看发布进度",
+        status: "completed",
+      })
+      const started = (await getDb().executionRunEvents.toArray()).find(
+        (item) => item.type === "run.started"
+      )
+      expect(started?.payload).toMatchObject({
+        locale: "zh-CN",
+        title: "帮我 查看发布进度",
+        safeTitle: true,
+      })
+      const bindings = await getDb().executionRunBindings.toArray()
+      expect(bindings).toHaveLength(liveActivity ? 1 : 0)
+      if (liveActivity) expect(bindings[0].locale).toBe("zh-CN")
+      const [job] = await getDb().outboundQueue.toArray()
+      const footer = cardPayloadOf(job).body?.elements.find(
+        (element) => element.element_id === "footer"
+      )
+      expect(footer?.content).toContain("用时")
+    }
+  )
+
+  it.each([
+    ["Review the deployment\n请保留这行作为正文", "Review the deployment", "zh-CN"],
+    ["Check the release", "Check the release", "en"],
+    ["Review " + "a".repeat(140), "Review " + "a".repeat(112) + "…", "en"],
+    ["Run `curl https://example.com/private`", "Agent run", "en"],
+    ["", "Agent run", "en"],
+  ])("sanitizes the Lark run title for %j", async (plainText, title, locale) => {
+    await seedLark()
+    await getDb().characters.put({ id: "char_abc", name: "Support Agent" } as never)
+    await getDb().settings.put({ id: "singleton", language: "en" } as never)
+    await callHandler(larkEvent({ plainText }), "ai-run")
+
+    const [run] = await getDb().executionRuns.toArray()
+    expect(run.title).toBe(title)
+    expect(run.latestSnapshot).toMatchObject({ title, locale })
+  })
+
   it("uses the persisted card preferences when queueing a final reply", async () => {
     await seedLark({
       settings: {

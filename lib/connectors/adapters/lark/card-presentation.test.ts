@@ -9,6 +9,14 @@ import {
   larkCardPanelStyle,
 } from "./card-presentation"
 
+it("defaults to fill width while retaining explicit compact and default preferences", () => {
+  expect(DEFAULT_LARK_CARD_PRESENTATION.width).toBe("fill")
+  expect(normalizeLarkCardPresentation(undefined).width).toBe("fill")
+  for (const width of ["default", "compact", "fill"] as const) {
+    expect(normalizeLarkCardPresentation({ width }).width).toBe(width)
+  }
+})
+
 it("normalizes malformed settings and preserves explicit false values", () => {
   expect(normalizeLarkCardPresentation(null)).toEqual(DEFAULT_LARK_CARD_PRESENTATION)
   expect(

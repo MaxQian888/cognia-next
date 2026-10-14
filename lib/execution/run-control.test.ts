@@ -31,6 +31,28 @@ describe("execution run controls", () => {
     })
   }
 
+  it("journals a declared safe bare tool identity for approval correlation", async () => {
+    await seed()
+    await createRunInterrupt({
+      id: "tool-interrupt:run-1:request-1",
+      runId: "run-1",
+      type: "tool_approval",
+      title: "Allow",
+      toolName: "mcp__issues__issue_list",
+      status: "pending",
+      createdAt: 2,
+      expiresAt: 1000,
+    })
+    const events = await getDb().executionRunEvents.where("runId").equals("run-1").toArray()
+    expect(events[0].payload).toMatchObject({ toolName: "issue_list", safeToolName: true })
+    expect((await getDb().executionRuns.get("run-1"))?.latestSnapshot?.activities).toEqual([
+      expect.objectContaining({
+        toolName: "issue_list",
+        approval: { requestId: "request-1", status: "pending" },
+      }),
+    ])
+  })
+
   it("does not publish a settled interrupt before its resolution event commits", async () => {
     await seed()
     await createRunInterrupt({

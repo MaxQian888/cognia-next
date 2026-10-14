@@ -6,6 +6,7 @@ import type {
 } from "@/types/execution/run"
 import {
   formatRunActivityTimeline,
+  activityStatusForPresentation,
   runActivitiesForPresentation,
   runTitleForPresentation,
 } from "@/lib/connectors/activity/activity-to-a2ui"
@@ -33,8 +34,22 @@ function chunks(snapshot: RunProjectionSnapshot): Array<Record<string, unknown>>
       type: "task_update",
       id: clamp(activity.id),
       title: clamp(i18n.activityLabel(activity)),
-      status: activityTaskStatus(activity.status),
-      ...(activity.target ? { details: clamp(activity.target.label) } : {}),
+      status: activityTaskStatus(activityStatusForPresentation(activity)),
+      ...(activity.target || activity.approval || activity.failureReason
+        ? {
+            details: clamp(
+              [
+                activity.approval && activity.approval.status !== "approved"
+                  ? i18n.approvalStatus(activity.approval.status)
+                  : undefined,
+                activity.target?.label,
+                activity.status === "failed" ? activity.failureReason : undefined,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            ),
+          }
+        : {}),
     })),
   ]
 }

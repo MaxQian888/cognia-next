@@ -262,6 +262,12 @@ export interface RunActivitySnapshot {
   category: RunActivityCategory
   status: RunActivityStatus
   label: string
+  /** Sanitized bare tool identity, distinct from its humanized display label. */
+  toolName?: string
+  /** One canonical approval request, including aliases emitted by different bridges. */
+  approval?: { requestId: string; status: ExecutionRunInterruptStatus }
+  /** Sanitized short error text; never tool arguments or raw result payloads. */
+  failureReason?: string
   target?: RunActivityTarget
   startedAt: number
   endedAt?: number
@@ -296,6 +302,9 @@ export interface RunProjectionSnapshot {
   activityCount?: number
   /** Number of safe activities omitted from the rolling presentation window. */
   omittedActivityCount?: number
+  /** Tool totals across the journal, before the rolling activity window. */
+  toolCount?: number
+  failedToolCount?: number
   /** Durable inbound turns waiting behind this run in the same conversation. */
   connectorQueueDepth?: number
   elapsedMs: number
@@ -305,6 +314,8 @@ export interface RunProjectionSnapshot {
   waitingReason?: string
   pendingInterrupt?: {
     id: string
+    /** Canonical request identity survives hashing of a long bridge interrupt id. */
+    requestId?: string
     title: string
     expiresAt?: number
     /** The interrupt type, so a card can render the matching decision form. */

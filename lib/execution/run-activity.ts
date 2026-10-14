@@ -1,5 +1,9 @@
-import { bareToolName, toolIconKeyForName } from "@/lib/chat/tool-summary"
-import type { RunActivityCategory, RunActivityTarget } from "@/types/execution/run"
+import { bareToolName, humanizeToolName, toolIconKeyForName } from "@/lib/chat/tool-summary"
+import type {
+  RunActivityCategory,
+  RunActivitySnapshot,
+  RunActivityTarget,
+} from "@/types/execution/run"
 import { hasNoLeakingPiiDeep, normalizeForRedaction, redactText } from "@cognia/redact"
 
 const LABEL_LIMIT = 120
@@ -25,6 +29,17 @@ export function safeStableActivityId(value: string): string {
   return `opaque-${(hash >>> 0).toString(16).padStart(8, "0")}`
 }
 
+export function safeStepActivityId(id: string): string {
+  const prefix = id.startsWith("tool:")
+    ? "tool:"
+    : id.startsWith("commentary:")
+      ? "commentary:"
+      : undefined
+  return prefix
+    ? `${prefix}${safeStableActivityId(id.slice(prefix.length))}`
+    : safeStableActivityId(id)
+}
+
 export function sanitizeActivityLabel(value: unknown, fallback: string, max = LABEL_LIMIT): string {
   const normalized =
     stringValue(value)
@@ -44,6 +59,93 @@ export function sanitizeActivityLabel(value: unknown, fallback: string, max = LA
     /\b(?:select|insert|update|delete)\b.+\b(?:from|into|set|where)\b/i.test(redacted)
   const safe = containsRawExecutionText ? redactText(fallbackText).redacted : redacted
   return safe.length <= max ? safe : `${safe.slice(0, max - 1)}…`
+}
+
+export function safeToolActivityLabel(toolName: string): string {
+  const name = sanitizeActivityLabel(bareToolName(toolName), "Tool")
+  const label = humanizeToolName(name)
+  return sanitizeActivityLabel(
+    label === "Tool" && name.toLowerCase() !== "tool" ? name : label,
+    name
+  )
+}
+
+/** Known bridge aliases share a request, not a second approval. */
+export function activityApprovalRequestId(interruptId: string, runId?: string): string {
+  if (interruptId.startsWith("action-review:")) return interruptId.slice("action-review:".length)
+  const toolPrefix = runId ? `tool-interrupt:${runId}:` : undefined
+  return toolPrefix && interruptId.startsWith(toolPrefix)
+    ? interruptId.slice(toolPrefix.length)
+    : interruptId
+}
+
+/** Fold only approvals whose structured identity identifies one tool unambiguously. */
+export function foldToolApprovals(
+  activities: readonly RunActivitySnapshot[],
+  runId?: string
+): RunActivitySnapshot[] {
+  const approvals = new Map<string, RunActivitySnapshot>()
+  const rows = activities.filter((activity) => activity.kind !== "approval")
+  for (const activity of activities) {
+    if (activity.kind !== "approval") continue
+    const requestId = safeStableActivityId(
+      activity.approval?.requestId ??
+        activityApprovalRequestId(activity.id.replace(/^approval:/, ""), runId)
+    )
+    const prior = approvals.get(requestId)
+    const status =
+      activity.approval?.status ??
+      (activity.status === "failed"
+        ? "denied"
+        : activity.status === "completed"
+          ? "approved"
+          : "pending")
+    // A delayed duplicate request cannot re-open a settled decision.
+    const current =
+      status === "pending" && prior?.approval?.status !== "pending" && prior ? prior : activity
+    approvals.set(requestId, {
+      ...prior,
+      ...current,
+      id: `approval:${requestId}`,
+      approval: { requestId, status: current === prior ? prior.approval!.status : status },
+      startedAt: Math.min(activity.startedAt, prior?.startedAt ?? activity.startedAt),
+      ...(activity.toolName || prior?.toolName
+        ? { toolName: activity.toolName ?? prior?.toolName }
+        : {}),
+    })
+  }
+  for (const approval of approvals.values()) {
+    const requestId = approval.approval!.requestId
+    const direct = rows.filter((row) => row.kind === "tool" && row.id === `tool:${requestId}`)
+    const matches = approval.toolName
+      ? rows.filter(
+          (row) =>
+            row.kind === "tool" &&
+            bareToolName(row.toolName ?? row.label).toLowerCase() ===
+              bareToolName(approval.toolName!).toLowerCase()
+        )
+      : []
+    const active = matches.filter(
+      (row) =>
+        row.startedAt <= approval.startedAt &&
+        (row.endedAt === undefined || row.endedAt >= approval.startedAt)
+    )
+    const tool =
+      direct.length === 1
+        ? direct[0]
+        : active.length === 1
+          ? active[0]
+          : matches.length === 1
+            ? matches[0]
+            : undefined
+    if (!tool) {
+      rows.push(approval)
+      continue
+    }
+    const index = rows.indexOf(tool)
+    rows[index] = { ...tool, approval: approval.approval }
+  }
+  return rows
 }
 
 function containsCommentaryExecution(text: string): boolean {

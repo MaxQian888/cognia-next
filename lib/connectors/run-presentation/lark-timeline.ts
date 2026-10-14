@@ -1,5 +1,6 @@
 import {
   formatRunStoppedNote,
+  activityStatusForPresentation,
   runActivitiesForPresentation,
   runMilestonesForPresentation,
 } from "@/lib/connectors/activity/activity-to-a2ui"
@@ -35,10 +36,7 @@ export function larkMilestoneLine(step: RunStepSnapshot, i18n: ActivityI18n): st
 
 /** Count all known activities, including the part outside the rolling window. */
 export function larkActivityCount(snapshot: RunProjectionSnapshot): number {
-  return Math.max(
-    snapshot.activityCount ?? 0,
-    runActivitiesForPresentation(snapshot).length + (snapshot.omittedActivityCount ?? 0)
-  )
+  return runActivitiesForPresentation(snapshot).length + (snapshot.omittedActivityCount ?? 0)
 }
 
 /**
@@ -97,12 +95,18 @@ export function formatLarkRunTimeline(snapshot: RunProjectionSnapshot, i18n: Act
       continue
     }
     previousCommentary = undefined
+    const approval = activity.approval?.status
+    const status = activityStatusForPresentation(activity)
+    const statusLabel =
+      approval && approval !== "approved"
+        ? i18n.approvalStatus(approval)
+        : i18n.activityStatus(status)
     const metadata = [
       duration(activity.startedAt, activity.endedAt, i18n),
       activity.target?.label,
     ].filter(Boolean)
     lines.push(
-      `${larkStatusTag(activity.status, i18n.activityStatus(activity.status))} ${escapeLarkCardText(label)}${metadata.length ? ` ${larkGreyText(`· ${metadata.join(" · ")}`)}` : ""}`
+      `${larkStatusTag(status, statusLabel)} ${escapeLarkCardText(label)}${metadata.length ? ` ${larkGreyText(`· ${metadata.join(" · ")}`)}` : ""}${activity.status === "failed" && activity.failureReason ? ` — ${escapeLarkCardText(activity.failureReason)}` : ""}`
     )
   }
   if (!activities.length) lines.push(larkGreyText(i18n.noPublicActivity))

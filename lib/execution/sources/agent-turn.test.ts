@@ -163,6 +163,72 @@ describe("AgentRunEventProducer", () => {
     )
   })
 
+  it("humanizes integration step titles and journals only sanitized failure text", async () => {
+    const appended: AppendRunEventInput[] = []
+    const producer = new AgentRunEventProducer("run-agent", async (_runId, input) => {
+      appended.push(input)
+      return {} as never
+    })
+    await producer.onCaptureEvent(
+      {
+        type: "tool-call",
+        id: "issue",
+        toolName: "mcp__issues__issue_list_projects",
+        input: { secret: "private arguments" },
+      },
+      1000
+    )
+    await producer.onCaptureEvent(
+      {
+        type: "tool-result",
+        id: "issue",
+        toolName: "mcp__issues__issue_list_projects",
+        result: {
+          error: { message: "Access denied for alice@example.com\nprivate stack" },
+          input: "private arguments",
+        },
+        isError: true,
+      },
+      1001
+    )
+    expect(
+      appended.filter((row) => row.type.startsWith("step.")).map((row) => row.payload.title)
+    ).toEqual(["Issue list projects", "Issue list projects", "Issue list projects"])
+    const failure = appended.find((row) => row.type === "tool.failed")?.payload
+    expect(failure).toMatchObject({
+      safeFailureReason: true,
+      failureReason: expect.stringContaining("Access denied for"),
+    })
+    expect(JSON.stringify(appended)).not.toMatch(
+      /alice@example.com|private stack|private arguments/
+    )
+  })
+
+  it.each([
+    ["Timed out", "Timed out"],
+    [{ content: [{ type: "text", text: "Server unavailable" }] }, "Server unavailable"],
+    [[{ type: "text", text: "Request timed out" }], "Request timed out"],
+    [{ error: "curl https://example.com?token=secret" }, "Tool failed"],
+    [{ error: "Permission denied", args: "private" }, "Permission denied"],
+  ])("extracts safe failure text from supported result shapes", async (result, reason) => {
+    const appended: AppendRunEventInput[] = []
+    const producer = new AgentRunEventProducer("run-agent", async (_runId, input) => {
+      appended.push(input)
+      return {} as never
+    })
+    await producer.onCaptureEvent({
+      type: "tool-result",
+      id: "failed",
+      toolName: "issue_list",
+      result,
+      isError: true,
+    })
+    expect(appended.find((row) => row.type === "tool.failed")?.payload).toMatchObject({
+      failureReason: reason,
+      safeFailureReason: true,
+    })
+  })
+
   it("preserves safe commentary prose while removing execution details before journaling", async () => {
     const appended: AppendRunEventInput[] = []
     const producer = new AgentRunEventProducer("run-agent", async (_runId, input) => {

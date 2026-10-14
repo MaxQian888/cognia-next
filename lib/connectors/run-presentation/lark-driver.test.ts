@@ -119,6 +119,177 @@ const snapshot = (
 })
 
 describe("Lark run presentation driver", () => {
+  // Production replay shape: two failed tool steps, two lifecycle entries,
+  // and two approval requests recorded through both approval bridges.
+  // New journals additionally retain each approval's structured tool identity.
+  function productionAgentSnapshot(linkedApprovals: boolean): RunProjectionSnapshot {
+    const tools = ["issue_list", "issue_list_projects"]
+    return {
+      ...snapshot(1),
+      kind: "agent-turn",
+      title: "Agent run",
+      locale: "zh-CN",
+      elapsedMs: 143_000,
+      progress: { completed: 0, total: 2, trustworthy: false },
+      activeSteps: [],
+      pendingSteps: [],
+      pendingStepCount: 0,
+      connectorQueueDepth: 0,
+      recentSteps: tools.map((_, index) => ({
+        id: `tool:call_${index}`,
+        title: "Using an integration",
+        status: "failed",
+        startedAt: 0,
+        completedAt: index ? 130_500 : 133_700,
+      })),
+      activities: [
+        {
+          id: "start",
+          kind: "lifecycle",
+          category: "status",
+          status: "completed",
+          label: "Run started",
+          startedAt: 0,
+          endedAt: 0,
+        },
+        ...tools.map((toolName, index) => ({
+          id: `tool:call_${index}`,
+          kind: "tool" as const,
+          category: "integration" as const,
+          status: "failed" as const,
+          label: toolName,
+          startedAt: 0,
+          endedAt: index ? 130_500 : 133_700,
+        })),
+        ...tools.flatMap((toolName, index) =>
+          ["action-review:", "tool-interrupt:run-1:"].map((prefix) => ({
+            id: `approval:${prefix}00000000-0000-4000-8000-00000000000${index}`,
+            kind: "approval" as const,
+            category: "approval" as const,
+            status: "completed" as const,
+            label: "Approval required",
+            startedAt: 0,
+            endedAt: 136_800,
+            ...(linkedApprovals ? { toolName } : {}),
+          }))
+        ),
+        {
+          id: "done",
+          kind: "lifecycle",
+          category: "status",
+          status: "completed",
+          label: "Run completed",
+          startedAt: 143_000,
+          endedAt: 143_000,
+        },
+      ],
+      activityCount: 8,
+      omittedActivityCount: 0,
+    }
+  }
+
+  it.each([false, true])(
+    "renders the production agent turn once per tool (structured approval linkage: %s)",
+    async (linkedApprovals) => {
+      const value = productionAgentSnapshot(linkedApprovals)
+      const fallback = buildLarkRunFallbackSegment(value)
+      const card = JSON.parse(JSON.stringify(fallback)).card.payload
+      expect(card.config.width_mode).toBe("fill")
+      expect(card.header).toMatchObject({
+        title: { content: "处理中" },
+        subtitle: { content: "智能体" },
+      })
+      const status = card.body.elements.find(
+        (element: { element_id: string }) => element.element_id === "run_status"
+      )
+      expect(status.content).toContain("用时 2分23秒 · 2 个工具 · 2 个失败")
+      const panel = card.body.elements.find(
+        (element: { element_id: string }) => element.element_id === "run_progress"
+      )
+      const text = panel.elements[0].content as string
+      expect(panel.header.title.content).toBe(`执行过程 · ${linkedApprovals ? 2 : 4} 步`)
+      expect(text.match(/Issue list projects/g)).toHaveLength(1)
+      expect(text.match(/Issue list /g)).toHaveLength(2)
+      expect(text).toContain("133.7s")
+      expect(text).toContain("130.5s")
+      expect(text).not.toMatch(/Plan|计划|开始执行|任务已完成|Using an integration|issue&#95;/)
+      // An old snapshot with no request-to-tool identity remains honestly
+      // unlinked; each UUID is still shown only once.
+      expect(text.match(/需要审批/g) ?? []).toHaveLength(linkedApprovals ? 0 : 2)
+
+      let nativeCard = ""
+      const driver = createLarkRunPresentationDriver(
+        async (_method, path, body) => {
+          if (path === "/cardkit/v1/cards") nativeCard = (body as { data: string }).data
+          return { data: { card_id: "production-card", message_id: "production-message" } }
+        },
+        { cot: false, statusReactions: false }
+      )
+      await driver.open(topicTarget, value)
+      const native = JSON.parse(nativeCard)
+      expect(native.config.width_mode).toBe("fill")
+      expect(native.body).toEqual(card.body)
+    }
+  )
+
+  it.each(["compact", "default", "fill"] as const)(
+    "honors %s run width in every state and the fallback",
+    (width) => {
+      for (const status of [
+        "queued",
+        "running",
+        "waiting",
+        "paused",
+        "recovery_required",
+        "completed",
+        "failed",
+        "cancelled",
+      ] as const) {
+        const card = JSON.parse(
+          JSON.stringify(buildLarkRunFallbackSegment(snapshot(1, status), undefined, { width }))
+        ).card.payload
+        expect(card.config.width_mode).toBe(width)
+      }
+    }
+  )
+
+  it("uses a safe request subtitle and full-journal tool counts for non-plan runs", () => {
+    const card = JSON.parse(
+      JSON.stringify(
+        buildLarkRunFallbackSegment({
+          ...productionAgentSnapshot(true),
+          title: "请查看项目状态",
+          toolCount: 18,
+          failedToolCount: 3,
+        })
+      )
+    ).card.payload
+    expect(card.header.subtitle.content).toBe("请查看项目状态")
+    expect(
+      card.body.elements.find(
+        (element: { element_id: string }) => element.element_id === "run_status"
+      ).content
+    ).toContain("18 个工具 · 3 个失败")
+  })
+
+  it("retains plan progress even when the visible milestone window is empty", () => {
+    const card = JSON.parse(
+      JSON.stringify(
+        buildLarkRunFallbackSegment({
+          ...snapshot(1),
+          activeSteps: [],
+          recentSteps: [],
+          pendingSteps: [],
+        })
+      )
+    ).card.payload
+    expect(
+      card.body.elements.find(
+        (element: { element_id: string }) => element.element_id === "run_status"
+      ).content
+    ).toContain("Progress 1/2")
+  })
+
   it.each(["en", "zh-CN"])(
     "builds the native activity panel and safe one-line rows in %s",
     (locale) => {
@@ -240,7 +411,7 @@ describe("Lark run presentation driver", () => {
     const driver = createLarkRunPresentationDriver(request, { cot: false })
     let ref = await driver.open(topicTarget, snapshot(1))
     request.mockClear()
-    const next = { ...snapshot(2), activityCount: 5 }
+    const next = { ...snapshot(2), activityCount: 5, omittedActivityCount: 3 }
     ref = await driver.update(ref, next)
     const replacement = request.mock.calls.find(
       ([, path]) => path === "/cardkit/v1/cards/count-card"
@@ -1381,7 +1552,7 @@ it("shows elapsed time and truthful progress in the streaming body", async () =>
     { statusReactions: false }
   )
   await driver.open(topicTarget, { ...snapshot(1), elapsedMs: 65000 })
-  expect(created).toContain("65s")
+  expect(created).toContain("1m 5s")
   expect(created).toContain("Progress 1/2")
   expect(created).not.toContain("■")
 })

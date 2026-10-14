@@ -16,7 +16,11 @@ import type {
 import {
   safeActivityTarget,
   safeStableActivityId,
+  safeStepActivityId,
   safeToolActivityMetadata,
+  safeToolActivityLabel,
+  activityApprovalRequestId,
+  foldToolApprovals,
   sanitizeActivityCommentary,
   sanitizeActivityLabel,
 } from "./run-activity"
@@ -281,14 +285,19 @@ function upsertActivity(activities: Map<string, RunActivitySnapshot>, event: Run
     if (!toolCallId) return
     const id = `tool:${safeStableActivityId(toolCallId)}`
     const prior = activities.get(id)
-    const toolName = stringValue(event.payload.toolName) ?? prior?.label ?? "Tool"
+    const toolName =
+      stringValue(event.payload.toolName) ?? prior?.toolName ?? prior?.label ?? "Tool"
     const metadata = safeToolActivityMetadata(toolName)
     activities.set(id, {
       id,
       kind: "tool",
       category: activityCategory(event.payload.category, metadata.category),
       status,
-      label: sanitizeActivityLabel(toolName, "Tool"),
+      label: safeToolActivityLabel(toolName),
+      toolName: metadata.toolName,
+      ...(event.payload.safeFailureReason === true && stringValue(event.payload.failureReason)
+        ? { failureReason: sanitizeActivityLabel(event.payload.failureReason, "Tool failed") }
+        : {}),
       ...((safeActivityTarget(event.payload.target) ?? prior?.target)
         ? { target: safeActivityTarget(event.payload.target) ?? prior?.target }
         : {}),
@@ -352,19 +361,40 @@ function upsertActivity(activities: Map<string, RunActivitySnapshot>, event: Run
   if (event.type.startsWith("interrupt.") && status) {
     const interruptId = stringValue(event.payload.interruptId)
     if (!interruptId) return
-    const id = `approval:${safeStableActivityId(interruptId)}`
+    const requestId = safeStableActivityId(activityApprovalRequestId(interruptId, event.runId))
+    const id = `approval:${requestId}`
     const prior = activities.get(id)
+    const approvalStatus =
+      event.type === "interrupt.expired"
+        ? "expired"
+        : event.type === "interrupt.resolved"
+          ? event.payload.resolution === "deny"
+            ? "denied"
+            : "approved"
+          : (prior?.approval?.status ?? "pending")
+    const nextStatus: RunActivityStatus =
+      approvalStatus === "pending"
+        ? "blocked"
+        : approvalStatus === "approved"
+          ? "completed"
+          : "failed"
     activities.set(id, {
       id,
       kind: "approval",
       category: "approval",
-      status,
+      status: nextStatus,
+      approval: { requestId, status: approvalStatus },
+      ...(event.payload.safeToolName === true && stringValue(event.payload.toolName)
+        ? { toolName: safeToolActivityMetadata(event.payload.toolName as string).toolName }
+        : prior?.toolName
+          ? { toolName: prior.toolName }
+          : {}),
       label:
         event.payload.safeTitle === true
           ? sanitizeActivityLabel(event.payload.title, prior?.label ?? "Approval required")
           : (prior?.label ?? "Approval required"),
       startedAt: prior?.startedAt ?? event.ts,
-      ...(status === "completed" || status === "failed" ? { endedAt: event.ts } : {}),
+      ...(approvalStatus !== "pending" ? { endedAt: prior?.endedAt ?? event.ts } : {}),
     })
     return
   }
@@ -394,12 +424,12 @@ function upsertActivity(activities: Map<string, RunActivitySnapshot>, event: Run
   }
 }
 
-function rollingActivities(activities: Map<string, RunActivitySnapshot>): {
+function rollingActivities(activities: readonly RunActivitySnapshot[]): {
   activities: RunActivitySnapshot[]
   activityCount: number
   omittedActivityCount: number
 } {
-  const all = [...activities.values()]
+  const all = activities.filter((activity) => activity.kind !== "lifecycle")
   const active = all
     .filter((activity) => ["pending", "running", "blocked"].includes(activity.status))
     .sort((a, b) => b.startedAt - a.startedAt)
@@ -483,12 +513,28 @@ export function reduceRunEvents(
   let pendingInterrupt: RunProjectionSnapshot["pendingInterrupt"]
   let teamId: string | undefined
   let usage: RunUsageSnapshot | undefined
+  let locale: string | undefined
+  let title = sanitizeActivityLabel(run.title, "Execution run")
+  let receivedTitle = false
+  const pendingInterrupts = new Map<
+    string,
+    NonNullable<RunProjectionSnapshot["pendingInterrupt"]>
+  >()
   const artifacts: RunProjectionSnapshot["artifacts"] = []
 
   for (const event of events) {
     revision = event.seq
     updatedAt = Math.max(updatedAt, event.ts)
     if (event.visibility === "private") continue
+    if (event.type === "run.started") {
+      if (!locale && (event.payload.locale === "en" || event.payload.locale === "zh-CN")) {
+        locale = event.payload.locale
+      }
+      if (!receivedTitle && event.payload.safeTitle === true && stringValue(event.payload.title)) {
+        title = sanitizeActivityLabel(event.payload.title, title)
+        receivedTitle = true
+      }
+    }
     if (event.type === "run.started" && run.kind === "team") {
       teamId = stringValue(event.payload.teamId) ?? teamId
     }
@@ -514,7 +560,7 @@ export function reduceRunEvents(
         const prior = steps.get(id)
         revisedSteps.set(id, {
           ...prior,
-          id: safeStableActivityId(id),
+          id: safeStepActivityId(id),
           title:
             row.safeTitle === true
               ? sanitizeActivityLabel(row.title, `Step ${index + 1}`)
@@ -544,7 +590,7 @@ export function reduceRunEvents(
             !steps.has(target)
           )
             return []
-          return [{ source: safeStableActivityId(source), target: safeStableActivityId(target) }]
+          return [{ source: safeStepActivityId(source), target: safeStepActivityId(target) }]
         })
         workflowGraph = {
           workflowId: safeStableActivityId(graph.workflowId),
@@ -572,7 +618,7 @@ export function reduceRunEvents(
           : undefined
       steps.set(stepId, {
         ...prior,
-        id: safeStableActivityId(stepId),
+        id: safeStepActivityId(stepId),
         title,
         status: nextStepStatus ?? prior?.status ?? "in_progress",
         ...(event.type === "step.started" ? { startedAt: event.ts } : {}),
@@ -599,18 +645,32 @@ export function reduceRunEvents(
       const id = stringValue(event.payload.interruptId)
       if (id) {
         const interruptType = stringValue(event.payload.type)
-        pendingInterrupt = {
+        const requestId = safeStableActivityId(activityApprovalRequestId(id, run.id))
+        const approval = activities.get(`approval:${requestId}`)?.approval
+        const pending = {
           id: safeStableActivityId(id),
+          requestId,
           title: "Approval required",
           ...(numberValue(event.payload.expiresAt) !== undefined
             ? { expiresAt: numberValue(event.payload.expiresAt) }
             : {}),
           ...(interruptType ? { type: interruptType } : {}),
         }
+        if (approval?.status === "pending") pendingInterrupts.set(requestId, pending)
       }
     }
     if (event.type === "interrupt.resolved" || event.type === "interrupt.expired") {
-      pendingInterrupt = undefined
+      const id = stringValue(event.payload.interruptId)
+      if (id) pendingInterrupts.delete(safeStableActivityId(activityApprovalRequestId(id, run.id)))
+      waitingReason = undefined
+    }
+    pendingInterrupt = [...pendingInterrupts.values()].at(-1)
+    if (pendingInterrupt && event.type.startsWith("interrupt.") && !TERMINAL.has(status)) {
+      status = "waiting"
+      waitingReason = "waiting_review"
+    } else if (event.type === "interrupt.requested" && !TERMINAL.has(status)) {
+      // An alias arriving after the decision must not park the run again.
+      status = "running"
       waitingReason = undefined
     }
     if (event.type === "artifact.created") {
@@ -637,7 +697,12 @@ export function reduceRunEvents(
     waitingReason = undefined
   }
 
-  const allSteps = [...steps.values()]
+  const allSteps = [...steps.values()].filter(
+    (step) =>
+      run.kind !== "agent-turn" ||
+      planVersion === undefined ||
+      (!step.id.startsWith("tool:") && !step.id.startsWith("commentary:"))
+  )
   const completed = allSteps.filter((step) => step.status === "completed").length
   const trustworthy = planVersion !== undefined && allSteps.length > 0
   const progress = {
@@ -652,12 +717,14 @@ export function reduceRunEvents(
     .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
     .slice(0, RECENT_STEP_LIMIT)
   const pendingSteps = allSteps.filter((step) => step.status === "pending")
-  const activityWindow = rollingActivities(activities)
+  const projectedActivities = foldToolApprovals([...activities.values()], run.id)
+  const tools = projectedActivities.filter((activity) => activity.kind === "tool")
+  const activityWindow = rollingActivities(projectedActivities)
 
   return {
     runId: run.id,
     kind: run.kind,
-    title: sanitizeActivityLabel(run.title, "Execution run"),
+    title,
     status,
     revision,
     startedAt: run.startedAt,
@@ -671,6 +738,14 @@ export function reduceRunEvents(
     pendingSteps,
     pendingStepCount: pendingSteps.length,
     ...activityWindow,
+    toolCount: tools.length,
+    failedToolCount: tools.filter(
+      (tool) =>
+        tool.status === "failed" ||
+        tool.approval?.status === "denied" ||
+        tool.approval?.status === "expired"
+    ).length,
+    ...(locale ? { locale } : {}),
     elapsedMs: Math.max(0, (endedAt ?? updatedAt) - run.startedAt),
     detailsUrl: `/agent-runs?run=${encodeURIComponent(run.id)}`,
     ...(summary ? { summary } : {}),

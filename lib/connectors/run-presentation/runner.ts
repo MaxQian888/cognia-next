@@ -27,7 +27,11 @@ import {
   runTitleForPresentation,
 } from "@/lib/connectors/activity/activity-to-a2ui"
 import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
-import { safeStableActivityId, sanitizeActivityLabel } from "@/lib/execution/run-activity"
+import {
+  safeStableActivityId,
+  safeStepActivityId,
+  sanitizeActivityLabel,
+} from "@/lib/execution/run-activity"
 
 const TERMINAL = new Set<RunProjectionSnapshot["status"]>(["completed", "failed", "cancelled"])
 const COALESCE_MS = 2_000
@@ -114,7 +118,7 @@ interface ImSafeProjection {
 
 function imSafeSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot {
   const safeStep = (step: RunProjectionSnapshot["activeSteps"][number]) => ({
-    id: safeStableActivityId(step.id),
+    id: safeStepActivityId(step.id),
     title: sanitizeActivityLabel(step.title, "Step"),
     status: step.status,
     ...(step.startedAt !== undefined ? { startedAt: step.startedAt } : {}),
@@ -159,6 +163,10 @@ function imSafeSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot 
     pendingSteps: snapshot.pendingSteps.map(safeStep),
     pendingStepCount: snapshot.pendingStepCount,
     activities: safeActivities,
+    ...(snapshot.toolCount !== undefined ? { toolCount: snapshot.toolCount } : {}),
+    ...(snapshot.failedToolCount !== undefined
+      ? { failedToolCount: snapshot.failedToolCount }
+      : {}),
     activityCount: snapshot.activityCount ?? safeActivities.length,
     omittedActivityCount: snapshot.omittedActivityCount ?? 0,
     ...(snapshot.connectorQueueDepth !== undefined
@@ -170,6 +178,9 @@ function imSafeSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot 
       snapshot.pendingInterrupt && !TERMINAL.has(snapshot.status)
         ? {
             id: safeStableActivityId(snapshot.pendingInterrupt.id),
+            ...(snapshot.pendingInterrupt.requestId
+              ? { requestId: safeStableActivityId(snapshot.pendingInterrupt.requestId) }
+              : {}),
             title: "Approval required",
             ...(snapshot.pendingInterrupt.expiresAt !== undefined
               ? { expiresAt: snapshot.pendingInterrupt.expiresAt }
@@ -206,6 +217,7 @@ function projectImSafeSnapshot(snapshot: RunProjectionSnapshot): ImSafeProjectio
     runId: safeRunId,
     kind: snapshot.kind,
     title: "Execution run",
+    ...(projected.locale ? { locale: projected.locale } : {}),
     status: snapshot.status,
     revision: snapshot.revision,
     startedAt: snapshot.startedAt,
@@ -289,7 +301,7 @@ export async function projectExecutionRunBinding(
   }
   const contextualSnapshot: RunProjectionSnapshot = {
     ...snapshot,
-    ...(binding.locale ? { locale: binding.locale } : {}),
+    ...(!snapshot.locale && binding.locale ? { locale: binding.locale } : {}),
     elapsedMs: Math.max(0, (snapshot.endedAt ?? Date.now()) - snapshot.startedAt),
     ...(deps.resolveQueueDepth
       ? { connectorQueueDepth: await deps.resolveQueueDepth(binding) }
@@ -388,6 +400,7 @@ async function deliverMilestone(
           // projected snapshot is already PII-safe, so its timeline markdown
           // and run link can go straight into the card body.
           buildLarkResultCardSegment({
+            locale: snapshot.locale,
             presentation: row?.settings?.cardPresentation,
             answer: markdown(snapshot),
             status:
@@ -757,7 +770,7 @@ async function runHeartbeatExecutionRunBinding(bindingId: string): Promise<void>
     try {
       const contextualSnapshot: RunProjectionSnapshot = {
         ...snapshot,
-        ...(binding.locale ? { locale: binding.locale } : {}),
+        ...(!snapshot.locale && binding.locale ? { locale: binding.locale } : {}),
         elapsedMs: Math.max(0, Date.now() - snapshot.startedAt),
         connectorQueueDepth: await countPendingConnectorInboundJobs(binding.conversationKey),
       }
@@ -790,7 +803,7 @@ async function runHeartbeatExecutionRunBinding(bindingId: string): Promise<void>
   try {
     const contextualSnapshot: RunProjectionSnapshot = {
       ...snapshot,
-      ...(binding.locale ? { locale: binding.locale } : {}),
+      ...(!snapshot.locale && binding.locale ? { locale: binding.locale } : {}),
       elapsedMs: Math.max(0, Date.now() - snapshot.startedAt),
       connectorQueueDepth: await countPendingConnectorInboundJobs(binding.conversationKey),
     }
