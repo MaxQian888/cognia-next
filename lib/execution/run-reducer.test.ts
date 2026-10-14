@@ -332,6 +332,104 @@ describe("reduceRunEvents", () => {
       expect(serialized).not.toContain(secret)
     }
   })
+
+  it("projects commentary safely into activities and the latest active step title", () => {
+    const snapshot = reduceRunEvents({ ...baseRun, kind: "agent-turn" }, [
+      event({
+        type: "step.started",
+        seq: 1,
+        payload: {
+          stepId: "commentary:c1",
+          category: "status",
+          title: "Checking `code` and git history",
+          safeTitle: true,
+        },
+      }),
+      event({
+        type: "step.progress",
+        seq: 2,
+        payload: {
+          stepId: "commentary:c1",
+          category: "status",
+          title: "Checking `code` at https://alice:password@example.com/private?token=secret",
+          safeTitle: true,
+        },
+      }),
+    ])
+
+    expect(snapshot.activities).toEqual([
+      expect.objectContaining({
+        kind: "step",
+        category: "status",
+        label: "Checking code at example.com",
+      }),
+    ])
+    expect(snapshot.activeSteps[0]).toMatchObject({
+      title: "Checking code at example.com",
+      status: "in_progress",
+      startedAt: 1_001,
+    })
+    expect(JSON.stringify(snapshot)).not.toMatch(/alice:password|token=secret|\/private/)
+  })
+
+  it.each([
+    "git log -S secret -- docs/plans",
+    "SELECT password FROM users",
+    "Found password=short-secret",
+  ])("keeps unsafe commentary out of both projections: %s", (title) => {
+    const snapshot = reduceRunEvents({ ...baseRun, kind: "agent-turn" }, [
+      event({
+        type: "step.started",
+        seq: 1,
+        payload: { stepId: "commentary:c1", category: "status", title, safeTitle: true },
+      }),
+    ])
+    expect(snapshot.activities?.[0].label).toBe("Agent progress")
+    expect(snapshot.activeSteps[0].title).toBe("Agent progress")
+    expect(JSON.stringify(snapshot)).not.toContain(title)
+  })
+
+  it("redacts commentary secrets in both projections and keeps ordinary steps strict", () => {
+    const snapshot = reduceRunEvents({ ...baseRun, kind: "agent-turn" }, [
+      event({
+        type: "step.started",
+        seq: 1,
+        payload: {
+          stepId: "commentary:c1",
+          category: "status",
+          title: "Checking key sk-proj-abc123def456ghi789jkl012",
+          safeTitle: true,
+        },
+      }),
+      event({
+        type: "step.started",
+        seq: 2,
+        payload: {
+          stepId: "commentary:misleading-id",
+          category: "command",
+          title: "Checking `code` with git history",
+          safeTitle: true,
+        },
+      }),
+      event({
+        type: "step.started",
+        seq: 3,
+        payload: {
+          stepId: "plain-step",
+          title: "Checking `code` with git history",
+          safeTitle: true,
+        },
+      }),
+    ])
+    expect(snapshot.activities?.[0].label).toContain("Checking key")
+    expect(snapshot.activeSteps[0].title).toContain("Checking key")
+    expect(snapshot.activities?.slice(1).map((activity) => activity.label)).toEqual([
+      "Step",
+      "Step",
+    ])
+    expect(snapshot.activeSteps.slice(1).map((step) => step.title)).toEqual(["Step", "Step"])
+    expect(JSON.stringify(snapshot)).not.toContain("sk-proj-abc123def456ghi789jkl012")
+  })
 })
 
 describe("team run allowed actions", () => {

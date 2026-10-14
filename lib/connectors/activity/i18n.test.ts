@@ -1,6 +1,17 @@
 import { resolveActivityI18n } from "./i18n"
 
 describe("resolveActivityI18n", () => {
+  it.each(["en", "zh-CN"])("localizes Lark timeline tags and headings in %s", (locale) => {
+    const i18n = resolveActivityI18n(locale)
+    expect(i18n.activityHeading(5)).toBe(locale === "en" ? "Activity · 5 steps" : "执行过程 · 5 步")
+    expect(i18n.activityStatus("running")).toBe(locale === "en" ? "Running" : "进行中")
+    expect(i18n.activityStatus("completed")).toBe(locale === "en" ? "Done" : "完成")
+    expect(i18n.activityStatus("pending")).toBe(locale === "en" ? "Waiting" : "等待")
+    expect(i18n.activityStatus("blocked")).toBe(locale === "en" ? "Waiting" : "等待")
+    expect(i18n.activityStatus("failed")).toBe(locale === "en" ? "Failed" : "失败")
+    expect(i18n.activityStatus("skipped")).toBe(locale === "en" ? "Skipped" : "跳过")
+  })
+
   it("returns English for en", () => {
     const i18n = resolveActivityI18n("en")
     expect(i18n.working).toBe("Working")

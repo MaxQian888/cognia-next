@@ -7,9 +7,12 @@ import {
   larkCallout,
   larkCard,
   larkCardHeader,
+  larkCollapsiblePanel,
   larkFieldGrid,
+  larkGreyText,
   larkNote,
   larkReplyLocale,
+  larkStatusTag,
   larkToneTemplate,
 } from "./card-kit"
 
@@ -68,6 +71,72 @@ describe("larkCard", () => {
       config: { update_multi: true, summary: { content: "新会话" } },
       body: { padding: "12px 16px 16px 16px", vertical_spacing: "8px", elements: [] },
     })
+  })
+})
+
+describe("larkCollapsiblePanel", () => {
+  it("uses a plain title and the shared Card 2.0 disclosure styling", () => {
+    const elements = [{ tag: "markdown", content: "steps", element_id: "run_summary" }]
+    expect(
+      larkCollapsiblePanel({
+        title: "执行过程 · 5 步",
+        expanded: true,
+        elements,
+        elementId: "run_progress",
+      })
+    ).toEqual({
+      tag: "collapsible_panel",
+      element_id: "run_progress",
+      expanded: true,
+      header: {
+        title: { tag: "plain_text", content: "执行过程 · 5 步" },
+        icon: {
+          tag: "standard_icon",
+          token: "down-small-ccm_outlined",
+          color: "grey",
+          size: "16px 16px",
+        },
+        icon_position: "follow_text",
+        icon_expanded_angle: -180,
+      },
+      border: { color: "grey", corner_radius: "5px" },
+      padding: "8px",
+      vertical_spacing: "4px",
+      elements,
+    })
+  })
+
+  it("keeps collapsed state and omits an unspecified element id", () => {
+    const panel = larkCollapsiblePanel({ title: "<at>*Activity*_", expanded: false, elements: [] })
+    expect(panel.expanded).toBe(false)
+    expect(panel).not.toHaveProperty("element_id")
+    expect(panel.header).toMatchObject({
+      title: { tag: "plain_text", content: "<at>*Activity*_" },
+    })
+  })
+})
+
+describe("larkStatusTag / larkGreyText", () => {
+  it.each([
+    ["running", "turquoise"],
+    ["completed", "green"],
+    ["failed", "red"],
+    ["blocked", "orange"],
+    ["waiting", "orange"],
+    ["pending", "neutral"],
+    ["skipped", "neutral"],
+  ] as const)("maps %s to the supported %s text tag color", (status, color) => {
+    expect(larkStatusTag(status, "label")).toBe(`<text_tag color='${color}'>label</text_tag>`)
+  })
+
+  it("escapes raw labels and metadata without backslash escapes", () => {
+    expect(larkStatusTag("completed", "<at>*Done*_")).toBe(
+      "<text_tag color='green'>&#60;at&#62;&#42;Done&#42;&#95;</text_tag>"
+    )
+    expect(larkGreyText("src/a_b.ts · `code` & <at>")).toBe(
+      "<font color='grey'>src/a&#95;b.ts · &#96;code&#96; &#38; &#60;at&#62;</font>"
+    )
+    expect(larkGreyText("\\path")).toBe("<font color='grey'>&#92;path</font>")
   })
 })
 

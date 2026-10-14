@@ -21,12 +21,13 @@ import type {
 } from "@/types/execution/run"
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
 import {
-  formatRunActivityTimeline,
+  runActivitiesForPresentation,
   runTitleForPresentation,
 } from "@/lib/connectors/activity/activity-to-a2ui"
 import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
 import { sanitizeActivityLabel, safeStableActivityId } from "@/lib/execution/run-activity"
 import { buildFollowUpItems, RUN_ACTION_LABEL_EN, RUN_ACTION_LABEL_ZH } from "./follow-up-items"
+import { formatLarkRunTimeline, larkActivityCount, larkMilestoneLine } from "./lark-timeline"
 import {
   createLarkCotClient,
   createLarkCotProjectionState,
@@ -44,6 +45,9 @@ import {
   larkButton,
   larkButtonRow,
   larkCardHeader,
+  larkCollapsiblePanel,
+  larkGreyText,
+  larkMarkdown,
   larkToneTemplate,
   type LarkCardTone,
   type LarkIcon,
@@ -57,7 +61,7 @@ const CARD_CREATED_AT_KEY = "cardCreatedAt"
 const SUMMARY_ELEMENT_ID = "run_summary"
 const STATUS_ELEMENT_ID = "run_status"
 const ACTIONS_ELEMENT_ID = "run_actions"
-const CARD_LAYOUT_VERSION = 2
+const CARD_LAYOUT_VERSION = 3
 const MAX_MUTATION_ATTEMPTS = 3
 const MUTATION_SAFETY_VERSION = 1
 
@@ -225,16 +229,7 @@ function deterministicUuid(input: string): string {
 function workflowElements(snapshot: RunProjectionSnapshot): Record<string, unknown>[] {
   const graph = snapshot.workflowGraph
   if (!graph?.nodes.length) return []
-  const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
   const i18n = resolveActivityI18n(snapshot.locale)
-  const marks = {
-    pending: "○",
-    in_progress: "▶",
-    completed: "✓",
-    failed: "✕",
-    skipped: "⊘",
-    blocked: "⏸",
-  }
   const nodes = graph.nodes.slice(0, 16)
   const index = new Map(graph.nodes.map((node, i) => [node.id, i + 1]))
   const rows: Record<string, unknown>[] = []
@@ -246,38 +241,31 @@ function workflowElements(snapshot: RunProjectionSnapshot): Record<string, unkno
         width: "weighted",
         weight: 1,
         elements: [
-          {
-            tag: "markdown",
-            content: `**${index.get(node.id)} · ${marks[node.status] ?? "○"} ${sanitizeActivityLabel(
-              node.title,
-              "Step"
-            )
-              .replace(/([\\`*_\[\]])/g, "\\$1")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;")}**\n${i18n.milestoneStatus(node.status)}`,
-          },
+          larkMarkdown(
+            `${larkGreyText(`${index.get(node.id)} ·`)} ${larkMilestoneLine(node, i18n)}`,
+            { text_size: "notation" }
+          ),
         ],
       })),
     })
   }
   const edges = graph.edges.filter((edge) => index.has(edge.source) && index.has(edge.target))
-  rows.push({
-    tag: "markdown",
-    content: `${zh ? "依赖关系" : "Dependencies"}: ${
-      edges
-        .slice(0, 24)
-        .map((edge) => `${index.get(edge.source)} → ${index.get(edge.target)}`)
-        .join(" · ") || (zh ? "无节点间依赖" : "No dependencies between nodes")
-    }`,
-  })
+  rows.push(
+    larkMarkdown(
+      larkGreyText(
+        i18n.workflowDependencies(
+          edges
+            .slice(0, 24)
+            .map((edge) => `${index.get(edge.source)} → ${index.get(edge.target)}`)
+            .join(" · ")
+        )
+      ),
+      { text_size: "notation" }
+    )
+  )
   if (graph.nodes.length > 16 || edges.length > 24)
-    rows.push({
-      tag: "markdown",
-      content: zh
-        ? "仅展示部分节点与连线，请打开完整工作流。"
-        : "Partial graph shown. Open the full workflow for all nodes and connections.",
-    })
-  return [{ tag: "markdown", content: `**${zh ? "工作流总览" : "Workflow overview"}**` }, ...rows]
+    rows.push(larkMarkdown(larkGreyText(i18n.workflowPartial), { text_size: "notation" }))
+  return [larkMarkdown(larkGreyText(i18n.workflowOverview), { text_size: "notation" }), ...rows]
 }
 
 function graphSignature(snapshot: RunProjectionSnapshot): string {
@@ -332,7 +320,6 @@ function cardJson(
   const title = presentation.title || runTitleForPresentation(snapshot, i18n)
   const actionLabel = zh ? ACTION_LABEL_ZH : ACTION_LABEL_EN
   const look = runStatusLook(snapshot.status)
-  const details = summaryContent(snapshot, cotActive, presentation)
   const runUrl = buildRunDetailsUrl(safeRunId, webBase)
   const detailsUrl =
     runUrl && snapshot.workflowGraph
@@ -352,9 +339,7 @@ function cardJson(
       larkButton({
         text:
           action === "open_details" && snapshot.workflowGraph
-            ? zh
-              ? "完整工作流"
-              : "Full workflow"
+            ? i18n.fullWorkflow
             : actionLabel[action],
         type: ACTION_LOOK[action].type as Parameters<typeof larkButton>[0]["type"],
         icon: ACTION_LOOK[action].icon,
@@ -421,52 +406,18 @@ function cardJson(
         // stream_summary mutations keep working). Without COT the collapsible
         // panel carries the full in-card timeline as before.
         cotActive
-          ? {
-              tag: "markdown",
-              ...larkCardMarkdownStyle(presentation),
-              content: details,
-              element_id: SUMMARY_ELEMENT_ID,
-            }
+          ? summaryElement(snapshot, cotActive, presentation)
           : {
-              tag: "collapsible_panel",
-              element_id: "run_progress",
-              expanded:
-                presentation.history === "expanded" ||
-                (presentation.history === "auto" &&
-                  !snapshot.workflowGraph &&
-                  !["completed", "cancelled"].includes(snapshot.status)),
-              ...larkCardBodyStyle(presentation),
+              ...larkCollapsiblePanel({
+                title: i18n.activityHeading(larkActivityCount(snapshot)),
+                elementId: "run_progress",
+                expanded:
+                  presentation.history === "expanded" ||
+                  (presentation.history === "auto" &&
+                    !["completed", "failed", "cancelled"].includes(snapshot.status)),
+                elements: [summaryElement(snapshot, cotActive, presentation)],
+              }),
               ...larkCardPanelStyle(presentation),
-              header: {
-                title: {
-                  tag: "plain_text",
-                  content:
-                    snapshot.kind === "workflow"
-                      ? zh
-                        ? "节点与执行活动"
-                        : "Nodes and activity"
-                      : zh
-                        ? "执行过程"
-                        : "Execution activity",
-                },
-                background_color: "grey-100",
-                padding: "12px",
-                icon: {
-                  tag: "standard_icon",
-                  token: "down-small-ccm_outlined",
-                  size: "16px 16px",
-                },
-                icon_position: "right",
-              },
-              border: { color: "grey-200", corner_radius: "8px" },
-              elements: [
-                {
-                  tag: "markdown",
-                  ...larkCardMarkdownStyle(presentation),
-                  content: details,
-                  element_id: SUMMARY_ELEMENT_ID,
-                },
-              ],
             },
         ...(actions.length > 0 ? [larkButtonRow(actions, { element_id: ACTIONS_ELEMENT_ID })] : []),
       ],
@@ -484,12 +435,8 @@ export function buildLarkRunFallbackSegment(
     type: "card",
     card: {
       kind: "lark",
-      payload: cardJson(
-        snapshot,
-        false,
-        webBase,
-        false,
-        normalizeLarkCardPresentation(preferences)
+      payload: JSON.parse(
+        serializeCard(snapshot, false, webBase, false, normalizeLarkCardPresentation(preferences))
       ),
     },
   }
@@ -505,24 +452,41 @@ function serializeCard(
   let json = JSON.stringify(cardJson(snapshot, streaming, webBase, cotActive, presentation))
   if (new TextEncoder().encode(json).byteLength <= CARD_LIMIT_BYTES) return json
   json = JSON.stringify(
-    cardJson(
-      {
-        ...snapshot,
-        summary: `${clamp(snapshot.summary, 1_000) ?? "Run details"} (truncated)`,
-        activeSteps: snapshot.activeSteps.slice(0, 2),
-        recentSteps: [],
-        artifacts: [],
-      },
-      streaming,
-      webBase,
-      cotActive,
-      presentation
-    )
+    cardJson(trimCardSnapshot(snapshot), streaming, webBase, cotActive, presentation)
   )
   if (new TextEncoder().encode(json).byteLength > CARD_LIMIT_BYTES) {
     throw new Error("Lark CardKit projection exceeds 30KB after safe trimming")
   }
   return json
+}
+
+function trimCardSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot {
+  const activities = runActivitiesForPresentation(snapshot)
+  return {
+    ...snapshot,
+    activities: activities.slice(0, 4),
+    omittedActivityCount: (snapshot.omittedActivityCount ?? 0) + Math.max(0, activities.length - 4),
+    activeSteps: snapshot.activeSteps.slice(0, 2),
+    recentSteps: [],
+    pendingSteps: snapshot.pendingSteps.slice(0, 2),
+    artifacts: [],
+  }
+}
+
+function cardNeedsTrimming(
+  snapshot: RunProjectionSnapshot,
+  webBase: string | null | undefined,
+  cotActive: boolean,
+  presentation: LarkCardPresentation
+): boolean {
+  const card = cardJson(
+    snapshot,
+    ["running", "queued"].includes(snapshot.status),
+    webBase,
+    cotActive,
+    presentation
+  )
+  return new TextEncoder().encode(JSON.stringify(card)).byteLength > CARD_LIMIT_BYTES
 }
 
 function summaryContent(
@@ -533,11 +497,19 @@ function summaryContent(
   if (cotActive) return statusContent(snapshot, true, presentation)
   // Keep elapsed time outside this element: heartbeats must not rewrite the
   // process history or disrupt the reader's position in the expanded panel.
-  return formatRunActivityTimeline(snapshot, resolveActivityI18n(snapshot.locale))
-    .split("\n")
-    .slice(presentation.showProgress ? 1 : 2)
-    .filter((line) => line !== "│")
-    .join("\n\n")
+  return formatLarkRunTimeline(snapshot, resolveActivityI18n(snapshot.locale))
+}
+
+function summaryElement(
+  snapshot: RunProjectionSnapshot,
+  cotActive = false,
+  presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION,
+  elementId = SUMMARY_ELEMENT_ID
+): Record<string, unknown> {
+  return larkMarkdown(summaryContent(snapshot, cotActive, presentation), {
+    element_id: elementId,
+    text_size: "notation",
+  })
 }
 
 function statusElement(
@@ -557,52 +529,44 @@ function statusContent(
   cotActive = false,
   presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION
 ): string {
-  const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
   const i18n = resolveActivityI18n(snapshot.locale)
   const safeLabel = (value: unknown, fallback: string) =>
     escapeLarkCardText(sanitizeActivityLabel(value, fallback))
-  const ratio = snapshot.progress.completed / snapshot.progress.total
-  const bar =
-    snapshot.progress.trustworthy && snapshot.progress.total > 0 && Number.isFinite(ratio)
-      ? "■".repeat(Math.round(Math.max(0, Math.min(1, ratio)) * 10)) +
-        "□".repeat(10 - Math.round(Math.max(0, Math.min(1, ratio)) * 10))
-      : undefined
   // The header names the state; this line only measures it.
   const measures = [
     presentation.showElapsed
-      ? `${zh ? "用时" : "Elapsed"} ${i18n.elapsed(Math.max(0, Math.round(snapshot.elapsedMs / 1000)))}`
+      ? `${i18n.elapsedLabel} ${i18n.elapsed(Math.max(0, Math.round(snapshot.elapsedMs / 1000)))}`
       : undefined,
-    snapshot.progress.trustworthy && snapshot.progress.total > 1
-      ? `${zh ? "进度" : "Progress"} ${snapshot.progress.completed}/${snapshot.progress.total}`
+    presentation.showProgress
+      ? snapshot.progress.trustworthy && snapshot.progress.total > 0
+        ? `${i18n.progressLabel} ${snapshot.progress.completed}/${snapshot.progress.total}`
+        : i18n.completedActivities(snapshot.progress.completed)
       : undefined,
   ].filter(Boolean)
-  const overview = measures.length ? `<font color='grey'>${measures.join(" · ")}</font>` : undefined
+  const overview = measures.length ? larkGreyText(measures.join(" · ")) : undefined
   const waiting = snapshot.pendingInterrupt
-    ? `**${zh ? "需要你的操作" : "Your action is needed"}**\n${zh ? "请使用下方按钮批准或拒绝，再继续执行。" : "Use the controls below to approve or deny before execution continues."}`
+    ? `**${escapeLarkCardText(i18n.actionNeeded)}**\n${larkGreyText(i18n.approvalHint)}`
     : undefined
   const artifacts =
     presentation.showArtifacts && snapshot.artifacts.length > 0
-      ? `**${zh ? "产物" : "Artifacts"} · ${snapshot.artifacts.length}**\n` +
+      ? `${larkGreyText(`${i18n.artifactsLabel} · ${snapshot.artifacts.length}`)}\n` +
         snapshot.artifacts
           .slice(0, 5)
-          .map((artifact) => `▣ ${safeLabel(artifact.title, "Artifact")}`)
+          .map((artifact) => safeLabel(artifact.title, i18n.artifactsLabel))
           .join("\n")
       : undefined
   // Every control is a button on this card, so the typed-reply hint other
   // platforms print would only repeat them.
   const lines = [
     overview,
-    presentation.showProgress && snapshot.progress.total > 1 ? bar : undefined,
     waiting,
     artifacts,
-    cotActive
-      ? `<font color='grey'>${escapeLarkCardText(i18n.cotProcessInline)}</font>`
-      : undefined,
+    cotActive ? larkGreyText(i18n.cotProcessInline) : undefined,
   ]
     .filter(Boolean)
     .join("\n")
   // An empty markdown element is not a valid card component.
-  return lines || `<font color='grey'>${escapeLarkCardText(i18n.runStatus(snapshot.status))}</font>`
+  return lines || larkGreyText(i18n.runStatus(snapshot.status))
 }
 
 function actionsElement(
@@ -630,19 +594,17 @@ function renderedContent(
   cotActive = false,
   presentation: LarkCardPresentation = DEFAULT_LARK_CARD_PRESENTATION
 ): Record<Exclude<PendingCardMutation["operation"], "batch_update">, string> {
+  const visible = cardNeedsTrimming(snapshot, webBase, cotActive, presentation)
+    ? trimCardSnapshot(snapshot)
+    : snapshot
   return {
-    stream_summary: deterministicUuid(summaryContent(snapshot, cotActive, presentation)),
+    stream_summary: deterministicUuid(summaryContent(visible, cotActive, presentation)),
     update_summary: deterministicUuid(
-      JSON.stringify({
-        tag: "markdown",
-        element_id: SUMMARY_ELEMENT_ID,
-        ...larkCardMarkdownStyle(presentation),
-        content: summaryContent(snapshot, cotActive, presentation),
-      })
+      JSON.stringify(summaryElement(visible, cotActive, presentation))
     ),
-    update_status: deterministicUuid(JSON.stringify(statusElement(snapshot, presentation))),
+    update_status: deterministicUuid(JSON.stringify(statusElement(visible, presentation))),
     update_actions: deterministicUuid(
-      JSON.stringify(actionsElement(snapshot, webBase, cotActive, presentation))
+      JSON.stringify(actionsElement(visible, webBase, cotActive, presentation))
     ),
     replace_card: deterministicUuid(
       serializeCard(
@@ -1115,6 +1077,13 @@ export function createLarkRunPresentationDriver(
         hasActions: snapshot.allowedActions.length > 0,
         presentedStatus: snapshot.status,
         presentedGraph: graphSignature(snapshot),
+        presentedActivityCount: larkActivityCount(snapshot),
+        presentedTrimmed: cardNeedsTrimming(
+          snapshot,
+          options.webEntryBaseUrl,
+          cotActive,
+          presentation
+        ),
         presentedCot: cotActive,
         presentedLayout: CARD_LAYOUT_VERSION,
         presentedPreferences: JSON.stringify(presentation),
@@ -1171,12 +1140,7 @@ export function createLarkRunPresentationDriver(
       if (!["running", "queued"].includes(snapshot.status)) {
         batchElements.push({
           operation: "update_summary",
-          element: {
-            tag: "markdown",
-            element_id: current.elementIds.summary,
-            ...larkCardMarkdownStyle(presentation),
-            content: summaryContent(snapshot, cotActive, presentation),
-          },
+          element: summaryElement(snapshot, cotActive, presentation, current.elementIds.summary),
         })
       }
       if (snapshot.allowedActions.length > 0) {
@@ -1249,12 +1213,12 @@ export function createLarkRunPresentationDriver(
                     operation === "update_status"
                       ? statusElement(snapshot, presentation)
                       : operation === "update_summary"
-                        ? {
-                            tag: "markdown",
-                            element_id: current.elementIds.summary,
-                            ...larkCardMarkdownStyle(presentation),
-                            content: summaryContent(snapshot, cotActive, presentation),
-                          }
+                        ? summaryElement(
+                            snapshot,
+                            cotActive,
+                            presentation,
+                            current.elementIds.summary
+                          )
                         : actionsElement(snapshot, options.webEntryBaseUrl, cotActive, presentation)
                   ),
                   sequence,
@@ -1351,6 +1315,10 @@ export function createLarkRunPresentationDriver(
           ? {
               presentedStatus: matchesDesired ? snapshot.status : undefined,
               presentedGraph: matchesDesired ? graphSignature(snapshot) : undefined,
+              presentedActivityCount: matchesDesired ? larkActivityCount(snapshot) : undefined,
+              presentedTrimmed: matchesDesired
+                ? cardNeedsTrimming(snapshot, options.webEntryBaseUrl, cotActive, presentation)
+                : undefined,
               presentedCot: matchesDesired ? cotActive : undefined,
               presentedLayout: matchesDesired ? CARD_LAYOUT_VERSION : undefined,
               presentedPreferences: matchesDesired ? JSON.stringify(presentation) : undefined,
@@ -1413,11 +1381,22 @@ export function createLarkRunPresentationDriver(
       ref = await syncCot(ref, snapshot, mutationOptions?.checkpoint)
       const current = state(ref)
       if (
+        // An element update must not undo the 30KB projection. Replace the
+        // bounded card until it fits again, then restore the complete layout.
+        ref.opaqueState?.presentedTrimmed === true ||
+        cardNeedsTrimming(
+          snapshot,
+          options.webEntryBaseUrl,
+          cotOpaqueState(ref)?.status === "active",
+          presentation
+        ) ||
         ref.opaqueState?.presentedLayout !== CARD_LAYOUT_VERSION ||
         ref.opaqueState?.presentedPreferences !== JSON.stringify(presentation) ||
         current.hasActions !== snapshot.allowedActions.length > 0 ||
         ref.opaqueState?.presentedStatus !== snapshot.status ||
         (ref.opaqueState?.presentedGraph ?? "") !== graphSignature(snapshot) ||
+        (cotOpaqueState(ref)?.status !== "active" &&
+          ref.opaqueState?.presentedActivityCount !== larkActivityCount(snapshot)) ||
         // A COT that just died mid-run means the card on screen has no
         // timeline panel — force a replace so the in-card timeline returns.
         (ref.opaqueState?.presentedCot === true) !== (cotOpaqueState(ref)?.status === "active")

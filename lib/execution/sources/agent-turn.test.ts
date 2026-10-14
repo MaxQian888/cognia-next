@@ -163,6 +163,40 @@ describe("AgentRunEventProducer", () => {
     )
   })
 
+  it("preserves safe commentary prose while removing execution details before journaling", async () => {
+    const appended: AppendRunEventInput[] = []
+    const producer = new AgentRunEventProducer("run-agent", async (_runId, input) => {
+      appended.push(input)
+      return {} as never
+    })
+    await producer.onCaptureEvent(
+      {
+        type: "commentary-delta",
+        messageId: "prose",
+        delta: "Checking `code` and git history at https://user:pass@example.com?token=secret",
+        done: true,
+      },
+      2_000
+    )
+    await producer.onCaptureEvent(
+      {
+        type: "commentary-delta",
+        messageId: "command",
+        delta: "git log -S secret -- docs/plans",
+        done: true,
+      },
+      2_001
+    )
+
+    expect(appended[2].payload).toMatchObject({
+      title: "Checking code and git history at example.com",
+      category: "status",
+      safeTitle: true,
+    })
+    expect(appended[5].payload.title).toBe("Agent progress")
+    expect(JSON.stringify(appended)).not.toMatch(/user:pass|token=secret|git log|docs\/plans/)
+  })
+
   it("records a machine-readable degradation event", async () => {
     const appended: AppendRunEventInput[] = []
     const producer = new AgentRunEventProducer("run-agent", async (_runId, input) => {

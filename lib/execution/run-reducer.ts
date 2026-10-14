@@ -17,6 +17,7 @@ import {
   safeActivityTarget,
   safeStableActivityId,
   safeToolActivityMetadata,
+  sanitizeActivityCommentary,
   sanitizeActivityLabel,
 } from "./run-activity"
 import { canRetryRunKind } from "./run-retry-registry"
@@ -305,6 +306,7 @@ function upsertActivity(activities: Map<string, RunActivitySnapshot>, event: Run
       : `step:${safeStableActivityId(stepId)}`
     const prior = activities.get(id)
     if (prior?.kind === "tool") return
+    const commentary = event.payload.category === "status"
     activities.set(id, {
       id,
       kind: "step",
@@ -312,7 +314,9 @@ function upsertActivity(activities: Map<string, RunActivitySnapshot>, event: Run
       status,
       label:
         event.payload.safeTitle === true
-          ? sanitizeActivityLabel(event.payload.title, prior?.label ?? "Step")
+          ? commentary
+            ? sanitizeActivityCommentary(event.payload.title, prior?.label ?? "Agent progress")
+            : sanitizeActivityLabel(event.payload.title, prior?.label ?? "Step")
           : (prior?.label ?? "Step"),
       ...((safeActivityTarget(event.payload.target) ?? prior?.target)
         ? { target: safeActivityTarget(event.payload.target) ?? prior?.target }
@@ -553,11 +557,14 @@ export function reduceRunEvents(
 
     const nextStepStatus = stepStatus(event.type)
     const stepId = stringValue(event.payload.stepId)
-    if (nextStepStatus && stepId) {
+    if ((nextStepStatus || event.type === "step.progress") && stepId) {
       const prior = steps.get(stepId)
+      const commentary = event.payload.category === "status"
       const title =
         event.payload.safeTitle === true
-          ? sanitizeActivityLabel(event.payload.title, prior?.title ?? "Step")
+          ? commentary
+            ? sanitizeActivityCommentary(event.payload.title, prior?.title ?? "Agent progress")
+            : sanitizeActivityLabel(event.payload.title, prior?.title ?? "Step")
           : (prior?.title ?? "Step")
       const safeSummary =
         event.payload.safeSummary === true && stringValue(event.payload.summary)
@@ -567,7 +574,7 @@ export function reduceRunEvents(
         ...prior,
         id: safeStableActivityId(stepId),
         title,
-        status: nextStepStatus,
+        status: nextStepStatus ?? prior?.status ?? "in_progress",
         ...(event.type === "step.started" ? { startedAt: event.ts } : {}),
         ...(nextStepStatus === "completed" || nextStepStatus === "failed"
           ? { completedAt: event.ts }

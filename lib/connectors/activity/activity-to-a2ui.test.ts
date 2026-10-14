@@ -4,6 +4,8 @@ import {
   formatRunMilestones,
   formatRunStoppedNote,
   runActivitiesForPresentation,
+  runTitleForPresentation,
+  runMilestonesForPresentation,
 } from "./activity-to-a2ui"
 import { resolveActivityI18n } from "./i18n"
 import type { RunProjectionSnapshot } from "@/types/execution/run"
@@ -95,7 +97,7 @@ describe("durable run activity presentation", () => {
     expect(text).toContain("… 2 earlier activities hidden")
     expect(text).toContain("Read · `src/index.ts`")
     expect(text).toContain("WebSearch")
-    expect(text).toContain("\n│\n")
+    expect(text).not.toContain("│")
     expect(text).not.toContain("raw stack")
   })
 
@@ -136,6 +138,40 @@ describe("durable run activity presentation", () => {
     expect(text).toContain("Build")
     expect(text).toContain("◉")
   })
+
+  it("keeps safe commentary at the final presentation boundary but keeps tool labels strict", () => {
+    const label = "Checking `node` behavior using https://example.com/docs?token=secret"
+    const activities = runActivitiesForPresentation(
+      runSnapshot({
+        activities: [
+          {
+            id: "commentary",
+            kind: "step",
+            category: "status",
+            status: "running",
+            label,
+            startedAt: 1,
+          },
+          { id: "tool", kind: "tool", category: "command", status: "running", label, startedAt: 2 },
+        ],
+      })
+    )
+    expect(activities[0].label).toBe("Checking node behavior using example.com")
+    expect(activities[1].label).toBe("Tool")
+  })
+
+  it.each(["en", "zh-CN"])("gives unknown kinds a localized title in %s", (locale) => {
+    const title = runTitleForPresentation(
+      runSnapshot({
+        kind: "future-kind" as RunProjectionSnapshot["kind"],
+        title: "Release review",
+      }),
+      resolveActivityI18n(locale)
+    )
+    expect(title).toBe(
+      locale === "en" ? "Execution run · Release review" : "执行任务 · Release review"
+    )
+  })
 })
 
 describe("milestone block", () => {
@@ -157,6 +193,16 @@ describe("milestone block", () => {
     expect(block).toContain("Write the migration")
     expect(block).toContain("Run the gates")
     expect(block).toContain("1/3")
+  })
+
+  it("exposes the same ordered milestone window and counts to native renderers", () => {
+    expect(runMilestonesForPresentation(planned)).toEqual({
+      steps: [planned.activeSteps[0], planned.pendingSteps[0], planned.recentSteps[0]],
+      completed: 1,
+      total: 3,
+      hidden: 0,
+    })
+    expect(runMilestonesForPresentation(runSnapshot())).toBeUndefined()
   })
 
   it("returns undefined when a run has no plan at all", () => {

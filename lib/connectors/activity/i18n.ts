@@ -76,6 +76,18 @@ export interface ActivityI18n {
   cotWaitingForAction: string
   /** Card note pointing at the COT message when the timeline lives there. */
   cotProcessInline: string
+  /** Plain-text Lark panel heading and compact native status tags. */
+  activityHeading: (count: number) => string
+  activityStatus: (status: import("@/types/execution/run").RunActivitySnapshot["status"]) => string
+  elapsedLabel: string
+  progressLabel: string
+  actionNeeded: string
+  approvalHint: string
+  artifactsLabel: string
+  workflowOverview: string
+  workflowDependencies: (edges: string) => string
+  workflowPartial: string
+  fullWorkflow: string
 }
 
 const EN: ActivityI18n = {
@@ -125,7 +137,7 @@ const EN: ActivityI18n = {
       // A run the external Run API asked for (ADR-0188). Named for what the
       // reader sees, not the subsystem.
       fusion: "Routed run",
-    })[kind],
+    })[kind] ?? "Execution run",
   activityLabel: (activity) =>
     ({
       "Run started": "Run started",
@@ -166,6 +178,25 @@ const EN: ActivityI18n = {
   cotToolFailed: "Tool failed",
   cotWaitingForAction: "Waiting for your action",
   cotProcessInline: "Process shown in the thinking timeline above",
+  activityHeading: (count) => `Activity · ${count} step${count === 1 ? "" : "s"}`,
+  activityStatus: (status) =>
+    ({
+      pending: "Waiting",
+      running: "Running",
+      completed: "Done",
+      failed: "Failed",
+      blocked: "Waiting",
+      skipped: "Skipped",
+    })[status],
+  elapsedLabel: "Elapsed",
+  progressLabel: "Progress",
+  actionNeeded: "Your action is needed",
+  approvalHint: "Use the controls below to approve or deny before execution continues.",
+  artifactsLabel: "Artifacts",
+  workflowOverview: "Workflow overview",
+  workflowDependencies: (edges) => `Dependencies: ${edges || "No dependencies between nodes"}`,
+  workflowPartial: "Partial graph shown. Open the full workflow for all nodes and connections.",
+  fullWorkflow: "Full workflow",
 }
 
 const ZH: ActivityI18n = {
@@ -209,7 +240,7 @@ const ZH: ActivityI18n = {
       "security-scan": "安全扫描",
       bot: "Bot",
       fusion: "路由运行",
-    })[kind],
+    })[kind] ?? "执行任务",
   activityLabel: (activity) =>
     ({
       "Run started": "开始执行",
@@ -250,6 +281,25 @@ const ZH: ActivityI18n = {
   cotToolFailed: "执行失败",
   cotWaitingForAction: "等待你的操作",
   cotProcessInline: "执行过程见上方思维链",
+  activityHeading: (count) => `执行过程 · ${count} 步`,
+  activityStatus: (status) =>
+    ({
+      pending: "等待",
+      running: "进行中",
+      completed: "完成",
+      failed: "失败",
+      blocked: "等待",
+      skipped: "跳过",
+    })[status],
+  elapsedLabel: "用时",
+  progressLabel: "进度",
+  actionNeeded: "需要你的操作",
+  approvalHint: "请使用下方按钮批准或拒绝，再继续执行。",
+  artifactsLabel: "产物",
+  workflowOverview: "工作流总览",
+  workflowDependencies: (edges) => `依赖关系：${edges || "无节点间依赖"}`,
+  workflowPartial: "仅展示部分节点与连线，请打开完整工作流。",
+  fullWorkflow: "完整工作流",
 }
 
 const MAPS: Record<string, ActivityI18n> = {

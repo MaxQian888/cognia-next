@@ -61,6 +61,7 @@ export const LARK_ICON = {
   tag: "tag_outlined",
   done: "done_outlined",
   close: "close_outlined",
+  down: "down-small-ccm_outlined",
 } as const
 
 export type LarkIcon = (typeof LARK_ICON)[keyof typeof LARK_ICON]
@@ -160,6 +161,57 @@ export function larkCard(input: LarkCardInput): Record<string, unknown> {
 /** Body text. `content` is markdown the caller has already escaped. */
 export function larkMarkdown(content: string, extra: Record<string, unknown> = {}) {
   return { tag: "markdown", content, ...extra }
+}
+
+export interface LarkCollapsiblePanelInput {
+  title: string
+  expanded: boolean
+  elements: Record<string, unknown>[]
+  elementId?: string
+}
+
+/** A compact disclosure whose title is plain text and body accepts card elements. */
+export function larkCollapsiblePanel(input: LarkCollapsiblePanelInput): Record<string, unknown> {
+  return {
+    tag: "collapsible_panel",
+    ...(input.elementId ? { element_id: input.elementId } : {}),
+    expanded: input.expanded,
+    header: {
+      title: { tag: "plain_text", content: input.title },
+      icon: {
+        tag: "standard_icon",
+        token: LARK_ICON.down,
+        color: "grey",
+        size: "16px 16px",
+      },
+      icon_position: "follow_text",
+      icon_expanded_angle: -180,
+    },
+    border: { color: "grey", corner_radius: "5px" },
+    padding: "8px",
+    vertical_spacing: "4px",
+    elements: input.elements,
+  }
+}
+
+const STATUS_TAG_COLORS = {
+  running: "turquoise",
+  completed: "green",
+  failed: "red",
+  blocked: "orange",
+  waiting: "orange",
+  pending: "neutral",
+  skipped: "neutral",
+} as const
+
+/** A short status marker. `label` is raw text, escaped here for card markdown. */
+export function larkStatusTag(status: keyof typeof STATUS_TAG_COLORS, label: string): string {
+  return `<text_tag color='${STATUS_TAG_COLORS[status]}'>${escapeLarkCardText(label)}</text_tag>`
+}
+
+/** Quiet inline metadata. `text` is raw text, escaped here for card markdown. */
+export function larkGreyText(text: string): string {
+  return `<font color='grey'>${escapeLarkCardText(text)}</font>`
 }
 
 /** A small bold heading over a group, with an optional icon. */

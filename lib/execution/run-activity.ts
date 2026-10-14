@@ -1,6 +1,6 @@
 import { bareToolName, toolIconKeyForName } from "@/lib/chat/tool-summary"
 import type { RunActivityCategory, RunActivityTarget } from "@/types/execution/run"
-import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
+import { hasNoLeakingPiiDeep, normalizeForRedaction, redactText } from "@cognia/redact"
 
 const LABEL_LIMIT = 120
 
@@ -44,6 +44,73 @@ export function sanitizeActivityLabel(value: unknown, fallback: string, max = LA
     /\b(?:select|insert|update|delete)\b.+\b(?:from|into|set|where)\b/i.test(redacted)
   const safe = containsRawExecutionText ? redactText(fallbackText).redacted : redacted
   return safe.length <= max ? safe : `${safe.slice(0, max - 1)}…`
+}
+
+function containsCommentaryExecution(text: string): boolean {
+  // Executable names alone occur in ordinary narration. Require shell syntax,
+  // a known subcommand, or an executable-specific argument before rejecting it.
+  return (
+    /\$\(|(?:&&|\|\|)|^\s*\$\s+\S/m.test(text) ||
+    /\b(?:curl|wget|git|npm|pnpm|yarn|bash|zsh|sh|python\d?|node|npx|rm|cat|echo|printenv|export|source|cd|ls|sed|awk|grep|rg)\s+(?:-[\w-]|\.{0,2}\/|~\/|\$[\w{]|["'])/i.test(
+      text
+    ) ||
+    /\b(?:git\s+(?:log|diff|show|status|checkout|switch|commit|push|pull|clone|fetch|branch|merge|rebase|restore|reset|clean|stash|add|worktree|config|grep|ls-files|rev-parse|tag)|(?:npm|pnpm|yarn|npx)\s+(?:run|exec|dlx|install|test|build|add|remove|config))\b/i.test(
+      text
+    ) ||
+    /\b(?:node|python\d?|bash|zsh|sh)\s+\S+\.(?:[cm]?[jt]s|py|sh)\b/i.test(text) ||
+    /\b(?:curl|wget)\s+(?:(?:[\w-]+\.)+[\w-]+|localhost\b|\[[a-f\d:]+\])/i.test(text) ||
+    /\b(?:rm|cat|source|cd|ls|sed|awk|grep|rg)\s+(?:\S*[/.\\*]\S+|README\b|LICENSE\b)/i.test(
+      text
+    ) ||
+    /\b(?:printenv\s+[A-Z_][A-Z\d_]*\b|export\s+[A-Z_][A-Z\d_]*=)/.test(text) ||
+    /^\s*(?:(?:sudo|env)\s+)?(?:rm|cat|echo|printenv|export|source|cd|ls|sed|awk|grep|rg)\s+\S/im.test(
+      text
+    ) ||
+    /^\s*(?:node|python\d?|bash|zsh|sh)\s+\S+\s*$/im.test(text) ||
+    /^\s*(?:select\b.+\bfrom\b|insert\s+into\b|update\b.+\bset\b|delete\s+from\b)/im.test(text)
+  )
+}
+
+/**
+ * Commentary is public narration, not a tool label. Keep its prose while
+ * projecting links to hosts and code spans to text; executable snippets and
+ * unresolved secrets still cannot cross the IM boundary.
+ */
+export function sanitizeActivityCommentary(
+  value: unknown,
+  fallback: string,
+  max = LABEL_LIMIT
+): string {
+  const projected = normalizeForRedaction(stringValue(value) ?? "").replace(
+    /\b[a-z][a-z\d+.-]*:\/\/[^\s<>"'`]+/gi,
+    (url) => {
+      try {
+        return new URL(url).hostname
+      } catch {
+        return ""
+      }
+    }
+  )
+  let unsafe = containsCommentaryExecution(projected.replace(/`+/g, ""))
+  const plain = projected
+    .replace(/(`+)([\s\S]*?)\1/g, (_match, _ticks: string, code: string) => {
+      unsafe ||=
+        containsCommentaryExecution(code) ||
+        /^\s*(?:curl|wget|git|npm|pnpm|yarn|bash|zsh|sh|python\d?|node|npx)\s+\S/im.test(code)
+      return code
+    })
+    .replace(/`+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+  const redacted = redactText(plain).redacted
+  unsafe ||=
+    /\b(?:[a-z][\w]*_(?:key|token|secret|password)|api[_-]?key|secret|token|password)\s*[:=]\s*["']?(?!<[\w]+_\d+>|\$\{?\w|process\.env\.)[^\s"'<>]/i.test(
+      redacted
+    ) ||
+    /\b[a-z][a-z\d+.-]*:\/\//i.test(redacted) ||
+    !hasNoLeakingPiiDeep(redacted)
+  if (!redacted || unsafe) return fallback ? sanitizeActivityCommentary(fallback, "", max) : ""
+  return redacted.length <= max ? redacted : `${redacted.slice(0, max - 1)}…`
 }
 
 function normalizePathSegments(

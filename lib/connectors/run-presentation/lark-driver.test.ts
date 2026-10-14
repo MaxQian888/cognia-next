@@ -119,6 +119,244 @@ const snapshot = (
 })
 
 describe("Lark run presentation driver", () => {
+  it.each(["en", "zh-CN"])(
+    "builds the native activity panel and safe one-line rows in %s",
+    (locale) => {
+      const value = snapshot(1)
+      const statuses = ["running", "completed", "failed", "blocked", "pending", "skipped"] as const
+      value.activities = statuses.map((status, index) => ({
+        id: `tool-${index}`,
+        kind: "tool",
+        category: "read",
+        status,
+        label: "Read <at>*file_name*</at>",
+        startedAt: 100,
+        endedAt: 1300,
+        target: { kind: "workspace_path", label: "src/app_test.ts" },
+      }))
+      value.activities.push(
+        ...["first", "duplicate"].map((id) => ({
+          id,
+          kind: "step" as const,
+          category: "status" as const,
+          status: "running" as const,
+          label: "Reviewing `node` behavior",
+          startedAt: 1400,
+        }))
+      )
+      const card = JSON.parse(
+        JSON.stringify(
+          buildLarkRunFallbackSegment({
+            ...value,
+            locale,
+            activeSteps: [],
+            activityCount: 8,
+            omittedActivityCount: 0,
+          })
+        )
+      ).card.payload
+      const panel = card.body.elements.find(
+        (element: { element_id: string }) => element.element_id === "run_progress"
+      )
+      expect(panel).toMatchObject({
+        tag: "collapsible_panel",
+        expanded: true,
+        header: {
+          title: {
+            tag: "plain_text",
+            content: locale === "en" ? "Activity · 8 steps" : "执行过程 · 8 步",
+          },
+          icon: {
+            tag: "standard_icon",
+            token: "down-small-ccm_outlined",
+            color: "grey",
+            size: "16px 16px",
+          },
+          icon_position: "follow_text",
+          icon_expanded_angle: -180,
+        },
+        border: { color: "grey", corner_radius: "5px" },
+        padding: "8px",
+        vertical_spacing: "4px",
+        elements: [{ tag: "markdown", element_id: "run_summary", text_size: "notation" }],
+      })
+      const text = panel.elements[0].content as string
+      expect(text).not.toMatch(/[\\`│⌕▤◇◆▣◷◉]/)
+      expect(text).not.toContain("\n\n")
+      expect(text).not.toContain("<at>")
+      expect(text).toContain("&#60;at&#62;&#42;file&#95;name&#42;&#60;/at&#62;")
+      expect(text).toContain("<font color='grey'>· 1.2s · src/app&#95;test.ts</font>")
+      expect(text.match(/Reviewing node behavior/g)).toHaveLength(1)
+      for (const color of ["turquoise", "green", "red", "orange", "neutral"]) {
+        expect(text).toContain(`<text_tag color='${color}'>`)
+      }
+      expect(text).not.toContain("<text_tag color='grey'>")
+      expect(card.body.elements.at(-1).element_id).toBe("run_actions")
+    }
+  )
+
+  it.each([
+    "running",
+    "queued",
+    "waiting",
+    "paused",
+    "recovery_required",
+    "completed",
+    "failed",
+    "cancelled",
+  ] as const)("honors all history preferences for %s", (status) => {
+    for (const history of ["auto", "expanded", "collapsed"] as const) {
+      const card = JSON.parse(
+        JSON.stringify(buildLarkRunFallbackSegment(snapshot(1, status), undefined, { history }))
+      ).card.payload
+      const panel = card.body.elements.find(
+        (element: { element_id: string }) => element.element_id === "run_progress"
+      )
+      expect(panel.expanded).toBe(
+        history === "expanded" ||
+          (history === "auto" && !["completed", "failed", "cancelled"].includes(status))
+      )
+    }
+  })
+
+  it("uses a safe localized subtitle for an unknown persisted run kind", () => {
+    const card = JSON.parse(
+      JSON.stringify(
+        buildLarkRunFallbackSegment({
+          ...snapshot(1),
+          locale: "zh-CN",
+          kind: "future-kind" as RunProjectionSnapshot["kind"],
+        })
+      )
+    ).card.payload
+    expect(card.header.subtitle.content).toBe("执行任务 · Release workflow")
+    expect(JSON.stringify(card)).not.toContain("undefined")
+  })
+
+  it("refreshes the panel count when it changes and streams narration updates to run_summary", async () => {
+    const request = jest.fn(async (_method: string, _path: string, _body: unknown) => ({
+      data: { card_id: "count-card", message_id: "message" },
+    }))
+    const driver = createLarkRunPresentationDriver(request, { cot: false })
+    let ref = await driver.open(topicTarget, snapshot(1))
+    request.mockClear()
+    const next = { ...snapshot(2), activityCount: 5 }
+    ref = await driver.update(ref, next)
+    const replacement = request.mock.calls.find(
+      ([, path]) => path === "/cardkit/v1/cards/count-card"
+    )!
+    expect(
+      JSON.parse((replacement[2] as { card: { data: string } }).card.data).body.elements[1].header
+        .title.content
+    ).toBe("Activity · 5 steps")
+    request.mockClear()
+    await driver.update(ref, {
+      ...next,
+      revision: 3,
+      activities: next.activities!.map((activity) => ({
+        ...activity,
+        label: "Checking `code` with npm configuration",
+      })),
+    })
+    const streamed = request.mock.calls.find(([, path]) =>
+      path.endsWith("/elements/run_summary/content")
+    )!
+    expect(streamed).toBeDefined()
+    expect((streamed[2] as { content: string }).content).toContain(
+      "<font color='grey'>Checking code with npm configuration</font>"
+    )
+    expect((streamed[2] as { content: string }).content).not.toContain("\\")
+  })
+
+  it("shrinks entity-heavy activities and milestones while preserving the omission note in native and fallback cards", async () => {
+    const large: RunProjectionSnapshot = {
+      ...snapshot(1),
+      activeSteps: [],
+      activityCount: 32,
+      omittedActivityCount: 20,
+      activities: Array.from({ length: 12 }, (_, index) => ({
+        id: `tool-${index}`,
+        kind: "tool",
+        category: "read",
+        status: "completed",
+        label: "~".repeat(120),
+        target: { kind: "workspace_path", label: `src/${"~".repeat(116)}` },
+        startedAt: 0,
+        endedAt: 1200,
+      })),
+      pendingSteps: Array.from({ length: 8 }, (_, index) => ({
+        id: `pending-${index}`,
+        title: "~".repeat(120),
+        status: "pending",
+      })),
+      pendingStepCount: 8,
+      workflowGraph: {
+        workflowId: "workflow",
+        sourceRunId: "source",
+        edges: [],
+        nodes: Array.from({ length: 16 }, (_, index) => ({
+          id: `node-${index}`,
+          title: "~".repeat(120),
+          status: "pending",
+        })),
+      },
+    }
+    const request = jest.fn(async (_method: string, _path: string, _body: unknown) => ({
+      data: { card_id: "large-card", message_id: "message" },
+    }))
+    const driver = createLarkRunPresentationDriver(request, { cot: false })
+    const ref = await driver.open(topicTarget, large)
+    const native = (
+      request.mock.calls.find(([, path]) => path === "/cardkit/v1/cards")![2] as { data: string }
+    ).data
+    const fallback = JSON.stringify(
+      JSON.parse(JSON.stringify(buildLarkRunFallbackSegment(large))).card.payload
+    )
+    expect(fallback).toBe(native.replace('"streaming_mode":true', '"streaming_mode":false'))
+    expect(new TextEncoder().encode(native).byteLength).toBeLessThanOrEqual(30_000)
+    expect(native).toContain("28 earlier activities hidden")
+    request.mockClear()
+    const updated = await driver.update(ref, {
+      ...large,
+      revision: 2,
+      activities: large.activities!.map((activity) => ({ ...activity, endedAt: 2300 })),
+    })
+    expect(request.mock.calls.some(([, path]) => path.includes("/elements/"))).toBe(false)
+    const replacement = request.mock.calls.find(
+      ([, path]) => path === "/cardkit/v1/cards/large-card"
+    )!
+    const updatedData = (replacement[2] as { card: { data: string } }).card.data
+    expect(new TextEncoder().encode(updatedData).byteLength).toBeLessThanOrEqual(30_000)
+    expect(updatedData).toContain("28 earlier activities hidden")
+    expect(updatedData).toContain("2.3s")
+    expect(updated.opaqueState?.presentedTrimmed).toBe(true)
+    request.mockClear()
+    const restoredSnapshot = {
+      ...large,
+      revision: 3,
+      activities: large.activities!.map((activity) => ({
+        ...activity,
+        label: "Read",
+        target: undefined,
+      })),
+      pendingSteps: large.pendingSteps.map((step) => ({ ...step, title: "Next" })),
+    }
+    const restored = await driver.update(updated, restoredSnapshot)
+    expect(request.mock.calls.some(([, path]) => path === "/cardkit/v1/cards/large-card")).toBe(
+      true
+    )
+    expect(restored.opaqueState?.presentedTrimmed).toBe(false)
+    request.mockClear()
+    await driver.update(restored, {
+      ...restoredSnapshot,
+      revision: 4,
+      activities: restoredSnapshot.activities.map((activity) => ({ ...activity, endedAt: 3400 })),
+    })
+    expect(
+      request.mock.calls.some(([, path]) => path.endsWith("/elements/run_summary/content"))
+    ).toBe(true)
+  })
+
   it("keeps responsive typography and header branding through partial updates", async () => {
     const request = jest.fn(async (_method: string, _path: string, _body?: unknown) => ({
       data: { card_id: "style-card", message_id: "message" },
@@ -149,7 +387,7 @@ describe("Lark run presentation driver", () => {
       (element: { tag: string }) => element.tag === "collapsible_panel"
     )
     expect(panel.background_color).toBe("cognia-panel")
-    expect(panel.elements[0].text_size).toBe("cognia-body")
+    expect(panel.elements[0].text_size).toBe("notation")
     request.mockClear()
     await driver.update(ref, { ...initial, revision: 2, elapsedMs: 2_000, pendingStepCount: 5 })
     const batch = request.mock.calls.find(([, path]) => path.endsWith("/batch_update"))
@@ -157,8 +395,9 @@ describe("Lark run presentation driver", () => {
     const actions = JSON.parse((batch![2] as { actions: string }).actions)
     expect(
       actions.every(
-        (action: { params: { element: { text_size: string } } }) =>
-          action.params.element.text_size === "cognia-body"
+        (action: { params: { element: { element_id: string; text_size: string } } }) =>
+          action.params.element.text_size ===
+          (action.params.element.element_id === "run_summary" ? "notation" : "cognia-body")
       )
     ).toBe(true)
   })
@@ -1143,8 +1382,8 @@ it("shows elapsed time and truthful progress in the streaming body", async () =>
   )
   await driver.open(topicTarget, { ...snapshot(1), elapsedMs: 65000 })
   expect(created).toContain("65s")
-  expect(created).toContain("50%")
-  expect(created).toContain("■")
+  expect(created).toContain("Progress 1/2")
+  expect(created).not.toContain("■")
 })
 
 it("renders real branch dependencies and only replaces the graph when its state changes", async () => {
@@ -1180,7 +1419,7 @@ it("renders real branch dependencies and only replaces the graph when its state 
     card.body.elements.find(
       (e: { tag: string; expanded?: boolean }) => e.tag === "collapsible_panel"
     ).expanded
-  ).toBe(false)
+  ).toBe(true)
   calls.length = 0
   ref = await driver.update(ref, { ...value, revision: 2, elapsedMs: 5000 })
   expect(calls.some((call) => call.path === "/cardkit/v1/cards/graph-card")).toBe(false)
@@ -1250,6 +1489,43 @@ describe("Lark COT presentation", () => {
       if (path.endsWith("/reactions")) return { data: { reaction_id: "r1" } }
       return { data: { message_id: "msg-cot" } }
     }
+
+  it("keeps the COT-active card reduced while escaping its artifact and workflow markdown", async () => {
+    const request = jest.fn(async (_method: string, path: string, _body: unknown) => ({
+      data: path.includes("message_cot")
+        ? { cot_id: "cot", message_id: "cot-message" }
+        : { card_id: "card", message_id: "message" },
+    }))
+    const value: RunProjectionSnapshot = {
+      ...snapshot(1),
+      artifacts: [{ id: "artifact", title: "<at>*output_name*</at>" }],
+      workflowGraph: {
+        workflowId: "workflow",
+        sourceRunId: "source",
+        edges: [],
+        nodes: [{ id: "node", title: "<at>*node_name*</at>", status: "in_progress" }],
+      },
+    }
+    await createLarkRunPresentationDriver(request).open(groupTarget, value)
+    const card = JSON.parse(
+      (request.mock.calls.find(([, path]) => path === "/cardkit/v1/cards")![2] as { data: string })
+        .data
+    )
+    expect(
+      card.body.elements.some((element: { tag: string }) => element.tag === "collapsible_panel")
+    ).toBe(false)
+    const summary = card.body.elements.find(
+      (element: { element_id: string }) => element.element_id === "run_summary"
+    )
+    expect(summary.text_size).toBe("notation")
+    expect(summary.content).toContain("&#60;at&#62;&#42;output&#95;name&#42;&#60;/at&#62;")
+    expect(summary.content).toContain(
+      "<font color='grey'>Process shown in the thinking timeline above</font>"
+    )
+    expect(JSON.stringify(card.body)).toContain("&#60;at&#62;&#42;node&#95;name&#42;&#60;/at&#62;")
+    expect(JSON.stringify(card.body)).not.toContain("\\\\")
+    expect(JSON.stringify(card.body)).not.toContain("<at>")
+  })
 
   it("creates the COT message before the card and persists the handle", async () => {
     const calls: CotCall[] = []
@@ -1472,7 +1748,14 @@ describe("Lark COT presentation", () => {
 
     // The next update is a plain stream_summary again — no more COT calls.
     calls.length = 0
-    await driver.update(updated, snapshot(3))
+    await driver.update(updated, {
+      ...next,
+      revision: 3,
+      activities: next.activities.map((activity) => ({
+        ...activity,
+        label: `${activity.label} updated`,
+      })),
+    })
     expect(calls.some((call) => call.path.includes("message_cot"))).toBe(false)
     expect(calls.map((call) => call.path)).toContain(
       "/cardkit/v1/cards/card-cot/elements/run_summary/content"

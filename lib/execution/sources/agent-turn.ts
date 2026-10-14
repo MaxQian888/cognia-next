@@ -7,7 +7,7 @@ import {
 import type { RunEvent } from "@/types/execution/run"
 import type { RunActivityCategory } from "@/types/execution/run"
 import {
-  sanitizeActivityLabel,
+  sanitizeActivityCommentary,
   safeToolActivityMetadata,
   type SafeToolActivityMetadata,
 } from "@/lib/execution/run-activity"
@@ -97,7 +97,7 @@ export class AgentRunEventProducer {
       const stepId = `commentary:${messageId}`
       const accumulated = `${this.commentaryByMessage.get(messageId) ?? ""}${event.delta}`
       this.commentaryByMessage.set(messageId, accumulated)
-      const title = sanitizeActivityLabel(accumulated, "Agent progress")
+      const title = sanitizeActivityCommentary(accumulated, "Agent progress")
       if (!title) return
 
       if (!this.startedCommentary.has(messageId)) {

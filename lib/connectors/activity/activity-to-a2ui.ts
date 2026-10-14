@@ -21,6 +21,7 @@ import type { ActivityI18n } from "./i18n"
 import {
   safeActivityTarget,
   safeStableActivityId,
+  sanitizeActivityCommentary,
   sanitizeActivityLabel,
 } from "@/lib/execution/run-activity"
 
@@ -111,7 +112,10 @@ export function runActivitiesForPresentation(
       kind,
       category,
       status,
-      label: sanitizeActivityLabel(activity.label, kind === "tool" ? "Tool" : "Activity"),
+      label:
+        kind === "step" && category === "status"
+          ? sanitizeActivityCommentary(activity.label, "Activity")
+          : sanitizeActivityLabel(activity.label, kind === "tool" ? "Tool" : "Activity"),
       ...(target ? { target } : {}),
       startedAt: Number.isFinite(activity.startedAt) ? activity.startedAt : 0,
       ...(activity.endedAt !== undefined && Number.isFinite(activity.endedAt)
@@ -143,6 +147,48 @@ const MILESTONE_STATUS_ICON: Record<RunStepSnapshot["status"], string> = {
 /** How many milestones the block renders before collapsing the remainder. */
 const MILESTONE_WINDOW = 8
 
+/** Shared selection and counts; platform renderers own only the visual syntax. */
+export function runMilestonesForPresentation(
+  snapshot: RunProjectionSnapshot,
+  excludedStepIds: ReadonlySet<string> = new Set()
+):
+  | {
+      steps: RunStepSnapshot[]
+      completed: number
+      total: number
+      hidden: number
+    }
+  | undefined {
+  const ordered = [
+    ...new Map(
+      [
+        ...snapshot.activeSteps,
+        ...snapshot.recentSteps.filter(
+          (step) => step.status === "failed" || step.status === "blocked"
+        ),
+        ...snapshot.pendingSteps,
+        ...snapshot.recentSteps,
+      ]
+        .filter((step) => !excludedStepIds.has(step.id))
+        .map((step) => [step.id, step])
+    ).values(),
+  ]
+  if (ordered.length === 0) return undefined
+  const total = Math.max(
+    ordered.length + Math.max(0, snapshot.pendingStepCount - snapshot.pendingSteps.length),
+    snapshot.progress.total || 0
+  )
+  const completed = snapshot.progress.trustworthy
+    ? snapshot.progress.completed
+    : ordered.filter((step) => step.status === "completed").length
+  const steps = ordered.slice(0, MILESTONE_WINDOW)
+  const hidden =
+    ordered.length -
+    steps.length +
+    Math.max(0, snapshot.pendingStepCount - snapshot.pendingSteps.length)
+  return { steps, completed, total, hidden }
+}
+
 /**
  * The plan block — what the run set out to do, and where it has got to.
  *
@@ -162,35 +208,9 @@ export function formatRunMilestones(
   snapshot: RunProjectionSnapshot,
   i18n: ActivityI18n
 ): string | undefined {
-  // Keep current and blocked work visible even after a long completed history.
-  const ordered = [
-    ...new Map(
-      [
-        ...snapshot.activeSteps,
-        ...snapshot.recentSteps.filter(
-          (step) => step.status === "failed" || step.status === "blocked"
-        ),
-        ...snapshot.pendingSteps,
-        ...snapshot.recentSteps,
-      ].map((step) => [step.id, step])
-    ).values(),
-  ]
-  if (ordered.length === 0) return undefined
-
-  const total = Math.max(
-    ordered.length + Math.max(0, snapshot.pendingStepCount - snapshot.pendingSteps.length),
-    snapshot.progress.total || 0
-  )
-  const completed = snapshot.progress.trustworthy
-    ? snapshot.progress.completed
-    : ordered.filter((step) => step.status === "completed").length
-  const shown = ordered.slice(0, MILESTONE_WINDOW)
-  // `pendingStepCount` counts steps the projection knows about but did not
-  // include; the window may hide more on top of that.
-  const hidden =
-    ordered.length -
-    shown.length +
-    Math.max(0, snapshot.pendingStepCount - snapshot.pendingSteps.length)
+  const milestones = runMilestonesForPresentation(snapshot)
+  if (!milestones) return undefined
+  const { steps: shown, completed, total, hidden } = milestones
 
   const lines = shown.map((step) => {
     const label = sanitizeActivityLabel(step.title, i18n.milestoneStatus(step.status))
@@ -267,12 +287,7 @@ export function formatRunActivityTimeline(
   const activityLines = runActivitiesForPresentation(snapshot).map((activity) =>
     activityLine(activity, i18n)
   )
-  const timeline =
-    activityLines.length > 0
-      ? activityLines.flatMap((line, index) =>
-          index < activityLines.length - 1 ? [line, "│"] : [line]
-        )
-      : [i18n.noPublicActivity]
+  const timeline = activityLines.length > 0 ? activityLines : [i18n.noPublicActivity]
   const terminal = ["completed", "failed", "cancelled"].includes(snapshot.status)
   return [
     `**${markdownText(runTitleForPresentation(snapshot, i18n))}** · ${i18n.runStatus(snapshot.status)} · ${elapsed}`,
