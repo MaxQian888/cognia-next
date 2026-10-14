@@ -15,14 +15,13 @@
 import { useEffect } from "react"
 
 import {
-  subscribePluginToolExec,
-  sendPluginToolResponse,
   subscribePluginHookExec,
   sendPluginHookResponse,
   subscribeProtocolAdapterExec,
   subscribeProtocolAdapterCancel,
   sendProtocolAdapterMessage,
 } from "@/lib/claude/ipc"
+import { subscribePluginToolDispatchBridge } from "@/lib/claude/plugin-tool-dispatch-bridge"
 import { canProxyRemoteToolCall } from "@/lib/claude/controller-tool-proxy"
 import { dispatchProtocolAdapterExec } from "@/lib/claude/protocol-adapter-ipc"
 import { loggers } from "@cognia/logging"
@@ -32,43 +31,14 @@ export function PluginToolDispatchProvider({ children }: { children: React.React
     let cancelled = false
     let unlisten: (() => void) | null = null
 
-    void subscribePluginToolExec((req) => {
-      if (req.remoteExecutionContext && !canProxyRemoteToolCall("plugin_tool_exec")) {
-        void sendPluginToolResponse(
-          {
-            type: "plugin_tool_response",
-            sessionId: req.sessionId,
-            toolUseId: req.toolUseId,
-            error: "REMOTE_FEATURE_UNSUPPORTED: controller tool proxy is not advertised",
-          },
-          req.remoteExecutionContext
-        ).catch((error) => {
-          loggers.app.error("unsupported remote plugin response failed", {
-            toolUseId: req.toolUseId,
-            error: String(error),
-          })
-        })
-        return
-      }
-      // handlePluginToolExec never throws (it collapses every failure onto the
-      // response.error field); the write-back is the only thing that can.
-      void import("@/lib/claude/plugin-tool-ipc")
-        .then(({ handlePluginToolExec }) => handlePluginToolExec(req))
-        .then((resp) =>
-          req.remoteExecutionContext
-            ? sendPluginToolResponse(resp, req.remoteExecutionContext)
-            : sendPluginToolResponse(resp)
-        )
-        .catch((err) => {
-          loggers.app.error("plugin_tool_response write failed", {
-            toolUseId: req.toolUseId,
-            error: String(err),
-          })
-        })
-    }).then((fn) => {
-      if (cancelled) fn()
-      else unlisten = fn
+    void subscribePluginToolDispatchBridge({
+      canExecuteRemote: () => canProxyRemoteToolCall("plugin_tool_exec"),
     })
+      .then((fn) => {
+        if (cancelled) fn()
+        else unlisten = fn
+      })
+      .catch(() => loggers.app.error("plugin tool dispatch subscription failed"))
 
     return () => {
       cancelled = true

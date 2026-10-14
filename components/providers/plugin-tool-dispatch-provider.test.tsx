@@ -90,7 +90,8 @@ describe("PluginToolDispatchProvider", () => {
     expect(mockHandle).toHaveBeenCalledWith(expect.objectContaining({ toolUseId: "t1", name: "x" }))
     await waitFor(() =>
       expect(mockSend).toHaveBeenCalledWith(
-        expect.objectContaining({ toolUseId: "t1", result: "ok" })
+        expect.objectContaining({ toolUseId: "t1", result: "ok" }),
+        undefined
       )
     )
   })
@@ -176,12 +177,14 @@ describe("PluginToolDispatchProvider", () => {
     await Promise.resolve()
 
     expect(mockHandle).not.toHaveBeenCalled()
-    expect(mockSend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toolUseId: "t1",
-        error: expect.stringContaining("REMOTE_FEATURE_UNSUPPORTED"),
-      }),
-      context
+    await waitFor(() =>
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolUseId: "t1",
+          error: expect.stringContaining("REMOTE_FEATURE_UNSUPPORTED"),
+        }),
+        context
+      )
     )
   })
 
@@ -246,7 +249,54 @@ describe("PluginToolDispatchProvider", () => {
     const { unmount } = render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
     await Promise.resolve()
     unmount()
-    expect(unlisten).toHaveBeenCalled()
+    await waitFor(() => expect(unlisten).toHaveBeenCalled())
+  })
+
+  it("shares one tool consumer across mounted providers", async () => {
+    let captured!: (request: PluginToolExecEvent) => void
+    const unlisten = jest.fn()
+    mockSubscribe.mockImplementation(async (handler) => {
+      captured = handler
+      return unlisten
+    })
+    mockHandle.mockResolvedValue({
+      type: "plugin_tool_response",
+      sessionId: "s1",
+      toolUseId: "shared",
+      result: "ok",
+    })
+    const first = render(<PluginToolDispatchProvider>first</PluginToolDispatchProvider>)
+    const second = render(<PluginToolDispatchProvider>second</PluginToolDispatchProvider>)
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
+    captured({
+      type: "plugin_tool_exec",
+      sessionId: "s1",
+      toolUseId: "shared",
+      name: "x",
+      args: {},
+    })
+    await waitFor(() => expect(mockSend).toHaveBeenCalledTimes(1))
+    expect(mockHandle).toHaveBeenCalledTimes(1)
+    first.unmount()
+    expect(unlisten).not.toHaveBeenCalled()
+    second.unmount()
+    await waitFor(() => expect(unlisten).toHaveBeenCalledTimes(1))
+  })
+
+  it("releases a subscription that finishes after unmount", async () => {
+    let subscribed!: (stop: () => void) => void
+    const unlisten = jest.fn()
+    mockSubscribe.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          subscribed = resolve
+        })
+    )
+    const { unmount } = render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
+    unmount()
+    subscribed(unlisten)
+    await waitFor(() => expect(unlisten).toHaveBeenCalledTimes(1))
   })
 
   it("cancels an in-flight protocol adapter execution when the sidecar cancels it", async () => {

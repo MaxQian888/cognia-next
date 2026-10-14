@@ -46,6 +46,8 @@
  * - `plugin-runtime` — boots the canonical Node PluginManager and serially
  *   reconciles native install/restore/uninstall events from cognia-server;
  *   installs the shared external-agent config and glance visibility hooks.
+ * - `plugin-tool-dispatch` — answers sidecar plugin and built-in skill calls
+ *   through the shared bridge, before schedulers and connectors accept turns.
  * - `workflow-trigger-bridge` — subscribes to `workflow:trigger` on the brain's
  *   events plane so the Rust cron daemon / webhook router in cognia-server
  *   actually start workflow runs (host-neutral `installTriggerBridge`).
@@ -184,10 +186,11 @@ import "./desktop-sync-source"
 import "./desktop-message-source"
 import "./a2ui-dispatch"
 import "./behavior-telemetry"
+import "./plugin-runtime"
+import "./plugin-tool-dispatch"
 import "./initializers"
 import "./connector-runtime"
 import "./backup-scheduler"
-import "./plugin-runtime"
 import "./managed-ide-broker"
 import "./memory-job-worker"
 import "./integration-runtime"

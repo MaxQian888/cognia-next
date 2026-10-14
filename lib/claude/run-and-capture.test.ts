@@ -14,6 +14,10 @@ import {
   type CaptureStreamEvent,
 } from "./run-and-capture"
 import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import { registerImElicitationContext } from "@/lib/connectors/hitl/im-elicitation-context"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
+import type { approveTool } from "./ipc"
 import type { AppSettings, ClaudeEvent } from "@cognia/agent-config-types"
 import { __resetFusionScopesForTesting } from "@/lib/router-fusion/gate/explicit-run"
 import {
@@ -39,7 +43,7 @@ const sendPromptMock = jest.fn<Promise<void>, [string, unknown, unknown?, unknow
   async () => undefined
 )
 const interruptSessionMock = jest.fn<Promise<void>, [string]>(async () => undefined)
-const approveToolMock = jest.fn<Promise<void>, [string, string, string, string?, unknown?]>(
+const approveToolMock = jest.fn<Promise<void>, Parameters<typeof approveTool>>(
   async () => undefined
 )
 const toolResultDecisionMock = jest.fn<Promise<void>, [string, string, unknown?]>(
@@ -68,8 +72,7 @@ jest.mock("./ipc", () => ({
       : sendPromptMock(sessionId, prompt, options, delivery),
   interruptSession: (sessionId: string) => interruptSessionMock(sessionId),
   onClaudeMessage: (handler: (evt: ClaudeEvent) => void) => onClaudeMessageMock(handler),
-  approveTool: (s: string, r: string, d: string, m?: string, u?: unknown) =>
-    approveToolMock(s, r, d, m, u),
+  approveTool: (...args: Parameters<typeof approveTool>) => approveToolMock(...args),
   toolResultDecision: (s: string, r: string, u?: unknown) => toolResultDecisionMock(s, r, u),
   subscribeAgentEvents: (cb: (e: unknown) => void) => subscribeAgentEventsMock(cb),
 }))
@@ -784,9 +787,7 @@ describe("runAndCaptureAssistantReply", () => {
       fire(assistantEvent("thinking")) // arms idle
       fire(idlePermissionRequest()) // pauses idle while the responder decides
       // Flush the async responder (onPermissionRequest → approveTool → re-arm).
-      await Promise.resolve()
-      await Promise.resolve()
-      await Promise.resolve()
+      await flushMicrotasks(10)
       // A post-approval provider stall (no further events) is now caught because
       // the watchdog was re-armed at decision dispatch (our fix), not left off.
       jest.advanceTimersByTime(150)
@@ -822,7 +823,15 @@ describe("runAndCaptureAssistantReply", () => {
       await Promise.resolve()
       await Promise.resolve()
       await Promise.resolve()
-      expect(approveToolMock).toHaveBeenCalledWith(SESSION, "req-1", "allow", undefined, undefined)
+      expect(approveToolMock).toHaveBeenCalledWith(
+        SESSION,
+        "req-1",
+        "allow",
+        undefined,
+        undefined,
+        undefined,
+        undefined
+      )
       // The clock resumes with what was left (600ms), not a fresh budget.
       const rejection = expect(promise).rejects.toMatchObject({ code: "session_error" })
       jest.advanceTimersByTime(650)
@@ -1870,6 +1879,8 @@ describe("runAndCaptureAssistantReply", () => {
       "suppressed",
       "allow",
       undefined,
+      undefined,
+      undefined,
       undefined
     )
     fire(assistantEvent("done"))
@@ -1887,7 +1898,15 @@ describe("runAndCaptureAssistantReply", () => {
     fire(permissionRequest("blocked", "Bash", {}))
     await flushMicrotasks()
     expect(responder).not.toHaveBeenCalled()
-    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "blocked", "deny", "blocked", undefined)
+    expect(approveToolMock).toHaveBeenCalledWith(
+      SESSION,
+      "blocked",
+      "deny",
+      "blocked",
+      undefined,
+      undefined,
+      { authority: "policy-deny" }
+    )
     fire(assistantEvent("done"))
     fire(sessionEnded())
     await promise
@@ -1906,9 +1925,15 @@ describe("runAndCaptureAssistantReply", () => {
     fire(permissionRequest("rewritten", "Read", { path: "original" }))
     await flushMicrotasks()
     expect(responder).toHaveBeenCalledWith(expect.objectContaining({ input: { path: "safe" } }))
-    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "rewritten", "allow", undefined, {
-      path: "safe",
-    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      SESSION,
+      "rewritten",
+      "allow",
+      undefined,
+      { path: "safe" },
+      undefined,
+      undefined
+    )
     fire(assistantEvent("done"))
     fire(sessionEnded())
     await promise
@@ -1935,7 +1960,15 @@ describe("runAndCaptureAssistantReply", () => {
     expect(responder).toHaveBeenCalledWith(
       expect.objectContaining({ input: { credentialId: "c1" }, requiresPerCallApproval: true })
     )
-    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "per-call", "allow", undefined, undefined)
+    expect(approveToolMock).toHaveBeenCalledWith(
+      SESSION,
+      "per-call",
+      "allow",
+      undefined,
+      undefined,
+      undefined,
+      undefined
+    )
     fire(assistantEvent("done"))
     fire(sessionEnded())
     await promise
@@ -1954,7 +1987,15 @@ describe("runAndCaptureAssistantReply", () => {
     } as never)
     await flushMicrotasks()
     expect(responder).not.toHaveBeenCalled()
-    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "per-call-deny", "deny", "no", undefined)
+    expect(approveToolMock).toHaveBeenCalledWith(
+      SESSION,
+      "per-call-deny",
+      "deny",
+      "no",
+      undefined,
+      undefined,
+      { authority: "policy-deny" }
+    )
     fire(assistantEvent("done"))
     fire(sessionEnded())
     await promise
@@ -2016,14 +2057,19 @@ describe("runAndCaptureAssistantReply", () => {
     await Promise.resolve()
     fire(permissionRequest("req-1", "web_fetch", { url: "secret" }))
     // Let the async responder run.
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushMicrotasks()
     fire(assistantEvent("done"))
     fire(sessionEnded())
     await promise
-    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "req-1", "allow", undefined, {
-      url: "<REDACTED>",
-    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      SESSION,
+      "req-1",
+      "allow",
+      undefined,
+      { url: "<REDACTED>" },
+      undefined,
+      undefined
+    )
   })
 
   it("never applies an approval that resolves after cancellation", async () => {
@@ -2072,8 +2118,7 @@ describe("runAndCaptureAssistantReply", () => {
     })
     await Promise.resolve()
     fire(permissionRequest("req-2", "bash", { cmd: "rm" }))
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushMicrotasks()
     fire(assistantEvent("done"))
     fire(sessionEnded())
     await promise
@@ -2082,8 +2127,139 @@ describe("runAndCaptureAssistantReply", () => {
       "req-2",
       "deny",
       "permission responder failed",
-      undefined
+      undefined,
+      undefined,
+      { authority: "system" }
     )
+  })
+})
+
+describe("connector permission attribution", () => {
+  const fixture = createDbTestFixture({ seeded: false })
+  let unregister: () => void
+  beforeAll(fixture.initialize)
+  beforeEach(async () => {
+    await fixture.restore()
+    unregister = registerImElicitationContext({
+      sessionId: SESSION,
+      adapterId: "lark",
+      conversationKey: "chat-a",
+      conversationRef: { platform: "lark", adapterId: "lark", conversationId: "chat-a" },
+      runId: "run-a",
+      initiatorUserId: "initiator-a",
+    })
+  })
+  afterEach(() => unregister())
+  afterAll(fixture.dispose)
+
+  it.each(["allow", "deny"] as const)(
+    "attributes a connector %s to the human once",
+    async (decision) => {
+      const context = {
+        hostId: "host-a",
+        originDeviceId: "device-a",
+        sessionId: SESSION,
+        generation: 1,
+        requestId: "remote-a",
+        issuedAt: 1,
+        expiresAt: 2,
+      }
+      const responder = jest.fn(async () => {
+        await getDb().executionRunInterrupts.put({
+          id: "tool-interrupt:run-a:approval-a",
+          runId: "run-a",
+          type: "tool_approval",
+          status: decision === "allow" ? "approved" : "denied",
+          title: "issue_list",
+          expiresAt: 10_000,
+          createdAt: 1,
+          resolvedBy: { remoteUserId: "operator-a" },
+        })
+        return { decision }
+      })
+      const running = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        onPermissionRequest: responder,
+      })
+      await flushUntilSubscribed()
+      const request = {
+        type: "permission_request",
+        sessionId: SESSION,
+        requestId: "approval-a",
+        toolName: "issue_list",
+        input: {},
+        remoteExecutionContext: context,
+      } as unknown as ClaudeEvent
+      fire(request)
+      fire(request)
+      for (let attempt = 0; attempt < 100 && approveToolMock.mock.calls.length === 0; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+      }
+      expect(responder).toHaveBeenCalledTimes(1)
+      expect(approveToolMock).toHaveBeenCalledTimes(1)
+      expect(approveToolMock).toHaveBeenCalledWith(
+        SESSION,
+        "approval-a",
+        decision,
+        undefined,
+        undefined,
+        context,
+        { authority: "human", actor: { kind: "connector-user", id: "operator-a" } }
+      )
+      fire(assistantEvent("done"))
+      fire(sessionEnded())
+      await running
+    }
+  )
+
+  it.each([
+    [{ decision: "allow" }, "policy-rule"],
+    [{ decision: "deny", message: "failed to surface approval card" }, "policy-deny"],
+    [{ decision: "deny", message: "approval timed out" }, "timeout"],
+  ] as const)(
+    "does not attribute an automatic decision to a human: %j",
+    async (decision, authority) => {
+      const running = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        onPermissionRequest: async () => decision,
+      })
+      await flushUntilSubscribed()
+      fire({
+        type: "permission_request",
+        sessionId: SESSION,
+        requestId: "automatic",
+        toolName: "issue_list",
+        input: {},
+      } as unknown as ClaudeEvent)
+      for (let attempt = 0; attempt < 100 && approveToolMock.mock.calls.length === 0; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+      }
+      expect(approveToolMock.mock.calls[0]?.[6]).toEqual({ authority })
+      fire(assistantEvent("done"))
+      fire(sessionEnded())
+      await running
+    }
+  )
+
+  it("preserves explicit responder attribution", async () => {
+    const attribution = {
+      authority: "human" as const,
+      actor: { kind: "connector-user" as const, id: "reviewer-a" },
+    }
+    const running = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      onPermissionRequest: () => ({ decision: "allow", attribution }),
+    })
+    await flushUntilSubscribed()
+    fire({
+      type: "permission_request",
+      sessionId: SESSION,
+      requestId: "explicit",
+      toolName: "issue_list",
+      input: {},
+    } as unknown as ClaudeEvent)
+    await flushMicrotasks(10)
+    expect(approveToolMock.mock.calls[0]?.[6]).toBe(attribution)
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await running
   })
 })
 

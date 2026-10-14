@@ -28,6 +28,7 @@ import {
   onClaudeMessage,
   approveTool,
   toolResultDecision,
+  type ApproveToolAttribution,
 } from "./ipc"
 import type {
   ApprovalDecision,
@@ -58,6 +59,7 @@ import type { RemoteExecutionContext } from "./remote-execution"
 import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import { getImElicitationContext } from "@/lib/connectors/hitl/im-elicitation-context"
 import { dispatchPreToolUse, dispatchPostToolUse } from "@/lib/claude/adapter-hooks"
 
 /**
@@ -448,6 +450,47 @@ export interface CapturePermissionDecision {
   decision: ApprovalDecision
   message?: string
   updatedInput?: unknown
+  /** Explicit provenance supplied by a responder that knows who decided. */
+  attribution?: ApproveToolAttribution
+}
+
+async function capturePermissionAttribution(
+  sessionId: string,
+  requestId: string,
+  outcome: CapturePermissionDecision
+): Promise<ApproveToolAttribution | undefined> {
+  if (outcome.attribution) return outcome.attribution
+  const context = getImElicitationContext(sessionId)
+  if (!context?.runId) return undefined
+  // The IM responder settles its own interrupt before returning. Use that
+  // evidence, not the turn's initiator (an operator may have answered instead).
+  // Automatic allows have no interrupt; transport/TTL denials carry a message.
+  try {
+    const { getDb } = await import("@/lib/db/schema")
+    const interrupt = await getDb().executionRunInterrupts.get(
+      `tool-interrupt:${context.runId}:${requestId}`
+    )
+    if (outcome.message === "approval timed out" || interrupt?.status === "expired") {
+      return { authority: "timeout" }
+    }
+    if (
+      !outcome.message &&
+      interrupt?.runId === context.runId &&
+      interrupt.status === (outcome.decision === "deny" ? "denied" : "approved")
+    ) {
+      return {
+        authority: "human",
+        actor: {
+          kind: "connector-user",
+          ...(interrupt.resolvedBy?.remoteUserId ? { id: interrupt.resolvedBy.remoteUserId } : {}),
+        },
+      }
+    }
+    return { authority: outcome.decision === "deny" ? "policy-deny" : "policy-rule" }
+  } catch {
+    // Missing evidence must not invent a human receipt or block the decision.
+    return undefined
+  }
 }
 
 /** Tool result + correlated call passed to an {@link RunAndCaptureOptions.onToolResultReview} responder. */
@@ -1041,7 +1084,11 @@ async function captureAssistantReplyCore(
           // "modify" neither rewrites nor pre-approves it.
           const perCall = req.requiresPerCallApproval === true
           if (pre.action === "deny") {
-            outcome = { decision: "deny", message: pre.reason ?? "denied by plugin onPreToolUse" }
+            outcome = {
+              decision: "deny",
+              message: pre.reason ?? "denied by plugin onPreToolUse",
+              attribution: { authority: "policy-deny" },
+            }
           } else {
             const rewritten = !perCall && pre.action === "modify" ? pre.modifiedArgs : undefined
             outcome = await cap.onPermissionRequest!({
@@ -1053,7 +1100,11 @@ async function captureAssistantReplyCore(
             }
           }
         } catch {
-          outcome = { decision: "deny", message: "permission responder failed" }
+          outcome = {
+            decision: "deny",
+            message: "permission responder failed",
+            attribution: { authority: "system" },
+          }
         } finally {
           resumeWallClock()
         }
@@ -1061,6 +1112,8 @@ async function captureAssistantReplyCore(
         // still be draining usage, so check the signal as well as settlement.
         if (settled || abortRequested || signal?.aborted) return
         try {
+          const attribution = await capturePermissionAttribution(sessionId, req.requestId, outcome)
+          if (settled || abortRequested || signal?.aborted) return
           await approveTool(
             sessionId,
             req.requestId,
@@ -1069,7 +1122,10 @@ async function captureAssistantReplyCore(
               ? "allow"
               : outcome.decision,
             outcome.message,
-            outcome.updatedInput
+            outcome.updatedInput,
+            (req as PermissionRequestEvent & { remoteExecutionContext?: RemoteExecutionContext })
+              .remoteExecutionContext,
+            attribution
           )
         } catch {
           /* best-effort — the sidecar may have already moved on */

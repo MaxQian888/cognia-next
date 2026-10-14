@@ -1,5 +1,11 @@
 /** @jest-environment jsdom */
 import { transport } from "@/lib/tauri"
+import { waitFor } from "@testing-library/react"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { createExecutionRun, listExecutionRunEvents } from "@/lib/db/execution-runs"
+import { getDb } from "@/lib/db/schema"
+import { getActionReviewReceipt } from "@/lib/db/action-review-receipts"
+import { __resetChatToolReviewsForTesting } from "@/lib/policy/action-review/chat-tool-channel"
 
 const mockRecordToolAuthorizationGovernance = jest.fn().mockResolvedValue("decision-1")
 const mockReportGovernanceProjectionFailure = jest.fn().mockResolvedValue(undefined)
@@ -29,6 +35,7 @@ jest.mock("@/lib/chat/transcript/revision-events", () => ({
 
 const mockHasNoLeakingPiiDeep = jest.fn((..._args: unknown[]) => true)
 jest.mock("@cognia/redact", () => ({
+  ...jest.requireActual("@cognia/redact"),
   hasNoLeakingPiiDeep: (...args: unknown[]) => mockHasNoLeakingPiiDeep(...args),
 }))
 
@@ -116,6 +123,99 @@ beforeEach(() => {
 afterEach(() => {
   setTauri(false)
   jest.restoreAllMocks()
+})
+
+describe("connector approval review settlement", () => {
+  const fixture = createDbTestFixture({ seeded: false })
+  beforeAll(fixture.initialize)
+  beforeEach(async () => {
+    await fixture.restore()
+    __resetChatToolReviewsForTesting()
+    await createExecutionRun({
+      id: "run-approval",
+      kind: "agent-turn",
+      sourceId: "connector",
+      sessionId: "session-approval",
+      title: "Connector turn",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+  })
+  afterAll(fixture.dispose)
+
+  async function requestReview() {
+    const handlers: Array<(event: unknown) => void> = []
+    jest.spyOn(transport, "subscribe").mockImplementation((_channel, handler) => {
+      handlers.push(handler)
+      return () => {}
+    })
+    await onClaudeMessage(() => {})
+    await onClaudeMessage(() => {})
+    for (const handler of handlers) {
+      handler({
+        type: "permission_request",
+        sessionId: "session-approval",
+        requestId: "approval-1",
+        toolName: "issue_list",
+        input: { private: "not-stored" },
+      })
+    }
+    await waitFor(async () => {
+      expect(await getDb().executionRunInterrupts.get("action-review:approval-1")).toMatchObject({
+        status: "pending",
+      })
+    })
+  }
+
+  it("settles the action-review projection exactly once after an attributed approval", async () => {
+    await requestReview()
+    callSpy.mockResolvedValue(undefined)
+    const attribution = { authority: "human" as const, actor: { kind: "connector-user" as const } }
+    await approveTool(
+      "session-approval",
+      "approval-1",
+      "allow",
+      undefined,
+      undefined,
+      undefined,
+      attribution
+    )
+    await approveTool(
+      "session-approval",
+      "approval-1",
+      "allow",
+      undefined,
+      undefined,
+      undefined,
+      attribution
+    )
+    expect(await getDb().executionRunInterrupts.get("action-review:approval-1")).toMatchObject({
+      status: "approved",
+    })
+    expect(await getActionReviewReceipt("approval-1")).toMatchObject({
+      decision: { authority: "human", actor: { kind: "connector-user" }, outcome: "allow" },
+    })
+    const events = await listExecutionRunEvents("run-approval")
+    expect(events.filter((event) => event.type === "interrupt.requested")).toHaveLength(1)
+    expect(events.filter((event) => event.type === "interrupt.resolved")).toHaveLength(1)
+  })
+
+  it("keeps the review pending when the approval transport fails", async () => {
+    await requestReview()
+    callSpy.mockRejectedValueOnce(new Error("disconnected"))
+    await expect(
+      approveTool("session-approval", "approval-1", "allow", undefined, undefined, undefined, {
+        authority: "human",
+        actor: { kind: "connector-user" },
+      })
+    ).rejects.toThrow("disconnected")
+    expect(await getDb().executionRunInterrupts.get("action-review:approval-1")).toMatchObject({
+      status: "pending",
+    })
+    expect(await getActionReviewReceipt("approval-1")).toBeUndefined()
+  })
 })
 
 describe("subscribePluginToolExec", () => {

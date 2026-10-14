@@ -12,21 +12,14 @@
  * StdioTransport (already installed by the sidecar bootstrap). The subscribe /
  * handle / send seams are injectable so the wiring unit-tests without a sidecar.
  */
-import { subscribePluginToolExec, sendPluginToolResponse } from "@/lib/claude/ipc"
 import {
-  handlePluginToolExec,
-  type PluginToolExecRequest,
-  type PluginToolExecResponse,
-} from "@/lib/claude/plugin-tool-ipc"
+  subscribePluginToolDispatchBridge,
+  type PluginToolDispatchBridgeDeps,
+} from "@/lib/claude/plugin-tool-dispatch-bridge"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 
-export interface PluginToolDispatchDeps {
-  /** Restrict a persistent session subscriber to its own requests. */
-  sessionId?: string
-  subscribe?: typeof subscribePluginToolExec
-  handle?: (req: PluginToolExecRequest) => Promise<PluginToolExecResponse>
-  send?: typeof sendPluginToolResponse
+export interface PluginToolDispatchDeps extends PluginToolDispatchBridgeDeps {
   /** Override the session → sandbox placement lookup. Tests inject here. */
   runtimeRef?: (sessionId: string) => string | undefined
 }
@@ -40,35 +33,24 @@ export interface PluginToolDispatchDeps {
 export function subscribePluginToolDispatch(
   deps: PluginToolDispatchDeps = {}
 ): Promise<UnlistenFn> {
-  const subscribe = deps.subscribe ?? subscribePluginToolExec
-  const handle = deps.handle ?? handlePluginToolExec
-  const send = deps.send ?? sendPluginToolResponse
   const runtimeRefFor =
     deps.runtimeRef ?? ((sessionId: string) => sandboxSessionRuntime.activeRefForSession(sessionId))
-  return subscribe((req) => {
-    // The CLI rail has no send envelope to carry the placement, so the frame
-    // arrives without `sandboxRuntimeRef`. The runtime service bound one for
-    // this session id from its persisted sandbox ceiling; stamp it here so
-    // headless `sandbox_*` calls clamp to that ceiling instead of falling back
-    // to an unpoliced host tier.
-    //
-    // The stamp is deliberately not scoped to the sandbox tools: the ref also
-    // carries the GUI placement, and the CLI binds `computerTarget: "local"`
-    // with Computer Use enabled — the host/local placement those tools already
-    // ran under. A ref that declared the GUI surface disabled would turn every
-    // `perform_action` on this rail into a refusal instead.
-    const request = req as PluginToolExecRequest
-    if (deps.sessionId && request.sessionId !== deps.sessionId) return
-    const bound = request.sandboxRuntimeRef ?? runtimeRefFor(request.sessionId)
-    void Promise.resolve()
-      .then(() => handle(bound ? { ...request, sandboxRuntimeRef: bound } : request))
-      .catch((): PluginToolExecResponse => ({
-        type: "plugin_tool_response",
-        sessionId: request.sessionId,
-        toolUseId: request.toolUseId,
-        error: "Plugin tool executor failed",
-      }))
-      .then((response) => send(response))
-      .catch(() => undefined) // transport teardown already cancels the owning turn
+  return subscribePluginToolDispatchBridge({
+    ...deps,
+    prepareRequest: (request) => {
+      // The CLI rail has no send envelope to carry the placement, so the frame
+      // arrives without `sandboxRuntimeRef`. The runtime service bound one for
+      // this session id from its persisted sandbox ceiling; stamp it here so
+      // headless `sandbox_*` calls clamp to that ceiling instead of falling back
+      // to an unpoliced host tier.
+      //
+      // The stamp is deliberately not scoped to the sandbox tools: the ref also
+      // carries the GUI placement, and the CLI binds `computerTarget: "local"`
+      // with Computer Use enabled — the host/local placement those tools already
+      // ran under. A ref that declared the GUI surface disabled would turn every
+      // `perform_action` on this rail into a refusal instead.
+      const bound = request.sandboxRuntimeRef ?? runtimeRefFor(request.sessionId)
+      return bound ? { ...request, sandboxRuntimeRef: bound } : request
+    },
   })
 }
