@@ -1,7 +1,29 @@
 import type { ChatSession } from "@cognia/agent-config-types"
+jest.mock("./client", () => ({
+  ensureSessionScratchWorkspaceBundle: jest.fn(),
+  archiveManagedWorkspace: jest.fn(),
+  getWorkspaceBundle: jest.fn(),
+  listWorkspaceBundles: jest.fn(),
+  getManagedWorkspace: jest.fn(),
+}))
+jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
+  getRuntimeSnapshot: jest.fn(() => ({ target: null })),
+}))
+jest.mock("./user-action", () => ({
+  runWorkspaceUserAction: jest.fn((_command, action) => action()),
+}))
+jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn(), updateSession: jest.fn() }))
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isHeadlessHost: jest.fn(() => false),
+}))
 import {
+  archiveSessionScratchWorkspace,
   createManagedWorkspaceArchive,
   createManagedWorkspaceContext,
+  ensureSessionScratchWorkspace,
+  isSessionScratchWorkspace,
+  mergePortableManagedContext,
   convertManagedWorkspaceToProject,
   deleteManagedWorkspace,
   importManagedWorkspaceArchive,
@@ -10,6 +32,20 @@ import {
   rebindManagedWorkspace,
   restoreManagedWorkspace,
 } from "./managed-workspace"
+import type { SessionScratchWorkspaceDeps } from "./managed-workspace"
+import type { WorkspaceBundle } from "./types"
+import {
+  archiveManagedWorkspace,
+  ensureSessionScratchWorkspaceBundle,
+  getWorkspaceBundle,
+  listWorkspaceBundles,
+  getManagedWorkspace,
+} from "./client"
+import { getSession } from "@/lib/db/sessions"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
+import { sha256Hex } from "@/lib/share/hash"
+import { runWorkspaceUserAction } from "./user-action"
 
 function session(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
@@ -191,5 +227,273 @@ describe("managed workspace lifecycle", () => {
         fx.deps
       )
     ).rejects.toThrow(/unsafe path/)
+  })
+})
+
+describe("headless session scratch workspace", () => {
+  beforeEach(() => {
+    jest.mocked(isHeadlessHost).mockReturnValue(false)
+    jest.mocked(getSession).mockReset()
+    jest.mocked(ensureSessionScratchWorkspaceBundle).mockReset()
+    jest.mocked(archiveManagedWorkspace).mockReset()
+    jest.mocked(getWorkspaceBundle).mockReset()
+    jest.mocked(listWorkspaceBundles).mockReset()
+    jest.mocked(getManagedWorkspace).mockReset()
+    jest
+      .mocked(getRuntimeSnapshot)
+      .mockReturnValue({ target: null, vaultState: "unavailable", connectionState: "offline" })
+  })
+  function scratchFixture() {
+    let row = session({
+      executionContext: undefined,
+      platformBinding: {
+        platform: "telegram",
+        adapterId: "adapter",
+        conversationKey: "thread",
+        conversationRef: { platform: "telegram", adapterId: "adapter" },
+      },
+    })
+    const bundle: WorkspaceBundle = {
+      bundleId: "scratch-bundle",
+      ownerType: "session",
+      ownerRef: row.id,
+      environmentKind: "managed",
+      state: "active",
+      leases: [
+        {
+          bundleId: "scratch-bundle",
+          workspaceId: "scratch-workspace",
+          logicalRootId: "primary",
+          role: "primary",
+          aliasPath: "/host/managed/opaque-id",
+        },
+      ],
+      lastUsedAt: 10,
+      createdAt: 10,
+      pinned: false,
+    }
+    const ensureBundle = jest.fn(async () => bundle)
+    const write = jest.fn(async (_id: string, patch: Partial<ChatSession>) => {
+      row = { ...row, ...patch }
+    })
+    const deps: SessionScratchWorkspaceDeps = {
+      isHeadlessHost: () => true,
+      now: () => 20,
+      getSession: async () => row,
+      updateSession: write,
+      ensureBundle,
+    }
+    return {
+      deps,
+      bundle,
+      ensureBundle,
+      write,
+      get row() {
+        return row
+      },
+    }
+  }
+
+  it("coalesces concurrent upgrades and reuses the durable bundle on later calls", async () => {
+    const fx = scratchFixture()
+    expect(
+      await Promise.all([
+        ensureSessionScratchWorkspace(fx.row, fx.deps),
+        ensureSessionScratchWorkspace(fx.row, fx.deps),
+      ])
+    ).toEqual(["/host/managed/opaque-id", "/host/managed/opaque-id"])
+    expect(fx.ensureBundle).toHaveBeenCalledTimes(1)
+    expect(fx.row.projectId).toBe("project-default")
+    expect(fx.row.workingDir).toBeUndefined()
+    expect(isSessionScratchWorkspace(fx.row)).toBe(true)
+    expect(fx.row.executionContext?.execution).toEqual({
+      mode: "managed",
+      base: { kind: "workingState" },
+      bundleId: "scratch-bundle",
+      roots: [
+        {
+          logicalRootId: "primary",
+          role: "primary",
+          aliasPath: "/host/managed/opaque-id",
+          workspaceId: "scratch-workspace",
+        },
+      ],
+    })
+    await ensureSessionScratchWorkspace(fx.row, { ...fx.deps })
+    expect(fx.ensureBundle).toHaveBeenLastCalledWith("session-1", "scratch-bundle")
+  })
+
+  it("propagates persistence failure and recovers the same owner on retry", async () => {
+    const fx = scratchFixture()
+    fx.write.mockRejectedValueOnce(new Error("Dexie write failed"))
+    await expect(ensureSessionScratchWorkspace(fx.row, fx.deps)).rejects.toThrow(
+      "Dexie write failed"
+    )
+    expect(fx.row.executionContext).toBeUndefined()
+    await expect(ensureSessionScratchWorkspace(fx.row, fx.deps)).resolves.toBe(
+      "/host/managed/opaque-id"
+    )
+    expect(fx.ensureBundle.mock.calls).toEqual([
+      ["session-1", undefined],
+      ["session-1", undefined],
+    ])
+    expect(fx.row.executionContext?.execution?.bundleId).toBe("scratch-bundle")
+  })
+
+  it("refuses foreign bundles without writing the session", async () => {
+    const fx = scratchFixture()
+    fx.bundle.ownerRef = "other-session"
+    await expect(ensureSessionScratchWorkspace(fx.row, fx.deps)).rejects.toThrow("another session")
+    expect(fx.write).not.toHaveBeenCalled()
+  })
+
+  it("does not create a workspace for an already deleted session", async () => {
+    const fx = scratchFixture()
+    await expect(
+      ensureSessionScratchWorkspace(fx.row, {
+        ...fx.deps,
+        getSession: async () => undefined,
+      })
+    ).rejects.toThrow("no longer exists")
+    expect(fx.ensureBundle).not.toHaveBeenCalled()
+    expect(fx.write).not.toHaveBeenCalled()
+  })
+
+  it.each(["deleted", "project-bound"])(
+    "does not overwrite a session that becomes %s during provisioning",
+    async (state) => {
+      const fx = scratchFixture()
+      const read = jest
+        .fn()
+        .mockResolvedValueOnce(fx.row)
+        .mockResolvedValueOnce(
+          state === "deleted" ? undefined : { ...fx.row, projectId: "project-new" }
+        )
+      await expect(
+        ensureSessionScratchWorkspace(fx.row, {
+          ...fx.deps,
+          getSession: read,
+        })
+      ).rejects.toThrow(state === "deleted" ? "no longer exists" : "Project-bound")
+      expect(fx.ensureBundle).toHaveBeenCalledTimes(1)
+      expect(fx.write).not.toHaveBeenCalled()
+    }
+  )
+
+  it("never provisions on desktop or replaces a project-bound session", async () => {
+    const fx = scratchFixture()
+    await expect(
+      ensureSessionScratchWorkspace(fx.row, { ...fx.deps, isHeadlessHost: () => false })
+    ).rejects.toThrow("headless host")
+    const projectSession = { ...fx.row, projectId: "project-missing" }
+    await expect(
+      ensureSessionScratchWorkspace(projectSession, {
+        ...fx.deps,
+        getSession: async () => projectSession,
+      })
+    ).rejects.toThrow("Project-bound")
+    expect(fx.ensureBundle).not.toHaveBeenCalled()
+    expect(isSessionScratchWorkspace(undefined)).toBe(false)
+    expect(isSessionScratchWorkspace(null)).toBe(false)
+  })
+
+  it("strips host bundle, aliases, environment and run leases while retaining portable identity", async () => {
+    const fx = scratchFixture()
+    await ensureSessionScratchWorkspace(fx.row, fx.deps)
+    const local = fx.row.executionContext!
+    local.environmentId = "host-environment"
+    local.execution!.environmentId = "host-environment"
+    local.taskWorkspace.runId = "host-run"
+    local.taskWorkspace.bundleTurnId = "host-turn"
+    const portable = portableExecutionContext(local)
+    expect(JSON.stringify(portable)).not.toMatch(
+      /host\/managed|scratch-bundle|scratch-workspace|host-environment|host-run|host-turn/
+    )
+    expect(portable.execution).toEqual({
+      mode: "managed",
+      base: { kind: "workingState" },
+      roots: [],
+    })
+    expect(isSessionScratchWorkspace({ ...fx.row, executionContext: portable })).toBe(true)
+    expect(mergePortableManagedContext(local)).toEqual(portable)
+    expect(mergePortableManagedContext(portable, local).execution).toEqual(local.execution)
+    expect(mergePortableManagedContext(portable, local).taskWorkspace).toEqual(local.taskWorkspace)
+  })
+
+  it("archives only the revalidated service-owned scratch workspace on the host", async () => {
+    const fx = scratchFixture()
+    await ensureSessionScratchWorkspace(fx.row, fx.deps)
+    jest.mocked(getSession).mockResolvedValue(fx.row)
+    jest.mocked(getWorkspaceBundle).mockResolvedValue(fx.bundle)
+    jest.mocked(getManagedWorkspace).mockResolvedValue({
+      ownerType: "session",
+      ownerRef: fx.row.id,
+      environmentKind: "managed",
+      isolationKind: "shadow",
+      base: { kind: "workingState" },
+      sourceRoot: `/host/sources/session-scratch/${await sha256Hex(fx.row.id)}`,
+    } as never)
+    await archiveSessionScratchWorkspace(fx.row.id)
+    expect(getSession).not.toHaveBeenCalled()
+    jest.mocked(isHeadlessHost).mockReturnValue(true)
+    await archiveSessionScratchWorkspace(fx.row.id)
+    expect(getWorkspaceBundle).toHaveBeenCalledWith("scratch-bundle")
+    expect(archiveManagedWorkspace).toHaveBeenCalledWith("scratch-workspace")
+    jest.mocked(getSession).mockClear()
+    jest.mocked(getSession).mockRejectedValue(new Error("must not reread inside a ledger hold"))
+    await archiveSessionScratchWorkspace(fx.row)
+    expect(getSession).not.toHaveBeenCalled()
+    jest.mocked(archiveManagedWorkspace).mockClear()
+    fx.bundle.ownerRef = "sibling"
+    await expect(archiveSessionScratchWorkspace(fx.row)).rejects.toThrow("another session")
+    expect(archiveManagedWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("archives a synced scratch owner through its companion before the host-state write", async () => {
+    const fx = scratchFixture()
+    await ensureSessionScratchWorkspace(fx.row, fx.deps)
+    const synced = {
+      ...fx.row,
+      executionContext: portableExecutionContext(fx.row.executionContext!),
+      platformBinding: {
+        platform: "telegram" as const,
+        adapterId: "adapter",
+        conversationKey: "thread",
+        conversationRef: { platform: "telegram" as const, adapterId: "adapter" },
+      },
+    }
+    jest.mocked(getRuntimeSnapshot).mockReturnValue({
+      target: { id: "paired", kind: "companion", platform: "mobile", hostKind: "cloud" },
+      vaultState: "unlocked",
+      connectionState: "online",
+    })
+    jest.mocked(getSession).mockResolvedValue(synced)
+    jest.mocked(listWorkspaceBundles).mockResolvedValue([fx.bundle])
+    jest.mocked(getManagedWorkspace).mockResolvedValue({
+      ownerType: "session",
+      ownerRef: fx.row.id,
+      environmentKind: "managed",
+      isolationKind: "shadow",
+      base: { kind: "workingState" },
+      sourceRoot: `/host/sources/session-scratch/${await sha256Hex(fx.row.id)}`,
+    } as never)
+    await archiveSessionScratchWorkspace(fx.row.id)
+    expect(ensureSessionScratchWorkspaceBundle).not.toHaveBeenCalled()
+    expect(runWorkspaceUserAction).toHaveBeenCalledWith(
+      "task_workspace_managed_archive",
+      expect.any(Function)
+    )
+    expect(archiveManagedWorkspace).toHaveBeenCalledWith("scratch-workspace")
+    jest.mocked(archiveManagedWorkspace).mockClear()
+    jest.mocked(getManagedWorkspace).mockResolvedValue({
+      ownerType: "session",
+      ownerRef: fx.row.id,
+      environmentKind: "managed",
+      isolationKind: "shadow",
+      base: { kind: "workingState" },
+      sourceRoot: "/desktop/managed-workspaces/managed-workspace_session-1",
+    } as never)
+    await archiveSessionScratchWorkspace(fx.row.id)
+    expect(archiveManagedWorkspace).not.toHaveBeenCalled()
   })
 })

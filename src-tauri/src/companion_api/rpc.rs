@@ -480,6 +480,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // of the task-workspace surface, which is device-reachable.
     "task_workspace_remote_source_ensure",
     "task_workspace_project_source_ensure",
+    "task_workspace_session_scratch_ensure",
     "code_snapshot_checkout_get",
     // ADR-0090 Phase 1 — Provider Profile Store admin plane (service scope;
     // redacted docs only, secrets never transit these arms).
@@ -2481,6 +2482,7 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "github_workspace_stat",
     "task_workspace_remote_source_ensure",
     "task_workspace_project_source_ensure",
+    "task_workspace_session_scratch_ensure",
     // The checkout a handed-over conversation works in (ADR-0224 A11b): the
     // brain binds the continued session to it by id.
     "code_snapshot_checkout_get",
@@ -3716,3 +3718,13 @@ pub(super) async fn dispatch(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[test]
+fn scratch_ensure_is_registered_only_on_the_service_plane() {
+    let command = "task_workspace_session_scratch_ensure";
+    assert!(known_commands().contains(&command));
+    assert!(SERVICE_ONLY_COMMANDS.contains(&command));
+    assert!(is_service_only_command(command));
+    assert!(service_plane::COMMANDS.contains(&command));
+}

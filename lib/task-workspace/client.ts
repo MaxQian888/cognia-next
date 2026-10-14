@@ -610,6 +610,16 @@ export function ensureProjectWorkspaceSource(input: EnsureProjectSource): Promis
   return transport.call("task_workspace_project_source_ensure", { input })
 }
 
+/** Service-only: paths and ownership are chosen and validated by the host. */
+export function ensureSessionScratchWorkspaceBundle(
+  sessionId: string,
+  bundleId?: string
+): Promise<WorkspaceBundle> {
+  return transport.call("task_workspace_session_scratch_ensure", {
+    input: { sessionId, ...(bundleId ? { bundleId } : {}) },
+  })
+}
+
 /**
  * Snapshot a folder on this device for an always-on host (ADR-0224 A11b): a
  * binary patch against a commit its remote has, or a gzip tar of a folder

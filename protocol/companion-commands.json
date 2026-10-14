@@ -11087,6 +11087,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "task_workspace_session_scratch_ensure",
+      "resource": "task.workspace.session_scratch",
+      "verb": "ensure",
+      "arm": "task_workspace_session_scratch_ensure",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "code_snapshot_create",
       "resource": "code.snapshot",
       "verb": "create",

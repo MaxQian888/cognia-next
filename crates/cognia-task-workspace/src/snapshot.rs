@@ -86,6 +86,7 @@ pub fn capture(root: &Path) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8
         &ResourceTrackingPolicy {
             generated_output_roots: Vec::new(),
             auto_detect: false,
+            self_contained: false,
         },
     )
 }
@@ -105,26 +106,30 @@ pub fn capture_with_policy(
     // for the tree costs one subprocess instead of reading the whole checkout.
     // Falls through to the walk below whenever the root is not a usable Git
     // worktree — no repository, an unborn branch, a broken `git`.
-    if let Some(captured) = capture_git_backed(&canonical_root, policy)? {
-        return Ok(captured);
+    if !policy.self_contained {
+        if let Some(captured) = capture_git_backed(&canonical_root, policy)? {
+            return Ok(captured);
+        }
     }
     let mut entries = BTreeMap::new();
     let mut blobs = HashMap::new();
     let mut builder = WalkBuilder::new(&canonical_root);
     builder
         .hidden(false)
-        .git_ignore(true)
-        .git_exclude(true)
-        .git_global(true)
-        .ignore(true)
-        .parents(true)
+        .git_ignore(!policy.self_contained)
+        .git_exclude(!policy.self_contained)
+        .git_global(!policy.self_contained)
+        .ignore(!policy.self_contained)
+        .parents(!policy.self_contained)
         .require_git(false)
         .follow_links(false);
 
     for item in builder.build() {
         let entry = item.map_err(|error| format!("walk {}: {error}", canonical_root.display()))?;
         let path = entry.path();
-        if path == canonical_root || excluded(path, &canonical_root, &policy.generated_output_roots)
+        if path == canonical_root
+            || (!policy.self_contained
+                && excluded(path, &canonical_root, &policy.generated_output_roots))
         {
             continue;
         }
@@ -151,6 +156,11 @@ pub fn capture_with_policy(
                 EntryKind::File,
                 fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?,
             )
+        } else if policy.self_contained {
+            return Err(format!(
+                "unsupported scratch archive entry: {}",
+                path.display()
+            ));
         } else {
             continue;
         };
@@ -172,8 +182,12 @@ pub fn capture_with_policy(
         );
         blobs.entry(hash).or_insert(bytes);
     }
-    capture_worktree_includes(&canonical_root, &mut entries, &mut blobs)?;
-    let generated_entries = capture_generated(&canonical_root, &policy.generated_output_roots)?;
+    let generated_entries = if policy.self_contained {
+        BTreeMap::new()
+    } else {
+        capture_worktree_includes(&canonical_root, &mut entries, &mut blobs)?;
+        capture_generated(&canonical_root, &policy.generated_output_roots)?
+    };
     Ok((
         WorkspaceSnapshot {
             entries,
@@ -1096,6 +1110,69 @@ mod tests {
     /// The point of the whole exercise: a clean checkout costs no blobs. If
     /// this regresses, the capture has silently gone back to reading the tree.
     #[test]
+    fn self_contained_snapshot_keeps_ignored_generated_and_git_content() {
+        let dir = git_fixture(|root| {
+            fs::write(root.join(".gitignore"), "*.csv\n").unwrap();
+            fs::write(root.join("result.csv"), "ignored").unwrap();
+            fs::create_dir(root.join("node_modules")).unwrap();
+            fs::write(root.join("node_modules/output.txt"), "dependency output").unwrap();
+            fs::create_dir(root.join("dist")).unwrap();
+            fs::write(root.join("dist/result.txt"), "generated").unwrap();
+        });
+        let (ordinary, _) = capture(dir.path()).unwrap();
+        assert!(!ordinary.entries.contains_key("result.csv"));
+        let (snapshot, blobs) = capture_with_policy(
+            dir.path(),
+            &ResourceTrackingPolicy {
+                self_contained: true,
+                generated_output_roots: vec!["dist".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(snapshot.base, SnapshotBase::Blobs);
+        for path in [
+            "tracked.txt",
+            "result.csv",
+            "node_modules/output.txt",
+            "dist/result.txt",
+            ".git/HEAD",
+        ] {
+            let entry = &snapshot.entries[path];
+            assert_eq!(blobs[&entry.hash], fs::read(dir.path().join(path)).unwrap());
+        }
+        let restored = TempDir::new().unwrap();
+        drop(dir);
+        materialize(restored.path(), &snapshot, &blobs).unwrap();
+        assert_eq!(
+            fs::read_to_string(restored.path().join("result.csv")).unwrap(),
+            "ignored"
+        );
+        assert_eq!(
+            fs::read_to_string(restored.path().join("tracked.txt")).unwrap(),
+            "committed\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn self_contained_snapshot_rejects_escaping_symlinks() {
+        let root = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join("secret"), "outside").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("linked")).unwrap();
+        let error = capture_with_policy(
+            root.path(),
+            &ResourceTrackingPolicy {
+                self_contained: true,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("escapes workspace"), "{error}");
+    }
+
+    #[test]
     fn git_capture_stores_no_blobs_for_unmodified_tracked_files() {
         let dir = git_fixture(|_| {});
         let (snapshot, blobs) = capture(dir.path()).unwrap();
@@ -1314,6 +1391,7 @@ mod tests {
             &ResourceTrackingPolicy {
                 generated_output_roots: Vec::new(),
                 auto_detect: false,
+                self_contained: false,
             },
         )
         .unwrap();
@@ -1340,6 +1418,7 @@ mod tests {
             &ResourceTrackingPolicy {
                 generated_output_roots: Vec::new(),
                 auto_detect: false,
+                self_contained: false,
             },
         )
         .unwrap();

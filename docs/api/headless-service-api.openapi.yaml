@@ -162329,6 +162329,305 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_session_scratch_ensure:
+    post:
+      operationId: internalRpcTaskWorkspaceSessionScratchEnsure
+      tags:
+        - headless-rpc
+      summary: task_workspace_session_scratch_ensure (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: Resolve the trusted session's private scratch workspace on this host. Service-only; no caller-chosen paths.
+                A known bundle must belong to the session.
+              type: object
+              required:
+                - input
+              properties:
+                input:
+                  type: object
+                  required:
+                    - sessionId
+                  properties:
+                    sessionId:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[A-Za-z0-9_.:-]+$
+                    bundleId:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[A-Za-z0-9_.:-]+$
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                description: |-
+                  A collection of `WorkspaceRootLease`s acquired atomically for one execution.
+
+                  The Registry acquires a Bundle in one call; on failure it rolls back every
+                  lease it already provisioned. See `bundle.rs` for the acquisition and
+                  atomic-apply implementations.
+                properties:
+                  bundleId:
+                    type: string
+                  createdAt:
+                    format: int64
+                    type: integer
+                  environmentKind:
+                    description: Product lifecycle of a physical execution environment.
+                    enum:
+                      - managed
+                      - permanent
+                      - imported
+                    type: string
+                    default: managed
+                  lastUsedAt:
+                    format: int64
+                    type: integer
+                  leases:
+                    items:
+                      additionalProperties: false
+                      description: |-
+                        One logical root inside a Bundle, resolved to its physical execution
+                        location.
+
+                        `alias_path` is the path executors see. Multiple leases may point at the
+                        same physical worktree when they share a Git common dir — the Bundle
+                        composer collapses roots by `git_common_dir` before creating worktrees.
+                      properties:
+                        aliasPath:
+                          type: string
+                        bundleId:
+                          type: string
+                        logicalRootId:
+                          type: string
+                        role:
+                          description: |-
+                            The role a logical root plays inside a Bundle.
+
+                            Exactly one lease must be `Primary`; the rest are `Additional` (forwarded
+                            as `additionalDirectories` when the executor spawns).
+                          enum:
+                            - primary
+                            - additional
+                          type: string
+                        workspaceId:
+                          type: string
+                      required:
+                        - aliasPath
+                        - bundleId
+                        - logicalRootId
+                        - role
+                        - workspaceId
+                      type: object
+                    type: array
+                  ownerRef:
+                    type:
+                      - string
+                      - "null"
+                  ownerType:
+                    description: |-
+                      Who created this managed workspace. Ownership determines whether the
+                      Registry may prune or unlock the workspace during reconciliation.
+
+                      `Imported` is reserved for worktrees discovered on disk that the Registry
+                      cannot verify as its own — those rows never participate in auto-prune.
+                    enum:
+                      - user
+                      - imported
+                      - session
+                      - team
+                      - scheduled
+                    type: string
+                  pinned:
+                    type: boolean
+                  state:
+                    description: |-
+                      Managed workspace lifecycle state. Transitions outside the Registry's
+                      controlled paths are rejected fail-closed.
+
+                      Legal transitions (all others error):
+
+                      - `Provisioning → Active | Removing`
+                      - `Active → Archived | Conflict | Removing`
+                      - `Archived → Restorable | Removing`
+                      - `Restorable → Active | Removing`
+                      - `Conflict → Active | Removing`   (via `ConflictResolution`)
+                      - `Removing → Removed`
+
+                      `Removed` is terminal.
+                    enum:
+                      - provisioning
+                      - active
+                      - archived
+                      - conflict
+                      - restorable
+                      - removing
+                      - removed
+                    type: string
+                required:
+                  - bundleId
+                  - createdAt
+                  - environmentKind
+                  - lastUsedAt
+                  - leases
+                  - ownerRef
+                  - ownerType
+                  - pinned
+                  - state
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/task_workspace_settle:
     post:
       operationId: internalRpcTaskWorkspaceSettle
@@ -181221,6 +181520,7 @@ components:
           - task_workspace_remote_source_ensure
           - task_workspace_resolve_conflict
           - task_workspace_restore_snapshot
+          - task_workspace_session_scratch_ensure
           - task_workspace_settle
           - task_workspace_status
           - task_workspace_undo
@@ -181569,10 +181869,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 841
-  generatedRequestSchemaCount: 841
+  internalCommandCount: 842
+  generatedRequestSchemaCount: 842
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 841
+  contractRequestSchemaCount: 842
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 841
+  generatedResponseSchemaCount: 842
   loopbackOnly: true

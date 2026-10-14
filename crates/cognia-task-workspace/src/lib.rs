@@ -106,7 +106,8 @@ pub use transfer::{
 pub use types::{
     AcquireWorkspaceBundle, AppliedFile, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn,
     BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffRootSelection,
-    BundleHandoffUndoOutcome, ChangeKind, ConflictResolution, ContributionOrigin, IsolationKind,
+    BundleHandoffUndoOutcome, ChangeKind, ConflictResolution, ContributionOrigin,
+    EnsureSessionScratchWorkspace, IsolationKind,
     PatchConflict, PatchFile, PatchHunk, PatchSelection, PatchSet, PatchState, PruneOutcome,
     ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventCounts,
     ResourceEventEvidence, ResourceKind, ResourceTimelineCompleteness, ResourceTrackingPolicy,

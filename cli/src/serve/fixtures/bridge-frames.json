@@ -16,7 +16,7 @@
         "media",
         "filespace"
       ],
-      "catalogHash": "0d4d7d586a971daf7e3c997efe308754920bd9426154edf9c2f30cd00d93af2f",
+      "catalogHash": "62b830bfbff0c55fdafd00b465a5cfd4c86cc27b7615e3fb629a6b91e623e96a",
       "contractVersion": 3
     },
     "helloAck": {
@@ -25,7 +25,7 @@
       "serverVersion": "0.9.0",
       "protocol": 3,
       "accountId": "local_acct_a",
-      "catalogHash": "0d4d7d586a971daf7e3c997efe308754920bd9426154edf9c2f30cd00d93af2f",
+      "catalogHash": "62b830bfbff0c55fdafd00b465a5cfd4c86cc27b7615e3fb629a6b91e623e96a",
       "contractVersion": 3
     },
     "helloRefused": {
@@ -34,7 +34,7 @@
       "reason": "contract_mismatch",
       "serverVersion": "0.9.0",
       "protocol": 3,
-      "catalogHash": "0d4d7d586a971daf7e3c997efe308754920bd9426154edf9c2f30cd00d93af2f",
+      "catalogHash": "62b830bfbff0c55fdafd00b465a5cfd4c86cc27b7615e3fb629a6b91e623e96a",
       "contractVersion": 3
     },
     "eventSyncPull": {

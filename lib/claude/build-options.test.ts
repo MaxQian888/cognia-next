@@ -269,6 +269,7 @@ jest.mock("@/lib/support-agent/context", () => {
 
 import { isTauri } from "@/lib/tauri"
 import { isNativeMobile } from "@/lib/platform/detect"
+import { createManagedWorkspaceContext } from "@/lib/task-workspace/managed-workspace"
 import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import {
@@ -5206,6 +5207,191 @@ describe("resolveSendOptions — always-on host placement (ADR-0224 A8)", () => 
   })
   afterEach(() => {
     delete globals.__COGNIA_HEADLESS__
+  })
+
+  function scratchSession(available = true) {
+    const context = createManagedWorkspaceContext(
+      "scratch",
+      1,
+      available ? "/host/scratch" : undefined,
+      "project-default"
+    )
+    if (available) {
+      context.execution = {
+        mode: "managed",
+        base: { kind: "workingState" },
+        bundleId: "scratch-bundle",
+        roots: [
+          {
+            logicalRootId: "primary",
+            role: "primary",
+            aliasPath: "/host/scratch",
+            workspaceId: "scratch-physical",
+          },
+        ],
+      }
+    }
+    return makeSession({
+      id: "scratch",
+      projectId: "project-default",
+      executionContext: context,
+      workingDir: "/stale/override",
+      sandboxEnabled: false,
+      sandboxTier: "os",
+    })
+  }
+
+  it.each(["anthropic", "openai"])(
+    "confines a scratch's cwd and file tool surface on the %s rail",
+    async (providerId) => {
+      const replacements = ["sandbox_bash", "sandbox_edit", "sandbox_write", "sandbox_text_editor"]
+      const hostReaders = [
+        "Read",
+        "Grep",
+        "Glob",
+        "LS",
+        "read",
+        "grep",
+        "glob",
+        "ls",
+        "file_search",
+        "file_info",
+        "git_diff",
+        "lsp_hover",
+      ]
+      const aliases = hostReaders.flatMap((name) => [name, `mcp__cognia-tools__${name}`])
+      const hostPlugin = {
+        name: "host_file_reader",
+        description: "Read host file",
+        jsonSchema: {},
+        pluginId: "host-reader",
+        access: "read" as const,
+      }
+      const opaquePlugin = {
+        name: "opaque_host_reader",
+        description: "Host tool",
+        jsonSchema: {},
+        pluginId: "opaque-plugin",
+      }
+      const hostMcp = {
+        id: "host-fs",
+        name: "host-fs",
+        transport: "stdio",
+        config: { command: "filesystem-server", args: ["/"] },
+      }
+      mListMcp.mockResolvedValue([hostMcp])
+      ;(buildPluginToolsManifest as jest.Mock).mockReturnValueOnce([
+        ...replacements.map((name) => ({
+          name,
+          description: name,
+          jsonSchema: {},
+          pluginId: "cognia-sandboxed-tools",
+          access: "write",
+        })),
+        hostPlugin,
+        opaquePlugin,
+      ])
+      const bindSpy = jest
+        .spyOn(sandboxSessionRuntime, "bindSession")
+        .mockResolvedValueOnce("sandbox-runtime:scratch")
+      try {
+        const opts = await resolveSendOptions({
+          session: scratchSession(),
+          character: makeChar({
+            providerId,
+            model: providerId === "anthropic" ? "claude-sonnet-4-6" : "gpt-4o",
+            workingDir: "/character",
+            allowedTools: [
+              ...aliases,
+              ...replacements,
+              "host_file_reader",
+              "mcp__cognia-plugin-tools__host_file_reader",
+              "opaque_host_reader",
+              "mcp__cognia-plugin-tools__opaque_host_reader",
+            ],
+          }),
+          appSettings: { defaultWorkingDir: "/app-default" } as AppSettings,
+          activeProject: {
+            ...makeProject([
+              { path: "/default-project", isPrimary: true },
+              { path: "/default-extra" },
+            ]),
+            id: "project-default",
+          },
+          referencedPaths: [{ absolute: "/sibling/secrets.txt", isDir: false }],
+          preloadedMcpServers: [hostMcp] as BuildOptionsContext["preloadedMcpServers"],
+        })
+        expect(opts.cwd).toBe("/host/scratch")
+        expect(opts.additionalDirectories).toBeUndefined()
+        expect(mListMcp).not.toHaveBeenCalled()
+        expect(mBuildMap).not.toHaveBeenCalled()
+        expect(opts.mcpServers).toBeUndefined()
+        expect(bindSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            workspaceRoot: "/host/scratch",
+            binding: expect.objectContaining({ shellTier: "container" }),
+            sandboxEnabled: true,
+          })
+        )
+        expect(opts.disallowedTools).toEqual(
+          expect.arrayContaining([
+            ...aliases,
+            "host_file_reader",
+            "mcp__cognia-plugin-tools__host_file_reader",
+          ])
+        )
+        expect(opts.allowedTools).toEqual(expect.arrayContaining(replacements))
+        expect(opts.allowedTools?.some((name) => aliases.includes(name))).toBe(false)
+        expect(toolNames(opts)).toEqual(expect.arrayContaining(replacements))
+        expect(toolNames(opts)).not.toContain("host_file_reader")
+        expect(toolNames(opts)).not.toContain("opaque_host_reader")
+        expect(opts.disallowedTools).toEqual(
+          expect.arrayContaining([
+            "opaque_host_reader",
+            "mcp__cognia-plugin-tools__opaque_host_reader",
+          ])
+        )
+      } finally {
+        bindSpy.mockRestore()
+      }
+    }
+  )
+
+  it("refuses a missing scratch alias instead of using a session, character or app directory", async () => {
+    await expect(
+      resolveSendOptions({
+        session: scratchSession(false),
+        character: makeChar({ workingDir: "/character" }),
+        appSettings: { defaultWorkingDir: "/app-default" } as AppSettings,
+      })
+    ).rejects.toThrow("no materialized primary root")
+  })
+
+  it("keeps the scratch sandbox unplaced when container admission fails", async () => {
+    const bindSpy = jest
+      .spyOn(sandboxSessionRuntime, "bindSession")
+      .mockRejectedValueOnce(new Error("pool unavailable"))
+    try {
+      const opts = await resolveSendOptions({ session: scratchSession() })
+      expect(opts.disallowedTools).toContain("Read")
+      await expect(
+        sandboxSessionRuntime.executeSandbox(opts.sandboxRuntimeRef!, {
+          tool: "sandbox_bash",
+          command: { argv: ["pwd"], cwd: "/host/scratch", env: {}, stdin: null, timeout: 1 },
+          request: {
+            writable: [],
+            readable: [],
+            targetFiles: [],
+            maxCpuSeconds: 0,
+            maxMemoryMb: 0,
+            network: "off",
+            networkHosts: [],
+          },
+        })
+      ).rejects.toMatchObject({ code: "placement-unavailable" })
+    } finally {
+      bindSpy.mockRestore()
+    }
   })
 
   it("runs a turn's tools in the container tier whatever the session chose", async () => {

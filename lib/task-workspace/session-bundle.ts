@@ -26,6 +26,37 @@ export interface SessionBundleBinding {
 /** The single logical root of a session-scoped managed workspace, if it has one. */
 export const MANAGED_WORKSPACE_ROOT_ID = "primary"
 
+/** Validate the service-owned single-root contract before trusting its alias. */
+export function validateSessionScratchBundle(
+  sessionId: string,
+  bundle: WorkspaceBundle,
+  knownBundleId?: string
+) {
+  if (bundle.ownerType !== "session" || bundle.ownerRef !== sessionId) {
+    throw new Error("Scratch workspace bundle is owned by another session")
+  }
+  if (knownBundleId && bundle.bundleId !== knownBundleId) {
+    throw new Error("Scratch workspace bundle identity changed")
+  }
+  if (bundle.environmentKind !== "managed" || bundle.state !== "active") {
+    throw new Error("Scratch workspace bundle is not an active managed environment")
+  }
+  const primary = bundle.leases[0]
+  if (
+    bundle.leases.length !== 1 ||
+    !primary ||
+    primary.logicalRootId !== MANAGED_WORKSPACE_ROOT_ID ||
+    primary.role !== "primary" ||
+    primary.bundleId !== bundle.bundleId ||
+    !primary.workspaceId ||
+    !primary.aliasPath.startsWith("/") ||
+    primary.aliasPath.split("/").includes("..")
+  ) {
+    throw new Error("Scratch workspace bundle has an invalid primary lease")
+  }
+  return primary
+}
+
 /**
  * The roots a `managed`-bound context mounts, or undefined when the context is
  * bound to a Project instead.

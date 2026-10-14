@@ -1,6 +1,12 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
+
+const archiveScratchMock = jest.fn()
+jest.mock("@/lib/task-workspace/managed-workspace", () => ({
+  archiveSessionScratchWorkspace: (sessionOrId: unknown) => archiveScratchMock(sessionOrId),
+}))
+
 import { __resetSearchIndexerForTesting } from "@/lib/chat/search/indexer"
 import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 
@@ -140,6 +146,7 @@ function action(
 
 describe("HostStateService", () => {
   beforeEach(async () => {
+    archiveScratchMock.mockReset().mockResolvedValue(undefined)
     activateAccountDatabase(scope.accountId, scope.runtimeTargetId)
     await getDb().delete()
     __resetDbForTesting()
@@ -1100,6 +1107,7 @@ describe("HostStateService", () => {
         owner
       )
       expect(archived.results).toEqual([expect.objectContaining({ outcome: "applied" })])
+      expect(archiveScratchMock).toHaveBeenCalledWith(expect.objectContaining({ id: "session-1" }))
       expect(announceFileSpaceMock).toHaveBeenCalledWith(["session-1"])
 
       // A replay of the same action is a duplicate: nothing changed again.
@@ -1109,6 +1117,7 @@ describe("HostStateService", () => {
         owner
       )
       expect(announceFileSpaceMock).not.toHaveBeenCalled()
+      expect(archiveScratchMock).toHaveBeenCalledTimes(1)
     })
 
     it("refuses to organize a conversation frozen for a handoff", async () => {
@@ -1331,6 +1340,11 @@ describe("HostStateService", () => {
         expect.objectContaining({ actionId: "delete-1", outcome: "applied", hostSeq: 1 }),
       ])
       expect(deleteSessions).toHaveBeenCalledWith(["session-1"])
+      expect(archiveScratchMock).toHaveBeenCalledTimes(1)
+      expect(archiveScratchMock).toHaveBeenCalledWith("session-1")
+      expect(archiveScratchMock.mock.invocationCallOrder[0]).toBeLessThan(
+        deleteSessions.mock.invocationCallOrder[0]
+      )
       // Nothing was in the ledger yet when the cascade ran.
       expect(ledgerRowsAtDelete).toEqual([0])
       await expect(service.snapshot({ ...scope, channel })).resolves.toMatchObject({
@@ -1352,6 +1366,28 @@ describe("HostStateService", () => {
           mutation: expect.objectContaining({ kind: "session.tombstoned", hostSeq: 1 }),
         })
       )
+    })
+
+    it("refuses deletion when scratch archival fails and keeps the session", async () => {
+      archiveScratchMock.mockRejectedValue(new Error("snapshot failed"))
+      const deleteSessions = jest.fn()
+      const { service } = listService(deleteSessions)
+      await service.start({ now: 0, heartbeat: false })
+      const request = {
+        ...scope,
+        actions: [action({ kind: "session.delete" }, { actionId: "scratch-failure" })],
+      }
+      const result = await service.submit(request, owner)
+      expect(result.results).toEqual([
+        expect.objectContaining({
+          outcome: "rejected",
+          rejection: expect.objectContaining({ code: "host_state_session_delete_failed" }),
+        }),
+      ])
+      expect(deleteSessions).not.toHaveBeenCalled()
+      expect(await getDb().sessions.get("session-1")).toBeDefined()
+      await service.submit(request, owner)
+      expect(archiveScratchMock).toHaveBeenCalledTimes(1)
     })
 
     it("answers a delete the cascade refused with a rejection, and keeps the row", async () => {

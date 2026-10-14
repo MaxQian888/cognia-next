@@ -50,6 +50,16 @@ jest.mock("@/lib/claude/provider-telemetry", () => {
 jest.mock("@/lib/task-workspace/client", () => ({
   __esModule: true,
   acquireWorkspaceBundle: jest.fn(),
+  ensureSessionScratchWorkspaceBundle: jest.fn(),
+}))
+
+jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn(), updateSession: jest.fn() }))
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isHeadlessHost: jest.fn(() => false),
+}))
+jest.mock("@/lib/sandbox/session-runtime", () => ({
+  rebindSendOptionsWorkspace: jest.fn(async (options) => options),
 }))
 
 jest.mock("@/lib/task-workspace/run-lease", () => ({
@@ -61,7 +71,14 @@ import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
 import { appendAudit } from "@/lib/connectors/audit"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"
-import { acquireWorkspaceBundle } from "@/lib/task-workspace/client"
+import {
+  acquireWorkspaceBundle,
+  ensureSessionScratchWorkspaceBundle,
+} from "@/lib/task-workspace/client"
+import { getSession } from "@/lib/db/sessions"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { rebindSendOptionsWorkspace } from "@/lib/sandbox/session-runtime"
+import { createManagedWorkspaceContext } from "@/lib/task-workspace/managed-workspace"
 import { openWorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
 
 const mockRun = runAndCaptureAssistantReply as jest.MockedFunction<
@@ -83,6 +100,13 @@ const mockOpenWorkspaceBundleTurnLease = openWorkspaceBundleTurnLease as jest.Mo
 >
 
 beforeEach(() => {
+  jest.mocked(isHeadlessHost).mockReturnValue(false)
+  jest.mocked(getSession).mockReset()
+  jest.mocked(ensureSessionScratchWorkspaceBundle).mockReset()
+  jest
+    .mocked(rebindSendOptionsWorkspace)
+    .mockReset()
+    .mockImplementation(async (options) => options)
   mockRun.mockClear()
   mockAudit.mockClear()
   mockRecordConnectorUsage.mockClear()
@@ -133,6 +157,115 @@ describe("isPiiSafeSendContent", () => {
 
 describe("safeSendPrompt", () => {
   const auditCtx = { adapterId: "adp_1", conversationKey: "telegram:adp_1:c1" }
+
+  function canonicalScratch() {
+    jest.mocked(isHeadlessHost).mockReturnValue(true)
+    const context = createManagedWorkspaceContext("sess_1", 1, "/scratch/old", "project-default")
+    context.execution!.bundleId = "scratch-bundle"
+    jest.mocked(getSession).mockResolvedValue({
+      id: "sess_1",
+      title: "IM",
+      createdAt: 1,
+      updatedAt: 1,
+      projectId: "project-default",
+      executionContext: context,
+    })
+    const bundle = {
+      bundleId: "scratch-bundle",
+      ownerType: "session" as const,
+      ownerRef: "sess_1",
+      environmentKind: "managed" as const,
+      state: "active" as const,
+      leases: [
+        {
+          bundleId: "scratch-bundle",
+          workspaceId: "scratch-workspace",
+          logicalRootId: "primary",
+          role: "primary" as const,
+          aliasPath: "/scratch/old",
+        },
+      ],
+      lastUsedAt: 1,
+      pinned: false,
+      createdAt: 1,
+    }
+    jest.mocked(ensureSessionScratchWorkspaceBundle).mockResolvedValue(bundle)
+    const settle = jest.fn(async () => [])
+    const abort = jest.fn(async () => [])
+    mockOpenWorkspaceBundleTurnLease.mockResolvedValue({
+      bundleTurnId: "scratch-turn",
+      bundleId: bundle.bundleId,
+      run: { runId: "scratch-run" } as never,
+      runs: [],
+      primaryAlias: "/scratch/current",
+      additionalAliases: [],
+      settle,
+      abort,
+    })
+    return { bundle, context, settle, abort }
+  }
+
+  it("leases canonical scratch before the sandbox early exit and rebinds changed aliases", async () => {
+    const fx = canonicalScratch()
+    await safeSendPrompt(
+      "sess_1",
+      "clean",
+      {
+        cwd: "/scratch/old",
+        sandboxRuntimeRef: "sandbox-scratch",
+        confinement: { enabled: true, roots: ["/scratch/old"] },
+        trustedWorkspaceRoots: ["/scratch/old"],
+      },
+      auditCtx
+    )
+    expect(ensureSessionScratchWorkspaceBundle).toHaveBeenCalledWith("sess_1", "scratch-bundle")
+    expect(mockAcquireWorkspaceBundle).not.toHaveBeenCalled()
+    expect(mockOpenWorkspaceBundleTurnLease).toHaveBeenCalledWith(
+      fx.bundle,
+      "primary",
+      expect.objectContaining({ sessionId: "sess_1", workspaceRoot: "/scratch/old" })
+    )
+    expect(rebindSendOptionsWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: "/scratch/current",
+        additionalDirectories: [],
+        confinement: { enabled: true, roots: ["/scratch/current"] },
+        trustedWorkspaceRoots: ["/scratch/current"],
+        taskWorkspace: expect.objectContaining({ runId: "scratch-run" }),
+      })
+    )
+    expect(fx.settle).toHaveBeenCalledWith("ready")
+    expect(fx.abort).not.toHaveBeenCalled()
+  })
+
+  it("aborts scratch when runtime rebinding fails without calling the model", async () => {
+    const fx = canonicalScratch()
+    jest.mocked(rebindSendOptionsWorkspace).mockRejectedValueOnce(new Error("rebind failed"))
+    await expect(
+      safeSendPrompt(
+        "sess_1",
+        "clean",
+        { cwd: "/scratch/old", sandboxRuntimeRef: "sandbox-scratch" },
+        auditCtx
+      )
+    ).rejects.toThrow("rebind failed")
+    expect(fx.abort).toHaveBeenCalledTimes(1)
+    expect(mockRun).not.toHaveBeenCalled()
+  })
+
+  it("rejects missing or cross-owner persisted scratch bundles without fallback", async () => {
+    const fx = canonicalScratch()
+    fx.bundle.ownerRef = "another-session"
+    await expect(
+      safeSendPrompt("sess_1", "clean", { cwd: "/scratch/old" }, auditCtx)
+    ).rejects.toThrow("another session")
+    expect(mockRun).not.toHaveBeenCalled()
+    fx.context.execution!.bundleId = undefined
+    await expect(
+      safeSendPrompt("sess_1", "clean", { cwd: "/scratch/old" }, auditCtx)
+    ).rejects.toThrow("no persisted bundle")
+    expect(mockAcquireWorkspaceBundle).not.toHaveBeenCalled()
+  })
 
   it("delegates to runAndCaptureAssistantReply when prompt is clean", async () => {
     const result = await safeSendPrompt("sess_1", "hello", undefined, auditCtx)

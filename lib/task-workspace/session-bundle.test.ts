@@ -6,7 +6,7 @@ jest.mock("./client", () => ({
   getWorkspaceBundle: (...args: unknown[]) => getWorkspaceBundle(...args),
 }))
 
-import { ensureSessionExecutionBundle } from "./session-bundle"
+import { ensureSessionExecutionBundle, validateSessionScratchBundle } from "./session-bundle"
 import type { SessionExecutionContext } from "@/types/execution-context"
 
 const context: SessionExecutionContext = {
@@ -56,6 +56,44 @@ const bundle = {
   pinned: false,
   createdAt: 1,
 }
+
+describe("scratch bundle validation", () => {
+  const scratch = {
+    ...bundle,
+    leases: [{ ...bundle.leases[0], logicalRootId: "primary" }],
+  }
+
+  it("accepts exactly the owned canonical primary lease", () => {
+    expect(validateSessionScratchBundle("session-1", scratch, "bundle-1")).toEqual(
+      scratch.leases[0]
+    )
+  })
+
+  it("refuses cross-owner and replaced bundles", () => {
+    expect(() => validateSessionScratchBundle("session-2", scratch)).toThrow("another session")
+    expect(() =>
+      validateSessionScratchBundle("session-1", { ...scratch, ownerType: "user" })
+    ).toThrow("another session")
+    expect(() => validateSessionScratchBundle("session-1", scratch, "other-bundle")).toThrow(
+      "identity changed"
+    )
+  })
+
+  it("refuses extra roots, traversal aliases and inactive bundles", () => {
+    expect(() =>
+      validateSessionScratchBundle("session-1", { ...scratch, leases: bundle.leases })
+    ).toThrow("invalid primary lease")
+    expect(() =>
+      validateSessionScratchBundle("session-1", {
+        ...scratch,
+        leases: [{ ...scratch.leases[0], aliasPath: "/host/../sibling" }],
+      })
+    ).toThrow("invalid primary lease")
+    expect(() =>
+      validateSessionScratchBundle("session-1", { ...scratch, state: "archived" })
+    ).toThrow("not an active")
+  })
+})
 
 describe("a session-scoped managed workspace", () => {
   // `createManagedWorkspaceContext` is used exactly when the owning workspace

@@ -25,6 +25,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "github_workspace_commit_and_push",
     "task_workspace_remote_source_ensure",
     "task_workspace_project_source_ensure",
+    "task_workspace_session_scratch_ensure",
     "code_snapshot_checkout_get",
     "github_workspace_remove",
     "github_workspace_stat",
@@ -887,6 +888,15 @@ pub(super) async fn dispatch(
         "task_workspace_project_source_ensure" => {
             let input: cognia_task_workspace::EnsureProjectSource = required(&args, "input")?;
             crate::task_workspace::task_workspace_project_source_ensure(input)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+
+        "task_workspace_session_scratch_ensure" => {
+            let input: cognia_task_workspace::EnsureSessionScratchWorkspace =
+                required(&args, "input")?;
+            crate::task_workspace::task_workspace_session_scratch_ensure(input)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -2020,6 +2030,7 @@ mod tests {
     fn command_family_is_non_empty_and_unique() {
         assert!(!COMMANDS.is_empty());
         assert!(COMMANDS.contains(&"connectors_lark_callback_respond"));
+        assert!(COMMANDS.contains(&"task_workspace_session_scratch_ensure"));
         let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len());
     }

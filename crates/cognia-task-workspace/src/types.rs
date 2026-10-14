@@ -65,6 +65,10 @@ pub enum ResourceCaptureClass {
 #[serde(rename_all = "camelCase")]
 #[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ResourceTrackingPolicy {
+    /// Capture every file into the blob store, including ignored/generated content.
+    /// Used for scratch archives whose directory is their only source of truth.
+    #[serde(default)]
+    pub self_contained: bool,
     #[serde(default)]
     pub generated_output_roots: Vec<String>,
     #[serde(default = "default_true")]
@@ -76,6 +80,7 @@ impl Default for ResourceTrackingPolicy {
         Self {
             generated_output_roots: Vec::new(),
             auto_detect: true,
+            self_contained: false,
         }
     }
 }
@@ -819,6 +824,17 @@ impl WorkspaceProvisioning {
     }
 }
 
+/// Service-only request for a session's private scratch environment. Paths
+/// are always chosen by the service; a known bundle is an ownership assertion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
+pub struct EnsureSessionScratchWorkspace {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+}
+
 /// Filesystem-bound request to provision every writable root for one task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1053,9 +1069,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn scratch_request_accepts_identity_but_refuses_caller_paths() {
+        let request: EnsureSessionScratchWorkspace =
+            serde_json::from_str(r#"{"sessionId":"session-1"}"#).unwrap();
+        assert_eq!(request.session_id, "session-1");
+        assert_eq!(request.bundle_id, None);
+        assert!(serde_json::from_str::<EnsureSessionScratchWorkspace>(
+            r#"{"sessionId":"session-1","sourceRoot":"/tmp/other"}"#,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn tracking_policy_defaults_to_safe_auto_detection() {
         let policy: ResourceTrackingPolicy = serde_json::from_str("{}").unwrap();
         assert!(policy.auto_detect);
+        assert!(!policy.self_contained);
         assert!(policy.generated_output_roots.is_empty());
     }
 

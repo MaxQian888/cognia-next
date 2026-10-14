@@ -33,6 +33,7 @@ pub fn resolve_tracking_policy(
     Ok(ResourceTrackingPolicy {
         generated_output_roots: roots.into_iter().collect(),
         auto_detect: requested.auto_detect,
+        self_contained: requested.self_contained,
     })
 }
 
@@ -196,6 +197,7 @@ mod tests {
             &ResourceTrackingPolicy {
                 generated_output_roots: vec!["custom-build".into()],
                 auto_detect: true,
+                self_contained: false,
             },
         )
         .unwrap();
@@ -214,6 +216,7 @@ mod tests {
                 &ResourceTrackingPolicy {
                     generated_output_roots: vec![candidate.into()],
                     auto_detect: false,
+                    self_contained: false,
                 },
             )
             .is_err());
@@ -233,6 +236,7 @@ mod tests {
             &ResourceTrackingPolicy {
                 generated_output_roots: vec!["linked/build".into()],
                 auto_detect: false,
+                self_contained: false,
             },
         )
         .is_err());

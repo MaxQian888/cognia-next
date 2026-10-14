@@ -1,14 +1,28 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getSession, updateSession } from "@/lib/db/sessions"
 import { registerDialogPathInRust } from "@/lib/files/allowed-roots-sync"
-import { isTauri } from "@/lib/platform/detect"
+import { isHeadlessHost, isTauri } from "@/lib/platform/detect"
+import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
+import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
+import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 import { decodeBase64, encodeBase64 } from "@/lib/share/encoding"
+import { sha256Hex } from "@/lib/share/hash"
 import type { SessionExecutionContext, SessionWorkspaceBinding } from "@/types/execution-context"
 import {
   createSessionExecutionContext,
   resolveSessionWorkspaceRoot,
 } from "./session-execution-context"
 import { useProjectStore } from "@/stores/project/project-store"
+import {
+  archiveManagedWorkspace,
+  ensureSessionScratchWorkspaceBundle,
+  getManagedWorkspace,
+  getWorkspaceBundle,
+  listWorkspaceBundles,
+} from "./client"
+import { runWorkspaceUserAction } from "./user-action"
+import { validateSessionScratchBundle } from "./session-bundle"
+import type { WorkspaceBundle } from "./types"
 
 const ARCHIVE_VERSION = 1 as const
 const MAX_ARCHIVE_FILES = 10_000
@@ -68,6 +82,160 @@ function managedWorkspaceId(sessionId: string): string {
   return `managed-workspace:${sessionId}`
 }
 
+/** Attribution to Default does not make these roots a Default project binding. */
+export function isSessionScratchWorkspace(
+  session:
+    (Pick<ChatSession, "projectId" | "executionContext"> & { id?: string }) | null | undefined
+): boolean {
+  if (!session) return false
+  const context = session.executionContext
+  const binding = context?.workspaceBinding
+  return (
+    binding?.kind === "managed" &&
+    context?.projectId === DEFAULT_PROJECT_ID &&
+    (!session.projectId || session.projectId === DEFAULT_PROJECT_ID) &&
+    (session.id
+      ? binding.workspaceId === managedWorkspaceId(session.id)
+      : /^managed-workspace:.+/.test(binding.workspaceId))
+  )
+}
+
+export interface SessionScratchWorkspaceDeps {
+  isHeadlessHost: () => boolean
+  now: () => number
+  getSession: (sessionId: string) => Promise<ChatSession | undefined>
+  updateSession: (sessionId: string, patch: Partial<ChatSession>) => Promise<unknown>
+  ensureBundle: (sessionId: string, bundleId?: string) => Promise<WorkspaceBundle>
+}
+
+const pendingSessionScratch = new Map<string, Promise<string>>()
+
+function requireScratchEligibleSession(session: ChatSession | undefined): ChatSession {
+  if (!session) throw new Error("Scratch workspace session no longer exists")
+  if (
+    !isSessionScratchWorkspace(session) &&
+    (session.projectId ||
+      session.executionContext?.projectId ||
+      session.executionContext?.workspaceBinding?.kind === "project")
+  ) {
+    throw new Error("Project-bound sessions cannot acquire a scratch workspace")
+  }
+  return session
+}
+
+/** Upgrade old unbound IM sessions and reuse the host's durable session owner. */
+export function ensureSessionScratchWorkspace(
+  session: ChatSession,
+  deps: SessionScratchWorkspaceDeps = {
+    isHeadlessHost,
+    now: Date.now,
+    getSession,
+    updateSession,
+    ensureBundle: ensureSessionScratchWorkspaceBundle,
+  }
+): Promise<string> {
+  if (!deps.isHeadlessHost()) {
+    return Promise.reject(new Error("Session scratch workspaces require a headless host"))
+  }
+  const pending = pendingSessionScratch.get(session.id)
+  if (pending) return pending
+  const operation = (async () => {
+    const current = requireScratchEligibleSession(await deps.getSession(session.id))
+    const knownBundleId = current.executionContext?.execution?.bundleId
+    const bundle = await deps.ensureBundle(current.id, knownBundleId)
+    const primary = validateSessionScratchBundle(current.id, bundle, knownBundleId)
+    const now = deps.now()
+    const context = createManagedWorkspaceContext(
+      current.id,
+      now,
+      primary.aliasPath,
+      DEFAULT_PROJECT_ID
+    )
+    context.execution = {
+      mode: "managed",
+      base: { kind: "workingState" },
+      bundleId: bundle.bundleId,
+      roots: [
+        {
+          logicalRootId: primary.logicalRootId,
+          role: "primary",
+          aliasPath: primary.aliasPath,
+          workspaceId: primary.workspaceId,
+        },
+      ],
+    }
+    context.lifecycle = {
+      state: "active",
+      createdAt: current.executionContext?.lifecycle?.createdAt ?? bundle.createdAt,
+      updatedAt: now,
+      pinned: bundle.pinned,
+    }
+    // A failed Dexie write is propagated. Retrying recovers the same host owner,
+    // even when no bundle id ever reached the session row.
+    const latest = requireScratchEligibleSession(await deps.getSession(current.id))
+    const latestBundleId = latest.executionContext?.execution?.bundleId
+    if (latestBundleId && latestBundleId !== bundle.bundleId) {
+      throw new Error("Scratch workspace binding changed during provisioning")
+    }
+    await deps.updateSession(current.id, {
+      projectId: DEFAULT_PROJECT_ID,
+      executionContext: context,
+    })
+    return primary.aliasPath
+  })().finally(() => pendingSessionScratch.delete(session.id))
+  pendingSessionScratch.set(session.id, operation)
+  return operation
+}
+
+/**
+ * Archive before deleting the row, while its service-owned identity is available.
+ * A ledger transaction passes its already-read row to avoid nesting encrypted
+ * Dexie reads inside the hold for filesystem I/O.
+ */
+export async function archiveSessionScratchWorkspace(
+  sessionOrId: ChatSession | string
+): Promise<void> {
+  const headless = isHeadlessHost()
+  if (!headless && getRuntimeSnapshot().target?.kind !== "companion") return
+  const session = typeof sessionOrId === "string" ? await getSession(sessionOrId) : sessionOrId
+  if (!session?.platformBinding || !isSessionScratchWorkspace(session)) return
+  const sessionId = session.id
+  assertSessionWritable(session, "metadata")
+  const bundleId = session.executionContext?.execution?.bundleId
+  // Portable rows carry the owner identity, never a host bundle id. Resolve
+  // that identity through the already-routed registry read on paired clients.
+  // Do not ensure here: archiving a never-used session must not create files.
+  const candidates = bundleId
+    ? [await getWorkspaceBundle(bundleId)].filter((value): value is WorkspaceBundle => !!value)
+    : (await listWorkspaceBundles()).filter(
+        (bundle) => bundle.ownerType === "session" && bundle.ownerRef === sessionId
+      )
+  if (!candidates.length && !bundleId) return
+  if (candidates.length !== 1) throw new Error("Scratch workspace bundle is missing or ambiguous")
+  const bundle = candidates[0]
+  const primary = validateSessionScratchBundle(sessionId, bundle, bundleId)
+  const workspace = await getManagedWorkspace(primary.workspaceId)
+  if (
+    !workspace ||
+    workspace.ownerType !== "session" ||
+    workspace.ownerRef !== sessionId ||
+    workspace.environmentKind !== "managed" ||
+    workspace.isolationKind !== "shadow"
+  ) {
+    throw new Error("Scratch workspace registry ownership is invalid")
+  }
+  // Desktop rootless chats use the same portable managed identity. Only the
+  // service scratch seed proves this row came from the always-on host command.
+  const seedSuffix = `/sources/session-scratch/${await sha256Hex(sessionId)}`
+  if (workspace.base.kind !== "workingState" || !workspace.sourceRoot.endsWith(seedSuffix)) {
+    if (!headless) return
+    throw new Error("Scratch workspace does not have a service-owned source")
+  }
+  await runWorkspaceUserAction("task_workspace_managed_archive", () =>
+    archiveManagedWorkspace(primary.workspaceId)
+  )
+}
+
 /**
  * The durable identity for a chat whose workspace has no directory to bind to.
  *
@@ -102,10 +270,22 @@ export function portableExecutionContext(
   context: SessionExecutionContext
 ): SessionExecutionContext {
   if (context.workspaceBinding?.kind !== "managed") return context
-  const { worktreePath: _worktreePath, branch: _branch, ...portable } = context
+  const {
+    worktreePath: _worktreePath,
+    branch: _branch,
+    environmentId: _environmentId,
+    ...portable
+  } = context
   return {
     ...portable,
     projectRoot: "",
+    execution: context.execution
+      ? { mode: context.execution.mode, base: context.execution.base, roots: [] }
+      : undefined,
+    taskWorkspace: {
+      taskId: context.taskWorkspace.taskId,
+      workspaceKey: context.taskWorkspace.workspaceKey,
+    },
     managedWorkspace: { availability: "missing-on-device" },
   }
 }
@@ -122,9 +302,12 @@ export function mergePortableManagedContext(
     local.managedWorkspace.localRoot
   ) {
     return {
-      ...incoming,
+      ...portableExecutionContext(incoming),
       projectRoot: local.managedWorkspace.localRoot,
       managedWorkspace: local.managedWorkspace,
+      execution: local.execution,
+      taskWorkspace: local.taskWorkspace,
+      ...(local.environmentId ? { environmentId: local.environmentId } : {}),
       ...(local.worktreePath ? { worktreePath: local.worktreePath } : {}),
       ...(local.branch ? { branch: local.branch } : {}),
     }

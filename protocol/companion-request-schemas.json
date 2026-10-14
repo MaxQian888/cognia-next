@@ -17447,6 +17447,37 @@
       },
       "additionalProperties": false
     },
+    "task_workspace_session_scratch_ensure": {
+      "description": "Resolve the trusted session's private scratch workspace on this host. Service-only; no caller-chosen paths. A known bundle must belong to the session.",
+      "type": "object",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": [
+            "sessionId"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            },
+            "bundleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "task_workspace_settle": {
       "type": "object",
       "required": [

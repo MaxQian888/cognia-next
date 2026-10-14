@@ -49,6 +49,32 @@ import type { ResolvedBinding } from "./policy-resolve"
 import type { AgentExecutionSendSpec } from "@cognia/agent-config-types/agent-execution"
 import { computeExecutionFingerprint } from "@/lib/ai/agent/execution/fingerprint"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
+import type { ChatSession } from "@cognia/agent-config-types"
+import type { Project } from "@/types"
+import * as buildOptions from "@/lib/claude/build-options"
+import * as platform from "@/lib/platform/detect"
+import { createManagedWorkspaceContext } from "@/lib/task-workspace/managed-workspace"
+import { saveSettings } from "@/lib/db/settings"
+import { createPlatformSession } from "./session-bindings"
+import { maybeHandleControlCommand } from "./commands/dispatch"
+
+// SWC exports getters; copied descriptors let these focused routing cases spy
+// without replacing the real resolver used by the rest of this suite.
+jest.mock("@/lib/platform/detect", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/platform/detect"),
+}))
+jest.mock("@/lib/claude/build-options", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/claude/build-options"),
+}))
+
+const mockEnsureSessionScratchWorkspace = jest.fn<Promise<string>, [ChatSession]>()
+jest.mock("@/lib/task-workspace/managed-workspace", () => ({
+  ...jest.requireActual("@/lib/task-workspace/managed-workspace"),
+  ensureSessionScratchWorkspace: (session: ChatSession) =>
+    mockEnsureSessionScratchWorkspace(session),
+}))
 
 const mockAppendCanonicalEnvelopes = jest.fn<Promise<number>, unknown[]>(async () => 1)
 jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
@@ -285,6 +311,222 @@ beforeEach(async () => {
 })
 
 // ── tests ─────────────────────────────────────────────────────────────────────
+
+describe("installRuntime — headless connector workspace routing", () => {
+  let resolveOptions: jest.SpyInstance
+  let headless: jest.SpyInstance
+
+  function project(id: string, path: string): Project {
+    return {
+      id,
+      name: id,
+      roots: [{ id: `${id}-root`, path, isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+      lastAccessedAt: new Date(0),
+    }
+  }
+
+  beforeEach(() => {
+    headless = jest.spyOn(platform, "isHeadlessHost").mockReturnValue(true)
+    resolveOptions = jest.spyOn(buildOptions, "resolveSendOptions").mockResolvedValue({
+      model: "claude-sonnet-5",
+    })
+    mockEnsureSessionScratchWorkspace.mockReset()
+    mockEnsureSessionScratchWorkspace.mockImplementation(async (session) => {
+      const alias = `/host/scratch/${session.id}/primary`
+      const context = createManagedWorkspaceContext(session.id, 1, alias, "project-default")
+      context.execution!.bundleId = `bundle-${session.id}`
+      await getDb().sessions.update(session.id, {
+        projectId: "project-default",
+        executionContext: context,
+      })
+      return alias
+    })
+  })
+
+  afterEach(() => {
+    headless.mockRestore()
+    resolveOptions.mockRestore()
+  })
+
+  it("upgrades an old unbound session before send resolution and journals its managed alias", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:old_unbound" })
+    const session = await createPlatformSession(event, undefined)
+    await getDb().projects.put(project("project-default", "/default-must-not-run"))
+    await saveSettings({ activeProjectId: "project-default" })
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockImplementationOnce(
+      async (_sessionId, _content, _opts, cap) => {
+        await cap?.onEvent?.({
+          type: "tool-call",
+          id: "write-result",
+          toolName: "Write",
+          input: { file_path: `/host/scratch/${session.id}/primary/results/result.txt` },
+        })
+        return { text: "done", messageId: "scratch-result" }
+      }
+    )
+
+    await callHandler(event, "ai-run")
+
+    expect(mockEnsureSessionScratchWorkspace).toHaveBeenCalledTimes(1)
+    expect(resolveOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeProject: null,
+        session: expect.objectContaining({
+          id: session.id,
+          projectId: "project-default",
+          executionContext: expect.objectContaining({
+            workspaceBinding: { kind: "managed", workspaceId: `managed-workspace:${session.id}` },
+            managedWorkspace: expect.objectContaining({
+              localRoot: `/host/scratch/${session.id}/primary`,
+            }),
+          }),
+        }),
+      })
+    )
+    const run = await getDb().executionRuns.where("sessionId").equals(session.id).first()
+    expect(run?.projectId).toBe("project-default")
+    const events = await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()
+    expect(events.find((item) => item.type === "tool.started")?.payload).toMatchObject({
+      target: { kind: "workspace_path", label: "results/result.txt" },
+    })
+  })
+
+  it("revalidates and reuses the same scratch binding on later turns", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:scratch_reuse" })
+    await callHandler(event, "ai-run")
+    const first = resolveOptions.mock.calls[0][0].session as ChatSession
+    await callHandler(makeEvent({ conversationKey: event.conversationKey }), "ai-run")
+    const second = resolveOptions.mock.calls[1][0].session as ChatSession
+    expect(second.id).toBe(first.id)
+    expect(second.executionContext?.execution?.bundleId).toBe(
+      first.executionContext?.execution?.bundleId
+    )
+    expect(mockEnsureSessionScratchWorkspace).toHaveBeenCalledTimes(2)
+    expect(resolveOptions.mock.calls[1][0].activeProject).toBeNull()
+    expect(await getDb().sessions.count()).toBe(1)
+  })
+
+  it("uses the bound session's project and journals its supplied host checkout without scratch", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:bound_project" })
+    const session = await createPlatformSession(event, undefined)
+    const own = project("own-project", "/own-root")
+    await getDb().projects.bulkPut([own, project("other-project", "/other-root")])
+    await getDb().sessions.update(session.id, { projectId: own.id })
+    await saveSettings({ activeProjectId: "other-project" })
+    resolveOptions.mockResolvedValueOnce({
+      model: "claude-sonnet-5",
+      cwd: "/host/project-checkout",
+    })
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockImplementationOnce(
+      async (_sessionId, _content, _opts, cap) => {
+        await cap?.onEvent?.({
+          type: "tool-call",
+          id: "project-result",
+          toolName: "Write",
+          input: { file_path: "/host/project-checkout/results/result.txt" },
+        })
+        return { text: "done", messageId: "project-result" }
+      }
+    )
+
+    await callHandler(event, "ai-run")
+
+    expect(resolveOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeProject: expect.objectContaining({ id: own.id, roots: own.roots }),
+      })
+    )
+    expect(mockEnsureSessionScratchWorkspace).not.toHaveBeenCalled()
+    const run = await getDb().executionRuns.where("sessionId").equals(session.id).first()
+    const events = await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()
+    expect(events.find((item) => item.type === "tool.started")?.payload).toMatchObject({
+      target: { kind: "workspace_path", label: "results/result.txt" },
+    })
+  })
+
+  it("refuses a missing bound project without falling back to scratch or active project", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:missing_project" })
+    const session = await createPlatformSession(event, undefined)
+    await getDb().sessions.update(session.id, { projectId: "deleted-project" })
+    await getDb().projects.put(project("project-default", "/default-root"))
+    await saveSettings({ activeProjectId: "project-default" })
+
+    await expect(callHandler(event, "ai-run")).rejects.toThrow(
+      "Connector session project unavailable: deleted-project"
+    )
+    expect(resolveOptions).not.toHaveBeenCalled()
+    expect(mockEnsureSessionScratchWorkspace).not.toHaveBeenCalled()
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+  })
+
+  it("does not capture if the scratch binding was not persisted", async () => {
+    mockEnsureSessionScratchWorkspace.mockResolvedValueOnce("/host/scratch/unpersisted")
+    await expect(callHandler(makeEvent({}), "ai-run")).rejects.toThrow(
+      "Connector session scratch binding unavailable:"
+    )
+    expect(resolveOptions).not.toHaveBeenCalled()
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+  })
+
+  it("leaves desktop connector routing unchanged", async () => {
+    headless.mockReturnValue(false)
+    await callHandler(makeEvent({}), "ai-run")
+    expect(mockEnsureSessionScratchWorkspace).not.toHaveBeenCalled()
+    expect(resolveOptions.mock.calls[0][0]).not.toHaveProperty("activeProject")
+    expect(resolveOptions.mock.calls[0][0].session.executionContext).toBeUndefined()
+  })
+
+  it("isolates Feishu threads and a /new rotation within the same thread", async () => {
+    const event = (thread: string) =>
+      makeEvent({
+        platform: "lark",
+        conversationKey: `lark:adapter_1:chat:${thread}`,
+        conversationRef: {
+          platform: "lark",
+          adapterId: "adapter_1",
+          channelId: "chat",
+          channelKind: "private",
+          threadRootMessageId: thread,
+          threadTs: thread,
+          replyInThread: true,
+        },
+      })
+    const firstThread = event("thread-a")
+    await callHandler(firstThread, "ai-run")
+    await callHandler(event("thread-b"), "ai-run")
+    const first = resolveOptions.mock.calls[0][0].session as ChatSession
+    const second = resolveOptions.mock.calls[1][0].session as ChatSession
+
+    const newCommand = { ...firstThread, plainText: "/new", messageId: "new-command" }
+    expect(
+      await maybeHandleControlCommand(
+        newCommand,
+        { id: "adapter_1", type: "lark" } as AdapterInstanceRow,
+        undefined,
+        RESOLVED,
+        {
+          enqueue: jest.fn(async () => undefined) as never,
+          audit: jest.fn(async () => undefined) as never,
+        }
+      )
+    ).toBe(true)
+    await callHandler({ ...firstThread, messageId: "after-new" }, "ai-run")
+    const rotated = resolveOptions.mock.calls[2][0].session as ChatSession
+    expect(new Set([first.id, second.id, rotated.id]).size).toBe(3)
+    expect(
+      new Set(
+        [first, second, rotated].map((session) => session.executionContext?.execution?.bundleId)
+      ).size
+    ).toBe(3)
+    expect(rotated.platformConversationKey).toBe(first.platformConversationKey)
+  })
+})
 
 describe("resolveRecoveryExecutionSpec", () => {
   const existingGateway: AgentExecutionSendSpec = {

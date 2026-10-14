@@ -70665,6 +70665,162 @@
       "outputTyped": true
     },
     {
+      "name": "task_workspace_session_scratch_ensure",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "task_workspace_session_scratch_ensure (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "description": "Resolve the trusted session's private scratch workspace on this host. Service-only; no caller-chosen paths. A known bundle must belong to the session.",
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "object",
+            "required": [
+              "sessionId"
+            ],
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_.:-]+$"
+              },
+              "bundleId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_.:-]+$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "description": "A collection of `WorkspaceRootLease`s acquired atomically for one execution.\n\nThe Registry acquires a Bundle in one call; on failure it rolls back every\nlease it already provisioned. See `bundle.rs` for the acquisition and\natomic-apply implementations.",
+        "properties": {
+          "bundleId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "environmentKind": {
+            "description": "Product lifecycle of a physical execution environment.",
+            "enum": [
+              "managed",
+              "permanent",
+              "imported"
+            ],
+            "type": "string",
+            "default": "managed"
+          },
+          "lastUsedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "leases": {
+            "items": {
+              "additionalProperties": false,
+              "description": "One logical root inside a Bundle, resolved to its physical execution\nlocation.\n\n`alias_path` is the path executors see. Multiple leases may point at the\nsame physical worktree when they share a Git common dir — the Bundle\ncomposer collapses roots by `git_common_dir` before creating worktrees.",
+              "properties": {
+                "aliasPath": {
+                  "type": "string"
+                },
+                "bundleId": {
+                  "type": "string"
+                },
+                "logicalRootId": {
+                  "type": "string"
+                },
+                "role": {
+                  "description": "The role a logical root plays inside a Bundle.\n\nExactly one lease must be `Primary`; the rest are `Additional` (forwarded\nas `additionalDirectories` when the executor spawns).",
+                  "enum": [
+                    "primary",
+                    "additional"
+                  ],
+                  "type": "string"
+                },
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "aliasPath",
+                "bundleId",
+                "logicalRootId",
+                "role",
+                "workspaceId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "ownerRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ownerType": {
+            "description": "Who created this managed workspace. Ownership determines whether the\nRegistry may prune or unlock the workspace during reconciliation.\n\n`Imported` is reserved for worktrees discovered on disk that the Registry\ncannot verify as its own — those rows never participate in auto-prune.",
+            "enum": [
+              "user",
+              "imported",
+              "session",
+              "team",
+              "scheduled"
+            ],
+            "type": "string"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "state": {
+            "description": "Managed workspace lifecycle state. Transitions outside the Registry's\ncontrolled paths are rejected fail-closed.\n\nLegal transitions (all others error):\n\n- `Provisioning → Active | Removing`\n- `Active → Archived | Conflict | Removing`\n- `Archived → Restorable | Removing`\n- `Restorable → Active | Removing`\n- `Conflict → Active | Removing`   (via `ConflictResolution`)\n- `Removing → Removed`\n\n`Removed` is terminal.",
+            "enum": [
+              "provisioning",
+              "active",
+              "archived",
+              "conflict",
+              "restorable",
+              "removing",
+              "removed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "bundleId",
+          "createdAt",
+          "environmentKind",
+          "lastUsedAt",
+          "leases",
+          "ownerRef",
+          "ownerType",
+          "pinned",
+          "state"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "task_workspace_settle",
       "category": "tasks",
       "resource": "task-workspaces",
@@ -79383,5 +79539,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "0d4d7d586a971daf7e3c997efe308754920bd9426154edf9c2f30cd00d93af2f"
+  "catalogHash": "62b830bfbff0c55fdafd00b465a5cfd4c86cc27b7615e3fb629a6b91e623e96a"
 }

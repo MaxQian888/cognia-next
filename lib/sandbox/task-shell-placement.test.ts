@@ -1,6 +1,7 @@
 import type { SandboxPlacementOutcome } from "./environment-placement"
 import type { RunEnvironmentSources } from "./run-environment"
 import { resolveTaskShellPlacement, type TaskShellPlacementSources } from "./task-shell-placement"
+import { createManagedWorkspaceContext } from "@/lib/task-workspace/managed-workspace"
 
 const placement = { kind: "container", spec: { specDigest: "sha256:abc" } } as never
 
@@ -35,6 +36,47 @@ function sources(
 }
 
 describe("resolveTaskShellPlacement", () => {
+  it("uses only deployment auto selection for a scratch, without Default's roots or approvals", async () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    const project = jest.fn(async () => ({ roots: [{ path: "/other-project" }] }) as never)
+    const context = createManagedWorkspaceContext("scratch", 1, "/scratch", "project-default")
+    context.environmentId = "default-host-process"
+    const { all, prepare, base } = sources(
+      {
+        session: async () => ({ projectId: "project-default", executionContext: context }),
+        project,
+      },
+      { runtime: { source: { kind: "auto" }, hostProcess: true, updatedAt: 1 }, policy: undefined }
+    )
+    try {
+      await expect(
+        resolveTaskShellPlacement({ sessionId: "scratch", workspaceRoot: "/scratch" }, all)
+      ).resolves.toBe(placement)
+      const [request, scoped] = prepare.mock.calls[0]
+      expect(request).toEqual({
+        agentId: "task-shell:scratch",
+        projectId: "project-default",
+        project: null,
+        executionRoot: "/scratch",
+        surface: "unattended",
+      })
+      expect(project).not.toHaveBeenCalled()
+      await expect(scoped.selection("project-default")).resolves.toEqual({
+        runtime: { source: { kind: "auto" }, isolationMinimum: "container", updatedAt: 0 },
+        policy: undefined,
+      })
+      expect(base.selection).not.toHaveBeenCalled()
+      await expect(scoped.declarationFiles("/scratch")).resolves.toEqual({
+        files: [],
+        searched: [],
+      })
+      await expect(scoped.serverApprovals("project-default")).resolves.toEqual([])
+      await expect(scoped.deviceApproval("/other-project")).resolves.toBeUndefined()
+    } finally {
+      delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+    }
+  })
+
   it("resolves the session's project environment as an unattended run", async () => {
     const { all, prepare } = setup()
     await expect(

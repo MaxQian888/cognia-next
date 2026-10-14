@@ -1,6 +1,12 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
+
+const archiveScratchMock = jest.fn()
+jest.mock("@/lib/task-workspace/managed-workspace", () => ({
+  archiveSessionScratchWorkspace: (session: unknown) => archiveScratchMock(session),
+}))
+
 import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
@@ -55,6 +61,7 @@ async function acquireWritableLease(): Promise<Awaited<ReturnType<typeof acquire
 
 describe("HostState durable store", () => {
   beforeEach(async () => {
+    archiveScratchMock.mockReset().mockResolvedValue(undefined)
     activateAccountDatabase(scope.accountId, scope.targetId)
     await getDb().delete()
     __resetDbForTesting()
@@ -74,6 +81,58 @@ describe("HostState durable store", () => {
   afterEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it("archives scratch once, keeps the transaction alive, and skips cleanup on unarchive", async () => {
+    await acquireWritableLease()
+    archiveScratchMock.mockImplementation(async (session: { id: string; archivedAt?: number }) => {
+      expect(session.id).toBe("session-1")
+      expect(session.archivedAt).toBeUndefined()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+    const input = {
+      action: draftAction({ action: { kind: "session.archive" as const, archived: true } }),
+      mutation: {
+        kind: "conversation.changed" as const,
+        conversation: "archived" as const,
+        revision: 1,
+      },
+      now: 100,
+    }
+    await commitHostStateAction(input)
+    expect((await getDb().sessions.get("session-1"))?.archivedAt).toBe(100)
+    await commitHostStateAction(input)
+    expect(archiveScratchMock).toHaveBeenCalledTimes(1)
+    await commitHostStateAction({
+      action: draftAction({
+        actionId: "restore",
+        baseRevision: 1,
+        action: { kind: "session.archive", archived: false },
+      }),
+      mutation: { kind: "conversation.changed", conversation: "present", revision: 2 },
+      now: 101,
+    })
+    expect((await getDb().sessions.get("session-1"))?.archivedAt).toBeUndefined()
+    expect(archiveScratchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("rolls back archive and ledger on scratch failure and allows retry", async () => {
+    await acquireWritableLease()
+    archiveScratchMock.mockRejectedValueOnce(new Error("snapshot failed"))
+    const input = {
+      action: draftAction({ action: { kind: "session.archive" as const, archived: true } }),
+      mutation: {
+        kind: "conversation.changed" as const,
+        conversation: "archived" as const,
+        revision: 1,
+      },
+      now: 100,
+    }
+    await expect(commitHostStateAction(input)).rejects.toThrow("snapshot failed")
+    expect((await getDb().sessions.get("session-1"))?.archivedAt).toBeUndefined()
+    expect(await getDb().hostStateActions.count()).toBe(0)
+    await commitHostStateAction(input)
+    expect((await getDb().sessions.get("session-1"))?.archivedAt).toBe(100)
   })
 
   it("preserves structured handoff content and pins media references on the host", async () => {

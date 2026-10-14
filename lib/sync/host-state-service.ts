@@ -1,3 +1,4 @@
+import { archiveSessionScratchWorkspace } from "@/lib/task-workspace/managed-workspace"
 import {
   canonicalHostStateJson,
   hostStateDigest,
@@ -1200,6 +1201,7 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         await deleteSessionsWithTeardown(ids)
       })
     try {
+      await archiveSessionScratchWorkspace(action.sessionId!)
       await deleteSessions([action.sessionId!])
       return accepted
     } catch (error) {

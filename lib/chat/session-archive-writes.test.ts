@@ -20,6 +20,10 @@ jest.mock("@/lib/chat/session-deletion", () => ({
 }))
 
 const announceMock = jest.fn()
+const archiveScratchMock = jest.fn()
+jest.mock("@/lib/task-workspace/managed-workspace", () => ({
+  archiveSessionScratchWorkspace: (id: string) => archiveScratchMock(id),
+}))
 jest.mock("@/lib/filespace/lifecycle", () => ({
   announceFileSpaceSessionsChanged: (ids: readonly string[]) => announceMock(ids),
 }))
@@ -27,6 +31,7 @@ jest.mock("@/lib/filespace/lifecycle", () => ({
 import { deleteSessionsRouted, setSessionsArchived } from "./session-archive-writes"
 
 beforeEach(() => {
+  archiveScratchMock.mockReset().mockResolvedValue(undefined)
   announceMock.mockReset()
   enqueueMock.mockReset().mockResolvedValue(null)
   for (const mock of [
@@ -65,6 +70,7 @@ describe("setSessionsArchived", () => {
       action: { kind: "session.archive", archived: false },
     })
     expect(unarchiveSessionMock).toHaveBeenCalledWith("a")
+    expect(archiveScratchMock).not.toHaveBeenCalled()
   })
 
   it("writes several local rows in one bulk transaction, each id once", async () => {
@@ -84,6 +90,10 @@ describe("setSessionsArchived", () => {
     expect(bulkArchiveMock).not.toHaveBeenCalled()
     // Only what this device wrote reaches its own file-share host.
     expect(announceMock).toHaveBeenCalledWith(["local"])
+    expect(archiveScratchMock.mock.calls).toEqual([["local"]])
+    expect(archiveScratchMock.mock.invocationCallOrder[0]).toBeLessThan(
+      archiveSessionMock.mock.invocationCallOrder[0]
+    )
   })
 
   it("tells the file-share host about every local archive and restore", async () => {
@@ -94,10 +104,13 @@ describe("setSessionsArchived", () => {
   })
 
   it("writes nothing locally when the Host took every id", async () => {
+    archiveScratchMock.mockRejectedValue(new Error("host offline"))
     enqueueMock.mockResolvedValue({ id: "job" })
     await setSessionsArchived(["a", "b"], true)
     expect(archiveSessionMock).not.toHaveBeenCalled()
     expect(bulkArchiveMock).not.toHaveBeenCalled()
+    expect(archiveScratchMock).not.toHaveBeenCalled()
+    expect(enqueueMock).toHaveBeenCalledTimes(2)
     expect(announceMock).not.toHaveBeenCalled()
   })
 
@@ -105,6 +118,12 @@ describe("setSessionsArchived", () => {
     archiveSessionMock.mockRejectedValue(new Error("locked"))
     await expect(setSessionsArchived(["a"], true)).rejects.toThrow("locked")
     expect(announceMock).not.toHaveBeenCalled()
+  })
+
+  it("preserves the session row if scratch archival fails", async () => {
+    archiveScratchMock.mockRejectedValue(new Error("snapshot failed"))
+    await expect(setSessionsArchived(["a"], true)).rejects.toThrow("snapshot failed")
+    expect(archiveSessionMock).not.toHaveBeenCalled()
   })
 })
 
@@ -125,11 +144,23 @@ describe("deleteSessionsRouted", () => {
       action: { kind: "session.delete" },
     })
     expect(deleteWithTeardownMock).toHaveBeenCalledWith(["x", "y"])
+    expect(archiveScratchMock.mock.calls).toEqual([["x"], ["y"]])
+    expect(archiveScratchMock.mock.invocationCallOrder[1]).toBeLessThan(
+      deleteWithTeardownMock.mock.invocationCallOrder[0]
+    )
   })
 
   it("skips the local teardown when the Host took every id", async () => {
+    archiveScratchMock.mockRejectedValue(new Error("host offline"))
     enqueueMock.mockResolvedValue({ id: "job" })
     await deleteSessionsRouted(["a"])
+    expect(deleteWithTeardownMock).not.toHaveBeenCalled()
+    expect(archiveScratchMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps the identity row when scratch archival fails before deletion", async () => {
+    archiveScratchMock.mockRejectedValue(new Error("snapshot failed"))
+    await expect(deleteSessionsRouted(["a"])).rejects.toThrow("snapshot failed")
     expect(deleteWithTeardownMock).not.toHaveBeenCalled()
   })
 })

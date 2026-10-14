@@ -18,6 +18,8 @@
 
 import type { ChatSession } from "@cognia/agent-config-types"
 import { SandboxRuntimeError } from "@cognia/plugin-sdk/api/sandbox"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { isSessionScratchWorkspace } from "@/lib/task-workspace/managed-workspace"
 import type { Project } from "@/types"
 import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
 
@@ -54,25 +56,41 @@ export async function resolveTaskShellPlacement(
   sources: TaskShellPlacementSources
 ): Promise<SandboxPlacement> {
   const session = await sources.session(input.sessionId)
+  const scratch = isHeadlessHost() && isSessionScratchWorkspace({ ...session, id: input.sessionId })
   const projectId = session?.executionContext?.projectId || session?.projectId
   if (!projectId) {
     throw refused(
       "The container shell tier runs in a project's runtime environment, and this session belongs to no project."
     )
   }
-  const project = await sources.project(projectId)
+  const project = scratch ? null : await sources.project(projectId)
   const base = await sources.runEnvironment()
-  const runEnvironment: RunEnvironmentSources = {
-    ...base,
-    selection: async (id, environmentId) => {
-      const selected = await base.selection(id, environmentId)
-      // Choosing the tier is the opt-in a spawn gets from the selection.
-      return selected.runtime
-        ? selected
-        : { ...selected, runtime: { source: { kind: "auto" }, updatedAt: 0 } }
-    },
-  }
-  const environmentId = session?.executionContext?.environmentId
+  const runEnvironment: RunEnvironmentSources = scratch
+    ? {
+        ...base,
+        // A scratch has no project configuration. Its files cannot select an image,
+        // setup command or approval from Default (or from a previous turn's output).
+        selection: async () => ({
+          runtime: { source: { kind: "auto" }, isolationMinimum: "container", updatedAt: 0 },
+          policy: undefined,
+        }),
+        declarationFiles: async () => ({ files: [], searched: [] }),
+        workspaceConfig: async () => ({ kind: "absent" }),
+        restricted: async () => false,
+        serverApprovals: async () => [],
+        deviceApproval: async () => undefined,
+      }
+    : {
+        ...base,
+        selection: async (id, environmentId) => {
+          const selected = await base.selection(id, environmentId)
+          // Choosing the tier is the opt-in a spawn gets from the selection.
+          return selected.runtime
+            ? selected
+            : { ...selected, runtime: { source: { kind: "auto" }, updatedAt: 0 } }
+        },
+      }
+  const environmentId = scratch ? undefined : session?.executionContext?.environmentId
   const outcome = await sources.prepare(
     {
       agentId: `task-shell:${input.sessionId}`,

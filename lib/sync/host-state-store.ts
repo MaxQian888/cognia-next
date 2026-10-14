@@ -1,3 +1,5 @@
+import Dexie from "dexie"
+import { archiveSessionScratchWorkspace } from "@/lib/task-workspace/managed-workspace"
 import { messageMediaRefRows } from "@/lib/db/message-media-refs"
 import { canonicalTurnToHandoffMessage } from "@/lib/chat/import-handoff-session"
 import {
@@ -1071,6 +1073,11 @@ async function persistBusinessProjection(
       return
     case "session.archive":
       assertSessionWritable(session, "metadata")
+      if (action.action.archived) {
+        // Keep the ledger atomic across host filesystem I/O. A failed archive
+        // rolls back both the session flag and the action, so replay can retry.
+        await Dexie.waitFor(archiveSessionScratchWorkspace(session!))
+      }
       await db.sessions.update(action.sessionId, {
         archivedAt: action.action.archived ? now : undefined,
         updatedAt: now,

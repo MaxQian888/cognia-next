@@ -1,4 +1,5 @@
 import { resolveHostTaskPlacement, type HostTaskPlacementSources } from "./host-task-placement"
+import { createManagedWorkspaceContext } from "@/lib/task-workspace/managed-workspace"
 
 function sources(overrides: Partial<HostTaskPlacementSources> = {}) {
   const selection = jest.fn(async () => ({ runtime: undefined }))
@@ -9,6 +10,29 @@ function sources(overrides: Partial<HostTaskPlacementSources> = {}) {
 }
 
 describe("resolveHostTaskPlacement", () => {
+  it("keeps a session scratch in a container without consulting Default's opt-out", async () => {
+    const { sources: s } = sources({
+      selection: jest.fn(async () => ({
+        runtime: { source: { kind: "auto" }, hostProcess: true, updatedAt: 1 },
+      })) as never,
+    })
+    await expect(
+      resolveHostTaskPlacement(
+        {
+          projectId: "project-default",
+          executionContext: createManagedWorkspaceContext(
+            "scratch",
+            1,
+            "/scratch",
+            "project-default"
+          ),
+        },
+        s
+      )
+    ).resolves.toEqual({ kind: "container" })
+    expect(s.selection).not.toHaveBeenCalled()
+  })
+
   it("overrides nothing on a host that is not always-on", async () => {
     const { sources: s, selection } = sources({ isHost: () => false })
     await expect(resolveHostTaskPlacement({ projectId: "p1" }, s)).resolves.toEqual({

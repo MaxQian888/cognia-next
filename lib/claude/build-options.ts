@@ -14,6 +14,8 @@ import { buildWorkspaceInstructionsSection } from "@/lib/workspace/workspace-ins
 import { buildProjectGoalSection } from "@/lib/project-coordinator/protocol"
 import { projectRoleToolsApply } from "@/lib/project-coordinator/config"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
+import { isSessionScratchWorkspace } from "@/lib/task-workspace/managed-workspace"
+import { listBuiltinTools, namespaced } from "@/lib/settings/builtin-tools"
 import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
@@ -1230,13 +1232,20 @@ function appendStableSection(
 const HOST_SESSIONLESS_SANDBOX_OWNER = "__always_on_host_sessionless__"
 
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
+  const scratchWorkspace = isHeadlessHost() && isSessionScratchWorkspace(ctx.session)
+  const scratchHostToolNames = new Set<string>()
+  // Default only attributes data for a managed scratch. Even a caller with a
+  // focused project may not lend that project's roots or grants to this turn.
+  if (scratchWorkspace) ctx = { ...ctx, activeProject: null, referencedPaths: [] }
   const { session, appSettings, memberOverride } = ctx
   // Which workspace's capability overlay this turn obeys. The session's own
   // workspace wins over the UI pointer for the same reason the cwd does: a
   // background turn in a conversation the user has navigated away from must
   // keep the skills and servers of the repo it is working in, not of whatever
   // is on screen. Only a turn with no workspace at all falls back.
-  const capabilityScope = { projectId: session?.projectId ?? ctx.activeProject?.id ?? null }
+  const capabilityScope = {
+    projectId: scratchWorkspace ? null : (session?.projectId ?? ctx.activeProject?.id ?? null),
+  }
   // Name the turn for lifecycle-hook scoping. Everything resolved here is a
   // chat-session turn; the surfaces that are NOT (teammate dispatch, plan
   // steps, dispatched subagents) overwrite `agentKind` on the options they
@@ -2352,21 +2361,27 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // (ahead of the system-prompt assembly) because project instruction discovery
   // below keys off it. The composer / settings UI resolve through the same
   // helper so what the user sees always matches what the send uses.
-  let cwd = resolveEffectiveCwd({
-    sessionWorkingDir: session?.workingDir,
-    // The durable execution binding wins over the workspace root: a
-    // `managedWorktree` session is leased into a bundle alias, and everything
-    // resolved from `cwd` below — instruction discovery, the sandbox placement
-    // — must see that alias rather than the source checkout the agent is not
-    // writing to. Undefined until a binding exists, so a brand-new managed
-    // session's first turn still resolves through the workspace root.
-    executionWorkspaceRoot: session?.executionContext
+  let cwd =
+    scratchWorkspace && session?.executionContext
       ? resolveSessionWorkspaceRoot(session.executionContext)
-      : undefined,
-    activeProject: ctx.activeProject,
-    characterWorkingDir: character?.workingDir,
-    defaultWorkingDir: appSettings?.defaultWorkingDir,
-  })
+      : resolveEffectiveCwd({
+          sessionWorkingDir: session?.workingDir,
+          // The durable execution binding wins over the workspace root: a
+          // `managedWorktree` session is leased into a bundle alias, and everything
+          // resolved from `cwd` below — instruction discovery, the sandbox placement
+          // — must see that alias rather than the source checkout the agent is not
+          // writing to. Undefined until a binding exists, so a brand-new managed
+          // session's first turn still resolves through the workspace root.
+          executionWorkspaceRoot: session?.executionContext
+            ? resolveSessionWorkspaceRoot(session.executionContext)
+            : undefined,
+          activeProject: ctx.activeProject,
+          characterWorkingDir: character?.workingDir,
+          defaultWorkingDir: appSettings?.defaultWorkingDir,
+        })
+  if (scratchWorkspace && !cwd) {
+    throw new Error("The session scratch workspace has no materialized primary root.")
+  }
   // On an always-on Host a workspace whose folder is not here runs in a clone
   // of its repository (ADR-0224 A11); one it cannot supply fails the turn.
   if (isHeadlessHost() && ctx.activeProject) {
@@ -3073,9 +3088,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   try {
     // CLI / headless callers inject `preloadedMcpServers` (incl. `[]`) so the
     // resolver never touches Dexie; desktop leaves it undefined → Dexie lookup.
-    const enabled = supportAgent
-      ? []
-      : (ctx.preloadedMcpServers ?? (await listEnabledMcpServers(capabilityScope)))
+    // Configured MCP servers run outside the bound container. Their tool
+    // metadata does not prove filesystem confinement, so a scratch cannot
+    // inherit them (including callers' preloaded server maps).
+    const enabled =
+      supportAgent || scratchWorkspace
+        ? []
+        : (ctx.preloadedMcpServers ?? (await listEnabledMcpServers(capabilityScope)))
     let chosen = enabled
     const memberMcp = memberOverride?.mcpServerIdsOverride
 
@@ -3324,6 +3343,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         exposeDockToAgents,
         ...(dispatchAgentGate ? { dispatchAgent: dispatchAgentGate } : {}),
       })
+      if (scratchWorkspace) {
+        // Installed plugins may omit filesystem metadata. Only the sandbox
+        // plugin's calls are known to execute inside this session's container.
+        // First-party app capabilities are composed separately below.
+        for (const entry of manifest) {
+          if (entry.pluginId !== "cognia-sandboxed-tools") scratchHostToolNames.add(entry.name)
+        }
+        manifest = manifest.filter((entry) => entry.pluginId === "cognia-sandboxed-tools")
+      }
       if (!computerUseAllowedForChat) {
         manifest = manifest.filter((entry) => entry.pluginId !== "cognia-computer-use")
       }
@@ -4264,6 +4292,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
   }
 
+  if (scratchWorkspace) {
+    const scratchHint =
+      "This conversation has a private scratch workspace. All file reads, searches, listings, " +
+      "writes and shell commands must use sandbox_bash / sandbox_edit / sandbox_write / " +
+      "sandbox_text_editor. Host filesystem tools are unavailable."
+    opts.appendSystemPrompt = `${opts.appendSystemPrompt ?? ""}\n\n${scratchHint}`.trim()
+  }
+
   // --- Workspace confinement (ADR-0028 "lite") ------------------------------
   // The always-on, cross-platform middle layer: when the heavy OS sandbox is
   // NOT active, confine the sidecar built-in file/bash tools to the active
@@ -5008,6 +5044,49 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  const toolAliases = (name: string): string[] => [name, `mcp__cognia-plugin-tools__${name}`]
+  if (scratchWorkspace) {
+    // Both model rails have host readers: SDK native names and sidecar core
+    // tools (bare / MCP aliases). Denying mutators alone still exposes sibling
+    // workspaces through absolute reads, git inspection, LSP and file search.
+    // Task bookkeeping and the clock do not inspect the host filesystem.
+    const sessionTools = new Set([
+      "TodoWrite",
+      "TaskCreate",
+      "TaskGet",
+      "TaskList",
+      "TaskUpdate",
+      "current_time",
+    ])
+    const hostTools = listBuiltinTools().filter((tool) => !sessionTools.has(tool.name))
+    const denied = new Set(opts.disallowedTools ?? [])
+    for (const name of [
+      "Read",
+      "Grep",
+      "Glob",
+      "LS",
+      "NotebookRead",
+      "text_editor",
+      "str_replace_based_edit_tool",
+      ...hostTools.map((tool) => tool.name),
+    ]) {
+      denied.add(name)
+      denied.add(namespaced(name))
+    }
+    for (const tool of opts.pluginTools ?? []) {
+      if (tool.access && tool.pluginId !== "cognia-sandboxed-tools") {
+        scratchHostToolNames.add(tool.name)
+      }
+    }
+    for (const name of scratchHostToolNames) {
+      for (const alias of toolAliases(name)) denied.add(alias)
+    }
+    opts.disallowedTools = [...denied]
+    opts.pluginTools = opts.pluginTools?.filter((tool) => !denied.has(tool.name))
+    delete opts.additionalDirectories
+    delete opts.lsp
+  }
+
   // --- Unified built-in Skill delivery ------------------------------------
   // Resolve descriptor triggers, persisted enablement, capability reasons,
   // request scope, prompt delivery, resource scope, and loader scope once.
@@ -5027,7 +5106,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     : null
   const projectedDenied = new Set(projectedToolSurface.disallowedTools ?? [])
   const pluginToolNames = new Set((opts.pluginTools ?? []).map((tool) => tool.name))
-  const toolAliases = (name: string): string[] => [name, `mcp__cognia-plugin-tools__${name}`]
   const projectedAllowsTool = (names: readonly string[]): boolean => {
     if (projectedToolSurface.toolSurface === "none") return false
     // Availability is decided per NAME, and a name's two aliases (bare and

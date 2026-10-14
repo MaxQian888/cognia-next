@@ -14825,6 +14825,9 @@
     "task_workspace_project_source_ensure": {
       "$ref": "#/$defs/ProjectSource"
     },
+    "task_workspace_session_scratch_ensure": {
+      "$ref": "#/$defs/WorkspaceBundle"
+    },
     "task_workspace_remote_source_ensure": {
       "$ref": "#/$defs/RemoteSourceCheckout"
     },

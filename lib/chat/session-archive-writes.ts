@@ -17,6 +17,7 @@
 import { deleteSessionsWithTeardown } from "@/lib/chat/session-deletion"
 import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
 import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
+import { archiveSessionScratchWorkspace } from "@/lib/task-workspace/managed-workspace"
 import {
   archiveSession,
   bulkArchiveSessions,
@@ -52,6 +53,9 @@ export async function setSessionsArchived(
     })
   )
   if (local.length === 0) return
+  if (archived) {
+    for (const sessionId of local) await archiveSessionScratchWorkspace(sessionId)
+  }
   if (local.length === 1) {
     await (archived ? archiveSession(local[0]!) : unarchiveSession(local[0]!))
   } else {
@@ -73,5 +77,8 @@ export async function deleteSessionsRouted(ids: readonly string[]): Promise<void
   const local = await idsLeftForThisDevice(uniqueIds, (sessionId) =>
     enqueueHostStateIntentIfAvailable({ sessionId, action: { kind: "session.delete" } })
   )
-  if (local.length > 0) await deleteSessionsWithTeardown(local)
+  if (local.length > 0) {
+    for (const sessionId of local) await archiveSessionScratchWorkspace(sessionId)
+    await deleteSessionsWithTeardown(local)
+  }
 }

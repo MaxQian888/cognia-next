@@ -32,7 +32,15 @@ import { appendAudit } from "@/lib/connectors/audit"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import { groundSendOptionsAnswer } from "@/lib/rag/chat-grounding"
-import { acquireWorkspaceBundle } from "@/lib/task-workspace/client"
+import {
+  acquireWorkspaceBundle,
+  ensureSessionScratchWorkspaceBundle,
+} from "@/lib/task-workspace/client"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { getSession } from "@/lib/db/sessions"
+import { isSessionScratchWorkspace } from "@/lib/task-workspace/managed-workspace"
+import { validateSessionScratchBundle } from "@/lib/task-workspace/session-bundle"
+import { rebindSendOptionsWorkspace } from "@/lib/sandbox/session-runtime"
 import { provisioningForWorkspaceRoot } from "@/lib/task-workspace/workspace-provisioning"
 import {
   openWorkspaceBundleTurnLease,
@@ -162,9 +170,31 @@ async function openConnectorWorkspaceTurn(
   options: SendOptions | undefined,
   opts: SafeSendPromptOptions
 ): Promise<ConnectorWorkspaceTurn | null> {
-  const roots = connectorWritableRoots(options)
+  const session = isHeadlessHost() ? await getSession(sessionId) : undefined
+  const scratch = session && isSessionScratchWorkspace(session)
+  const knownBundleId = scratch ? session.executionContext?.execution?.bundleId : undefined
+  if (scratch && !knownBundleId) {
+    throw new Error("Connector scratch workspace has no persisted bundle")
+  }
+  // Revalidate the canonical owner through the service, without acquiring a
+  // second bundle around its alias. This must precede the sandbox early exit.
+  const scratchBundle = scratch
+    ? await ensureSessionScratchWorkspaceBundle(sessionId, knownBundleId)
+    : undefined
+  const scratchPrimary = scratchBundle
+    ? validateSessionScratchBundle(sessionId, scratchBundle, knownBundleId)
+    : undefined
+  const roots = scratchPrimary
+    ? [
+        {
+          logicalRootId: "primary",
+          role: "primary" as const,
+          sourceRoot: options?.cwd ?? scratchPrimary.aliasPath,
+        },
+      ]
+    : connectorWritableRoots(options)
   if (roots.length === 0) return null
-  if (options?.sandboxRuntimeRef) {
+  if (options?.sandboxRuntimeRef && !scratch) {
     // The send already carries a resolved sandbox placement, bound against the
     // pre-remap roots. Remapping `cwd` onto bundle aliases underneath it would
     // leave the two describing different directories, so the bundle stands
@@ -178,9 +208,9 @@ async function openConnectorWorkspaceTurn(
   // Same provisioning a chat turn in this workspace would get. An IM-driven
   // turn runs the same agent against the same repository; the only difference
   // is who asked.
-  const provisioning = await provisioningForWorkspaceRoot(roots[0]?.sourceRoot).catch(
-    () => undefined
-  )
+  const provisioning = scratch
+    ? undefined
+    : await provisioningForWorkspaceRoot(roots[0]?.sourceRoot).catch(() => undefined)
   const acquire: AcquireWorkspaceBundle = {
     ownerType: "session",
     ownerRef: sessionId,
@@ -189,7 +219,7 @@ async function openConnectorWorkspaceTurn(
     roots,
     ...(provisioning ? { provisioning } : {}),
   }
-  const bundle = await acquireWorkspaceBundle(acquire)
+  const bundle = scratchBundle ?? (await acquireWorkspaceBundle(acquire))
   const turnId =
     options?.turnId?.trim() || `connector-${Date.now()}-${(connectorTurnSequence += 1)}`
   const taskId = connectorBoundaryId("task:connector:", sessionId)
@@ -218,33 +248,39 @@ async function openConnectorWorkspaceTurn(
     roots.map((root, index) => [root.sourceRoot, aliases[index]] as const)
   )
 
-  return {
-    lease,
-    options: {
-      ...options,
-      cwd: lease.primaryAlias,
-      additionalDirectories: lease.additionalAliases,
-      ...(options?.confinement
-        ? {
-            confinement: {
-              ...options.confinement,
-              roots: remapExactRoots(options.confinement.roots, aliasesBySource),
-            },
-          }
-        : {}),
-      ...(options?.trustedWorkspaceRoots
-        ? {
-            trustedWorkspaceRoots: remapExactRoots(options.trustedWorkspaceRoots, aliasesBySource),
-          }
-        : {}),
-      taskWorkspace: {
-        taskId,
-        runId: lease.run.runId,
-        workspaceRoot: primaryRoot.sourceRoot,
-        agentId: opts.adapterId,
-        agentKind: "connector",
-      },
+  const nextOptions: SendOptions = {
+    ...options,
+    cwd: lease.primaryAlias,
+    additionalDirectories: lease.additionalAliases,
+    ...(options?.confinement
+      ? {
+          confinement: {
+            ...options.confinement,
+            roots: remapExactRoots(options.confinement.roots, aliasesBySource),
+          },
+        }
+      : {}),
+    ...(options?.trustedWorkspaceRoots
+      ? {
+          trustedWorkspaceRoots: remapExactRoots(options.trustedWorkspaceRoots, aliasesBySource),
+        }
+      : {}),
+    taskWorkspace: {
+      taskId,
+      runId: lease.run.runId,
+      workspaceRoot: primaryRoot.sourceRoot,
+      agentId: opts.adapterId,
+      agentKind: "connector",
     },
+  }
+  try {
+    return {
+      lease,
+      options: scratch ? await rebindSendOptionsWorkspace(nextOptions) : nextOptions,
+    }
+  } catch (error) {
+    await lease.abort().catch(() => undefined)
+    throw error
   }
 }
 

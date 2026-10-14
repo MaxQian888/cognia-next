@@ -509,6 +509,7 @@ mod tests {
         ("github_workspace_commit_and_push", OutputShape::Scalar(ScalarShape::Text)),
         ("task_workspace_remote_source_ensure", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::RemoteSourceCheckout", schema: schema_of::<cognia_task_workspace::RemoteSourceCheckout> })),
         ("task_workspace_project_source_ensure", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::ProjectSource", schema: schema_of::<cognia_task_workspace::ProjectSource> })),
+        ("task_workspace_session_scratch_ensure", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceBundle", schema: schema_of::<cognia_task_workspace::WorkspaceBundle> })),
         ("code_snapshot_checkout_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::CodeCheckout>", schema: schema_of::<Option<cognia_task_workspace::CodeCheckout>> })),
         ("github_workspace_remove", OutputShape::Scalar(ScalarShape::Bool)),
         ("github_workspace_stat", OutputShape::Opaque(RootType::Any)),

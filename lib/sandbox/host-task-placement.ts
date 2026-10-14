@@ -16,6 +16,7 @@
 
 import type { ChatSession } from "@cognia/agent-config-types"
 import { isHeadlessHost } from "@/lib/platform/detect"
+import { isSessionScratchWorkspace } from "@/lib/task-workspace/managed-workspace"
 import type { ProjectRuntimeSelection } from "@/types/project-environment"
 
 export type HostTaskPlacement =
@@ -34,13 +35,15 @@ export interface HostTaskPlacementSources {
   ): Promise<{ runtime?: ProjectRuntimeSelection | undefined }>
 }
 
-export type HostTaskSession = Pick<ChatSession, "projectId" | "executionContext">
+export type HostTaskSession = Pick<ChatSession, "projectId" | "executionContext"> & { id?: string }
 
 export async function resolveHostTaskPlacement(
   session: HostTaskSession | null | undefined,
   sources: HostTaskPlacementSources = defaultHostTaskPlacementSources()
 ): Promise<HostTaskPlacement> {
   if (!sources.isHost()) return { kind: "not-a-host" }
+  // Default is data attribution for a private scratch, never a runtime grant.
+  if (isSessionScratchWorkspace(session)) return { kind: "container" }
   const projectId = session?.executionContext?.projectId || session?.projectId
   if (projectId) {
     const selected = await sources

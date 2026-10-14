@@ -326,6 +326,7 @@ fn capture(canonical_root: &Path) -> Result<WorkspaceSnapshot, CaptureError> {
     let policy = ResourceTrackingPolicy {
         generated_output_roots: Vec::new(),
         auto_detect: false,
+        self_contained: false,
     };
     match crate::snapshot::capture_with_policy(canonical_root, &policy) {
         Ok((snapshot, _blobs)) => Ok(snapshot),

@@ -13,15 +13,16 @@ use cognia_task_workspace::{
     BundleHandoffUndoOutcome, CodeCheckout, CodeResult, CodeSnapshotLimits, CodeSnapshotUpload,
     CommittedCodeSnapshot, ConfinedFileRead, ConflictResolution, CreateCodeSnapshot,
     CreatedCodeSnapshot, DownloadHandle, EnsureProjectSource, EnsureRemoteSource,
-    ExportCodeCheckout, PatchSelection, PatchSet, ProjectSource, PruneOutcome, ReconcileOutcome,
-    RemoteSourceCheckout, ResourceCaptureChunk, ResourceChange, ResourceEvent, ResourceEventKind,
-    ResourceIndexEntry, ResourceRead, ResourceTrackingPolicy, RevisionApplyOutcome, RevisionPatch,
-    RunState, ServiceConfig, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
-    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
-    UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome,
-    WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
-    WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision,
-    WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
+    EnsureSessionScratchWorkspace, ExportCodeCheckout, PatchSelection, PatchSet, ProjectSource,
+    PruneOutcome, ReconcileOutcome, RemoteSourceCheckout, ResourceCaptureChunk, ResourceChange,
+    ResourceEvent, ResourceEventKind, ResourceIndexEntry, ResourceRead, ResourceTrackingPolicy,
+    RevisionApplyOutcome, RevisionPatch, RunState, ServiceConfig, TaskResourceManifest,
+    TaskResourceSummary, TaskRun, TaskWorkspace, TaskWorkspaceEventSink,
+    TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle,
+    WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome, WorkspaceEnvironmentSummary,
+    WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent, WorkspaceMaintenanceRequest,
+    WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision, WorktreeLifecycleEvent,
+    WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -533,6 +534,14 @@ pub async fn task_workspace_project_source_ensure(
 ) -> Result<ProjectSource, String> {
     let input = with_stored_project_token(input);
     blocking(move |service| service.ensure_project_source(&input)).await
+}
+
+/// Service-only session scratch acquisition. The trusted host brain supplies
+/// the session identity; this command never accepts a filesystem path.
+pub async fn task_workspace_session_scratch_ensure(
+    input: EnsureSessionScratchWorkspace,
+) -> Result<WorkspaceBundle, String> {
+    blocking(move |service| service.ensure_session_scratch_workspace(&input)).await
 }
 
 // ---------------------------------------------------------------------------

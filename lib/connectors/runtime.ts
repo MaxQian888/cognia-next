@@ -103,11 +103,17 @@ import { sanitizeActivityLabel } from "@/lib/execution/run-activity"
 import { registerAgentRunController } from "@/lib/execution/control-handlers"
 import type { ConnectorLiveSteerCoordinator } from "./live-steer"
 import { sessionExecutionRootPath } from "@/lib/workspace/session-root"
+import { resolveSessionWorkspace, sessionWorkspaceId } from "@/lib/workspace/session-workspace"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import {
+  ensureSessionScratchWorkspace,
+  isSessionScratchWorkspace,
+} from "@/lib/task-workspace/managed-workspace"
 import { invalidatePersistSnapshot, stampSessionLastMessage } from "@/lib/db/messages"
 import { getAllProjects } from "@/lib/db/projects"
 import { waitForExecutionRunPresentationFreeze } from "./run-presentation/runner"
 import { markConnectorInboundJobRecoveryRequired } from "@/lib/db/connector-inbound-jobs"
-import { setSdkSessionId } from "@/lib/db/sessions"
+import { getSession, setSdkSessionId } from "@/lib/db/sessions"
 import {
   buildAgentRunRecoveryAnchor,
   parseAgentRunRecoveryAnchor,
@@ -953,9 +959,9 @@ export function shouldEmbedInboundText(plainText: string): boolean {
  * `draft-prepare` branches so a draft is grounded in the exact same character,
  * twin, and long-term-memory context a live reply would use. Pure context
  * resolution: it wires no send-side hooks, applies no suppression handling, and
- * owns no span accounting — the caller does. Every lookup is best-effort; a
- * missing AppSettings / character degrades to an ungrounded reply rather than
- * crashing the pipeline.
+ * owns no span accounting — the caller does. Settings / character lookups are
+ * best-effort. A headless session's workspace is mandatory: missing project
+ * bindings or failed scratch provisioning fail the turn before tool setup.
  */
 async function resolveInboundSendOptions(params: {
   event: NormalizedInboundEvent
@@ -999,6 +1005,31 @@ async function resolveInboundSendOptions(params: {
     resolvedCharacter,
     compositionSelection,
   } = params
+
+  let projects: Awaited<ReturnType<typeof getAllProjects>> | undefined
+  let activeProject: Awaited<ReturnType<typeof getAllProjects>>[number] | null | undefined
+  let scratchWorkspaceRoot: string | undefined
+  const headlessConnector = isHeadlessHost() && !!session.platformBinding
+  if (headlessConnector) {
+    if (isSessionScratchWorkspace(session) || !sessionWorkspaceId(session)) {
+      scratchWorkspaceRoot = await ensureSessionScratchWorkspace(session)
+      const persistedSession = await getSession(session.id)
+      if (!persistedSession || !isSessionScratchWorkspace(persistedSession)) {
+        throw new Error(`Connector session scratch binding unavailable: ${session.id}`)
+      }
+      // The caller journals and captures with this same object. Refresh it so
+      // Default remains data attribution while the managed alias owns tools.
+      Object.assign(session, persistedSession)
+      activeProject = null
+      projects = []
+    } else {
+      projects = await getAllProjects()
+      activeProject = resolveSessionWorkspace(session, projects)
+      if (!activeProject) {
+        throw new Error(`Connector session project unavailable: ${sessionWorkspaceId(session)}`)
+      }
+    }
+  }
 
   let appSettings: AppSettings | undefined
   try {
@@ -1074,6 +1105,7 @@ async function resolveInboundSendOptions(params: {
 
   const sendOptions = await resolveSendOptions({
     session,
+    ...(activeProject !== undefined ? { activeProject } : {}),
     character,
     appSettings,
     conversationKey: event.conversationKey,
@@ -1103,12 +1135,16 @@ async function resolveInboundSendOptions(params: {
     compositionSelection,
   })
 
-  const projects = await getAllProjects().catch(() => [])
+  projects ??= await getAllProjects().catch(() => [])
   // The conversation's OWN execution root, not its workspace's primary root:
   // an IM message resuming a worktree-bound conversation must run where that
   // conversation runs, or the agent writes into the checkout the worktree was
   // cut from.
-  const workspaceRoot = sessionExecutionRootPath(session, projects)
+  // Code supply may have moved a headless project's cwd to its host checkout.
+  const workspaceRoot =
+    scratchWorkspaceRoot ??
+    (headlessConnector ? sendOptions.cwd : undefined) ??
+    sessionExecutionRootPath(session, projects)
 
   return {
     sendOptions,

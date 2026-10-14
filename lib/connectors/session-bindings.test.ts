@@ -18,6 +18,7 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import { createManagedWorkspaceContext } from "@/lib/task-workspace/managed-workspace"
 
 const dbFixture = createDbTestFixture()
 
@@ -235,6 +236,56 @@ describe("session-bindings", () => {
       second.conversationKey
     )
     expect(refreshed.platformBinding?.deliveryTarget?.sourceMessageId).toBe("om-b")
+  })
+
+  it("keeps one scratch identity for a Feishu thread and leaves a new thread unbound", async () => {
+    const first = larkPrivateEvent("om-scratch-a")
+    const session = await createPlatformSession(first, undefined)
+    const executionContext = createManagedWorkspaceContext(
+      session.id,
+      1,
+      "/host/scratch/first/primary",
+      "project-default"
+    )
+    await getDb().sessions.update(session.id, { projectId: "project-default", executionContext })
+
+    const reused = await findActiveSessionForConversation(first.conversationKey)
+    expect(reused?.id).toBe(session.id)
+    expect(reused?.executionContext?.workspaceBinding).toEqual(executionContext.workspaceBinding)
+    const second = larkPrivateEvent("om-scratch-b")
+    expect(await findActiveSessionForConversation(second.conversationKey)).toBeUndefined()
+    const fresh = await createPlatformSession(second, undefined)
+    expect(fresh.id).not.toBe(session.id)
+    expect(fresh.projectId).toBeUndefined()
+    expect(fresh.executionContext).toBeUndefined()
+  })
+
+  it("creates an unbound session for a /new rotation without copying the prior scratch", async () => {
+    const event = larkPrivateEvent("om-scratch-rotate")
+    const prior = await createPlatformSession(event, undefined)
+    await getDb().sessions.update(prior.id, {
+      projectId: "project-default",
+      executionContext: createManagedWorkspaceContext(
+        prior.id,
+        1,
+        "/host/scratch/prior/primary",
+        "project-default"
+      ),
+    })
+
+    // /new uses this factory and selects its returned id as activeSessionId.
+    const rotated = await createPlatformSession({ ...event, plainText: "/new" }, undefined)
+    const selected = await findActiveSessionForConversation(event.conversationKey, {
+      activeSessionId: rotated.id,
+    })
+    expect(selected?.id).toBe(rotated.id)
+    expect(rotated.id).not.toBe(prior.id)
+    expect(rotated.projectId).toBeUndefined()
+    expect(rotated.executionContext).toBeUndefined()
+    expect((await getDb().sessions.get(prior.id))?.executionContext?.workspaceBinding).toEqual({
+      kind: "managed",
+      workspaceId: `managed-workspace:${prior.id}`,
+    })
   })
 
   it("allows a refreshed legacy base session to be selected from a private thread", async () => {

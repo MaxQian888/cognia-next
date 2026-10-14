@@ -72,7 +72,9 @@ pub fn execution_root_from(raw: Option<&str>) -> Result<Option<PathBuf>, String>
     match raw.map(str::trim).filter(|value| !value.is_empty()) {
         None => Ok(None),
         Some(value) if std::path::Path::new(value).is_absolute() => Ok(Some(PathBuf::from(value))),
-        Some(value) => Err(format!("{EXECUTION_ROOT_ENV}={value:?} must be an absolute path")),
+        Some(value) => Err(format!(
+            "{EXECUTION_ROOT_ENV}={value:?} must be an absolute path"
+        )),
     }
 }
 
@@ -401,6 +403,250 @@ impl TaskWorkspaceService {
         crate::project_source::ensure_project_source(input, |request| {
             self.ensure_remote_source(&request)
         })
+    }
+
+    /// Resolve a session's canonical scratch bundle without accepting a path
+    /// from the caller. The on-disk lock serializes separate service instances
+    /// too, and is released by the OS if provisioning is interrupted.
+    pub fn ensure_session_scratch_workspace(
+        &self,
+        input: &crate::EnsureSessionScratchWorkspace,
+    ) -> Result<crate::WorkspaceBundle, String> {
+        validate_id("sessionId", &input.session_id)?;
+        if matches!(input.session_id.as_str(), "." | "..") {
+            return Err("invalid sessionId".into());
+        }
+        if let Some(bundle_id) = &input.bundle_id {
+            validate_id("bundleId", bundle_id)?;
+        }
+        let (_session_lock, seed) = self.lock_session_scratch(&input.session_id)?;
+        validate_scratch_path(&seed)?;
+
+        let bundles = self.list_workspace_bundles()?;
+        let owned = bundles
+            .iter()
+            .filter(|bundle| {
+                bundle.owner_type == WorkspaceOwnerType::Session
+                    && bundle.owner_ref.as_deref() == Some(input.session_id.as_str())
+            })
+            .collect::<Vec<_>>();
+        if let Some(bundle_id) = &input.bundle_id {
+            let known = bundles
+                .iter()
+                .find(|bundle| &bundle.bundle_id == bundle_id)
+                .ok_or_else(|| format!("scratch workspace bundle not found: {bundle_id}"))?;
+            if known.owner_type != WorkspaceOwnerType::Session
+                || known.owner_ref.as_deref() != Some(input.session_id.as_str())
+            {
+                return Err("scratch workspace bundle belongs to another owner".into());
+            }
+        }
+        if owned.len() > 1 {
+            return Err(
+                "session has multiple workspace bundles; scratch ownership is ambiguous".into(),
+            );
+        }
+        if let Some(bundle) = owned.first() {
+            self.validate_session_scratch_bundle(bundle, &input.session_id, &seed)?;
+            return Ok((*bundle).clone());
+        }
+        // An interrupted acquisition can leave a reserved registry row. Do
+        // not replace it (or a lost bundle) with a new empty working copy.
+        if self
+            .registry
+            .list()
+            .map_err(|error| error.to_string())?
+            .iter()
+            .any(|record| {
+                record.owner_type == WorkspaceOwnerType::Session
+                    && record.owner_ref.as_deref() == Some(input.session_id.as_str())
+            })
+        {
+            return Err(
+                "scratch workspace has registry state but no bundle; repair is required".into(),
+            );
+        }
+        if seed.exists() {
+            return Err("scratch source exists without its bundle; repair is required".into());
+        }
+        fs::create_dir(&seed).map_err(|error| format!("create scratch session seed: {error}"))?;
+        if git2::Repository::discover(&seed).is_ok() {
+            let _ = fs::remove_dir(&seed);
+            return Err("scratch source area must not be inside a Git repository".into());
+        }
+        let result = self.acquire_workspace_bundle(AcquireWorkspaceBundle {
+            owner_type: WorkspaceOwnerType::Session,
+            owner_ref: Some(input.session_id.clone()),
+            project_id: None,
+            environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+            base: WorkspaceBaseSpec::WorkingState,
+            roots: vec![crate::WorkspaceBundleRootInput {
+                logical_root_id: "primary".into(),
+                role: crate::WorkspaceRootRole::Primary,
+                source_root: seed.to_string_lossy().into_owned(),
+            }],
+            provisioning: None,
+            requested_name: None,
+        });
+        let bundle = match result {
+            Ok(bundle) => bundle,
+            Err(error) => {
+                // Remove only the empty seed this attempt created. Any
+                // partial registry state remains visible on the next call.
+                let _ = fs::remove_dir(&seed);
+                return Err(error);
+            }
+        };
+        self.validate_session_scratch_bundle(&bundle, &input.session_id, &seed)?;
+        Ok(bundle)
+    }
+
+    /// One lock protects provisioning, turn acquisition, and archive. A
+    /// checked idle scratch cannot become busy before its files are removed.
+    fn lock_session_scratch(&self, session_id: &str) -> Result<(fs::File, PathBuf), String> {
+        use sha2::{Digest, Sha256};
+        let area = self.sources_dir.join("session-scratch");
+        validate_scratch_path(&area)?;
+        validate_scratch_path(&self.execution_dir.join("bundles"))?;
+        fs::create_dir_all(&area)
+            .map_err(|error| format!("create scratch source area: {error}"))?;
+        let area = area
+            .canonicalize()
+            .map_err(|error| format!("resolve scratch source area: {error}"))?;
+        let key = hex::encode(Sha256::digest(session_id.as_bytes()));
+        let lock_path = area.join(format!("{key}.lock"));
+        validate_scratch_path(&lock_path)?;
+        let mut options = fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        let lock = options
+            .open(&lock_path)
+            .map_err(|error| format!("open scratch session lock: {error}"))?;
+        lock.lock()
+            .map_err(|error| format!("lock scratch session: {error}"))?;
+        Ok((lock, area.join(key)))
+    }
+
+    fn lock_scratch_record(&self, record: &WorkspaceRecord) -> Result<Option<fs::File>, String> {
+        use sha2::{Digest, Sha256};
+        let Some(session_id) = record.owner_ref.as_deref() else {
+            return Ok(None);
+        };
+        if record.owner_type != WorkspaceOwnerType::Session
+            || record.environment_kind != crate::WorkspaceEnvironmentKind::Managed
+            || record.isolation_kind != IsolationKind::Shadow
+            || record.project_id.is_some()
+        {
+            return Ok(None);
+        }
+        let expected_seed = self
+            .sources_dir
+            .join("session-scratch")
+            .join(hex::encode(Sha256::digest(session_id.as_bytes())));
+        if normalized_path_key(Path::new(&record.source_root))
+            != normalized_path_key(&expected_seed)
+        {
+            return Ok(None);
+        }
+        let (lock, _) = self.lock_session_scratch(session_id)?;
+        Ok(Some(lock))
+    }
+
+    fn validate_session_scratch_bundle(
+        &self,
+        bundle: &crate::WorkspaceBundle,
+        session_id: &str,
+        seed: &Path,
+    ) -> Result<(), String> {
+        if bundle.environment_kind != crate::WorkspaceEnvironmentKind::Managed
+            || bundle.state != WorkspaceState::Active
+            || bundle.leases.len() != 1
+        {
+            return Err("scratch workspace bundle is not a single active managed root".into());
+        }
+        let lease = &bundle.leases[0];
+        if lease.logical_root_id != "primary"
+            || lease.role != crate::WorkspaceRootRole::Primary
+            || lease.bundle_id != bundle.bundle_id
+        {
+            return Err("scratch workspace bundle has an invalid primary lease".into());
+        }
+        let record = self
+            .registry
+            .get(&lease.workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "scratch workspace registry record is missing".to_string())?;
+        let expected_root = self
+            .execution_dir
+            .join("bundles")
+            .join(storage_key(&bundle.bundle_id))
+            .join(storage_key(&lease.workspace_id));
+        if record.owner_type != WorkspaceOwnerType::Session
+            || record.owner_ref.as_deref() != Some(session_id)
+            || record.environment_kind != crate::WorkspaceEnvironmentKind::Managed
+            || record.isolation_kind != IsolationKind::Shadow
+            || record.base != WorkspaceBaseSpec::WorkingState
+            || record.project_id.is_some()
+            || Path::new(&record.source_root) != seed
+            || Path::new(&record.execution_root) != expected_root
+            || Path::new(&lease.alias_path) != expected_root
+        {
+            return Err(
+                "scratch workspace ownership, isolation, or managed path does not match".into(),
+            );
+        }
+        validate_scratch_path(seed)?;
+        validate_scratch_path(&expected_root)?;
+        if !seed.is_dir()
+            || fs::read_dir(seed)
+                .map_err(|error| format!("read scratch seed: {error}"))?
+                .next()
+                .is_some()
+        {
+            return Err("scratch workspace empty source seed is missing or modified".into());
+        }
+        if !matches!(
+            record.state,
+            WorkspaceState::Active | WorkspaceState::Archived | WorkspaceState::Restorable
+        ) {
+            return Err(format!(
+                "scratch workspace is not usable: {:?}",
+                record.state
+            ));
+        }
+        if !expected_root.is_dir() {
+            if self
+                .store
+                .lock()
+                .get_workspace_archive(&record.workspace_id)?
+                .is_none()
+            {
+                return Err(
+                    "scratch workspace files are missing and no restorable archive exists".into(),
+                );
+            }
+            if record.state == WorkspaceState::Active {
+                self.registry
+                    .transition(
+                        &record.workspace_id,
+                        record.owner_type,
+                        record.owner_ref.as_deref(),
+                        WorkspaceState::Archived,
+                        now_ms(),
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            self.restore_managed_workspace(&record.workspace_id)?;
+        } else if record.state != WorkspaceState::Active {
+            return Err(
+                "archived scratch workspace still has a directory; repair is required".into(),
+            );
+        }
+        Ok(())
     }
 
     /// Snapshot a working copy on this device for an always-on host
@@ -745,11 +991,19 @@ impl TaskWorkspaceService {
             .iter()
             .find(|lease| lease.logical_root_id == logical_root_id)
             .ok_or_else(|| format!("workspace bundle has no logical root: {logical_root_id}"))?;
-        let record = self
+        let mut record = self
             .registry
             .get(&lease.workspace_id)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("managed workspace is missing: {}", lease.workspace_id))?;
+        let _scratch_lock = self.lock_scratch_record(&record)?;
+        if _scratch_lock.is_some() {
+            record = self
+                .registry
+                .get(&lease.workspace_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| format!("managed workspace is missing: {}", lease.workspace_id))?;
+        }
         if record.state != WorkspaceState::Active {
             return Err(format!(
                 "managed workspace is not active: {}",
@@ -820,6 +1074,17 @@ impl TaskWorkspaceService {
                 request.primary_logical_root_id
             ));
         }
+        let primary_record = self
+            .registry
+            .get(&primary_lease.workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| {
+                format!(
+                    "managed workspace is missing: {}",
+                    primary_lease.workspace_id
+                )
+            })?;
+        let _scratch_lock = self.lock_scratch_record(&primary_record)?;
         let bundle_turn_id = request
             .run
             .turn_id
@@ -2833,6 +3098,38 @@ impl TaskWorkspaceService {
             .get(workspace_id)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        let _scratch_lock = self.lock_scratch_record(&record)?;
+        if _scratch_lock.is_some() {
+            record = self
+                .registry
+                .get(workspace_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+            let store = self.store.lock();
+            let active_turn = store.list_workspace_bundle_turns()?.iter().any(|turn| {
+                matches!(turn.state, RunState::Running | RunState::Settling)
+                    && turn
+                        .runs
+                        .iter()
+                        .any(|lease| lease.workspace_id == workspace_id)
+            });
+            let mut active_run = false;
+            for task in store
+                .list_tasks()?
+                .iter()
+                .filter(|task| Some(task.session_id.as_str()) == record.owner_ref.as_deref())
+            {
+                active_run |= store.list_runs(&task.task_id)?.iter().any(|run| {
+                    matches!(run.state, RunState::Running | RunState::Settling)
+                        && normalized_path_key(Path::new(&run.execution_root))
+                            == normalized_path_key(Path::new(&record.execution_root))
+                });
+            }
+            if active_turn || active_run {
+                return Err("cannot archive a scratch workspace while a turn is active; retry after it settles".into());
+            }
+            validate_scratch_path(Path::new(&record.execution_root))?;
+        }
         match record.environment_kind {
             crate::WorkspaceEnvironmentKind::Imported => {
                 return Err("imported environments cannot be archived before adoption".into())
@@ -2855,8 +3152,11 @@ impl TaskWorkspaceService {
         }
         let execution_root = Path::new(&record.execution_root);
         if execution_root.is_dir() {
-            let (snapshot, blobs) =
-                capture_with_policy(execution_root, &crate::ResourceTrackingPolicy::default())?;
+            let policy = crate::ResourceTrackingPolicy {
+                self_contained: _scratch_lock.is_some(),
+                ..Default::default()
+            };
+            let (snapshot, blobs) = capture_with_policy(execution_root, &policy)?;
             let now = now_ms();
             let size_bytes = blobs.values().fold(0_u64, |total, bytes| {
                 total.saturating_add(bytes.len() as u64)
@@ -2867,6 +3167,24 @@ impl TaskWorkspaceService {
                     store.put_blob(hash, bytes, now)?;
                 }
                 store.put_workspace_archive(workspace_id, &snapshot, now)?;
+                if policy.self_contained {
+                    // Verify persisted bytes before deleting the only working copy.
+                    let archived = store
+                        .get_workspace_archive(workspace_id)?
+                        .ok_or_else(|| "scratch archive was not persisted".to_string())?;
+                    if archived != snapshot {
+                        return Err("scratch archive snapshot verification failed".into());
+                    }
+                    for entry in archived.entries.values() {
+                        let bytes = store.get_blob(&entry.hash, now)?;
+                        if blobs.get(&entry.hash) != Some(&bytes) {
+                            return Err(format!(
+                                "scratch archive blob verification failed: {}",
+                                entry.path
+                            ));
+                        }
+                    }
+                }
             }
             record = self
                 .registry
@@ -5538,6 +5856,21 @@ fn inspect_bundle_root(
     })
 }
 
+fn validate_scratch_path(path: &Path) -> Result<(), String> {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        || workspace_path_contains_symlink(path)?
+    {
+        return Err(format!(
+            "scratch workspace path must be absolute without traversal or symlinks: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 fn workspace_path_contains_symlink(path: &Path) -> Result<bool, String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -6041,6 +6374,437 @@ mod tests {
     use tempfile::TempDir;
 
     struct ChannelSink(Mutex<mpsc::Sender<TaskWorkspaceResourceEvent>>);
+
+    fn scratch_input(session_id: &str) -> crate::EnsureSessionScratchWorkspace {
+        crate::EnsureSessionScratchWorkspace {
+            session_id: session_id.into(),
+            bundle_id: None,
+        }
+    }
+
+    #[test]
+    fn scratch_ensure_reuses_content_after_restart_and_isolates_sessions() {
+        let data = TempDir::new().unwrap();
+        let config = ServiceConfig::new(data.path().into());
+        let service = TaskWorkspaceService::open(config.clone()).unwrap();
+        let first = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        assert_eq!(first.leases.len(), 1);
+        let lease = &first.leases[0];
+        assert_eq!(lease.logical_root_id, "primary");
+        let record = service.registry.get(&lease.workspace_id).unwrap().unwrap();
+        assert_eq!(record.isolation_kind, IsolationKind::Shadow);
+        assert_eq!(record.base, WorkspaceBaseSpec::WorkingState);
+        assert_eq!(record.project_id, None);
+        assert!(!record.source_root.contains("session-1"));
+        fs::write(Path::new(&lease.alias_path).join("keep.txt"), "retained").unwrap();
+        drop(service);
+        let service = TaskWorkspaceService::open(config).unwrap();
+        let again = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        assert_eq!(first.bundle_id, again.bundle_id);
+        assert_eq!(
+            fs::read_to_string(Path::new(&again.leases[0].alias_path).join("keep.txt")).unwrap(),
+            "retained"
+        );
+        let other = service
+            .ensure_session_scratch_workspace(&scratch_input("session-2"))
+            .unwrap();
+        assert_ne!(first.bundle_id, other.bundle_id);
+        assert_ne!(lease.alias_path, other.leases[0].alias_path);
+        assert!(!Path::new(&other.leases[0].alias_path)
+            .join("keep.txt")
+            .exists());
+    }
+
+    #[test]
+    fn scratch_ensure_serializes_concurrent_service_instances() {
+        let data = TempDir::new().unwrap();
+        let first = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let second = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let threads = [first, second]
+            .into_iter()
+            .map(|service| {
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    service
+                        .ensure_session_scratch_workspace(&scratch_input("session-1"))
+                        .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        let bundles = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(bundles[0].bundle_id, bundles[1].bundle_id);
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        assert_eq!(service.list_workspace_bundles().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn scratch_ensure_refuses_foreign_and_missing_known_bundles() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        let foreign = crate::EnsureSessionScratchWorkspace {
+            session_id: "session-2".into(),
+            bundle_id: Some(bundle.bundle_id),
+        };
+        assert!(service
+            .ensure_session_scratch_workspace(&foreign)
+            .unwrap_err()
+            .contains("another owner"));
+        let missing = crate::EnsureSessionScratchWorkspace {
+            session_id: "session-2".into(),
+            bundle_id: Some("missing".into()),
+        };
+        assert!(service
+            .ensure_session_scratch_workspace(&missing)
+            .unwrap_err()
+            .contains("not found"));
+        assert_eq!(service.list_workspace_bundles().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn scratch_ensure_refuses_lost_files_without_snapshot() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        fs::remove_dir_all(&bundle.leases[0].alias_path).unwrap();
+        assert!(service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap_err()
+            .contains("no restorable archive"));
+        assert!(!Path::new(&bundle.leases[0].alias_path).exists());
+        assert_eq!(service.list_workspace_bundles().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn scratch_ensure_refuses_a_lost_source_seed() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        let record = service
+            .registry
+            .get(&bundle.leases[0].workspace_id)
+            .unwrap()
+            .unwrap();
+        fs::remove_dir(&record.source_root).unwrap();
+        assert!(service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap_err()
+            .contains("source seed is missing"));
+        assert!(!Path::new(&record.source_root).exists());
+        assert!(Path::new(&record.execution_root).is_dir());
+    }
+
+    #[test]
+    fn scratch_ensure_refuses_a_non_primary_lease_or_non_shadow_record() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let mut bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        bundle.leases[0].logical_root_id = "other".into();
+        service
+            .store
+            .lock()
+            .delete_bundle_leases(&bundle.bundle_id)
+            .unwrap();
+        service.store.lock().put_workspace_bundle(&bundle).unwrap();
+        assert!(service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap_err()
+            .contains("primary lease"));
+        bundle.leases[0].logical_root_id = "primary".into();
+        service
+            .store
+            .lock()
+            .delete_bundle_leases(&bundle.bundle_id)
+            .unwrap();
+        service.store.lock().put_workspace_bundle(&bundle).unwrap();
+        service
+            .registry
+            .reclassify_isolation(&bundle.leases[0].workspace_id, IsolationKind::GitWorktree)
+            .unwrap();
+        assert!(service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap_err()
+            .contains("isolation"));
+    }
+
+    #[test]
+    fn scratch_ensure_restores_archived_content() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        let lease = &bundle.leases[0];
+        fs::write(Path::new(&lease.alias_path).join("keep.txt"), "archived").unwrap();
+        service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        assert!(!Path::new(&lease.alias_path).exists());
+        let restored = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        assert_eq!(bundle.bundle_id, restored.bundle_id);
+        assert_eq!(
+            fs::read_to_string(Path::new(&lease.alias_path).join("keep.txt")).unwrap(),
+            "archived"
+        );
+    }
+
+    #[test]
+    fn scratch_archive_restores_ignored_files() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-ignored"))
+            .unwrap();
+        let lease = &bundle.leases[0];
+        let root = Path::new(&lease.alias_path);
+        fs::write(root.join(".gitignore"), "*.csv\n").unwrap();
+        fs::write(root.join(".ignore"), "hidden-output/\n").unwrap();
+        fs::create_dir(root.join("hidden-output")).unwrap();
+        fs::write(root.join("result.csv"), "name,value\nanswer,42\n").unwrap();
+        fs::write(root.join("hidden-output/result.txt"), "ignored output").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("result.csv", root.join("result-link")).unwrap();
+        service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        assert!(!root.exists());
+        drop(service);
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        service
+            .ensure_session_scratch_workspace(&scratch_input("session-ignored"))
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("result.csv")).unwrap(),
+            "name,value\nanswer,42\n"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("hidden-output/result.txt")).unwrap(),
+            "ignored output"
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            fs::read_link(root.join("result-link")).unwrap(),
+            Path::new("result.csv")
+        );
+    }
+
+    #[test]
+    fn scratch_archive_size_limit_keeps_directory_and_active_record() {
+        let data = TempDir::new().unwrap();
+        let mut config = ServiceConfig::new(data.path().into());
+        config.max_blob_bytes = 1;
+        let service = TaskWorkspaceService::open(config).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-large"))
+            .unwrap();
+        let lease = &bundle.leases[0];
+        let root = Path::new(&lease.alias_path);
+        fs::write(root.join(".gitignore"), "*.csv\n").unwrap();
+        fs::write(root.join("result.csv"), "must not be lost").unwrap();
+        let error = service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap_err();
+        assert!(error.contains("capacity exceeded"), "{error}");
+        assert_eq!(
+            fs::read_to_string(root.join("result.csv")).unwrap(),
+            "must not be lost"
+        );
+        let record = service
+            .get_managed_workspace(&lease.workspace_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.state, WorkspaceState::Active);
+        assert!(service
+            .store
+            .lock()
+            .get_workspace_archive(&lease.workspace_id)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn scratch_archive_refuses_active_bundle_turn_then_preserves_settled_files() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        let lease = &bundle.leases[0];
+        let turn = service
+            .begin_workspace_bundle_turn(
+                &bundle.bundle_id,
+                crate::BeginWorkspaceBundleTurn {
+                    primary_logical_root_id: "primary".into(),
+                    run: input(&data, "scratch-task", "scratch-run"),
+                },
+            )
+            .unwrap();
+        let path = Path::new(&lease.alias_path).join("during-turn.txt");
+        fs::write(&path, "unfinished").unwrap();
+        assert!(service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap_err()
+            .contains("while a turn is active"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "unfinished");
+        assert_eq!(
+            service
+                .registry
+                .get(&lease.workspace_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            WorkspaceState::Active
+        );
+        fs::write(&path, "finished").unwrap();
+        service
+            .settle_workspace_bundle_turn(&turn.bundle_turn_id, RunState::Ready)
+            .unwrap();
+        service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        assert!(!path.exists());
+        service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "finished");
+    }
+
+    #[test]
+    fn scratch_archive_refuses_active_borrowed_run_until_aborted() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        let lease = &bundle.leases[0];
+        let run = service
+            .begin_bundle_run(
+                &bundle.bundle_id,
+                "primary",
+                input(&data, "scratch-task", "scratch-run"),
+            )
+            .unwrap();
+        assert!(service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap_err()
+            .contains("while a turn is active"));
+        assert!(Path::new(&lease.alias_path).is_dir());
+        service.settle_cancelled_run(&run.run_id).unwrap();
+        service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        assert!(!Path::new(&lease.alias_path).exists());
+    }
+
+    #[test]
+    fn scratch_archive_and_turn_acquisition_are_serialized() {
+        let data = TempDir::new().unwrap();
+        let config = ServiceConfig::new(data.path().into());
+        let service = TaskWorkspaceService::open(config.clone()).unwrap();
+        let archive_service = TaskWorkspaceService::open(config).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        let workspace_id = bundle.leases[0].workspace_id.clone();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let archive_barrier = Arc::clone(&barrier);
+        let archive = std::thread::spawn(move || {
+            archive_barrier.wait();
+            archive_service.archive_managed_workspace(&workspace_id)
+        });
+        barrier.wait();
+        let turn = service.begin_workspace_bundle_turn(
+            &bundle.bundle_id,
+            crate::BeginWorkspaceBundleTurn {
+                primary_logical_root_id: "primary".into(),
+                run: input(&data, "scratch-task", "scratch-run"),
+            },
+        );
+        let archived = archive.join().unwrap();
+        match (turn, archived) {
+            (Ok(turn), Err(error)) => {
+                assert!(error.contains("while a turn is active"));
+                assert!(Path::new(&bundle.leases[0].alias_path).is_dir());
+                service
+                    .abort_workspace_bundle_turn(&turn.bundle_turn_id)
+                    .unwrap();
+            }
+            (Err(error), Ok(record)) => {
+                assert!(error.contains("not active"));
+                assert_eq!(record.state, WorkspaceState::Archived);
+            }
+            outcome => {
+                panic!("scratch archive and acquisition both succeeded or failed: {outcome:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn scratch_ensure_refuses_traversal_and_tampered_alias() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        for session_id in ["../other", "..", "/tmp/other", "a/b", "a\\b", ""] {
+            assert!(service
+                .ensure_session_scratch_workspace(&scratch_input(session_id))
+                .is_err());
+        }
+        let mut bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        bundle.leases[0].alias_path = data.path().to_string_lossy().into_owned();
+        service.store.lock().put_workspace_bundle(&bundle).unwrap();
+        assert!(service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap_err()
+            .contains("managed path"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scratch_ensure_refuses_symlinked_execution_and_source_area() {
+        use std::os::unix::fs::symlink;
+        let data = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap();
+        fs::remove_dir_all(&bundle.leases[0].alias_path).unwrap();
+        symlink(outside.path(), &bundle.leases[0].alias_path).unwrap();
+        assert!(service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap_err()
+            .contains("symlinks"));
+        let other_data = TempDir::new().unwrap();
+        let service =
+            TaskWorkspaceService::open(ServiceConfig::new(other_data.path().into())).unwrap();
+        fs::create_dir_all(&service.sources_dir).unwrap();
+        symlink(outside.path(), service.sources_dir.join("session-scratch")).unwrap();
+        assert!(service
+            .ensure_session_scratch_workspace(&scratch_input("session-1"))
+            .unwrap_err()
+            .contains("symlinks"));
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+    }
 
     impl TaskWorkspaceEventSink for ChannelSink {
         fn emit(&self, event: TaskWorkspaceResourceEvent) {
@@ -6915,6 +7679,7 @@ mod tests {
         request.tracking_policy = ResourceTrackingPolicy {
             generated_output_roots: vec!["dist".into()],
             auto_detect: false,
+            self_contained: false,
         };
         let run = service.begin_run(request).unwrap();
         let execution = PathBuf::from(&run.execution_root);
@@ -7043,7 +7808,11 @@ mod tests {
             "{}",
             run.execution_root
         );
-        assert!(!data.path().join("task-workspaces").join("executions").exists());
+        assert!(!data
+            .path()
+            .join("task-workspaces")
+            .join("executions")
+            .exists());
         service.settle_run("run-moved").unwrap();
     }
 

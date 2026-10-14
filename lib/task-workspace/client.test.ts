@@ -65,6 +65,7 @@ import {
   recordTaskResourceToolEvent,
   ensureRemoteWorkspaceSource,
   ensureProjectWorkspaceSource,
+  ensureSessionScratchWorkspaceBundle,
   openCodeResultReceive,
   writeCodeResultChunk,
   commitCodeResultReceive,
@@ -102,6 +103,18 @@ import {
 
 describe("task resource transfer wire contracts", () => {
   beforeEach(() => call.mockReset())
+
+  it("ensures scratch by session identity without accepting paths", async () => {
+    call.mockResolvedValue({ bundleId: "scratch" })
+    await ensureSessionScratchWorkspaceBundle("session-1", "scratch")
+    expect(call).toHaveBeenCalledWith("task_workspace_session_scratch_ensure", {
+      input: { sessionId: "session-1", bundleId: "scratch" },
+    })
+    await ensureSessionScratchWorkspaceBundle("session-2")
+    expect(call).toHaveBeenLastCalledWith("task_workspace_session_scratch_ensure", {
+      input: { sessionId: "session-2" },
+    })
+  })
 
   const hash = async (bytes: Uint8Array) =>
     Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer)))
