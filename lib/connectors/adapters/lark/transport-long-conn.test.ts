@@ -97,6 +97,20 @@ afterEach(() => {
 })
 
 describe("startLarkLongConn", () => {
+  it("carries callback ids separately from the parsed platform envelope", async () => {
+    const session = createFakeWsSession()
+    installSeam(session.listenImpl)
+    const ctrl = new AbortController()
+    const gen = startLarkLongConn({ adapterId: "lark-1", signal: ctrl.signal })
+    const next = gen.next()
+    await session.waitForListeners()
+    const envelope = makeLarkEnvelope("om_callback")
+    session.push({ ...envelope, _cognia_callback_id: "reply-1" })
+    expect(await next).toEqual({ done: false, value: { envelope, callbackId: "reply-1" } })
+    ctrl.abort()
+    await gen.return(undefined)
+  })
+
   it("yields envelopes delivered on the /event channel", async () => {
     const session = createFakeWsSession()
     installSeam(session.listenImpl)
@@ -110,7 +124,7 @@ describe("startLarkLongConn", () => {
         signal: ctrl.signal,
         _backoffBaseMs: 1,
       })) {
-        yielded.push(envelope.event.message!.message_id)
+        yielded.push(envelope.envelope.event.message!.message_id)
         if (yielded.length >= 2) break
       }
     })()
@@ -247,7 +261,7 @@ describe("startLarkLongConn", () => {
         signal: ctrl.signal,
         _backoffBaseMs: 1,
       })) {
-        yielded.push(envelope.event.message!.message_id)
+        yielded.push(envelope.envelope.event.message!.message_id)
         if (yielded.length >= 1) break
       }
     })()

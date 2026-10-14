@@ -14,6 +14,7 @@ pub mod discord_upload;
 // and `super::http_client::…` resolve unchanged.
 pub use cognia_net::http_client;
 pub mod keyring;
+pub mod lark_callback_reply;
 pub mod lark_upload;
 pub mod lark_ws;
 pub mod matrix_crypto;

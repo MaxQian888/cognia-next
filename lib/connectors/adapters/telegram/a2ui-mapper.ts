@@ -18,15 +18,14 @@
  * `sendMessage(plainTextMirror)`.
  *
  * Telegram limits `callback_data` to 64 bytes; we use
- * `truncateActionId` + `recordCallbackBinding` so the long
- * `a2ui:<surfaceId>:<componentId>:<action>` id round-trips through
- * `connectorCallbackBindings` while only the short hash form goes on
- * the wire.
+ * `truncateActionId` and bind generic buttons by their wire ID. Author-owned
+ * approval bindings keep their original ID; the shared resolver also accepts
+ * its compact wire form without creating another binding row.
  */
 
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import {
-  buildActionId,
+  resolveButtonWireAction,
   recordCallbackBinding,
   truncateActionId,
   walkA2UISurface,
@@ -156,18 +155,21 @@ export async function buildTelegramA2UICalls(
       }
       case "Button": {
         const text = stringValue(node.raw.text) || stringValue(node.raw.action) || "Button"
-        const action = stringValue(node.raw.action) || node.id
         const href = stringValue(node.raw.href) || stringValue(node.raw.url)
-        const fullActionId = buildActionId(input.surfaceId, node.id, action)
-        await recordCallbackBinding({
-          adapterId: input.adapterId,
-          actionId: fullActionId,
-          surfaceId: input.surfaceId,
-          componentId: node.id,
-          conversationKey: input.conversationKey,
-          ...bindingHintFields(node.raw),
-        })
+        const { actionId: fullActionId, recordBinding } = resolveButtonWireAction(
+          input.surfaceId,
+          node
+        )
         const { wireId } = await truncateActionId(fullActionId, 64)
+        if (recordBinding)
+          await recordCallbackBinding({
+            adapterId: input.adapterId,
+            actionId: wireId,
+            surfaceId: input.surfaceId,
+            componentId: node.id,
+            conversationKey: input.conversationKey,
+            ...bindingHintFields(node.raw),
+          })
         const button: InlineKeyboardButton = href
           ? { text, url: href }
           : { text, callback_data: wireId }

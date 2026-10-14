@@ -352,6 +352,7 @@ commands.allow = [
   "connectors_keyring_get",
   "connectors_keyring_list",
   "connectors_keyring_set",
+  "connectors_lark_callback_respond",
   "connectors_lark_upload_file",
   "connectors_lark_upload_image",
   "connectors_lark_ws_close",

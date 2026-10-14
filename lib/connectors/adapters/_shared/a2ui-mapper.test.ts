@@ -9,6 +9,7 @@
 import "fake-indexeddb/auto"
 import {
   buildActionId,
+  resolveButtonWireAction,
   generatePlainTextMirror,
   recordCallbackBinding,
   resolveCallbackBinding,
@@ -395,5 +396,79 @@ describe("bindingHintFields", () => {
     // Non-string kinds and non-object payloads are ignored, not forwarded.
     expect(bindingHintFields({ bindingKind: 3, bindingPayload: [1] })).toEqual({})
     expect(bindingHintFields({ bindingPayload: "nope" })).toEqual({})
+  })
+})
+
+describe("resolveButtonWireAction", () => {
+  it.each([
+    "tapa:",
+    "tapd:",
+    "taps:",
+    "plna:",
+    "plnr:",
+    "mgs:",
+    "mga:",
+    "mgd:",
+    "wfapp:",
+    "wfcan:",
+    "wffanoutapp:",
+    "wffanoutcan:",
+    "skill_invoke:",
+  ])("preserves %s without a second binding", (prefix) => {
+    expect(
+      resolveButtonWireAction("surface", {
+        id: "button",
+        component: "Button",
+        childIds: [],
+        raw: { action: "approve", value: `${prefix}request` },
+      })
+    ).toEqual({ actionId: `${prefix}request`, recordBinding: false })
+  })
+
+  it.each([undefined, null, 42, {}, "ordinary", "unknown:request"])(
+    "keeps generic actions for %p",
+    (value) => {
+      expect(
+        resolveButtonWireAction("surface", {
+          id: "button",
+          component: "Button",
+          childIds: [],
+          raw: { action: "go", value },
+        })
+      ).toEqual({ actionId: "a2ui:surface:button:go", recordBinding: true })
+    }
+  )
+
+  it("uses the node id as the default verb and never treats select values as button bindings", () => {
+    expect(
+      resolveButtonWireAction("surface", {
+        id: "select",
+        component: "Select",
+        childIds: [],
+        raw: { value: "tapa:request" },
+      })
+    ).toEqual({ actionId: "a2ui:surface:select:select", recordBinding: true })
+  })
+
+  it("resolves compact author-owned IDs without duplicating rows and enforces adapter scope and expiry", async () => {
+    const actionId = `skill_invoke:${"long-skill".repeat(20)}:request`
+    await recordCallbackBinding({
+      adapterId: "adapter",
+      actionId,
+      surfaceId: "surface",
+      kind: "skill_invoke",
+    })
+    const { wireId } = await truncateActionId(actionId)
+    expect(new TextEncoder().encode(wireId).length).toBeLessThanOrEqual(64)
+    expect(await resolveCallbackBinding("adapter", wireId)).toMatchObject({
+      actionId,
+      kind: "skill_invoke",
+    })
+    expect(await resolveCallbackBinding("other", wireId)).toBeUndefined()
+    expect(await getDb().connectorCallbackBindings.count()).toBe(1)
+    await getDb().connectorCallbackBindings.update(`adapter:${actionId}`, {
+      expiresAt: Date.now() - 1,
+    })
+    expect(await resolveCallbackBinding("adapter", wireId)).toBeUndefined()
   })
 })

@@ -21,6 +21,7 @@
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import {
   buildActionId,
+  resolveButtonWireAction,
   recordCallbackBinding,
   truncateActionId,
   walkA2UISurface,
@@ -192,20 +193,20 @@ export async function buildDiscordA2UIPayload(
       }
       case "Button": {
         const label = stringValue(node.raw.text) || stringValue(node.raw.action) || "Button"
-        const action = stringValue(node.raw.action) || node.id
-        const fullId = buildActionId(input.surfaceId, node.id, action)
+        const { actionId: fullId, recordBinding } = resolveButtonWireAction(input.surfaceId, node)
         // Hash the entire identity when it exceeds Discord's limit; slicing
         // the suffix discards the surface and can overwrite another binding.
         // Persist the wire ID because interactions echo it verbatim.
         const { wireId } = await truncateActionId(fullId, CUSTOM_ID_MAX)
-        await recordCallbackBinding({
-          adapterId: input.adapterId,
-          actionId: wireId,
-          surfaceId: input.surfaceId,
-          componentId: node.id,
-          conversationKey: input.conversationKey,
-          ...bindingHintFields(node.raw),
-        })
+        if (recordBinding)
+          await recordCallbackBinding({
+            adapterId: input.adapterId,
+            actionId: wireId,
+            surfaceId: input.surfaceId,
+            componentId: node.id,
+            conversationKey: input.conversationKey,
+            ...bindingHintFields(node.raw),
+          })
         const href = stringValue(node.raw.href) || stringValue(node.raw.url)
         const row = ensureRow(false)
         if (href) {

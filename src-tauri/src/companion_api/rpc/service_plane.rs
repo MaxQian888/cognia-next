@@ -71,6 +71,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "connectors_discord_upload",
     "connectors_lark_ws_open",
     "connectors_lark_ws_close",
+    "connectors_lark_callback_respond",
     "connectors_reset_all_ws",
     "connectors_attachment_fetch",
     "connectors_attachment_read",
@@ -1392,6 +1393,17 @@ pub(super) async fn dispatch(
             Ok(Value::Null)
         }
 
+        "connectors_lark_callback_respond" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
+            let callback_id: String = required_aliased(&args, "callback_id", "callbackId")?;
+            let response: serde_json::Value = required(&args, "response")?;
+            to_json(crate::connectors::lark_callback_reply::respond(
+                &callback_id,
+                response,
+            ))
+        }
+
         "connectors_reset_all_ws" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
@@ -2007,6 +2019,7 @@ mod tests {
     #[test]
     fn command_family_is_non_empty_and_unique() {
         assert!(!COMMANDS.is_empty());
+        assert!(COMMANDS.contains(&"connectors_lark_callback_respond"));
         let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len());
     }

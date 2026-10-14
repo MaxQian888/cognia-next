@@ -17,8 +17,9 @@
 //!   3. Data payloads may be chunked across frames (`sum`/`seq` headers, keyed
 //!      by `message_id`); reassemble then optionally gunzip.
 //!   4. After handling a complete event, ack by echoing the inbound frame with
-//!      payload `{"code":200,"headers":{},"data":null}` + a `biz_rt` header,
-//!      on the same socket (must land within ~3s).
+//!      payload `{"code":200,"headers":{},"data":null}` + a `biz_rt` header.
+//!      Card callbacks instead carry the base64 JSON callback reply in `data`,
+//!      after waiting up to 2.5s for the renderer (must land within ~3s).
 //!   5. Client sends its own ping Control frame every `PingInterval`.
 //!
 //! Emits to the renderer:
@@ -32,6 +33,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
 use serde::Deserialize;
@@ -44,6 +46,7 @@ use cognia_net::proxy_config;
 use cognia_net::proxy_config::wsproxy::{AsyncReadWrite, ProxyStream};
 
 use super::axum_app::EventEmitter;
+use super::lark_callback_reply;
 
 const ENDPOINT_URL: &str = "https://open.feishu.cn/callback/ws/endpoint";
 
@@ -148,6 +151,15 @@ fn build_ack(mut frame: Frame, biz_rt_ms: i64) -> Frame {
     frame.payload_encoding = String::new();
     frame.payload_type = String::new();
     frame
+}
+
+fn build_callback_ack(frame: Frame, biz_rt_ms: i64, reply: serde_json::Value) -> Frame {
+    let mut ack = build_ack(frame, biz_rt_ms);
+    let data = base64::engine::general_purpose::STANDARD.encode(reply.to_string());
+    ack.payload = serde_json::json!({ "code": 200, "headers": {}, "data": data })
+        .to_string()
+        .into_bytes();
+    ack
 }
 
 /// Inflate a gzip payload when the frame says so; pass through otherwise.
@@ -651,6 +663,34 @@ async fn handle_frame(
     // which runs the handler and acks on completion, not per chunk).
     if let Some(payload) = full {
         let payload = maybe_inflate(&frame.payload_encoding, payload);
+        let mut envelope = serde_json::from_slice::<serde_json::Value>(&payload).ok();
+        let is_card_callback = envelope.as_ref().is_some_and(|envelope| {
+            envelope.is_object()
+                && (msg_type == T_CARD || lark_callback_reply::is_card_callback(envelope))
+        });
+        if is_card_callback {
+            let (callback_id, reply) = lark_callback_reply::register();
+            let envelope = envelope
+                .as_mut()
+                .expect("card callback has a JSON envelope");
+            envelope[lark_callback_reply::CALLBACK_ID_FIELD] = callback_id.into();
+            emitter.emit(
+                &format!("connectors://lark-ws/{handle_id}/event"),
+                serde_json::Value::String(envelope.to_string()),
+            );
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                // The socket's outbound receiver closes when its pump stops.
+                // Dropping the pending reply then also removes its registry entry.
+                let response = tokio::select! {
+                    _ = tx.closed() => return,
+                    response = reply.receive() => response,
+                };
+                let ack = build_callback_ack(frame, started.elapsed().as_millis() as i64, response);
+                let _ = tx.send(Message::Binary(ack.encode_to_vec().into())).await;
+            });
+            return;
+        }
         if msg_type == T_EVENT || msg_type == T_CARD {
             if let Ok(json) = String::from_utf8(payload) {
                 log::info!(
@@ -682,6 +722,190 @@ mod tests {
         fn emit(&self, topic: &str, payload: serde_json::Value) {
             self.events.lock().push((topic.to_string(), payload));
         }
+    }
+
+    fn card_frame(kind: &str, event_type: &str) -> Frame {
+        Frame {
+            seqid: 17,
+            method: METHOD_DATA,
+            headers: vec![Header { key: H_TYPE.into(), value: kind.into() }],
+            payload: serde_json::json!({"header": {"event_type": event_type}, "event": {"action": {"value": "approve"}}})
+                .to_string().into_bytes(),
+            ..Default::default()
+        }
+    }
+
+    fn emitted_callback_id(emitter: &RecordingEmitter) -> String {
+        let events = emitter.events.lock();
+        let envelope: serde_json::Value =
+            serde_json::from_str(events[0].1.as_str().unwrap()).unwrap();
+        envelope[lark_callback_reply::CALLBACK_ID_FIELD]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    async fn receive_ack(rx: &mut mpsc::Receiver<Message>) -> Frame {
+        let Message::Binary(bytes) = tokio::time::timeout(Duration::from_secs(4), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("ack must be a binary frame");
+        };
+        Frame::decode(bytes.as_ref()).unwrap()
+    }
+
+    fn callback_ack_reply(ack: &Frame) -> serde_json::Value {
+        let payload: serde_json::Value = serde_json::from_slice(&ack.payload).unwrap();
+        assert_eq!(payload["code"], 200);
+        assert_eq!(payload["headers"], serde_json::json!({}));
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(payload["data"].as_str().unwrap())
+            .unwrap();
+        serde_json::from_slice(&decoded).unwrap()
+    }
+
+    #[tokio::test]
+    async fn card_frame_returns_base64_reply_without_blocking_later_frames() {
+        let emitter = RecordingEmitter::default();
+        let mut reassembler = Reassembler::default();
+        let (tx, mut rx) = mpsc::channel(2);
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            handle_frame(
+                &emitter,
+                "lark-card",
+                card_frame(T_CARD, "card.action.trigger"),
+                &mut reassembler,
+                &tx,
+            ),
+        )
+        .await
+        .expect("callback must not block the read loop while waiting for TypeScript");
+        assert!(rx.try_recv().is_err(), "card ack waits for its reply");
+
+        let ordinary = Frame {
+            seqid: 18,
+            method: METHOD_DATA,
+            headers: vec![Header {
+                key: H_TYPE.into(),
+                value: T_EVENT.into(),
+            }],
+            payload: br#"{"event":"message"}"#.to_vec(),
+            ..Default::default()
+        };
+        handle_frame(&emitter, "lark-card", ordinary, &mut reassembler, &tx).await;
+        let immediate_ack = receive_ack(&mut rx).await;
+        assert_eq!(immediate_ack.seqid, 18);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&immediate_ack.payload).unwrap()["data"],
+            serde_json::Value::Null
+        );
+
+        let response = serde_json::json!({"toast": {"type": "success", "content": "Approved"}});
+        assert!(lark_callback_reply::respond(
+            &emitted_callback_id(&emitter),
+            response.clone()
+        ));
+        let ack = receive_ack(&mut rx).await;
+        assert_eq!(ack.seqid, 17);
+        assert!(ack.header(H_BIZ_RT).is_some());
+        assert_eq!(callback_ack_reply(&ack), response);
+    }
+
+    #[tokio::test]
+    async fn card_event_types_are_recognized_regardless_of_frame_type() {
+        for event_type in [
+            "card.action.trigger",
+            "im.interactive_message.action_triggered_v1",
+        ] {
+            let emitter = RecordingEmitter::default();
+            let mut reassembler = Reassembler::default();
+            let (tx, mut rx) = mpsc::channel(1);
+            handle_frame(
+                &emitter,
+                "lark-card",
+                card_frame("other", event_type),
+                &mut reassembler,
+                &tx,
+            )
+            .await;
+            let response = serde_json::json!({"toast": {"type": "info", "content": "Received"}});
+            assert!(lark_callback_reply::respond(
+                &emitted_callback_id(&emitter),
+                response.clone()
+            ));
+            assert_eq!(callback_ack_reply(&receive_ack(&mut rx).await), response);
+        }
+    }
+
+    #[tokio::test]
+    async fn card_frame_timeout_ack_contains_empty_object() {
+        let emitter = RecordingEmitter::default();
+        let mut reassembler = Reassembler::default();
+        let (tx, mut rx) = mpsc::channel(1);
+        handle_frame(
+            &emitter,
+            "lark-card",
+            card_frame(T_CARD, "card.action.trigger"),
+            &mut reassembler,
+            &tx,
+        )
+        .await;
+        let id = emitted_callback_id(&emitter);
+        assert_eq!(
+            callback_ack_reply(&receive_ack(&mut rx).await),
+            serde_json::json!({})
+        );
+        assert!(!lark_callback_reply::respond(&id, serde_json::json!({})));
+    }
+
+    #[tokio::test]
+    async fn card_frame_pending_reply_is_dropped_when_connection_closes() {
+        let emitter = RecordingEmitter::default();
+        let mut reassembler = Reassembler::default();
+        let (tx, rx) = mpsc::channel(1);
+        handle_frame(
+            &emitter,
+            "lark-card",
+            card_frame(T_CARD, "card.action.trigger"),
+            &mut reassembler,
+            &tx,
+        )
+        .await;
+        let id = emitted_callback_id(&emitter);
+        drop(rx);
+        tokio::task::yield_now().await;
+        assert!(!lark_callback_reply::respond(&id, serde_json::json!({})));
+    }
+
+    #[tokio::test]
+    async fn chunked_card_callback_is_registered_only_after_reassembly() {
+        let emitter = RecordingEmitter::default();
+        let mut reassembler = Reassembler::default();
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut frame = card_frame(T_CARD, "card.action.trigger");
+        let payload = frame.payload.clone();
+        let midpoint = payload.len() / 2;
+        frame.set_header(H_SUM, "2".into());
+        frame.set_header(H_MESSAGE_ID, "chunked-card".into());
+        frame.set_header(H_SEQ, "0".into());
+        frame.payload = payload[..midpoint].to_vec();
+        handle_frame(&emitter, "lark-card", frame.clone(), &mut reassembler, &tx).await;
+        assert!(emitter.events.lock().is_empty());
+        assert!(rx.try_recv().is_err());
+        frame.set_header(H_SEQ, "1".into());
+        frame.payload = payload[midpoint..].to_vec();
+        handle_frame(&emitter, "lark-card", frame, &mut reassembler, &tx).await;
+        assert!(lark_callback_reply::respond(
+            &emitted_callback_id(&emitter),
+            serde_json::json!({})
+        ));
+        assert_eq!(
+            callback_ack_reply(&receive_ack(&mut rx).await),
+            serde_json::json!({})
+        );
     }
 
     #[tokio::test]

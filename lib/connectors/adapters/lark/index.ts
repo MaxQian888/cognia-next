@@ -24,9 +24,17 @@ import type {
   PlatformHistoryCursor,
 } from "@/types/connectors/adapter"
 import { createLarkRunPresentationDriver } from "@/lib/connectors/run-presentation/lark-driver"
+import type {
+  ConnectorCallbackDecision,
+  ConnectorCallbackEvent,
+} from "@/types/connectors/interaction"
 import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
-import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import {
+  connectorsHttpRequest,
+  connectorsLarkCallbackRespond,
+} from "@/lib/connectors/tauri/commands"
+import { larkCallbackToast } from "./callback-toast"
 import { extractLarkCode, LARK_PERMISSION_CODES } from "./http"
 import { LARK_A2UI_CAPABILITY, LARK_CAPS } from "./capability"
 import {
@@ -514,13 +522,61 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       })
     )
 
+    const callbackTasks = new Set<Promise<void>>()
+    function dispatchLarkCallback(
+      callback: ConnectorCallbackEvent,
+      callbackId?: string,
+      locale?: string
+    ): void {
+      let responded = false
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const respond = (decision?: ConnectorCallbackDecision) => {
+        if (!callbackId || responded) return
+        responded = true
+        clearTimeout(timer)
+        void connectorsLarkCallbackRespond(
+          callbackId,
+          decision ? { toast: larkCallbackToast(decision, locale) } : {}
+        ).catch((error: unknown) => {
+          loggers.network.warn("[lark] callback reply failed", {
+            adapterId: opts.id,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+      }
+      // Release Rust before its 2.5s budget even if storage/routing is stalled.
+      if (callbackId) timer = setTimeout(() => respond(), 2_200)
+      const task = Promise.resolve()
+        .then(() => getBus().dispatchConnectorCallback(callback, { onDecision: respond }))
+        .then((outcome) => {
+          loggers.network.info("[lark] callback dispatched", {
+            adapterId: opts.id,
+            triggerId: callback.triggerId,
+            outcome,
+          })
+        })
+        .catch((error: unknown) => {
+          respond({ status: "failed" })
+          loggers.network.warn("[lark] callback dispatch failed", {
+            adapterId: opts.id,
+            triggerId: callback.triggerId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+        .finally(() => callbackTasks.delete(task))
+      callbackTasks.add(task)
+    }
+
     /**
      * Shared envelope dispatcher — handles both the long-connection and
      * webhook paths. Interactive-card callbacks (G3.4) go through the
      * ConnectorBus callback channel; everything else flows to
      * `ctx.emit` as a normalised message event.
      */
-    const dispatchEnvelope = async (envelope: LarkEventEnvelope): Promise<void> => {
+    const dispatchEnvelope = async (
+      envelope: LarkEventEnvelope,
+      callbackId?: string
+    ): Promise<void> => {
       // Any envelope — even one that gets gated or fails to parse — proves
       // the transport is connected and delivering.
       markInboundActivity()
@@ -536,12 +592,39 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       // the two payload shapes.
       if (
         envelope.header?.event_type === "im.interactive_message.action_triggered_v1" ||
-        envelope.header?.event_type === "card.action.trigger"
+        envelope.header?.event_type === "card.action.trigger" ||
+        callbackId
       ) {
-        const callback = parseLarkInteractiveCallback(opts.id, opts.selfBotOpenId, envelope)
+        const callback = parseLarkInteractiveCallback(
+          opts.id,
+          opts.selfBotOpenId,
+          envelope,
+          (reason) => {
+            loggers.network.warn("[lark] invalid interactive callback", {
+              adapterId: opts.id,
+              eventId: envelope.header?.event_id,
+              reason,
+            })
+          }
+        )
         if (callback) {
           lastActivityAt = Date.now()
-          await getBus().dispatchConnectorCallback(callback)
+          const locale = (envelope.event as { operator?: { locale?: unknown } }).operator?.locale
+          dispatchLarkCallback(
+            callback,
+            callbackId,
+            typeof locale === "string" ? locale : undefined
+          )
+        } else if (callbackId) {
+          // Malformed/unsupported callbacks still get visible feedback.
+          void connectorsLarkCallbackRespond(callbackId, {
+            toast: larkCallbackToast({ status: "failed" }),
+          }).catch((error: unknown) => {
+            loggers.network.warn("[lark] callback reply failed", {
+              adapterId: opts.id,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          })
         }
         return
       }
@@ -651,9 +734,9 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
             adapterId: opts.id,
             signal,
           })
-          for await (const envelope of generator) {
+          for await (const { envelope, callbackId } of generator) {
             if (signal.aborted) break
-            await dispatchEnvelope(envelope as LarkEventEnvelope)
+            await dispatchEnvelope(envelope, callbackId)
           }
           if (!stopCalled) {
             healthState = "down"
@@ -680,9 +763,9 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
             adapterId: opts.id,
             signal,
           })
-          for await (const envelope of generator) {
+          for await (const { envelope, callbackId } of generator) {
             if (signal.aborted) break
-            await dispatchEnvelope(envelope as LarkEventEnvelope)
+            await dispatchEnvelope(envelope, callbackId)
           }
           if (!stopCalled) {
             healthState = "down"

@@ -241,3 +241,12 @@ describe("applyMediaGrantCallback", () => {
     )
   })
 })
+
+it("keeps existing prefix exports compatible with the shared registry", async () => {
+  const registry = await import("@/lib/connectors/hitl/callback-prefixes")
+  expect([MEDIA_GRANT_SESSION_PREFIX, MEDIA_GRANT_ALWAYS_PREFIX, MEDIA_GRANT_DENY_PREFIX]).toEqual([
+    registry.MEDIA_GRANT_SESSION_PREFIX,
+    registry.MEDIA_GRANT_ALWAYS_PREFIX,
+    registry.MEDIA_GRANT_DENY_PREFIX,
+  ])
+})

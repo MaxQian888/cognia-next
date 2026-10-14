@@ -3,6 +3,7 @@ import {
   parseLarkBotMenuEvent,
   extractTenantKey,
   parseLarkInteractiveCallback,
+  unpackLarkTransportEvent,
 } from "./parse"
 import type { LarkEventEnvelope } from "./parse"
 import type { LarkQuickCommand } from "./quick-commands"
@@ -14,6 +15,28 @@ import imageMessageFixture from "./fixtures/image-message.json"
 
 const ADAPTER_ID = "lark-adapter-1"
 const SELF_BOT_OPEN_ID = "ou_bot_self_001"
+
+describe("unpackLarkTransportEvent", () => {
+  it("separates reply correlation without mutating the delivered payload", () => {
+    const payload = { ...dmTextFixture, _cognia_callback_id: "reply-1" } as LarkEventEnvelope & {
+      _cognia_callback_id: string
+    }
+    expect(unpackLarkTransportEvent(payload)).toEqual({
+      envelope: dmTextFixture,
+      callbackId: "reply-1",
+    })
+    expect(payload._cognia_callback_id).toBe("reply-1")
+  })
+
+  it.each([undefined, null, 123, ""])("strips invalid correlation %s", (callbackId) => {
+    expect(
+      unpackLarkTransportEvent({
+        ...(dmTextFixture as LarkEventEnvelope),
+        _cognia_callback_id: callbackId,
+      })
+    ).toEqual({ envelope: dmTextFixture })
+  })
+})
 
 describe("parseLarkEventEnvelope", () => {
   describe("dm-text.json — p2p text message", () => {
@@ -1058,4 +1081,25 @@ it("supports native person selectors from authored Card 2.0 payloads", () => {
     },
   } as LarkEventEnvelope)
   expect(cb).toMatchObject({ actionType: "select", value: "ou_owner" })
+})
+
+it.each([
+  [undefined, "missing_action"],
+  [{ action: { tag: "button" } }, "missing_operator"],
+  [{ operator: { open_id: "user" }, action: { tag: "button" } }, "missing_trigger_id"],
+])("reports malformed interactive callbacks to the caller", (event, reason) => {
+  const onInvalid = jest.fn()
+  expect(
+    parseLarkInteractiveCallback(
+      "adapter",
+      "bot",
+      {
+        schema: "2.0",
+        header: { event_type: "card.action.trigger" } as LarkEventEnvelope["header"],
+        event: event as unknown as LarkEventEnvelope["event"],
+      },
+      onInvalid
+    )
+  ).toBeNull()
+  expect(onInvalid).toHaveBeenCalledWith(reason)
 })

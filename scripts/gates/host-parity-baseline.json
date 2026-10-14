@@ -109,6 +109,7 @@
     "C:connectors_http_request:headless-only",
     "C:connectors_lark_upload_file:headless-only",
     "C:connectors_lark_upload_image:headless-only",
+    "C:connectors_lark_callback_respond:headless-only",
     "C:connectors_lark_ws_close:headless-only",
     "C:connectors_lark_ws_open:headless-only",
     "C:connectors_list_adapters:headless-only",

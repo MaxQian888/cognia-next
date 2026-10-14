@@ -373,6 +373,14 @@ pub async fn connectors_lark_ws_close(handle_id: String) -> Result<(), String> {
     super::lark_ws::close(&handle_id).await
 }
 
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn connectors_lark_callback_respond(
+    callback_id: String,
+    response: serde_json::Value,
+) -> bool {
+    super::lark_callback_reply::respond(&callback_id, response)
+}
+
 // ---------------------------------------------------------------------------
 // OneBot reverse-WS live-client probe (ADR-0036 follow-up)
 //
@@ -601,6 +609,15 @@ mod tests {
     use std::collections::HashMap;
     use wiremock::matchers::{body_bytes, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn connectors_lark_callback_respond_resolves_pending_reply_once() {
+        let (id, receiver) = super::super::lark_callback_reply::register();
+        let response = serde_json::json!({"toast": {"type": "success", "content": "Approved"}});
+        assert!(connectors_lark_callback_respond(id.clone(), response.clone()).await);
+        assert_eq!(receiver.receive().await, response);
+        assert!(!connectors_lark_callback_respond(id, serde_json::json!({})).await);
+    }
 
     #[tokio::test]
     async fn connectors_reset_all_ws_command_runs_without_live_handles() {

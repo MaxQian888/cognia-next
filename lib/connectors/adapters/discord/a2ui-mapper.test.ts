@@ -5,9 +5,13 @@
  */
 
 import "fake-indexeddb/auto"
+import { parseDiscordInteraction } from "./parse"
 import { buildDiscordA2UIPayload, buildDiscordModalData } from "./a2ui-mapper"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { resolveCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import {
+  recordCallbackBinding,
+  resolveCallbackBinding,
+} from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 
 beforeEach(async () => {
@@ -414,4 +418,84 @@ it("preserves canonical Card.description and Alert.message", async () => {
   const result = await buildDiscordA2UIPayload(baseInput(surface))
   expect(JSON.stringify(result)).toContain("Card details")
   expect(JSON.stringify(result)).toContain("Canonical alert message")
+})
+
+it.each([
+  "tapa:request",
+  "tapd:request",
+  "wffanoutapp:request",
+  "wffanoutcan:request",
+  "skill_invoke:skill:request",
+])("preserves %s on the wire and does not replace its binding", async (actionId) => {
+  const action =
+    actionId.startsWith("tapd:") || actionId.startsWith("wffanoutcan:") ? "cancel" : "approve"
+  const surface: A2UISegmentContent = {
+    rootId: "button",
+    dataModel: {},
+    components: { button: { component: "Button", text: "Decide", action, value: actionId } },
+  }
+  await recordCallbackBinding({
+    adapterId: "adp_dc",
+    actionId,
+    surfaceId: "sfc_1",
+    kind: "tool_approve",
+  })
+  const before = await getDb().connectorCallbackBindings.toArray()
+  const payload = await buildDiscordA2UIPayload(baseInput(surface))
+  const row = payload.components![0] as { components: Array<{ custom_id: string }> }
+  const wireId = row.components[0].custom_id
+  const callback = parseDiscordInteraction("adp_dc", "bot", {
+    t: "INTERACTION_CREATE",
+    op: 0,
+    d: {
+      id: "click",
+      type: 3,
+      channel_id: "ch_xyz",
+      user: { id: "user", username: "User" },
+      data: { component_type: 2, custom_id: wireId },
+    },
+  })
+  expect(wireId).toBe(actionId)
+  expect(callback).toMatchObject({ triggerId: actionId, value: action })
+  expect(await resolveCallbackBinding("adp_dc", callback!.triggerId)).toMatchObject({
+    kind: "tool_approve",
+  })
+  expect(await getDb().connectorCallbackBindings.toArray()).toEqual(before)
+})
+
+it("keeps a long author-owned skill binding reachable within the wire limit", async () => {
+  const actionId = `skill_invoke:${"long-skill".repeat(20)}:request`
+  await recordCallbackBinding({
+    adapterId: "adp_dc",
+    actionId,
+    surfaceId: "sfc_1",
+    kind: "skill_invoke",
+  })
+  const surface: A2UISegmentContent = {
+    rootId: "button",
+    dataModel: {},
+    components: {
+      button: { component: "Button", text: "Approve", action: "approve", value: actionId },
+    },
+  }
+  const payload = await buildDiscordA2UIPayload(baseInput(surface))
+  const row = payload.components![0] as { components: Array<{ custom_id: string }> }
+  const wireId = row.components[0].custom_id
+  const callback = parseDiscordInteraction("adp_dc", "bot", {
+    t: "INTERACTION_CREATE",
+    op: 0,
+    d: {
+      id: "click",
+      type: 3,
+      channel_id: "ch_xyz",
+      user: { id: "user", username: "User" },
+      data: { component_type: 2, custom_id: wireId },
+    },
+  })
+  expect(new TextEncoder().encode(wireId).length).toBeLessThanOrEqual(100)
+  expect(await resolveCallbackBinding("adp_dc", callback!.triggerId)).toMatchObject({
+    actionId,
+    kind: "skill_invoke",
+  })
+  expect(await getDb().connectorCallbackBindings.count()).toBe(1)
 })

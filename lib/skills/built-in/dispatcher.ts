@@ -35,6 +35,7 @@ import { z } from "zod"
 
 import { hasNoLeakingPii } from "@cognia/redact"
 import { append as appendAudit } from "@/lib/db/connector-audit"
+import { SKILL_INVOKE_PREFIX } from "@/lib/connectors/hitl/callback-prefixes"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { getSharedBuiltInSkillRegistry } from "./registry"
 import type { BuiltInSkill, BuiltInSkillContext, BuiltInSkillResult } from "./types"
@@ -271,7 +272,7 @@ export async function runBuiltInSkill(
       const surface = skill.hitlSurface(validArgs as never)
       // Persist the binding so the inbound callback can re-fire the skill
       // with `hitlBypass: true`.
-      const actionId = `skill_invoke:${skill.id}:${cryptoRandomId()}`
+      const actionId = `${SKILL_INVOKE_PREFIX}${skill.id}:${cryptoRandomId()}`
       await recordCallbackBinding({
         adapterId: ctx.imBinding.adapterId,
         actionId,

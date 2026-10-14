@@ -4750,6 +4750,20 @@
       },
       "additionalProperties": false
     },
+    "connectors_lark_callback_respond": {
+      "type": "object",
+      "required": [
+        "callbackId",
+        "response"
+      ],
+      "properties": {
+        "callbackId": {
+          "type": "string"
+        },
+        "response": {}
+      },
+      "additionalProperties": false
+    },
     "connectors_lark_upload_file": {
       "type": "object",
       "required": [

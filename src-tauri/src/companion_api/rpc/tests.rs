@@ -1474,6 +1474,7 @@ fn service_only_commands_are_known_and_not_control_gated() {
         "connectors_discord_upload",
         "connectors_lark_ws_open",
         "connectors_lark_ws_close",
+        "connectors_lark_callback_respond",
         "connectors_reset_all_ws",
         "connectors_attachment_fetch",
         "connectors_attachment_read",

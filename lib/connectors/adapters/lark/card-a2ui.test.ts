@@ -8,7 +8,10 @@ import { buildLarkA2UICard, segmentsToLarkBodyAsync } from "./card"
 import { parseLarkInteractiveCallback } from "./parse"
 import type { LarkEventEnvelope } from "./parse"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { resolveCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import {
+  recordCallbackBinding,
+  resolveCallbackBinding,
+} from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 
@@ -26,6 +29,40 @@ const baseInput = (surface: A2UISegmentContent) => ({
 })
 
 describe("buildLarkA2UICard", () => {
+  it.each(["tapa:request", "tapd:request", "wffanoutapp:request", "skill_invoke:skill:request"])(
+    "round-trips the existing %s binding without recording a generic row",
+    async (actionId) => {
+      const action = actionId.startsWith("tapd:") ? "cancel" : "approve"
+      await recordCallbackBinding({
+        adapterId: "adp_lk",
+        actionId,
+        surfaceId: "sfc_1",
+        kind: "tool_approve",
+      })
+      const before = await getDb().connectorCallbackBindings.toArray()
+      const body = await buildLarkA2UICard(
+        baseInput({
+          rootId: "button",
+          dataModel: {},
+          components: { button: { component: "Button", text: "Approve", action, value: actionId } },
+        })
+      )
+      const button = JSON.parse(body.content).body.elements[0]
+      const value = button.behaviors[0].value
+      expect(value).toMatchObject({ actionId, action })
+      const callback = parseLarkInteractiveCallback("adp_lk", "bot", {
+        schema: "2.0",
+        header: { event_type: "card.action.trigger", event_id: "event" },
+        event: {
+          operator: { open_id: "user" },
+          action: { tag: "button", value },
+          context: { open_message_id: "message", open_chat_id: "chat" },
+        } as unknown as LarkEventEnvelope["event"],
+      })
+      expect(callback).toMatchObject({ triggerId: actionId, value: action })
+      expect(await getDb().connectorCallbackBindings.toArray()).toEqual(before)
+    }
+  )
   it("renders bound descriptions, canonical alert messages, and footer actions", async () => {
     const body = await buildLarkA2UICard(
       baseInput({
@@ -317,61 +354,6 @@ describe("parseLarkInteractiveCallback", () => {
     expect(cb!.componentId).toBe("b1")
     expect(cb!.conversationKey).toBe("lark:adp_lk:oc_chat")
     expect(cb!.user.remoteUserId).toBe("ou_user1")
-  })
-
-  // B4 — when the mapper marks a select_static value with
-  // simulatedCheckbox:true, the parser lifts it back into a real
-  // checkbox event so the bridge doesn't need to know about Lark's
-  // stand-in encoding.
-  it("simulated checkbox select_static lifts to actionType=checkbox + boolean value", () => {
-    const envelope: LarkEventEnvelope = {
-      schema: "2.0",
-      header: {
-        event_id: "evt_chk",
-        event_type: "im.interactive_message.action_triggered_v1",
-      },
-      event: {
-        operator: { open_id: "ou_user1" },
-        open_chat_id: "oc_chat",
-        action: {
-          tag: "select_static",
-          value: {
-            actionId: "a2ui:sfc:chk:agree",
-            surfaceId: "sfc",
-            componentId: "chk",
-            simulatedCheckbox: true,
-          },
-          option: "true",
-        },
-      } as unknown as LarkEventEnvelope["event"],
-    }
-    const cb = parseLarkInteractiveCallback("adp_lk", "BOT", envelope)
-    expect(cb!.actionType).toBe("checkbox")
-    expect(cb!.value).toBe("true")
-  })
-
-  it("simulated checkbox returns 'false' when the selected option is anything other than 'true'", () => {
-    const envelope: LarkEventEnvelope = {
-      schema: "2.0",
-      header: { event_id: "evt_chk_2", event_type: "im.interactive_message.action_triggered_v1" },
-      event: {
-        operator: { open_id: "ou_user1" },
-        open_chat_id: "oc_chat",
-        action: {
-          tag: "select_static",
-          value: {
-            actionId: "a2ui:sfc:chk:agree",
-            surfaceId: "sfc",
-            componentId: "chk",
-            simulatedCheckbox: true,
-          },
-          option: "false",
-        },
-      } as unknown as LarkEventEnvelope["event"],
-    }
-    const cb = parseLarkInteractiveCallback("adp_lk", "BOT", envelope)
-    expect(cb!.actionType).toBe("checkbox")
-    expect(cb!.value).toBe("false")
   })
 
   it("select_static produces actionType=select with option as value", () => {

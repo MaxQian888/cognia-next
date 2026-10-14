@@ -257,3 +257,31 @@ it("uses button labels and primitive actions when no text is provided", () => {
     "false",
   ])
 })
+
+it.each([
+  "tapa:request",
+  "tapd:request",
+  "plna:request",
+  "mgd:request",
+  "wffanoutapp:request",
+  "wffanoutcan:request",
+  "skill_invoke:skill:request",
+])("points a numeric reply at the existing %s binding without a second write", async (actionId) => {
+  const segment = makeSegment("approval", {
+    root: { component: "Button", text: "Decide", action: "approve", value: actionId },
+  })
+  await recordCallbackBinding({
+    adapterId: "adp",
+    actionId,
+    surfaceId: "approval",
+    kind: "tool_approve",
+  })
+  const before = await getDb().connectorCallbackBindings.toArray()
+  await buildIlinkA2UISurface({
+    adapterId: "adp",
+    conversationKey: "wechat-personal:adp:user",
+    segment,
+  })
+  expect(__peekNumericActionForTesting("wechat-personal:adp:user", 1)).toBe(actionId)
+  expect(await getDb().connectorCallbackBindings.toArray()).toEqual(before)
+})

@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
+import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import {
   buildWeComTemplateCard,
@@ -146,3 +147,39 @@ describe("buildAckUpdateCard", () => {
     expect(card.main_title?.title).toBe("✓")
   })
 })
+
+it.each(["tapa:request", "tapd:request", "wffanoutapp:request", "skill_invoke:skill:request"])(
+  "reuses %s and keeps its verb on inbound callbacks",
+  async (actionId) => {
+    const seg = surface()
+    seg.content.rootId = "b1"
+    seg.content.components.b1 = {
+      component: "Button",
+      text: "Decide",
+      action: "approve",
+      value: actionId,
+    }
+    await recordCallbackBinding({
+      adapterId: "adp",
+      actionId,
+      surfaceId: seg.surfaceId,
+      kind: "tool_approve",
+    })
+    const before = await getDb().connectorCallbackBindings.toArray()
+    const card = await buildWeComTemplateCard("adp", seg)
+    expect(card!.button_list![0].key).toBe(actionId)
+    const callback = parseTemplateCardEvent("adp", "bot", {
+      event: {
+        eventtype: "template_card_event",
+        template_card: { event_key: card!.button_list![0].key },
+      },
+      from: { userid: "user" },
+      chatid: "chat",
+    } as WeComInboundEventBody)
+    expect(callback).toMatchObject({
+      triggerId: actionId,
+      value: actionId.startsWith("tapd:") ? "cancel" : "approve",
+    })
+    expect(await getDb().connectorCallbackBindings.toArray()).toEqual(before)
+  }
+)

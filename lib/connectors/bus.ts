@@ -32,6 +32,7 @@ import type {
   UrgentChannel,
 } from "@/types/connectors"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
+import type { ConnectorCallbackDecision } from "@/types/connectors/interaction"
 import type { StoredMessage } from "@cognia/agent-config-types"
 import type {
   ConversationOverrideRow,
@@ -2425,17 +2426,39 @@ export class ConnectorBus {
    * first delivery is still processing is guarded by the in-memory
    * `callbackInFlight` set.
    */
-  async dispatchConnectorCallback(event: ConnectorCallbackEvent): Promise<"terminal" | "retry"> {
+  async dispatchConnectorCallback(
+    event: ConnectorCallbackEvent,
+    options?: { onDecision?: (decision: ConnectorCallbackDecision) => void }
+  ): Promise<"terminal" | "retry"> {
     const flightKey = `${event.adapterId}:${event.triggerId}`
     let terminal = false
+    let decisionSent = false
+    const decide = (decision: ConnectorCallbackDecision) => {
+      if (decisionSent) return
+      decisionSent = true
+      try {
+        options?.onDecision?.(decision)
+      } catch (err) {
+        // Transport feedback is observational; it must never consume or
+        // interrupt the callback's authoritative routing decision.
+        console.error("[connector-bus] callback decision observer failed", err)
+      }
+    }
     try {
       // ── Step 1: Dedup (check now, commit on terminal outcome) ──────
       // An in-flight callback can still fail transiently. Its concurrent
       // delivery must not acknowledge or consume a numeric menu binding.
-      if (this.callbackInFlight.has(flightKey)) return "retry"
+      if (this.callbackInFlight.has(flightKey)) {
+        decide({ status: "in_flight" })
+        return "retry"
+      }
       const duplicate = await isRecordedInbound(event.adapterId, event.triggerId, "callback")
-      if (this.callbackInFlight.has(flightKey)) return "retry"
+      if (this.callbackInFlight.has(flightKey)) {
+        decide({ status: "in_flight" })
+        return "retry"
+      }
       if (duplicate) {
+        decide({ status: "deduped" })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "callback.deduped",
@@ -2453,7 +2476,7 @@ export class ConnectorBus {
       // and is audited by the outer catch.
       terminal = true
       try {
-        terminal = await this.runConnectorCallback(event)
+        terminal = await this.runConnectorCallback(event, decide)
       } finally {
         if (terminal) {
           await recordAndCheckInbound(event.adapterId, event.triggerId, "callback").catch(
@@ -2464,6 +2487,7 @@ export class ConnectorBus {
       }
       return terminal ? "terminal" : "retry"
     } catch (err) {
+      decide({ status: "failed" })
       console.error("[connector-bus] callback pipeline failed", err)
       await appendAudit({
         adapterId: event.adapterId,
@@ -2475,6 +2499,9 @@ export class ConnectorBus {
         fields: { triggerId: event.triggerId },
       }).catch(() => undefined)
       return terminal ? "terminal" : "retry"
+    } finally {
+      // Covers no-handler branches and failures before a route is known.
+      decide({ status: "failed" })
     }
   }
 
@@ -2483,7 +2510,10 @@ export class ConnectorBus {
    * TERMINAL — `true` commits the triggerId to the dedup ledger, `false`
    * (transient failure) leaves it retryable for a platform redelivery.
    */
-  private async runConnectorCallback(event: ConnectorCallbackEvent): Promise<boolean> {
+  private async runConnectorCallback(
+    event: ConnectorCallbackEvent,
+    decide: (decision: ConnectorCallbackDecision) => void
+  ): Promise<boolean> {
     const now = Date.now()
 
     // ── Step 2: Binding lookup (optional — event may already carry
@@ -2506,6 +2536,7 @@ export class ConnectorBus {
         resolvedConversationKey = resolvedBinding.conversationKey ?? resolvedConversationKey
       }
     } catch (err) {
+      decide({ status: "failed" })
       // TRANSIENT: a Dexie hiccup here says nothing about the click itself.
       // Falling through on the event's self-reported fields would take a
       // kind-specific binding (tool_approve, wf_approve, …) down the generic
@@ -2574,6 +2605,9 @@ export class ConnectorBus {
       ...(isRunControl ? { runId } : {}),
     })
     if (!authDecision.allowed) {
+      if (authDecision.mode === "enforce") {
+        decide({ status: "denied", reason: authDecision.reason })
+      }
       await appendAudit({
         adapterId: event.adapterId,
         kind:
@@ -2604,6 +2638,7 @@ export class ConnectorBus {
     }
 
     if (isRunControl) {
+      decide({ status: "accepted", kind: "run_control", action: runAction })
       // Return to the transport immediately so CardKit can ACK well inside
       // its three-second deadline. Durable execution and card refresh happen
       // asynchronously from the journal update.
@@ -2636,6 +2671,7 @@ export class ConnectorBus {
             { operatorIds }
           )
         } catch (err) {
+          decide({ status: "failed" })
           await appendAudit({
             adapterId: event.adapterId,
             kind: "callback.handler_failed",
@@ -2651,6 +2687,7 @@ export class ConnectorBus {
     }
 
     if (!resolvedSurfaceId) {
+      decide({ status: "expired" })
       // No anchoring surface at all — log and bail. We DON'T fire the
       // handler because A2UI ActionEvents require a target surface.
       await appendAudit({
@@ -2669,7 +2706,8 @@ export class ConnectorBus {
     }
 
     // ── Step 3: Audit reception ─────────────────────────────────────
-    await appendAudit({
+    // Admission feedback must not wait for the audit database's write queue.
+    void appendAudit({
       adapterId: event.adapterId,
       kind: "callback.received",
       at: now,
@@ -2683,7 +2721,7 @@ export class ConnectorBus {
         value: event.value,
         bindingFound,
       },
-    })
+    }).catch((err) => console.error("[connector-bus] callback reception audit failed", err))
 
     // Passive plugin observers (ctx.connectors.onCallback) see every bound
     // callback here, with the resolved conversation key, before any
@@ -2715,6 +2753,11 @@ export class ConnectorBus {
         resolvedBinding.kind === "wf_fanout_cancel" ||
         (event.value ?? "").toLowerCase() === "cancel" ||
         event.actionType === "dismiss"
+      decide({
+        status: "accepted",
+        kind: resolvedBinding.kind,
+        action: cancelled ? "cancel" : "approve",
+      })
       try {
         const { handleWorkflowFanoutCallback } = await import("@/lib/a2ui/workflow-fanout-handler")
         await handleWorkflowFanoutCallback({
@@ -2726,6 +2769,7 @@ export class ConnectorBus {
         })
         await settleCallbackCard(cancelled ? "denied" : "processed")
       } catch (err) {
+        decide({ status: "failed" })
         await settleCallbackCard("failed")
         await appendAudit({
           adapterId: event.adapterId,
@@ -2755,6 +2799,11 @@ export class ConnectorBus {
         resolvedBinding.kind === "wf_cancel" ||
         (event.value ?? "").toLowerCase() === "cancel" ||
         event.actionType === "dismiss"
+      decide({
+        status: "accepted",
+        kind: resolvedBinding.kind,
+        action: cancelled ? "cancel" : "approve",
+      })
       try {
         const { handleWorkflowApprovalCallback } =
           await import("@/lib/a2ui/workflow-approval-handler")
@@ -2767,6 +2816,7 @@ export class ConnectorBus {
         })
         await settleCallbackCard(cancelled ? "denied" : "processed")
       } catch (err) {
+        decide({ status: "failed" })
         await settleCallbackCard("failed")
         await appendAudit({
           adapterId: event.adapterId,
@@ -2798,6 +2848,7 @@ export class ConnectorBus {
         ? await this.issueActionSenderRefusal(event, adapterRow, resolvedConversationKey)
         : "policy-unavailable"
       if (refusal) {
+        decide({ status: "denied", reason: refusal })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "issue.card_action_denied",
@@ -2808,6 +2859,9 @@ export class ConnectorBus {
         })
         return true
       }
+      // This acknowledges routing admission. The handler still owns business
+      // validation and reports its eventual result through the existing card.
+      decide({ status: "accepted", kind: resolvedBinding.kind, action: event.value })
       try {
         const { handleIssueActionCallback } = await import("@/lib/issues/im/callback-handler")
         await handleIssueActionCallback({
@@ -2817,6 +2871,7 @@ export class ConnectorBus {
           user: event.user,
         })
       } catch (err) {
+        decide({ status: "failed" })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "issue.card_action_denied",
@@ -2837,6 +2892,7 @@ export class ConnectorBus {
     // registered command directly, with no model digest turn. See
     // `lib/notifications/im-callback-handler.ts`.
     if (resolvedBinding?.kind === "notification_action") {
+      decide({ status: "accepted", kind: resolvedBinding.kind, action: event.value })
       try {
         const { handleNotificationActionCallback } =
           await import("@/lib/notifications/im-callback-handler")
@@ -2846,6 +2902,7 @@ export class ConnectorBus {
           conversationKey: resolvedConversationKey ?? undefined,
         })
       } catch (err) {
+        decide({ status: "failed" })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "adapter.error",
@@ -2884,6 +2941,11 @@ export class ConnectorBus {
           decision,
           resolve: resolveApproval,
         })
+        decide(
+          resolved
+            ? { status: "accepted", kind: resolvedBinding.kind, decision }
+            : { status: "expired" }
+        )
         await appendAudit({
           adapterId: event.adapterId,
           kind: granted ? "tool_approve.granted" : "tool_approve.denied",
@@ -2892,6 +2954,7 @@ export class ConnectorBus {
           fields: { toolName, requestId, decision, resolved },
         })
       } catch (err) {
+        decide({ status: "failed" })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "callback.handler_failed",
@@ -2941,6 +3004,11 @@ export class ConnectorBus {
         if (correlated) {
           const outcome = await applyAskUserCallback({
             event,
+            // Report a toggle once it is stored, before the slow card repaint;
+            // a stale prompt or an unknown option reports through the audit
+            // hook or the final outcome instead.
+            onToggleApplied: () =>
+              decide({ status: "accepted", kind: "ask_user", action: "toggle" }),
             ...(resolvedBinding ? { binding: resolvedBinding } : {}),
             ...(resolvedSurfaceId ? { surfaceId: resolvedSurfaceId } : {}),
             operatorIds: Array.isArray(adapterRow?.settings.runOperatorUserIds)
@@ -2948,10 +3016,39 @@ export class ConnectorBus {
                   (v): v is string => typeof v === "string"
                 )
               : [],
+            deps: {
+              // Surface-correlated inputs recheck their actor inside the
+              // handler. Observe that result instead of duplicating its guard.
+              audit: (entry) => {
+                if (entry.kind === "callback.forbidden") {
+                  decide({ status: "denied", reason: entry.reason ?? "actor_forbidden" })
+                } else if (entry.kind === "ask_user.answered" && entry.fields?.stale === true) {
+                  decide({ status: "expired" })
+                } else if (
+                  (entry.kind === "ask_user.answered" || entry.kind === "ask_user.cancelled") &&
+                  entry.fields?.resolved === true
+                ) {
+                  decide({
+                    status: "accepted",
+                    kind: "ask_user",
+                    ...(typeof entry.fields.op === "string" ? { action: entry.fields.op } : {}),
+                  })
+                }
+                return appendAudit(entry)
+              },
+            },
           })
-          if (outcome.handled) return true
+          if (outcome.handled) {
+            decide(
+              outcome.resolved
+                ? { status: "accepted", kind: "ask_user", action: outcome.op }
+                : { status: "failed" }
+            )
+            return true
+          }
         }
       } catch (err) {
+        decide({ status: "failed" })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "callback.handler_failed",
@@ -2995,6 +3092,11 @@ export class ConnectorBus {
           provider,
           ...(grantSessionId ? { sessionId: grantSessionId } : {}),
         })
+        decide({
+          status: "accepted",
+          kind: resolvedBinding.kind,
+          action: granted ? "approve" : "cancel",
+        })
         await settleCallbackCard(granted ? "approved" : "denied")
         await appendAudit({
           adapterId: event.adapterId,
@@ -3004,6 +3106,7 @@ export class ConnectorBus {
           fields: { provider, decision },
         })
       } catch (err) {
+        decide({ status: "failed" })
         await settleCallbackCard("failed")
         await appendAudit({
           adapterId: event.adapterId,
@@ -3046,6 +3149,15 @@ export class ConnectorBus {
           ...(feedback ? { feedback } : {}),
           resolve: resolveApproval,
         })
+        decide(
+          resolved
+            ? {
+                status: "accepted",
+                kind: resolvedBinding.kind,
+                action: approved ? "approve" : "cancel",
+              }
+            : { status: "expired" }
+        )
         await appendAudit({
           adapterId: event.adapterId,
           kind: approved ? "plan_approve.granted" : "plan_approve.denied",
@@ -3056,6 +3168,7 @@ export class ConnectorBus {
           fields: { runId: planRunId, requestId, decision, resolved },
         })
       } catch (err) {
+        decide({ status: "failed" })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "callback.handler_failed",
@@ -3083,6 +3196,11 @@ export class ConnectorBus {
       const value = (event.value ?? "").toLowerCase()
       const cancelled = value === "cancel" || event.actionType === "dismiss"
       if (cancelled || !skillId) {
+        decide(
+          cancelled
+            ? { status: "accepted", kind: resolvedBinding.kind, action: "cancel" }
+            : { status: "failed" }
+        )
         await appendAudit({
           adapterId: event.adapterId,
           kind: "builtin_skill_hitl_rejected",
@@ -3094,6 +3212,7 @@ export class ConnectorBus {
         })
         return true
       }
+      decide({ status: "accepted", kind: resolvedBinding.kind, action: "approve" })
       try {
         // Lazy import to avoid pulling the skill registry into adapter
         // bundles that don't need it (mobile lite shells, for instance).
@@ -3108,6 +3227,7 @@ export class ConnectorBus {
           hitlBypass: true,
         })
       } catch (err) {
+        decide({ status: "failed" })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "builtin_skill_failed",
@@ -3134,6 +3254,7 @@ export class ConnectorBus {
       const text = typeof action?.value === "string" ? action.value : ""
       const convKey = resolvedConversationKey
       if (!text || !convKey) {
+        decide({ status: "failed" })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "callback.unbound",
@@ -3148,6 +3269,7 @@ export class ConnectorBus {
       try {
         parsed = parseConversationKey(convKey)
       } catch {
+        decide({ status: "failed" })
         // The bound conversationKey cannot be parsed back into (platform,
         // adapterId, chat) — the synthetic re-entry event cannot be built.
         // Terminal, but audited: a silently dead quick-command button was
@@ -3187,9 +3309,11 @@ export class ConnectorBus {
         raw: event.raw,
         kind: "create",
       }
+      decide({ status: "accepted", kind: resolvedBinding.kind, action: text })
       try {
         await this.dispatchInboundFull(synthetic)
       } catch (err) {
+        decide({ status: "failed" })
         await appendAudit({
           adapterId: event.adapterId,
           kind: "callback.handler_failed",
@@ -3204,13 +3328,17 @@ export class ConnectorBus {
     }
 
     // ── Step 4b: Hand off to the bridge ──────────────────────────────
-    if (!this.callbackHandler) return true
+    if (!this.callbackHandler) {
+      decide({ status: "failed" })
+      return true
+    }
     const projected: ConnectorCallbackEvent = {
       ...event,
       surfaceId: resolvedSurfaceId,
       componentId: resolvedComponentId,
       conversationKey: resolvedConversationKey ?? undefined,
     }
+    decide({ status: "accepted", kind: resolvedBinding?.kind ?? "generic", action: event.value })
     try {
       await this.callbackHandler(projected, resolvedConversationKey)
     } catch (err) {

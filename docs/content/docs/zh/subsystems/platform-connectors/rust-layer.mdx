@@ -51,6 +51,7 @@ pub fn build_unresolved_router() -> Router<ConnectorsState> {
 ```
 
 `webhook_handler`（`axum_app.rs:103`）从 `ConnectorsState` 解析 adapter 的**已注册**类型，把 WeChat-OA 分流到它专属的 `wechat_oa_handler`（`axum_app.rs:178`——GET `echostr` 握手 + POST `msg_signature` + AES 解密），其余则调用纯函数 `verify_webhook`（`axum_app.rs:261`）。`Ok` 时发出报文体并返回 `200`；`Err` 时返回验证器的状态（`axum_app.rs:138-144`）。
+已通过验证的飞书卡片回调携带 `_cognia_callback_id`，最多等待 2,500 ms，由 `connectors_lark_callback_respond` 提供的 JSON 直接作为 HTTP 响应体，超时则返回 `{}`。其他 webhook 事件仍返回 `{ "ok": true }`，URL 验证仍返回 challenge。
 
 防伪造的关键在于丢弃 URL 的 `{adapter_type}` 段——验证完全按 adapter 注册时的类型分发：
 
@@ -78,7 +79,9 @@ flowchart TD
   SV -->|"Ok"| PARSE["parse body to JSON<br/>(Lark: decrypt first)"]
   PARSE --> EMIT["emit_webhook"]
   EMIT --> CH["connectors://webhook/id"]
-  EMIT --> OK["200 ok:true"]
+  EMIT -->|"Lark card callback"| WAIT["await callback reply, max 2500 ms"]
+  WAIT --> REPLY["200 callback JSON or {}"]
+  EMIT -->|"other events"| OK["200 ok:true"]
   WOA --> EMIT
 ```
 
@@ -248,7 +251,7 @@ sequenceDiagram
 pub struct Header {
 ```
 
-`open`（`lark_ws.rs:272`）从 keyring 读取 `appId` / `appSecret`，并启动一个带指数退避（`1000 * 2^attempts`，上限 32 s）的自重连循环。`connect_and_run`（`lark_ws.rs:329`）向 endpoint POST `{AppID,AppSecret}`，收到 `{URL,ClientConfig}`，逐字拨号该 URL，运行 keepalive ping（默认 120 s），并对每个二进制消息做 `Frame::decode`。`handle_frame`（`lark_ws.rs:444`）按 `message_id`/`sum`/`seq` 重组分块报文、解压 gzip，在 `connectors://lark-ws/<id>/event` 上发出完整的 `event`/`card` 信封，并以 `build_ack` 构造的 `200` Response 对每个数据帧确认：
+`open`（`lark_ws.rs:272`）从 keyring 读取 `appId` / `appSecret`，并启动一个带指数退避（`1000 * 2^attempts`，上限 32 s）的自重连循环。`connect_and_run`（`lark_ws.rs:329`）向 endpoint POST `{AppID,AppSecret}`，收到 `{URL,ClientConfig}`，逐字拨号该 URL，运行 keepalive ping（默认 120 s），并对每个二进制消息做 `Frame::decode`。`handle_frame`（`lark_ws.rs:444`）按 `message_id`/`sum`/`seq` 重组分块报文、解压 gzip，在 `connectors://lark-ws/<id>/event` 上发出完整的 `event`/`card` 信封，并以 `build_ack` 构造的 `200` Response 立即确认非卡片回调的数据帧：
 
 ```rust
 // src-tauri/src/connectors/lark_ws.rs:137-140
@@ -257,6 +260,8 @@ fn build_ack(mut frame: Frame, biz_rt_ms: i64) -> Frame {
     let resp = serde_json::json!({ "code": 200, "headers": {}, "data": null });
     frame.payload = serde_json::to_vec(&resp).unwrap_or_default();
 ```
+
+卡片回调使用 `crates/cognia-connectors/src/lark_callback_reply.rs` 中有容量上限的进程级注册表。Rust 在发出的 JSON 字符串中注入 `_cognia_callback_id`；TypeScript 移除该传输字段，并经 `connectorsLarkCallbackRespond` 回复。独立任务最多等待 2,500 ms，再通过现有出站 pump 发送带 `biz_rt` 头的确认帧，`data` 是回调 JSON 的 base64 编码（超时为 `{}`）。等待期间读取循环继续处理其他帧。回调响应携带双语 toast，卡片本身仍由后续 PATCH/CardKit 路径完成更新。
 
 ## OS Keyring
 
@@ -307,6 +312,7 @@ fn build_ack(mut frame: Frame, biz_rt_ms: i64) -> Frame {
 | `commands.rs:170` | `connectors_ws_close` | `connectorsWsClose` |
 | `commands.rs:182` | `connectors_lark_ws_open` | `connectorsLarkWsOpen` |
 | `commands.rs:190` | `connectors_lark_ws_close` | `connectorsLarkWsClose` |
+| `commands.rs` | `connectors_lark_callback_respond` | `connectorsLarkCallbackRespond` |
 | `commands.rs:222` | `connectors_onebot_probe` | `connectorsOnebotProbe` |
 | `commands.rs:199` | `connectors_attachment_fetch` | `connectorsAttachmentFetch` |
 | `commands.rs:241` | `connectors_media_upload` | `connectorsMediaUpload` |

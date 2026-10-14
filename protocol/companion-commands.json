@@ -6003,6 +6003,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "connectors_lark_callback_respond",
+      "resource": "connector.lark.callback",
+      "verb": "respond",
+      "arm": "connectors_lark_callback_respond",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "connectors_lark_ws_close",
       "resource": "connector.lark.ws",
       "verb": "close",

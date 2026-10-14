@@ -16,6 +16,11 @@ import { settleApprovalCard } from "./approval-card-state"
  * promise via `bus.dispatchConnectorCallback`'s `tool_approve` short-circuit.
  */
 
+import {
+  TOOL_APPROVE_PREFIX,
+  TOOL_DENY_PREFIX,
+  TOOL_ALLOW_SESSION_PREFIX,
+} from "@/lib/connectors/hitl/callback-prefixes"
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { ConversationDeliveryTarget, ConversationReference } from "@/types/connectors/event"
@@ -42,9 +47,11 @@ import {
 export const CONNECTOR_TURN_TIMEOUT_MS = 15 * 60 * 1000
 
 /** Action-id namespaces so the bus can route + the numeric mirror can map. */
-export const TOOL_APPROVE_PREFIX = "tapa:"
-export const TOOL_DENY_PREFIX = "tapd:"
-export const TOOL_ALLOW_SESSION_PREFIX = "taps:"
+export {
+  TOOL_APPROVE_PREFIX,
+  TOOL_DENY_PREFIX,
+  TOOL_ALLOW_SESSION_PREFIX,
+} from "@/lib/connectors/hitl/callback-prefixes"
 
 /** Decision encoded onto a `tool_approve` binding payload. */
 export type ToolApprovalDecision = "allow" | "deny" | "allow_session"

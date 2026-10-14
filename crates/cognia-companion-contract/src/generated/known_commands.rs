@@ -19,7 +19,7 @@ use super::{
 pub const CONTRACT_VERSION: u32 = 3;
 
 /// The sha256 of the Headless command catalog rendered from this contract.
-pub const CATALOG_HASH: &str = "a7700b1e04087b63edbf7ecc9a658ec3cdfad6ee3f3ff2f339168157e11ad1c3";
+pub const CATALOG_HASH: &str = "0d4d7d586a971daf7e3c997efe308754920bd9426154edf9c2f30cd00d93af2f";
 
 /// Every command in the contract, in contract order.
 #[rustfmt::skip]
@@ -377,6 +377,7 @@ pub static WIRE_COMMANDS: &[WireCommand] = &[
     WireCommand { name: "host_provider_credentials_load", arm: "host_provider_credentials_load", resource: "host.secret.provider", verb: "load", target: CommandTarget::Service, operation: CommandOperation::Read, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::None, idempotency: CommandIdempotency::Structural, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "connectors_lark_upload_file", arm: "connectors_lark_upload_file", resource: "connector.lark.file", verb: "upload", target: CommandTarget::Service, operation: CommandOperation::Write, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "connectors_lark_upload_image", arm: "connectors_lark_upload_image", resource: "connector.lark.image", verb: "upload", target: CommandTarget::Service, operation: CommandOperation::Write, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
+    WireCommand { name: "connectors_lark_callback_respond", arm: "connectors_lark_callback_respond", resource: "connector.lark.callback", verb: "respond", target: CommandTarget::Service, operation: CommandOperation::SideEffect, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "connectors_lark_ws_close", arm: "connectors_lark_ws_close", resource: "connector.lark.ws", verb: "close", target: CommandTarget::Service, operation: CommandOperation::SideEffect, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "connectors_lark_ws_open", arm: "connectors_lark_ws_open", resource: "connector.lark.ws", verb: "open", target: CommandTarget::Service, operation: CommandOperation::SideEffect, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "connectors_list_adapters", arm: "connectors_list_adapters", resource: "connector.adapter", verb: "list", target: CommandTarget::Service, operation: CommandOperation::Read, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Structural, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::PageToken, long_running: false },
@@ -1965,6 +1966,7 @@ pub static RENAMED_COMMANDS: &[(&str, &str)] = &[
     ("connectors_keyring_get", "connector.keyring.get"),
     ("connectors_keyring_list", "connector.keyring.list"),
     ("connectors_keyring_set", "connector.keyring.set"),
+    ("connectors_lark_callback_respond", "connector.lark.callback.respond"),
     ("connectors_lark_upload_file", "connector.lark.file.upload"),
     ("connectors_lark_upload_image", "connector.lark.image.upload"),
     ("connectors_lark_ws_close", "connector.lark.ws.close"),

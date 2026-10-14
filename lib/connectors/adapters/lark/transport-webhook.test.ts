@@ -89,7 +89,7 @@ describe("startLarkWebhookTransport", () => {
         adapterId: "lark-2",
         signal: ctrl.signal,
       })) {
-        collected.push(env.event.message!.message_id)
+        collected.push(env.envelope.event.message!.message_id)
         if (collected.length >= 2) {
           ctrl.abort()
           break
@@ -108,6 +108,25 @@ describe("startLarkWebhookTransport", () => {
     expect(collected).toEqual(["om_001", "om_002"])
   })
 
+  it("strips callback ids from webhook envelopes without mutating the payload", async () => {
+    const ctrl = new AbortController()
+    let listener!: (event: { payload: unknown }) => void
+    mockListen.mockImplementation(async (_eventName, fn) => {
+      listener = fn
+      return jest.fn()
+    })
+    const gen = startLarkWebhookTransport({ adapterId: "lark-2", signal: ctrl.signal })
+    const next = gen.next()
+    await Promise.resolve()
+    const envelope = makeEnvelope("om_callback")
+    const payload = { ...envelope, _cognia_callback_id: "reply-2" }
+    listener({ payload })
+    expect(await next).toEqual({ done: false, value: { envelope, callbackId: "reply-2" } })
+    expect(payload._cognia_callback_id).toBe("reply-2")
+    ctrl.abort()
+    await gen.return(undefined)
+  })
+
   it("stops cleanly when signal is aborted", async () => {
     const ctrl = new AbortController()
     const unlistenMock = jest.fn()
@@ -120,7 +139,7 @@ describe("startLarkWebhookTransport", () => {
         adapterId: "lark-3",
         signal: ctrl.signal,
       })) {
-        results.push(env.event.message!.message_id)
+        results.push(env.envelope.event.message!.message_id)
       }
       return results
     })()

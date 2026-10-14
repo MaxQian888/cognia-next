@@ -1,4 +1,4 @@
-import { parseDiscordDispatch } from "./parse"
+import { parseDiscordDispatch, parseDiscordInteraction } from "./parse"
 import type { DiscordDispatch } from "./parse"
 
 import dmTextFixture from "./fixtures/dm-text.json"
@@ -479,4 +479,24 @@ describe("parseDiscordDispatch", () => {
       expect(roleSegments).toHaveLength(0)
     })
   })
+})
+
+it.each([
+  ["tapa:request", "approve"],
+  ["tapd:request", "cancel"],
+  ["wffanoutcan:request", "cancel"],
+])("keeps the %s trigger identity and recovers its approval verb", (customId, value) => {
+  expect(
+    parseDiscordInteraction("adapter", "bot", {
+      t: "INTERACTION_CREATE",
+      op: 0,
+      d: {
+        id: "click",
+        type: 3,
+        channel_id: "chat",
+        user: { id: "user", username: "User" },
+        data: { component_type: 2, custom_id: customId },
+      },
+    })
+  ).toMatchObject({ triggerId: customId, value })
 })

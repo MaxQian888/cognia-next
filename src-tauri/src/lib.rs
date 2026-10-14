@@ -1401,6 +1401,7 @@ pub fn run() {
             connectors::commands::connectors_onebot_send,
             connectors::commands::connectors_lark_ws_open,
             connectors::commands::connectors_lark_ws_close,
+            connectors::commands::connectors_lark_callback_respond,
             connectors::commands::connectors_reset_all_ws,
             connectors::commands::connectors_attachment_fetch,
             connectors::commands::connectors_attachment_read,
@@ -1963,6 +1964,12 @@ mod tests {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
         assert!(source.contains("shutdown::handle_run_event"));
         assert!(!source.contains("block_on(process_registry::teardown"));
+    }
+
+    #[test]
+    fn lark_callback_reply_is_registered_for_desktop_invocation() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(source.contains("connectors::commands::connectors_lark_callback_respond,"));
     }
 
     #[test]

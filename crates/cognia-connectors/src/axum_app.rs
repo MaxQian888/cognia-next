@@ -442,12 +442,18 @@ async fn webhook_handler(
     }
 
     match verify_webhook(&state, &adapter_id, &headers, &body).await {
-        Ok(payload) => {
+        Ok(mut payload) => {
             // Lark's URL-verification handshake requires the challenge echoed
             // in the response body — without it the console URL save fails.
             // A handshake carries no event, so it is not emitted.
             if let Some(resp) = url_verification_challenge_response(&payload) {
                 return resp;
+            }
+            if adapter_type == "lark" && super::lark_callback_reply::is_card_callback(&payload) {
+                let (callback_id, reply) = super::lark_callback_reply::register();
+                payload[super::lark_callback_reply::CALLBACK_ID_FIELD] = callback_id.into();
+                emitter.emit_webhook(&adapter_id, &payload);
+                return Json(reply.receive().await).into_response();
             }
             emitter.emit_webhook(&adapter_id, &payload);
             ok_response()
@@ -2380,6 +2386,148 @@ mod tests {
         assert_eq!(body_string(resp).await, r#"{"ok":true}"#);
         assert_eq!(emitter.events.lock().len(), 1);
 
+        super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
+    }
+
+    struct LarkReplyEmitter {
+        events: Mutex<Vec<(String, serde_json::Value)>>,
+        response: serde_json::Value,
+    }
+
+    impl EventEmitter for LarkReplyEmitter {
+        fn emit(&self, topic: &str, payload: serde_json::Value) {
+            let id = payload[super::super::lark_callback_reply::CALLBACK_ID_FIELD]
+                .as_str()
+                .expect("card callback carries reply id");
+            assert!(super::super::lark_callback_reply::respond(
+                id,
+                self.response.clone()
+            ));
+            self.events.lock().push((topic.to_string(), payload));
+        }
+    }
+
+    #[tokio::test]
+    async fn lark_card_callback_returns_renderer_reply_in_http_body() {
+        let adapter_id = "lark-card-reply-http";
+        super::super::keyring::set(adapter_id, "verificationToken", "vtok-card").unwrap();
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "lark");
+        let response = serde_json::json!({"toast": {"type": "success", "content": "Approved"}});
+        let emitter = Arc::new(LarkReplyEmitter {
+            events: Mutex::new(Vec::new()),
+            response: response.clone(),
+        });
+        let app = build_router(state, emitter.clone());
+        for event_type in [
+            "card.action.trigger",
+            "im.interactive_message.action_triggered_v1",
+        ] {
+            let body = serde_json::json!({
+                "header": {"token": "vtok-card", "event_type": event_type},
+                "event": {"action": {"value": "approve"}}
+            })
+            .to_string()
+            .into_bytes();
+            let resp = post_webhook(
+                app.clone(),
+                &format!("/webhook/lark/{adapter_id}"),
+                vec![],
+                body,
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&body_string(resp).await).unwrap(),
+                response
+            );
+        }
+        let events = emitter.events.lock();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, format!("connectors://webhook/{adapter_id}"));
+        assert_eq!(events[0].1["event"]["action"]["value"], "approve");
+        super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
+    }
+
+    #[tokio::test]
+    async fn lark_encrypted_card_callback_returns_reply_after_verification() {
+        use aes::cipher::{block_padding::Pkcs7, BlockModeEncrypt, KeyIvInit};
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        use sha2::{Digest, Sha256};
+        let adapter_id = "lark-encrypted-card-http";
+        super::super::keyring::set(adapter_id, "verificationToken", "vtok-card").unwrap();
+        super::super::keyring::set(adapter_id, "encryptKey", "the-encrypt-key").unwrap();
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "lark");
+        let response = serde_json::json!({"toast": {"type": "info", "content": "Received"}});
+        let emitter = Arc::new(LarkReplyEmitter {
+            events: Mutex::new(Vec::new()),
+            response: response.clone(),
+        });
+        let app = build_router(state, emitter.clone());
+        let plaintext = br#"{"header":{"token":"vtok-card","event_type":"card.action.trigger"},"event":{"action":{"value":"approve"}}}"#;
+        let key: [u8; 32] = Sha256::digest(b"the-encrypt-key").into();
+        let iv = [9u8; 16];
+        let ciphertext = cbc::Encryptor::<aes::Aes256>::new(&key.into(), &iv.into())
+            .encrypt_padded_vec::<Pkcs7>(plaintext);
+        let mut combined = iv.to_vec();
+        combined.extend_from_slice(&ciphertext);
+        let body = serde_json::json!({"encrypt": BASE64.encode(combined)}).to_string();
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhook/lark/{adapter_id}"));
+        *request.headers_mut().unwrap() = lark_signature_headers(body.as_bytes());
+        let resp = app
+            .oneshot(request.body(Body::from(body)).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body_string(resp).await).unwrap(),
+            response
+        );
+        assert_eq!(
+            emitter.events.lock()[0].1["event"]["action"]["value"],
+            "approve"
+        );
+        super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
+        super::super::keyring::delete(adapter_id, "encryptKey").unwrap();
+    }
+
+    #[tokio::test]
+    async fn lark_card_callback_timeout_returns_empty_http_object() {
+        let adapter_id = "lark-card-timeout-http";
+        super::super::keyring::set(adapter_id, "verificationToken", "vtok-card").unwrap();
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "lark");
+        let (app, emitter) = test_router_with(state);
+        let body =
+            br#"{"header":{"token":"vtok-card","event_type":"card.action.trigger"}}"#.to_vec();
+        let resp = post_webhook(app, &format!("/webhook/lark/{adapter_id}"), vec![], body).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, "{}");
+        let events = emitter.events.lock();
+        let id = events[0].1[super::super::lark_callback_reply::CALLBACK_ID_FIELD]
+            .as_str()
+            .unwrap();
+        assert!(!super::super::lark_callback_reply::respond(
+            id,
+            serde_json::json!({})
+        ));
+        super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
+    }
+
+    #[tokio::test]
+    async fn lark_card_callback_with_bad_token_does_not_emit() {
+        let adapter_id = "lark-card-denied-http";
+        super::super::keyring::set(adapter_id, "verificationToken", "expected").unwrap();
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "lark");
+        let (app, emitter) = test_router_with(state);
+        let body = br#"{"header":{"token":"wrong","event_type":"card.action.trigger"}}"#.to_vec();
+        let resp = post_webhook(app, &format!("/webhook/lark/{adapter_id}"), vec![], body).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(emitter.events.lock().is_empty());
         super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
     }
 

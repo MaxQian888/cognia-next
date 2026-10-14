@@ -13,14 +13,14 @@
  * the outer loop here only re-opens if Rust signals a terminal `/close` while
  * we haven't been aborted.
  *
- * Returns AsyncGenerator<LarkEventEnvelope> — same shape the adapter expects.
+ * Yields envelopes with reply correlation kept separately from platform data.
  */
 
 import { connectorListen, type ConnectorUnlistenFn } from "@/lib/connectors/events"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import { connectorsLarkWsOpen, connectorsLarkWsClose } from "@/lib/connectors/tauri/commands"
 import { loggers } from "@cognia/logging"
-import type { LarkEventEnvelope } from "./parse"
+import { unpackLarkTransportEvent, type LarkEventEnvelope, type LarkTransportEvent } from "./parse"
 
 export interface LarkLongConnOptions {
   /** Adapter id — Rust reads appId/appSecret from the keyring to handshake. */
@@ -52,7 +52,7 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
  */
 export async function* startLarkLongConn(
   opts: LarkLongConnOptions
-): AsyncGenerator<LarkEventEnvelope> {
+): AsyncGenerator<LarkTransportEvent> {
   const backoffBaseMs = opts._backoffBaseMs ?? 1000
   let attempts = 0
 
@@ -91,7 +91,7 @@ export async function* startLarkLongConn(
     }
 
     // Queue + wake pattern over the event/close Tauri channels.
-    const queue: LarkEventEnvelope[] = []
+    const queue: LarkTransportEvent[] = []
     let wakeResolve: (() => void) | null = null
     let ended = false
 
@@ -116,7 +116,7 @@ export async function* startLarkLongConn(
         `connectors://lark-ws/${handleId}/event`,
         (event) => {
           try {
-            queue.push(JSON.parse(event.payload) as LarkEventEnvelope)
+            queue.push(unpackLarkTransportEvent(JSON.parse(event.payload) as LarkEventEnvelope))
           } catch {
             return
           }

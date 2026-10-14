@@ -20,10 +20,10 @@
  * `recordCallbackBinding` calls.
  */
 
+import { WF_APPROVE_PREFIX, WF_CANCEL_PREFIX } from "@/lib/connectors/hitl/callback-prefixes"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 
-export const WF_APPROVE_PREFIX = "wfapp:"
-export const WF_CANCEL_PREFIX = "wfcan:"
+export { WF_APPROVE_PREFIX, WF_CANCEL_PREFIX } from "@/lib/connectors/hitl/callback-prefixes"
 
 export interface ApprovalSurfaceInput {
   /** Stable id for the binding pair — used in both Approve + Cancel action ids. */

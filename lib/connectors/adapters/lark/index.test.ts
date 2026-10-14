@@ -7,6 +7,14 @@ import { listen } from "@tauri-apps/api/event"
 import { createLarkAdapter } from "./index"
 import { normalizeLarkCardPresentation } from "./card-presentation"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
+import type { ConnectorCallbackDecision } from "@/types/connectors/interaction"
+
+import dmTextFixture from "./fixtures/dm-text.json"
+
+jest.mock("@/lib/connectors/bus", () => ({
+  getBus: () => ({ dispatchConnectorCallback: mockDispatchCallback }),
+}))
+const mockDispatchCallback = jest.fn()
 
 const mockInvoke = invoke as jest.Mock
 const mockListen = listen as jest.Mock
@@ -214,6 +222,7 @@ describe("createLarkAdapter", () => {
     expect(JSON.parse(JSON.parse(create.body!).data).header.template).toBe("purple")
   })
   beforeEach(() => {
+    mockDispatchCallback.mockReset().mockResolvedValue("terminal")
     mockInvoke.mockReset()
     mockListen.mockReset()
     mockEnrich.mockClear()
@@ -531,6 +540,245 @@ describe("createLarkAdapter", () => {
     expect(unparsed(warn)).toEqual(["im.something.new_v1"])
     warn.mockRestore()
     debug.mockRestore()
+  })
+
+  it("dispatches later clicks and messages while an earlier callback is pending, and logs outcomes", async () => {
+    const session = createFakeLongConnSession()
+    mockListen.mockImplementation(session.listenImpl)
+    let finish!: (outcome: "terminal") => void
+    mockDispatchCallback.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    mockDispatchCallback.mockResolvedValueOnce("retry")
+    const { loggers } = await import("@cognia/logging")
+    const info = jest.spyOn(loggers.network, "info").mockImplementation(() => {})
+    const adapter = makeAdapter()
+    const { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    await session.waitForListeners()
+    try {
+      for (const triggerId of ["first", "second"]) {
+        session.push({
+          schema: "2.0",
+          header: { event_type: "card.action.trigger", event_id: triggerId },
+          event: {
+            operator: { open_id: "user" },
+            action: { tag: "button", value: { actionId: triggerId, action: "approve" } },
+          },
+        })
+      }
+      session.push(dmTextFixture)
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      expect(mockDispatchCallback).toHaveBeenCalledTimes(2)
+      expect(emitted).toHaveLength(1)
+      expect(info).toHaveBeenCalledWith("[lark] callback dispatched", {
+        adapterId: "lark-1",
+        triggerId: "second",
+        outcome: "retry",
+      })
+      finish("terminal")
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(info).toHaveBeenCalledWith("[lark] callback dispatched", {
+        adapterId: "lark-1",
+        triggerId: "first",
+        outcome: "terminal",
+      })
+    } finally {
+      finish?.("terminal")
+      await adapter.stop()
+      info.mockRestore()
+    }
+  })
+
+  describe.each(["webhook", "long-connection"] as const)("%s callback replies", (transport) => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    async function startCallbackHarness() {
+      let push!: (envelope: unknown) => void
+      if (transport === "long-connection") {
+        const session = createFakeLongConnSession()
+        mockListen.mockImplementation(session.listenImpl)
+        push = session.push
+      } else {
+        mockListen.mockImplementation(async (_name, listener) => {
+          push = (envelope) => listener({ payload: envelope })
+          return jest.fn()
+        })
+      }
+      const adapter = makeAdapter(transport)
+      await adapter.start(makeCtx().ctx)
+      await jest.advanceTimersByTimeAsync(0)
+      return {
+        adapter,
+        click(callbackId: string | undefined = "reply-1", event?: unknown) {
+          push({
+            schema: "2.0",
+            header: { event_type: "card.action.trigger", event_id: "click-1" },
+            _cognia_callback_id: callbackId,
+            event: event ?? {
+              operator: { open_id: "user", locale: "en_us" },
+              action: { tag: "button", value: { actionId: "approve-tool", action: "approve" } },
+            },
+          })
+        },
+        replies: () =>
+          mockInvoke.mock.calls.filter(([cmd]) => cmd === "connectors_lark_callback_respond"),
+      }
+    }
+
+    it("responds once to the decision before the long handler finishes", async () => {
+      let finish!: (outcome: string) => void
+      mockDispatchCallback.mockImplementation((_event, { onDecision }) => {
+        onDecision({ status: "accepted", kind: "tool_approve", decision: "allow" })
+        onDecision({ status: "failed" })
+        return new Promise((resolve) => {
+          finish = resolve
+        })
+      })
+      const harness = await startCallbackHarness()
+      try {
+        harness.click()
+        await jest.advanceTimersByTimeAsync(0)
+        expect(harness.replies()).toEqual([
+          [
+            "connectors_lark_callback_respond",
+            {
+              callbackId: "reply-1",
+              response: {
+                toast: {
+                  type: "success",
+                  content: "Approved",
+                  i18n: { zh_cn: "已允许", en_us: "Approved" },
+                },
+              },
+            },
+          ],
+        ])
+        expect(mockDispatchCallback.mock.calls[0][0].raw).not.toHaveProperty("_cognia_callback_id")
+        await jest.advanceTimersByTimeAsync(2_500)
+        expect(harness.replies()).toHaveLength(1)
+      } finally {
+        finish?.("terminal")
+        await harness.adapter.stop()
+      }
+    })
+
+    it("releases Rust after 2200ms and ignores late decisions", async () => {
+      let decide!: (decision: ConnectorCallbackDecision) => void
+      let finish!: (outcome: string) => void
+      mockDispatchCallback.mockImplementation((_event, { onDecision }) => {
+        decide = onDecision
+        return new Promise((resolve) => {
+          finish = resolve
+        })
+      })
+      const harness = await startCallbackHarness()
+      try {
+        harness.click()
+        await jest.advanceTimersByTimeAsync(2_199)
+        expect(harness.replies()).toHaveLength(0)
+        await jest.advanceTimersByTimeAsync(1)
+        expect(harness.replies()).toEqual([
+          [
+            "connectors_lark_callback_respond",
+            {
+              callbackId: "reply-1",
+              response: {},
+            },
+          ],
+        ])
+        decide({ status: "accepted", kind: "generic" })
+        finish("terminal")
+        await jest.advanceTimersByTimeAsync(1_000)
+        expect(harness.replies()).toHaveLength(1)
+      } finally {
+        finish?.("terminal")
+        await harness.adapter.stop()
+      }
+    })
+
+    it("does not invoke the response command without a callback id", async () => {
+      mockDispatchCallback.mockImplementation(async (_event, { onDecision }) => {
+        onDecision({ status: "accepted", kind: "generic" })
+        return "terminal"
+      })
+      const harness = await startCallbackHarness()
+      try {
+        harness.click("")
+        await jest.advanceTimersByTimeAsync(3_000)
+        expect(mockDispatchCallback).toHaveBeenCalledTimes(1)
+        expect(harness.replies()).toHaveLength(0)
+      } finally {
+        await harness.adapter.stop()
+      }
+    })
+
+    it.each(["dispatch rejection", "invalid callback"])(
+      "answers %s with one failure toast",
+      async (mode) => {
+        mockDispatchCallback.mockRejectedValue(new Error("routing failed"))
+        const harness = await startCallbackHarness()
+        try {
+          harness.click("reply-1", mode === "invalid callback" ? {} : undefined)
+          await jest.advanceTimersByTimeAsync(3_000)
+          expect(harness.replies()).toHaveLength(1)
+          expect(harness.replies()[0][1]).toMatchObject({
+            callbackId: "reply-1",
+            response: { toast: { type: "error" } },
+          })
+        } finally {
+          await harness.adapter.stop()
+        }
+      }
+    )
+  })
+
+  it("logs dispatch failures and malformed callback reasons without logging their payloads", async () => {
+    const session = createFakeLongConnSession()
+    mockListen.mockImplementation(session.listenImpl)
+    mockDispatchCallback.mockRejectedValueOnce(new Error("dispatch failed"))
+    const { loggers } = await import("@cognia/logging")
+    const warn = jest.spyOn(loggers.network, "warn").mockImplementation(() => {})
+    const adapter = makeAdapter()
+    await adapter.start(makeCtx().ctx)
+    await session.waitForListeners()
+    try {
+      const events = [
+        {},
+        { action: { tag: "button" } },
+        { operator: { open_id: "user" }, action: { tag: "button", value: { actionId: "" } } },
+        { operator: { open_id: "user" }, action: { tag: "button", value: { actionId: "valid" } } },
+      ]
+      for (const [index, event] of events.entries())
+        session.push({
+          schema: "2.0",
+          header: { event_type: "card.action.trigger", event_id: String(index) },
+          event: { ...event, privateText: "must not be logged" },
+        })
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      expect(
+        warn.mock.calls
+          .filter(([message]) => message === "[lark] invalid interactive callback")
+          .map(([, fields]) => fields)
+      ).toEqual([
+        { adapterId: "lark-1", eventId: "0", reason: "missing_action" },
+        { adapterId: "lark-1", eventId: "1", reason: "missing_operator" },
+        { adapterId: "lark-1", eventId: "2", reason: "missing_trigger_id" },
+      ])
+      expect(warn).toHaveBeenCalledWith("[lark] callback dispatch failed", {
+        adapterId: "lark-1",
+        triggerId: "valid",
+        error: "dispatch failed",
+      })
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("must not be logged")
+    } finally {
+      await adapter.stop()
+      warn.mockRestore()
+    }
   })
 
   it("start() is idempotent (second call is no-op)", async () => {

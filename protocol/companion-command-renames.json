@@ -1024,6 +1024,9 @@
     "connectors_lark_upload_image": {
       "to": "connector.lark.image.upload"
     },
+    "connectors_lark_callback_respond": {
+      "to": "connector.lark.callback.respond"
+    },
     "connectors_lark_ws_close": {
       "to": "connector.lark.ws.close"
     },

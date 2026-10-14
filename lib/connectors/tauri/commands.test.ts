@@ -29,6 +29,7 @@ import {
   connectorsWsSend,
   connectorsWsClose,
   connectorsResetAllWs,
+  connectorsLarkCallbackRespond,
   connectorsRuntimeLeaseAcquire,
   connectorsRuntimeLeaseRenew,
   connectorsRuntimeLeaseRelease,
@@ -331,6 +332,33 @@ describe("connectorsResetAllWs", () => {
     const reaped = await connectorsResetAllWs()
     expect(mockInvoke).toHaveBeenCalledWith("connectors_reset_all_ws")
     expect(reaped).toBe(3)
+  })
+})
+
+describe("connectorsLarkCallbackRespond", () => {
+  it.each([true, false])("returns %s from the pending reply registry", async (delivered) => {
+    mockInvoke.mockResolvedValueOnce(delivered)
+    const response = { toast: { type: "success", content: "Approved" } }
+    await expect(connectorsLarkCallbackRespond("callback-1", response)).resolves.toBe(delivered)
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_lark_callback_respond", {
+      callbackId: "callback-1",
+      response,
+    })
+  })
+
+  it("uses the swappable invoker for headless hosts", async () => {
+    const custom = jest.fn().mockResolvedValue(true)
+    const previous = setConnectorCommandInvoker(custom)
+    try {
+      await expect(connectorsLarkCallbackRespond("callback-2", {})).resolves.toBe(true)
+      expect(custom).toHaveBeenCalledWith("connectors_lark_callback_respond", {
+        callbackId: "callback-2",
+        response: {},
+      })
+      expect(mockInvoke).not.toHaveBeenCalled()
+    } finally {
+      setConnectorCommandInvoker(previous)
+    }
   })
 })
 

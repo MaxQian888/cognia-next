@@ -17,6 +17,7 @@
  * locations (carried in embeds rather than a top-level field).
  */
 
+import { namespacedCallbackAction } from "@/lib/connectors/hitl/callback-prefixes"
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -499,7 +500,7 @@ export function parseDiscordInteraction(
     }
   } else {
     actionType = "button"
-    value = data.custom_id ?? ""
+    value = namespacedCallbackAction(data.custom_id) ?? data.custom_id ?? ""
   }
 
   // Telegram-style: prefer the custom_id as the trigger key so the bus

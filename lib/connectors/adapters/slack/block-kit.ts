@@ -13,6 +13,7 @@
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import {
   buildActionId,
+  resolveButtonWireAction,
   recordCallbackBinding,
   walkA2UISurface,
   type A2UIWalkNode,
@@ -320,15 +321,16 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
       case "Button": {
         const label = stringValue(node.raw.text) || stringValue(node.raw.action) || "Button"
         const action = stringValue(node.raw.action) || node.id
-        const fullId = buildActionId(input.surfaceId, node.id, action)
-        await recordCallbackBinding({
-          adapterId: input.adapterId,
-          actionId: fullId,
-          surfaceId: input.surfaceId,
-          componentId: node.id,
-          conversationKey: input.conversationKey,
-          ...bindingHintFields(node.raw),
-        })
+        const { actionId: fullId, recordBinding } = resolveButtonWireAction(input.surfaceId, node)
+        if (recordBinding)
+          await recordCallbackBinding({
+            adapterId: input.adapterId,
+            actionId: fullId,
+            surfaceId: input.surfaceId,
+            componentId: node.id,
+            conversationKey: input.conversationKey,
+            ...bindingHintFields(node.raw),
+          })
         const variant = stringValue(node.raw.variant)
         const style =
           variant === "primary" ? "primary" : variant === "destructive" ? "danger" : undefined

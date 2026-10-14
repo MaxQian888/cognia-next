@@ -53,3 +53,11 @@ describe("buildApprovalSurface", () => {
     expect(approve.value).not.toBe(cancel.value)
   })
 })
+
+it("keeps existing prefix exports compatible with the shared registry", async () => {
+  const registry = await import("@/lib/connectors/hitl/callback-prefixes")
+  expect([WF_APPROVE_PREFIX, WF_CANCEL_PREFIX]).toEqual([
+    registry.WF_APPROVE_PREFIX,
+    registry.WF_CANCEL_PREFIX,
+  ])
+})

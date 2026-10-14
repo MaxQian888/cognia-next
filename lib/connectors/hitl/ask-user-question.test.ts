@@ -339,6 +339,38 @@ describe("applyAskUserCallback", () => {
     })
   })
 
+  it("signals onToggleApplied only for a stored toggle, before the repaint", async () => {
+    const d = deps()
+    const order: string[] = []
+    d.enqueue.mockImplementation(async () => {
+      order.push("repaint")
+      return { id: "job-1" } as never
+    })
+    void awaitAskUser("sess-1", "use-1", { meta: meta() })
+    const onToggleApplied = jest.fn(() => order.push("applied"))
+    await applyAskUserCallback({
+      event: event(),
+      binding: binding({ op: "toggle", value: "red" }),
+      deps: d,
+      onToggleApplied,
+    })
+    expect(order).toEqual(["applied", "repaint"])
+    await applyAskUserCallback({
+      event: event(),
+      binding: binding({ op: "toggle", value: "not-an-option" }),
+      deps: d,
+      onToggleApplied,
+    })
+    __resetAskUserRegistryForTesting()
+    await applyAskUserCallback({
+      event: event(),
+      binding: binding({ op: "toggle", value: "red" }),
+      deps: d,
+      onToggleApplied,
+    })
+    expect(onToggleApplied).toHaveBeenCalledTimes(1)
+  })
+
   it("submit_text resolves with text plus already-toggled selections", async () => {
     const p = awaitAskUser("sess-1", "use-1", { meta: meta() })
     await applyAskUserCallback({

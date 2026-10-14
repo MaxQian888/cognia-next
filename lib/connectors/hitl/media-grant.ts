@@ -27,6 +27,11 @@
  * chat that sends photos all day is not carpeted with consent prompts.
  */
 
+import {
+  MEDIA_GRANT_SESSION_PREFIX,
+  MEDIA_GRANT_ALWAYS_PREFIX,
+  MEDIA_GRANT_DENY_PREFIX,
+} from "@/lib/connectors/hitl/callback-prefixes"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import type { ConversationDeliveryTarget, ConversationReference } from "@/types/connectors/event"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
@@ -38,9 +43,11 @@ import { updateConversationConfigSection } from "@/lib/db/conversation-overrides
 import type { MediaModelGrant } from "@/lib/connectors/media-model-gate"
 
 /** Action-id namespaces so the bus can route the press back to a decision. */
-export const MEDIA_GRANT_SESSION_PREFIX = "mgs:"
-export const MEDIA_GRANT_ALWAYS_PREFIX = "mga:"
-export const MEDIA_GRANT_DENY_PREFIX = "mgd:"
+export {
+  MEDIA_GRANT_SESSION_PREFIX,
+  MEDIA_GRANT_ALWAYS_PREFIX,
+  MEDIA_GRANT_DENY_PREFIX,
+} from "@/lib/connectors/hitl/callback-prefixes"
 
 export type MediaGrantDecision = "allow_24h" | "allow_always" | "deny"
 

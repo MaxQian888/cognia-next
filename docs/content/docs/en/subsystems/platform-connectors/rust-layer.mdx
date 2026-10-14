@@ -71,6 +71,9 @@ pub fn build_unresolved_router() -> Router<ConnectorsState> {
 branches WeChat-OA off to its bespoke `wechat_oa_handler` (`axum_app.rs:178` — GET `echostr` handshake + POST
 `msg_signature` + AES decrypt), and otherwise calls the pure `verify_webhook` (`axum_app.rs:261`). On `Ok` it
 emits the payload and returns `200`; on `Err` it returns the verifier's status (`axum_app.rs:138-144`).
+Verified Lark card callbacks carry `_cognia_callback_id` and wait up to 2,500 ms for
+`connectors_lark_callback_respond`; the response JSON becomes the HTTP body, falling back to `{}`.
+Other webhook events retain `{ "ok": true }`, and URL verification retains its challenge response.
 
 The anti-spoof guard is that the URL's `{adapter_type}` segment is discarded — verification dispatches purely on
 the type the adapter was registered with:
@@ -103,7 +106,9 @@ flowchart TD
   SV -->|"Ok"| PARSE["parse body to JSON<br/>(Lark: decrypt first)"]
   PARSE --> EMIT["emit_webhook"]
   EMIT --> CH["connectors://webhook/id"]
-  EMIT --> OK["200 ok:true"]
+  EMIT -->|"Lark card callback"| WAIT["await callback reply, max 2500 ms"]
+  WAIT --> REPLY["200 callback JSON or {}"]
+  EMIT -->|"other events"| OK["200 ok:true"]
   WOA --> EMIT
 ```
 
@@ -299,7 +304,8 @@ exponential backoff (`1000 * 2^attempts`, capped at 32 s). `connect_and_run` (`l
 `{AppID,AppSecret}` to the endpoint, receives `{URL,ClientConfig}`, dials the URL verbatim, runs a keepalive ping
 (default 120 s), and `Frame::decode`s each binary message. `handle_frame` (`lark_ws.rs:444`) reassembles chunked
 payloads by `message_id`/`sum`/`seq`, inflates gzip, emits complete `event`/`card` envelopes on
-`connectors://lark-ws/<id>/event`, and acks each data frame with a `200` Response built by `build_ack`:
+`connectors://lark-ws/<id>/event`, and immediately acks non-callback data frames with a `200` Response
+built by `build_ack`:
 
 ```rust
 // src-tauri/src/connectors/lark_ws.rs:137-140
@@ -308,6 +314,13 @@ fn build_ack(mut frame: Frame, biz_rt_ms: i64) -> Frame {
     let resp = serde_json::json!({ "code": 200, "headers": {}, "data": null });
     frame.payload = serde_json::to_vec(&resp).unwrap_or_default();
 ```
+
+Card callbacks use the bounded process-wide registry in `crates/cognia-connectors/src/lark_callback_reply.rs`.
+Rust injects `_cognia_callback_id` into the emitted JSON string; TypeScript strips this transport field and
+answers through `connectorsLarkCallbackRespond`. A separate task waits at most 2,500 ms, then sends the
+ack through the existing outbound pump with `data` containing base64-encoded callback JSON (or `{}` on
+timeout) and a `biz_rt` header. The read loop remains available while the callback is handled.
+The callback response carries a bilingual toast; existing PATCH/CardKit paths settle the card later.
 
 ## OS Keyring
 
@@ -375,6 +388,7 @@ wrappers in `lib/connectors/tauri/commands.ts`.
 | `commands.rs:170` | `connectors_ws_close` | `connectorsWsClose` |
 | `commands.rs:182` | `connectors_lark_ws_open` | `connectorsLarkWsOpen` |
 | `commands.rs:190` | `connectors_lark_ws_close` | `connectorsLarkWsClose` |
+| `commands.rs` | `connectors_lark_callback_respond` | `connectorsLarkCallbackRespond` |
 | `commands.rs:222` | `connectors_onebot_probe` | `connectorsOnebotProbe` |
 | `commands.rs:199` | `connectors_attachment_fetch` | `connectorsAttachmentFetch` |
 | `commands.rs:241` | `connectors_media_upload` | `connectorsMediaUpload` |

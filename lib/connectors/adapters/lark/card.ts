@@ -13,7 +13,7 @@
 
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import {
-  buildActionId,
+  resolveButtonWireAction,
   recordCallbackBinding,
   walkA2UISurface,
   type A2UIWalkNode,
@@ -277,19 +277,26 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
   const formName = (id: string) => JSON.stringify([input.surfaceId, id])
   const callback = async (node: A2UIWalkNode, extra: Record<string, unknown> = {}) => {
     const action = stringValue(node.raw.action) || node.id
-    const actionId = buildActionId(input.surfaceId, node.id, action)
-    await recordCallbackBinding({
-      adapterId: input.adapterId,
-      actionId,
-      surfaceId: input.surfaceId,
-      componentId: node.id,
-      conversationKey: input.conversationKey,
-      ...bindingHintFields(node.raw),
-    })
+    const { actionId, recordBinding } = resolveButtonWireAction(input.surfaceId, node)
+    if (recordBinding)
+      await recordCallbackBinding({
+        adapterId: input.adapterId,
+        actionId,
+        surfaceId: input.surfaceId,
+        componentId: node.id,
+        conversationKey: input.conversationKey,
+        ...bindingHintFields(node.raw),
+      })
     return [
       {
         type: "callback",
-        value: { actionId, surfaceId: input.surfaceId, componentId: node.id, ...extra },
+        value: {
+          actionId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          ...(node.component === "Button" ? { action } : {}),
+          ...extra,
+        },
       },
     ]
   }

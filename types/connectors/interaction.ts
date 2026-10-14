@@ -252,6 +252,17 @@ export type ConnectorCallbackBindingKind =
   // its Submit. See `lib/connectors/hitl/ask-user-question.ts`.
   | "ask_user"
 
+/** Routing admission reported before a callback starts long-running work. */
+export type ConnectorCallbackDecision =
+  | {
+      status: "accepted"
+      kind: ConnectorCallbackBindingKind | "run_control" | "generic"
+      action?: string
+      decision?: "allow" | "deny" | "allow_session"
+    }
+  | { status: "deduped" | "in_flight" | "expired" | "failed" }
+  | { status: "denied"; reason: string }
+
 /**
  * Persisted association between an outbound A2UI surface and the
  * platform-specific identifiers we need to route inbound callbacks back

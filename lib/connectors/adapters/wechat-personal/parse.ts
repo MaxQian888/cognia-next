@@ -8,6 +8,7 @@
  * so the media resolver can decrypt lazily.
  */
 
+import { namespacedCallbackAction } from "@/lib/connectors/hitl/callback-prefixes"
 import type { NormalizedInboundEvent, ConversationReference } from "@/types/connectors/event"
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -209,7 +210,7 @@ export function tryParseNumericCallback(
     surfaceId: "",
     componentId: undefined,
     actionType: "button",
-    value: String(numeric),
+    value: namespacedCallbackAction(wireActionId) ?? String(numeric),
     conversationKey,
     user: {
       id: userId,

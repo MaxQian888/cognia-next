@@ -10,8 +10,8 @@
  *      digit and we never juggle multi-character input.
  *   3. Record the binding the bus will need to route the inbound digit
  *      reply through `dispatchConnectorCallback`:
- *        - When `node.raw.value` is already namespaced (`wfapp:` /
- *          `wfcan:`) the row already exists in
+ *        - When `node.raw.value` is an author-owned approval or skill ID,
+ *          the row already exists in
  *          `connectorCallbackBindings` from whichever upstream tool
  *          emitted the surface (see `plugins/workflow-ai`). We DO NOT
  *          write a second row — that would split the dispatch into two
@@ -38,7 +38,7 @@
 
 import {
   bindingHintFields,
-  buildActionId,
+  resolveButtonWireAction,
   generatePlainTextMirror,
   recordCallbackBinding,
   walkA2UISurface,
@@ -52,7 +52,7 @@ interface NumberedInteractive {
   label: string
   /**
    * The wire action id we'll route inbound digits to. Either:
-   *   - a pre-existing `wfapp:` / `wfcan:` id (workflow approval surface)
+   *   - a pre-existing namespaced approval or skill id
    *   - a freshly-built `a2ui:<surfaceId>:<componentId>:<action>` id
    */
   wireActionId: string
@@ -63,12 +63,6 @@ interface NumberedInteractive {
 
 const MAX_NUMERIC = 9
 const FOOTER_PREFIX = "回复数字触发按钮："
-
-const PRESERVED_PREFIXES = ["wfapp:", "wfcan:"] as const
-
-function preserveExistingWireActionId(value: string): boolean {
-  return PRESERVED_PREFIXES.some((p) => value.startsWith(p))
-}
 
 /**
  * Walk the surface and assemble the numbered list. Pure — exported for
@@ -85,29 +79,18 @@ export function collectNumberedInteractives(
     if (out.length + numericOffset >= MAX_NUMERIC) return
     const raw = node.raw
     const action = stringValue(raw.action) || node.id
-    const value = stringValue(raw.value)
     const label = stringValue(raw.text) || stringValue(raw.label) || action || node.id
 
-    if (value && preserveExistingWireActionId(value)) {
-      // Workflow approve/cancel button — upstream tool already wrote the
-      // binding row, just point the numeric at it.
-      out.push({
-        componentId: node.id,
-        numeric: numericOffset + out.length + 1,
-        label,
-        wireActionId: value,
-        needsBindingWrite: false,
-      })
-      return
-    }
-
-    const wireActionId = buildActionId(segment.surfaceId, node.id, action)
+    const { actionId: wireActionId, recordBinding } = resolveButtonWireAction(
+      segment.surfaceId,
+      node
+    )
     out.push({
       componentId: node.id,
       numeric: numericOffset + out.length + 1,
       label,
       wireActionId,
-      needsBindingWrite: true,
+      needsBindingWrite: recordBinding,
       bindingHints: bindingHintFields(raw),
     })
   })
@@ -133,7 +116,7 @@ export interface BuildIlinkA2UIOutput {
  * Build the mirror text and record callback bindings for an A2UI segment.
  * Persists `callback_query` bindings for plain interactive components +
  * caches numeric → wireActionId for every numbered row. Existing
- * `wfapp:` / `wfcan:` bindings are reused rather than duplicated.
+ * namespaced approval and skill bindings are reused rather than duplicated.
  */
 export async function buildIlinkA2UISurface(
   input: BuildIlinkA2UIInput

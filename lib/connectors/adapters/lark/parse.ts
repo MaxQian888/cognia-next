@@ -142,6 +142,22 @@ export interface LarkEventEnvelope {
   event: LarkEventBody
 }
 
+/** Rust reply correlation stays outside the platform envelope and callback audit. */
+export interface LarkTransportEvent {
+  envelope: LarkEventEnvelope
+  callbackId?: string
+}
+
+export function unpackLarkTransportEvent(
+  payload: LarkEventEnvelope & { _cognia_callback_id?: unknown }
+): LarkTransportEvent {
+  const { _cognia_callback_id: callbackId, ...envelope } = payload
+  return {
+    envelope,
+    ...(typeof callbackId === "string" && callbackId ? { callbackId } : {}),
+  }
+}
+
 /**
  * Pull the sender's `tenant_key` out of an inbound envelope. The 2.0 header
  * carries it on every event; older/edge payloads only nest it under the
@@ -970,7 +986,8 @@ export interface LarkInteractiveEvent {
 export function parseLarkInteractiveCallback(
   adapterId: string,
   selfBotOpenId: string,
-  envelope: LarkEventEnvelope
+  envelope: LarkEventEnvelope,
+  onInvalid?: (reason: "missing_action" | "missing_operator" | "missing_trigger_id") => void
 ): ConnectorCallbackEvent | null {
   const eventType = envelope.header?.event_type
   if (
@@ -980,12 +997,21 @@ export function parseLarkInteractiveCallback(
     return null
   }
   const event = envelope.event as unknown as LarkInteractiveEvent
-  const action = event.action
-  if (!action) return null
+  const action = event?.action
+  if (!action) {
+    onInvalid?.("missing_action")
+    return null
+  }
   const operator = event.operator
-  if (!operator?.open_id) return null
+  if (!operator?.open_id) {
+    onInvalid?.("missing_operator")
+    return null
+  }
   const triggerId = action.value?.actionId ?? envelope.header.event_id
-  if (!triggerId) return null
+  if (typeof triggerId !== "string" || !triggerId) {
+    onInvalid?.("missing_trigger_id")
+    return null
+  }
 
   let actionType: ConnectorCallbackActionType = "button"
   let value = ""
@@ -1040,19 +1066,6 @@ export function parseLarkInteractiveCallback(
   } else if (action.tag === "select_static" || action.tag === "select_person") {
     actionType = "select"
     value = action.option ?? ""
-    // B4 — simulated Checkbox (ADR-0009 v41). The mapper marks the wire
-    // value with `simulatedCheckbox: true` so the parser can lift the
-    // event back into a real `actionType: "checkbox"` event with a
-    // canonical "true"/"false" value, sparing the bridge from a
-    // platform-aware coercion step.
-    if (
-      typeof action.value === "object" &&
-      action.value &&
-      (action.value as Record<string, unknown>).simulatedCheckbox === true
-    ) {
-      actionType = "checkbox"
-      value = value === "true" ? "true" : "false"
-    }
   } else if (
     action.tag === "picker_date" ||
     action.tag === "picker_time" ||

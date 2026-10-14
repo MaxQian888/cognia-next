@@ -5,9 +5,13 @@
  */
 
 import "fake-indexeddb/auto"
+import { parseSlackInteractivePayload } from "./parse"
 import { buildSlackA2UIBlocks } from "./block-kit"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { resolveCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import {
+  recordCallbackBinding,
+  resolveCallbackBinding,
+} from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 
 beforeEach(async () => {
@@ -235,3 +239,42 @@ it.each(["Select", "RadioGroup", "Checkbox", "DatePicker", "TimePicker", "TextFi
     }
   }
 )
+
+it.each([
+  "tapa:request",
+  "tapd:request",
+  "wffanoutapp:request",
+  "wffanoutcan:request",
+  "skill_invoke:skill:request",
+])("preserves %s on the wire and does not replace its binding", async (actionId) => {
+  const action =
+    actionId.startsWith("tapd:") || actionId.startsWith("wffanoutcan:") ? "cancel" : "approve"
+  const surface: A2UISegmentContent = {
+    rootId: "button",
+    dataModel: {},
+    components: { button: { component: "Button", text: "Decide", action, value: actionId } },
+  }
+  await recordCallbackBinding({
+    adapterId: "adp_sl",
+    actionId,
+    surfaceId: "sfc_1",
+    kind: "tool_approve",
+  })
+  const before = await getDb().connectorCallbackBindings.toArray()
+  const blocks = await buildSlackA2UIBlocks(baseInput(surface))
+  const row = blocks[0] as unknown as {
+    elements: Array<{ action_id: string; type: string; value: string }>
+  }
+  const wireId = row.elements[0].action_id
+  const callback = parseSlackInteractivePayload("adp_sl", "bot", {
+    type: "block_actions",
+    user: { id: "user" },
+    actions: [row.elements[0]],
+  })
+  expect(wireId).toBe(actionId)
+  expect(callback).toMatchObject({ triggerId: actionId, value: action })
+  expect(await resolveCallbackBinding("adp_sl", callback!.triggerId)).toMatchObject({
+    kind: "tool_approve",
+  })
+  expect(await getDb().connectorCallbackBindings.toArray()).toEqual(before)
+})

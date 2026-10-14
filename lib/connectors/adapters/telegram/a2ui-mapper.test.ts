@@ -7,9 +7,13 @@
  */
 
 import "fake-indexeddb/auto"
+import { parseTelegramCallbackQuery } from "./parse"
 import { buildTelegramA2UICalls } from "./a2ui-mapper"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { resolveCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import {
+  recordCallbackBinding,
+  resolveCallbackBinding,
+} from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 
 beforeEach(async () => {
@@ -184,7 +188,7 @@ describe("buildTelegramA2UICalls — buttons + callback bindings", () => {
     expect(btn.callback_data).toBeUndefined()
   })
 
-  it("truncates long action ids to the 64-byte wire cap (binding row keeps the full id)", async () => {
+  it("truncates long action ids to the 64-byte wire cap and resolves the exact wire binding", async () => {
     const longComponentId = "btn_" + "x".repeat(80)
     const longAction = "a_" + "y".repeat(80)
     const surface: A2UISegmentContent = {
@@ -211,9 +215,8 @@ describe("buildTelegramA2UICalls — buttons + callback bindings", () => {
     const wireId = btn.callback_data as string
     expect(new TextEncoder().encode(wireId).length).toBeLessThanOrEqual(64)
     expect(wireId.startsWith("a2ui:#")).toBe(true)
-    // The binding row uses the FULL id, not the hash.
-    const fullId = `a2ui:sfc_1:${longComponentId}:${longAction}`
-    const binding = await resolveCallbackBinding("adp_tg", fullId)
+    const binding = await resolveCallbackBinding("adp_tg", wireId)
+    expect(binding?.actionId).toBe(wireId)
     expect(binding?.componentId).toBe(longComponentId)
   })
 })
@@ -231,4 +234,84 @@ it("preserves canonical Card.description and Alert.message", async () => {
   const result = await buildTelegramA2UICalls(baseInput(surface))
   expect(JSON.stringify(result)).toContain("Card details")
   expect(JSON.stringify(result)).toContain("Canonical alert message")
+})
+
+it.each([
+  "tapa:request",
+  "tapd:request",
+  "wffanoutapp:request",
+  "wffanoutcan:request",
+  "skill_invoke:skill:request",
+])("preserves %s on the wire and does not replace its binding", async (actionId) => {
+  const action =
+    actionId.startsWith("tapd:") || actionId.startsWith("wffanoutcan:") ? "cancel" : "approve"
+  const surface: A2UISegmentContent = {
+    rootId: "button",
+    dataModel: {},
+    components: { button: { component: "Button", text: "Decide", action, value: actionId } },
+  }
+  await recordCallbackBinding({
+    adapterId: "adp_tg",
+    actionId,
+    surfaceId: "sfc_1",
+    kind: "tool_approve",
+  })
+  const before = await getDb().connectorCallbackBindings.toArray()
+  const calls = await buildTelegramA2UICalls(baseInput(surface))
+  const keyboard = calls[0].payload.reply_markup as {
+    inline_keyboard: Array<Array<{ callback_data: string }>>
+  }
+  const wireId = keyboard.inline_keyboard[0][0].callback_data
+  const callback = parseTelegramCallbackQuery("adp_tg", "bot", {
+    update_id: 1,
+    callback_query: {
+      id: "click",
+      from: { id: 1, first_name: "User" },
+      data: wireId,
+      message: { message_id: 1, date: 1, chat: { id: 12345, type: "private" } },
+    },
+  })
+  expect(wireId).toBe(actionId)
+  expect(callback).toMatchObject({ triggerId: actionId, value: action })
+  expect(await resolveCallbackBinding("adp_tg", callback!.triggerId)).toMatchObject({
+    kind: "tool_approve",
+  })
+  expect(await getDb().connectorCallbackBindings.toArray()).toEqual(before)
+})
+
+it("keeps a long author-owned skill binding reachable within the wire limit", async () => {
+  const actionId = `skill_invoke:${"long-skill".repeat(20)}:request`
+  await recordCallbackBinding({
+    adapterId: "adp_tg",
+    actionId,
+    surfaceId: "sfc_1",
+    kind: "skill_invoke",
+  })
+  const surface: A2UISegmentContent = {
+    rootId: "button",
+    dataModel: {},
+    components: {
+      button: { component: "Button", text: "Approve", action: "approve", value: actionId },
+    },
+  }
+  const calls = await buildTelegramA2UICalls(baseInput(surface))
+  const keyboard = calls[0].payload.reply_markup as {
+    inline_keyboard: Array<Array<{ callback_data: string }>>
+  }
+  const wireId = keyboard.inline_keyboard[0][0].callback_data
+  const callback = parseTelegramCallbackQuery("adp_tg", "bot", {
+    update_id: 1,
+    callback_query: {
+      id: "click",
+      from: { id: 1, first_name: "User" },
+      data: wireId,
+      message: { message_id: 1, date: 1, chat: { id: 12345, type: "private" } },
+    },
+  })
+  expect(new TextEncoder().encode(wireId).length).toBeLessThanOrEqual(64)
+  expect(await resolveCallbackBinding("adp_tg", callback!.triggerId)).toMatchObject({
+    actionId,
+    kind: "skill_invoke",
+  })
+  expect(await getDb().connectorCallbackBindings.count()).toBe(1)
 })

@@ -478,6 +478,11 @@ export interface ApplyAskUserCallbackInput {
   /** Adapter `settings.runOperatorUserIds` — widens initiator/operator scope. */
   operatorIds?: string[]
   deps?: AskUserDeps
+  /**
+   * Fires once a multi-select toggle is validated and stored, before the
+   * card repaint — the point a platform receipt may report success.
+   */
+  onToggleApplied?: () => void
 }
 
 export interface ApplyAskUserCallbackResult {
@@ -612,6 +617,7 @@ export async function applyAskUserCallback(
         return { handled: true, resolved: false, op }
       }
       toggleAskUserValue(entry.sessionId, entry.toolUseId, candidate)
+      input.onToggleApplied?.()
       // Reflect the pick on the card. Presentation-only — never blocks.
       await refreshAskUserCard(entry, event.originatingMessageId, deps)
       return { handled: true, resolved: false, op }

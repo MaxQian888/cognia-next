@@ -14,12 +14,13 @@
  * (`triggerId = actionId`, surface recovered via the binding lookup).
  */
 
+import { namespacedCallbackAction } from "@/lib/connectors/hitl/callback-prefixes"
 import type { A2UIMessageSegment } from "@/types/connectors/segment"
 import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
 import { buildConversationKey } from "@/types/connectors/event"
 import {
   walkA2UISurface,
-  buildActionId,
+  resolveButtonWireAction,
   recordCallbackBinding,
   bindingHintFields,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
@@ -71,18 +72,19 @@ export async function buildWeComTemplateCard(
         if (buttons.length >= MAX_BUTTONS) break
         const action = stringValue(node.raw.action) || node.id
         const text = stringValue(node.raw.text) || action
-        const actionId = buildActionId(seg.surfaceId, node.id, action)
+        const { actionId, recordBinding } = resolveButtonWireAction(seg.surfaceId, node)
         buttons.push({ key: actionId, text, style: 1 })
-        bindingWrites.push(
-          recordCallbackBinding({
-            adapterId,
-            actionId,
-            surfaceId: seg.surfaceId,
-            componentId: node.id,
-            conversationKey,
-            ...bindingHintFields(node.raw),
-          })
-        )
+        if (recordBinding)
+          bindingWrites.push(
+            recordCallbackBinding({
+              adapterId,
+              actionId,
+              surfaceId: seg.surfaceId,
+              componentId: node.id,
+              conversationKey,
+              ...bindingHintFields(node.raw),
+            })
+          )
         break
       }
       default:
@@ -159,7 +161,7 @@ export function parseTemplateCardEvent(
     surfaceId: parsed?.surfaceId ?? "",
     componentId: parsed?.componentId,
     actionType: "button",
-    value: parsed?.action ?? eventKey,
+    value: namespacedCallbackAction(eventKey) ?? parsed?.action ?? eventKey,
     conversationKey,
     user: {
       id: userId,

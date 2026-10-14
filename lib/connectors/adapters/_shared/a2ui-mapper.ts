@@ -19,6 +19,10 @@
  * on platform-specific node shapes only.
  */
 
+import {
+  CALLBACK_PREFIXES,
+  namespacedCallbackAction,
+} from "@/lib/connectors/hitl/callback-prefixes"
 import { getDb } from "@/lib/db/schema"
 import type {
   CallbackActorScope,
@@ -173,18 +177,33 @@ function resolveDisplayBindings(
  *   `a2ui:<surfaceId>:<componentId>:<action>`
  *
  * Telegram caps `callback_data` at 64 bytes — `truncateActionId` below
- * is provided for adapters that must squeeze under that limit; they
- * SHOULD store the full id in `ConnectorCallbackBindingRow.actionId` and
- * use the truncated form on the wire.
+ * is provided for adapters that must squeeze under that limit; new generic
+ * bindings must store the wire ID. Author-owned namespaced bindings retain
+ * their full ID and resolve through the compact-ID fallback.
  */
 export function buildActionId(surfaceId: string, componentId: string, action: string): string {
   return `a2ui:${surfaceId}:${componentId}:${action}`
 }
 
+/** Reuse author-owned approval bindings instead of replacing their dispatch kind. */
+export function resolveButtonWireAction(
+  surfaceId: string,
+  node: A2UIWalkNode
+): { actionId: string; recordBinding: boolean } {
+  const value = node.raw.value
+  if (node.component === "Button" && typeof value === "string" && namespacedCallbackAction(value)) {
+    return { actionId: value, recordBinding: false }
+  }
+  return {
+    actionId: buildActionId(surfaceId, node.id, stringValue(node.raw.action) || node.id),
+    recordBinding: true,
+  }
+}
+
 /**
  * Telegram-specific helper: callback_data is capped at 64 bytes. We
  * sha1-hash the long id when it exceeds the cap; the parser side uses
- * `connectorCallbackBindings.actionId` (the full string) to recover
+ * `connectorCallbackBindings.actionId` to recover
  * surface/component context.
  */
 export async function truncateActionId(
@@ -199,7 +218,8 @@ export async function truncateActionId(
   const hex = Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
-  return { wireId: `a2ui:#${hex}`, isHashed: true }
+  const prefix = CALLBACK_PREFIXES.find((prefix) => fullId.startsWith(prefix)) ?? "a2ui:"
+  return { wireId: `${prefix}#${hex}`, isHashed: true }
 }
 
 /**
@@ -379,10 +399,29 @@ export async function resolveCallbackBinding(
   adapterId: string,
   actionId: string
 ): Promise<ConnectorCallbackBindingRow | undefined> {
-  const row = await getDb()
+  let row = await getDb()
     .connectorCallbackBindings.where("[adapterId+actionId]")
     .equals([adapterId, actionId])
     .first()
+  // Long author-owned IDs keep their single original row. A compact wire ID
+  // is resolved against that adapter's namespace, including after a restart.
+  if (!row) {
+    const prefix = CALLBACK_PREFIXES.find((prefix) => actionId.startsWith(`${prefix}#`))
+    if (prefix && /^[a-f0-9]{40}$/.test(actionId.slice(prefix.length + 1))) {
+      const candidates = await getDb()
+        .connectorCallbackBindings.where("adapterId")
+        .equals(adapterId)
+        .filter((binding) => binding.actionId.startsWith(prefix))
+        .toArray()
+      for (const candidate of candidates) {
+        const { wireId } = await truncateActionId(candidate.actionId, 0)
+        if (wireId === actionId) {
+          row = candidate
+          break
+        }
+      }
+    }
+  }
   if (row?.expiresAt !== undefined && row.expiresAt <= Date.now()) return undefined
   return row
 }

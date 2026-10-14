@@ -236,6 +236,7 @@ describe("runBuiltInSkill — write tier HITL routing", () => {
       .equals("skill_invoke")
       .toArray()
     expect(bindings).toHaveLength(1)
+    expect(bindings[0].actionId).toMatch(/^skill_invoke:lark\.calendar\.create_event:/)
     expect(bindings[0].payload?.skillId).toBe("lark.calendar.create_event")
     // No running inbound job in this harness → confirm button is scoped to
     // configured operators only (plan 2026-07-24 Phase 2).

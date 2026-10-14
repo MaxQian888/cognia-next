@@ -540,6 +540,7 @@ mod tests {
         ("connectors_discord_upload", OutputShape::Scalar(ScalarShape::Text)),
         ("connectors_lark_ws_open", OutputShape::Scalar(ScalarShape::Text)),
         ("connectors_lark_ws_close", OutputShape::Scalar(ScalarShape::Null)),
+        ("connectors_lark_callback_respond", OutputShape::Scalar(ScalarShape::Bool)),
         ("connectors_reset_all_ws", OutputShape::Scalar(ScalarShape::Integer)),
         ("connectors_attachment_fetch", OutputShape::Declared(RootType::Object)),
         ("connectors_attachment_read", OutputShape::Scalar(ScalarShape::NullableText)),

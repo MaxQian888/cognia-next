@@ -211,6 +211,22 @@ describe("tryParseNumericCallback", () => {
     ).toMatchObject({ triggerId: "a2ui:sfc1:yes:confirm" })
   })
 
+  it.each([
+    ["tapa:request", "approve"],
+    ["tapd:request", "cancel"],
+    ["wffanoutcan:request", "cancel"],
+  ])("recovers the authorization verb for %s", (actionId, action) => {
+    setNumericAction(CONV, 1, actionId)
+    expect(
+      tryParseNumericCallback(
+        ADP,
+        msg({
+          item_list: [{ type: ILINK_ITEM.text, text_item: { text: "1" } }],
+        })
+      )
+    ).toMatchObject({ triggerId: actionId, value: action })
+  })
+
   it("routes a wfapp:* registered binding through the same path", () => {
     setNumericAction(CONV, 2, "wfapp:bind1")
     const ev = tryParseNumericCallback(

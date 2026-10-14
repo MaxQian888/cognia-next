@@ -13,7 +13,7 @@
  */
 
 import { connectorListen as listen } from "@/lib/connectors/events"
-import type { LarkEventEnvelope } from "./parse"
+import { unpackLarkTransportEvent, type LarkEventEnvelope, type LarkTransportEvent } from "./parse"
 
 export interface LarkWebhookOptions {
   adapterId: string
@@ -26,17 +26,17 @@ export interface LarkWebhookOptions {
  */
 export async function* startLarkWebhookTransport(
   opts: LarkWebhookOptions
-): AsyncGenerator<LarkEventEnvelope> {
+): AsyncGenerator<LarkTransportEvent> {
   if (opts.signal.aborted) return
   const eventName = `connectors://webhook/${opts.adapterId}`
 
-  const queue: LarkEventEnvelope[] = []
+  const queue: LarkTransportEvent[] = []
   let resolve: (() => void) | null = null
   let done = false
 
   const unlisten = await listen<LarkEventEnvelope>(eventName, (event) => {
     if (done) return
-    queue.push(event.payload)
+    queue.push(unpackLarkTransportEvent(event.payload))
     resolve?.()
     resolve = null
   })

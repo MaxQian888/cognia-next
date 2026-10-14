@@ -952,3 +952,17 @@ describe("parseTelegramCallbackQuery", () => {
     expect(parseTelegramCallbackQuery(ADAPTER_ID, SELF_ID, update)).toBeNull()
   })
 })
+
+it.each([
+  ["tapa:request", "approve"],
+  ["tapd:request", "cancel"],
+  ["wffanoutcan:request", "cancel"],
+])("keeps the %s trigger identity and recovers its approval verb", (data, value) => {
+  const update = callbackQueryFixture as TelegramUpdate
+  expect(
+    parseTelegramCallbackQuery(ADAPTER_ID, SELF_ID, {
+      ...update,
+      callback_query: { ...update.callback_query!, data },
+    })
+  ).toMatchObject({ triggerId: data, value })
+})

@@ -17,6 +17,7 @@
  *   description so the assistant sees SOMETHING.
  */
 
+import { namespacedCallbackAction } from "@/lib/connectors/hitl/callback-prefixes"
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -945,8 +946,8 @@ function sameReaction(a: TelegramReactionType, b: TelegramReactionType): boolean
  * suitable for `ConnectorBus.dispatchConnectorCallback`.
  *
  * Telegram inline-keyboard buttons carry up to 64 bytes of `callback_data`.
- * The Telegram A2UI mapper (`a2ui-mapper.ts`) writes the long
- * `a2ui:<surfaceId>:<componentId>:<action>` id into
+ * The Telegram A2UI mapper (`a2ui-mapper.ts`) writes the wire
+ * action id into
  * `connectorCallbackBindings` and uses a SHA-1-suffix short form on the
  * wire when needed. The bus's `dispatchConnectorCallback` recovers the
  * surface context via the binding lookup — adapter side just hands back
@@ -969,7 +970,8 @@ export function parseTelegramCallbackQuery(
   const conversationKey = buildConversationKey("telegram", adapterId, String(chatId), threadId)
   const sender = buildPlatformIdentity(adapterId, chatId, cq.from)
 
-  const value = cq.data ?? ""
+  const wireId = cq.data ?? ""
+  const value = namespacedCallbackAction(wireId) ?? wireId
 
   return {
     platform: "telegram",
@@ -977,7 +979,7 @@ export function parseTelegramCallbackQuery(
     selfId,
     // The callback_query.id is globally unique per press — Telegram never
     // re-issues it. Perfect dedup key for namespace="callback".
-    triggerId: value || `tgcq:${cq.id}`,
+    triggerId: wireId || `tgcq:${cq.id}`,
     // surfaceId / componentId are resolved via the binding row written at
     // outbound time. The event passes whatever we have right now (empty)
     // and the bus's `resolveCallbackBinding` upgrades them.

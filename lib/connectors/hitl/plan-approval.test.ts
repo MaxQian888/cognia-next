@@ -205,3 +205,11 @@ it("closes the original plan card when the approval expires", async () => {
   await expect(pending).resolves.toMatchObject({ outcome: "reject" })
   expect(settleApprovalCard).toHaveBeenLastCalledWith(expect.objectContaining({ state: "expired" }))
 })
+
+it("keeps existing prefix exports compatible with the shared registry", async () => {
+  const registry = await import("@/lib/connectors/hitl/callback-prefixes")
+  expect([PLAN_APPROVE_PREFIX, PLAN_REJECT_PREFIX]).toEqual([
+    registry.PLAN_APPROVE_PREFIX,
+    registry.PLAN_REJECT_PREFIX,
+  ])
+})

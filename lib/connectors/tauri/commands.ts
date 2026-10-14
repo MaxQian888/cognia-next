@@ -480,6 +480,14 @@ export async function connectorsLarkWsOpen(adapterId: string): Promise<string> {
   return invoker<string>("connectors_lark_ws_open", { adapterId })
 }
 
+/** Complete a pending card callback on either Lark transport. */
+export async function connectorsLarkCallbackRespond(
+  callbackId: string,
+  response: Record<string, unknown>
+): Promise<boolean> {
+  return invoker<boolean>("connectors_lark_callback_respond", { callbackId, response })
+}
+
 export async function connectorsLarkWsClose(handleId: string): Promise<void> {
   await invoker("connectors_lark_ws_close", { handleId })
 }

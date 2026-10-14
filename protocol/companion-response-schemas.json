@@ -12476,6 +12476,9 @@
     "connectors_lark_upload_image": {
       "$ref": "#/$defs/StringResult"
     },
+    "connectors_lark_callback_respond": {
+      "$ref": "#/$defs/BooleanResult"
+    },
     "connectors_lark_ws_close": {
       "$ref": "#/$defs/NullResult"
     },
