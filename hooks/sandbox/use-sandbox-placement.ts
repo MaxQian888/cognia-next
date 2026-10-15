@@ -1,17 +1,43 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 
 import {
   onSandboxPlacementReport,
+  sandboxDeliveryRecords,
+  readTaskDeliveryRecord,
+  recordTaskDelivery,
   sandboxPlacementReport,
   subscribeSandboxPlacements,
   type SandboxPlacementReport,
 } from "@/lib/sandbox/placement-report"
 import { onRunEnvironmentOutcome, runEnvironmentOutcome } from "@/lib/sandbox/run-environment"
 import type { SandboxPlacementOutcome } from "@/lib/sandbox/environment-placement"
+import { environmentDeliveryList } from "@/lib/project-environment/environment-client"
+import { transport, onTransportChange } from "@/lib/tauri/transport-instance"
+import { collectPages } from "@/lib/tauri/companion-paging"
+import {
+  getActiveRemoteTransport,
+  subscribeActiveRemoteTransport,
+} from "@/lib/tauri/transport-routing"
+import type { TaskDeliveryRecord } from "@/types/sandbox/environment-spec"
+import { parseInvokeError } from "@/lib/tauri/command-error"
 import { onTauriEvent } from "@/lib/tauri/events"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
+
+// The initial local transport remains the default cache scope; replacement
+// companion transports must never reuse its agent ids or pending snapshots.
+const initialTransport = transport
+const placementHost = () =>
+  getActiveRemoteTransport() ?? (transport === initialTransport ? undefined : transport)
+function subscribePlacementHost(notify: () => void): () => void {
+  const remote = subscribeActiveRemoteTransport(notify)
+  const process = onTransportChange(notify)
+  return () => {
+    remote()
+    process()
+  }
+}
 
 /**
  * What one agent's run asked for and what it actually got (ADR-0182).
@@ -32,39 +58,96 @@ import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 export interface SandboxPlacementState {
   requested: SandboxPlacementOutcome | undefined
   report: SandboxPlacementReport | undefined
+  deliveries: readonly TaskDeliveryRecord[]
+  deliveryStatus: "loading" | "ready" | "unavailable" | "failed"
 }
 
-/**
- * Subscribe to the Host's placement channel for the lifetime of the mount.
- *
- * Idempotent across mounts by construction: `subscribeSandboxPlacements`
- * records into the module-scoped report map, so several panels mounting at
- * once each open a listener and every one of them sees the same reports. The
- * alternative — one process-wide subscription started at boot — would report
- * placements nobody is looking at and is what `components/providers` is for
- * once a second surface needs it.
- */
-function useSandboxPlacementChannel(): void {
+/** Subscribe before hydrating; revisions reconcile events racing the snapshot. */
+function useSandboxPlacementChannel(
+  agentId: string | undefined,
+  host?: object
+): SandboxPlacementState["deliveryStatus"] {
+  const [load, setLoad] = useState<{
+    agentId?: string
+    host?: object
+    status: SandboxPlacementState["deliveryStatus"]
+  }>({ status: "loading" })
   useEffect(() => {
     let stop: (() => void) | undefined
     let cancelled = false
+    let inFlight = false
+    const isCurrent = () => !cancelled && placementHost() === host
+    const refresh = async () => {
+      if (!agentId || !isCurrent() || inFlight) return
+      inFlight = true
+      try {
+        const records = await collectPages(
+          (pageToken) => {
+            if (!isCurrent()) throw new Error("Delivery Host changed")
+            return environmentDeliveryList({
+              agentId,
+              pageSize: 200,
+              ...(pageToken ? { pageToken } : {}),
+            })
+          },
+          { requireComplete: true }
+        )
+        if (!isCurrent()) return
+        for (const value of records) {
+          const record = readTaskDeliveryRecord(value)
+          if (record?.agentId === agentId) {
+            recordTaskDelivery(record, host)
+          }
+        }
+        setLoad({ agentId, host, status: "ready" })
+      } catch (error) {
+        if (!isCurrent()) return
+        const code = parseInvokeError(error).code
+        const unavailable = [
+          "sandbox_pool_disabled",
+          "unknown_command",
+          "not_supported",
+          "command_not_found",
+          "no_host_transport",
+        ].includes(code)
+        setLoad({ agentId, host, status: unavailable ? "unavailable" : "failed" })
+      } finally {
+        inFlight = false
+      }
+    }
     void subscribeSandboxPlacements(async (channel, handler) => {
-      const unlisten = await onTauriEvent<unknown>(channel, handler)
+      const unlisten = await onTauriEvent<unknown>(channel, (payload) => {
+        if (isCurrent()) handler(payload)
+      })
       return () => safeUnlisten(unlisten)
-    })
+    }, host)
       .then((unsubscribe) => {
         if (cancelled) unsubscribe()
         else stop = unsubscribe
       })
-      .catch(() => {
-        // No placement channel on this host — a browser with no companion, or
-        // a Host older than ADR-0182. The requested half still renders.
+      .catch(() => undefined)
+      .finally(() => {
+        void refresh()
       })
+    // Cleanup retries may happen while disconnected. Refresh on reconnection,
+    // focus and periodically so their persisted state never depends on an event.
+    const timer = setInterval(() => {
+      void refresh()
+    }, 15_000)
+    const onRefresh = () => {
+      void refresh()
+    }
+    window.addEventListener("online", onRefresh)
+    window.addEventListener("focus", onRefresh)
     return () => {
       cancelled = true
       stop?.()
+      clearInterval(timer)
+      window.removeEventListener("online", onRefresh)
+      window.removeEventListener("focus", onRefresh)
     }
-  }, [])
+  }, [agentId, host])
+  return load.agentId === agentId && load.host === host ? load.status : "loading"
 }
 
 /**
@@ -75,7 +158,8 @@ function useSandboxPlacementChannel(): void {
  * missed.
  */
 export function useSandboxPlacement(agentId: string | undefined): SandboxPlacementState {
-  useSandboxPlacementChannel()
+  const host = useSyncExternalStore(subscribePlacementHost, placementHost, () => undefined)
+  const deliveryStatus = useSandboxPlacementChannel(agentId, host)
 
   // Both halves live in module-scoped stores that hand back the recorded
   // object itself, so each read is a stable snapshot and a render only
@@ -96,16 +180,24 @@ export function useSandboxPlacement(agentId: string | undefined): SandboxPlaceme
 
   const subscribeReport = useCallback(
     (notify: () => void) =>
-      onSandboxPlacementReport((report) => {
-        if (report.agentId === agentId) notify()
+      onSandboxPlacementReport((report, reportHost) => {
+        if (report.agentId === agentId && reportHost === host) notify()
       }),
-    [agentId]
+    [agentId, host]
   )
   const report = useSyncExternalStore(
     subscribeReport,
-    () => (agentId ? sandboxPlacementReport(agentId) : undefined),
+    () => (agentId ? sandboxPlacementReport(agentId, host) : undefined),
     () => undefined
   )
 
-  return useMemo(() => ({ requested, report }), [requested, report])
+  const deliveries = useSyncExternalStore(
+    subscribeReport,
+    () => sandboxDeliveryRecords(agentId ?? "", host),
+    () => sandboxDeliveryRecords("")
+  )
+  return useMemo(
+    () => ({ requested, report, deliveries, deliveryStatus }),
+    [requested, report, deliveries, deliveryStatus]
+  )
 }

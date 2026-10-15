@@ -15,6 +15,7 @@
 export const LOCAL_ENVIRONMENT_COMMAND = "environment_local_call"
 
 export const LOCAL_ENVIRONMENT_COMMANDS: ReadonlySet<string> = new Set([
+  "environment_delivery_list",
   "environment_catalog_list",
   "environment_catalog_get",
   "environment_catalog_create",

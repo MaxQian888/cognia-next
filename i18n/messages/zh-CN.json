@@ -17038,6 +17038,32 @@
       "ready": "已登录",
       "unreadable": "登录状态无法确认"
     },
+    "delivery": {
+      "branch": "分支：{branch}",
+      "bundle": "已保存至 Host 的 bundle：{path}",
+      "cleanup": {
+        "destroyRetrying": "正在重试销毁实例",
+        "destroyed": "实例已销毁",
+        "pending": "等待清理实例",
+        "retained": "实例已保留"
+      },
+      "commit": "提交：{commit}",
+      "instance": "实例：{id}",
+      "loadFailed": "无法从此 Host 加载交付历史，将自动重试。",
+      "persistFailed": "Host 无法保存此次交付更新，重新加载后记录的状态可能不是最新状态。",
+      "publish": {
+        "discarded": "已到期丢弃",
+        "failed": "交付失败",
+        "held": "已保留，等待重试交付",
+        "nothingToPublish": "无内容需要发布",
+        "pushed": "已推送",
+        "running": "运行中",
+        "savedBundle": "已保存为 bundle"
+      },
+      "session": "会话：{id}",
+      "task": "任务：{id}",
+      "title": "远程沙箱交付历史"
+    },
     "detectionInstalled": "已安装",
     "detectionInstalledWithVersion": "已安装 v{version}",
     "detectionMissing": "未找到",

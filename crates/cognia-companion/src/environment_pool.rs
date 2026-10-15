@@ -228,6 +228,21 @@ impl EnvironmentServiceError {
 
 type Served<T> = Result<T, EnvironmentServiceError>;
 
+/// Historical delivery records remain readable after the pool is disabled.
+/// The directory belongs to the execution Host, never to the querying client.
+pub fn delivery_page(
+    data_dir: &std::path::Path,
+    agent_id: Option<&str>,
+    task_id: Option<&str>,
+    request: &cognia_problem::paging::PageRequest,
+) -> Served<Page<cognia_sandbox_pool::delivery::TaskDeliveryRecord>> {
+    let records = cognia_sandbox_pool::delivery::DeliveryStore::new(data_dir)
+        .list(agent_id, task_id)
+        .map_err(EnvironmentServiceError::Store)?;
+    Page::slice_all(records, request, DEFAULT_PAGE_SIZE)
+        .map_err(|error| EnvironmentServiceError::refused("malformed_request", error.to_string()))
+}
+
 /// A catalog entry as a console reads it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -869,6 +884,52 @@ pub fn approval_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delivery_history_reads_without_an_installed_pool_or_creating_a_store() {
+        let root = tempfile::tempdir().expect("temporary host data");
+        let page = delivery_page(root.path(), None, None, &Default::default())
+            .expect("history is available independently of pool services");
+        assert!(page.items.is_empty());
+        assert!(page.next_page_token.is_none());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn delivery_history_rejects_a_token_from_another_paging_scheme() {
+        let root = tempfile::tempdir().unwrap();
+        let request = cognia_problem::paging::PageRequest {
+            page_size: Some(1),
+            page_token: Some(cognia_problem::paging::PageToken::Cursor("foreign".into())),
+        };
+        let error = delivery_page(root.path(), None, None, &request).unwrap_err();
+        assert_eq!(error.code(), "malformed_request");
+    }
+
+    #[test]
+    fn delivery_history_schema_matches_the_published_response_contract() {
+        let published: Value = serde_json::from_str(include_str!(
+            "../../../protocol/companion-response-schemas.json"
+        ))
+        .unwrap();
+        let mut generated = serde_json::to_value(schemars::schema_for!(
+            Page<cognia_sandbox_pool::delivery::TaskDeliveryRecord>
+        ))
+        .unwrap();
+        let root = generated.as_object_mut().unwrap();
+        root.remove("$schema");
+        root.remove("title");
+        root.remove("description");
+        if let Some(Value::Object(definitions)) = root.remove("$defs") {
+            for (name, definition) in definitions {
+                assert_eq!(definition, published["$defs"][&name], "{name}");
+            }
+        }
+        assert_eq!(
+            generated,
+            published["commands"]["environment_delivery_list"]
+        );
+    }
     use cognia_environment::approval::EgressGrant;
     use cognia_environment::baseline::{load_baseline_from, BaselineInputs};
     use cognia_environment::catalog::{CatalogEntrySource, CatalogImage};

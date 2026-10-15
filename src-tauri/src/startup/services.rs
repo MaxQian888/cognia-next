@@ -232,6 +232,11 @@ pub(crate) fn remote_sandboxes(app: &App) {
         );
         match installed {
             Ok(Some(pool)) => {
+                // Reconcile delivery records and resume removal retries before
+                // this desktop accepts new remote sessions, as cognia-server does.
+                if let Err(error) = tauri::async_runtime::block_on(pool.backend.reap_orphans()) {
+                    log::warn!("remote sandboxes: recovery reconciliation failed: {error}");
+                }
                 if let Err(error) = state.install_router(pool.backend) {
                     log::warn!("remote sandboxes: {error}");
                     return;
@@ -313,6 +318,10 @@ mod tests {
         assert_eq!(
             cognia_data_dir(app_data),
             PathBuf::from("/data/com.cognia.app/cognia")
+        );
+        assert_eq!(
+            cognia_data_dir(app_data).join(cognia_sandbox_pool::delivery::DELIVERY_DIR),
+            PathBuf::from("/data/com.cognia.app/cognia/sandbox-deliveries")
         );
         assert_eq!(
             agent_session_db(app_data),

@@ -29,6 +29,7 @@ use crate::companion_api::workspace_access::{
 };
 
 pub(super) const COMMANDS: &[&str] = &[
+    "environment_delivery_list",
     "environment_catalog_list",
     "environment_catalog_get",
     "environment_catalog_create",
@@ -193,6 +194,24 @@ async fn dispatch_arm(
     tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    // Delivery history outlives the pool: disabling providers must not hide
+    // work already pushed or saved on this Host.
+    if name == "environment_delivery_list" {
+        let request = page_request(&args)?;
+        let agent_id: Option<String> = optional(&args, "agentId")?;
+        let task_id: Option<String> = optional(&args, "taskId")?;
+        let data_dir = host
+            .data_dir()
+            .map_err(|error| served(name, EnvironmentServiceError::Store(error)))?;
+        let data_dir = match host {
+            super::super::dispatch_host::DispatchHost::Tauri(_) => data_dir.join("cognia"),
+            super::super::dispatch_host::DispatchHost::Headless(_) => data_dir,
+        };
+        return to_json(
+            pool::delivery_page(&data_dir, agent_id.as_deref(), task_id.as_deref(), &request)
+                .map_err(|error| served(name, error))?,
+        );
+    }
     let services = services(name)?;
 
     match name {

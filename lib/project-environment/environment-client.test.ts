@@ -2,6 +2,7 @@
 import { transport } from "@/lib/tauri/transport-instance"
 import {
   declarationReader,
+  environmentDeliveryList,
   environmentBuildStart,
   environmentPortsList,
   environmentBuildGet,
@@ -411,4 +412,22 @@ it("lists the authenticated runtime ports for the requested project", async () =
   call.mockResolvedValueOnce({ ports })
   await expect(environmentPortsList("p")).resolves.toEqual(ports)
   expect(call).toHaveBeenCalledWith("environment_ports_list", { projectId: "p" })
+})
+
+it("reads durable deliveries from the routed Host with all supported filters", async () => {
+  call.mockResolvedValue({ items: [], nextPageToken: "next" })
+  await expect(
+    environmentDeliveryList({
+      agentId: "agent",
+      taskId: "task",
+      pageSize: 20,
+      pageToken: "previous",
+    })
+  ).resolves.toEqual({ items: [], nextPageToken: "next" })
+  expect(call).toHaveBeenCalledWith("environment_delivery_list", {
+    agentId: "agent",
+    taskId: "task",
+    pageSize: 20,
+    pageToken: "previous",
+  })
 })

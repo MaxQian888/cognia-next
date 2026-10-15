@@ -5,6 +5,8 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   __resetPlacementReportsForTests,
   recordPlacementReport,
+  recordTaskDelivery,
+  recordWorkspacePublish,
 } from "@/lib/sandbox/placement-report"
 import {
   __resetRunEnvironmentForTests,
@@ -12,6 +14,10 @@ import {
 } from "@/lib/sandbox/run-environment"
 import en from "@/i18n/messages/en/externalAgent.json"
 import pe from "@/i18n/messages/en/projectEnvironment.json"
+
+jest.mock("@/lib/project-environment/environment-client", () => ({
+  environmentDeliveryList: jest.fn(() => new Promise(() => {})),
+}))
 
 jest.mock("@/lib/tauri/events", () => ({
   // No placement channel in this suite: reports are recorded directly.
@@ -296,4 +302,43 @@ describe("SandboxPlacementBadge", () => {
       expect(text).not.toContain("Remote provider")
     })
   })
+})
+
+it("shows saved outcome and cleanup state from a durable delivery without a live placement", async () => {
+  recordTaskDelivery({
+    id: "session",
+    agentId: "a1",
+    providerId: "e2b",
+    instanceId: "box",
+    branch: "task/a",
+    publishState: "savedBundle",
+    cleanupState: "destroyRetrying",
+    publish: { pushed: false, recovery: { bundle: "/host/recovery.bundle", commits: 2 } },
+    createdAt: 100,
+    updatedAt: 200,
+    revision: 1,
+  })
+  renderBadge()
+  const text = await tooltipText("sandbox-placement-sandboxed")
+  expect(text).toContain("/host/recovery.bundle")
+  expect(text).toContain("Instance destruction retrying")
+})
+
+it("warns when a publish update could not be persisted without erasing its actual success", async () => {
+  recordPlacementReport({
+    agentId: "a1",
+    kind: "sandbox",
+    provider: "e2b",
+    publish: { pushed: true, branch: "task/a", commit: "abc" },
+  })
+  recordWorkspacePublish(
+    "a1",
+    { pushed: false, code: "sandbox_delivery_store_failed" },
+    undefined,
+    { code: "sandbox_delivery_store_failed" }
+  )
+  renderBadge()
+  const text = await tooltipText("sandbox-placement-sandboxed")
+  expect(text).toContain("Pushed")
+  expect(text).toContain("The Host could not save this delivery update")
 })

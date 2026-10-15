@@ -23,6 +23,7 @@ pub mod boot;
 pub mod build;
 pub mod command;
 pub mod desktop;
+pub mod delivery;
 pub mod docker;
 pub mod git_proxy;
 pub mod probe_cache;

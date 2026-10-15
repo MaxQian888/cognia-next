@@ -20,6 +20,10 @@ describe("local environment commands", () => {
   })
 
   it("routes an environment command through the local dispatcher", () => {
+    expect(localInvocation("environment_delivery_list", { agentId: "agent-1" })).toEqual({
+      command: LOCAL_ENVIRONMENT_COMMAND,
+      args: { name: "environment_delivery_list", args: { agentId: "agent-1" } },
+    })
     expect(localInvocation("environment_driver_status", { a: 1 })).toEqual({
       command: LOCAL_ENVIRONMENT_COMMAND,
       args: { name: "environment_driver_status", args: { a: 1 } },

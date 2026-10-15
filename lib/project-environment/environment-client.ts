@@ -30,7 +30,12 @@
 import { parseInvokeError } from "@/lib/tauri/command-error"
 import { collectPages, type Page, type PageRequest } from "@/lib/tauri/companion-paging"
 import { transport } from "@/lib/tauri/transport-instance"
-import type { EgressTier, IsolationTier, PinnedImage } from "@/types/sandbox/environment-spec"
+import type {
+  EgressTier,
+  IsolationTier,
+  PinnedImage,
+  TaskDeliveryRecord,
+} from "@/types/sandbox/environment-spec"
 import type { SandboxProviderView } from "@/types/sandbox/remote-sandboxes"
 import type {
   CatalogEntrySource,
@@ -554,4 +559,11 @@ export async function fetchEnvironmentCatalog(pageSize = 200): Promise<Environme
           },
         }),
   }
+}
+
+/** Durable remote-session history belongs to the selected execution Host. */
+export function environmentDeliveryList(
+  request: PageRequest & { agentId?: string; taskId?: string } = {}
+): Promise<Page<TaskDeliveryRecord>> {
+  return transport.call("environment_delivery_list", { ...request })
 }
