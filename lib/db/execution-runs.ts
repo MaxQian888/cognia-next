@@ -78,8 +78,15 @@ export async function listExecutionRuns(query: ExecutionRunQuery = {}): Promise<
   const kinds = query.kinds ? new Set(query.kinds) : undefined
   const statuses = query.statuses ? new Set(query.statuses) : undefined
   const limit = Math.max(1, query.limit ?? 50)
-  return getDb()
-    .executionRuns.orderBy("updatedAt")
+  const table = getDb().executionRuns
+  // Preserve the global timestamp order (including primary-key ties), but
+  // constrain session reads before materializing rows for residual filters.
+  const ordered = query.sessionId
+    ? table
+        .where("[sessionId+updatedAt]")
+        .between([query.sessionId, Dexie.minKey], [query.sessionId, Dexie.maxKey], true, true)
+    : table.orderBy("updatedAt")
+  return ordered
     .reverse()
     .filter(
       (run) =>

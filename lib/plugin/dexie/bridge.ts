@@ -221,7 +221,8 @@ export async function restorePluginTables(
   return runSchemaMutationExclusive(dbName, async () => {
     const db = resolveDb(dbSource)
     const metas = await getAllPluginDexiaMeta()
-    if (metas.length === 0 && !options.registerMissing) return []
+    if (metas.length === 0 && !options.registerMissing && !options.requiredStoreNames?.length)
+      return []
     const metaByPluginId = new Map(metas.map((meta) => [meta.pluginId, meta]))
 
     // `db.tables` is Dexie's CODE-declared schema — on a fresh process it holds
@@ -284,7 +285,9 @@ export async function restorePluginTables(
     }
 
     const restored = Object.keys(patch)
-    if (restored.length === 0) {
+    // A skipped core store still requires an explicit bump when no plugin
+    // contributes a patch (for example after all table-owning plugins were removed).
+    if (restored.length === 0 && !requiresCreate) {
       for (const registration of registrations) {
         await putPluginDexiaMeta({
           ...registration,

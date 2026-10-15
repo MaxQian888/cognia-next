@@ -1,3 +1,10 @@
+let mockDatabaseName = "archive-host-a"
+jest.mock("@/lib/db/schema", () => ({ getDb: () => ({ name: mockDatabaseName }) }))
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
+
 const enqueueMock = jest.fn()
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueueHostStateIntentIfAvailable: (input: unknown) => enqueueMock(input),
@@ -31,6 +38,8 @@ jest.mock("@/lib/filespace/lifecycle", () => ({
 import { deleteSessionsRouted, setSessionsArchived } from "./session-archive-writes"
 
 beforeEach(() => {
+  mockDatabaseName = "archive-host-a"
+  clearActiveRuntimeTargetContext()
   archiveScratchMock.mockReset().mockResolvedValue(undefined)
   announceMock.mockReset()
   enqueueMock.mockReset().mockResolvedValue(null)
@@ -163,4 +172,50 @@ describe("deleteSessionsRouted", () => {
     await expect(deleteSessionsRouted(["a"])).rejects.toThrow("snapshot failed")
     expect(deleteWithTeardownMock).not.toHaveBeenCalled()
   })
+})
+
+describe("Host changes during routed writes", () => {
+  it.each(["archive", "restore", "delete"])(
+    "rejects %s after route eligibility changes scope",
+    async (kind) => {
+      setActiveRuntimeTargetContext("acct_archive", "host-a")
+      let resolve!: (value: null) => void
+      enqueueMock.mockReturnValueOnce(
+        new Promise((done) => {
+          resolve = done
+        })
+      )
+      const pending =
+        kind === "delete"
+          ? deleteSessionsRouted(["same-id"])
+          : setSessionsArchived(["same-id"], kind === "archive")
+      mockDatabaseName = "archive-host-b"
+      setActiveRuntimeTargetContext("acct_archive", "host-b")
+      resolve(null)
+      await expect(pending).rejects.toThrow("scope changed")
+      expect(archiveScratchMock).not.toHaveBeenCalled()
+      expect(archiveSessionMock).not.toHaveBeenCalled()
+      expect(unarchiveSessionMock).not.toHaveBeenCalled()
+      expect(deleteWithTeardownMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["archive", "delete"])(
+    "rejects %s after scratch archival changes scope",
+    async (kind) => {
+      setActiveRuntimeTargetContext("acct_archive", "host-a")
+      archiveScratchMock.mockImplementation(async () => {
+        mockDatabaseName = "archive-host-b"
+        setActiveRuntimeTargetContext("acct_archive", "host-b")
+      })
+      const pending =
+        kind === "delete"
+          ? deleteSessionsRouted(["same-id"])
+          : setSessionsArchived(["same-id"], true)
+      await expect(pending).rejects.toThrow("scope changed")
+      expect(archiveSessionMock).not.toHaveBeenCalled()
+      expect(deleteWithTeardownMock).not.toHaveBeenCalled()
+      expect(announceMock).not.toHaveBeenCalled()
+    }
+  )
 })

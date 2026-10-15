@@ -64,6 +64,11 @@ export interface SessionHistoryHydration {
   mode: "timeline" | "legacy" | "local"
 }
 
+function assertTransportBinding(transport: Transport): void {
+  const bound = transport as Transport & { assertRuntimeTargetBinding?: () => void }
+  bound.assertRuntimeTargetBinding?.()
+}
+
 function currentScope(): string {
   const scope = getActiveRuntimeTargetContext()
   let databaseName: string | undefined
@@ -149,8 +154,14 @@ export function hydrateSessionHistory(
   sessionId: string,
   options: { pageSize?: number } = {}
 ): Promise<SessionHistoryHydration> {
+  try {
+    assertTransportBinding(transport)
+  } catch (error) {
+    return Promise.reject(error)
+  }
   watchConnection(transport)
-  let key = scopedSession(sessionId)
+  const scope = currentScope()
+  const key = scopedSession(sessionId)
   if (owners.has(key) && owners.get(key) !== transport) invalidateSessionHistory(sessionId)
   owners.set(key, transport)
   const completedMode = hydrated.get(key)
@@ -163,17 +174,11 @@ export function hydrateSessionHistory(
    * Re-take the coalescing slot after a supersession.
    *
    * `invalidateSessionHistory` drops the in-flight entry so a stale answer
-   * cannot be handed out, and a scope switch moves the key the entry is filed
-   * under. Without re-taking it, the very next caller — the chat pane and the
+   * cannot be handed out. Without re-taking it, the very next caller — the chat pane and the
    * session hook negotiate the same conversation — opens a second, parallel
    * hydration of a session this one is already re-asking about.
    */
   const reclaim = () => {
-    const next = scopedSession(sessionId)
-    if (next !== key) {
-      if (inflight.get(key) === task) inflight.delete(key)
-      key = next
-    }
     owners.set(key, transport)
     if (!inflight.has(key)) inflight.set(key, task)
   }
@@ -192,12 +197,16 @@ export function hydrateSessionHistory(
    */
   const task: Promise<SessionHistoryHydration> = (async () => {
     for (let attempt = 1; ; attempt += 1) {
-      const scope = currentScope()
       const generation = generations.get(key) ?? 0
       const assertCurrent = () => {
-        if (scope !== currentScope() || generation !== (generations.get(key) ?? 0)) {
+        if (
+          scope !== currentScope() ||
+          owners.get(key) !== transport ||
+          generation !== (generations.get(key) ?? 0)
+        ) {
           throw supersededError()
         }
+        assertTransportBinding(transport)
       }
       try {
         const result = await negotiateAndHydrate(transport, sessionId, pageSize, assertCurrent)
@@ -205,7 +214,16 @@ export function hydrateSessionHistory(
         publishMode(key, result.mode)
         return result
       } catch (error) {
-        if (!isSuperseded(error) || attempt >= MAX_SUPERSEDED_ATTEMPTS) throw error
+        // Reconnects within this scope may retry. A different Host/account or
+        // transport must start its own request; this transport still owns the
+        // old Host and must never hydrate the newly selected database.
+        if (
+          !isSuperseded(error) ||
+          scope !== currentScope() ||
+          owners.get(key) !== transport ||
+          attempt >= MAX_SUPERSEDED_ATTEMPTS
+        )
+          throw error
         reclaim()
       }
     }
@@ -250,10 +268,11 @@ async function negotiateAndHydrate(
   assertCurrent: () => void
 ): Promise<SessionHistoryHydration> {
   try {
+    assertCurrent()
     const capability = await transport.call<{ version?: unknown }>("transcript_capabilities", {})
+    assertCurrent()
     if (capability?.version === 1) {
-      assertCurrent()
-      return negotiateTimelineOwnership(transport, sessionId)
+      return negotiateTimelineOwnership(transport, sessionId, assertCurrent)
     }
     throw new Error("invalid transcript capability response")
   } catch (error) {
@@ -281,18 +300,22 @@ async function negotiateAndHydrate(
  */
 async function negotiateTimelineOwnership(
   transport: Transport,
-  sessionId: string
+  sessionId: string,
+  assertCurrent: () => void
 ): Promise<SessionHistoryHydration> {
   try {
+    assertCurrent()
     await transport.call("session_timeline", {
       session_id: sessionId,
       direction: "backward",
       limit: 1,
     })
   } catch (error) {
+    assertCurrent()
     if (!isSessionNotFound(error)) throw error
     return { applied: 0, total: 0, mode: "local" }
   }
+  assertCurrent()
   return { applied: 0, total: 0, mode: "timeline" }
 }
 
@@ -312,10 +335,13 @@ export async function readCompleteSessionHistory(
   const scope = currentScope()
   const assertCurrent = () => {
     if (scope !== currentScope()) throw supersededError()
+    assertTransportBinding(transport)
   }
+  assertCurrent()
   const limits = { maxPages: options.maxPages ?? MAX_PAGES, requireComplete: true }
   const readSession = async () => {
     const sessions = await collectPages<ChatSession>(async (pageToken) => {
+      assertCurrent()
       const page = await transport.call("session_list", { pageSize: MAX_PAGE_SIZE, pageToken })
       assertCurrent()
       if (!isPage(page)) throw new Error("invalid session history metadata page")
@@ -343,6 +369,7 @@ export async function readCompleteSessionHistory(
   const ids = new Set<string>()
   let expectedTotal: number | undefined
   const messages = await collectPages<StoredMessage>(async (pageToken) => {
+    assertCurrent()
     const page = await transport.call("message_get_by_session", {
       session_id: sessionId,
       pageSize: MAX_PAGE_SIZE,
@@ -393,6 +420,7 @@ async function drainSessionHistory(
   let total = 0
 
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
+    assertCurrent()
     const page = await transport.call<SessionHistoryPage>("message_get_by_session", {
       session_id: sessionId,
       limit: pageSize,
@@ -424,6 +452,7 @@ async function persistHistoryPage(rows: StoredMessage[], assertCurrent: () => vo
   const orphanCandidates = new Set<string>()
   await db.transaction("rw", db.messages, db.messageMediaRefs, async () => {
     const oldRefs = await db.messageMediaRefs.where("messageId").anyOf(messageIds).toArray()
+    assertCurrent()
     for (const ref of oldRefs) orphanCandidates.add(ref.hash)
     await db.messages.bulkPut(normalized)
     await db.messageMediaRefs.where("messageId").anyOf(messageIds).delete()
@@ -432,6 +461,7 @@ async function persistHistoryPage(rows: StoredMessage[], assertCurrent: () => vo
     )
     if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
   })
+  assertCurrent()
   // Hydrated history is chat history: queue the touched sessions so the ADR-0099
   // index projects them. The lazy backfill cannot be relied on here — it walks
   // once, newest-first, and latches `complete`, so anything pulled down after

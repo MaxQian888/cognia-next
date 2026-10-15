@@ -449,6 +449,24 @@ describe("headless session scratch workspace", () => {
     expect(archiveManagedWorkspace).not.toHaveBeenCalled()
   })
 
+  it("refuses scratch archival after an awaited registry read changes scope", async () => {
+    const fx = scratchFixture()
+    await ensureSessionScratchWorkspace(fx.row, fx.deps)
+    jest.mocked(isHeadlessHost).mockReturnValue(true)
+    let active = true
+    jest.mocked(getWorkspaceBundle).mockImplementation(async () => {
+      active = false
+      return fx.bundle
+    })
+    await expect(
+      archiveSessionScratchWorkspace(fx.row, () => {
+        if (!active) throw new Error("Session database scope changed")
+      })
+    ).rejects.toThrow("scope changed")
+    expect(getManagedWorkspace).not.toHaveBeenCalled()
+    expect(archiveManagedWorkspace).not.toHaveBeenCalled()
+  })
+
   it("archives a synced scratch owner through its companion before the host-state write", async () => {
     const fx = scratchFixture()
     await ensureSessionScratchWorkspace(fx.row, fx.deps)

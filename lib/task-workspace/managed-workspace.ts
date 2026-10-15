@@ -193,11 +193,14 @@ export function ensureSessionScratchWorkspace(
  * Dexie reads inside the hold for filesystem I/O.
  */
 export async function archiveSessionScratchWorkspace(
-  sessionOrId: ChatSession | string
+  sessionOrId: ChatSession | string,
+  assertActive?: () => void
 ): Promise<void> {
+  assertActive?.()
   const headless = isHeadlessHost()
   if (!headless && getRuntimeSnapshot().target?.kind !== "companion") return
   const session = typeof sessionOrId === "string" ? await getSession(sessionOrId) : sessionOrId
+  assertActive?.()
   if (!session?.platformBinding || !isSessionScratchWorkspace(session)) return
   const sessionId = session.id
   assertSessionWritable(session, "metadata")
@@ -210,11 +213,13 @@ export async function archiveSessionScratchWorkspace(
     : (await listWorkspaceBundles()).filter(
         (bundle) => bundle.ownerType === "session" && bundle.ownerRef === sessionId
       )
+  assertActive?.()
   if (!candidates.length && !bundleId) return
   if (candidates.length !== 1) throw new Error("Scratch workspace bundle is missing or ambiguous")
   const bundle = candidates[0]
   const primary = validateSessionScratchBundle(sessionId, bundle, bundleId)
   const workspace = await getManagedWorkspace(primary.workspaceId)
+  assertActive?.()
   if (
     !workspace ||
     workspace.ownerType !== "session" ||
@@ -227,13 +232,15 @@ export async function archiveSessionScratchWorkspace(
   // Desktop rootless chats use the same portable managed identity. Only the
   // service scratch seed proves this row came from the always-on host command.
   const seedSuffix = `/sources/session-scratch/${await sha256Hex(sessionId)}`
+  assertActive?.()
   if (workspace.base.kind !== "workingState" || !workspace.sourceRoot.endsWith(seedSuffix)) {
     if (!headless) return
     throw new Error("Scratch workspace does not have a service-owned source")
   }
-  await runWorkspaceUserAction("task_workspace_managed_archive", () =>
-    archiveManagedWorkspace(primary.workspaceId)
-  )
+  await runWorkspaceUserAction("task_workspace_managed_archive", () => {
+    assertActive?.()
+    return archiveManagedWorkspace(primary.workspaceId)
+  })
 }
 
 /**

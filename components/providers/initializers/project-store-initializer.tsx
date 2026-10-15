@@ -1,7 +1,12 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 import Dexie from "dexie"
+
+import {
+  getRuntimeTargetScopeKey,
+  subscribeRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 
 import { getAllProjects } from "@/lib/db/projects"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -26,28 +31,38 @@ const log = loggers.shell
  * table rather than the sync run also covers every other writer.
  */
 export function ProjectStoreInitializer() {
-  const hasInitialized = useRef(false)
+  const scopeKey = useSyncExternalStore(
+    subscribeRuntimeTargetContext,
+    getRuntimeTargetScopeKey,
+    getRuntimeTargetScopeKey
+  )
 
   useEffect(() => {
-    if (hasInitialized.current) return
-    hasInitialized.current = true
+    let cancelled = false
+    const isCurrent = () => !cancelled && getRuntimeTargetScopeKey() === scopeKey
 
     let subscription: { unsubscribe: () => void } | null = null
     void useProjectStore
       .getState()
       .load()
       .then(() => {
+        if (!isCurrent()) return
         // `Dexie.liveQuery`, not the named `liveQuery` export: the latter is
         // undefined under Jest's module interop.
         subscription = Dexie.liveQuery(() => getAllProjects()).subscribe({
-          next: (projects) => useProjectStore.getState().adoptPersistedProjects(projects),
+          next: (projects) => {
+            if (isCurrent()) useProjectStore.getState().adoptPersistedProjects(projects)
+          },
           error: (err: unknown) => log.warn("project-store: live query failed", { err }),
         })
       })
       .catch((err) => log.warn("project-store: boot load threw", { err }))
 
-    return () => subscription?.unsubscribe()
-  }, [])
+    return () => {
+      cancelled = true
+      subscription?.unsubscribe()
+    }
+  }, [scopeKey])
 
   return null
 }

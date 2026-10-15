@@ -96,6 +96,8 @@ const bulkAssignToFolder = jest.fn().mockResolvedValue(undefined)
 const reorderSessions = jest.fn().mockResolvedValue(undefined)
 // Every `crossWorkspace` the workspace asked `useSessions` for, in order.
 const useSessionsCrossWorkspace: boolean[] = []
+const mockListOnlyOptions: boolean[] = []
+let mockPaneSessions: ChatSession[] | undefined
 let activeSessionId: string | null = null
 // Navigation epochs — mirror the real stores so the workspace can decide
 // whether the guild or the active session was chosen more recently.
@@ -104,7 +106,11 @@ let selectedGuildEpoch = 0
 let activeSessionEpoch = 0
 let mockActiveProjectIdForSessions: string | null = null
 jest.mock("@/hooks/chat", () => ({
-  useSessions: ({ crossWorkspace = false }: { crossWorkspace?: boolean } = {}) => {
+  useSessions: ({
+    crossWorkspace = false,
+    listOnly = false,
+  }: { crossWorkspace?: boolean; listOnly?: boolean } = {}) => {
+    mockListOnlyOptions.push(listOnly)
     useSessionsCrossWorkspace.push(crossWorkspace)
     const listedActiveSession =
       sessionsRef.current.find((session) => session.id === activeSessionId) ?? null
@@ -116,6 +122,7 @@ jest.mock("@/hooks/chat", () => ({
         : listedActiveSession
     return {
       sessions: sessionsRef.current,
+      paneSessions: mockPaneSessions ?? sessionsRef.current,
       activeSessionId,
       activeSession,
       activeSessionState: activeSession ? "present" : "absent",
@@ -380,6 +387,8 @@ beforeEach(() => {
   requestChatHome.mockClear()
   bulkAssignToFolder.mockClear()
   useSessionsCrossWorkspace.length = 0
+  mockListOnlyOptions.length = 0
+  mockPaneSessions = undefined
   mockConversationSidebar = undefined
   // The workspace-switch tests below write the real project store; reset it so
   // an `activeProjectId` never leaks into the guild-reconcile suites.
@@ -1473,4 +1482,15 @@ test("routes a manual reorder through useSessions so a paired client reaches its
     await onReorderSessions(["s-2", "s-1"], "recent")
   })
   expect(reorderSessions).toHaveBeenCalledWith(["s-2", "s-1"], "recent")
+})
+
+test("opts into projected navigation and gives desktop panes separate complete rows", async () => {
+  sessionsRef.current = [{ id: "projected", title: "Navigation", createdAt: 1, updatedAt: 1 }]
+  mockPaneSessions = [{ ...sessionsRef.current[0]!, systemPrompt: "Complete encrypted settings" }]
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  expect(mockListOnlyOptions.at(-1)).toBe(true)
+  expect(paneGroupPropsLog.at(-1)?.sessions).toBe(sessionsRef.current)
+  expect(paneGroupPropsLog.at(-1)?.paneSessions).toBe(mockPaneSessions)
 })

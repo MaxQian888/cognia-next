@@ -1,6 +1,6 @@
 import { loggers } from "@cognia/logging"
 import { closeSession } from "@/lib/claude/ipc"
-import { bulkDeleteSessions } from "@/lib/db/sessions"
+import { bulkDeleteSessions, type SessionPersistenceScope } from "@/lib/db/sessions"
 import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { isTauri } from "@/lib/tauri"
@@ -29,7 +29,11 @@ import { useImNotifyStore } from "@/stores/chat/im-notify-store"
  *    the plugin bus (ids only — PII red line), and deselect the active session
  *    if it was one of them.
  */
-export async function deleteSessionsWithTeardown(ids: readonly string[]): Promise<void> {
+export async function deleteSessionsWithTeardown(
+  ids: readonly string[],
+  scope?: SessionPersistenceScope
+): Promise<void> {
+  scope?.assertActive()
   const uniqueIds = [...new Set(ids)]
   if (uniqueIds.length === 0) return
   if (isTauri()) {
@@ -44,7 +48,9 @@ export async function deleteSessionsWithTeardown(ids: readonly string[]): Promis
       })
     )
   }
-  await bulkDeleteSessions(uniqueIds)
+  scope?.assertActive()
+  await bulkDeleteSessions(uniqueIds, scope)
+  scope?.assertActive()
   const notify = useImNotifyStore.getState()
   for (const id of uniqueIds) {
     // A deleted session can never settle — drop its armed entry rather than

@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
+const mockGetSession = jest.fn()
+jest.mock("@/lib/db/sessions", () => ({ getSession: (id: string) => mockGetSession(id) }))
 const mockStart = jest.fn()
 const mockRemote = jest.fn()
 const mockRecover = jest.fn()
@@ -68,6 +70,7 @@ beforeEach(() => {
   ]
   mockActiveHost = null
   mockRemote.mockResolvedValue({})
+  mockGetSession.mockResolvedValue(session)
 })
 function show(value = session) {
   return render(<ThreadHandoffSourceDialog session={value} open onOpenChange={mockChange} />)
@@ -107,6 +110,7 @@ it("resumes interrupted remote ownership instead of the mobile dispatch queue", 
   const target = { hostRef: "cloud", kind: "cloud" }
   mockSnapshot = { devices: [], ticket: { target, state: "frozen" } }
   const locked = { ...session, handoffLock: { ticketId: "ticket", state: "frozen" } } as ChatSession
+  mockGetSession.mockResolvedValue(locked)
   show(locked)
   fireEvent.click(screen.getByRole("button", { name: "retry" }))
   await waitFor(() => expect(mockRemote).toHaveBeenCalledWith(locked, target))
@@ -261,4 +265,13 @@ describe("an always-on Host can take the code along (ADR-0224 A11b)", () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith("codeFailure.too-large"))
     expect(mockChange).not.toHaveBeenCalledWith(false)
   })
+})
+
+it("hydrates encrypted session configuration before handing a projected row to another host", async () => {
+  const full = { ...session, systemPrompt: "Secret prompt", sdkSessionId: "sdk-session" }
+  mockGetSession.mockResolvedValue(full)
+  show()
+  fireEvent.click(screen.getByRole("button", { name: /My Cloud/ }))
+  fireEvent.click(screen.getByRole("button", { name: "continue" }))
+  await waitFor(() => expect(mockRemote).toHaveBeenCalledWith(full, expect.any(Object)))
 })

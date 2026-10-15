@@ -1,3 +1,6 @@
+import "fake-indexeddb/auto"
+import Dexie from "dexie"
+import { ensureSessionListReady } from "./session-list"
 import type { PluginManifestDexieBlock } from "@/types/plugin"
 
 import {
@@ -40,6 +43,7 @@ describe("database boot coordination", () => {
       verifySchema: jest.fn(() => undefined),
       assertLayoutSupported: jest.fn(async () => undefined),
       markLayout: jest.fn(async () => undefined),
+      prepareSessionList: jest.fn(async () => order.push("projection")),
       seed: jest.fn(async () => order.push("seed")),
     } as never)
 
@@ -52,7 +56,7 @@ describe("database boot coordination", () => {
       requiredStoreNames: ["settings", "plugins"],
       recreateDatabase,
     })
-    expect(order).toEqual(["lock", "open", "restore", "seed", "unlock"])
+    expect(order).toEqual(["lock", "open", "restore", "projection", "seed", "unlock"])
   })
 
   it("refuses an unsupported storage layout before the database is opened", async () => {
@@ -82,6 +86,7 @@ describe("database boot coordination", () => {
           throw refusal
         }),
         markLayout: jest.fn(async () => undefined),
+        prepareSessionList: jest.fn(async () => undefined),
         seed: jest.fn(async () => undefined),
       } as never)
     ).rejects.toThrow(refusal)
@@ -123,6 +128,7 @@ describe("database boot coordination", () => {
       verifySchema: jest.fn(() => undefined),
       assertLayoutSupported: jest.fn(async () => undefined),
       markLayout: jest.fn(async () => undefined),
+      prepareSessionList: jest.fn(async () => order.push("projection")),
       seed,
     }
 
@@ -130,7 +136,7 @@ describe("database boot coordination", () => {
     const second = ensureActiveDatabaseReady(dependencies as never)
     await Promise.all([first, second])
 
-    expect(order).toEqual(["open", "restore:1", "seed"])
+    expect(order).toEqual(["open", "restore:1", "projection", "seed"])
     expect(database.open).toHaveBeenCalledTimes(1)
     expect(restorePluginSchema).toHaveBeenCalledTimes(1)
     expect(seed).toHaveBeenCalledTimes(1)
@@ -150,6 +156,7 @@ describe("database boot coordination", () => {
       verifySchema: jest.fn(() => undefined),
       assertLayoutSupported: jest.fn(async () => undefined),
       markLayout: jest.fn(async () => undefined),
+      prepareSessionList: jest.fn(async () => undefined),
       seed: jest.fn(async () => undefined),
     }
 
@@ -193,4 +200,47 @@ describe("assertPluginSchemaReady", () => {
 
     expect(() => assertPluginSchemaReady(database as never, manifests)).toThrow("plugin-a:rows")
   })
+})
+
+it("backfills sessions after a higher plugin version materializes a skipped core store", async () => {
+  const database = new Dexie("boot-plugin-higher-session-list")
+  database.version(245).stores({ storageLayout: "id", sessions: "id", plugins: "id" })
+  await database.open()
+  await database.table("sessions").put({ id: "kept", title: "Existing", updatedAt: 1 })
+  const prepareSessionList = jest.fn(ensureSessionListReady)
+  const seed = jest.fn(async () => {
+    expect(await database.table("sessionList").get("kept")).toMatchObject({
+      id: "kept",
+      title: "Existing",
+      workspaceKey: "",
+    })
+  })
+  try {
+    await ensureActiveDatabaseReady({
+      getDatabase: () => database,
+      getBuiltinPluginManifests: () => new Map(),
+      restorePluginSchema: async () => {
+        database.close()
+        database
+          .version(246)
+          .stores({ sessionList: "id, updatedAt, workspaceKey, [workspaceKey+updatedAt]" })
+        await database.open()
+        return []
+      },
+      recreateDatabase: () => database,
+      verifySchema: () => undefined,
+      assertLayoutSupported: async () => undefined,
+      markLayout: async () => undefined,
+      prepareSessionList,
+      seed,
+    } as never)
+    expect(prepareSessionList).toHaveBeenCalledWith(database)
+    expect(seed).toHaveBeenCalledTimes(1)
+    expect(await database.table("storageLayout").get("session-list-v241")).toEqual({
+      id: "session-list-v241",
+      version: 1,
+    })
+  } finally {
+    await database.delete()
+  }
 })

@@ -93,25 +93,35 @@ const isLoadingSessionsRef = { current: false }
 const directSend = jest.fn().mockResolvedValue(undefined)
 const teamSend = jest.fn().mockResolvedValue(undefined)
 let activeSessionId: string | null = null
+let mockFullActiveSession: ChatSession | null | undefined
+const mockPaneSession = { current: null as ChatSession | null }
+const mockSessionOptions = jest.fn()
 jest.mock("@/hooks/chat", () => ({
-  useSessions: () => ({
-    sessions: sessionsRef.current,
-    isLoadingSessions: isLoadingSessionsRef.current,
-    activeSessionId,
-    select,
-    create,
-    remove,
-    rename,
-    archive,
-    unarchive,
-    bulkSetPinned,
-    assignToFolder,
-    bulkRemove,
-    bulkArchive,
-    bulkUnarchive,
-    bulkAssignToFolder,
-    folders: [],
-  }),
+  useSessions: (options: unknown) => {
+    mockSessionOptions(options)
+    return {
+      sessions: sessionsRef.current,
+      isLoadingSessions: isLoadingSessionsRef.current,
+      activeSessionId,
+      activeSession:
+        mockFullActiveSession === undefined
+          ? (sessionsRef.current.find((row) => row.id === activeSessionId) ?? null)
+          : mockFullActiveSession,
+      select,
+      create,
+      remove,
+      rename,
+      archive,
+      unarchive,
+      bulkSetPinned,
+      assignToFolder,
+      bulkRemove,
+      bulkArchive,
+      bulkUnarchive,
+      bulkAssignToFolder,
+      folders: [],
+    }
+  },
   useClaudeChat: () => ({
     send: directSend,
     stop: jest.fn(),
@@ -310,6 +320,7 @@ const welcomeExtrasRef: {
 } = { current: null }
 jest.mock("@/components/chat/chat-view", () => ({
   ChatPane: ({
+    activeSession,
     showHeader,
     onSend,
     onResumeAfterPlanApproval,
@@ -319,6 +330,7 @@ jest.mock("@/components/chat/chat-view", () => ({
     heroRouting,
     recentSessions,
   }: {
+    activeSession?: ChatSession | null
     recentSessions?: ReadonlyArray<{ id: string }>
     heroRouting?: boolean
     composerDisabled?: boolean
@@ -333,6 +345,7 @@ jest.mock("@/components/chat/chat-view", () => ({
     ) => Promise<void>
     onResumeAfterPlanApproval?: (prompt: string, mode: string) => void | Promise<void>
   }) => {
+    mockPaneSession.current = activeSession ?? null
     welcomeExtrasRef.current = welcomeExtras ?? null
     recentSessionsRef.current = recentSessions
     return (
@@ -589,6 +602,9 @@ import { MobileGlanceHome } from "@/components/mobile/glance/mobile-glance-home"
 import { AppShellMobile } from "./app-shell-mobile"
 
 beforeEach(() => {
+  mockFullActiveSession = undefined
+  mockPaneSession.current = null
+  mockSessionOptions.mockClear()
   logInfo.mockReset()
   logWarn.mockReset()
   select.mockReset()
@@ -1794,4 +1810,21 @@ it("normalizes an explicitly absent template before the mobile team send", async
     )
   )
   expect(directSend).not.toHaveBeenCalled()
+})
+
+it("opts into projections while giving the chat pane only the hydrated full session", () => {
+  activeSessionId = "full"
+  sessionsRef.current = [{ id: "full", title: "Navigation", createdAt: 1, updatedAt: 1 }]
+  mockFullActiveSession = { ...sessionsRef.current[0]!, systemPrompt: "Private configuration" }
+  render(<AppShellMobile />)
+  expect(mockSessionOptions).toHaveBeenCalledWith(expect.objectContaining({ listOnly: true }))
+  expect(mockPaneSession.current).toBe(mockFullActiveSession)
+})
+
+it("does not pass a projected active row to the mobile pane while hydration is pending", () => {
+  activeSessionId = "pending"
+  sessionsRef.current = [{ id: "pending", title: "Navigation", createdAt: 1, updatedAt: 1 }]
+  mockFullActiveSession = null
+  render(<AppShellMobile />)
+  expect(mockPaneSession.current).toBeNull()
 })

@@ -14,16 +14,32 @@
  * runs outside React.
  */
 
+import { getRuntimeTargetScopeKey } from "@/lib/runtime/runtime-target-context"
+import { getDb } from "@/lib/db/schema"
 import { deleteSessionsWithTeardown } from "@/lib/chat/session-deletion"
 import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
 import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
 import { archiveSessionScratchWorkspace } from "@/lib/task-workspace/managed-workspace"
 import {
+  type SessionPersistenceScope,
   archiveSession,
   bulkArchiveSessions,
   bulkUnarchiveSessions,
   unarchiveSession,
 } from "@/lib/db/sessions"
+
+function captureWriteScope(): SessionPersistenceScope {
+  const db = getDb()
+  const key = getRuntimeTargetScopeKey()
+  return {
+    db,
+    assertActive() {
+      if (key !== getRuntimeTargetScopeKey() || db.name !== getDb().name) {
+        throw new Error("Session database scope changed")
+      }
+    },
+  }
+}
 
 /** The ids no Host took, in the order given. */
 async function idsLeftForThisDevice(
@@ -46,23 +62,30 @@ export async function setSessionsArchived(
 ): Promise<void> {
   const uniqueIds = [...new Set(ids)]
   if (uniqueIds.length === 0) return
+  const scope = captureWriteScope()
   const local = await idsLeftForThisDevice(uniqueIds, (sessionId) =>
     enqueueHostStateIntentIfAvailable({
       sessionId,
       action: { kind: "session.archive", archived },
     })
   )
+  scope.assertActive()
   if (local.length === 0) return
   if (archived) {
-    for (const sessionId of local) await archiveSessionScratchWorkspace(sessionId)
+    for (const sessionId of local) {
+      scope.assertActive()
+      await archiveSessionScratchWorkspace(sessionId, scope.assertActive)
+      scope.assertActive()
+    }
   }
   if (local.length === 1) {
-    await (archived ? archiveSession(local[0]!) : unarchiveSession(local[0]!))
+    await (archived ? archiveSession(local[0]!, scope) : unarchiveSession(local[0]!, scope))
   } else {
-    await (archived ? bulkArchiveSessions(local) : bulkUnarchiveSessions(local))
+    await (archived ? bulkArchiveSessions(local, scope) : bulkUnarchiveSessions(local, scope))
   }
   // Live file shares are suspended while archived and resumed on restore
   // (ADR-0222 §10); a Host that took the write announces it itself.
+  scope.assertActive()
   announceFileSpaceSessionsChanged(local)
 }
 
@@ -74,11 +97,17 @@ export async function setSessionsArchived(
 export async function deleteSessionsRouted(ids: readonly string[]): Promise<void> {
   const uniqueIds = [...new Set(ids)]
   if (uniqueIds.length === 0) return
+  const scope = captureWriteScope()
   const local = await idsLeftForThisDevice(uniqueIds, (sessionId) =>
     enqueueHostStateIntentIfAvailable({ sessionId, action: { kind: "session.delete" } })
   )
+  scope.assertActive()
   if (local.length > 0) {
-    for (const sessionId of local) await archiveSessionScratchWorkspace(sessionId)
-    await deleteSessionsWithTeardown(local)
+    for (const sessionId of local) {
+      scope.assertActive()
+      await archiveSessionScratchWorkspace(sessionId, scope.assertActive)
+      scope.assertActive()
+    }
+    await deleteSessionsWithTeardown(local, scope)
   }
 }

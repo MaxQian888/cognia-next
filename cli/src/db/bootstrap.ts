@@ -33,6 +33,9 @@ import {
 } from "./store-lock"
 import {
   decodeSnapshotRowsAsync,
+  SNAPSHOT_DERIVED_TABLES,
+  snapshotRowsForTable,
+  prepareRestoredSessionLists,
   encodeSnapshotRows,
   parseMultiSnapshot,
   restoreMultiSnapshot,
@@ -446,7 +449,7 @@ async function collectTableBinaryOrphans(tableDirectory: string): Promise<void> 
 }
 
 function includedTableNames(source: SnapshotSource): string[] {
-  const excluded = new Set(source.excludeTables ?? [])
+  const excluded = new Set([...SNAPSHOT_DERIVED_TABLES, ...(source.excludeTables ?? [])])
   return source.db.tables.filter((table) => !excluded.has(table.name)).map((table) => table.name)
 }
 
@@ -550,6 +553,7 @@ async function restoreTableStore(
     }
     const tablesByName = new Map(source.db.tables.map((table) => [table.name, table]))
     for (const tableName of entry.tables) {
+      if (SNAPSHOT_DERIVED_TABLES.includes(tableName)) continue
       const table = tablesByName.get(tableName)
       if (!table) continue
       const tableFile = path.join(tableDirectory, tableFileName(source.name, tableName))
@@ -571,8 +575,9 @@ async function restoreTableStore(
           `corrupt (table file for ${source.name}.${tableName} is not an array)`
         )
       }
+      const authoritativeRows = snapshotRowsForTable(tableName, rows)
       await table.clear()
-      if (rows.length > 0) await table.bulkPut(rows)
+      if (authoritativeRows.length > 0) await table.bulkPut(authoritativeRows)
       restored.add(tableKey(source.name, tableName))
     }
     if (entry.version < source.db.verno) {
@@ -595,8 +600,14 @@ async function flushDirtyTables(
     const [databaseName, tableName] = splitTableKey(key)
     const source = sourceByName.get(databaseName)
     const table = source?.db.tables.find((candidate) => candidate.name === tableName)
-    if (!source || !table || source.excludeTables?.includes(tableName)) continue
-    const rows = await table.toArray()
+    if (
+      !source ||
+      !table ||
+      source.excludeTables?.includes(tableName) ||
+      SNAPSHOT_DERIVED_TABLES.includes(tableName)
+    )
+      continue
+    const rows = snapshotRowsForTable(tableName, await table.toArray())
     await writeSnapshotAtomicallyAsync(
       path.join(tableDirectory, tableFileName(databaseName, tableName)),
       JSON.stringify(await encodeSnapshotRows(rows, tableBinaryStore(tableDirectory)))
@@ -852,7 +863,8 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
             }
             const schemaTables = tablesBySource.get(source.name) ?? new Set<string>()
             for (const tableName of entry.tables) {
-              if (!schemaTables.has(tableName)) continue
+              if (SNAPSHOT_DERIVED_TABLES.includes(tableName) || !schemaTables.has(tableName))
+                continue
               const tableFile = path.join(tableDirectory, tableFileName(source.name, tableName))
               let readable = false
               try {
@@ -913,6 +925,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
         }
       }
     }
+    await prepareRestoredSessionLists(sources)
     if (useTableStore) {
       for (const source of sources) {
         for (const tableName of includedTableNames(source)) {
@@ -1147,6 +1160,7 @@ export async function importSnapshotStore(
         tableDirectory,
         refuse(manifestFile)
       )
+      await prepareRestoredSessionLists(sources)
       return { kind: "table-store", tables: restore.restored.size }
     }
 
@@ -1165,6 +1179,7 @@ export async function importSnapshotStore(
       }
       throw error
     }
+    await prepareRestoredSessionLists(sources)
     const tables = Object.values(parsed.snapshot.dbs).reduce(
       (count, db) => count + Object.keys(db.tables).length,
       0

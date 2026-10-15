@@ -55,6 +55,10 @@ jest.mock("@/lib/workspace/rebind-workspace-schedules", () => ({
   rebindWorkspaceSchedules: (...args: unknown[]) => rebindWorkspaceSchedules(...args),
 }))
 
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import { useProjectStore } from "./project-store"
 import type { Project } from "@/types"
 
@@ -77,6 +81,7 @@ function projectFixture(overrides: Partial<Project> = {}): Project {
 }
 
 beforeEach(() => {
+  clearActiveRuntimeTargetContext()
   useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   dispatchProjectCreate.mockClear()
   dispatchProjectUpdate.mockClear()
@@ -445,6 +450,7 @@ import { primaryRootOf, additionalDirsOf } from "@/lib/workspace/roots"
 
 describe("project-store roots", () => {
   beforeEach(() => {
+    clearActiveRuntimeTargetContext()
     useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   })
 
@@ -701,4 +707,42 @@ it("preserves valid derived metadata when a knowledge edit leaves source text un
     .knowledgeBase[0]
   expect(updated.structure).toEqual(structure)
   expect(updated.embeddableContent).toBe("projection")
+})
+
+describe("Host scoped project hydration", () => {
+  it("replaces old Host projects while preserving a selection present on the new Host", async () => {
+    setActiveRuntimeTargetContext("acct_local", "host-a")
+    getAllProjects.mockResolvedValue([
+      projectFixture({ id: "shared", name: "Host A" }),
+      projectFixture({ id: "only-a" }),
+    ])
+    loadActiveProjectId.mockResolvedValue("shared")
+    await useProjectStore.getState().load()
+    setActiveRuntimeTargetContext("acct_local", "host-b")
+    getAllProjects.mockResolvedValue([projectFixture({ id: "shared", name: "Host B" })])
+    await useProjectStore.getState().load()
+    expect(useProjectStore.getState().projects.map((row) => row.name)).toEqual(["Host B"])
+    expect(useProjectStore.getState().activeProjectId).toBe("shared")
+    expect(putProject).not.toHaveBeenCalled()
+  })
+
+  it("discards an old Host load resolving after new Host hydration", async () => {
+    setActiveRuntimeTargetContext("acct_local", "host-a")
+    let resolve!: (projects: Project[]) => void
+    getAllProjects.mockReturnValueOnce(
+      new Promise<Project[]>((done) => {
+        resolve = done
+      })
+    )
+    const oldLoad = useProjectStore.getState().load()
+    setActiveRuntimeTargetContext("acct_local", "host-b")
+    getAllProjects.mockResolvedValue([projectFixture({ id: "host-b" })])
+    loadActiveProjectId.mockResolvedValue("host-b")
+    await useProjectStore.getState().load()
+    resolve([projectFixture({ id: "host-a" })])
+    await oldLoad
+    expect(useProjectStore.getState().activeProjectId).toBe("host-b")
+    expect(useProjectStore.getState().projects.map((row) => row.id)).toEqual(["host-b"])
+    expect(putProject).not.toHaveBeenCalled()
+  })
 })

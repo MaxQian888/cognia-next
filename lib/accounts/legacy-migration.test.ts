@@ -377,3 +377,50 @@ describe("migrateLegacyDatabaseToAccount", () => {
     registryDb.close()
   })
 })
+
+it("rebuilds legacy session projections instead of copying stale rows or readiness", async () => {
+  const sourceDbName = "cognia-legacy-session-list-copy"
+  const targetDbName = encryptedAccountDatabaseName("acct_legacy")
+  await Promise.all([Dexie.delete(sourceDbName), Dexie.delete(targetDbName)])
+  const source = new Dexie(sourceDbName)
+  source.version(1).stores({ sessions: "id", sessionList: "id", storageLayout: "id" })
+  await source.table("sessions").put({ id: "s", title: "Current", updatedAt: 4 })
+  await source.table("sessionList").bulkPut([{ id: "s", title: "Stale" }, { id: "orphan" }])
+  await source.table("storageLayout").bulkPut([
+    { id: "singleton", layout: "single-database", schemaVersion: 240 },
+    { id: "session-list-v241", version: 1 },
+  ])
+  source.close()
+  const { db: registryDb, registry } = await createRegistry("projection-copy")
+  await activateTestCipher("acct_legacy")
+  const target = new CogniaDB(targetDbName)
+  try {
+    const result = await migrateLegacyDatabaseToAccount({
+      registry,
+      sourceDbName,
+      targetAccountId: "acct_legacy",
+      batchSize: 1,
+    })
+    expect(result.tables.some((table) => table.name === "sessionList")).toBe(false)
+    expect(result.tables.find((table) => table.name === "storageLayout")).toMatchObject({
+      copied: 1,
+      verified: 1,
+    })
+    await target.open()
+    expect(await target.sessionList.toArray()).toEqual([
+      { id: "s", title: "Current", updatedAt: 4, workspaceKey: "" },
+    ])
+    expect(await target.table("storageLayout").get("session-list-v241")).toEqual({
+      id: "session-list-v241",
+      version: 2,
+    })
+    expect(await target.table("storageLayout").get("singleton")).toMatchObject({
+      layout: "single-database",
+    })
+  } finally {
+    await target.delete()
+    await Dexie.delete(sourceDbName)
+    await registryDb.delete()
+    __resetAccountContentCipherForTesting()
+  }
+})

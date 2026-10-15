@@ -16,6 +16,7 @@
  * dispatcher) stay lazy-loaded behind the handlers.
  */
 
+import { getSession } from "@/lib/db/sessions"
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -70,6 +71,12 @@ export function useSessionDesktopHandoffs(
    * `~/.cognia/handoff/<id>.jsonl`, then launch `cognia-agent resume <id>` in
    * a fresh dock tab. Desktop only; heavy collaborators stay lazy-loaded.
    */
+  const fullSession = async () => {
+    const row = await getSession(session.id)
+    if (!row) throw new Error(t("openInCodexAppFailed"))
+    return row
+  }
+
   const handleOpenInTerminal = () => {
     void (async () => {
       try {
@@ -88,7 +95,7 @@ export function useSessionDesktopHandoffs(
         ])
         const messages = await listMessages(session.id)
         await exportHandoffToCli({ sessionId: session.id, messages })
-        const cwd = session.workingDir?.trim() || (await homeDir())
+        const cwd = (await fullSession()).workingDir?.trim() || (await homeDir())
         const outcome = await launchCogniaAgent({
           handoffSessionId: session.id,
           cwd,
@@ -109,7 +116,7 @@ export function useSessionDesktopHandoffs(
   const handleOpenInCodexApp = () => {
     setCodexDispatching(true)
     void import("@/lib/chat/dispatch-to-codex-app")
-      .then(({ dispatchSessionToCodexApp }) => dispatchSessionToCodexApp(session))
+      .then(async ({ dispatchSessionToCodexApp }) => dispatchSessionToCodexApp(await fullSession()))
       .then(() => {
         log.info("session open-in-codex-app", { sessionId: session.id })
         toast.success(t("openedInCodexApp"))
@@ -140,7 +147,7 @@ export function useSessionDesktopHandoffs(
   const handleReturnFromCodexApp = (event: ReactMouseEvent) => {
     setCodexDispatching(true)
     void import("@/lib/chat/dispatch-to-codex-app")
-      .then(({ returnSessionFromCodexApp }) => returnSessionFromCodexApp(session))
+      .then(async ({ returnSessionFromCodexApp }) => returnSessionFromCodexApp(await fullSession()))
       .then((sessionId) => {
         latest.current.onReturned(sessionId, event)
         toast.success(t("returnedFromCodexApp"))

@@ -56,7 +56,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(383)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(384)
     db.close()
   })
 
@@ -608,5 +608,18 @@ describe("Notification V2 (ADR-0190)", () => {
         enforcement: "explicit-delete",
       })
     }
+  })
+})
+
+it("keeps the encrypted session list derived and outside both sync protocols", () => {
+  const entry = DATA_TABLE_CATALOG.find((table) => table.name === "sessionList")
+  expect(entry).toMatchObject({
+    role: "projection",
+    contentProtection: "encrypted-content",
+    sensitivity: "confidential",
+    backupPolicy: { mode: "derived" },
+    syncPolicy: { mode: "none" },
+    accountSync: { mode: "none" },
+    cleanupPolicy: "protected",
   })
 })

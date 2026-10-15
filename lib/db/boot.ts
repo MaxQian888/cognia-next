@@ -6,6 +6,7 @@ import { getBuiltinPluginDexieManifests } from "@/lib/plugin/dexie/builtin-manif
 import { toNamespacedTableName } from "@/lib/plugin/dexie/namespace"
 import { getDb, recreateActiveDatabaseForSchemaUpgrade, type CogniaDB, whenSeeded } from "./schema"
 import { assertStorageLayoutSupported, writeStorageLayoutMarker } from "./storage-layout"
+import { ensureSessionListReady } from "./session-list"
 
 interface PersistedPluginManifestRow {
   manifest?: unknown
@@ -33,6 +34,7 @@ export interface DatabaseBootDependencies {
   /** Refuses a database written by an older storage layout. See `storage-layout.ts`. */
   assertLayoutSupported: (databaseName: string) => Promise<void>
   markLayout: (database: CogniaDB) => Promise<void>
+  prepareSessionList: (database: CogniaDB) => Promise<void>
   seed: () => Promise<void>
 }
 
@@ -44,6 +46,7 @@ const defaultDependencies: DatabaseBootDependencies = {
   verifySchema: assertPluginSchemaReady,
   assertLayoutSupported: assertStorageLayoutSupported,
   markLayout: writeStorageLayoutMarker,
+  prepareSessionList: ensureSessionListReady,
   seed: whenSeeded,
 }
 
@@ -119,6 +122,9 @@ export function ensureActiveDatabaseReady(
       )
     }
     dependencies.verifySchema(active, manifests)
+    // Plugin versions can skip the core upgrade callback; build only after
+    // schema adoption has materialized the projection store.
+    await dependencies.prepareSessionList(active)
     await dependencies.seed()
     return { databaseName: active.name, restoredPluginTables }
   })

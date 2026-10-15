@@ -112,6 +112,50 @@ function encryptedTable(databaseName: string, table: DBCoreTable): DBCoreTable {
     return { ...metadata, ...payload }
   }
 
+  const cachedRow = (row: unknown, explicitKey?: unknown): unknown => {
+    if (table.name !== "sessionList" || !isRecord(row)) return undefined
+    const envelope = row[ENCRYPTED_CONTENT_FIELD]
+    if (!isEncryptedEnvelope(envelope)) return undefined
+    const cached = cipher().getCachedDecrypted<Record<string, unknown>>(
+      table.name,
+      explicitKey ?? table.schema.primaryKey.extractKey?.(row),
+      "payload",
+      CONTENT_ENCRYPTION_SCHEMA_VERSION,
+      envelope
+    )
+    if (!cached) return undefined
+    const metadata = { ...row }
+    delete metadata[ENCRYPTED_CONTENT_FIELD]
+    return { ...metadata, ...cached.value }
+  }
+
+  const decryptRows = (rows: unknown[], keys?: unknown[]): unknown[] | Promise<unknown[]> => {
+    if (!rows.some(carriesEnvelope)) return rows
+    if (table.name !== "sessionList") {
+      return holdTransaction(Promise.all(rows.map((row, index) => decryptRow(row, keys?.[index]))))
+    }
+    const result = rows.slice()
+    const missing: number[] = []
+    // Probe every cache entry before starting async work. A validation error
+    // must not leave already-started decryptions without a transaction hold.
+    rows.forEach((row, index) => {
+      if (!carriesEnvelope(row)) return
+      const cached = cachedRow(row, keys?.[index])
+      if (cached === undefined) missing.push(index)
+      else result[index] = cached
+    })
+    if (!missing.length) return result
+    return holdTransaction(
+      Promise.all(
+        missing.map((index) =>
+          decryptRow(rows[index], keys?.[index]).then((value) => {
+            result[index] = value
+          })
+        )
+      ).then(() => result)
+    )
+  }
+
   const encryptRow = async (row: unknown, explicitKey?: unknown): Promise<unknown> => {
     if (!isRecord(row)) return row
     const primaryKey = explicitKey ?? table.schema.primaryKey.extractKey?.(row)
@@ -174,29 +218,63 @@ function encryptedTable(databaseName: string, table: DBCoreTable): DBCoreTable {
     // spins a keep-alive `get` against the store on every event-loop turn until
     // the promise settles. So it is applied only when a row actually carries an
     // envelope. A miss, or a row written before encryption, decrypts to itself
-    // and is returned without ever suspending.
+    // and is returned without ever suspending. Authenticated session-list cache
+    // hits also stay synchronous; only uncached ciphertext needs the hold.
     async get(request) {
       cipher()
       const row = await table.get(request)
       if (!carriesEnvelope(row)) return row
+      const cached = cachedRow(row, request.key)
+      if (cached !== undefined) return cached
       return holdTransaction(decryptRow(row, request.key))
     },
     async getMany(request) {
       cipher()
+      const transaction = Dexie.currentTransaction
+      if (
+        table.name === "sessionList" &&
+        request.keys.length >= 128 &&
+        !request.cache &&
+        transaction?.explicit &&
+        transaction.idbtrans === request.trans &&
+        table.schema.primaryKey.keyPath === "id" &&
+        request.keys.every((key) => typeof key === "string")
+      ) {
+        const requested = new Set(request.keys)
+        // Keep duplicates on native per-key reads so plaintext and indexed
+        // objects retain their independent structured-clone ownership.
+        if (requested.size === request.keys.length) {
+          const query = {
+            index: table.schema.primaryKey,
+            range: { type: 3 as const, lower: undefined, upper: undefined },
+          }
+          const count = await table.count({ trans: request.trans, query })
+          if (count <= requested.size * 2) {
+            // Explicit transactions bypass Dexie's shared query-result cache.
+            // The density guard bounds extra raw reads; only requested rows
+            // reach decryption, so corrupt orphan projections remain ignored.
+            const { result } = await table.query({ trans: request.trans, query, values: true })
+            const byId = new Map(
+              result.filter((row) => requested.has(row.id)).map((row) => [row.id, row])
+            )
+            return decryptRows(
+              request.keys.map((key) => byId.get(key)),
+              request.keys
+            )
+          }
+        }
+      }
       const rows = await table.getMany(request)
-      if (!rows.some(carriesEnvelope)) return rows
-      return holdTransaction(
-        Promise.all(rows.map((row, index) => decryptRow(row, request.keys[index])))
-      )
+      return decryptRows(rows, request.keys)
     },
     async query(request) {
       cipher()
       const response = await table.query(request)
       if (request.values === false) return response
-      if (!response.result.some(carriesEnvelope)) return response
+      const result = decryptRows(response.result)
       return {
         ...response,
-        result: await holdTransaction(Promise.all(response.result.map((row) => decryptRow(row)))),
+        result: Array.isArray(result) ? result : await result,
       }
     },
     async openCursor(request) {

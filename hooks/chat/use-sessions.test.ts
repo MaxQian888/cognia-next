@@ -1,12 +1,29 @@
 /**
  * @jest-environment jsdom
  */
+import "fake-indexeddb/auto"
+import Dexie from "dexie"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 
 const liveQueryMock = jest.fn()
+let mockRealLiveQuery = false
+let mockDatabaseName = "test-db"
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: <T>(fn: () => Promise<T> | T): T | undefined => liveQueryMock(fn) as T | undefined,
+  useLiveQuery: <T>(fn: () => Promise<T> | T, deps: unknown[]): T | undefined => {
+    if (mockRealLiveQuery) return jest.requireActual("dexie-react-hooks").useLiveQuery(fn, deps)
+    const result = liveQueryMock(fn)
+    if (Array.isArray(result) && ["readSessionList", "readSessionFolders"].includes(fn.name)) {
+      return {
+        key: JSON.stringify([
+          jest.requireActual("@/lib/runtime/runtime-target-context").getRuntimeTargetScopeKey(),
+          mockDatabaseName,
+        ]),
+        rows: result,
+      } as T
+    }
+    return result as T | undefined
+  },
 }))
 
 const listMessagesMock = jest.fn()
@@ -21,6 +38,7 @@ jest.mock("@/lib/db/messages", () => ({
 const createSessionMock = jest.fn()
 const deleteSessionMock = jest.fn()
 const bulkDeleteSessionsMock = jest.fn()
+const listSessionListRowsMock = jest.fn()
 const listSessionsMock = jest.fn()
 const listAllSessionsMock = jest.fn()
 const updateSessionMock = jest.fn()
@@ -37,6 +55,7 @@ jest.mock("@/lib/db/sessions", () => ({
   deleteSession: (id: string) => deleteSessionMock(id),
   bulkDeleteSessions: (ids: readonly string[]) => bulkDeleteSessionsMock(ids),
   listWorkspaceSessions: (projectId: string) => listSessionsMock(projectId),
+  listSessionListRows: (projectId?: string) => listSessionListRowsMock(projectId),
   listSessions: () => listAllSessionsMock(),
   updateSession: (id: string, p: unknown) => updateSessionMock(id, p),
   getSession: (id: string) => getSessionMock(id),
@@ -73,6 +92,7 @@ const dbTransactionMock = jest.fn((_mode: string, _table: unknown, scope: () => 
 )
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
+    name: mockDatabaseName,
     connected: true,
     sessions: "sessions-table",
     transaction: (mode: string, table: unknown, scope: () => Promise<unknown>) =>
@@ -88,10 +108,15 @@ jest.mock("@/lib/claude/ipc", () => ({
 const chatStoreState = {
   setActiveSession: jest.fn(),
   setMessages: jest.fn(),
+  setSessionMessages: jest.fn(),
+  setSessionStatus: jest.fn(),
+  setSessionMessagesLoadError: jest.fn(),
   setSessionMessagesLoading: jest.fn(),
   setMessagesLoadError: jest.fn(),
   hydrateSessionActiveBranches: jest.fn(),
   activeSessionId: null as string | null,
+  splitSessionId: null as string | null,
+  openSessionIds: [] as string[],
   messages: [] as Array<{ id: string }>,
   sessions: {} as Record<string, { messages: Array<{ id: string }>; status?: ChatStatus }>,
   messagesReloadNonce: 0,
@@ -114,6 +139,7 @@ const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).
 const isCapacitorMock = jest.fn().mockReturnValue(false)
 jest.mock("@/lib/platform/detect", () => ({
   isCapacitor: () => isCapacitorMock(),
+  isHeadlessHost: () => false,
   // `capabilities.hasHostRuntime` (reached via `startNewSession`'s managed
   // workspace path) resolves through `detectPlatform` / `isTauri`.
   detectPlatform: () => "web" as const,
@@ -137,7 +163,12 @@ jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
 }))
 
+const transportChangeListeners = new Set<() => void>()
 jest.mock("@/lib/tauri/transport-instance", () => ({
+  onTransportChange: (listener: () => void) => {
+    transportChangeListeners.add(listener)
+    return () => transportChangeListeners.delete(listener)
+  },
   transport: { call: jest.fn(), subscribe: jest.fn() },
 }))
 const companionTransportMock = (
@@ -169,6 +200,10 @@ jest.mock("@/lib/plugin/messaging/message-bus", () => {
   return { ...actual, emitSystemBusEvent: jest.fn() }
 })
 
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import { publishRemoteChanges } from "@/lib/account-sync/data/remote-changes"
 import { useSessions } from "./use-sessions"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
@@ -176,6 +211,14 @@ import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message
 const mockedEmit = emitSystemBusEvent as jest.Mock
 
 beforeEach(() => {
+  mockRealLiveQuery = false
+  mockDatabaseName = "test-db"
+  clearActiveRuntimeTargetContext()
+  chatStoreState.setSessionMessages.mockClear()
+  chatStoreState.setSessionMessagesLoadError.mockClear()
+  listSessionListRowsMock.mockReset().mockResolvedValue([])
+  chatStoreState.splitSessionId = null
+  chatStoreState.openSessionIds = []
   liveQueryMock.mockReset().mockReturnValue([])
   listMessagesMock.mockReset().mockResolvedValue([])
   persistMessagesMock.mockReset().mockResolvedValue(undefined)
@@ -409,7 +452,7 @@ describe("useSessions", () => {
         return undefined
       })
       renderHook(() => useSessions())
-      return () => queriers[0]!()
+      return async () => ((await queriers[0]!()) as unknown as { rows: readonly Row[] }).rows
     }
     const row = (id: string, extra: Record<string, unknown> = {}) => ({
       id,
@@ -648,6 +691,36 @@ describe("useSessions", () => {
       ])
     )
     expect(hydrateSessionHistoryMock).toHaveBeenCalledWith(companionTransportMock, "s1")
+  })
+
+  it("retries history after transport replacement without a companion config event", async () => {
+    chatStoreState.activeSessionId = "s1"
+    isTauriMock.mockReturnValue(false)
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    listMessagesMock.mockResolvedValue([])
+    hydrateSessionHistoryMock.mockRejectedValueOnce(
+      Object.assign(new Error("companion target scope changed"), {
+        code: "companion_target_scope_changed",
+      })
+    )
+    const instance = jest.requireMock("@/lib/tauri/transport-instance")
+    const hook = renderHook(() => useSessions())
+    try {
+      await waitFor(() => expect(chatStoreState.setMessagesLoadError).toHaveBeenCalled())
+      const next = { call: jest.fn(), subscribe: jest.fn() }
+      listMessagesMock.mockResolvedValue([{ id: "host-b-history" }])
+      act(() => {
+        instance.transport = next
+        for (const listener of transportChangeListeners) listener()
+      })
+      await waitFor(() => expect(hydrateSessionHistoryMock).toHaveBeenCalledWith(next, "s1"))
+      await waitFor(() =>
+        expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "host-b-history" }])
+      )
+    } finally {
+      hook.unmount()
+      instance.transport = companionTransportMock
+    }
   })
 
   it("keeps the bounded synced tail when the host supports transcript pages", async () => {
@@ -1212,4 +1285,260 @@ describe("useSessions", () => {
     expect(assignSessionToFolderMock).toHaveBeenCalledWith("s1", "f1")
     expect(assignSessionToFolderMock).toHaveBeenCalledWith("s1", null)
   })
+})
+
+describe("encrypted list projection mode", () => {
+  it("uses only the projection accessor for navigation and keeps pending panes empty", async () => {
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-a"
+    chatStoreState.activeSessionId = "active"
+    listMessagesMock.mockReturnValue(new Promise(() => {}))
+    const queries: Array<() => Promise<unknown>> = []
+    liveQueryMock.mockImplementation((query) => {
+      queries.push(query)
+      return queries.length === 1
+        ? [{ id: "active", title: "Projected", projectId: "project-a" }]
+        : undefined
+    })
+    const { result } = renderHook(() => useSessions({ listOnly: true }))
+    expect(result.current.activeSession).toBeNull()
+    expect(result.current.activeSessionState).toBe("pending")
+    expect(result.current.paneSessions).toEqual([])
+    await queries[0]!()
+    expect(listSessionListRowsMock).toHaveBeenCalledWith("project-a")
+    expect(listSessionsMock).not.toHaveBeenCalled()
+    expect(listAllSessionsMock).not.toHaveBeenCalled()
+  })
+
+  it("hydrates only active and open split panes and rejects stale workspace results", async () => {
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-a"
+    chatStoreState.activeSessionId = "active"
+    chatStoreState.splitSessionId = "split"
+    chatStoreState.openSessionIds = ["active", "split", "background"]
+    listMessagesMock.mockReturnValue(new Promise(() => {}))
+    getSessionMock.mockImplementation(async (id: string) => ({
+      id,
+      title: id,
+      projectId: "project-a",
+      systemPrompt: `prompt-${id}`,
+      executionPolicy: { maxTurns: 12 },
+    }))
+    const fullResult: { current?: unknown } = {}
+    const queries: Array<() => Promise<unknown>> = []
+    liveQueryMock.mockImplementation((query) => {
+      const slot = queries.length % 3
+      queries.push(query)
+      return slot === 0
+        ? [{ id: "active", title: "Projected", projectId: "project-a" }]
+        : slot === 1
+          ? fullResult.current
+          : []
+    })
+    const { result, rerender } = renderHook(() => useSessions({ listOnly: true }))
+    fullResult.current = await queries[1]!()
+    rerender()
+    expect(getSessionMock.mock.calls.map(([id]) => id)).toEqual(["active", "split"])
+    expect(result.current.activeSession?.systemPrompt).toBe("prompt-active")
+    expect(result.current.paneSessions).toHaveLength(2)
+    expect(result.current.paneSessions[1]?.executionPolicy).toEqual({ maxTurns: 12 })
+    const snapshot = fullResult.current
+    getSessionMock.mockImplementation(async (id: string) => ({
+      id,
+      title: id,
+      projectId: "project-a",
+      systemPrompt: `prompt-${id}`,
+      executionPolicy: { maxTurns: 12 },
+      transcriptRevision: 99,
+    }))
+    expect(await queries[1]!()).toBe(snapshot)
+    const warning = jest.spyOn(console, "warn").mockImplementation(() => {})
+    getSessionMock.mockRejectedValue(new Error("temporary read failure"))
+    await expect(queries[1]!()).resolves.toBe(snapshot)
+    mockProjectState.activeProjectId = "project-b"
+    rerender()
+    expect(result.current.activeSessionState).toBe("pending")
+    expect(result.current.paneSessions).toEqual([])
+    await expect(queries.at(-2)!()).resolves.toBeUndefined()
+    expect(warning).toHaveBeenCalledWith("resolve active session failed", expect.any(Error))
+    warning.mockRestore()
+  })
+
+  it("does not read projections or full panes when disabled", async () => {
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-a"
+    const queries: Array<() => Promise<unknown>> = []
+    liveQueryMock.mockImplementation((query) => {
+      queries.push(query)
+      return undefined
+    })
+    renderHook(() => useSessions({ listOnly: true, enabled: false }))
+    await queries[0]!()
+    await queries[1]!()
+    expect(listSessionListRowsMock).not.toHaveBeenCalled()
+    expect(getSessionMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("runtime scope and remote message refresh", () => {
+  it("rebinds real Dexie subscriptions when Hosts reuse workspace and session IDs", async () => {
+    mockRealLiveQuery = true
+    const a = new Dexie("session-scope-a"),
+      b = new Dexie("session-scope-b")
+    a.version(1).stores({ sessions: "id" })
+    b.version(1).stores({ sessions: "id" })
+    await a.open()
+    await b.open()
+    let active = a
+    mockDatabaseName = a.name
+    setActiveRuntimeTargetContext("acct_local", "host-a")
+    await a.table("sessions").put({
+      id: "s1",
+      projectId: "p",
+      title: "Host A",
+      systemPrompt: "A",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await b.table("sessions").put({
+      id: "s1",
+      projectId: "p",
+      title: "Host B",
+      systemPrompt: "B",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "p"
+    chatStoreState.activeSessionId = "s1"
+    listSessionListRowsMock.mockImplementation(() => active.table("sessions").toArray())
+    getSessionMock.mockImplementation((id: string) => active.table("sessions").get(id))
+    const hook = renderHook(() => useSessions({ listOnly: true }))
+    try {
+      await waitFor(() => expect(hook.result.current.activeSession?.systemPrompt).toBe("A"))
+      await waitFor(() => expect(hook.result.current.sessions[0]?.title).toBe("Host A"))
+      act(() => {
+        active = b
+        mockDatabaseName = b.name
+        a.close()
+        setActiveRuntimeTargetContext("acct_local", "host-b")
+      })
+      expect(hook.result.current.sessions).toEqual([])
+      expect(hook.result.current.activeSession).toBeNull()
+      await waitFor(() => expect(hook.result.current.activeSession?.systemPrompt).toBe("B"))
+      await act(async () => {
+        await b.table("sessions").update("s1", { title: "Host B updated" })
+      })
+      await waitFor(() => expect(hook.result.current.sessions[0]?.title).toBe("Host B updated"))
+    } finally {
+      hook.unmount()
+      a.close()
+      b.close()
+      await Dexie.delete(a.name)
+      await Dexie.delete(b.name)
+    }
+  })
+
+  it("replays busy invalidations on idle and refreshes both visible panes", async () => {
+    chatStoreState.activeSessionId = "s1"
+    chatStoreState.splitSessionId = "s2"
+    chatStoreState.openSessionIds = ["s1", "s2"]
+    chatStoreState.sessions = {
+      s1: { messages: [], status: "streaming" },
+      s2: { messages: [], status: "idle" },
+    }
+    listMessagesMock.mockImplementation(async (id) => [
+      { id: `message-${id}`, role: "user", parts: [] },
+    ])
+    const hook = renderHook(() => useSessions({ listOnly: true }))
+    await waitFor(() =>
+      expect(chatStoreState.setSessionMessages).toHaveBeenCalledWith("s2", expect.any(Array))
+    )
+    listMessagesMock.mockClear()
+    act(() => publishRemoteChanges(new Set(["messages"])))
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("s2"))
+    expect(listMessagesMock).not.toHaveBeenCalledWith("s1")
+    act(() => {
+      chatStoreState.sessions.s1!.status = "idle"
+      hook.rerender()
+    })
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("s1"))
+  })
+
+  it("discards old Host message loads even before React handles the scope event", async () => {
+    chatStoreState.activeSessionId = "s1"
+    setActiveRuntimeTargetContext("acct_local", "host-a")
+    let resolve!: (rows: unknown[]) => void
+    listMessagesMock.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done
+      })
+    )
+    const hook = renderHook(() => useSessions())
+    await act(async () => {
+      setActiveRuntimeTargetContext("acct_local", "host-b")
+      resolve([{ id: "old-host", role: "user", parts: [] }])
+    })
+    expect(chatStoreState.setMessages).not.toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "old-host" })])
+    )
+    expect(persistMessagesMock).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+})
+
+it("keeps a busy pane invalidation when the other visible pane changes", async () => {
+  chatStoreState.activeSessionId = "s1"
+  chatStoreState.splitSessionId = "s2"
+  chatStoreState.openSessionIds = ["s1", "s2", "s3"]
+  chatStoreState.sessions = {
+    s1: { messages: [], status: "streaming" },
+    s2: { messages: [], status: "idle" },
+    s3: { messages: [], status: "idle" },
+  }
+  const hook = renderHook(() => useSessions())
+  await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("s1"))
+  act(() => publishRemoteChanges(new Set(["messages"])))
+  act(() => {
+    chatStoreState.splitSessionId = "s3"
+    hook.rerender()
+  })
+  listMessagesMock.mockClear()
+  act(() => {
+    chatStoreState.sessions.s1!.status = "idle"
+    hook.rerender()
+  })
+  await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("s1"))
+})
+
+it("does not fall back to a new Host write after an old Host rename route resolves", async () => {
+  setActiveRuntimeTargetContext("acct_local", "host-a")
+  let resolve!: (value: null) => void
+  enqueueHostStateIntentMock.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done
+    })
+  )
+  const hook = renderHook(() => useSessions())
+  let pending!: Promise<void>
+  act(() => {
+    pending = hook.result.current.rename("s1", "Old Host title")
+  })
+  await act(async () => {
+    setActiveRuntimeTargetContext("acct_local", "host-b")
+    resolve(null)
+    await pending
+  })
+  expect(updateSessionMock).not.toHaveBeenCalled()
+})
+
+it("rejects callbacks retained from the previous Host", async () => {
+  setActiveRuntimeTargetContext("acct_local", "host-a")
+  const hook = renderHook(() => useSessions())
+  const previous = hook.result.current
+  act(() => setActiveRuntimeTargetContext("acct_local", "host-b"))
+  act(() => previous.select("s1"))
+  expect(chatStoreState.setActiveSession).not.toHaveBeenCalled()
+  await expect(previous.create()).rejects.toThrow("scope changed")
+  expect(createSessionMock).not.toHaveBeenCalled()
 })

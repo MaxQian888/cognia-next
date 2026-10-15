@@ -191,6 +191,7 @@ export function AppShellMobile() {
     sessions,
     isLoadingSessions,
     activeSessionId,
+    activeSession,
     select,
     create,
     remove,
@@ -205,6 +206,7 @@ export function AppShellMobile() {
     bulkAssignToFolder,
     folders,
   } = useSessions({
+    listOnly: true,
     crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
   })
   // The drawer rows' turn glyphs and its `running` filter, as on desktop.
@@ -373,7 +375,6 @@ export function AppShellMobile() {
     }
   }, [chatErrorMessage, canvasGuild])
 
-  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
   const [exportOpen, setExportOpen] = useState(false)
   // The private conversation's share sheet, opened from the ⋮ menu.
   const [sharePanelOpen, setSharePanelOpen] = useState(false)

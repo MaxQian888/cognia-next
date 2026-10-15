@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { commitMessageDelta, listMessages, persistMessages } from "@/lib/db/messages"
 import { closeEndedTurnToolParts } from "@/lib/chat/phantom-run"
@@ -9,6 +9,7 @@ import {
   bulkSetSessionsPinned,
   getSession,
   listWorkspaceSessions,
+  listSessionListRows,
   listSessions,
   setSessionRanks,
   updateSession,
@@ -24,11 +25,16 @@ import { deleteSessionsRouted, setSessionsArchived } from "@/lib/chat/session-ar
 import { resolveCharacterById } from "@/lib/db/characters"
 import { buildOpeningMessage } from "@/lib/chat/opening-message"
 import { startNewSession, type NewSessionInput } from "@/lib/chat/start-session"
+import {
+  getRuntimeTargetScopeKey,
+  subscribeRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import { getDb } from "@/lib/db/schema"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
+import { onTransportChange, transport } from "@/lib/tauri/transport-instance"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { subscribeRemoteChanges } from "@/lib/account-sync/data/remote-changes"
@@ -59,8 +65,11 @@ export type ActiveSessionState = "pending" | "absent" | "present"
  */
 const EMPTY_SESSIONS: readonly ChatSession[] = []
 const EMPTY_FOLDERS: SessionFolder[] = []
+const getTransportSnapshot = () => transport
 
 export interface UseSessionsOptions {
+  /** Read encrypted list projections; hydrate only the visible chat panes in full. */
+  listOnly?: boolean
   /**
    * List conversations from *every* workspace instead of only the active one.
    *
@@ -89,23 +98,61 @@ export interface UseSessionsOptions {
   enabled?: boolean
 }
 
-export function useSessions({ crossWorkspace = false, enabled = true }: UseSessionsOptions = {}) {
+export function useSessions({
+  crossWorkspace = false,
+  enabled = true,
+  listOnly = false,
+}: UseSessionsOptions = {}) {
+  const activeTransport = useSyncExternalStore(
+    onTransportChange,
+    getTransportSnapshot,
+    getTransportSnapshot
+  )
+  const runtimeScope = useSyncExternalStore(
+    subscribeRuntimeTargetContext,
+    getRuntimeTargetScopeKey,
+    getRuntimeTargetScopeKey
+  )
+  const databaseName = typeof window === "undefined" ? "" : getDb().name
+  const scopeKey = JSON.stringify([runtimeScope, databaseName])
+  const isCurrentScope = useCallback(
+    () => getRuntimeTargetScopeKey() === runtimeScope && getDb().name === databaseName,
+    [runtimeScope, databaseName]
+  )
   const setActiveSession = useChatStore((s) => s.setActiveSession)
   const setMessages = useChatStore((s) => s.setMessages)
   const setSessionMessagesLoading = useChatStore((s) => s.setSessionMessagesLoading)
   const setMessagesLoadError = useChatStore((s) => s.setMessagesLoadError)
   const hydrateSessionActiveBranches = useChatStore((s) => s.hydrateSessionActiveBranches)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const splitSessionId = useChatStore((s) => s.splitSessionId)
+  const openSessionIds = useChatStore((s) => s.openSessionIds)
   const messagesReloadNonce = useChatStore((s) => s.messagesReloadNonce)
   // Active workspace — the session list is scoped to it so workspaces stay
   // isolated. Re-runs the live query on a project switch (it's in the deps).
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const projectStoreLoaded = useProjectStore((s) => s.loaded)
+  const previousScopeRef = useRef(scopeKey)
+  useEffect(() => {
+    if (previousScopeRef.current === scopeKey) return
+    previousScopeRef.current = scopeKey
+    // Pane IDs can be shared across Hosts; their optimistic/runtime state cannot.
+    const chat = useChatStore.getState()
+    for (const id of new Set([...chat.openSessionIds, chat.activeSessionId, chat.splitSessionId])) {
+      if (!id) continue
+      chat.setSessionMessages(id, [])
+      chat.setSessionStatus(id, "idle")
+      chat.setSessionMessagesLoading(id, true)
+      chat.hydrateSessionActiveBranches(id, {})
+    }
+  }, [scopeKey])
 
   // The previous emission, so the next one can keep the rows that did not
   // change (`shareUnchangedSessions`). Only the querier below touches it, and
   // Dexie runs the querier outside render.
-  const sharedSessionsRef = useRef<readonly ChatSession[] | undefined>(undefined)
+  const sharedSessionsRef = useRef<{ key: string; rows: readonly ChatSession[] } | undefined>(
+    undefined
+  )
   // Live-bind the session list to Dexie so other tabs / quick deletes update.
   //
   // Structurally shared: a streaming reply rewrites its session row several
@@ -114,17 +161,34 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
   // derived map — for a change nothing on screen shows. Unchanged rows keep
   // their identity; a write that changed nothing listable hands back the
   // previous array, which `useLiveQuery` skips without rendering at all.
-  const sessions = useLiveQuery<readonly ChatSession[]>(async () => {
-    if (typeof window === "undefined") return EMPTY_SESSIONS
-    if (!enabled) return EMPTY_SESSIONS
-    if (!projectStoreLoaded || !activeProjectId) return EMPTY_SESSIONS
-    // Scoped reads keep the conversations of NO workspace (a paired client's
-    // host-synced history, pre-workspace chats) — see `listWorkspaceSessions`.
-    const rows = await (crossWorkspace ? listSessions() : listWorkspaceSessions(activeProjectId))
-    const shared = shareUnchangedSessions(sharedSessionsRef.current, rows)
-    sharedSessionsRef.current = shared
-    return shared
-  }, [activeProjectId, projectStoreLoaded, crossWorkspace, enabled])
+  const listRead = useLiveQuery(
+    async function readSessionList() {
+      if (typeof window === "undefined") return { key: scopeKey, rows: EMPTY_SESSIONS }
+      if (!enabled) return { key: scopeKey, rows: EMPTY_SESSIONS }
+      if (!projectStoreLoaded || !activeProjectId) return { key: scopeKey, rows: EMPTY_SESSIONS }
+      // Scoped reads keep the conversations of NO workspace (a paired client's
+      // host-synced history, pre-workspace chats) — see `listWorkspaceSessions`.
+      const rows = await (listOnly
+        ? listSessionListRows(crossWorkspace ? undefined : activeProjectId)
+        : crossWorkspace
+          ? listSessions()
+          : listWorkspaceSessions(activeProjectId))
+      if (!isCurrentScope()) return undefined
+      const previous = sharedSessionsRef.current
+      const shared = shareUnchangedSessions(
+        previous?.key === scopeKey ? previous.rows : undefined,
+        rows
+      )
+      const snapshot =
+        previous?.key === scopeKey && previous.rows === shared
+          ? previous
+          : { key: scopeKey, rows: shared }
+      sharedSessionsRef.current = snapshot
+      return snapshot
+    },
+    [activeProjectId, projectStoreLoaded, crossWorkspace, enabled, listOnly, scopeKey]
+  )
+  const sessions = listRead?.key === scopeKey ? listRead.rows : undefined
   const exposedSessions = useMemo(() => {
     if (!Array.isArray(sessions)) return []
     const exposed = filterExposedSessions(sessions, "main-list")
@@ -146,6 +210,51 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     }
     return unique as ChatSession[]
   }, [sessions, crossWorkspace])
+
+  const visibleSplitId =
+    splitSessionId && openSessionIds?.includes(splitSessionId) ? splitSessionId : null
+  const paneQueryKey = JSON.stringify([
+    scopeKey,
+    activeProjectId,
+    activeSessionId,
+    visibleSplitId,
+    enabled,
+    projectStoreLoaded,
+  ])
+  const sharedPanesRef = useRef<{ key: string; rows: readonly ChatSession[] } | undefined>(
+    undefined
+  )
+  const paneRead = useLiveQuery(async () => {
+    if (!listOnly || !enabled || !projectStoreLoaded || !activeProjectId) return undefined
+    const ids = [
+      ...new Set([activeSessionId, visibleSplitId].filter((id): id is string => Boolean(id))),
+    ]
+    try {
+      const rows = (await Promise.all(ids.map((id) => getSession(id)))).filter(
+        (row): row is ChatSession =>
+          row !== undefined && (!row.projectId || row.projectId === activeProjectId)
+      )
+      if (!isCurrentScope()) return undefined
+      const exposed = filterExposedSessions(rows, "main-list")
+      const previous = sharedPanesRef.current
+      const shared = shareUnchangedSessions(
+        previous?.key === paneQueryKey ? previous.rows : undefined,
+        exposed
+      )
+      const snapshot =
+        previous?.key === paneQueryKey && previous.rows === shared
+          ? previous
+          : { key: paneQueryKey, rows: shared }
+      sharedPanesRef.current = snapshot
+      return snapshot
+    } catch (error) {
+      // A failed lookup is not evidence of deletion. Retain only a snapshot
+      // for this exact workspace and pane selection; otherwise stay pending.
+      console.warn("resolve active session failed", error)
+      return sharedPanesRef.current?.key === paneQueryKey ? sharedPanesRef.current : undefined
+    }
+  }, [listOnly, paneQueryKey])
+  const paneRows = paneRead?.key === paneQueryKey ? paneRead.rows : undefined
 
   // Resolve the active session's ROW, rather than leaving every consumer to
   // search `sessions` for it.
@@ -172,23 +281,26 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     return row
   }, [exposedSessions, activeSessionId, crossWorkspace, activeProjectId])
   // `session: null` = looked up and genuinely not part of this workspace's list.
+  const activeLookupKey = JSON.stringify([scopeKey, activeProjectId])
   const [lookedUpActive, setLookedUpActive] = useState<{
     id: string
+    key: string
     session: ChatSession | null
   } | null>(null)
   useEffect(() => {
-    if (!activeSessionId || listedActiveSession) return
+    if (listOnly || !activeSessionId || listedActiveSession) return
     if (!projectStoreLoaded || !activeProjectId) return
     let cancelled = false
     const id = activeSessionId
     void getSession(id)
       .then((row) => {
-        if (cancelled) return
+        if (cancelled || !isCurrentScope()) return
         // This list is workspace-scoped, so a row belonging to another workspace
         // is absent from it too — that is what re-points the chat pane after a
         // workspace switch, which never touches `activeSessionId` itself.
         setLookedUpActive({
           id,
+          key: activeLookupKey,
           session: row && row.projectId === activeProjectId ? row : null,
         })
       })
@@ -200,28 +312,51 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     return () => {
       cancelled = true
     }
-  }, [activeSessionId, listedActiveSession, activeProjectId, projectStoreLoaded])
+  }, [
+    activeSessionId,
+    listedActiveSession,
+    activeProjectId,
+    projectStoreLoaded,
+    listOnly,
+    activeLookupKey,
+    isCurrentScope,
+  ])
 
   const activeSessionResolution = useMemo((): {
     state: ActiveSessionState
     session: ChatSession | null
   } => {
     if (!activeSessionId) return { state: "absent", session: null }
+    if (listOnly) {
+      if (!paneRows) return { state: "pending", session: null }
+      const row = paneRows.find((session) => session.id === activeSessionId) ?? null
+      return { state: row ? "present" : "absent", session: row }
+    }
     if (listedActiveSession) return { state: "present", session: listedActiveSession }
-    if (!lookedUpActive || lookedUpActive.id !== activeSessionId) {
+    if (
+      !lookedUpActive ||
+      lookedUpActive.id !== activeSessionId ||
+      lookedUpActive.key !== activeLookupKey
+    ) {
       return { state: "pending", session: null }
     }
     return lookedUpActive.session
       ? { state: "present", session: lookedUpActive.session }
       : { state: "absent", session: null }
-  }, [activeSessionId, listedActiveSession, lookedUpActive])
+  }, [activeSessionId, listedActiveSession, lookedUpActive, listOnly, paneRows, activeLookupKey])
 
   // Live-bind the workspace's conversation folders (conversation-list overhaul).
-  const folders = useLiveQuery<SessionFolder[]>(() => {
-    if (typeof window === "undefined") return Promise.resolve([])
-    if (!projectStoreLoaded || !activeProjectId) return Promise.resolve([])
-    return listFolders(activeProjectId)
-  }, [activeProjectId, projectStoreLoaded])
+  const folderRead = useLiveQuery(
+    async function readSessionFolders() {
+      const rows =
+        typeof window === "undefined" || !projectStoreLoaded || !activeProjectId
+          ? EMPTY_FOLDERS
+          : await listFolders(activeProjectId)
+      return isCurrentScope() ? { key: scopeKey, rows } : undefined
+    },
+    [activeProjectId, projectStoreLoaded, scopeKey]
+  )
+  const folders = folderRead?.key === scopeKey ? folderRead.rows : undefined
 
   const [historyInvalidationNonce, setHistoryInvalidationNonce] = useState(0)
   useEffect(() => {
@@ -230,21 +365,48 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
       if (getSessionHistoryMode(activeSessionId) === null)
         setHistoryInvalidationNonce((value) => value + 1)
     })
-  }, [activeSessionId])
+  }, [activeSessionId, scopeKey])
 
   // Account sync writes another device's messages straight into Dexie; reload
   // the visible transcript when they land, unless this tab is mid-turn there
   // (the hydration below also yields to any newer in-memory messages).
-  const [remoteMessagesNonce, setRemoteMessagesNonce] = useState(0)
-  useEffect(() => {
-    if (!activeSessionId) return
-    return subscribeRemoteChanges((tables) => {
-      if (!tables.has("messages")) return
-      const status = useChatStore.getState().sessions[activeSessionId]?.status
-      if (status === "streaming" || status === "awaiting_approval") return
-      setRemoteMessagesNonce((value) => value + 1)
+  const visibleStatusKey = useChatStore((state) =>
+    JSON.stringify([
+      state.sessions[activeSessionId ?? ""]?.status,
+      state.sessions[visibleSplitId ?? ""]?.status,
+    ])
+  )
+  const pendingRemote = useRef(new Set<string>())
+  const [remoteMessagesNonce, setRemoteMessagesNonce] = useState<Record<string, number>>({})
+  const drainRemote = useCallback(() => {
+    if (!isCurrentScope()) return
+    const ready = [...pendingRemote.current].filter((id) => {
+      const status = useChatStore.getState().sessions[id]?.status
+      return status !== "streaming" && status !== "awaiting_approval"
     })
-  }, [activeSessionId])
+    if (ready.length === 0) return
+    ready.forEach((id) => pendingRemote.current.delete(id))
+    setRemoteMessagesNonce((previous) => {
+      const next = { ...previous }
+      ready.forEach((id) => {
+        next[id] = (next[id] ?? 0) + 1
+      })
+      return next
+    })
+  }, [isCurrentScope])
+  useEffect(() => {
+    pendingRemote.current.clear()
+  }, [scopeKey])
+  useEffect(() => {
+    return subscribeRemoteChanges((tables) => {
+      if (!tables.has("messages") || !isCurrentScope()) return
+      for (const id of [activeSessionId, visibleSplitId]) if (id) pendingRemote.current.add(id)
+      drainRemote()
+    })
+  }, [activeSessionId, visibleSplitId, isCurrentScope, drainRemote])
+  useEffect(() => {
+    drainRemote()
+  }, [visibleStatusKey, drainRemote])
 
   // Shared projections commit their messages and cursor together. Subscribe to
   // that cursor so incoming events refresh the currently visible transcript.
@@ -257,106 +419,121 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
   // it shows immediately and survives reload. Idempotent: once seeded the
   // session is no longer empty, so re-activating it won't re-seed.
   useEffect(() => {
-    if (!activeSessionId) return
+    const ids = [
+      ...new Set([activeSessionId, visibleSplitId].filter((id): id is string => Boolean(id))),
+    ]
     let cancelled = false
-    const hydrationBase = useChatStore.getState().sessions[activeSessionId]?.messages
-    const liveMessagesChanged = () =>
-      useChatStore.getState().sessions[activeSessionId]?.messages !== hydrationBase
-    const finishSupersededHydration = () => {
-      setSessionMessagesLoading(activeSessionId, false)
-    }
-    const loadMessages = async () => {
-      const local = await listMessages(activeSessionId)
-      if (isTauri() || isCapacitor() || !hasWebCompanionTarget()) return local
-      try {
-        const hydration = await hydrateSessionHistory(
-          (await import("@/lib/tauri/transport-instance")).transport,
-          activeSessionId
-        )
-        // Transcript-capable hosts are rendered from bounded timeline pages;
-        // keep only the already-synced recent tail in Zustand for the active
-        // turn. Legacy hosts still require the fully hydrated Dexie snapshot.
-        return hydration.mode === "timeline" ? local : listMessages(activeSessionId)
-      } catch (error) {
-        // Backward-compatible with older companion servers: keep a usable
-        // recent tail when the lazy-history RPC is unavailable, but do not
-        // hide a genuinely empty history failure.
-        if (local.length > 0) {
-          console.warn("remote session history hydration failed; using synced tail", error)
-          return local
-        }
-        throw error
+    const stale = () => cancelled || !isCurrentScope() || transport !== activeTransport
+    for (const sessionId of ids) {
+      if (pendingRemote.current.has(sessionId)) continue
+      const publishMessages = (messages: Awaited<ReturnType<typeof listMessages>>) => {
+        if (stale()) return
+        if (useChatStore.getState().activeSessionId === sessionId) setMessages(messages)
+        else useChatStore.getState().setSessionMessages(sessionId, messages)
       }
-    }
-    loadMessages()
-      .then(async (msgs) => {
-        if (cancelled) return
-        const session = await getSession(activeSessionId)
-        if (cancelled) return
-        hydrateSessionActiveBranches(activeSessionId, session?.activeBranchByGroup ?? {})
-        // The first send can win while this activation read is still in flight.
-        // Publishing the older Dexie snapshot after that point replaces the
-        // optimistic/streaming array, then the next SDK event replaces it back;
-        // the two orders visibly trade places until persistence catches up.
-        // Message arrays are immutable in the chat store, so reference identity
-        // is a precise generation check without introducing another counter.
-        if (liveMessagesChanged()) {
-          finishSupersededHydration()
-          return
+      const hydrationBase = useChatStore.getState().sessions[sessionId]?.messages
+      const liveMessagesChanged = () =>
+        useChatStore.getState().sessions[sessionId]?.messages !== hydrationBase
+      const finishSupersededHydration = () => {
+        setSessionMessagesLoading(sessionId, false)
+      }
+      const loadMessages = async () => {
+        const local = await listMessages(sessionId)
+        if (stale()) return local
+        if (isTauri() || isCapacitor() || !hasWebCompanionTarget()) return local
+        try {
+          if (stale()) return local
+          const hydration = await hydrateSessionHistory(activeTransport, sessionId)
+          // Transcript-capable hosts are rendered from bounded timeline pages;
+          // keep only the already-synced recent tail in Zustand for the active
+          // turn. Legacy hosts still require the fully hydrated Dexie snapshot.
+          if (stale()) return local
+          return hydration.mode === "timeline" ? local : listMessages(sessionId)
+        } catch (error) {
+          // Backward-compatible with older companion servers: keep a usable
+          // recent tail when the lazy-history RPC is unavailable, but do not
+          // hide a genuinely empty history failure.
+          if (local.length > 0) {
+            console.warn("remote session history hydration failed; using synced tail", error)
+            return local
+          }
+          throw error
         }
-        if (msgs.length === 0) {
-          const character = session?.characterId
-            ? await resolveCharacterById(session.characterId)
-            : null
-          if (cancelled) return
+      }
+      loadMessages()
+        .then(async (msgs) => {
+          if (stale()) return
+          const session = await getSession(sessionId)
+          if (stale()) return
+          hydrateSessionActiveBranches(sessionId, session?.activeBranchByGroup ?? {})
+          // The first send can win while this activation read is still in flight.
+          // Publishing the older Dexie snapshot after that point replaces the
+          // optimistic/streaming array, then the next SDK event replaces it back;
+          // the two orders visibly trade places until persistence catches up.
+          // Message arrays are immutable in the chat store, so reference identity
+          // is a precise generation check without introducing another counter.
           if (liveMessagesChanged()) {
             finishSupersededHydration()
             return
           }
-          const opening = buildOpeningMessage(character)
-          if (opening) {
-            await persistMessages(activeSessionId, [opening])
-            if (cancelled) return
+          if (msgs.length === 0) {
+            const character = session?.characterId
+              ? await resolveCharacterById(session.characterId)
+              : null
+            if (stale()) return
             if (liveMessagesChanged()) {
               finishSupersededHydration()
               return
             }
-            setMessages([opening])
-            return
+            const opening = buildOpeningMessage(character)
+            if (opening) {
+              await persistMessages(sessionId, [opening])
+              if (stale()) return
+              if (liveMessagesChanged()) {
+                finishSupersededHydration()
+                return
+              }
+              publishMessages([opening])
+              return
+            }
           }
-        }
-        if (cancelled) return
-        // A turn that ended without delivering its tool results (a timed-out
-        // prompt, a runtime that died, a reload mid-turn) left those calls
-        // open, and every reload would show them "running" again. Close the
-        // ones the transcript proves are over, and write the fix back so the
-        // repair happens once.
-        const busy = (() => {
-          const status = useChatStore.getState().sessions[activeSessionId]?.status
-          return status === "streaming" || status === "awaiting_approval"
-        })()
-        const repaired = closeEndedTurnToolParts(msgs, { trailingMayBeLive: busy })
-        if (repaired.changed.length > 0) {
-          void commitMessageDelta(activeSessionId, { upserts: repaired.changed }).catch(
-            (error: unknown) => console.warn("closing interrupted tool calls failed", error)
-          )
-        }
-        setMessages(repaired.messages)
-      })
-      .catch((err) => {
-        // A transient Dexie read failure must not leave the conversation
-        // silently blank (it reads as "history lost"). Surface it so the chat
-        // pane can show an error + retry; don't overwrite the store with [].
-        console.error("listMessages failed", err)
-        if (!cancelled) {
-          setMessagesLoadError(err instanceof Error ? err.message : String(err))
-        }
-      })
+          if (stale()) return
+          // A turn that ended without delivering its tool results (a timed-out
+          // prompt, a runtime that died, a reload mid-turn) left those calls
+          // open, and every reload would show them "running" again. Close the
+          // ones the transcript proves are over, and write the fix back so the
+          // repair happens once.
+          const busy = (() => {
+            const status = useChatStore.getState().sessions[sessionId]?.status
+            return status === "streaming" || status === "awaiting_approval"
+          })()
+          const repaired = closeEndedTurnToolParts(msgs, { trailingMayBeLive: busy })
+          if (repaired.changed.length > 0) {
+            void commitMessageDelta(sessionId, { upserts: repaired.changed }).catch(
+              (error: unknown) => console.warn("closing interrupted tool calls failed", error)
+            )
+          }
+          publishMessages(repaired.messages)
+        })
+        .catch((err) => {
+          // A transient Dexie read failure must not leave the conversation
+          // silently blank (it reads as "history lost"). Surface it so the chat
+          // pane can show an error + retry; don't overwrite the store with [].
+          console.error("listMessages failed", err)
+          if (!stale()) {
+            const message = err instanceof Error ? err.message : String(err)
+            if (useChatStore.getState().activeSessionId === sessionId) setMessagesLoadError(message)
+            else useChatStore.getState().setSessionMessagesLoadError(sessionId, message)
+          }
+        })
+    }
     return () => {
       cancelled = true
     }
+    // Transport replacement also retries a scope activated before its pairing was ready.
     // `messagesReloadNonce` re-runs the load when the retry button bumps it.
   }, [
+    activeTransport,
     activeSessionId,
     hydrateSessionActiveBranches,
     setMessages,
@@ -366,18 +543,27 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     historyInvalidationNonce,
     sharedProjectionCursor,
     remoteMessagesNonce,
+    visibleSplitId,
+    isCurrentScope,
   ])
 
   const select = useCallback(
     (id: string | null) => {
+      if (!isCurrentScope()) return
       setActiveSession(id)
       // Plugin bus: announce the active-session switch (ids only — PII red-line).
       if (id) emitSystemBusEvent(SystemEvents.SESSION_SWITCHED, { sessionId: id })
     },
-    [setActiveSession]
+    [setActiveSession, isCurrentScope]
   )
 
-  const create = useCallback((partial?: NewSessionInput) => startNewSession(partial), [])
+  const create = useCallback(
+    (partial?: NewSessionInput) => {
+      if (!isCurrentScope()) return Promise.reject(new Error("Session database scope changed"))
+      return startNewSession(partial)
+    },
+    [isCurrentScope]
+  )
 
   const remove = useCallback(
     async (id: string) => {
@@ -387,73 +573,100 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
       // The local teardown deselects what it deleted; a Host-owned delete is
       // left the same way, rather than keep a composer open against a row
       // about to disappear.
+      if (!isCurrentScope()) return
       await deleteSessionsRouted([id])
+      if (!isCurrentScope()) return
       if (useChatStore.getState().activeSessionId === id) setActiveSession(null)
     },
-    [setActiveSession]
+    [setActiveSession, isCurrentScope]
   )
 
-  const rename = useCallback(async (id: string, title: string) => {
-    // A manual rename opts the session out of auto-title generation.
-    if (
-      await enqueueHostStateIntentIfAvailable({
-        sessionId: id,
-        action: { kind: "session.rename", title },
-      })
-    ) {
-      return
-    }
-    await updateSession(id, { title, titleAuto: false })
-  }, [])
+  const rename = useCallback(
+    async (id: string, title: string) => {
+      if (!isCurrentScope()) return
+      // A manual rename opts the session out of auto-title generation.
+      if (
+        await enqueueHostStateIntentIfAvailable({
+          sessionId: id,
+          action: { kind: "session.rename", title },
+        })
+      ) {
+        return
+      }
+      if (!isCurrentScope()) return
+      await updateSession(id, { title, titleAuto: false })
+    },
+    [isCurrentScope]
+  )
 
   const bulkRemove = useCallback(
     async (ids: readonly string[]) => {
-      if (ids.length === 0) return
+      if (ids.length === 0 || !isCurrentScope()) return
       const uniqueIds = [...new Set(ids)]
       // The local cascade deselects what it deleted; the Host-owned ones are
       // left the same way `remove` leaves them.
+      if (!isCurrentScope()) return
       await deleteSessionsRouted(uniqueIds)
+      if (!isCurrentScope()) return
       const current = useChatStore.getState().activeSessionId
       if (current && uniqueIds.includes(current)) setActiveSession(null)
     },
-    [setActiveSession]
+    [setActiveSession, isCurrentScope]
   )
 
-  const bulkSetPinned = useCallback(async (ids: readonly string[], pinned: boolean) => {
-    if (ids.length === 0) return
-    const uniqueIds = [...new Set(ids)]
-    const queued = await Promise.all(
-      uniqueIds.map((sessionId) =>
-        enqueueHostStateIntentIfAvailable({ sessionId, action: { kind: "session.pin", pinned } })
+  const bulkSetPinned = useCallback(
+    async (ids: readonly string[], pinned: boolean) => {
+      if (ids.length === 0 || !isCurrentScope()) return
+      const uniqueIds = [...new Set(ids)]
+      const queued = await Promise.all(
+        uniqueIds.map((sessionId) =>
+          enqueueHostStateIntentIfAvailable({ sessionId, action: { kind: "session.pin", pinned } })
+        )
       )
-    )
-    const legacyIds = uniqueIds.filter((_, index) => !queued[index])
-    if (legacyIds.length > 0) await bulkSetSessionsPinned(legacyIds, pinned)
-  }, [])
+      if (!isCurrentScope()) return
+      const legacyIds = uniqueIds.filter((_, index) => !queued[index])
+      if (legacyIds.length > 0) await bulkSetSessionsPinned(legacyIds, pinned)
+    },
+    [isCurrentScope]
+  )
 
   const archive = useCallback(
     async (id: string) => {
+      if (!isCurrentScope()) return
       await setSessionsArchived([id], true)
+      if (!isCurrentScope()) return
       // An archived session leaves the active list; deselect it if active so
       // the chat panel doesn't keep showing a now-hidden conversation.
       if (useChatStore.getState().activeSessionId === id) setActiveSession(null)
     },
-    [setActiveSession]
+    [setActiveSession, isCurrentScope]
   )
 
-  const unarchive = useCallback((id: string) => setSessionsArchived([id], false), [])
+  const unarchive = useCallback(
+    async (id: string) => {
+      if (isCurrentScope()) await setSessionsArchived([id], false)
+    },
+    [isCurrentScope]
+  )
 
   const bulkArchive = useCallback(
     async (ids: readonly string[]) => {
-      if (ids.length === 0) return
+      if (ids.length === 0 || !isCurrentScope()) return
+      if (!isCurrentScope()) return
       await setSessionsArchived(ids, true)
+      if (!isCurrentScope()) return
       const current = useChatStore.getState().activeSessionId
       if (current && ids.includes(current)) setActiveSession(null)
     },
-    [setActiveSession]
+    [setActiveSession, isCurrentScope]
   )
 
-  const bulkUnarchive = useCallback((ids: readonly string[]) => setSessionsArchived(ids, false), [])
+  const bulkUnarchive = useCallback(
+    async (ids: readonly string[]) => {
+      if (isCurrentScope()) await setSessionsArchived(ids, false)
+    },
+    [isCurrentScope]
+  )
 
   // Folder writes route themselves (`lib/db/session-folders.ts`): on a paired
   // client each becomes a `folder.*` HostState intent — a create also shows its
@@ -461,17 +674,43 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
   // back through `sessionFolders` table sync. A folder delete unfiles its
   // members in the Host's own transaction, so nothing here routes them.
   // Standalone, all four write locally.
-  const createFolder = useCallback((name: string) => createFolderDb(name), [])
-  const renameFolder = useCallback((id: string, name: string) => renameFolderDb(id, name), [])
-  const deleteFolder = useCallback((id: string) => deleteFolderDb(id), [])
-  const reorderFolders = useCallback((ids: string[]) => reorderFoldersDb(ids), [])
-  const assignToFolder = useCallback(async (sessionId: string, folderId: string | null) => {
-    const queued = await enqueueHostStateIntentIfAvailable({
-      sessionId,
-      action: { kind: "session.folder", folderId },
-    })
-    if (!queued) await assignSessionToFolder(sessionId, folderId)
-  }, [])
+  const createFolder = useCallback(
+    (name: string) => {
+      if (!isCurrentScope()) return Promise.reject(new Error("Session database scope changed"))
+      return createFolderDb(name)
+    },
+    [isCurrentScope]
+  )
+  const renameFolder = useCallback(
+    async (id: string, name: string) => {
+      if (isCurrentScope()) await renameFolderDb(id, name)
+    },
+    [isCurrentScope]
+  )
+  const deleteFolder = useCallback(
+    async (id: string) => {
+      if (isCurrentScope()) await deleteFolderDb(id)
+    },
+    [isCurrentScope]
+  )
+  const reorderFolders = useCallback(
+    async (ids: string[]) => {
+      if (isCurrentScope()) await reorderFoldersDb(ids)
+    },
+    [isCurrentScope]
+  )
+  const assignToFolder = useCallback(
+    async (sessionId: string, folderId: string | null) => {
+      if (!isCurrentScope()) return
+      const queued = await enqueueHostStateIntentIfAvailable({
+        sessionId,
+        action: { kind: "session.folder", folderId },
+      })
+      if (!isCurrentScope()) return
+      if (!queued) await assignSessionToFolder(sessionId, folderId)
+    },
+    [isCurrentScope]
+  )
   // File a whole selection at once. The rows a Host takes are forwarded one
   // intent each; the rest are filed locally in one transaction, so the list's
   // live query re-emits once for the batch rather than once per row, and a row
@@ -481,7 +720,7 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
   // through the same db.
   const bulkAssignToFolder = useCallback(
     async (ids: readonly string[], folderId: string | null) => {
-      if (ids.length === 0) return
+      if (ids.length === 0 || !isCurrentScope()) return
       const uniqueIds = [...new Set(ids)]
       const queued = await Promise.all(
         uniqueIds.map((sessionId) =>
@@ -491,6 +730,7 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
           })
         )
       )
+      if (!isCurrentScope()) return
       const legacyIds = uniqueIds.filter((_, index) => !queued[index])
       if (legacyIds.length === 0) return
       const db = getDb()
@@ -498,7 +738,7 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
         Promise.all(legacyIds.map((id) => assignSessionToFolder(id, folderId)))
       )
     },
-    []
+    [isCurrentScope]
   )
   /**
    * Persist a drag-reorder of one conversation-list section. `ids` are the
@@ -507,20 +747,24 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
    * forwarded with its rank in the FULL arrangement; the rest keep that same
    * rank locally, so a mixed batch cannot collide.
    */
-  const reorderSessions = useCallback(async (ids: readonly string[], sectionKey: string) => {
-    if (ids.length === 0) return
-    const ranks = ids.map((id, manualOrder) => ({ id, manualOrder }))
-    const queued = await Promise.all(
-      ranks.map(({ id, manualOrder }) =>
-        enqueueHostStateIntentIfAvailable({
-          sessionId: id,
-          action: { kind: "session.order", manualOrder, sectionKey },
-        })
+  const reorderSessions = useCallback(
+    async (ids: readonly string[], sectionKey: string) => {
+      if (ids.length === 0 || !isCurrentScope()) return
+      const ranks = ids.map((id, manualOrder) => ({ id, manualOrder }))
+      const queued = await Promise.all(
+        ranks.map(({ id, manualOrder }) =>
+          enqueueHostStateIntentIfAvailable({
+            sessionId: id,
+            action: { kind: "session.order", manualOrder, sectionKey },
+          })
+        )
       )
-    )
-    const legacyRanks = ranks.filter((_, index) => !queued[index])
-    if (legacyRanks.length > 0) await setSessionRanks(legacyRanks, sectionKey)
-  }, [])
+      if (!isCurrentScope()) return
+      const legacyRanks = ranks.filter((_, index) => !queued[index])
+      if (legacyRanks.length > 0) await setSessionRanks(legacyRanks, sectionKey)
+    },
+    [isCurrentScope]
+  )
 
   return {
     /**
@@ -530,6 +774,8 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
      * (`transcriptRevision`) of the read it came from — read those from Dexie.
      */
     sessions: exposedSessions,
+    /** Full rows for chat panes; projections must never supply execution settings. */
+    paneSessions: listOnly ? (paneRows ?? EMPTY_SESSIONS) : exposedSessions,
     // `useLiveQuery` returns `undefined` until the first Dexie read resolves;
     // distinguishing that from a genuinely empty list lets the session list
     // show a skeleton instead of flashing the empty state on cold start. The

@@ -1,4 +1,4 @@
-import type { Memory } from "@/types/memory/memory"
+import type { Memory, MemoryReaderContext } from "@/types/memory/memory"
 import { createDbTestFixture } from "./test-fixture"
 import { getDb } from "./schema"
 import {
@@ -26,6 +26,7 @@ import {
   touchMemories,
   updateMemory,
   type MemoryCreateInput,
+  type ListMemoriesQuery,
 } from "./memories"
 
 function buildInput(overrides: Partial<MemoryCreateInput> = {}): MemoryCreateInput {
@@ -159,6 +160,83 @@ describe("touch / pin", () => {
 })
 
 describe("listing & scope-union", () => {
+  const listingCases: { query: ListMemoriesQuery; ids: string[] }[] = [
+    { query: { projectId: "p1", status: "active" }, ids: ["a", "b", "branch"] },
+    { query: { agentId: "agent1", status: "active" }, ids: ["agent"] },
+    { query: { projectId: "p1", agentId: "agent1", status: "active" }, ids: [] },
+    { query: { projectId: "p1", scope: "global", status: "active" }, ids: [] },
+    { query: { scope: "global", status: "active" }, ids: ["global"] },
+    { query: { type: "procedural", status: "active" }, ids: ["agent"] },
+    { query: { characterId: "char1", status: "active" }, ids: ["character"] },
+    { query: { projectId: "p1" }, ids: ["invalidated", "a", "b", "branch"] },
+    { query: { agentId: "agent1" }, ids: ["agent"] },
+    { query: { scope: "global" }, ids: ["global"] },
+    { query: { type: "procedural" }, ids: ["agent"] },
+    { query: { characterId: "char1" }, ids: ["character"] },
+    { query: { status: "invalidated" }, ids: ["invalidated"] },
+    {
+      query: { projectId: "p1", status: "active", branch: "main", pathPattern: "src/**" },
+      ids: ["branch"],
+    },
+    {
+      query: { scope: "workspace", projectId: "p1", status: "active", exactNamespace: true },
+      ids: ["a", "b"],
+    },
+    { query: { scope: "global", status: "active", exactNamespace: true }, ids: ["global"] },
+    { query: { projectId: "", status: "active" }, ids: ["empty-project"] },
+    { query: { projectId: "missing", status: "active" }, ids: [] },
+    {
+      query: { projectId: "p1", status: "active", includeRevisions: true },
+      ids: ["revision", "a", "b", "branch"],
+    },
+  ]
+  it.each(listingCases)(
+    "preserves scoped results and stable timestamp ties for $query",
+    async ({ query, ids }) => {
+      const rows: MemoryCreateInput[] = [
+        buildInput({ id: "b", scope: "workspace", projectId: "p1", createdAt: 20 }),
+        buildInput({ id: "a", scope: "workspace", projectId: "p1", createdAt: 20 }),
+        buildInput({
+          id: "branch",
+          scope: "workspace",
+          projectId: "p1",
+          branch: "main",
+          pathPattern: "src/**",
+          createdAt: 10,
+        }),
+        buildInput({
+          id: "invalidated",
+          scope: "workspace",
+          projectId: "p1",
+          status: "invalidated",
+          createdAt: 30,
+        }),
+        buildInput({
+          id: "revision",
+          scope: "workspace",
+          projectId: "p1",
+          revisionOf: "a",
+          createdAt: 40,
+        }),
+        buildInput({ id: "other", scope: "workspace", projectId: "p2", createdAt: 50 }),
+        buildInput({
+          id: "agent",
+          scope: "agent",
+          agentId: "agent1",
+          type: "procedural",
+          createdAt: 20,
+        }),
+        buildInput({ id: "character", scope: "character", characterId: "char1", createdAt: 20 }),
+        buildInput({ id: "global", createdAt: 20 }),
+        buildInput({ id: "empty-project", scope: "workspace", projectId: "", createdAt: 20 }),
+      ]
+      for (const row of rows) await createMemory(row)
+      const result = await listMemories(query)
+      expect(result.map((row) => row.id)).toEqual(ids)
+      expect(result.every((row) => row.text === "The user prefers pnpm")).toBe(true)
+    }
+  )
+
   async function seed() {
     await createMemory(buildInput({ id: "g1", scope: "global", type: "semantic" }))
     await createMemory(buildInput({ id: "g2", scope: "global", type: "procedural" }))
@@ -208,6 +286,75 @@ describe("listing & scope-union", () => {
     expect(noChar.map((m) => m.id)).toEqual(["g1"])
   })
 
+  const readerCases: { reader: MemoryReaderContext | string; ids: string[] }[] = [
+    { reader: {}, ids: ["g0", "g2"] },
+    { reader: { projectId: "", characterId: "", agentId: "" }, ids: ["g0", "g2"] },
+    { reader: "c1", ids: ["c-unbound", "g0", "g2"] },
+    {
+      reader: {
+        projectId: "p1",
+        characterId: "c1",
+        agentId: "a1",
+        branch: "main",
+        path: "src/a.ts",
+      },
+      ids: [
+        "Z-agent",
+        "path-character",
+        "a-character",
+        "c-unbound",
+        "b-workspace",
+        "g0",
+        "g1",
+        "g2",
+      ],
+    },
+  ]
+
+  it.each(readerCases)(
+    "preserves reader visibility, union deduplication and tied key winners for $reader",
+    async ({ reader, ids }) => {
+      const rows: MemoryCreateInput[] = [
+        buildInput({ id: "g0" }),
+        buildInput({ id: "g1", projectId: "p1", characterId: "c1", agentId: "a1" }),
+        buildInput({ id: "g2", revisionOf: "legacy-parent" }),
+        buildInput({ id: "b-workspace", scope: "workspace", projectId: "p1" }),
+        buildInput({ id: "a-character", scope: "character", characterId: "c1", projectId: "p1" }),
+        buildInput({ id: "c-unbound", scope: "character", characterId: "c1" }),
+        buildInput({
+          id: "path-character",
+          scope: "character",
+          characterId: "c1",
+          branch: "main",
+          pathPattern: "src/**",
+        }),
+        buildInput({ id: "a-agent", scope: "agent", agentId: "a1", key: "same" }),
+        buildInput({
+          id: "Z-agent",
+          scope: "agent",
+          agentId: "a1",
+          projectId: "p1",
+          key: " SAME ",
+        }),
+        buildInput({ id: "foreign-project", projectId: "p2" }),
+        buildInput({ id: "conflict", reviewStatus: "conflict" }),
+        buildInput({ id: "missing-project", scope: "workspace" }),
+        buildInput({ id: "foreign-agent", scope: "agent", agentId: "a2", projectId: "p1" }),
+        buildInput({
+          id: "inactive-character",
+          scope: "character",
+          characterId: "c1",
+          status: "invalidated",
+        }),
+        buildInput({ id: "foreign-branch", branch: "other" }),
+      ]
+      for (const row of rows) await createMemory({ ...row, createdAt: 20 })
+      const result = await listActiveForReader(reader)
+      expect(result.map((row) => row.id)).toEqual(ids)
+      expect(result.every((row) => row.text === "The user prefers pnpm")).toBe(true)
+    }
+  )
+
   it("layers workspace and character memories over global stable keys", async () => {
     await createMemory(buildInput({ id: "global", key: "package-manager", text: "Use npm" }))
     await createMemory(
@@ -234,6 +381,24 @@ describe("listing & scope-union", () => {
     expect(
       rows.filter((memory) => memory.key === "package-manager").map((memory) => memory.id)
     ).toEqual(["character"])
+  })
+
+  it("preserves results as an empty or global-only pool gains and loses other namespaces", async () => {
+    const reader = { projectId: "p1" }
+    expect(await listActiveForReader(reader)).toEqual([])
+    await createMemory(buildInput({ id: "global", createdAt: 20 }))
+    expect((await listActiveForReader(reader)).map((row) => row.id)).toEqual(["global"])
+    await createMemory(
+      buildInput({ id: "local", scope: "workspace", projectId: "p1", createdAt: 20 })
+    )
+    await createMemory(
+      buildInput({ id: "foreign", scope: "workspace", projectId: "p2", createdAt: 20 })
+    )
+    expect((await listActiveForReader(reader)).map((row) => row.id)).toEqual(["local", "global"])
+    await invalidateMemory("foreign")
+    expect((await listActiveForReader(reader)).map((row) => row.id)).toEqual(["local", "global"])
+    await updateMemory("local", { text: "Updated local content" })
+    expect((await listActiveForReader(reader))[0].text).toBe("Updated local content")
   })
 
   it("keeps agent namespaces private and applies branch/path restrictions", async () => {

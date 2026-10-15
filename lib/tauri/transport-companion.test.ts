@@ -732,8 +732,41 @@ describe("config helpers", () => {
     expect(loadCompanionConfig()).toEqual(hydrated)
   })
 
+  it("checks browser history binding while preserving unscoped and injected transports", () => {
+    const transport = new CompanionTransport()
+    const headless = new CompanionTransport({ configProvider: () => MOCK_CONFIG })
+    try {
+      __setCompanionConfigCacheForTests(MOCK_CONFIG)
+      expect(() => transport.assertRuntimeTargetBinding()).not.toThrow()
+      setActiveRuntimeTargetContext("acct_transport", "host-b")
+      expect(() => transport.assertRuntimeTargetBinding()).toThrow("companion target scope changed")
+      expect(() => headless.assertRuntimeTargetBinding()).not.toThrow()
+      __setCompanionConfigCacheForTests({
+        ...MOCK_CONFIG,
+        accountId: "acct_transport",
+        targetId: "host-b",
+      })
+      expect(() => transport.assertRuntimeTargetBinding()).not.toThrow()
+      __setCompanionConfigCacheForTests({
+        ...MOCK_CONFIG,
+        accountId: "acct_other",
+        targetId: "host-b",
+      })
+      expect(() => transport.assertRuntimeTargetBinding()).toThrow("companion target scope changed")
+      __setCompanionConfigCacheForTests(null)
+      expect(() => transport.assertRuntimeTargetBinding()).toThrow("companion target scope changed")
+    } finally {
+      transport.destroy()
+      headless.destroy()
+      clearActiveRuntimeTargetContext()
+    }
+  })
+
   it("reloads an explicit active target without racing the ordered Host rebind", async () => {
     const changed = jest.fn()
+    const instance = await import("./transport-instance")
+    const rebound = jest.fn()
+    const unsubscribe = instance.onTransportChange(rebound)
     window.addEventListener("cognia:companion-config-changed", changed)
     __setCompanionStorageForTests({
       load: async () => ({ ...MOCK_CONFIG, targetId: "host-b", accountId: "acct_transport" }),
@@ -746,7 +779,10 @@ describe("config helpers", () => {
       )
       expect(loadCompanionConfig()).toEqual(expect.objectContaining({ targetId: "host-b" }))
       expect(changed).not.toHaveBeenCalled()
+      expect(rebound).toHaveBeenCalledTimes(1)
+      expect(instance.transport).toBeInstanceOf(CompanionTransport)
     } finally {
+      unsubscribe()
       window.removeEventListener("cognia:companion-config-changed", changed)
     }
   })
@@ -3640,6 +3676,17 @@ describe("WAN tier activation lifecycle", () => {
     rendezvousId: "room-other",
     signalingRoomDescriptor: { ...wanConfig.signalingRoomDescriptor!, roomId: "room-other" },
   }
+
+  it("refuses history binding while the previous Host still owns the WAN lane", async () => {
+    transport = new CompanionTransport()
+    await transport.enableWanTier(options)
+    const next = { ...otherHost, accountId: "acct_transport" }
+    setActiveRuntimeTargetContext(next.accountId, next.targetId!)
+    __setCompanionConfigCacheForTests(next)
+    expect(() => transport.assertRuntimeTargetBinding()).toThrow("companion target scope changed")
+    await transport.enableWanTier({ ...options, configOverride: next })
+    expect(() => transport.assertRuntimeTargetBinding()).not.toThrow()
+  })
 
   /** The TransportRtc each connect() ran on, with a way to finish it. */
   function pendingConnects() {

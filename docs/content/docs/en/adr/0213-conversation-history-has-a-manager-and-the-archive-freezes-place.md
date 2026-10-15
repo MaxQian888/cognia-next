@@ -192,6 +192,73 @@ row now says more on its own:
   it. The empty Active tab is titled "No conversations yet" instead of
   repeating the header's "New chat".
 
+### 7. Encrypted list projection (2026-10-15 amendment)
+
+The conversation list reads the derived `sessionList` table once its durable
+readiness marker exists. `sessions` remains authoritative. The projection
+contains only the fields used to render, filter, order and route list rows;
+full prompts and transcript revisions stay in the source row. Its
+`[workspaceKey+updatedAt]` index includes `workspaceKey = ""` for both missing
+and empty project ids, preserving legacy and paired-client visibility.
+
+A DBCore middleware above account encryption maintains the projection in the
+same transaction as every session mutation, including import, sync, archive,
+move and deletion. Source-only changes do not write an unchanged projection.
+Titles, previews and other content remain encrypted with the account cipher;
+the projection does not add content indexes or plaintext content digests.
+
+Schema v241 adds the table; the data-only v242 migration records each source
+row's existing ciphertext IV in lightweight `storageLayout` witnesses, without
+adding indexes. A middleware below
+encryption maintains those witnesses atomically, including source-only writes.
+It advances a witness only when the previous ciphertext was already covered,
+so an unrelated current-build write cannot certify an older build's stale
+projection. The IV is existing cryptographic metadata, not a content digest.
+
+Schema v243 adds the `sessions.__cogniaEncryptedContent.iv` index over the
+existing envelope. Index construction does not decrypt, re-encrypt or rewrite
+source, projection or message rows. Legacy plaintext rows have no IV index
+entry and remain authoritative fallback reads.
+
+The global list compares source IV index keys with witnesses in the same
+readonly transaction, avoiding full source ciphertext transfer when they
+match. It also observes `sessions.count()` through the primary store: this
+subscribes to same-timestamp row replacements from older static-schema writers
+that do not know the IV index. IndexedDB still maintains the physical index for
+those writers. Workspace-scoped reads retain the bounded raw source scan;
+missing indexes or unmatched IVs retain the authoritative raw/source fallback.
+This also detects older-build writes made while the current build was closed.
+The v242 upgrade rebuilds both projection and witnesses before replacing the
+v241 readiness marker. The rebuild collects at most 500 IV witnesses from each
+existing raw source page before decryption, avoiding a second source read. It
+writes the encrypted projections and witnesses concurrently within that page's
+existing transaction, awaiting both before advancing or marking readiness. A
+failure on either side rolls back the entire rebuild; retry remains safe.
+
+The unlocked account cipher caches only authenticated `sessionList` payload
+JSON text, with at most 2,048 entries and 8 MiB of accounted string storage.
+Every hit validates the exact envelope and storage coordinates and reparses a
+fresh result; indexed metadata still comes from the current row. Locking or
+replacing the cipher clears the cache synchronously, and a decrypt that finishes
+after locking cannot refill it. The cache neither changes encryption nor
+replaces source/witness verification.
+
+For a dense explicit-transaction `sessionList.bulkGet`, the encryption middleware
+uses a bounded native batch read: at least 128 unique string ids, and at most
+twice as many stored rows as requested ids. It filters raw rows to requested ids
+before decryption, preserving missing-row positions and ignoring corrupt orphan
+projections. Duplicate ids, sparse lists, implicit transactions and transaction
+cache requests retain per-key reads. Source membership, IV verification and dirty
+source fallback remain unchanged; small workspaces do not use this path.
+
+Boot checks readiness after plugin schema adoption. The first list read also
+initializes a fresh target database before taking its readonly snapshot.
+Missing stores or raw middleware retain the full-session fallback. Snapshot and
+account/target migrations exclude derived list rows and their readiness marker,
+preserve other storage-layout rows, and rebuild after restoring authoritative
+sessions. The table is neither portable backup data nor an independently
+synced domain.
+
 ## Consequences
 
 - One write path and one list model serve three surfaces: the sidebar, the

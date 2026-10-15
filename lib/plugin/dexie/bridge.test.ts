@@ -19,6 +19,10 @@ import {
   restorePluginTables,
 } from "./bridge"
 import { getPluginDexieMeta } from "./meta"
+import { CogniaDB, CURRENT_SCHEMA } from "@/lib/db/schema"
+import { ensureActiveDatabaseReady, assertPluginSchemaReady } from "@/lib/db/boot"
+import { ensureSessionListReady } from "@/lib/db/session-list"
+import { assertStorageLayoutSupported, writeStorageLayoutMarker } from "@/lib/db/storage-layout"
 
 // We bypass CogniaDB entirely and spin up a lightweight test Dexie instance
 // that includes the pluginDexieMeta table but nothing else.
@@ -710,4 +714,103 @@ describe("restorePluginTables", () => {
     // Both plugins re-declared in ONE close→bump→open pass, not one per plugin.
     expect(db.verno).toBe(vernoBefore + 1)
   })
+})
+
+it.each([false, true])(
+  "repairs a missing core store with no plugin patches (registerMissing=%s)",
+  async (registerMissing) => {
+    const name = `core-only-repair-${Math.random().toString(36).slice(2)}`
+    const old = new Dexie(name)
+    old.version(245).stores({ pluginDexieMeta: "&pluginId", sessions: "id", storageLayout: "id" })
+    await old.table("sessions").put({ id: "kept", title: "Keep source", updatedAt: 5 })
+    __setTestDb(old)
+    let repaired: CogniaDB | undefined
+    try {
+      expect(Array.from(old.backendDB().objectStoreNames)).not.toContain("sessionList")
+      const restored = await restorePluginTables(old, new Map(), {
+        registerMissing,
+        requiredStoreNames: ["sessionList"],
+        recreateDatabase: () => {
+          repaired = new CogniaDB(name)
+          __setTestDb(repaired)
+          return repaired
+        },
+      })
+      expect(restored).toEqual([])
+      expect(repaired).toBeDefined()
+      expect(repaired!.backendDB().version).toBe(2460)
+      expect(Array.from(repaired!.backendDB().objectStoreNames)).toContain("sessionList")
+      await ensureSessionListReady(repaired!)
+      expect(await repaired!.sessionList.get("kept")).toMatchObject({
+        title: "Keep source",
+        workspaceKey: "",
+      })
+      const version = repaired!.backendDB().version
+      await restorePluginTables(repaired!, new Map(), {
+        registerMissing: true,
+        requiredStoreNames: ["sessionList"],
+      })
+      expect(repaired!.backendDB().version).toBe(version)
+    } finally {
+      old.close()
+      await (repaired ?? old).delete()
+    }
+  }
+)
+
+it("boots and backfills a real higher-version database through the production plugin bridge", async () => {
+  const name = `core-session-boot-${Math.random().toString(36).slice(2)}`
+  const schema = { ...CURRENT_SCHEMA }
+  delete schema.sessionList
+  const previous = new Dexie(name)
+  previous.version(245).stores(schema)
+  await previous
+    .table("storageLayout")
+    .put({ id: "singleton", layout: "single-database", schemaVersion: 240, writtenAt: 1 })
+  await previous.table("sessions").put({
+    id: "kept",
+    title: "Existing",
+    projectId: "p",
+    updatedAt: 7,
+    systemPrompt: "Keep full source",
+  })
+  const nativeBefore = previous.backendDB().version
+  previous.close()
+  let active = new CogniaDB(name)
+  __setTestDb(active)
+  const seed = jest.fn(async () => {
+    expect(await active.sessionList.get("kept")).toEqual({
+      id: "kept",
+      title: "Existing",
+      projectId: "p",
+      updatedAt: 7,
+      workspaceKey: "p",
+    })
+  })
+  try {
+    await ensureActiveDatabaseReady({
+      getDatabase: () => active,
+      getBuiltinPluginManifests: () => new Map(),
+      restorePluginSchema: restorePluginTables,
+      recreateDatabase: () => {
+        active = new CogniaDB(name)
+        __setTestDb(active)
+        return active
+      },
+      verifySchema: assertPluginSchemaReady,
+      assertLayoutSupported: assertStorageLayoutSupported,
+      markLayout: writeStorageLayoutMarker,
+      prepareSessionList: ensureSessionListReady,
+      seed,
+    })
+    expect(seed).toHaveBeenCalledTimes(1)
+    expect(active.backendDB().version).toBeGreaterThanOrEqual(nativeBefore)
+    expect(await active.sessions.get("kept")).toMatchObject({ systemPrompt: "Keep full source" })
+    expect(await active.table("storageLayout").get("session-list-v241")).toEqual({
+      id: "session-list-v241",
+      version: 2,
+    })
+  } finally {
+    await active.delete()
+  }
 })

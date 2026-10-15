@@ -47,6 +47,11 @@ export function setActiveRuntimeTargetContext(
   for (const listener of [...listeners]) listener()
 }
 
+/** Stable primitive snapshot for React consumers and asynchronous scope guards. */
+export function getRuntimeTargetScopeKey(): string {
+  return JSON.stringify(activeScope)
+}
+
 export function getActiveRuntimeTargetContext(): RuntimeTargetScope | null {
   return activeScope ? { ...activeScope } : null
 }

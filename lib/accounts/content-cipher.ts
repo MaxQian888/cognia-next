@@ -38,8 +38,20 @@ export interface AccountContentCipherContract {
   lock(): void
 }
 
+interface CachedSessionListPayload {
+  envelope: EncryptedContentEnvelope
+  json: string
+  bytes: number
+  needsBinaryReviver: boolean
+}
+
+const SESSION_LIST_CACHE_MAX_ENTRIES = 2048
+const SESSION_LIST_CACHE_MAX_BYTES = 8 * 1024 * 1024
+
 export class AccountContentCipher implements AccountContentCipherContract {
   private key: CryptoKey | null
+  private readonly sessionListCache = new Map<string, CachedSessionListPayload>()
+  private sessionListCacheBytes = 0
 
   constructor(
     readonly localAccountId: string,
@@ -119,28 +131,142 @@ export class AccountContentCipher implements AccountContentCipherContract {
     schemaVersion: number,
     envelope: EncryptedContentEnvelope
   ): Promise<T> {
-    if (envelope.accountId !== this.localAccountId) {
-      throw new Error("Encrypted content belongs to another account.")
-    }
-    if (envelope.version !== 1 || envelope.algorithm !== "AES-256-GCM") {
-      throw new Error("Encrypted content envelope is incompatible.")
-    }
+    const { key, aad, captured } = this.prepareDecryption(
+      table,
+      primaryKey,
+      field,
+      schemaVersion,
+      envelope
+    )
+    const cached = this.cachedDecryption<T>(table, field, aad, captured)
+    if (cached) return cached.value
     const plaintext = await subtle().decrypt(
       {
         name: "AES-GCM",
-        iv: toBufferSource(decodeBase64Url(envelope.iv)),
-        additionalData: toBufferSource(
-          contentAad(this.databaseName, table, primaryKey, field, schemaVersion)
-        ),
+        iv: toBufferSource(decodeBase64Url(captured.iv)),
+        additionalData: toBufferSource(new TextEncoder().encode(aad)),
       },
-      this.requireKey(),
-      toBufferSource(decodeBase64Url(envelope.ciphertext))
+      key,
+      toBufferSource(decodeBase64Url(captured.ciphertext))
     )
-    return JSON.parse(new TextDecoder().decode(plaintext), reviveBinary) as T
+    const json = new TextDecoder().decode(plaintext)
+    const value = JSON.parse(json, reviveBinary) as T
+    // A lock during WebCrypto must not repopulate the cleared plaintext cache.
+    if (table === "sessionList" && field === "payload" && this.key === key) {
+      this.cacheSessionListPayload(aad, captured, json)
+    }
+    return value
+  }
+
+  /** An authenticated cache hit needs neither WebCrypto nor a transaction hold. */
+  getCachedDecrypted<T>(
+    table: string,
+    primaryKey: unknown,
+    field: string,
+    schemaVersion: number,
+    envelope: EncryptedContentEnvelope
+  ): { value: T } | undefined {
+    const { aad, captured } = this.prepareDecryption(
+      table,
+      primaryKey,
+      field,
+      schemaVersion,
+      envelope
+    )
+    return this.cachedDecryption<T>(table, field, aad, captured)
+  }
+
+  private prepareDecryption(
+    table: string,
+    primaryKey: unknown,
+    field: string,
+    schemaVersion: number,
+    envelope: EncryptedContentEnvelope
+  ) {
+    // Capture the authenticated envelope before awaiting crypto: callers may
+    // reuse or mutate their row object while the operation is in flight.
+    const captured: EncryptedContentEnvelope = {
+      version: envelope.version,
+      algorithm: envelope.algorithm,
+      accountId: envelope.accountId,
+      iv: envelope.iv,
+      ciphertext: envelope.ciphertext,
+    }
+    if (captured.accountId !== this.localAccountId) {
+      throw new Error("Encrypted content belongs to another account.")
+    }
+    if (captured.version !== 1 || captured.algorithm !== "AES-256-GCM") {
+      throw new Error("Encrypted content envelope is incompatible.")
+    }
+    const key = this.requireKey()
+    const aad = contentAadText(this.databaseName, table, primaryKey, field, schemaVersion)
+    return { key, aad, captured }
+  }
+
+  private cachedDecryption<T>(
+    table: string,
+    field: string,
+    aad: string,
+    captured: EncryptedContentEnvelope
+  ): { value: T } | undefined {
+    const cached =
+      table === "sessionList" && field === "payload" ? this.sessionListCache.get(aad) : undefined
+    if (
+      cached &&
+      cached.envelope.iv === captured.iv &&
+      cached.envelope.ciphertext === captured.ciphertext
+    ) {
+      this.sessionListCache.delete(aad)
+      this.sessionListCache.set(aad, cached)
+      // Parse afresh to preserve the existing object and binary ownership
+      // contract. Indexed metadata is still read and merged by the middleware.
+      return {
+        value: JSON.parse(cached.json, cached.needsBinaryReviver ? reviveBinary : undefined) as T,
+      }
+    }
+    return undefined
   }
 
   lock(): void {
     this.key = null
+    this.sessionListCache.clear()
+    this.sessionListCacheBytes = 0
+  }
+
+  private cacheSessionListPayload(
+    aad: string,
+    envelope: EncryptedContentEnvelope,
+    json: string
+  ): void {
+    const previous = this.sessionListCache.get(aad)
+    if (previous) {
+      this.sessionListCache.delete(aad)
+      this.sessionListCacheBytes -= previous.bytes
+    }
+    // Account for all retained strings at their UTF-16 upper bound. The entry
+    // cap separately bounds object overhead, including tiny payloads.
+    const bytes =
+      2 *
+      (aad.length +
+        envelope.accountId.length +
+        envelope.algorithm.length +
+        envelope.iv.length +
+        envelope.ciphertext.length +
+        json.length)
+    if (bytes > SESSION_LIST_CACHE_MAX_BYTES) return
+    while (
+      this.sessionListCache.size >= SESSION_LIST_CACHE_MAX_ENTRIES ||
+      this.sessionListCacheBytes + bytes > SESSION_LIST_CACHE_MAX_BYTES
+    ) {
+      const oldest = this.sessionListCache.entries().next().value!
+      this.sessionListCache.delete(oldest[0])
+      this.sessionListCacheBytes -= oldest[1].bytes
+    }
+    // Escapes may spell the binary tag without its literal key, so any escape
+    // conservatively keeps the reviver. Ordinary list JSON needs no tree walk.
+    const needsBinaryReviver = json.includes("\\") || json.includes('"$cogniaBytes"')
+    this.sessionListCache.set(aad, { envelope, json, bytes, needsBinaryReviver })
+    this.sessionListCacheBytes += bytes
   }
 
   private requireKey(): CryptoKey {
@@ -176,12 +302,22 @@ function contentAad(
   field: string,
   schemaVersion: number
 ): Uint8Array {
+  return new TextEncoder().encode(
+    contentAadText(databaseName, table, primaryKey, field, schemaVersion)
+  )
+}
+
+function contentAadText(
+  databaseName: string,
+  table: string,
+  primaryKey: unknown,
+  field: string,
+  schemaVersion: number
+): string {
   if (!table.trim() || !field.trim() || !Number.isSafeInteger(schemaVersion) || schemaVersion < 1) {
     throw new Error("Content encryption coordinates are invalid.")
   }
-  return new TextEncoder().encode(
-    JSON.stringify(["cognia-content", databaseName, table, primaryKey, field, schemaVersion])
-  )
+  return JSON.stringify(["cognia-content", databaseName, table, primaryKey, field, schemaVersion])
 }
 
 /**

@@ -14,6 +14,11 @@
  * volume rather than wall clock.
  */
 import { canonicalJson, decodeKey, encodeKey } from "./canonical"
+import {
+  SNAPSHOT_DERIVED_TABLES,
+  snapshotRowsForTable,
+  prepareRestoredSessionLists,
+} from "../../db/snapshot"
 import { installTransactionCapture, type CaptureDexieLike, type CaptureHandle } from "./capture"
 import {
   durabilityRoot,
@@ -108,7 +113,7 @@ export interface DurabilityStore {
 }
 
 function includedTables(source: DurabilitySourceLike): DurabilityTableLike[] {
-  const excluded = new Set(source.excludeTables ?? [])
+  const excluded = new Set([...SNAPSHOT_DERIVED_TABLES, ...(source.excludeTables ?? [])])
   return source.db.tables.filter((table) => !excluded.has(table.name))
 }
 
@@ -128,7 +133,7 @@ function extractByKeyPath(value: unknown, keyPath: string | string[]): unknown {
 
 /** Dump one table into `{ encodedKey: row }`, handling outbound-key tables. */
 export async function readTableRows(table: DurabilityTableLike): Promise<Record<string, unknown>> {
-  const rows = await table.toArray()
+  const rows = snapshotRowsForTable(table.name, await table.toArray())
   const keyPath = keyPathOf(table)
   const out: Record<string, unknown> = {}
   if (keyPath) {
@@ -174,7 +179,10 @@ export async function restoreState(
   for (const source of sources) {
     const entry = state.dbs[source.name]
     if (!entry) continue
-    if (entry.schema.version !== source.db.verno) {
+    if (
+      entry.schema.version !== source.db.verno &&
+      !isSessionListUpgrade(source, entry.schema.version)
+    ) {
       const { DurabilityFault } = await import("./types")
       throw new DurabilityFault(
         "checkpoint-schema-mismatch",
@@ -185,13 +193,26 @@ export async function restoreState(
       const rows = entry.rows[table.name]
       if (!rows) continue
       await table.clear()
-      const encodedKeys = Object.keys(rows)
+      const encodedKeys = Object.keys(rows).filter(
+        (key) => table.name !== "storageLayout" || key !== encodeKey("session-list-v241")
+      )
       if (encodedKeys.length === 0) continue
       const values = encodedKeys.map((key) => rows[key])
       if (keyPathOf(table)) await table.bulkPut(values)
       else await table.bulkPut(values, encodedKeys.map(decodeKey))
     }
   }
+}
+
+/** The additive list projection and ciphertext witnesses rebuild from authoritative rows. */
+function isSessionListUpgrade(source: DurabilitySourceLike, previous: number | undefined): boolean {
+  return (
+    ((previous === 240 && source.db.verno === 241) ||
+      ((previous === 240 || previous === 241) && source.db.verno === 242)) &&
+    ["sessions", "sessionList", "storageLayout"].every((name) =>
+      source.db.tables.some((table) => table.name === name)
+    )
+  )
 }
 
 /**
@@ -217,6 +238,12 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
   let closing: Promise<void> | null = null
 
   function onCommit(mutations: DurabilityMutation[]): void {
+    mutations = mutations.filter(
+      (mutation) =>
+        !SNAPSHOT_DERIVED_TABLES.includes(mutation.table) &&
+        !(mutation.table === "storageLayout" && mutation.key === encodeKey("session-list-v241"))
+    )
+    if (mutations.length === 0) return
     const backend = backendRef
     if (!backend) return
     sequence += 1
@@ -252,7 +279,7 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
     captures.push(
       installTransactionCapture(source.db, {
         database: source.name,
-        excludeTables: source.excludeTables,
+        excludeTables: [...SNAPSHOT_DERIVED_TABLES, ...(source.excludeTables ?? [])],
         onCommit,
       })
     )
@@ -285,6 +312,16 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
       )
     }
     await restoreState(sources, resolved.state)
+    await prepareRestoredSessionLists(sources)
+    // Pin the known additive migration once; future boots need not reinterpret
+    // an older checkpoint version. Restore/rebuild remains capture-suppressed.
+    if (
+      sources.some((source) =>
+        isSessionListUpgrade(source, resolved.state.dbs[source.name]?.schema.version)
+      )
+    ) {
+      await resolved.backend.compact(await readSourcesState(sources, sequence))
+    }
   })
 
   function compact(): Promise<void> {

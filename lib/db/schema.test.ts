@@ -7,6 +7,13 @@
 import "fake-indexeddb/auto"
 
 import Dexie from "dexie"
+import {
+  AccountContentCipher,
+  activateAccountContentCipher,
+  __resetAccountContentCipherForTesting,
+} from "@/lib/accounts/content-cipher"
+import { createEncryptedContentMiddleware } from "./encrypted-content-middleware"
+import { ensureSessionListReady, readVerifiedSessionListRows } from "./session-list"
 
 import {
   CogniaDB,
@@ -59,11 +66,193 @@ function schemaIt(name: string, run: () => Promise<void>, timeout = 30_000): voi
   it(name, run, timeout)
 }
 
+schemaIt(
+  "v242 backfills encrypted session lists and witnesses from v240 without rewriting source rows",
+  async () => {
+    const name = "cognia-account-session-list-upgrade-v241"
+    await Dexie.delete(name)
+    activateAccountContentCipher(
+      await AccountContentCipher.createForTesting("session-list-upgrade", name)
+    )
+    const oldSchema: Record<string, string | null> = {
+      ...CURRENT_SCHEMA,
+      storageLayout: "id",
+      sessions: CURRENT_SCHEMA.sessions!.replace(", __cogniaEncryptedContent.iv", ""),
+    }
+    delete oldSchema.sessionList
+    oldSchema.storageLayout = "id"
+    const previous = new Dexie(name)
+    previous.use(createEncryptedContentMiddleware(name))
+    previous.version(240).stores(oldSchema)
+    await previous.table("sessions").bulkPut([
+      {
+        id: "scoped",
+        title: "Private title",
+        projectId: "p",
+        updatedAt: 5,
+        systemPrompt: "Private full prompt",
+      },
+      { id: "unscoped", title: "Legacy title", updatedAt: 3 },
+    ])
+    await previous.table("messages").put({
+      id: "message",
+      sessionId: "scoped",
+      parts: [{ text: "Keep message" }],
+      syncRevision: 42,
+    })
+    await previous.table("messageSyncClock").put({ id: "singleton", revision: 42 })
+    previous.close()
+    const rawBefore = new Dexie(name)
+    await rawBefore.open()
+    const sourceRows = await rawBefore.table("sessions").toArray()
+    const messageRows = await rawBefore.table("messages").toArray()
+    rawBefore.close()
+    const upgraded = new CogniaDB(name)
+    try {
+      await upgraded.open()
+      expect(upgraded.verno).toBe(CURRENT_SCHEMA_VERSION)
+      expect(await upgraded.sessionList.toArray()).toEqual([
+        { id: "scoped", title: "Private title", projectId: "p", updatedAt: 5, workspaceKey: "p" },
+        { id: "unscoped", title: "Legacy title", updatedAt: 3, workspaceKey: "" },
+      ])
+      expect(await upgraded.messageSyncClock.get("singleton")).toEqual({
+        id: "singleton",
+        revision: 42,
+      })
+      expect(await upgraded.table("storageLayout").get("session-list-v241")).toEqual({
+        id: "session-list-v241",
+        version: 2,
+      })
+      upgraded.close()
+      const rawAfter = new Dexie(name)
+      await rawAfter.open()
+      try {
+        expect(await rawAfter.table("sessions").toArray()).toEqual(sourceRows)
+        expect(await rawAfter.table("messages").toArray()).toEqual(messageRows)
+        const rows = await rawAfter.table("sessionList").toArray()
+        expect(rows.every((row) => row.__cogniaEncryptedContent)).toBe(true)
+        expect(JSON.stringify(rows)).not.toContain("Private title")
+        expect(JSON.stringify(rows)).not.toContain("Legacy title")
+        expect(JSON.stringify(rows)).not.toContain("Private full prompt")
+      } finally {
+        rawAfter.close()
+      }
+    } finally {
+      await upgraded.delete()
+      __resetAccountContentCipherForTesting()
+    }
+  }
+)
+
+schemaIt("v241 fresh databases initialize the projection before later session writes", async () => {
+  const db = new CogniaDB("session-list-v241-fresh")
+  try {
+    await db.open()
+    await ensureSessionListReady(db)
+    expect(db.sessionList.schema.indexes.map((index) => index.name)).toEqual([
+      "updatedAt",
+      "workspaceKey",
+      "[workspaceKey+updatedAt]",
+    ])
+    await db.sessions.put({ id: "later", title: "Later", updatedAt: 7 } as never)
+    expect(await db.sessionList.get("later")).toMatchObject({ title: "Later", workspaceKey: "" })
+  } finally {
+    await db.delete()
+  }
+})
+
+schemaIt(
+  "v240 indexes session execution history when upgrading v239 and preserves stored rows",
+  async () => {
+    const name = "execution-session-v240-upgrade"
+    await Dexie.delete(name)
+    const oldSchema: Record<string, string | null> = {
+      ...CURRENT_SCHEMA,
+      storageLayout: "id",
+      sessions: CURRENT_SCHEMA.sessions!.replace(", __cogniaEncryptedContent.iv", ""),
+    }
+    oldSchema.executionRuns = oldSchema.executionRuns!.replace(", [sessionId+updatedAt]", "")
+    const previous = new Dexie(name)
+    previous.version(239).stores(oldSchema)
+    const rows = [
+      {
+        id: "a",
+        sessionId: "s",
+        updatedAt: 20,
+        title: "Existing run",
+        latestSnapshot: { summary: "Keep" },
+      },
+      { id: "b", sessionId: "s", updatedAt: 20 },
+      { id: "zero", sessionId: "s", updatedAt: 0 },
+      { id: "negative", sessionId: "s", updatedAt: -1 },
+      { id: "missing-time", sessionId: "s" },
+      { id: "missing-session", updatedAt: 30 },
+      { id: "empty-session", sessionId: "", updatedAt: 40 },
+    ]
+    await previous.table("executionRuns").bulkPut(rows)
+    const event = { id: "event", runId: "a", seq: 1, type: "run.started", payload: { keep: true } }
+    await previous.table("executionRunEvents").put(event)
+    await previous.table("sessions").put({ id: "s", title: "Existing conversation" })
+    previous.close()
+    let upgraded = new CogniaDB(name)
+    try {
+      await upgraded.open()
+      expect(upgraded.verno).toBe(CURRENT_SCHEMA_VERSION)
+      expect(
+        upgraded.executionRuns.schema.indexes.find(
+          (index) => index.name === "[sessionId+updatedAt]"
+        )?.keyPath
+      ).toEqual(["sessionId", "updatedAt"])
+      expect(
+        await upgraded.executionRuns
+          .where("[sessionId+updatedAt]")
+          .between(["s", Dexie.minKey], ["s", Dexie.maxKey], true, true)
+          .reverse()
+          .primaryKeys()
+      ).toEqual(["b", "a", "zero", "negative"])
+      expect(await upgraded.executionRuns.toArray()).toEqual(
+        [...rows].sort((a, b) => a.id.localeCompare(b.id))
+      )
+      expect(await upgraded.executionRunEvents.get("event")).toEqual(event)
+      expect(await upgraded.sessions.get("s")).toEqual({ id: "s", title: "Existing conversation" })
+      await upgraded.executionRuns.update("a", { sessionId: "other", updatedAt: 50 })
+      upgraded.close()
+      upgraded = new CogniaDB(name)
+      await upgraded.open()
+      expect(
+        await upgraded.executionRuns
+          .where("[sessionId+updatedAt]")
+          .equals(["other", 50])
+          .primaryKeys()
+      ).toEqual(["a"])
+      expect(await upgraded.executionRuns.count()).toBe(rows.length)
+    } finally {
+      await upgraded.delete()
+    }
+  }
+)
+
+schemaIt("v240 exposes the session execution index on a fresh database", async () => {
+  const db = new CogniaDB("execution-session-v240-fresh")
+  try {
+    await db.open()
+    expect(
+      db.executionRuns.schema.indexes.some((index) => index.name === "[sessionId+updatedAt]")
+    ).toBe(true)
+  } finally {
+    await db.delete()
+  }
+})
+
 schemaIt("v226 adds message revision metadata and backfills the previous layout", async () => {
   const name = "message-revision-schema-upgrade"
   await Dexie.delete(name)
   const previous = new Dexie(name)
-  const oldSchema = { ...CURRENT_SCHEMA }
+  const oldSchema: Record<string, string | null> = {
+    ...CURRENT_SCHEMA,
+    storageLayout: "id",
+    sessions: CURRENT_SCHEMA.sessions!.replace(", __cogniaEncryptedContent.iv", ""),
+  }
   delete oldSchema.messageSyncClock
   oldSchema.messages = oldSchema.messages!.replace(", [syncRevision+id]", "")
   oldSchema.workflowRuns = oldSchema.workflowRuns!.replace(", [syncActivityAt+id]", "")
@@ -104,7 +293,11 @@ schemaIt(
     const name = "shared-run-schema-upgrade"
     await Dexie.delete(name)
     const previous = new Dexie(name)
-    const previousSchema = { ...CURRENT_SCHEMA }
+    const previousSchema: Record<string, string | null> = {
+      ...CURRENT_SCHEMA,
+      storageLayout: "id",
+      sessions: CURRENT_SCHEMA.sessions!.replace(", __cogniaEncryptedContent.iv", ""),
+    }
     delete previousSchema.sharedRunJournals
     previous.version(224).stores(previousSchema)
     await previous.open()
@@ -129,7 +322,11 @@ schemaIt(
     const name = `cognia-notifications-v2-${Date.now()}`
     await Dexie.delete(name)
     const previous = new Dexie(name)
-    const previousSchema = { ...CURRENT_SCHEMA }
+    const previousSchema: Record<string, string | null> = {
+      ...CURRENT_SCHEMA,
+      storageLayout: "id",
+      sessions: CURRENT_SCHEMA.sessions!.replace(", __cogniaEncryptedContent.iv", ""),
+    }
     // Strip every v227 addition so the legacy database is the pre-V2 shape.
     for (const table of [
       "notificationTargets",
@@ -4786,4 +4983,129 @@ describe("startBlockedYieldRetry", () => {
     expect(nudge).toHaveBeenCalledTimes(3)
     expect(onGiveUp).toHaveBeenCalledTimes(1)
   })
+})
+
+schemaIt("v242 rebuilds stale v241 projection before the v243 source index", async () => {
+  const name = "cognia-account-v242-test-upgrade"
+  activateAccountContentCipher(await AccountContentCipher.createForTesting("v242-test", name))
+  const oldSchema: Record<string, string | null> = {
+    ...CURRENT_SCHEMA,
+    storageLayout: "id",
+    sessions: CURRENT_SCHEMA.sessions!.replace(", __cogniaEncryptedContent.iv", ""),
+  }
+  const old = new Dexie(name)
+  old.use(createEncryptedContentMiddleware(name))
+  old.version(241).stores(oldSchema)
+  await old.table("sessions").put({ id: "a", title: "Authoritative", updatedAt: 5 })
+  await old.table("sessionList").put({ id: "a", title: "Stale", updatedAt: 5, workspaceKey: "" })
+  await old.table("storageLayout").put({ id: "session-list-v241", version: 1 })
+  expect(
+    old.table("sessions").schema.indexes.some((index) => index.name.includes("EncryptedContent"))
+  ).toBe(false)
+  old.close()
+  const upgraded = new CogniaDB(name)
+  try {
+    await upgraded.open()
+    expect(upgraded.table("storageLayout").schema.indexes).toHaveLength(0)
+    expect(
+      upgraded.sessions.schema.indexes.some((index) => index.name === "__cogniaEncryptedContent.iv")
+    ).toBe(true)
+    expect((await readVerifiedSessionListRows(upgraded))?.[0].title).toBe("Authoritative")
+    expect(await upgraded.table("storageLayout").get("session-list-v241")).toEqual({
+      id: "session-list-v241",
+      version: 2,
+    })
+  } finally {
+    await upgraded.delete()
+    __resetAccountContentCipherForTesting()
+  }
+})
+
+schemaIt("v243 indexes existing source IVs without re-encrypting v242 data", async () => {
+  const name = "cognia-account-v243-test-source-iv-upgrade"
+  await Dexie.delete(name)
+  const cipher = await AccountContentCipher.createForTesting("v243-test", name)
+  activateAccountContentCipher(cipher)
+  const previousSchema = {
+    ...CURRENT_SCHEMA,
+    sessions: CURRENT_SCHEMA.sessions!.replace(", __cogniaEncryptedContent.iv", ""),
+  }
+  const previous = new Dexie(name)
+  previous.use(createEncryptedContentMiddleware(name))
+  previous.version(242).stores(previousSchema)
+  await previous.table("sessions").put({ id: "encrypted", title: "Private source", updatedAt: 5 })
+  await previous.table("sessionList").put({
+    id: "encrypted",
+    title: "Private projection",
+    updatedAt: 5,
+    workspaceKey: "",
+  })
+  await previous.table("messages").put({
+    id: "message",
+    sessionId: "encrypted",
+    parts: [{ text: "Private message" }],
+    syncRevision: 7,
+  })
+  await previous.table("storageLayout").put({ id: "session-list-v241", version: 2 })
+  previous.close()
+  const rawBefore = new Dexie(name)
+  await rawBefore.open()
+  await rawBefore.table("sessions").put({ id: "legacy", title: "Legacy plaintext", updatedAt: 4 })
+  const before = {
+    sessions: await rawBefore.table("sessions").toArray(),
+    sessionList: await rawBefore.table("sessionList").toArray(),
+    messages: await rawBefore.table("messages").toArray(),
+    storageLayout: await rawBefore.table("storageLayout").toArray(),
+  }
+  const sourceIv = before.sessions.find((row) => row.id === "encrypted").__cogniaEncryptedContent.iv
+  rawBefore.close()
+  const encrypt = jest.spyOn(cipher, "encrypt")
+  const decrypt = jest.spyOn(cipher, "decrypt")
+  const upgraded = new CogniaDB(name)
+  const rawAfter = new Dexie(name)
+  // An older static-schema client declares only its known indexes, while
+  // opening the current physical version without triggering a downgrade.
+  const oldWriter = new Dexie(name)
+  oldWriter.use(createEncryptedContentMiddleware(name))
+  oldWriter.version(243).stores(previousSchema)
+  try {
+    await upgraded.open()
+    expect(upgraded.verno).toBe(243)
+    expect(encrypt).not.toHaveBeenCalled()
+    expect(decrypt).not.toHaveBeenCalled()
+    await rawAfter.open()
+    for (const table of ["sessions", "sessionList", "messages", "storageLayout"] as const) {
+      expect(await rawAfter.table(table).toArray()).toEqual(before[table])
+    }
+    expect(await rawAfter.table("sessions").orderBy("__cogniaEncryptedContent.iv").keys()).toEqual([
+      sourceIv,
+    ])
+    expect(
+      await rawAfter.table("sessions").orderBy("__cogniaEncryptedContent.iv").primaryKeys()
+    ).toEqual(["encrypted"])
+    expect(await rawAfter.table("sessions").count()).toBe(2)
+    expect(await rawAfter.table("sessions").get("legacy")).toEqual({
+      id: "legacy",
+      title: "Legacy plaintext",
+      updatedAt: 4,
+    })
+    await oldWriter
+      .table("sessions")
+      .put({ id: "encrypted", title: "Older writer edit", updatedAt: 5 })
+    const replaced = await rawAfter.table("sessions").get("encrypted")
+    expect(replaced.__cogniaEncryptedContent.iv).not.toBe(sourceIv)
+    expect(await rawAfter.table("sessions").orderBy("__cogniaEncryptedContent.iv").keys()).toEqual([
+      replaced.__cogniaEncryptedContent.iv,
+    ])
+    expect(JSON.stringify(replaced)).not.toContain("Older writer edit")
+  } finally {
+    encrypt.mockRestore()
+    decrypt.mockRestore()
+    previous.close()
+    rawBefore.close()
+    rawAfter.close()
+    oldWriter.close()
+    await upgraded.delete()
+    __resetAccountContentCipherForTesting()
+  }
 })

@@ -240,3 +240,11 @@ describe("ChatPaneGroup", () => {
     })
   })
 })
+
+it("never supplies a list projection as pane configuration while full rows load", () => {
+  chatState.splitSessionId = "b"
+  const full = { ...sessions[0]!, systemPrompt: "Full encrypted prompt" }
+  render(<ChatPaneGroup {...makeProps({ paneSessions: [full] })} />)
+  expect(paneRenders.find((pane) => pane.sessionId === "a")?.activeSession).toBe(full)
+  expect(paneRenders.find((pane) => pane.sessionId === "b")?.activeSession).toBeNull()
+})

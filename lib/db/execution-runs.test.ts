@@ -14,6 +14,7 @@ import {
   getExecutionRunSnapshot,
   listExecutionRunEvents,
   listExecutionRuns,
+  type ExecutionRunQuery,
   listVisibleExecutionRunEvents,
   listExecutionRunBindings,
   putExecutionRunBinding,
@@ -28,6 +29,53 @@ describe("execution run journal", () => {
     await getDb().delete()
     __resetDbForTesting()
   })
+
+  const listingCases: { query: ExecutionRunQuery; ids: string[] }[] = [
+    { query: { sessionId: "selected" }, ids: ["b", "a", "zero", "negative"] },
+    { query: { sessionId: "selected", limit: 1 }, ids: ["b"] },
+    { query: { sessionId: "selected", limit: 0 }, ids: ["b"] },
+    { query: { sessionId: "selected", limit: -1 }, ids: ["b"] },
+    { query: { sessionId: "selected", limit: Infinity }, ids: ["b", "a", "zero", "negative"] },
+    { query: { sessionId: "selected", statuses: ["running"], limit: 1 }, ids: ["a"] },
+    { query: { sessionId: "selected", kinds: ["goal"] }, ids: ["zero"] },
+    { query: { sessionId: "selected", projectId: "p2" }, ids: ["negative"] },
+    { query: { sessionId: "selected", kinds: ["goal"], statuses: ["completed"] }, ids: [] },
+    { query: { sessionId: "selected", kinds: [] }, ids: [] },
+    { query: { sessionId: "selected", statuses: [] }, ids: [] },
+    { query: { sessionId: "missing" }, ids: [] },
+    { query: { sessionId: "", limit: 2 }, ids: ["other", "unscoped"] },
+    { query: { limit: 2 }, ids: ["other", "unscoped"] },
+  ]
+
+  it.each(listingCases)(
+    "preserves execution listing semantics for $query",
+    async ({ query, ids }) => {
+      const base: ExecutionRun = {
+        id: "a",
+        kind: "agent-turn",
+        sourceId: "source",
+        title: "Complete payload",
+        sessionId: "selected",
+        projectId: "p1",
+        status: "running",
+        currentRevision: 0,
+        startedAt: 1,
+        updatedAt: 20,
+      }
+      await getDb().executionRuns.bulkPut([
+        base,
+        { ...base, id: "b", status: "completed" },
+        { ...base, id: "zero", kind: "goal", updatedAt: 0 },
+        { ...base, id: "negative", projectId: "p2", updatedAt: -1 },
+        { ...base, id: "other", sessionId: "other", updatedAt: 50 },
+        { ...base, id: "unscoped", sessionId: undefined, updatedAt: 40 },
+        { ...base, id: "missing-time", updatedAt: undefined } as unknown as ExecutionRun,
+      ])
+      const result = await listExecutionRuns(query)
+      expect(result.map((row) => row.id)).toEqual(ids)
+      expect(result.every((row) => row.title === "Complete payload")).toBe(true)
+    }
+  )
 
   it.each(["create", "binding", "append", "appendBatch"] as const)(
     "does not retry %s into another account or target database",

@@ -21,6 +21,7 @@ import { Surface } from "@/components/surface/surface"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { getThreadHandoffTicket } from "@/lib/db/thread-handoff-tickets"
 import { getDb } from "@/lib/db/schema"
+import { getSession } from "@/lib/db/sessions"
 import { formatBytesCompact } from "@/lib/observability/format-utils"
 import { isTauri } from "@/lib/platform/detect"
 import {
@@ -97,13 +98,23 @@ export function ThreadHandoffSourceDialog({
   const offersCode = Boolean(selectedRemote?.alwaysOn) && codeRefusal !== "not-desktop"
   const bringsCode = offersCode && codeRefusal === null && withCode
 
+  const fullSession = async () => {
+    const row = await getSession(session.id)
+    if (!row) throw new Error("Session no longer exists")
+    return row
+  }
+
   const startWithCode = async () => {
     if (!selectedRemote) return
     setBusy(true)
     try {
-      const { checkout } = await continueSessionOnAlwaysOnHost(session, selectedRemote, {
-        onProgress: setCodeProgress,
-      })
+      const { checkout } = await continueSessionOnAlwaysOnHost(
+        await fullSession(),
+        selectedRemote,
+        {
+          onProgress: setCodeProgress,
+        }
+      )
       toast.success(
         checkout.branch
           ? t("codeCompletedBranch", { host: selectedRemote.label, branch: checkout.branch })
@@ -125,13 +136,13 @@ export function ThreadHandoffSourceDialog({
     try {
       if (selectedRemote) {
         const manifest = selectedRemote.featureManifest
-        await startRemoteThreadHandoff(session, {
+        await startRemoteThreadHandoff(await fullSession(), {
           hostRef: selectedRemote.id,
           kind: manifest && "hostIdentity" in manifest ? manifest.hostIdentity.kind : "desktop",
           label: selectedRemote.label,
         })
       } else if (selected)
-        await startThreadHandoff(session, {
+        await startThreadHandoff(await fullSession(), {
           hostRef: selected.deviceId,
           kind: "mobile",
           label: selected.label,
@@ -150,7 +161,7 @@ export function ThreadHandoffSourceDialog({
     setBusy(true)
     try {
       if (snapshot.ticket.target.kind !== "mobile") {
-        await startRemoteThreadHandoff(session, snapshot.ticket.target)
+        await startRemoteThreadHandoff(await fullSession(), snapshot.ticket.target)
       } else if (snapshot.dispatch) {
         await getDb().hostDispatchQueue.update(snapshot.dispatch.id, {
           status: "pending",
@@ -161,7 +172,7 @@ export function ThreadHandoffSourceDialog({
           lastError: undefined,
         })
       } else {
-        await recoverThreadHandoffOffer(session, snapshot.ticket)
+        await recoverThreadHandoffOffer(await fullSession(), snapshot.ticket)
       }
       toast.success(t("retryQueued"))
     } catch {

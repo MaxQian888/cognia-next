@@ -525,6 +525,253 @@ it("routes decryption through Dexie.waitFor, and only when there is ciphertext",
   }
 })
 
+describe("synchronous session list cache hits", () => {
+  async function fixture() {
+    const cipher = await AccountContentCipher.createForTesting("acct_crypto", DATABASE_NAME)
+    activateAccountContentCipher(cipher)
+    const db = new Dexie(DATABASE_NAME)
+    db.version(1).stores({ sessionList: "id, updatedAt" })
+    db.use(createEncryptedContentMiddleware(DATABASE_NAME))
+    await db.open()
+    const projection = db.table("sessionList")
+    await projection.bulkPut([
+      { id: "a", updatedAt: 1, title: "cached", nested: { bytes: new Uint8Array([1, 2]) } },
+      { id: "b", updatedAt: 2, title: "cold" },
+    ])
+    const raw = new Dexie(DATABASE_NAME)
+    await raw.open()
+    await raw.table("sessionList").put({ id: "legacy", updatedAt: 3, title: "plaintext legacy" })
+    return { cipher, db, raw, projection }
+  }
+
+  it("skips async decrypt wrappers and transaction holds for cached and plaintext reads", async () => {
+    const { cipher, db, raw, projection } = await fixture()
+    try {
+      await projection.toArray()
+      await raw.table("sessionList").update("a", { updatedAt: 99 })
+      const waitFor = jest.spyOn(Dexie, "waitFor")
+      const decrypt = jest.spyOn(cipher, "decrypt")
+      try {
+        const row = await projection.get("a")
+        expect(row.updatedAt).toBe(99)
+        row.nested.bytes[0] = 99
+        expect(await projection.bulkGet(["legacy", "b", "missing", "a"])).toMatchObject([
+          { id: "legacy", title: "plaintext legacy" },
+          { id: "b", title: "cold" },
+          undefined,
+          { id: "a", updatedAt: 99, nested: { bytes: new Uint8Array([1, 2]) } },
+        ])
+        expect(await projection.toArray()).toHaveLength(3)
+        expect(decrypt).not.toHaveBeenCalled()
+        expect(waitFor).not.toHaveBeenCalled()
+      } finally {
+        decrypt.mockRestore()
+        waitFor.mockRestore()
+      }
+    } finally {
+      raw.close()
+      db.close()
+    }
+  })
+
+  it("holds one mixed cache-miss read through crypto before the following transaction write", async () => {
+    const { cipher, db, raw, projection } = await fixture()
+    try {
+      await projection.get("a")
+      const waitFor = jest.spyOn(Dexie, "waitFor")
+      const decrypt = jest.spyOn(cipher, "decrypt")
+      try {
+        await withSpecTransactionActivity(() =>
+          db.transaction("rw", projection, async () => {
+            expect(await projection.bulkGet(["legacy", "a", "missing", "b"])).toMatchObject([
+              { id: "legacy", title: "plaintext legacy" },
+              { id: "a", title: "cached" },
+              undefined,
+              { id: "b", title: "cold" },
+            ])
+            expect(decrypt).toHaveBeenCalledTimes(1)
+            expect(waitFor).toHaveBeenCalledTimes(1)
+            await projection.put({ id: "written", updatedAt: 4, title: "after mixed read" })
+          })
+        )
+        expect(await projection.get("written")).toMatchObject({ title: "after mixed read" })
+      } finally {
+        decrypt.mockRestore()
+        waitFor.mockRestore()
+      }
+    } finally {
+      raw.close()
+      db.close()
+    }
+  })
+
+  it("rejects corrupted envelopes and locked reads after the projection cache is warm", async () => {
+    const { cipher, db, raw, projection } = await fixture()
+    try {
+      await projection.get("a")
+      const stored = await raw.table("sessionList").get("a")
+      const ciphertext = stored.__cogniaEncryptedContent.ciphertext as string
+      stored.__cogniaEncryptedContent.ciphertext =
+        (ciphertext[0] === "A" ? "B" : "A") + ciphertext.slice(1)
+      await raw.table("sessionList").put(stored)
+      await expect(projection.get("a")).rejects.toBeDefined()
+      cipher.lock()
+      await expect(projection.bulkGet(["legacy", "a"])).rejects.toThrow(/locked/)
+      await expect(projection.toArray()).rejects.toThrow(/locked/)
+    } finally {
+      raw.close()
+      db.close()
+    }
+  })
+
+  async function denseFixture() {
+    const prepared = await fixture()
+    const ids = Array.from({ length: 128 }, (_, index) => `dense-${String(index).padStart(3, "0")}`)
+    await prepared.projection.bulkPut(
+      ids.map((id, index) => ({ id, updatedAt: index, title: `Private ${id}` }))
+    )
+    await prepared.raw
+      .table("sessionList")
+      .update("legacy", { nested: { bytes: new Uint8Array([1, 2]) } })
+    await prepared.projection.toArray()
+    return { ...prepared, ids }
+  }
+
+  it("batches dense requested IDs in two native requests without decrypting corrupt orphan rows", async () => {
+    const { cipher, db, raw, projection, ids } = await denseFixture()
+    try {
+      const orphan = { ...(await raw.table("sessionList").get("a")), id: "orphan" }
+      await raw.table("sessionList").put(orphan)
+      const keys = ["missing", ...ids.toReversed(), "legacy"]
+      const get = jest.spyOn(IDBObjectStore.prototype, "get")
+      const getAll = jest.spyOn(IDBObjectStore.prototype, "getAll")
+      const count = jest.spyOn(IDBObjectStore.prototype, "count")
+      const decrypt = jest.spyOn(cipher, "decrypt")
+      try {
+        const result = await db.transaction("r", projection, () => projection.bulkGet(keys))
+        expect(result.map((row) => row?.id)).toEqual([undefined, ...ids.toReversed(), "legacy"])
+        expect(result[1]).toMatchObject({ title: `Private ${ids[127]}` })
+        expect(get).not.toHaveBeenCalled()
+        expect(count).toHaveBeenCalledTimes(1)
+        expect(getAll).toHaveBeenCalledTimes(1)
+        expect(decrypt).not.toHaveBeenCalled()
+      } finally {
+        get.mockRestore()
+        getAll.mockRestore()
+        count.mockRestore()
+        decrypt.mockRestore()
+      }
+      await expect(
+        db.transaction("r", projection, () => projection.bulkGet([...ids, "orphan"]))
+      ).rejects.toBeDefined()
+    } finally {
+      raw.close()
+      db.close()
+    }
+  })
+
+  it("keeps duplicate and separate plaintext results independently owned", async () => {
+    const { db, raw, projection, ids } = await denseFixture()
+    try {
+      const keys = ["legacy", "legacy", ...ids]
+      const getAll = jest.spyOn(IDBObjectStore.prototype, "getAll")
+      const count = jest.spyOn(IDBObjectStore.prototype, "count")
+      try {
+        const result = await db.transaction("r", projection, () => projection.bulkGet(keys))
+        result[0].nested.bytes[0] = 99
+        expect(result[1].nested.bytes).toEqual(new Uint8Array([1, 2]))
+        expect(getAll).not.toHaveBeenCalled()
+        expect(count).not.toHaveBeenCalled()
+      } finally {
+        getAll.mockRestore()
+        count.mockRestore()
+      }
+      const first = await db.transaction("r", projection, () =>
+        projection.bulkGet(["legacy", ...ids])
+      )
+      first[0].nested.bytes[0] = 99
+      const second = await db.transaction("r", projection, () =>
+        projection.bulkGet(["legacy", ...ids])
+      )
+      expect(second[0].nested.bytes).toEqual(new Uint8Array([1, 2]))
+    } finally {
+      raw.close()
+      db.close()
+    }
+  })
+
+  it("keeps a dense cold encrypted batch alive through a following transaction write", async () => {
+    const { db, raw, projection, ids } = await denseFixture()
+    try {
+      await projection.bulkPut(
+        ids.map((id, index) => ({ id, updatedAt: index, title: `Changed ${id}` }))
+      )
+      const waitFor = jest.spyOn(Dexie, "waitFor")
+      try {
+        await withSpecTransactionActivity(() =>
+          db.transaction("rw", projection, async () => {
+            const result = await projection.bulkGet([...ids, "legacy", "missing"])
+            expect(result[0]).toMatchObject({ title: `Changed ${ids[0]}` })
+            expect(result[ids.length]).toMatchObject({ title: "plaintext legacy" })
+            expect(result[ids.length + 1]).toBeUndefined()
+            expect(waitFor).toHaveBeenCalledTimes(1)
+            await projection.put({ id: "after-dense", updatedAt: 5, title: "committed" })
+          })
+        )
+      } finally {
+        waitFor.mockRestore()
+      }
+      expect(await projection.get("after-dense")).toMatchObject({ title: "committed" })
+    } finally {
+      raw.close()
+      db.close()
+    }
+  })
+
+  it("falls back to per-key reads for sparse, small, implicit, or transaction-cache requests", async () => {
+    const { db, raw, projection, ids } = await denseFixture()
+    try {
+      await raw.table("sessionList").bulkPut(
+        Array.from({ length: 400 }, (_, index) => ({
+          id: `outside-${index}`,
+          updatedAt: index,
+          title: "unrequested legacy row",
+        }))
+      )
+      const get = jest.spyOn(IDBObjectStore.prototype, "get")
+      const getAll = jest.spyOn(IDBObjectStore.prototype, "getAll")
+      const count = jest.spyOn(IDBObjectStore.prototype, "count")
+      try {
+        await db.transaction("r", projection, () => projection.bulkGet(ids))
+        expect(count).toHaveBeenCalledTimes(1)
+        expect(getAll).not.toHaveBeenCalled()
+        expect(get).toHaveBeenCalledTimes(ids.length)
+        count.mockClear()
+        get.mockClear()
+        await db.transaction("r", projection, () => projection.bulkGet(ids.slice(0, 2)))
+        await projection.bulkGet(ids)
+        await db.transaction("r", projection, () =>
+          projection.core.getMany({
+            trans: Dexie.currentTransaction!.idbtrans,
+            keys: ids,
+            cache: "clone",
+          })
+        )
+        expect(count).not.toHaveBeenCalled()
+        expect(getAll).not.toHaveBeenCalled()
+        expect(get).toHaveBeenCalledTimes(ids.length * 2 + 2)
+      } finally {
+        get.mockRestore()
+        getAll.mockRestore()
+        count.mockRestore()
+      }
+    } finally {
+      raw.close()
+      db.close()
+    }
+  })
+})
+
 /**
  * The crash this guards is real and was reachable from ordinary UI work: a
  * `waitFor` established on a transaction that has already committed throws

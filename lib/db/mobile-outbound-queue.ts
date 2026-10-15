@@ -26,6 +26,7 @@ import { getDb } from "./schema"
 import type { CollabFieldClash } from "@/lib/collab/client"
 import {
   getActiveRuntimeTargetContext,
+  getRuntimeTargetScopeKey,
   type RuntimeTargetScope,
 } from "@/lib/runtime/runtime-target-context"
 import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
@@ -97,14 +98,24 @@ export interface EnqueueHostStateIntentInput {
 export async function hostStateSessionIntentAvailable(sessionId: string): Promise<boolean> {
   if (!sessionId) return false
   const local = getActiveRuntimeTargetContext()
-  if (!local || !(await hostStateSubmitNegotiated())) return false
+  if (!local) return false
+  const key = getRuntimeTargetScopeKey()
+  const db = getDb()
+  const assertActive = () => {
+    if (key !== getRuntimeTargetScopeKey() || db.name !== getDb().name) {
+      throw new Error("Host-state database scope changed")
+    }
+  }
+  const negotiated = await hostStateSubmitNegotiated()
+  assertActive()
+  if (!negotiated) return false
   const scope = (await negotiatedHostStateScope()) ?? {
     accountId: local.accountId,
     targetId: local.targetId,
   }
-  const confirmed = await getDb().hostStateChannels.get(
-    sessionStateChannel(scope.targetId, sessionId)
-  )
+  assertActive()
+  const confirmed = await db.hostStateChannels.get(sessionStateChannel(scope.targetId, sessionId))
+  assertActive()
   return Boolean(confirmed?.hostId) && (confirmed?.hostGeneration ?? 0) >= 1
 }
 
@@ -121,7 +132,17 @@ export async function enqueueHostStateIntentIfAvailable(
   input: EnqueueHostStateIntentInput
 ): Promise<MobileOutboundJobRow | null> {
   const local = getActiveRuntimeTargetContext()
-  if (!local || !(await hostStateSubmitNegotiated())) return null
+  if (!local) return null
+  const key = getRuntimeTargetScopeKey()
+  const db = getDb()
+  const assertActive = () => {
+    if (key !== getRuntimeTargetScopeKey() || db.name !== getDb().name) {
+      throw new Error("Host-state database scope changed")
+    }
+  }
+  const negotiated = await hostStateSubmitNegotiated()
+  assertActive()
+  if (!negotiated) return null
   // Host-state is addressed in the HOST's namespace. `local` is what this
   // client calls the pairing; the Host writes its channels under the scope it
   // declared in the manifest, and refuses a submit under any other target. A
@@ -131,6 +152,7 @@ export async function enqueueHostStateIntentIfAvailable(
     accountId: local.accountId,
     targetId: local.targetId,
   }
+  assertActive()
   const targetsIndex = hostStateIntentTargetsSessionIndex(input.action.kind)
   if (targetsIndex && input.sessionId !== undefined) {
     throw new Error("host_state_index_intent_names_session")
@@ -139,7 +161,6 @@ export async function enqueueHostStateIntentIfAvailable(
   const channel = targetsIndex
     ? sessionIndexChannel(scope.targetId)
     : sessionStateChannel(scope.targetId, input.sessionId!)
-  const db = getDb()
   const preferredClientId = input.clientId ?? loadOrCreateHostStateClientId()
   const now = input.nowMs ?? Date.now()
   const actionId = input.actionId ?? randomHostStateId()
@@ -152,7 +173,9 @@ export async function enqueueHostStateIntentIfAvailable(
     input.action.kind === "session.create" ? sessionIndexChannel(scope.targetId) : channel
 
   return db.transaction("rw", db.hostStateChannels, db.mobileOutboundQueue, async () => {
+    assertActive()
     const confirmed = await db.hostStateChannels.get(confirmationChannel)
+    assertActive()
     if (!confirmed?.hostId || confirmed.hostGeneration < 1) return null
 
     const rows = await db.mobileOutboundQueue
@@ -163,6 +186,7 @@ export async function enqueueHostStateIntentIfAvailable(
           row.targetId === local.targetId
       )
       .toArray()
+    assertActive()
     const active = rows.filter((row) => IN_FLIGHT_STATUSES.includes(row.status))
     if (active.length >= MAX_PENDING_HOST_STATE_ACTIONS) {
       throw new Error("host_state_outbox_full")
@@ -199,12 +223,15 @@ export async function enqueueHostStateIntentIfAvailable(
       accountId: local.accountId,
       targetId: local.targetId,
     })
+    assertActive()
     await db.mobileOutboundQueue.add(row)
+    assertActive()
     // A new draft makes the drafts still waiting before it moot (see
     // `supersededHostStateDraftIds`), so the queue holds one per conversation
     // instead of one per debounced save while the Host is away.
     const superseded = supersededHostStateDraftIds([...rows, row])
     if (superseded.length > 0) await db.mobileOutboundQueue.bulkDelete(superseded)
+    assertActive()
     return row
   })
 }

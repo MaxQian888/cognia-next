@@ -22,6 +22,8 @@ import type { ChatTemplateRun } from "@/lib/chat/template/run"
 export interface ChatPaneGroupProps {
   /** All sessions (for resolving tab titles / character ids). */
   sessions: readonly ChatSession[]
+  /** Full active/split rows when the navigation list contains projections. */
+  paneSessions?: readonly ChatSession[]
   /** Per-session send — the workspace wraps trust-prompting around it. */
   send: (
     content: SendContent,
@@ -89,6 +91,7 @@ export interface ChatPaneGroupProps {
 
 export function ChatPaneGroup({
   sessions,
+  paneSessions,
   send,
   stop,
   steerNow,
@@ -153,7 +156,9 @@ export function ChatPaneGroup({
     onSplitView?: () => void,
     onExitSplit?: () => void
   ) => {
-    const session = sessionById(sessionId)
+    const session = paneSessions
+      ? (paneSessions.find((row) => row.id === sessionId) ?? null)
+      : sessionById(sessionId)
     return (
       <ChatPane
         sessionId={sessionId ?? undefined}

@@ -1,3 +1,9 @@
+import Dexie from "dexie"
+import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
+import {
+  createSessionListMiddleware,
+  createSessionListWitnessMiddleware,
+} from "@/lib/db/session-list"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -724,4 +730,160 @@ describe("openDurabilityStore", () => {
     expect(store.sequence()).toBe(1)
     await store.close()
   })
+})
+
+describe("session list durability", () => {
+  it("excludes derived rows and readiness from checkpoint and transaction capture", async () => {
+    const home = tempHome()
+    const tables = [
+      new FakeTable("sessions"),
+      new FakeTable("sessionList"),
+      new FakeTable("storageLayout"),
+    ]
+    const db = new FakeDexie("CogniaDB", 241, tables)
+    const source = { name: "CogniaDB", db }
+    await tables[0].bulkPut([{ id: "s", title: "Source" }])
+    await tables[1].bulkPut([{ id: "s", title: "Derived" }])
+    await tables[2].bulkPut([
+      { id: "singleton", layout: "single-database" },
+      { id: "session-list-v241", version: 1 },
+    ])
+    const store = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [source],
+    })
+    try {
+      const seed = await store.backend.load()
+      expect(seed.dbs.CogniaDB.schema.tables).toEqual(["sessions", "storageLayout"])
+      expect(seed.dbs.CogniaDB.rows.sessionList).toBeUndefined()
+      expect(seed.dbs.CogniaDB.rows.storageLayout).toEqual({
+        [encodeKey("singleton")]: { id: "singleton", layout: "single-database" },
+      })
+      await db.commit("sessionList", { type: "put", values: [{ id: "derived" }] })
+      await db.commit("storageLayout", {
+        type: "put",
+        values: [{ id: "session-list-v241", version: 1 }],
+      })
+      expect(store.sequence()).toBe(0)
+      await db.commit("sessions", { type: "put", values: [{ id: "s", title: "Changed" }] })
+      expect(store.sequence()).toBe(1)
+      expect((await store.backend.load()).dbs.CogniaDB.rows.sessions[encodeKey("s")]).toEqual({
+        id: "s",
+        title: "Changed",
+      })
+    } finally {
+      await store.close()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("ignores stale projection and readiness from a previously persisted checkpoint", async () => {
+    const tables = [
+      new FakeTable("sessions"),
+      new FakeTable("sessionList"),
+      new FakeTable("storageLayout"),
+    ]
+    const db = new FakeDexie("CogniaDB", 241, tables)
+    await restoreState([{ name: "CogniaDB", db }], {
+      sequence: 1,
+      dbs: {
+        CogniaDB: {
+          schema: { version: 241, tables: ["sessions", "sessionList", "storageLayout"] },
+          rows: {
+            sessions: { [encodeKey("s")]: { id: "s", title: "Source" } },
+            sessionList: { [encodeKey("s")]: { id: "s", title: "Stale" } },
+            storageLayout: {
+              [encodeKey("session-list-v241")]: { id: "session-list-v241", version: 1 },
+            },
+          },
+        },
+      },
+    })
+    expect(await tables[0].toArray()).toEqual([{ id: "s", title: "Source" }])
+    expect(await tables[1].toArray()).toEqual([])
+    expect(await tables[2].toArray()).toEqual([])
+  })
+
+  it.each([
+    [240, "journal-v4"],
+    [240, "sqlite-v5"],
+    [241, "journal-v4"],
+    [241, "sqlite-v5"],
+  ] as const)(
+    "upgrades v%i %s state to v242, rebuilds projection and reopens after further writes",
+    async (previousVersion, backend) => {
+      const home = tempHome()
+      const name = `SessionLedger-${backend}-${path.basename(home)}`
+      await installFakeIndexedDb()
+      const old = new FakeDexie(name, previousVersion, [
+        new FakeTable("sessions"),
+        new FakeTable("storageLayout"),
+      ])
+      const previous = await openDurabilityStore({
+        home,
+        accountId: "acct",
+        backend,
+        getSources: async () => [{ name, db: old }],
+      })
+      await old.commit("sessions", {
+        type: "put",
+        values: [{ id: "s", title: "Before upgrade", updatedAt: 1, systemPrompt: "Full prompt" }],
+      })
+      await previous.close()
+      const open = () => {
+        const db = new Dexie(name)
+        db.version(242).stores({
+          sessions: "id",
+          sessionList: "id, updatedAt, workspaceKey, [workspaceKey+updatedAt]",
+          storageLayout: "id",
+        })
+        db.use(createSessionListMiddleware())
+        db.use(createSessionListWitnessMiddleware())
+        return db
+      }
+      let db = open()
+      let store: Awaited<ReturnType<typeof openDurabilityStore>> | undefined
+      try {
+        const options = () => ({
+          home,
+          accountId: "acct",
+          backend,
+          getSources: async () => [{ name, db: db as unknown as DurabilityDbLike }],
+        })
+        store = await openDurabilityStore(options())
+        expect(await db.table("sessionList").get("s")).toEqual({
+          id: "s",
+          title: "Before upgrade",
+          updatedAt: 1,
+          workspaceKey: "",
+        })
+        expect(await db.table("sessions").get("s")).toMatchObject({ systemPrompt: "Full prompt" })
+        expect((await store.backend.load()).dbs[name].schema.version).toBe(242)
+        expect(store.sequence()).toBe(1)
+        await db.table("sessions").update("s", { title: "After upgrade", updatedAt: 2 })
+        expect(store.sequence()).toBe(2)
+        const persisted = (await store.backend.load()).dbs[name]
+        expect(persisted.rows.sessionList).toBeUndefined()
+        expect(persisted.rows.storageLayout[encodeKey("session-list-v241")]).toBeUndefined()
+        await store.close()
+        await db.delete()
+        db = open()
+        store = await openDurabilityStore(options())
+        expect(await db.table("sessionList").get("s")).toMatchObject({
+          title: "After upgrade",
+          updatedAt: 2,
+        })
+        expect(await db.table("storageLayout").get("session-list-v241")).toEqual({
+          id: "session-list-v241",
+          version: 2,
+        })
+        expect(store.sequence()).toBe(2)
+      } finally {
+        await store?.close()
+        await db.delete()
+        fs.rmSync(home, { recursive: true, force: true })
+      }
+    }
+  )
 })

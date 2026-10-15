@@ -121,3 +121,20 @@ describe("deleteSessionsWithTeardown", () => {
     expect(bulkDeleteSessionsMock).not.toHaveBeenCalled()
   })
 })
+
+it("does not delete or announce against a new scope after sidecar teardown", async () => {
+  let active = true
+  closeSessionMock.mockImplementation(async () => {
+    active = false
+  })
+  const scope = {
+    db: {} as import("@/lib/db/sessions").SessionPersistenceScope["db"],
+    assertActive() {
+      if (!active) throw new Error("Session database scope changed")
+    },
+  }
+  await expect(deleteSessionsWithTeardown(["same-id"], scope)).rejects.toThrow("scope changed")
+  expect(bulkDeleteSessionsMock).not.toHaveBeenCalled()
+  expect(announceMock).not.toHaveBeenCalled()
+  expect(disarmSessionMock).not.toHaveBeenCalled()
+})

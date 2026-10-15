@@ -798,6 +798,26 @@ export class CompanionTransport implements Transport {
     return this.configProvider ? this.configProvider() : loadCompanionConfig()
   }
 
+  /** Refuse history reads during the gap between database and pairing activation. */
+  public assertRuntimeTargetBinding(): void {
+    // Headless service transports have an explicit provider and no browser target binding.
+    if (this.configProvider) return
+    const scope = getActiveRuntimeTargetContext()
+    if (!scope) return
+    const config = this.config()
+    if (
+      config?.accountId !== scope.accountId ||
+      config?.targetId !== scope.targetId ||
+      ((this.rtc || this.rtcConnecting) && this.rtcTargetKey !== wanTargetKey(config))
+    ) {
+      throw new CompanionError({
+        code: "companion_target_scope_changed",
+        message: "companion target scope changed",
+        retryable: true,
+      })
+    }
+  }
+
   // ── Public: connection state observable ────────────────────────────────────
 
   public getConnectionState(): ConnectionState {

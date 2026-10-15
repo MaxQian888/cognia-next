@@ -33,6 +33,8 @@ jest.mock("@/lib/chat/dispatch-to-codex-app", () => ({
   returnSessionFromCodexApp: (session: ChatSession) => returnFromCodex(session),
 }))
 
+const mockGetSession = jest.fn()
+jest.mock("@/lib/db/sessions", () => ({ getSession: (id: string) => mockGetSession(id) }))
 const listMessages = jest.fn()
 jest.mock("@/lib/db/messages", () => ({ listMessages: (id: string) => listMessages(id) }))
 const exportHandoff = jest.fn()
@@ -67,6 +69,7 @@ beforeEach(() => {
   ]) {
     mock.mockReset()
   }
+  mockGetSession.mockReset().mockResolvedValue(session({ workingDir: "/repo" }))
   listMessages.mockResolvedValue([])
   exportHandoff.mockResolvedValue(undefined)
 })
@@ -146,4 +149,20 @@ describe("useSessionDesktopHandoffs", () => {
     await waitFor(() => expect(onReturned).toHaveBeenCalledWith("s-back", event))
     expect(toastSuccess).toHaveBeenCalledWith("returnedFromCodexApp")
   })
+})
+
+it("dispatches the stored configuration instead of a lightweight list row", async () => {
+  const full = session({ systemPrompt: "Private instructions", workingDir: "/complete" })
+  mockGetSession.mockResolvedValue(full)
+  const { result } = renderHook(() => useSessionDesktopHandoffs(session(), jest.fn()))
+  act(() => result.current.desktop?.onOpenInCodexApp())
+  await waitFor(() => expect(dispatchToCodex).toHaveBeenCalledWith(full))
+})
+
+it("does not dispatch an incomplete snapshot when the full session read fails", async () => {
+  mockGetSession.mockRejectedValue(new Error("account locked"))
+  const { result } = renderHook(() => useSessionDesktopHandoffs(session(), jest.fn()))
+  act(() => result.current.desktop?.onOpenInCodexApp())
+  await waitFor(() => expect(toastError).toHaveBeenCalled())
+  expect(dispatchToCodex).not.toHaveBeenCalled()
 })

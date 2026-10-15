@@ -1,6 +1,7 @@
 import {
   clearActiveRuntimeTargetContext,
   getActiveRuntimeTargetContext,
+  getRuntimeTargetScopeKey,
   setActiveRuntimeTargetContext,
   subscribeRuntimeTargetContext,
 } from "./runtime-target-context"
@@ -57,4 +58,12 @@ it("notifies scope owners for direct target, generation and lock changes only", 
     { accountId: "acct_alpha", targetId: "desktop-cloud", routingGeneration: 102 },
     null,
   ])
+})
+
+it("exposes a stable primitive snapshot that distinguishes routing generations", () => {
+  setActiveRuntimeTargetContext("acct_alpha", "host-one", 100)
+  const key = getRuntimeTargetScopeKey()
+  expect(getRuntimeTargetScopeKey()).toBe(key)
+  setActiveRuntimeTargetContext("acct_alpha", "host-one", 101)
+  expect(getRuntimeTargetScopeKey()).not.toBe(key)
 })

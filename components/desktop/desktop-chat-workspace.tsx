@@ -108,6 +108,7 @@ export function DesktopChatWorkspace() {
   const sidebarSearch = resolveConversationSearchOptions(sidebarSettings)
   const {
     sessions,
+    paneSessions,
     isLoadingSessions,
     activeSessionId,
     activeSession,
@@ -131,6 +132,7 @@ export function DesktopChatWorkspace() {
     bulkAssignToFolder,
     reorderSessions,
   } = useSessions({
+    listOnly: true,
     crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
   })
   const directChat = useClaudeChat()
@@ -739,6 +741,7 @@ export function DesktopChatWorkspace() {
                     inline approval gate, dispatched by session kind. */}
                   <ChatPaneGroup
                     sessions={sessions}
+                    paneSessions={paneSessions}
                     send={paneSend}
                     stop={paneStop}
                     steerNow={paneSteer}

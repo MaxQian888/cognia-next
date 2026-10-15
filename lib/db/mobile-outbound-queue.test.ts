@@ -36,7 +36,10 @@ import {
   __resetRuntimeSnapshotForTesting,
   setRuntimeSnapshot,
 } from "@/lib/runtime/runtime-snapshot-store"
-import { setActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
+import {
+  getActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import {
   createEmptyHostStateSession,
   sessionIndexChannel,
@@ -60,6 +63,52 @@ describe("mobile outbound queue target isolation", () => {
     await getDb().delete()
     __resetDbForTesting()
     __resetRuntimeSnapshotForTesting()
+  })
+
+  it("rejects an eligibility check overtaken by a routing generation instead of falling back", async () => {
+    const pending = enqueueHostStateIntentIfAvailable({
+      sessionId: "s1",
+      action: { kind: "session.delete" },
+    })
+    setActiveRuntimeTargetContext(
+      scope.accountId,
+      scope.targetId,
+      getActiveRuntimeTargetContext()!.routingGeneration + 1
+    )
+    await expect(pending).rejects.toThrow("scope changed")
+    expect(await getDb().mobileOutboundQueue.count()).toBe(0)
+  })
+
+  it("never files an old Host intent in a new Host database with matching channel IDs", async () => {
+    activateAccountDatabase(scope.accountId, "host-other")
+    await getDb().delete()
+    __resetDbForTesting()
+    activateAccountDatabase(scope.accountId, "host-other")
+    await getDb().hostStateChannels.put({
+      channel: sessionStateChannel(scope.targetId, "s1"),
+      hostId: "host-authority",
+      hostGeneration: 1,
+      hostSeq: 1,
+      revision: 1,
+      digest: "digest",
+      state: createEmptyHostStateSession(scope.targetId, "s1"),
+      updatedAt: 1,
+    })
+    activateAccountDatabase(scope.accountId, scope.targetId)
+    setRuntimeSnapshot({
+      target: { id: scope.targetId, kind: "companion", platform: "web", hostKind: "desktop" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations: ["host_state_submit"], grants: [] },
+    })
+    const pending = enqueueHostStateIntentIfAvailable({
+      sessionId: "s1",
+      action: { kind: "session.delete" },
+    })
+    activateAccountDatabase(scope.accountId, "host-other")
+    setActiveRuntimeTargetContext(scope.accountId, "host-other")
+    await expect(pending).rejects.toThrow("scope changed")
+    expect(await getDb().mobileOutboundQueue.count()).toBe(0)
   })
 
   it("persists the account and runtime target that owned an enqueued action", async () => {

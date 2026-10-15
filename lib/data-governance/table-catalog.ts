@@ -347,6 +347,7 @@ export const CORE_TABLE_NAMES = [
   "sessionState",
   "sessionUsage",
   "sessionPrObservations",
+  "sessionList",
   "sessions",
   "settings",
   "sharedLinks",
@@ -882,6 +883,7 @@ const CACHE_TABLES = new Set<CoreTableName>([
 ])
 
 const PROJECTION_TABLES = new Set<CoreTableName>([
+  "sessionList",
   // Account sync's per-field clocks (ADR-0215 phase 3): bookkeeping about the
   // rows they describe, which stay the record. Not rebuildable, but meaningless
   // without them and never backed up.
@@ -1070,6 +1072,7 @@ const USER_CONTENT_TABLES = new Set<CoreTableName>([
   "agentTeams",
   "agentTeammates",
   "agentTeamTasks",
+  "sessionList",
   "sessions",
   "sessionState",
   "chatDrafts",

@@ -25,6 +25,8 @@ import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { assertSessionWritable, type SessionWriteOperation } from "@/lib/chat/session-write-guard"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { stampOrganizationalWrite } from "./session-row-stamps"
+import { surfaceBindingKey } from "@/lib/context-workbench/resource-session"
+import { readVerifiedSessionListRows } from "./session-list"
 
 export interface SessionPersistenceScope {
   db: ReturnType<typeof getDb>
@@ -137,6 +139,18 @@ async function listScopedSessionsNow(projectId?: string): Promise<ChatSession[]>
  */
 export function listWorkspaceSessions(projectId: string): Promise<ChatSession[]> {
   return measureOperation("storage.sessions.list", () => listWorkspaceSessionsNow(projectId))
+}
+
+/** List rows only; panes, exports and handoffs must read their full session. */
+export async function listSessionListRows(projectId?: string): Promise<ChatSession[]> {
+  // Shells only pass nonempty workspace ids. Preserve the legacy API's
+  // overlapping empty-project ranges for callers that explicitly pass "".
+  if (projectId === "") return listWorkspaceSessions(projectId)
+  const db = getDb()
+  const rows = await readVerifiedSessionListRows(db, projectId)
+  if (rows === undefined)
+    return projectId === undefined ? listSessions() : listWorkspaceSessions(projectId)
+  return rows.map(({ workspaceKey: _workspaceKey, ...row }) => row)
 }
 
 async function listWorkspaceSessionsNow(projectId: string): Promise<ChatSession[]> {
@@ -598,9 +612,20 @@ export async function acknowledgeImportDivergence(id: string): Promise<void> {
     })
 }
 
+/**
+ * Sessions whose lifetime is owned by `rootIds`: attached children (ADR-0204)
+ * and, with `includeSideChats`, the side chats bound to them.
+ *
+ * Side chats carry no `parentSessionId` — they are found through their
+ * `surfaceBindingKey` — so a lineage walk alone never sees them, and deleting a
+ * conversation used to leave its side chats and their messages behind with
+ * nothing able to render or reach them. Archive does not pass the flag: an
+ * archived conversation keeps its side chats for when it is restored.
+ */
 async function listOwnedAttachedDescendantIds(
   db: ReturnType<typeof getDb>,
-  rootIds: readonly string[]
+  rootIds: readonly string[],
+  { includeSideChats = false }: { includeSideChats?: boolean } = {}
 ): Promise<string[]> {
   const uniqueRootIds = [...new Set(rootIds)]
   const existingRoots = (await db.sessions.bulkGet(uniqueRootIds)).flatMap((row) =>
@@ -611,7 +636,15 @@ async function listOwnedAttachedDescendantIds(
   let frontier = existingRoots
 
   while (frontier.length > 0) {
-    const children = await db.sessions.where("parentSessionId").anyOf(frontier).toArray()
+    const [children, sideChats] = await Promise.all([
+      db.sessions.where("parentSessionId").anyOf(frontier).toArray(),
+      includeSideChats
+        ? db.sessions
+            .where("surfaceBindingKey")
+            .anyOf(frontier.map((id) => surfaceBindingKey({ kind: "session", sessionId: id })))
+            .primaryKeys()
+        : Promise.resolve([] as string[]),
+    ])
     const next: string[] = []
     for (const child of children) {
       if (
@@ -625,6 +658,12 @@ async function listOwnedAttachedDescendantIds(
       seen.add(child.id)
       descendants.push(child.id)
       next.push(child.id)
+    }
+    for (const id of sideChats as string[]) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      descendants.push(id)
+      next.push(id)
     }
     frontier = next
   }
@@ -659,13 +698,16 @@ async function closeOwnedAttachedDescendants(
  * the Archived view. `updatedAt` is intentionally left untouched so the row
  * keeps its real recency for the archived-view sort and on restore.
  */
-export async function archiveSession(id: string): Promise<void> {
-  const db = getDb()
+export async function archiveSession(id: string, scope?: SessionPersistenceScope): Promise<void> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
   const now = Date.now()
   await db.transaction("rw", db.sessions, async () => {
     await assertSessionsWritable(db, [id], "metadata")
+    scope?.assertActive()
     await db.sessions.update(id, { archivedAt: now })
     await closeOwnedAttachedDescendants(db, [id], now)
+    scope?.assertActive()
   })
 }
 
@@ -675,10 +717,13 @@ export async function archiveSession(id: string): Promise<void> {
  * to `delete` the field outright (passing `undefined` through `update()` would
  * leave it intact — see {@link clearSessionSdkLink}).
  */
-export async function unarchiveSession(id: string): Promise<void> {
-  assertSessionWritable(await getDb().sessions.get(id), "metadata")
-  await getDb()
-    .sessions.where("id")
+export async function unarchiveSession(id: string, scope?: SessionPersistenceScope): Promise<void> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
+  assertSessionWritable(await db.sessions.get(id), "metadata")
+  scope?.assertActive()
+  await db.sessions
+    .where("id")
     .equals(id)
     .modify((s) => {
       delete s.archivedAt
@@ -686,14 +731,20 @@ export async function unarchiveSession(id: string): Promise<void> {
 }
 
 /** Archive many sessions in a single transaction. Missing ids are skipped. */
-export async function bulkArchiveSessions(ids: readonly string[]): Promise<void> {
+export async function bulkArchiveSessions(
+  ids: readonly string[],
+  scope?: SessionPersistenceScope
+): Promise<void> {
+  scope?.assertActive()
   if (ids.length === 0) return
   const now = Date.now()
-  const db = getDb()
+  const db = scope?.db ?? getDb()
   await db.transaction("rw", db.sessions, async () => {
     await assertSessionsWritable(db, ids, "metadata")
+    scope?.assertActive()
     for (const id of ids) await db.sessions.update(id, { archivedAt: now })
     await closeOwnedAttachedDescendants(db, ids, now)
+    scope?.assertActive()
   })
 }
 
@@ -705,11 +756,17 @@ export async function bulkArchiveSessions(ids: readonly string[]): Promise<void>
  * implicit transaction, so a mid-batch failure can't leave the selection
  * half-restored. Missing ids are skipped.
  */
-export async function bulkUnarchiveSessions(ids: readonly string[]): Promise<void> {
+export async function bulkUnarchiveSessions(
+  ids: readonly string[],
+  scope?: SessionPersistenceScope
+): Promise<void> {
+  scope?.assertActive()
   if (ids.length === 0) return
-  await assertSessionsWritable(getDb(), ids, "metadata")
-  await getDb()
-    .sessions.where("id")
+  const db = scope?.db ?? getDb()
+  await assertSessionsWritable(db, ids, "metadata")
+  scope?.assertActive()
+  await db.sessions
+    .where("id")
     .anyOf(ids as string[])
     .modify((s) => {
       delete s.archivedAt
@@ -1039,7 +1096,10 @@ export async function bulkDeleteSessions(
   // Native task state is outside Dexie. Stop/revoke/delete it before dropping
   // the durable link, so a host failure leaves a retryable conversation row.
   const cleanupIds = [
-    ...new Set([...requestedIds, ...(await listOwnedAttachedDescendantIds(db, requestedIds))]),
+    ...new Set([
+      ...requestedIds,
+      ...(await listOwnedAttachedDescendantIds(db, requestedIds, { includeSideChats: true })),
+    ]),
   ]
   scope?.assertActive()
   await assertSessionsWritable(db, cleanupIds, "delete")
@@ -1080,7 +1140,9 @@ export async function bulkDeleteSessions(
       deletedIds = (await db.sessions.bulkGet(requestedIds)).flatMap((row) => (row ? [row.id] : []))
       if (deletedIds.length === 0) return
       await assertSessionsWritable(db, deletedIds, "delete")
-      const attachedDescendants = await listOwnedAttachedDescendantIds(db, deletedIds)
+      const attachedDescendants = await listOwnedAttachedDescendantIds(db, deletedIds, {
+        includeSideChats: true,
+      })
       deletedIds = [...new Set([...deletedIds, ...attachedDescendants])]
       const doomedIds = new Set(deletedIds)
       const doomedRows = await db.sessions.where("id").anyOf(deletedIds).toArray()

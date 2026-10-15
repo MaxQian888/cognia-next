@@ -383,3 +383,27 @@ describe("parseMultiSnapshot", () => {
     }
   })
 })
+
+it("omits derived session lists and their readiness from snapshots and legacy restore", async () => {
+  const marker = { id: "singleton", layout: "single-database" }
+  const readiness = { id: "session-list-v241", version: 1 }
+  const sessions = new FakeTable("sessions", [{ id: "s", title: "Source" }])
+  const projection = new FakeTable("sessionList", [{ id: "s", title: "Current" }])
+  const layout = new FakeTable("storageLayout", [marker, readiness])
+  const db = fakeDb([sessions, projection, layout], 241)
+  expect((await serializeDb(db)).tables).toEqual({
+    sessions: sessions.rows,
+    storageLayout: [marker],
+  })
+  await restoreSnapshot(db, {
+    version: 241,
+    tables: {
+      sessions: [{ id: "s", title: "Restored source" }],
+      sessionList: [{ id: "s", title: "Stale" }],
+      storageLayout: [marker, readiness],
+    },
+  })
+  expect(sessions.rows).toEqual([{ id: "s", title: "Restored source" }])
+  expect(projection.rows).toEqual([{ id: "s", title: "Current" }])
+  expect(layout.rows).toEqual([marker])
+})

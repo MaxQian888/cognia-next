@@ -6,6 +6,7 @@
  * have their own modules to keep this file focused on definitions.
  */
 
+import Dexie from "dexie"
 import type {
   VisualWorkflow,
   WorkflowRow,
@@ -193,10 +194,23 @@ export async function listWorkflowRuns(query: WorkflowRunQuery = {}): Promise<Wo
   const { workflowId, limit = 50, offset = 0 } = query
   const db = getDb()
   if (workflowId) {
-    // `sortBy` materializes then sorts in memory — fine for one workflow's runs.
-    const rows = await db.workflowRuns.where("workflowId").equals(workflowId).sortBy("startedAt")
-    rows.reverse()
-    return rows.slice(offset, offset + limit)
+    return db.transaction("r", db.workflowRuns, async () => {
+      const scoped = db.workflowRuns.where("workflowId").equals(workflowId)
+      if (Number.isSafeInteger(offset) && offset >= 0 && Number.isSafeInteger(limit) && limit > 0) {
+        const ordered = db.workflowRuns
+          .where("[workflowId+startedAt]")
+          .between([workflowId, Dexie.minKey], [workflowId, Dexie.maxKey], true, true)
+        // A legacy row without startedAt is absent from the compound index.
+        // Count keys in the same snapshot before paging, so it cannot vanish.
+        const [total, indexed] = await Promise.all([scoped.count(), ordered.count()])
+        if (total === indexed) return ordered.reverse().offset(offset).limit(limit).toArray()
+      }
+      // Preserve the old stable sort and Array.slice behavior for legacy rows
+      // and nonstandard page values (negative, fractional, or unbounded).
+      const rows = await scoped.sortBy("startedAt")
+      rows.reverse()
+      return rows.slice(offset, offset + limit)
+    })
   }
   return db.workflowRuns.orderBy("startedAt").reverse().offset(offset).limit(limit).toArray()
 }

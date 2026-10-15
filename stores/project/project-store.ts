@@ -19,6 +19,8 @@
  * `Project` matches the type exported from `@/types`.
  */
 
+import { getRuntimeTargetScopeKey } from "@/lib/runtime/runtime-target-context"
+
 import { create } from "zustand"
 import { nanoid } from "nanoid"
 import type { Project, KnowledgeFile } from "@/types"
@@ -119,6 +121,7 @@ function nowDate(): Date {
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => {
+  let loadedScope: string | undefined
   // Mirror a single project row to Dexie after a mutation. Gated on `loaded`
   // so we never write empty in-memory state back over persisted rows before
   // the boot-time `load()` has hydrated — unit tests that `setState` directly
@@ -148,7 +151,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     loaded: false,
 
     load: async () => {
-      if (get().loaded) return
+      const scope = getRuntimeTargetScopeKey()
+      if (get().loaded && (loadedScope === undefined || loadedScope === scope)) {
+        loadedScope = scope
+        return
+      }
+      const changedScope = loadedScope !== undefined && loadedScope !== scope
+      const previousActiveId = get().activeProjectId
+      loadedScope = scope
+      if (changedScope) set({ projects: [], loaded: false })
+      const isCurrent = () => loadedScope === scope && getRuntimeTargetScopeKey() === scope
       try {
         const [persisted, persistedActiveId] = await Promise.all([
           getAllProjects(),
@@ -158,12 +170,18 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // this async hydration resolved lives only in memory (persist() was
         // gated on `loaded`). In-memory rows win on id conflicts, and any row
         // that isn't yet persisted is flushed below so it survives a reload.
+        if (!isCurrent()) return
         const inMemory = get().projects
-        const preloadActiveId = get().activeProjectId
+        const preloadActiveId = changedScope
+          ? persisted.some((project) => project.id === previousActiveId)
+            ? previousActiveId
+            : null
+          : get().activeProjectId
         let activeProjectId = preloadActiveId ?? persistedActiveId
         let fallbackProject: Project | null = null
         if (!activeProjectId) {
           fallbackProject = await ensureDefaultProject()
+          if (!isCurrent()) return
           activeProjectId = fallbackProject.id
         }
         const persistedWithFallback =
@@ -183,7 +201,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       } catch {
         // No persistence available (web/test without indexedDB) — still mark
         // loaded so the store works in-memory.
-        set({ loaded: true })
+        if (isCurrent()) set({ loaded: true })
       }
     },
 

@@ -511,7 +511,35 @@ export interface ListMemoriesQuery {
  * both active and invalidated rows are returned (so the panel can show history).
  */
 export async function listMemories(query: ListMemoriesQuery = {}): Promise<Memory[]> {
-  let collection = getDb().memories.toCollection()
+  const table = getDb().memories
+  let collection = table.toCollection()
+  // Equality ranges keep primary-key order, preserving the stable updatedAt
+  // sort below. Retain every predicate, including exact-namespace omissions.
+  if (query.projectId !== undefined) {
+    collection =
+      query.status !== undefined
+        ? table.where("[projectId+status]").equals([query.projectId, query.status])
+        : table.where("projectId").equals(query.projectId)
+  } else if (query.agentId !== undefined) {
+    collection =
+      query.status !== undefined
+        ? table.where("[agentId+status]").equals([query.agentId, query.status])
+        : table.where("agentId").equals(query.agentId)
+  } else if (query.characterId !== undefined) {
+    collection = table.where("characterId").equals(query.characterId)
+  } else if (query.scope !== undefined) {
+    collection =
+      query.status !== undefined
+        ? table.where("[scope+status]").equals([query.scope, query.status])
+        : table.where("scope").equals(query.scope)
+  } else if (query.type !== undefined) {
+    collection =
+      query.status !== undefined
+        ? table.where("[type+status]").equals([query.type, query.status])
+        : table.where("type").equals(query.type)
+  } else if (query.status !== undefined) {
+    collection = table.where("status").equals(query.status)
+  }
   if (!query.includeRevisions) collection = collection.filter((m) => m.revisionOf === undefined)
   if (query.scope !== undefined) collection = collection.filter((m) => m.scope === query.scope)
   if (query.exactNamespace) {
@@ -595,7 +623,54 @@ export async function listActiveForReader(
     typeof readerOrCharacterId === "string"
       ? { characterId: readerOrCharacterId }
       : readerOrCharacterId
-  const active = await getDb().memories.where("status").equals("active").toArray()
+  const db = getDb()
+  const scoped = await db.transaction("r", db.memories, async () => {
+    const table = db.memories
+    const [activeCount, globalCount] = await Promise.all([
+      table.where("status").equals("active").count(),
+      table.where("[scope+status]").equals(["global", "active"]).count(),
+    ])
+    // A global-only (or empty) pool needs no namespace narrowing.
+    if (globalCount === activeCount) return undefined
+    const sources: Promise<string[]>[] = [
+      table.where("[scope+status]").equals(["global", "active"]).primaryKeys(),
+    ]
+    if (reader.projectId) {
+      sources.push(
+        table.where("[projectId+status]").equals([reader.projectId, "active"]).primaryKeys()
+      )
+    }
+    if (reader.agentId) {
+      sources.push(table.where("[agentId+status]").equals([reader.agentId, "active"]).primaryKeys())
+    }
+    if (reader.characterId) {
+      // There is no character/status compound index. Intersect keys so old
+      // revision snapshots do not have to be decrypted to find active rows.
+      sources.push(
+        Promise.all([
+          table.where("characterId").equals(reader.characterId).primaryKeys(),
+          table.where("[scope+status]").equals(["character", "active"]).primaryKeys(),
+        ]).then(([characterIds, activeIds]) => {
+          const activeSet = new Set(activeIds)
+          return characterIds.filter((id) => activeSet.has(id))
+        })
+      )
+    }
+    // The old status scan yielded primary-key order. Restore that order before
+    // the stable specificity/time sort so tied stable keys keep the same winner.
+    const groups = await Promise.all(sources)
+    const ids = [...new Set(groups.flat())].sort()
+    // When every active row is a candidate, the original range read avoids
+    // the per-key bulkGet overhead without decrypting any additional content.
+    if (ids.length === activeCount) return undefined
+    const rows = await table.bulkGet(ids)
+    return rows.filter(
+      (memory): memory is Memory => memory !== undefined && memory.status === "active"
+    )
+  })
+  // No narrowing: retain the original read's transaction lifetime. The earlier
+  // counts only select a plan; all returned rows come from this one range read.
+  const active = scoped ?? (await db.memories.where("status").equals("active").toArray())
   const visible = active
     .filter((memory) => isVisibleToReader(memory, reader))
     .sort((a, b) => scopeSpecificity(b) - scopeSpecificity(a) || b.updatedAt - a.updatedAt)

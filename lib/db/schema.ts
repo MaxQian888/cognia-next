@@ -1,9 +1,9 @@
 // IndexedDB schema (via Dexie) for cognia-next — the single `CogniaDB`
 // instance backing chat, plugins, connectors, workflows, twin, and more.
 //
-// The schema is declared as ONE current version (`CURRENT_SCHEMA` below), not
-// as an append-only chain of historical deltas. Dexie parses index specs
-// eagerly and `Version.stores()` re-walks every version declared so far, so a
+// Historical schemas are collapsed into the immutable v240 baseline below.
+// Subsequent migrations append only their deltas to that baseline. Dexie parses
+// index specs eagerly and `Version.stores()` re-walks every version declared so far, so a
 // 200-block chain cost ~4.7s of pure index parsing per fresh connection.
 //
 // HARD RULE: a database whose `storageLayout` marker does not match is NOT
@@ -361,6 +361,12 @@ import { encryptedRuntimeTargetDatabaseName } from "@/lib/runtime/target-registr
 import { rootsFromLegacy } from "@/lib/workspace/roots"
 import { isTauri } from "@/lib/platform/detect"
 import { createEncryptedContentMiddleware } from "./encrypted-content-middleware"
+import {
+  backfillSessionList,
+  createSessionListMiddleware,
+  createSessionListWitnessMiddleware,
+  type SessionListRow,
+} from "./session-list"
 import { activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 import {
   setNotificationNamespaceAccount,
@@ -429,10 +435,10 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 239
+export const CURRENT_SCHEMA_VERSION = 243
 
 /**
- * The complete current Dexie schema, declared as ONE version.
+ * The immutable cumulative v240 schema baseline.
  *
  * This object is GENERATED, not hand-written: it is the exact cumulative
  * merge of the historical version chain that used to live in this file (200
@@ -447,10 +453,10 @@ export const CURRENT_SCHEMA_VERSION = 239
  * table, which is fine for a fresh database but silently wrong for one that
  * still carries the old store.
  *
- * ADDING A TABLE: add the key here and bump CURRENT_SCHEMA_VERSION.
- * REMOVING A TABLE: set its value to `null` and bump. Never delete the key.
+ * Keep this shipped baseline unchanged. Append later version deltas and
+ * include them in CURRENT_SCHEMA; removed tables use `null`, never omission.
  */
-export const CURRENT_SCHEMA: Record<string, string | null> = {
+const SCHEMA_V240: Record<string, string | null> = {
   // Must stay first: `lib/db/storage-layout.ts` refuses any database that
   // lacks this store, which is how a pre-collapse database is kept from being
   // opened and silently misread.
@@ -647,8 +653,9 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   browserExtensionMirror: "&id, name, updatedAt",
   browserCredentialMeta: "&id, origin, updatedAt",
   behaviorEvents: "&id, eventName, at, sessionId, [eventName+at]",
+  // v240 — session-scoped execution history in updatedAt order.
   executionRuns:
-    "&id, kind, sourceId, status, sessionId, projectId, updatedAt, [kind+sourceId], parentRunId, [parentRunId+status]",
+    "&id, kind, sourceId, status, sessionId, projectId, updatedAt, [kind+sourceId], parentRunId, [parentRunId+status], [sessionId+updatedAt]",
   executionRunEvents: "&id, runId, [runId+seq], type, ts, projectId",
   executionRunBindings:
     "&id, runId, adapterId, conversationKey, status, [runId+conversationKey], projectId",
@@ -1034,6 +1041,20 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   documentTemplates: "&id, name, updatedAt, createdAt",
 }
 
+const SESSION_LIST_SCHEMA = {
+  sessionList: "id, updatedAt, workspaceKey, [workspaceKey+updatedAt]",
+}
+
+const SESSION_LIST_SOURCE_SCHEMA = {
+  sessions: `${SCHEMA_V240.sessions}, __cogniaEncryptedContent.iv`,
+}
+
+export const CURRENT_SCHEMA: Record<string, string | null> = {
+  ...SCHEMA_V240,
+  ...SESSION_LIST_SCHEMA,
+  ...SESSION_LIST_SOURCE_SCHEMA,
+}
+
 let databaseConnectionSequence = 0
 
 /** Historical table shape retained only so old databases remain readable. */
@@ -1052,6 +1073,7 @@ export class CogniaDB extends Dexie {
   readonly connectionId: string
   private readonly connectionCreatedAt: number
   sessions!: Table<ChatSession, string>
+  sessionList!: Table<SessionListRow, string>
   sharedRunJournals!: Table<import("./shared-run-journal").SharedRunJournalRow, string>
   messages!: Table<StoredMessage, string>
   // v155 — independent-session messages and their durable delivery receipts.
@@ -1601,6 +1623,8 @@ export class CogniaDB extends Dexie {
     this.use(createMessageSyncRevisionMiddleware())
     // Inert until this database is enrolled in account sync (ADR-0215 phase 3).
     this.use(createAccountSyncCaptureMiddleware())
+    this.use(createSessionListMiddleware())
+    this.use(createSessionListWitnessMiddleware())
     this.connectionOwner = connectionOwner
     this.connectionId = `db-${++databaseConnectionSequence}`
     this.connectionCreatedAt = Date.now()
@@ -1611,7 +1635,10 @@ export class CogniaDB extends Dexie {
     })
     this.on("blocked", () => this.logConnectionEvent("blocked"))
 
-    this.version(CURRENT_SCHEMA_VERSION).stores(CURRENT_SCHEMA).upgrade(backfillMessageSyncRevision)
+    this.version(240).stores(SCHEMA_V240).upgrade(backfillMessageSyncRevision)
+    this.version(241).stores(SESSION_LIST_SCHEMA).upgrade(backfillSessionList)
+    this.version(242).stores({}).upgrade(backfillSessionList)
+    this.version(243).stores(SESSION_LIST_SOURCE_SCHEMA)
   }
 
   messageSyncClock!: Table<MessageSyncClock, "singleton">

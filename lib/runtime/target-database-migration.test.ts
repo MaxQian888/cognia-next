@@ -124,3 +124,38 @@ it("leaves a failed journal instead of claiming success", async () => {
   })
   journal.close()
 })
+
+it("rebuilds the target session list while excluding stale source projection state", async () => {
+  const source = new Dexie(sourceName)
+  source.version(1).stores({ sessions: "id", sessionList: "id", storageLayout: "id" })
+  await source.table("sessions").put({ id: "s", title: "Current", projectId: "p", updatedAt: 4 })
+  await source.table("sessionList").bulkPut([{ id: "s", title: "Stale" }, { id: "orphan" }])
+  await source.table("storageLayout").bulkPut([
+    { id: "singleton", layout: "single-database", schemaVersion: 240 },
+    { id: "session-list-v241", version: 1 },
+  ])
+  source.close()
+  activateAccountContentCipher(await AccountContentCipher.createForTesting(accountId, targetName))
+  const result = await migrateAccountDatabaseToTarget({ accountId, targetId, batchSize: 1 })
+  expect(result.tables.some((table) => table.name === "sessionList")).toBe(false)
+  expect(result.tables.find((table) => table.name === "storageLayout")).toMatchObject({
+    sourceCount: 1,
+    verifiedCount: 1,
+  })
+  const target = new CogniaDB(targetName)
+  try {
+    await target.open()
+    expect(await target.sessionList.toArray()).toEqual([
+      { id: "s", title: "Current", projectId: "p", updatedAt: 4, workspaceKey: "p" },
+    ])
+    expect(await target.table("storageLayout").get("session-list-v241")).toEqual({
+      id: "session-list-v241",
+      version: 2,
+    })
+    expect(await target.table("storageLayout").get("singleton")).toMatchObject({
+      layout: "single-database",
+    })
+  } finally {
+    target.close()
+  }
+})

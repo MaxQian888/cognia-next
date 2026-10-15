@@ -1,5 +1,7 @@
 import Dexie from "dexie"
 
+import { ensureSessionListReady } from "@/lib/db/session-list"
+
 import { CogniaDB, LEGACY_COGNIA_DB_NAME } from "@/lib/db/schema"
 import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
 import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
@@ -58,10 +60,12 @@ export async function migrateLegacyDatabaseToAccount(
     await target.open()
 
     const sourceTableCounts = await Promise.all(
-      source.tables.map(async (sourceTable) => ({
-        sourceTable,
-        rowCount: await sourceTable.count(),
-      }))
+      source.tables
+        .filter((table) => table.name !== "sessionList")
+        .map(async (sourceTable) => ({
+          sourceTable,
+          rowCount: await copyableRows(sourceTable).count(),
+        }))
     )
     const targetTableNames = new Set(target.tables.map((table) => table.name))
     const tables: LegacyMigrationTableSummary[] = []
@@ -86,6 +90,8 @@ export async function migrateLegacyDatabaseToAccount(
       const verified = await verifyCopiedRows(sourceTable, targetTable, batchSize)
       tables.push({ name: sourceTable.name, copied, verified })
     }
+
+    await ensureSessionListReady(target)
 
     await input.registry.markLegacyMigrationCompleted({
       sourceDbName,
@@ -133,7 +139,7 @@ async function copyTableRows(
   let offset = 0
 
   while (true) {
-    const rows = await sourceTable.offset(offset).limit(batchSize).toArray()
+    const rows = await copyableRows(sourceTable).offset(offset).limit(batchSize).toArray()
     if (rows.length === 0) return copied
     await targetTable.bulkPut(rows.map(transform))
     copied += rows.length
@@ -171,7 +177,7 @@ async function verifyCopiedRows(
   let offset = 0
 
   while (true) {
-    const keys = await sourceTable.offset(offset).limit(batchSize).primaryKeys()
+    const keys = await copyableRows(sourceTable).offset(offset).limit(batchSize).primaryKeys()
     if (keys.length === 0) return verified
     const rows = await targetTable.bulkGet(keys)
     const missingIndex = rows.findIndex((row) => row === undefined)
@@ -183,4 +189,11 @@ async function verifyCopiedRows(
     verified += keys.length
     offset += keys.length
   }
+}
+
+/** Projections and their readiness belong to the destination, not the source. */
+function copyableRows(table: Dexie.Table) {
+  return table.name === "storageLayout"
+    ? table.filter((row) => row.id !== "session-list-v241")
+    : table.toCollection()
 }

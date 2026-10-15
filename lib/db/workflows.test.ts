@@ -24,6 +24,7 @@ import {
   listWorkflows,
   listWorkflowsByUpdated,
   listWorkflowsInFolder,
+  listWorkflowRuns,
   moveWorkflowsToFolder,
   moveWorkflowToFolder,
   regenerateNodeIds,
@@ -72,6 +73,85 @@ function manualNode(id: string, x = 0): VisualWorkflow["nodes"][number] {
     data: { label: "Run", params: {} },
   }
 }
+
+describe("listWorkflowRuns pagination", () => {
+  async function seedHistory() {
+    const workflowSnapshot = await createWorkflow({ name: "History" })
+    await getDb().workflowRuns.bulkPut(
+      [
+        { id: "r-a", workflowId: "selected", startedAt: 20 },
+        { id: "r-b", workflowId: "selected", startedAt: 20 },
+        { id: "r-c", workflowId: "selected", startedAt: 0 },
+        { id: "r-d", workflowId: "selected", startedAt: -1 },
+        { id: "r-other", workflowId: "other", startedAt: 30 },
+      ].map((row) => ({
+        ...row,
+        status: "succeeded" as const,
+        triggerKind: "trigger.manual" as const,
+        triggerPayload: { input: row.id },
+        workflowSnapshot,
+      }))
+    )
+  }
+
+  it("pages only the selected workflow and preserves descending primary-key ties", async () => {
+    await seedHistory()
+    const rows = await listWorkflowRuns({ workflowId: "selected", offset: 1, limit: 2 })
+    expect(rows.map((row) => row.id)).toEqual(["r-a", "r-c"])
+    expect(rows[0].triggerPayload).toEqual({ input: "r-a" })
+    expect(rows[0].workflowSnapshot.name).toBe("History")
+    expect((await listWorkflowRuns({ workflowId: "selected" })).map((row) => row.id)).toEqual([
+      "r-b",
+      "r-a",
+      "r-c",
+      "r-d",
+    ])
+    expect(await listWorkflowRuns({ workflowId: "missing" })).toEqual([])
+    expect(await listWorkflowRuns({ workflowId: "selected", offset: 10 })).toEqual([])
+  })
+
+  it.each([
+    { offset: 0, limit: 0, ids: [] },
+    { offset: -2, limit: 10, ids: ["r-c", "r-d"] },
+    { offset: 0, limit: -1, ids: ["r-b", "r-a", "r-c"] },
+    { offset: 1.5, limit: 2, ids: ["r-a", "r-c"] },
+    { offset: 0, limit: Number.POSITIVE_INFINITY, ids: ["r-b", "r-a", "r-c", "r-d"] },
+  ])(
+    "preserves slice semantics for offset=$offset limit=$limit",
+    async ({ offset, limit, ids }) => {
+      await seedHistory()
+      expect(
+        (await listWorkflowRuns({ workflowId: "selected", offset, limit })).map((row) => row.id)
+      ).toEqual(ids)
+    }
+  )
+
+  it("retains legacy rows missing the compound-index timestamp", async () => {
+    await seedHistory()
+    const legacy = await getDb().workflowRuns.get("r-a")
+    await getDb().workflowRuns.put({
+      ...legacy!,
+      id: "legacy",
+      workflowId: "legacy",
+      startedAt: undefined,
+    } as unknown as NonNullable<typeof legacy>)
+    expect(
+      (await listWorkflowRuns({ workflowId: "legacy", limit: 1 })).map((row) => row.id)
+    ).toEqual(["legacy"])
+    await getDb().workflowRuns.put({ ...legacy!, id: "legacy-timed", workflowId: "legacy" })
+    expect(
+      (await listWorkflowRuns({ workflowId: "legacy", offset: 1, limit: 1 })).map((row) => row.id)
+    ).toEqual(["legacy"])
+  })
+
+  it("keeps empty workflow ids on the existing global listing path", async () => {
+    await seedHistory()
+    const query = { offset: 1, limit: 2 }
+    expect(await listWorkflowRuns({ ...query, workflowId: "" })).toEqual(
+      await listWorkflowRuns(query)
+    )
+  })
+})
 
 describe("createWorkflow", () => {
   it("inserts a row with sensible defaults and returns the new shape", async () => {

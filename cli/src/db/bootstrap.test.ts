@@ -1799,3 +1799,70 @@ it("makes concurrent callers await restoration and receive its failure", async (
   await expect(first).rejects.toBe(failure)
   await expect(second).rejects.toBe(failure)
 })
+
+it("rebuilds the session list after table-store restore and excludes derived state on flush", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-session-list-"))
+  const tableDir = path.join(home, "db.json.tables")
+  fs.mkdirSync(tableDir)
+  await installFakeIndexedDb()
+  const name = `SessionList-${path.basename(home)}`
+  const database = new Dexie(name)
+  database.version(241).stores({
+    sessions: "id",
+    sessionList: "id, updatedAt, [workspaceKey+updatedAt]",
+    storageLayout: "id",
+  })
+  const { createSessionListMiddleware } = await import("@/lib/db/session-list")
+  database.use(createSessionListMiddleware())
+  const file = (table: string) => path.join(tableDir, `${encodeURIComponent(name)}--${table}.json`)
+  fs.writeFileSync(
+    path.join(tableDir, "manifest.json"),
+    JSON.stringify({
+      snapshotFormat: 3,
+      dbs: { [name]: { version: 241, tables: ["sessions", "sessionList", "storageLayout"] } },
+    })
+  )
+  fs.writeFileSync(file("sessions"), JSON.stringify([{ id: "s", title: "Current", updatedAt: 4 }]))
+  // A stale projection entry may even lack a file: it is not authoritative input.
+  fs.writeFileSync(
+    file("storageLayout"),
+    JSON.stringify([
+      { id: "singleton", layout: "single-database" },
+      { id: "session-list-v241", version: 1 },
+    ])
+  )
+  let handle: Awaited<ReturnType<typeof ensureCliDb>> | undefined
+  try {
+    handle = await ensureCliDb({
+      home,
+      getDatabase: () => database,
+      installGlobals: async () => {},
+      whenReady: async () => {
+        await database.open()
+      },
+      schedule: () => () => {},
+    })
+    expect(await database.table("sessionList").toArray()).toEqual([
+      { id: "s", title: "Current", updatedAt: 4, workspaceKey: "" },
+    ])
+    expect(await database.table("storageLayout").get("session-list-v241")).toEqual({
+      id: "session-list-v241",
+      version: 1,
+    })
+    handle.scheduleTableFlush(name, "sessionList")
+    handle.scheduleTableFlush(name, "storageLayout")
+    await handle.flush()
+    expect(fs.existsSync(file("sessionList"))).toBe(false)
+    expect(
+      JSON.parse(fs.readFileSync(path.join(tableDir, "manifest.json"), "utf8")).dbs[name].tables
+    ).toEqual(["sessions", "storageLayout"])
+    expect(JSON.parse(fs.readFileSync(file("storageLayout"), "utf8"))).toEqual([
+      { id: "singleton", layout: "single-database" },
+    ])
+  } finally {
+    await handle?.dispose()
+    __resetCliDbForTesting()
+    await database.delete()
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})

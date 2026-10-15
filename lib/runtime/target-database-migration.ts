@@ -1,5 +1,7 @@
 import Dexie, { type Table } from "dexie"
 
+import { ensureSessionListReady } from "@/lib/db/session-list"
+
 import { accountDatabaseName } from "@/lib/accounts/account-db"
 import { CogniaDB } from "@/lib/db/schema"
 import { encryptedRuntimeTargetDatabaseName } from "./target-registry"
@@ -139,9 +141,9 @@ export async function migrateAccountDatabaseToTarget(
       })
 
       for (const sourceTable of source.tables) {
-        if (sourceTable.name === "accountContentMigrations") continue
+        if (["accountContentMigrations", "sessionList"].includes(sourceTable.name)) continue
         if (!targetTables.has(sourceTable.name)) {
-          if ((await sourceTable.count()) > 0) {
+          if ((await copyableRows(sourceTable).count()) > 0) {
             throw new Error(
               `Account content migration cannot copy unknown table ${sourceTable.name}.`
             )
@@ -150,7 +152,7 @@ export async function migrateAccountDatabaseToTarget(
         }
         const targetTable = target.table(sourceTable.name)
         if (completedTables.includes(sourceTable.name)) {
-          const sourceCount = await sourceTable.count()
+          const sourceCount = await copyableRows(sourceTable).count()
           const verifiedCount = await verifyRows(sourceTable, targetTable, batchSize)
           tables.push({ name: sourceTable.name, sourceCount, verifiedCount })
           continue
@@ -167,6 +169,8 @@ export async function migrateAccountDatabaseToTarget(
           updatedAt: Date.now(),
         })
       }
+
+      await ensureSessionListReady(target)
 
       await target.accountContentMigrations.put({
         id: "singleton",
@@ -235,7 +239,7 @@ function normalizeBatchSize(batchSize: number | undefined): number {
 async function copyRows(source: Table, target: Table, batchSize: number): Promise<number> {
   let offset = 0
   while (true) {
-    const rows = await source.offset(offset).limit(batchSize).toArray()
+    const rows = await copyableRows(source).offset(offset).limit(batchSize).toArray()
     if (rows.length === 0) return offset
     await target.bulkPut(rows)
     offset += rows.length
@@ -245,7 +249,7 @@ async function copyRows(source: Table, target: Table, batchSize: number): Promis
 async function verifyRows(source: Table, target: Table, batchSize: number): Promise<number> {
   let offset = 0
   while (true) {
-    const keys = await source.offset(offset).limit(batchSize).primaryKeys()
+    const keys = await copyableRows(source).offset(offset).limit(batchSize).primaryKeys()
     if (keys.length === 0) return offset
     const rows = await target.bulkGet(keys)
     const missingIndex = rows.findIndex((row) => row === undefined)
@@ -256,4 +260,11 @@ async function verifyRows(source: Table, target: Table, batchSize: number): Prom
     }
     offset += keys.length
   }
+}
+
+/** Rebuild target-local session projections rather than trusting copied readiness. */
+function copyableRows(table: Table) {
+  return table.name === "storageLayout"
+    ? table.filter((row) => row.id !== "session-list-v241")
+    : table.toCollection()
 }

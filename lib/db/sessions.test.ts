@@ -21,6 +21,7 @@ import {
   listAgentThreadSessions,
   listScopedSessions,
   listWorkspaceSessions,
+  listSessionListRows,
   listWorkspaceSessionIds,
   countWorkspaceConversations,
   deleteSession,
@@ -44,6 +45,11 @@ import {
 import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
 import { getDb } from "./schema"
+import {
+  ensureSessionListReady,
+  projectSessionListRow,
+  SESSION_LIST_READY_ID,
+} from "./session-list"
 import { createRecreatedDbTestFixture } from "./test-fixture"
 import { createLoop, getLoop, listLoopsBySession } from "./loops"
 import { createGoal, listGoalsBySession } from "./goals"
@@ -167,6 +173,68 @@ jest.mock("@/lib/sandbox/session-runtime", () => ({
 }))
 
 const dbFixture = createRecreatedDbTestFixture()
+
+it("projects the same workspace membership and stable timestamp ties without body fields", async () => {
+  const db = getDb()
+  const rows = [
+    { id: "a", projectId: "p1" },
+    { id: "Z", projectId: "p1" },
+    { id: "legacy" },
+    { id: "empty", projectId: "" },
+    { id: "other", projectId: "p2" },
+  ].map((row) => ({
+    ...row,
+    title: row.id,
+    createdAt: 1,
+    updatedAt: 20,
+    systemPrompt: "secret",
+    transcriptRevision: 5,
+  }))
+  await db.sessions.bulkPut(rows)
+  await db.sessions.put({
+    id: "legacy-no-time",
+    title: "Old row",
+    createdAt: 1,
+  } as import("@cognia/agent-config-types").ChatSession)
+  const expected = (await listWorkspaceSessions("p1")).map((row) => {
+    const { workspaceKey: _workspaceKey, ...projected } = projectSessionListRow(row)
+    return projected
+  })
+  await ensureSessionListReady(db)
+  expect(await listSessionListRows("p1")).toEqual(expected)
+  expect(await listSessionListRows("")).toEqual(await listWorkspaceSessions(""))
+  expect((await listSessionListRows()).map((row) => row.id)).toEqual(
+    (await listSessions()).map((row) => row.id)
+  )
+  expect((await getSession("a"))?.systemPrompt).toBe("secret")
+  await db.sessions.update("other", { projectId: "p1", pinned: true, archivedAt: 99 })
+  expect(await listSessionListRows("p1")).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "other", pinned: true, archivedAt: 99 })])
+  )
+  await db.sessions.delete("a")
+  expect((await listSessionListRows("p1")).some((row) => row.id === "a")).toBe(false)
+})
+
+it("lazily backfills a skipped projection before serving list rows", async () => {
+  const db = getDb()
+  await db.sessions.put({
+    id: "pending",
+    title: "Pending",
+    createdAt: 1,
+    updatedAt: 2,
+    projectId: "p1",
+    systemPrompt: "kept",
+  })
+  await db.table("storageLayout").delete(SESSION_LIST_READY_ID)
+  await db.table("sessionList").clear()
+  expect(await listSessionListRows("p1")).toEqual([
+    { id: "pending", title: "Pending", projectId: "p1", createdAt: 1, updatedAt: 2 },
+  ])
+  expect(await listSessionListRows()).toEqual(await listSessionListRows("p1"))
+  await ensureSessionListReady(db)
+  expect((await listSessionListRows("p1"))[0]).toMatchObject({ id: "pending", title: "Pending" })
+  expect((await listSessionListRows("p1"))[0].systemPrompt).toBeUndefined()
+})
 
 const deleteExternalSessionMock = jest.fn(async (_agentId: string, _sessionId: string) => undefined)
 jest.mock("@/lib/ai/agent/external/manager", () => ({
@@ -1823,6 +1891,32 @@ describe("clearSessionSdkLink", () => {
 })
 
 describe("archive / unarchive", () => {
+  it.each(["archive", "unarchive", "bulkArchive", "bulkUnarchive"] as const)(
+    "%s refuses a scope invalidated during its awaited lock check",
+    async (operation) => {
+      const row = await createSession({ title: "original" })
+      if (operation === "unarchive" || operation === "bulkUnarchive") await archiveSession(row.id)
+      const before = await getSession(row.id)
+      const assertActive = jest
+        .fn()
+        .mockImplementationOnce(() => {})
+        .mockImplementation(() => {
+          throw new Error("Session database scope changed")
+        })
+      const scope = { db: getDb(), assertActive }
+      const write =
+        operation === "archive"
+          ? archiveSession(row.id, scope)
+          : operation === "unarchive"
+            ? unarchiveSession(row.id, scope)
+            : operation === "bulkArchive"
+              ? bulkArchiveSessions([row.id], scope)
+              : bulkUnarchiveSessions([row.id], scope)
+      await expect(write).rejects.toThrow("scope changed")
+      expect(await getSession(row.id)).toEqual(before)
+    }
+  )
+
   it("archiveSession stamps archivedAt without touching updatedAt", async () => {
     const s = await createSession({ title: "to archive" })
     const before = (await getSession(s.id))!.updatedAt

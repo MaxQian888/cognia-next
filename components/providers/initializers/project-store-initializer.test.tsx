@@ -1,9 +1,9 @@
 /**
  * @jest-environment jsdom
  */
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
 
-const loadMock = jest.fn(async () => undefined)
+const loadMock = jest.fn(async (): Promise<void> => undefined)
 const adoptMock = jest.fn()
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: {
@@ -36,10 +36,16 @@ jest.mock("dexie", () => ({
   },
 }))
 
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import { ProjectStoreInitializer } from "./project-store-initializer"
 
 beforeEach(() => {
-  loadMock.mockClear()
+  clearActiveRuntimeTargetContext()
+  getAllProjectsMock.mockReset().mockResolvedValue([{ id: "ws1", name: "Synced" }])
+  loadMock.mockReset().mockResolvedValue(undefined)
   adoptMock.mockClear()
   unsubscribe.mockClear()
   emit = null
@@ -80,4 +86,32 @@ describe("ProjectStoreInitializer", () => {
     const { container } = render(<ProjectStoreInitializer />)
     expect(container).toBeEmptyDOMElement()
   })
+})
+
+it("rebinds projects on a Host switch and ignores the previous subscription", async () => {
+  setActiveRuntimeTargetContext("acct_local", "host-a")
+  render(<ProjectStoreInitializer />)
+  await waitFor(() => expect(adoptMock).toHaveBeenCalled())
+  const oldEmit = emit
+  getAllProjectsMock.mockResolvedValue([{ id: "ws2", name: "Host B" }])
+  act(() => setActiveRuntimeTargetContext("acct_local", "host-b"))
+  await waitFor(() => expect(adoptMock).toHaveBeenLastCalledWith([{ id: "ws2", name: "Host B" }]))
+  expect(unsubscribe).toHaveBeenCalled()
+  oldEmit?.([{ id: "stale", name: "Host A" }])
+  expect(adoptMock).toHaveBeenLastCalledWith([{ id: "ws2", name: "Host B" }])
+})
+
+it("does not subscribe after a pending boot load resolves following unmount", async () => {
+  let resolve!: () => void
+  loadMock.mockReturnValueOnce(
+    new Promise<void>((done) => {
+      resolve = done
+    })
+  )
+  const { unmount } = render(<ProjectStoreInitializer />)
+  unmount()
+  await act(async () => {
+    resolve()
+  })
+  expect(getAllProjectsMock).not.toHaveBeenCalled()
 })

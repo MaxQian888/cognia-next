@@ -11,6 +11,10 @@ import {
 } from "@/lib/runtime/runtime-target-context"
 import { isMediaRef, parseMediaRef } from "@/lib/db/message-media"
 import type { Transport } from "@/lib/tauri/transport-types"
+import {
+  CompanionTransport,
+  __setCompanionConfigCacheForTests,
+} from "@/lib/tauri/transport-companion"
 
 import {
   __resetHydratedSessionHistoryForTests,
@@ -43,6 +47,80 @@ describe("hydrateSessionHistory", () => {
     __resetHydratedSessionHistoryForTests()
     clearActiveRuntimeTargetContext()
     await getDb().messages.clear()
+  })
+
+  it("refuses a new Host scope while the companion still has the previous Host config", async () => {
+    setActiveRuntimeTargetContext("acct-history", "host-two", 2)
+    __setCompanionConfigCacheForTests({
+      baseUrl: "https://host-one.invalid",
+      deviceId: "device-one",
+      serverVersion: "0.1.0",
+      accountId: "acct-history",
+      targetId: "host-one",
+    })
+    const transport = new CompanionTransport()
+    const call = jest.spyOn(transport, "call").mockResolvedValue({ version: 1 })
+    try {
+      await expect(hydrateSessionHistory(transport, "same")).rejects.toMatchObject({
+        code: "companion_target_scope_changed",
+      })
+      await expect(readCompleteSessionHistory(transport, "same")).rejects.toMatchObject({
+        code: "companion_target_scope_changed",
+      })
+      expect(call).not.toHaveBeenCalled()
+      expect(await getDb().messages.count()).toBe(0)
+      expect(getSessionHistoryMode("same")).toBeNull()
+
+      __setCompanionConfigCacheForTests({
+        baseUrl: "https://host-two.invalid",
+        deviceId: "device-two",
+        serverVersion: "0.1.0",
+        accountId: "acct-history",
+        targetId: "host-two",
+      })
+      await expect(hydrateSessionHistory(transport, "same")).resolves.toMatchObject({
+        mode: "timeline",
+      })
+      expect(call).toHaveBeenCalledTimes(2)
+    } finally {
+      transport.destroy()
+      __setCompanionConfigCacheForTests(null)
+    }
+  })
+
+  it("rechecks companion binding after a pending history RPC without publishing ownership", async () => {
+    setActiveRuntimeTargetContext("acct-history", "host-two", 2)
+    const config = {
+      baseUrl: "https://host-two.invalid",
+      deviceId: "device-two",
+      serverVersion: "0.1.0",
+      accountId: "acct-history",
+      targetId: "host-two",
+    }
+    __setCompanionConfigCacheForTests(config)
+    const transport = new CompanionTransport()
+    let resolveCapabilities: (value: unknown) => void = () => {}
+    const call = jest
+      .spyOn(transport, "call")
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveCapabilities = resolve
+          })
+      )
+      .mockResolvedValue({ version: 1 })
+    try {
+      const pending = hydrateSessionHistory(transport, "same")
+      const outcome = pending.catch((error: unknown) => error)
+      __setCompanionConfigCacheForTests({ ...config, targetId: "host-one" })
+      resolveCapabilities({ version: 1 })
+      await expect(outcome).resolves.toMatchObject({ code: "companion_target_scope_changed" })
+      expect(call).toHaveBeenCalledTimes(1)
+      expect(getSessionHistoryMode("same")).toBeNull()
+    } finally {
+      transport.destroy()
+      __setCompanionConfigCacheForTests(null)
+    }
   })
 
   it("does not reuse another Host's ownership result for the same session id", async () => {
@@ -182,6 +260,71 @@ describe("hydrateSessionHistory", () => {
     setActiveRuntimeTargetContext("acct-second", "host-one", 3)
     await hydrateSessionHistory(transport, "same")
     expect(call).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not retry an old Host's legacy transport into the new scope", async () => {
+    let resolvePage: (value: unknown) => void = () => {}
+    const page = {
+      sessionId: "same",
+      rows: [
+        {
+          id: "old-host-message",
+          sessionId: "same",
+          role: "user",
+          parts: [{ type: "text", text: "Old Host private text" }],
+          createdAt: 1,
+        },
+      ],
+      offset: 0,
+      nextOffset: null,
+      total: 1,
+    }
+    const call = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolvePage = resolve
+          })
+      )
+      .mockResolvedValue(page)
+    setActiveRuntimeTargetContext("acct-history", "host-one", 1)
+    const pending = hydrateSessionHistory(createTransport(call), "same")
+    const outcome = pending.then(
+      () => null,
+      (error: unknown) => error
+    )
+    await flush()
+    setActiveRuntimeTargetContext("acct-history", "host-two", 2)
+    resolvePage(page)
+
+    expect(await outcome).toMatchObject({ message: "session_history_scope_changed" })
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(await getDb().messages.get("old-host-message")).toBeUndefined()
+    expect(getSessionHistoryMode("same")).toBeNull()
+  })
+
+  it("does not reclaim ownership from a replacement transport", async () => {
+    let resolveOld: (value: unknown) => void = () => {}
+    const oldCall = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve
+        })
+    )
+    const pending = hydrateSessionHistory(createTransport(oldCall, { version: 1 }), "s1")
+    const outcome = pending.then(
+      () => null,
+      (error: unknown) => error
+    )
+    await flush()
+    const nextCall = jest.fn().mockResolvedValue({ items: [] })
+    await hydrateSessionHistory(createTransport(nextCall, { version: 1 }), "s1")
+    resolveOld({ items: [] })
+
+    expect(await outcome).toMatchObject({ message: "session_history_scope_changed" })
+    expect(oldCall).toHaveBeenCalledTimes(1)
+    expect(getSessionHistoryMode("s1")).toBe("timeline")
   })
 
   it("invalidates remote ownership on reconnect and re-negotiates", async () => {
