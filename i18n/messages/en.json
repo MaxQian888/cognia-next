@@ -17038,6 +17038,32 @@
       "ready": "Signed in",
       "unreadable": "Sign-in unknown"
     },
+    "delivery": {
+      "branch": "Branch: {branch}",
+      "bundle": "Saved bundle on Host: {path}",
+      "cleanup": {
+        "destroyRetrying": "Instance destruction retrying",
+        "destroyed": "Instance destroyed",
+        "pending": "Instance cleanup pending",
+        "retained": "Instance retained"
+      },
+      "commit": "Commit: {commit}",
+      "instance": "Instance: {id}",
+      "loadFailed": "Delivery history could not be loaded from this Host. It will retry automatically.",
+      "persistFailed": "The Host could not save this delivery update. The recorded status may be out of date after a reload.",
+      "publish": {
+        "discarded": "Discarded at deadline",
+        "failed": "Delivery failed",
+        "held": "Held for delivery retry",
+        "nothingToPublish": "Nothing to publish",
+        "pushed": "Pushed",
+        "running": "Running",
+        "savedBundle": "Saved as a bundle"
+      },
+      "session": "Session: {id}",
+      "task": "Task: {id}",
+      "title": "Remote sandbox delivery history"
+    },
     "detectionInstalled": "Installed",
     "detectionInstalledWithVersion": "Installed v{version}",
     "detectionMissing": "Not found",

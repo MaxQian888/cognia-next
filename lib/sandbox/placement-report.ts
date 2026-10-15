@@ -35,6 +35,7 @@ import type {
   IsolationTier,
   WorkspacePublishRecovery,
   WorkspacePublishReport,
+  TaskDeliveryRecord,
 } from "@/types/sandbox/environment-spec"
 import {
   SANDBOX_PLACEMENT_CHANNEL,
@@ -94,6 +95,10 @@ export interface SandboxPlacementReport {
    * `external-agent://workspace-publish`. Absent until it reports.
    */
   publish?: WorkspacePublishReport
+  delivery?: TaskDeliveryRecord
+  /** Set only by a live placement; historical records cannot select another session. */
+  deliveryRecordId?: string
+  deliveryRecordError?: { code: string; message?: string }
 }
 
 const text = (value: unknown): string | undefined =>
@@ -173,6 +178,7 @@ export function readPlacementEvent(payload: unknown): SandboxPlacementReport | n
   set("credentialsMode", text(object(placement.credentials).mode))
 
   set("provider", text(placement.provider))
+  set("deliveryRecordId", text(placement.deliveryRecordId))
   const workspace = object(placement.workspace)
   const remoteWorkspace = {
     ...(text(workspace.remoteUrl) ? { remoteUrl: text(workspace.remoteUrl) } : {}),
@@ -187,9 +193,13 @@ export function readPlacementEvent(payload: unknown): SandboxPlacementReport | n
  * Read a workspace-publish event (ADR-0221 D6). `null` for one that names no
  * agent; every other field is kept only when it has the expected type.
  */
-export function readWorkspacePublishEvent(
-  payload: unknown
-): { agentId: string; publish: WorkspacePublishReport } | null {
+export function readWorkspacePublishEvent(payload: unknown): {
+  agentId: string
+  publish: WorkspacePublishReport
+  delivery?: TaskDeliveryRecord
+  deliveryRecordId?: string
+  deliveryRecordError?: { code: string; message?: string }
+} | null {
   const event = object(payload)
   const agentId = text(event.agentId)
   if (!agentId) return null
@@ -211,7 +221,21 @@ export function readWorkspacePublishEvent(
   if (text(rawRecovery.code)) recovery.code = text(rawRecovery.code)
   if (text(rawRecovery.message)) recovery.message = text(rawRecovery.message)
   if (Object.keys(recovery).length > 0) publish.recovery = recovery
-  return { agentId, publish }
+  const delivery = readTaskDeliveryRecord(raw.deliveryRecord)
+  const failure = object(raw.deliveryRecordError)
+  const deliveryRecordError = text(failure.code)
+    ? {
+        code: text(failure.code)!,
+        ...(text(failure.message) ? { message: text(failure.message) } : {}),
+      }
+    : undefined
+  return {
+    agentId,
+    publish,
+    ...(delivery?.agentId === agentId ? { delivery } : {}),
+    ...(text(raw.deliveryRecordId) ? { deliveryRecordId: text(raw.deliveryRecordId) } : {}),
+    ...(deliveryRecordError ? { deliveryRecordError } : {}),
+  }
 }
 
 /**
@@ -219,37 +243,183 @@ export function readWorkspacePublishEvent(
  * report yet (this client subscribed after the spawn) still records one, so
  * the outcome of the session is not lost.
  */
-export function recordWorkspacePublish(agentId: string, publish: WorkspacePublishReport): void {
-  const current = reports.get(agentId) ?? { agentId, kind: "sandbox" as const }
-  recordPlacementReport({ ...current, publish })
+export function recordWorkspacePublish(
+  agentId: string,
+  publish: WorkspacePublishReport,
+  host?: object,
+  deliveryRecordError?: { code: string; message?: string },
+  deliveryRecordId?: string
+): void {
+  const previous = sandboxPlacementReport(agentId, host)
+  const current = previous ?? { agentId, kind: "sandbox" as const }
+  if (
+    deliveryRecordId &&
+    previous &&
+    (previous.deliveryRecordId ?? previous.delivery?.id) !== deliveryRecordId
+  )
+    return
+  recordPlacementReport(
+    {
+      ...current,
+      publish:
+        deliveryRecordError && publish.code === "sandbox_delivery_store_failed" && current.publish
+          ? current.publish
+          : publish,
+      deliveryRecordError,
+      ...(deliveryRecordId ? { deliveryRecordId } : {}),
+    },
+    host
+  )
 }
 
-/**
- * The last report per agent id.
- *
- * Module-scoped and last-write-wins: a reconnect re-places the agent and the
- * newer answer is the true one. Bounded by the number of live agents, and an
- * entry is dropped when its agent exits.
- */
-const reports = new Map<string, SandboxPlacementReport>()
-const listeners = new Set<(report: SandboxPlacementReport) => void>()
+/** In-memory projections are scoped to a transport; the Host owns durable history. */
+const reports = new Map<object | undefined, Map<string, SandboxPlacementReport>>()
+const deliveries = new Map<object | undefined, Map<string, readonly TaskDeliveryRecord[]>>()
+const listeners = new Set<(report: SandboxPlacementReport, host?: object) => void>()
+const EMPTY_DELIVERIES: readonly TaskDeliveryRecord[] = []
 
-export function recordPlacementReport(report: SandboxPlacementReport): void {
-  reports.set(report.agentId, report)
-  for (const listener of listeners) listener(report)
+export function recordPlacementReport(report: SandboxPlacementReport, host?: object): void {
+  let scoped = reports.get(host)
+  if (!scoped) reports.set(host, (scoped = new Map()))
+  scoped.set(report.agentId, report)
+  for (const listener of listeners) listener(report, host)
 }
 
-export function sandboxPlacementReport(agentId: string): SandboxPlacementReport | undefined {
-  return reports.get(agentId)
+export function sandboxPlacementReport(
+  agentId: string,
+  host?: object
+): SandboxPlacementReport | undefined {
+  return reports.get(host)?.get(agentId)
+}
+
+export function sandboxDeliveryRecords(
+  agentId: string,
+  host?: object
+): readonly TaskDeliveryRecord[] {
+  return deliveries.get(host)?.get(agentId) ?? EMPTY_DELIVERIES
+}
+
+/** Boundary parser shared by list snapshots and live publish notifications. */
+export function readTaskDeliveryRecord(value: unknown): TaskDeliveryRecord | undefined {
+  const raw = object(value)
+  const required = ["id", "agentId", "providerId", "instanceId", "branch"] as const
+  if (required.some((key) => !text(raw[key]))) return undefined
+  const publishState = oneOf<TaskDeliveryRecord["publishState"]>(
+    ["running", "pushed", "savedBundle", "held", "discarded", "nothingToPublish", "failed"],
+    raw.publishState
+  )
+  const cleanupState = oneOf<TaskDeliveryRecord["cleanupState"]>(
+    ["retained", "pending", "destroyRetrying", "destroyed"],
+    raw.cleanupState
+  )
+  if (
+    !publishState ||
+    !cleanupState ||
+    [raw.createdAt, raw.updatedAt, raw.revision].some((v) => count(v) === undefined)
+  )
+    return undefined
+  // Strip nested delivery metadata before parsing so malformed recursive input cannot recurse.
+  const publish = readWorkspacePublishEvent({
+    agentId: raw.agentId,
+    publish: { ...object(raw.publish), deliveryRecord: undefined },
+  })!.publish
+  return {
+    id: raw.id as string,
+    agentId: raw.agentId as string,
+    providerId: raw.providerId as string,
+    instanceId: raw.instanceId as string,
+    branch: raw.branch as string,
+    ...(text(raw.taskId) ? { taskId: text(raw.taskId) } : {}),
+    ...(text(raw.commit) ? { commit: text(raw.commit) } : {}),
+    publishState,
+    cleanupState,
+    publish,
+    createdAt: raw.createdAt as number,
+    updatedAt: raw.updatedAt as number,
+    revision: raw.revision as number,
+  }
+}
+
+/** A persisted snapshot must account for an outcome whose write failed. */
+function persistedPublishCovers(live: WorkspacePublishReport, record: TaskDeliveryRecord): boolean {
+  // A held workspace can subsequently be delivered or expire; a saved bundle
+  // can subsequently be pushed. These are forward transitions for one session.
+  if (live.held && ["pushed", "savedBundle", "discarded"].includes(record.publishState)) return true
+  if (live.recovery?.bundle && record.publishState === "pushed") return true
+  // Host records omit diagnostic messages because they may contain git output.
+  const fields = ["branch", "pushed", "commit", "code", "held", "discarded"] as const
+  const recoveryFields = ["bundle", "commit", "commits", "bytes", "code"] as const
+  return (
+    fields.every((key) => live[key] === record.publish[key]) &&
+    recoveryFields.every((key) => live.recovery?.[key] === record.publish.recovery?.[key])
+  )
+}
+
+/** Merge by session identity and revision; late snapshots cannot undo live events. */
+export function recordTaskDelivery(record: TaskDeliveryRecord, host?: object): void {
+  const previous = sandboxDeliveryRecords(record.agentId, host)
+  const existing = previous.find((item) => item.id === record.id)
+  const changed = !existing || existing.revision < record.revision
+  const next = changed
+    ? [...previous.filter((item) => item.id !== record.id), record].sort(
+        (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)
+      )
+    : previous
+  if (changed) {
+    let scoped = deliveries.get(host)
+    if (!scoped) deliveries.set(host, (scoped = new Map()))
+    scoped.set(record.agentId, next)
+  }
+  const current = sandboxPlacementReport(record.agentId, host)
+  // A live placement is evidence of one exact session. Records for previous
+  // sessions still update history but must never replace its provider, image,
+  // branch or outcome. Older Hosts without correlation keep their live report.
+  if (current && (current.kind !== "sandbox" || (!current.deliveryRecordId && !current.delivery))) {
+    if (changed) for (const listener of listeners) listener(current, host)
+    return
+  }
+  const selected = current?.deliveryRecordId
+    ? next.find((item) => item.id === current.deliveryRecordId)
+    : next[0]
+  if (
+    !selected ||
+    (current?.delivery?.id === selected.id && current.delivery.revision >= selected.revision)
+  ) {
+    if (changed && current) for (const listener of listeners) listener(current, host)
+    return
+  }
+  // Revision orders successful writes only. A failed write has no revision,
+  // so even a higher durable revision may still contain the earlier publish.
+  const pendingPublish =
+    current?.deliveryRecordError &&
+    current.publish &&
+    !persistedPublishCovers(current.publish, selected)
+  recordPlacementReport(
+    {
+      ...current,
+      agentId: record.agentId,
+      kind: "sandbox",
+      provider: selected.providerId,
+      workspace: { ...current?.workspace, branch: selected.branch },
+      publish: pendingPublish
+        ? current.publish
+        : selected.publishState === "running"
+          ? undefined
+          : selected.publish,
+      delivery: selected,
+      deliveryRecordError: pendingPublish ? current.deliveryRecordError : undefined,
+    },
+    host
+  )
 }
 
 export function forgetPlacementReport(agentId: string): void {
-  reports.delete(agentId)
+  reports.get(undefined)?.delete(agentId)
 }
 
 /** Subscribe to reports as they arrive. Returns an unsubscribe. */
 export function onSandboxPlacementReport(
-  listener: (report: SandboxPlacementReport) => void
+  listener: (report: SandboxPlacementReport, host?: object) => void
 ): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
@@ -257,6 +427,7 @@ export function onSandboxPlacementReport(
 
 export function __resetPlacementReportsForTests(): void {
   reports.clear()
+  deliveries.clear()
   listeners.clear()
 }
 
@@ -268,17 +439,26 @@ export function __resetPlacementReportsForTests(): void {
  * and so this module stays free of Tauri and transport imports.
  */
 export async function subscribeSandboxPlacements(
-  listen: (channel: string, handler: (payload: unknown) => void) => Promise<() => void>
+  listen: (channel: string, handler: (payload: unknown) => void) => Promise<() => void>,
+  host?: object
 ): Promise<() => void> {
   const placements = await listen(SANDBOX_PLACEMENT_CHANNEL, (payload) => {
     const report = readPlacementEvent(payload)
-    if (report) recordPlacementReport(report)
+    if (report) recordPlacementReport(report, host)
   })
   let publishes: () => void
   try {
     publishes = await listen(WORKSPACE_PUBLISH_CHANNEL, (payload) => {
       const event = readWorkspacePublishEvent(payload)
-      if (event) recordWorkspacePublish(event.agentId, event.publish)
+      if (event?.delivery) recordTaskDelivery(event.delivery, host)
+      else if (event)
+        recordWorkspacePublish(
+          event.agentId,
+          event.publish,
+          host,
+          event.deliveryRecordError,
+          event.deliveryRecordId
+        )
     })
   } catch (error) {
     placements()

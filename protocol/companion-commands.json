@@ -24925,6 +24925,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "environment_delivery_list",
+      "resource": "environment.delivery",
+      "verb": "list",
+      "arm": "environment_delivery_list",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "pagination": "page-token",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "environment_catalog_list",
       "resource": "environment.catalog",
       "verb": "list",

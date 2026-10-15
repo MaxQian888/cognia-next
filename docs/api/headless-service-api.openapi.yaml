@@ -47250,6 +47250,319 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/environment_delivery_list:
+    post:
+      operationId: internalRpcEnvironmentDeliveryList
+      tags:
+        - headless-rpc
+      summary: environment_delivery_list (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pageSize:
+                  type: integer
+                  minimum: 1
+                  maximum: 1000
+                  description: How many items to answer. Absent means the command's default.
+                pageToken:
+                  type: string
+                  minLength: 1
+                  description: The nextPageToken of the previous page, handed back unchanged.
+                agentId:
+                  type: string
+                  minLength: 1
+                taskId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      additionalProperties: false
+                      properties:
+                        agentId:
+                          type: string
+                        branch:
+                          type: string
+                        cleanupState:
+                          enum:
+                            - retained
+                            - pending
+                            - destroyRetrying
+                            - destroyed
+                          type: string
+                        commit:
+                          type:
+                            - string
+                            - "null"
+                        createdAt:
+                          format: uint64
+                          minimum: 0
+                          type: integer
+                        id:
+                          type: string
+                        instanceId:
+                          type: string
+                        providerId:
+                          type: string
+                        publish:
+                          additionalProperties: false
+                          properties:
+                            branch:
+                              type:
+                                - string
+                                - "null"
+                            code:
+                              type:
+                                - string
+                                - "null"
+                            commit:
+                              type:
+                                - string
+                                - "null"
+                            discarded:
+                              type:
+                                - boolean
+                                - "null"
+                            held:
+                              type:
+                                - boolean
+                                - "null"
+                            pushed:
+                              type: boolean
+                            recovery:
+                              anyOf:
+                                - additionalProperties: false
+                                  properties:
+                                    bundle:
+                                      type:
+                                        - string
+                                        - "null"
+                                    bytes:
+                                      format: uint64
+                                      minimum: 0
+                                      type:
+                                        - integer
+                                        - "null"
+                                    code:
+                                      type:
+                                        - string
+                                        - "null"
+                                    commit:
+                                      type:
+                                        - string
+                                        - "null"
+                                    commits:
+                                      format: uint64
+                                      minimum: 0
+                                      type:
+                                        - integer
+                                        - "null"
+                                    manifest:
+                                      type:
+                                        - string
+                                        - "null"
+                                  type: object
+                                - type: "null"
+                          required:
+                            - pushed
+                          type: object
+                        publishState:
+                          enum:
+                            - running
+                            - pushed
+                            - savedBundle
+                            - held
+                            - discarded
+                            - nothingToPublish
+                            - failed
+                          type: string
+                        revision:
+                          format: uint64
+                          minimum: 0
+                          type: integer
+                        taskId:
+                          type:
+                            - string
+                            - "null"
+                        updatedAt:
+                          format: uint64
+                          minimum: 0
+                          type: integer
+                      required:
+                        - id
+                        - agentId
+                        - providerId
+                        - instanceId
+                        - branch
+                        - publishState
+                        - cleanupState
+                        - publish
+                        - createdAt
+                        - updatedAt
+                        - revision
+                      type: object
+                  nextPageToken:
+                    type:
+                      - string
+                      - "null"
+                    description: Present exactly when another page exists.
+                required:
+                  - items
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/environment_driver_status:
     post:
       operationId: internalRpcEnvironmentDriverStatus
@@ -181456,6 +181769,7 @@ components:
           - environment_catalog_list
           - environment_catalog_update
           - environment_declaration_read
+          - environment_delivery_list
           - environment_driver_status
           - environment_egress_grant_create
           - environment_egress_grant_delete
@@ -182335,10 +182649,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 844
-  generatedRequestSchemaCount: 844
+  internalCommandCount: 845
+  generatedRequestSchemaCount: 845
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 844
+  contractRequestSchemaCount: 845
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 844
+  generatedResponseSchemaCount: 845
   loopbackOnly: true

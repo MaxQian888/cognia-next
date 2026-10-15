@@ -1062,5 +1062,31 @@
     "statusRegion": "Agent extension status",
     "widget": "Output from the {name} extension",
     "dismissNotice": "Dismiss notice"
+  },
+  "delivery": {
+    "title": "Remote sandbox delivery history",
+    "loadFailed": "Delivery history could not be loaded from this Host. It will retry automatically.",
+    "session": "Session: {id}",
+    "task": "Task: {id}",
+    "instance": "Instance: {id}",
+    "branch": "Branch: {branch}",
+    "commit": "Commit: {commit}",
+    "bundle": "Saved bundle on Host: {path}",
+    "publish": {
+      "running": "Running",
+      "pushed": "Pushed",
+      "savedBundle": "Saved as a bundle",
+      "held": "Held for delivery retry",
+      "discarded": "Discarded at deadline",
+      "nothingToPublish": "Nothing to publish",
+      "failed": "Delivery failed"
+    },
+    "cleanup": {
+      "retained": "Instance retained",
+      "pending": "Instance cleanup pending",
+      "destroyRetrying": "Instance destruction retrying",
+      "destroyed": "Instance destroyed"
+    },
+    "persistFailed": "The Host could not save this delivery update. The recorded status may be out of date after a reload."
   }
 }

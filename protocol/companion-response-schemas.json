@@ -1,6 +1,149 @@
 {
   "schemaVersion": 1,
   "$defs": {
+    "CleanupState": {
+      "enum": ["retained", "pending", "destroyRetrying", "destroyed"],
+      "type": "string"
+    },
+    "DurablePublish": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "type": ["string", "null"]
+        },
+        "code": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "discarded": {
+          "type": ["boolean", "null"]
+        },
+        "held": {
+          "type": ["boolean", "null"]
+        },
+        "pushed": {
+          "type": "boolean"
+        },
+        "recovery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DurableRecovery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["pushed"],
+      "type": "object"
+    },
+    "DurableRecovery": {
+      "additionalProperties": false,
+      "properties": {
+        "bundle": {
+          "type": ["string", "null"]
+        },
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "code": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "commits": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "manifest": {
+          "type": ["string", "null"]
+        }
+      },
+      "type": "object"
+    },
+    "PublishState": {
+      "enum": [
+        "running",
+        "pushed",
+        "savedBundle",
+        "held",
+        "discarded",
+        "nothingToPublish",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "TaskDeliveryRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "cleanupState": {
+          "$ref": "#/$defs/CleanupState"
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "createdAt": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "publish": {
+          "$ref": "#/$defs/DurablePublish"
+        },
+        "publishState": {
+          "$ref": "#/$defs/PublishState"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "taskId": {
+          "type": ["string", "null"]
+        },
+        "updatedAt": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "agentId",
+        "providerId",
+        "instanceId",
+        "branch",
+        "publishState",
+        "cleanupState",
+        "publish",
+        "createdAt",
+        "updatedAt",
+        "revision"
+      ],
+      "type": "object"
+    },
     "HostUpdateIdleReport": {
       "type": "object",
       "required": ["jobs", "workerSlots", "mutations", "adminLeases"],
@@ -11911,6 +12054,23 @@
     }
   },
   "commands": {
+    "environment_delivery_list": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskDeliveryRecord"
+          }
+        },
+        "nextPageToken": {
+          "type": ["string", "null"],
+          "description": "Present exactly when another page exists."
+        }
+      },
+      "required": ["items"]
+    },
     "host_update_configure": {
       "$ref": "#/$defs/HostUpdateStatus"
     },

@@ -1275,6 +1275,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // deployment facts (`host.observe` / `host.admin`); the approvals and the
     // egress grants are workspace-scoped and carry their own ADR-0149
     // authority check on top of the capability.
+    "environment_delivery_list",
     "environment_catalog_list",
     "environment_catalog_get",
     "environment_catalog_create",
@@ -1640,6 +1641,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // ADR-0059 W2: the brain's runtimes as they are now.
     "host_runtime_status",
     // Runtime environments — every read is a projection of stored state.
+    "environment_delivery_list",
     "environment_catalog_list",
     "environment_catalog_get",
     "environment_declaration_read",

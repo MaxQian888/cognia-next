@@ -18887,6 +18887,243 @@
       "outputTyped": true
     },
     {
+      "name": "environment_delivery_list",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_delivery_list (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "How many items to answer. Absent means the command's default."
+          },
+          "pageToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The nextPageToken of the previous page, handed back unchanged."
+          },
+          "agentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "taskId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agentId": {
+                  "type": "string"
+                },
+                "branch": {
+                  "type": "string"
+                },
+                "cleanupState": {
+                  "enum": [
+                    "retained",
+                    "pending",
+                    "destroyRetrying",
+                    "destroyed"
+                  ],
+                  "type": "string"
+                },
+                "commit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "instanceId": {
+                  "type": "string"
+                },
+                "providerId": {
+                  "type": "string"
+                },
+                "publish": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "branch": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "code": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "commit": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "discarded": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "held": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "pushed": {
+                      "type": "boolean"
+                    },
+                    "recovery": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "bundle": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "bytes": {
+                              "format": "uint64",
+                              "minimum": 0,
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            },
+                            "code": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "commit": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "commits": {
+                              "format": "uint64",
+                              "minimum": 0,
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            },
+                            "manifest": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "pushed"
+                  ],
+                  "type": "object"
+                },
+                "publishState": {
+                  "enum": [
+                    "running",
+                    "pushed",
+                    "savedBundle",
+                    "held",
+                    "discarded",
+                    "nothingToPublish",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                "revision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "taskId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "updatedAt": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "agentId",
+                "providerId",
+                "instanceId",
+                "branch",
+                "publishState",
+                "cleanupState",
+                "publish",
+                "createdAt",
+                "updatedAt",
+                "revision"
+              ],
+              "type": "object"
+            }
+          },
+          "nextPageToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present exactly when another page exists."
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "outputTyped": true
+    },
+    {
       "name": "environment_driver_status",
       "category": "development",
       "resource": "environment",
@@ -79772,5 +80009,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "244d22683536dbc85b7e4713e7c10fad8e1b0e6c4017b0233fb2ffb75bd1edaa"
+  "catalogHash": "ae1b74316498187ecd898b13ded9ab4036d648f5c1178fa24f26a64ca9d840dd"
 }

@@ -1062,5 +1062,31 @@
     "statusRegion": "Agent 扩展状态",
     "widget": "{name} 扩展的输出",
     "dismissNotice": "关闭提示"
+  },
+  "delivery": {
+    "title": "远程沙箱交付历史",
+    "loadFailed": "无法从此 Host 加载交付历史，将自动重试。",
+    "session": "会话：{id}",
+    "task": "任务：{id}",
+    "instance": "实例：{id}",
+    "branch": "分支：{branch}",
+    "commit": "提交：{commit}",
+    "bundle": "已保存至 Host 的 bundle：{path}",
+    "publish": {
+      "running": "运行中",
+      "pushed": "已推送",
+      "savedBundle": "已保存为 bundle",
+      "held": "已保留，等待重试交付",
+      "discarded": "已到期丢弃",
+      "nothingToPublish": "无内容需要发布",
+      "failed": "交付失败"
+    },
+    "cleanup": {
+      "retained": "实例已保留",
+      "pending": "等待清理实例",
+      "destroyRetrying": "正在重试销毁实例",
+      "destroyed": "实例已销毁"
+    },
+    "persistFailed": "Host 无法保存此次交付更新，重新加载后记录的状态可能不是最新状态。"
   }
 }

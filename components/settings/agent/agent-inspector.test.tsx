@@ -64,6 +64,12 @@ jest.mock("@/components/agent/external-agent/unsandboxed-consent-action", () => 
 jest.mock("@/components/agent/external-agent/unsandboxed-status-badge", () => ({
   UnsandboxedStatusBadge: () => null,
 }))
+jest.mock("@/components/agent/external-agent/sandbox-delivery-history", () => ({
+  SandboxDeliveryHistory: ({ agentId }: { agentId: string }) => (
+    <div data-testid="sandbox-delivery-history">{agentId}</div>
+  ),
+}))
+
 jest.mock("@/components/agent/external-agent/sandbox-placement-badge", () => ({
   SandboxPlacementBadge: () => null,
 }))
@@ -142,6 +148,7 @@ describe("AgentInspector", () => {
   it("renders the header, readiness strip, and tabs", () => {
     renderInspector()
     expect(screen.getByTestId("agent-detail-a1")).toBeInTheDocument()
+    expect(screen.getByTestId("sandbox-delivery-history")).toHaveTextContent("a1")
     expect(screen.getByTestId("inspector-readiness")).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /connection/i })).toBeInTheDocument()
   })

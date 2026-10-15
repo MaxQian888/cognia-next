@@ -4,6 +4,9 @@ import {
   onSandboxPlacementReport,
   readPlacementEvent,
   readWorkspacePublishEvent,
+  readTaskDeliveryRecord,
+  recordTaskDelivery,
+  sandboxDeliveryRecords,
   recordPlacementReport,
   recordWorkspacePublish,
   sandboxPlacementReport,
@@ -326,4 +329,262 @@ describe("subscribeSandboxPlacements", () => {
     await expect(subscribeSandboxPlacements(listen)).rejects.toThrow("no channel")
     expect(stop).toHaveBeenCalled()
   })
+})
+
+describe("durable delivery projection", () => {
+  const delivery = (id: string, createdAt = 100, revision = 1) => ({
+    id,
+    agentId: "a1",
+    providerId: "remote",
+    instanceId: "box",
+    branch: "task/one",
+    publishState: "held" as const,
+    cleanupState: "retained" as const,
+    publish: { held: true },
+    createdAt,
+    updatedAt: createdAt,
+    revision,
+  })
+
+  it("retains multiple sessions and ignores stale snapshots after live delivery", () => {
+    recordTaskDelivery(delivery("first"))
+    recordTaskDelivery(delivery("second", 200))
+    recordTaskDelivery({
+      ...delivery("first", 100, 2),
+      publishState: "pushed",
+      publish: { pushed: true },
+      updatedAt: 300,
+    })
+    recordTaskDelivery(delivery("first"))
+    expect(sandboxDeliveryRecords("a1").map((record) => record.id)).toEqual(["second", "first"])
+    expect(sandboxDeliveryRecords("a1")[1].publishState).toBe("pushed")
+    expect(sandboxPlacementReport("a1")?.delivery?.id).toBe("second")
+  })
+
+  it("keeps identical agent and session ids on different Hosts separate", () => {
+    const host = {}
+    recordTaskDelivery(delivery("same"))
+    recordTaskDelivery({ ...delivery("same"), providerId: "other" }, host)
+    expect(sandboxPlacementReport("a1")?.provider).toBe("remote")
+    expect(sandboxPlacementReport("a1", host)?.provider).toBe("other")
+  })
+
+  it("parses embedded records without trusting malformed or misattributed records", () => {
+    expect(readTaskDeliveryRecord({ ...delivery("one"), revision: -1 })).toBeUndefined()
+    expect(readTaskDeliveryRecord({ ...delivery("one"), cleanupState: "unknown" })).toBeUndefined()
+    expect(
+      readWorkspacePublishEvent({
+        agentId: "a1",
+        publish: { held: true, deliveryRecord: delivery("one") },
+      })?.delivery?.id
+    ).toBe("one")
+    expect(
+      readWorkspacePublishEvent({
+        agentId: "another",
+        publish: { deliveryRecord: delivery("one") },
+      })?.delivery
+    ).toBeUndefined()
+  })
+})
+
+it("keeps a successful delivery when only persisting cleanup failed, and accepts a real newer publish", () => {
+  const error = { code: "sandbox_delivery_store_failed", message: "disk full" }
+  recordWorkspacePublish("a1", { pushed: true, commit: "commit" })
+  recordWorkspacePublish(
+    "a1",
+    { pushed: false, code: "sandbox_delivery_store_failed" },
+    undefined,
+    error
+  )
+  expect(sandboxPlacementReport("a1")?.publish).toEqual({ pushed: true, commit: "commit" })
+  expect(sandboxPlacementReport("a1")?.deliveryRecordError).toEqual(error)
+  recordWorkspacePublish("a1", { pushed: false, held: true, branch: "next" }, undefined, error)
+  expect(sandboxPlacementReport("a1")?.publish?.held).toBe(true)
+})
+
+it("keeps a newer fallback badge separate from older remote delivery history", () => {
+  recordPlacementReport({ agentId: "a1", kind: "fallback", code: "sandbox_fallback_pool_disabled" })
+  recordTaskDelivery({
+    id: "old",
+    agentId: "a1",
+    providerId: "remote",
+    instanceId: "box",
+    branch: "task/one",
+    publishState: "pushed",
+    cleanupState: "destroyed",
+    publish: { pushed: true },
+    createdAt: 1,
+    updatedAt: 2,
+    revision: 1,
+  })
+  expect(sandboxPlacementReport("a1")?.kind).toBe("fallback")
+  expect(sandboxDeliveryRecords("a1")).toHaveLength(1)
+})
+
+it("reads the exact delivery identity from remote placement events", () => {
+  expect(
+    readPlacementEvent({
+      agentId: "a1",
+      placement: { kind: "sandbox", deliveryRecordId: "session-new" },
+    })?.deliveryRecordId
+  ).toBe("session-new")
+})
+
+it("ignores another session's persistence failure while keeping the current session publish", () => {
+  recordPlacementReport({
+    agentId: "a1",
+    kind: "sandbox",
+    provider: "new",
+    deliveryRecordId: "new-session",
+  })
+  const error = { code: "sandbox_delivery_store_failed" }
+  recordWorkspacePublish(
+    "a1",
+    { pushed: false, code: "sandbox_delivery_store_failed" },
+    undefined,
+    error,
+    "old-session"
+  )
+  expect(sandboxPlacementReport("a1")?.publish).toBeUndefined()
+  expect(sandboxPlacementReport("a1")?.deliveryRecordError).toBeUndefined()
+  recordWorkspacePublish(
+    "a1",
+    { pushed: true, commit: "new-commit" },
+    undefined,
+    error,
+    "new-session"
+  )
+  expect(sandboxPlacementReport("a1")?.publish?.pushed).toBe(true)
+  expect(sandboxPlacementReport("a1")?.deliveryRecordError).toEqual(error)
+})
+
+it("retains the first failed-to-persist outcome even without a live placement", () => {
+  recordWorkspacePublish(
+    "a1",
+    { pushed: true },
+    undefined,
+    { code: "sandbox_delivery_store_failed" },
+    "first-session"
+  )
+  expect(sandboxPlacementReport("a1")?.publish?.pushed).toBe(true)
+  expect(sandboxPlacementReport("a1")?.deliveryRecordId).toBe("first-session")
+})
+
+it("preserves a failed-to-persist success against a delayed running record until persistence catches up", () => {
+  recordPlacementReport({ agentId: "a1", kind: "sandbox", deliveryRecordId: "session" })
+  const error = { code: "sandbox_delivery_store_failed" }
+  const published = { pushed: true, branch: "task/one", commit: "published-commit" }
+  recordWorkspacePublish("a1", published, undefined, error, "session")
+  const running = {
+    id: "session",
+    agentId: "a1",
+    providerId: "remote",
+    instanceId: "box",
+    branch: "task/one",
+    publishState: "running" as const,
+    cleanupState: "retained" as const,
+    publish: { pushed: false, code: "session_running" },
+    createdAt: 100,
+    updatedAt: 100,
+    revision: 1,
+  }
+  recordTaskDelivery(running)
+  expect(sandboxPlacementReport("a1")?.publish).toEqual(published)
+  expect(sandboxPlacementReport("a1")?.deliveryRecordError).toEqual(error)
+  expect(sandboxDeliveryRecords("a1")[0].publishState).toBe("running")
+  recordTaskDelivery({ ...running, revision: 2, publishState: "pushed", publish: published })
+  expect(sandboxPlacementReport("a1")?.publish).toEqual(published)
+  expect(sandboxPlacementReport("a1")?.deliveryRecordError).toBeUndefined()
+})
+
+it("keeps a failed-to-persist saved bundle over equal and newer stale held records", () => {
+  const held = {
+    id: "session",
+    agentId: "a1",
+    providerId: "remote",
+    instanceId: "box",
+    branch: "task/one",
+    publishState: "held" as const,
+    cleanupState: "retained" as const,
+    publish: { pushed: false, held: true },
+    createdAt: 100,
+    updatedAt: 100,
+    revision: 1,
+  }
+  recordPlacementReport({ agentId: "a1", kind: "sandbox", deliveryRecordId: "session" })
+  recordTaskDelivery(held)
+  const error = { code: "sandbox_delivery_store_failed" }
+  const saved = { pushed: false, recovery: { bundle: "/host/work.bundle", commit: "saved-commit" } }
+  recordWorkspacePublish("a1", saved, undefined, error, "session")
+  recordTaskDelivery(held)
+  recordTaskDelivery({ ...held, revision: 2, cleanupState: "pending" })
+  expect(sandboxPlacementReport("a1")?.publish).toEqual(saved)
+  expect(sandboxPlacementReport("a1")?.deliveryRecordError).toEqual(error)
+  recordTaskDelivery({ ...held, revision: 3, publishState: "savedBundle", publish: saved })
+  expect(sandboxPlacementReport("a1")?.publish).toEqual(saved)
+  expect(sandboxPlacementReport("a1")?.deliveryRecordError).toBeUndefined()
+})
+
+it("accepts durable delivery progress beyond a failed-to-persist held outcome", () => {
+  recordPlacementReport({ agentId: "a1", kind: "sandbox", deliveryRecordId: "session" })
+  recordWorkspacePublish(
+    "a1",
+    { pushed: false, held: true },
+    undefined,
+    { code: "sandbox_delivery_store_failed" },
+    "session"
+  )
+  recordTaskDelivery({
+    id: "session",
+    agentId: "a1",
+    providerId: "remote",
+    instanceId: "box",
+    branch: "task/one",
+    publishState: "savedBundle",
+    cleanupState: "destroyed",
+    publish: { recovery: { bundle: "/host/work.bundle" } },
+    createdAt: 100,
+    updatedAt: 200,
+    revision: 2,
+  })
+  expect(sandboxPlacementReport("a1")?.publish?.recovery?.bundle).toBe("/host/work.bundle")
+  expect(sandboxPlacementReport("a1")?.deliveryRecordError).toBeUndefined()
+})
+
+it("clears a persistence failure when a sanitized retry preserves the known saved bundle", () => {
+  recordPlacementReport({ agentId: "a1", kind: "sandbox", deliveryRecordId: "session" })
+  const persisted = {
+    pushed: false,
+    code: "sandbox_workspace_push_refused",
+    recovery: { bundle: "/host/work.bundle", commit: "saved-commit" },
+  }
+  recordWorkspacePublish(
+    "a1",
+    {
+      ...persisted,
+      message: "git diagnostic omitted from durable history",
+      recovery: {
+        ...persisted.recovery,
+        message: "export diagnostic omitted from durable history",
+      },
+    },
+    undefined,
+    { code: "sandbox_delivery_store_failed" },
+    "session"
+  )
+  recordTaskDelivery({
+    id: "session",
+    agentId: "a1",
+    providerId: "remote",
+    instanceId: "box",
+    branch: "task/one",
+    publishState: "savedBundle",
+    cleanupState: "destroyed",
+    publish: persisted,
+    createdAt: 100,
+    updatedAt: 200,
+    revision: 2,
+  })
+  expect(sandboxPlacementReport("a1")?.publish).toEqual(persisted)
+  expect(sandboxPlacementReport("a1")?.deliveryRecordError).toBeUndefined()
 })

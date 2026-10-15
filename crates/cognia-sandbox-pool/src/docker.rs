@@ -1897,6 +1897,9 @@ impl ExecBackend for DockerSandboxBackend {
     }
 
     async fn reap_orphans(&self) -> Result<Vec<String>, String> {
+        if self.remote.is_some() {
+            return Ok(self.adopt_remote_instances().await);
+        }
         let mut reaped = reap_owned_orphans(
             &self.container,
             &self.config.instance_id,

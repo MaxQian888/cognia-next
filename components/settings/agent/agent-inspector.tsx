@@ -57,6 +57,7 @@ import { effectiveStateIsolation } from "@/components/agent/external-agent/add-a
 import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
 import { UnsandboxedConsentAction } from "@/components/agent/external-agent/unsandboxed-consent-action"
 import { UnsandboxedStatusBadge } from "@/components/agent/external-agent/unsandboxed-status-badge"
+import { SandboxDeliveryHistory } from "@/components/agent/external-agent/sandbox-delivery-history"
 import { SandboxPlacementBadge } from "@/components/agent/external-agent/sandbox-placement-badge"
 import { lifecycleErrorMessage } from "@/lib/ai/agent/external/lifecycle/error-messages"
 import { getExternalAgentLifecycleService } from "@/lib/ai/agent/external/lifecycle/service"
@@ -660,6 +661,8 @@ export function AgentInspector({
           </Button>
         ) : null}
       </Surface>
+
+      <SandboxDeliveryHistory agentId={agent.id} />
 
       <Tabs defaultValue="overview" className="w-full">
         <TabsList className="max-w-full overflow-x-auto">

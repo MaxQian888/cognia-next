@@ -344,6 +344,8 @@ export type SandboxPlacementPayload =
       credentials?: { mode?: string }
       /** The provider that ran it (ADR-0221); absent from a local driver. */
       provider?: string
+      /** The exact remote supervisor session whose delivery this placement owns. */
+      deliveryRecordId?: string
       /** A remote workspace, as the Host cloned it. Never carries a credential. */
       workspace?: { remoteUrl?: string; baseRef?: string; branch?: string }
     }
@@ -389,5 +391,27 @@ export interface WorkspacePublishRecovery {
 
 export interface WorkspacePublishEvent {
   agentId: string
+  publish: WorkspacePublishReport & {
+    deliveryRecordId?: string
+    deliveryRecord?: TaskDeliveryRecord
+    deliveryRecordError?: { code: string; message?: string }
+  }
+}
+
+/** Host-owned outcome of one remote supervisor session (ADR-0221). */
+export interface TaskDeliveryRecord {
+  id: string
+  agentId: string
+  taskId?: string
+  providerId: string
+  instanceId: string
+  branch: string
+  commit?: string
+  publishState:
+    "running" | "pushed" | "savedBundle" | "held" | "discarded" | "nothingToPublish" | "failed"
+  cleanupState: "retained" | "pending" | "destroyRetrying" | "destroyed"
   publish: WorkspacePublishReport
+  createdAt: number
+  updatedAt: number
+  revision: number
 }

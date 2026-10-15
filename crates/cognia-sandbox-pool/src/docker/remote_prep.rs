@@ -34,6 +34,7 @@ use super::persistent::{
 };
 use super::services::{pump_bridge, BridgeGuard, BridgeTarget};
 use super::*;
+use crate::delivery::{CleanupState, DeliveryStore, TaskDeliveryRecord};
 use crate::git_proxy::{is_valid_branch, GitProxy, GitProxyConfig};
 use crate::remote::{
     instance_name, EgressPlan, ProvisionRequest, RemoteLimits, RemoteProvider, RemoteProvisioner,
@@ -107,6 +108,8 @@ pub(crate) struct RemoteParts {
     /// Where a workspace that could not be pushed is exported to; unset, a
     /// failed publish can only hold its instance until the deadline.
     recovery_dir: std::sync::OnceLock<PathBuf>,
+    deliveries: std::sync::OnceLock<DeliveryStore>,
+    pending_deliveries: Mutex<HashMap<String, (Value, CleanupState)>>,
 }
 
 impl Drop for RemoteParts {
@@ -146,6 +149,7 @@ struct Instance {
     /// session's end, a retry and the deadline's last attempt never run git
     /// side by side.
     delivery: Arc<tokio::sync::Mutex<()>>,
+    delivery_sinks: Vec<(String, String, Arc<dyn ExternalAgentEventSink>)>,
 }
 
 #[derive(Clone)]
@@ -178,7 +182,7 @@ impl DestroyRetry {
 struct HeldPublish {
     /// Every session whose work is in it, oldest first: a persistent
     /// instance reused while held carries the earlier session's work too.
-    agents: Vec<(String, Arc<dyn ExternalAgentEventSink>)>,
+    agents: Vec<(String, String, Option<Arc<dyn ExternalAgentEventSink>>)>,
     next_at: tokio::time::Instant,
     /// A delivery attempt is running off the sweep; it decides what happens
     /// next, so the sweep leaves the instance alone until it finishes.
@@ -189,14 +193,11 @@ struct HeldPublish {
 }
 
 impl HeldPublish {
-    fn notify(&self, publish: &Value) {
-        for (agent_id, sink) in &self.agents {
-            sink.workspace_published(agent_id, publish);
-        }
-    }
-
     fn latest_agent(&self) -> String {
-        self.agents.last().map(|(id, _)| id.clone()).unwrap_or_default()
+        self.agents
+            .last()
+            .map(|(_, id, _)| id.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -220,6 +221,7 @@ impl Instance {
             destroy_retry: None,
             held: None,
             delivery: Arc::new(tokio::sync::Mutex::new(())),
+            delivery_sinks: Vec::new(),
         }
     }
 }
@@ -413,6 +415,8 @@ impl RemoteParts {
             instances: Mutex::new(HashMap::new()),
             reaper: Mutex::new(None),
             recovery_dir: std::sync::OnceLock::new(),
+            deliveries: std::sync::OnceLock::new(),
+            pending_deliveries: Mutex::new(HashMap::new()),
         }
     }
 
@@ -497,6 +501,7 @@ impl DockerSandboxBackend {
     pub fn configure_publish_recovery(&self, data_dir: &Path) {
         if let Some(remote) = self.remote.as_ref() {
             let _ = remote.recovery_dir.set(data_dir.join(RECOVERY_DIR));
+            let _ = remote.deliveries.set(DeliveryStore::new(data_dir));
         }
     }
 
@@ -791,8 +796,21 @@ impl DockerSandboxBackend {
         connect.env = encode_runtime_config_env(&runtime)
             .map_err(|error| refused("sandbox_runtime_config_invalid", error.to_string()))?;
 
+        if let Some(store) = remote.deliveries.get() {
+            store
+                .create(TaskDeliveryRecord::running(
+                    session.clone(),
+                    id.clone(),
+                    gateway.as_ref().map(|authority| authority.task_id.clone()),
+                    remote.provider_id.clone(),
+                    instance.clone(),
+                    source.branch.clone(),
+                ))
+                .map_err(|error| fault("sandbox_delivery_store_failed", error))?;
+        }
         let cleanup = Arc::new(RemoteSession {
-            session: SessionApi::new(self.api.clone(), instance.clone(), session),
+            delivery_id: session.clone(),
+            session: SessionApi::new(self.api.clone(), instance.clone(), session.clone()),
             backend: self.own.clone(),
             instance: instance.clone(),
             agent_id: id.clone(),
@@ -804,16 +822,26 @@ impl DockerSandboxBackend {
             Err(error) => {
                 // A failed start may still have reached the supervisor.
                 let _ = cleanup.session.kill(&instance).await;
+                self.record_publish(
+                    &session,
+                    &id,
+                    Some(&sink),
+                    &json!({"pushed":false,"code":"sandbox_persistent_runtime_failed"}),
+                    CleanupState::Pending,
+                );
                 return Err(fault("sandbox_persistent_runtime_failed", error));
             }
         };
         if let Some(entry) = remote.instances.lock().get_mut(&instance) {
+            entry
+                .delivery_sinks
+                .push((session.clone(), id.clone(), Arc::clone(&sink)));
             entry.sessions.insert(id.clone());
             entry.idle_since = None;
         }
         teardown.armed = false;
 
-        let placement = remote_placement(
+        let mut placement = remote_placement(
             &admitted,
             &report,
             libc,
@@ -823,6 +851,7 @@ impl DockerSandboxBackend {
             egress_enforced,
             &source,
         );
+        placement["deliveryRecordId"] = json!(session);
         sink.sandbox_placement(&id, &placement);
         let cleanup: Arc<dyn ContainerApi> = cleanup;
         let id = self
@@ -928,6 +957,12 @@ impl DockerSandboxBackend {
 
     async fn remote_slot(&self) -> Result<tokio::sync::OwnedSemaphorePermit, SandboxSpawnError> {
         let remote = self.remote.as_ref().expect("a remote driver");
+        if remote.instances.lock().len() >= remote.limits.max_concurrent.max(1) as usize {
+            return Err(fault(
+                "sandbox_provider_capacity",
+                "the remote provider is at capacity",
+            ));
+        }
         tokio::time::timeout(CAPACITY_WAIT, remote.slots.clone().acquire_owned())
             .await
             .map_err(|_| {
@@ -962,13 +997,172 @@ impl DockerSandboxBackend {
         Ok(instance)
     }
 
+    fn delivery_cleanup(&self, instance: &str, safe: bool) -> CleanupState {
+        let persistent = self.remote.as_ref().is_some_and(|remote| {
+            remote
+                .instances
+                .lock()
+                .get(instance)
+                .is_some_and(|entry| entry.persistent)
+        });
+        if persistent || !safe {
+            CleanupState::Retained
+        } else {
+            CleanupState::Pending
+        }
+    }
+
+    fn record_publish(
+        &self,
+        record_id: &str,
+        agent_id: &str,
+        sink: Option<&Arc<dyn ExternalAgentEventSink>>,
+        publish: &Value,
+        cleanup: CleanupState,
+    ) {
+        let mut event = publish.clone();
+        event["deliveryRecordId"] = json!(record_id);
+        if let Some((remote, store)) = self
+            .remote
+            .as_ref()
+            .and_then(|remote| remote.deliveries.get().map(|store| (remote, store)))
+        {
+            // Same lock order as retry: a queued older outcome must never
+            // overwrite a newer successfully persisted delivery.
+            let mut pending = remote.pending_deliveries.lock();
+            match store.publish(record_id, publish, cleanup) {
+                Ok(record) => {
+                    pending.remove(record_id);
+                    event["deliveryRecord"] = json!(record);
+                }
+                Err(error) => {
+                    pending.insert(record_id.into(), (publish.clone(), cleanup));
+                    log::error!("persisting sandbox delivery {record_id} failed: {error}");
+                    event["deliveryRecordError"] =
+                        json!({"code":"sandbox_delivery_store_failed","message":error});
+                }
+            }
+        }
+        if let Some(sink) = sink {
+            sink.workspace_published(agent_id, &event);
+        }
+    }
+
+    /// A journal failure must not erase a known push/bundle outcome. Keep the
+    /// exact report and retry it before deletion; retries also run for held
+    /// instances. Provider TTL remains the external lifetime bound.
+    fn flush_pending_deliveries(&self) -> bool {
+        let Some(remote) = self.remote.as_ref() else {
+            return true;
+        };
+        let Some(store) = remote.deliveries.get() else {
+            return true;
+        };
+        let mut pending = remote.pending_deliveries.lock();
+        let mut written = Vec::new();
+        pending.retain(
+            |id, (publish, cleanup)| match store.publish(id, publish, *cleanup) {
+                Ok(record) => {
+                    written.push(record);
+                    false
+                }
+                Err(error) => {
+                    log::error!("retrying sandbox delivery {id} failed: {error}");
+                    true
+                }
+            },
+        );
+        let complete = pending.is_empty();
+        drop(pending);
+        let sinks: Vec<_> = remote
+            .instances
+            .lock()
+            .values()
+            .flat_map(|entry| entry.delivery_sinks.clone())
+            .collect();
+        for record in written {
+            if let Some((_, agent, sink)) = sinks.iter().find(|(id, _, _)| id == &record.id) {
+                let mut publish = record.publish.clone();
+                publish["deliveryRecord"] = json!(record);
+                sink.workspace_published(agent, &publish);
+            }
+        }
+        complete
+    }
+
+    fn notify_held(&self, instance: &str, held: &HeldPublish, publish: &Value) {
+        for (record_id, agent_id, sink) in &held.agents {
+            self.record_publish(
+                record_id,
+                agent_id,
+                sink.as_ref(),
+                publish,
+                self.delivery_cleanup(instance, !publish["held"].as_bool().unwrap_or(false)),
+            );
+        }
+    }
+
+    fn record_cleanup(&self, instance: &str, state: CleanupState, lost: bool) -> bool {
+        let Some(remote) = self.remote.as_ref() else {
+            return true;
+        };
+        let Some(store) = remote.deliveries.get() else {
+            return true;
+        };
+        let sinks = remote
+            .instances
+            .lock()
+            .get(instance)
+            .map(|entry| entry.delivery_sinks.clone())
+            .unwrap_or_default();
+        match store.cleanup(&remote.provider_id, instance, state, lost) {
+            Ok(records) => {
+                for record in records {
+                    if let Some((_, agent_id, sink)) =
+                        sinks.iter().find(|(id, _, _)| id == &record.id)
+                    {
+                        let mut publish = record.publish.clone();
+                        publish["deliveryRecord"] = json!(record);
+                        sink.workspace_published(agent_id, &publish);
+                    }
+                }
+                true
+            }
+            Err(error) => {
+                log::error!("persisting cleanup of sandbox {instance} failed: {error}");
+                for (record_id, agent_id, sink) in sinks {
+                    sink.workspace_published(&agent_id, &json!({"pushed":false,"code":"sandbox_delivery_store_failed","deliveryRecordId":record_id,"deliveryRecordError":{"code":"sandbox_delivery_store_failed","message":error}}));
+                }
+                false
+            }
+        }
+    }
+
     /// Destroy an instance and forget it, releasing its slot, proxy and
     /// bridge. Idempotent. When the provider refuses, the instance stays
     /// tracked with its slot held (it may still be running and billed) and
     /// the sweep retries with backoff; the provider's own TTL is the last
     /// bound. Returns whether it is gone.
     async fn destroy_instance(&self, instance: &str) -> bool {
+        if !self.flush_pending_deliveries() {
+            if let Some(remote) = self.remote.as_ref() {
+                if let Some(entry) = remote.instances.lock().get_mut(instance) {
+                    entry.destroy_retry = Some(DestroyRetry::after(1));
+                }
+            }
+            return false;
+        }
         let Err(error) = remove_owned(&self.container, instance).await else {
+            if !self.record_cleanup(instance, CleanupState::Destroyed, true) {
+                if let Some(remote) = self.remote.as_ref() {
+                    if let Some(entry) = remote.instances.lock().get_mut(instance) {
+                        entry.destroy_retry = Some(DestroyRetry::after(1));
+                        entry.workspace = None;
+                        entry.held = None;
+                    }
+                }
+                return false;
+            }
             if let Some(remote) = self.remote.as_ref() {
                 remote.instances.lock().remove(instance);
             }
@@ -978,6 +1172,7 @@ impl DockerSandboxBackend {
             log::warn!("remote instance {instance} could not be destroyed: {error}");
             return false;
         };
+        self.record_cleanup(instance, CleanupState::DestroyRetrying, false);
         let mut instances = remote.instances.lock();
         match instances.get_mut(instance) {
             Some(entry) => {
@@ -1678,6 +1873,7 @@ impl DockerSandboxBackend {
     async fn finish_remote_session(
         &self,
         instance: &str,
+        delivery_id: &str,
         agent_id: &str,
         sink: &Arc<dyn ExternalAgentEventSink>,
     ) {
@@ -1693,8 +1889,22 @@ impl DockerSandboxBackend {
                 // passes; the UI says so.
                 publish["held"] = json!(true);
             }
-            sink.workspace_published(agent_id, &publish);
+            self.record_publish(
+                delivery_id,
+                agent_id,
+                Some(sink),
+                &publish,
+                self.delivery_cleanup(instance, safe),
+            );
             outcome = Some((publish, safe));
+        } else {
+            self.record_publish(
+                delivery_id,
+                agent_id,
+                Some(sink),
+                &json!({"pushed":false,"discarded":true,"code":"sandbox_workspace_instance_lost"}),
+                CleanupState::Destroyed,
+            );
         }
         let (destroy, earlier) = {
             let mut instances = remote.instances.lock();
@@ -1710,11 +1920,15 @@ impl DockerSandboxBackend {
                         Some(_) => entry.held.take().map(|held| held.agents).unwrap_or_default(),
                         None => Vec::new(),
                     };
-                    agents.retain(|(id, _)| id != agent_id);
+                    agents.retain(|(id, _, _)| id != delivery_id);
                     let mut earlier = None;
                     match outcome.as_ref() {
                         Some((publish, false)) => {
-                            agents.push((agent_id.to_string(), Arc::clone(sink)));
+                            agents.push((
+                                delivery_id.to_string(),
+                                agent_id.to_string(),
+                                Some(Arc::clone(sink)),
+                            ));
                             entry.held = Some(HeldPublish {
                                 agents,
                                 next_at: tokio::time::Instant::now() + PUBLISH_RETRY_INTERVAL,
@@ -1732,8 +1946,14 @@ impl DockerSandboxBackend {
             }
         };
         if let (Some(agents), Some((publish, _))) = (earlier, outcome.as_ref()) {
-            for (id, sink) in agents {
-                sink.workspace_published(&id, publish);
+            for (record_id, id, sink) in agents {
+                self.record_publish(
+                    &record_id,
+                    &id,
+                    sink.as_ref(),
+                    publish,
+                    self.delivery_cleanup(instance, true),
+                );
             }
         }
         if destroy {
@@ -1779,7 +1999,7 @@ impl DockerSandboxBackend {
             (safe && !entry.persistent && entry.sessions.is_empty(), delivered_to)
         };
         if let Some(held) = delivered_to {
-            held.notify(&publish);
+            self.notify_held(instance, &held, &publish);
             if destroy {
                 self.destroy_instance(instance).await;
             }
@@ -1799,6 +2019,7 @@ impl DockerSandboxBackend {
         let Some(remote) = self.remote.as_ref() else {
             return;
         };
+        self.flush_pending_deliveries();
         let now = tokio::time::Instant::now();
         let mut stop_sessions = Vec::new();
         let mut destroy = Vec::new();
@@ -1863,7 +2084,7 @@ impl DockerSandboxBackend {
         }
         for (instance, held) in overrun {
             log::warn!("a delivery from instance {instance} outran its deadline; discarding it");
-            held.notify(&json!({
+            self.notify_held(&instance, &held, &json!({
                 "pushed": false,
                 "code": "sandbox_workspace_deadline",
                 "message": "the sandbox reached its deadline while its work was being delivered",
@@ -1929,7 +2150,7 @@ impl DockerSandboxBackend {
                 "the workspace of {agent_id} was never delivered; its instance {instance} reached its deadline"
             );
         }
-        held.notify(&publish);
+        self.notify_held(instance, &held, &publish);
     }
 
     /// After a restart: track this deployment's persistent instances so their
@@ -1947,31 +2168,96 @@ impl DockerSandboxBackend {
                 return Vec::new();
             }
         };
+        let history = match remote
+            .deliveries
+            .get()
+            .map(|store| store.list(None, None))
+            .transpose()
+        {
+            Ok(records) => records.unwrap_or_default(),
+            Err(error) => {
+                log::error!("reading sandbox history during reconciliation failed: {error}");
+                return Vec::new();
+            }
+        };
+        // A provider list that succeeded is authoritative for instances already
+        // deleted by its TTL (or by a previous Host after the last journal write).
+        for record in &history {
+            if record.provider_id == remote.provider_id
+                && record.cleanup_state != CleanupState::Destroyed
+                && !owned.iter().any(|item| item.id == record.instance_id)
+            {
+                self.record_cleanup(&record.instance_id, CleanupState::Destroyed, true);
+            }
+        }
         let mut destroyed = Vec::new();
         for item in owned {
             if item.deployment() != Some(self.config.deployment_id.as_str())
-                || item.labels.get(PERSISTENT_RUNTIME_LABEL).map(String::as_str) != Some("1")
                 || item.labels.get(PROVIDER_LABEL) != Some(&remote.provider_id)
                 || remote.instances.lock().contains_key(&item.id)
             {
                 continue;
             }
-            match remote.slots.clone().try_acquire_owned() {
-                Ok(slot) => {
-                    remote.instances.lock().insert(
-                        item.id.clone(),
-                        Instance::new(
-                            slot,
-                            true,
-                            deadline_from_labels(&item.labels, remote.limits.max_lifetime),
-                            Some(tokio::time::Instant::now()),
-                        ),
-                    );
-                }
+            let persistent = item
+                .labels
+                .get(PERSISTENT_RUNTIME_LABEL)
+                .map(String::as_str)
+                == Some("1");
+            let removing = history.iter().any(|r| {
+                r.provider_id == remote.provider_id
+                    && r.instance_id == item.id
+                    && matches!(
+                        r.cleanup_state,
+                        CleanupState::Pending | CleanupState::DestroyRetrying
+                    )
+            });
+            // Adopt even an orphan being removed so failed removal remains
+            // tracked and retries, including when boot found more instances
+            // than the newly configured capacity.
+            let slot = match remote.slots.clone().try_acquire_owned() {
+                Ok(slot) => slot,
                 Err(_) => {
-                    if remove_owned(&self.container, &item.id).await.is_ok() {
-                        destroyed.push(item.id);
-                    }
+                    Arc::new(tokio::sync::Semaphore::new(1)).try_acquire_owned().expect("the orphan slot")
+                }
+            };
+            let mut adopted = Instance::new(
+                slot,
+                persistent,
+                deadline_from_labels(&item.labels, remote.limits.max_lifetime),
+                Some(tokio::time::Instant::now()),
+            );
+            let unresolved: Vec<_> = history
+                .iter()
+                .filter(|r| {
+                    r.provider_id == remote.provider_id
+                        && r.instance_id == item.id
+                        && matches!(
+                            r.publish_state,
+                            crate::delivery::PublishState::Held
+                                | crate::delivery::PublishState::Running
+                        )
+                })
+                .collect();
+            if persistent && !removing && !unresolved.is_empty() {
+                adopted.held = Some(HeldPublish {
+                    agents: unresolved
+                        .iter()
+                        .map(|r| (r.id.clone(), r.agent_id.clone(), None))
+                        .collect(),
+                    next_at: tokio::time::Instant::now() + PUBLISH_RETRY_INTERVAL,
+                    in_flight: false,
+                    export_too_large: unresolved.iter().any(|r| {
+                        r.publish["recovery"]["code"] == "sandbox_workspace_recovery_too_large"
+                    }),
+                });
+            }
+            remote.instances.lock().insert(item.id.clone(), adopted);
+            if !persistent
+                || removing
+                || remote.instances.lock().len() > remote.limits.max_concurrent as usize
+            {
+                if self.destroy_instance(&item.id).await {
+                    destroyed.push(item.id);
                 }
             }
         }
@@ -2027,6 +2313,7 @@ impl Drop for InstanceTeardown {
 /// session like a local persistent one, and on removal publishes the
 /// workspace and releases the instance.
 struct RemoteSession {
+    delivery_id: String,
     session: SessionApi,
     backend: Weak<DockerSandboxBackend>,
     instance: String,
@@ -2060,7 +2347,12 @@ impl ContainerApi for RemoteSession {
         if !self.finished.swap(true, Ordering::AcqRel) {
             if let Some(backend) = self.backend.upgrade() {
                 backend
-                    .finish_remote_session(&self.instance, &self.agent_id, &self.sink)
+                    .finish_remote_session(
+                        &self.instance,
+                        &self.delivery_id,
+                        &self.agent_id,
+                        &self.sink,
+                    )
                     .await;
             }
         }
@@ -2406,7 +2698,11 @@ mod tests {
         assert_eq!(publish["pushed"], false);
         assert_eq!(publish["code"], "sandbox_workspace_push_refused");
         assert!(publish.get("held").is_none(), "kept work does not hold the instance");
+        let record = DeliveryStore::new(data.path()).list(Some("agent/1"), None).unwrap().remove(0);
+        assert_eq!(record.publish_state, crate::delivery::PublishState::SavedBundle);
+        assert_eq!(record.cleanup_state, CleanupState::Destroyed);
         let recovery = &publish["recovery"];
+        assert_eq!(record.publish["recovery"]["bundle"], recovery["bundle"]);
         assert_eq!(recovery["commit"], "b".repeat(40));
         assert_eq!(recovery["commits"], 2);
         let bundle = PathBuf::from(recovery["bundle"].as_str().unwrap());
@@ -2436,6 +2732,291 @@ mod tests {
         assert!(bundle_call
             .windows(6)
             .any(|args| args == ["bundle", "create", "-", "HEAD", "--not", "--remotes"]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn delivery_history_survives_reused_agent_ids_and_tracks_idle_cleanup() {
+        let mut environment = spec(EgressTier::Off, None);
+        environment.lifecycle = SandboxLifecycleKind::Persistent;
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        let data = tempfile::tempdir().unwrap();
+        remote.backend.configure_publish_recovery(data.path());
+        for count in 1..=2 {
+            changed_workspace(&remote.fake);
+            if count == 2 {
+                remote
+                    .fake
+                    .answer_git("rev-parse", vec![answer(&"b".repeat(40), 0)]);
+            }
+            remote
+                .spawn(remote_config("reused-agent", &environment))
+                .await
+                .unwrap();
+            remote.exit_session();
+            remote
+                .until("a durable completed session", |_| {
+                    let records = DeliveryStore::new(data.path())
+                        .list(Some("reused-agent"), None)
+                        .unwrap();
+                    records.len() == count
+                        && records.iter().all(|record| {
+                            record.publish_state == crate::delivery::PublishState::Pushed
+                        })
+                })
+                .await;
+        }
+        let records = DeliveryStore::new(data.path()).list(None, None).unwrap();
+        assert_ne!(records[0].id, records[1].id);
+        let placements = remote.events(PLACEMENT_CHANNEL);
+        assert_ne!(
+            placements[0]["placement"]["deliveryRecordId"],
+            placements[1]["placement"]["deliveryRecordId"]
+        );
+        assert!(placements.iter().all(|event| records
+            .iter()
+            .any(|record| event["placement"]["deliveryRecordId"] == record.id)));
+        assert!(records.iter().all(|r| r.commit.as_deref()
+            == Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+            && r.cleanup_state == CleanupState::Retained));
+        let journal = data.path().join(crate::delivery::DELIVERY_DIR);
+        std::fs::rename(&journal, data.path().join("saved-journal")).unwrap();
+        std::fs::write(&journal, "cleanup journal unavailable").unwrap();
+        tokio::time::advance(Duration::from_secs(601)).await;
+        remote.backend.sweep_remote_instances().await;
+        assert!(remote
+            .fake
+            .removed
+            .lock()
+            .contains(&"instance-1".to_string()));
+        assert_eq!(
+            remote.backend.remote.as_ref().unwrap().snapshot(),
+            (1, 0),
+            "cleanup journal failure stays tracked for retry"
+        );
+        std::fs::remove_file(&journal).unwrap();
+        std::fs::rename(data.path().join("saved-journal"), &journal).unwrap();
+        tokio::time::advance(DESTROY_RETRY_BASE + Duration::from_secs(1)).await;
+        remote.backend.sweep_remote_instances().await;
+        let records = DeliveryStore::new(data.path()).list(None, None).unwrap();
+        assert!(records
+            .iter()
+            .all(|r| r.cleanup_state == CleanupState::Destroyed && r.revision >= 2));
+        assert!(remote
+            .events(WORKSPACE_PUBLISH_CHANNEL)
+            .iter()
+            .filter(|e| e["publish"].get("deliveryRecordError").is_none())
+            .all(|e| e["publish"]["deliveryRecord"].is_object()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn durable_held_deadline_and_destroy_retries_are_recorded() {
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        let data = tempfile::tempdir().unwrap();
+        remote.backend.configure_publish_recovery(data.path());
+        std::fs::write(data.path().join(RECOVERY_DIR), "cannot export").unwrap();
+        changed_workspace(&remote.fake);
+        remote.fake.answer_git("push", vec![answer("refused", 128)]);
+        *remote.fake.remove_failures.lock() = 1;
+        remote
+            .spawn(remote_config("agent-1", &environment))
+            .await
+            .unwrap();
+        remote.exit_session();
+        remote
+            .until("a durable held delivery", |_| {
+                DeliveryStore::new(data.path()).list(None, None).unwrap()[0].publish_state
+                    == crate::delivery::PublishState::Held
+            })
+            .await;
+        tokio::time::advance(Duration::from_secs(3601)).await;
+        remote.backend.sweep_remote_instances().await;
+        remote
+            .until("a durable destroy retry", |_| {
+                DeliveryStore::new(data.path()).list(None, None).unwrap()[0].cleanup_state
+                    == CleanupState::DestroyRetrying
+            })
+            .await;
+        let record = DeliveryStore::new(data.path())
+            .list(None, None)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            record.publish_state,
+            crate::delivery::PublishState::Discarded
+        );
+        tokio::time::advance(DESTROY_RETRY_BASE + Duration::from_secs(1)).await;
+        remote.backend.sweep_remote_instances().await;
+        assert_eq!(
+            DeliveryStore::new(data.path()).list(None, None).unwrap()[0].cleanup_state,
+            CleanupState::Destroyed
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn restart_reconciles_orphan_delivery_and_retries_refused_cleanup() {
+        let environment = spec(EgressTier::Off, None);
+        let fake = FakeRemote::new("fake");
+        let remote = Remote::new(fake.clone(), environment.clone(), 1);
+        let data = tempfile::tempdir().unwrap();
+        remote.backend.configure_publish_recovery(data.path());
+        std::fs::write(data.path().join(RECOVERY_DIR), "cannot export").unwrap();
+        changed_workspace(&fake);
+        fake.answer_git("push", vec![answer("refused", 128)]);
+        remote
+            .spawn(remote_config("agent-1", &environment))
+            .await
+            .unwrap();
+        remote.exit_session();
+        remote
+            .until("a held delivery", |_| {
+                DeliveryStore::new(data.path()).list(None, None).unwrap()[0].publish_state
+                    == crate::delivery::PublishState::Held
+            })
+            .await;
+        drop(remote);
+        *fake.remove_failures.lock() = 1;
+        let restarted = Remote::new(fake, environment, 1);
+        restarted.backend.configure_publish_recovery(data.path());
+        let record = DeliveryStore::new(data.path())
+            .list(None, None)
+            .unwrap()
+            .remove(0);
+        let path = data
+            .path()
+            .join(crate::delivery::DELIVERY_DIR)
+            .join(format!("{}.json", record.id));
+        let original = std::fs::read(&path).unwrap();
+        std::fs::write(&path, "corrupt").unwrap();
+        restarted.backend.reap_orphans().await.unwrap();
+        assert!(
+            restarted.fake.removed.lock().is_empty(),
+            "unreadable history does not authorize destructive reconciliation"
+        );
+        assert_eq!(*restarted.fake.remove_failures.lock(), 1);
+        std::fs::write(&path, original).unwrap();
+        restarted.backend.reap_orphans().await.unwrap();
+        assert_eq!(
+            DeliveryStore::new(data.path()).list(None, None).unwrap()[0].cleanup_state,
+            CleanupState::DestroyRetrying
+        );
+        tokio::time::advance(DESTROY_RETRY_BASE + Duration::from_secs(1)).await;
+        restarted.backend.sweep_remote_instances().await;
+        let record = DeliveryStore::new(data.path())
+            .list(None, None)
+            .unwrap()
+            .remove(0);
+        assert_eq!(record.cleanup_state, CleanupState::Destroyed);
+        assert_eq!(
+            record.publish_state,
+            crate::delivery::PublishState::Discarded
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn recovered_persistent_hold_is_kept_past_idle_and_delivered_by_next_session() {
+        let mut environment = spec(EgressTier::Off, None);
+        environment.lifecycle = SandboxLifecycleKind::Persistent;
+        let fake = FakeRemote::new("fake");
+        let remote = Remote::new(fake.clone(), environment.clone(), 1);
+        let data = tempfile::tempdir().unwrap();
+        remote.backend.configure_publish_recovery(data.path());
+        std::fs::write(data.path().join(RECOVERY_DIR), "cannot export").unwrap();
+        changed_workspace(&fake);
+        fake.answer_git("push", vec![answer("refused", 128)]);
+        remote
+            .spawn(remote_config("old-agent", &environment))
+            .await
+            .unwrap();
+        remote.exit_session();
+        remote
+            .until("a durable hold", |_| {
+                DeliveryStore::new(data.path()).list(None, None).unwrap()[0].publish_state
+                    == crate::delivery::PublishState::Held
+            })
+            .await;
+        drop(remote);
+        let restarted = Remote::new(fake.clone(), environment.clone(), 1);
+        restarted.backend.configure_publish_recovery(data.path());
+        restarted.backend.reap_orphans().await.unwrap();
+        tokio::time::advance(Duration::from_secs(601)).await;
+        restarted.backend.sweep_remote_instances().await;
+        restarted
+            .until("the failed retry to settle", |remote| {
+                !remote.backend.remote.as_ref().unwrap().instances.lock()["instance-1"]
+                    .held
+                    .as_ref()
+                    .unwrap()
+                    .in_flight
+            })
+            .await;
+        assert!(
+            fake.removed.lock().is_empty(),
+            "recovered hold outlives the idle limit"
+        );
+        fake.answer_git("push", vec![answer("", 0)]);
+        fake.answer_git("rev-parse", vec![answer(&"b".repeat(40), 0)]);
+        restarted
+            .spawn(remote_config("new-agent", &environment))
+            .await
+            .unwrap();
+        restarted.exit_session();
+        restarted
+            .until("both historical sessions to be delivered", |_| {
+                let records = DeliveryStore::new(data.path()).list(None, None).unwrap();
+                records.len() == 2
+                    && records
+                        .iter()
+                        .all(|record| record.publish_state == crate::delivery::PublishState::Pushed)
+            })
+            .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn journal_write_failure_is_reported_instead_of_claiming_durability() {
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        let data = tempfile::tempdir().unwrap();
+        remote.backend.configure_publish_recovery(data.path());
+        changed_workspace(&remote.fake);
+        remote
+            .spawn(remote_config("agent-1", &environment))
+            .await
+            .unwrap();
+        let journal = data.path().join(crate::delivery::DELIVERY_DIR);
+        std::fs::rename(&journal, data.path().join("old-journal")).unwrap();
+        std::fs::write(&journal, "disk unavailable").unwrap();
+        remote.exit_session();
+        remote
+            .until("the journal failure report", |remote| {
+                !remote.events(WORKSPACE_PUBLISH_CHANNEL).is_empty()
+            })
+            .await;
+        let event = &remote.events(WORKSPACE_PUBLISH_CHANNEL)[0]["publish"];
+        assert_eq!(
+            event["deliveryRecordError"]["code"],
+            "sandbox_delivery_store_failed"
+        );
+        assert!(event.get("deliveryRecord").is_none());
+        assert_eq!(
+            event["deliveryRecordId"],
+            remote.events(PLACEMENT_CHANNEL)[0]["placement"]["deliveryRecordId"]
+        );
+        assert_eq!(event["pushed"], true);
+        assert!(
+            remote.fake.removed.lock().is_empty(),
+            "known outcome is journaled before cleanup"
+        );
+        std::fs::remove_file(&journal).unwrap();
+        std::fs::rename(data.path().join("old-journal"), &journal).unwrap();
+        tokio::time::advance(DESTROY_RETRY_BASE + Duration::from_secs(1)).await;
+        remote.backend.sweep_remote_instances().await;
+        let record = DeliveryStore::new(data.path())
+            .list(None, None)
+            .unwrap()
+            .remove(0);
+        assert_eq!(record.publish_state, crate::delivery::PublishState::Pushed);
+        assert_eq!(record.cleanup_state, CleanupState::Destroyed);
     }
 
     #[tokio::test]

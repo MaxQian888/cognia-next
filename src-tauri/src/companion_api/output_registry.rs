@@ -967,6 +967,7 @@ mod tests {
         // and `cognia-environment`, they already carry `JsonSchema`, and the
         // catalog a console renders is the same struct admission reads. There
         // is no hand-written shape here for either side to drift from.
+        ("environment_delivery_list", OutputShape::Derived(DerivedOutput { rust_type: "cognia_problem::paging::Page<cognia_sandbox_pool::delivery::TaskDeliveryRecord>", schema: schema_of::<cognia_problem::paging::Page<cognia_sandbox_pool::delivery::TaskDeliveryRecord>> })),
         ("environment_catalog_list", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::CatalogPage", schema: schema_of::<crate::companion_api::environment_pool::CatalogPage> })),
         ("environment_catalog_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<crate::companion_api::environment_pool::CatalogEntryView>", schema: schema_of::<Option<crate::companion_api::environment_pool::CatalogEntryView>> })),
         ("environment_catalog_create", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::catalog::CatalogEntry", schema: schema_of::<cognia_environment::catalog::CatalogEntry> })),

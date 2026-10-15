@@ -72,6 +72,14 @@ An allowlist the provider cannot enforce is refused (`sandbox_egress_unenforceab
 - **Work that was not pushed is never destroyed with its instance.** The driver first exports every commit not on the remote as a git bundle, with a JSON manifest, to `<data_dir>/sandbox-recovery/` on the Host. The report carries the bundle's path as `recovery.bundle`. If the export fails too, the instance is `held`: it stays past its idle limit while the sweep retries delivery every minute. A held instance that reaches its deadline is reported `discarded`. Deliveries into one workspace run one at a time. A session that reuses a held persistent workspace delivers the earlier work with its own. The hold lives in memory only, so a Host restart reaps a held ephemeral instance like any other orphan. That is why the bundle export comes first.
 - **Provider account credentials:** the E2B key and the kubeconfig are resolved on the Host only.
 
+### Delivery records belong to the Host
+
+Each remote session has a durable task delivery record in `<data_dir>/sandbox-deliveries/`, beside the recovery bundles. Atomic file replacement and file/directory synchronization precede the publish event. The record names the session, agent, optional gateway task, provider, instance, branch and commit. It records publication (`running`, `pushed`, `savedBundle`, `held`, `discarded`, `nothingToPublish` or `failed`) independently from cleanup (`retained`, `pending`, `destroyRetrying` or `destroyed`). A failed delete therefore cannot make a successfully saved workspace look lost, and a persistent instance is not incorrectly described as destroyed.
+
+Agent ids can be reused; they are filters, not record keys. Every session keeps its own record, creation time and monotonic revision. Delivery retries update the original record, and instance cleanup updates all records for that instance. Boot reconciliation records orphan cleanup and lost work; the history does not recreate a git proxy or resume a session. Credentials, spawn environments, repository URLs and raw git stderr are excluded from persisted records.
+
+`environment_delivery_list` serves pages filtered by `agentId` and/or `taskId` through the existing `host.observe` companion authorization and the desktop's `environment_local_call`. The read remains available when the pool is disabled. The badge and the agent inspector's delivery history read this Host ledger after reload and refresh while open. Live events carry the record revision so an older read cannot overwrite a newer event. Client projections are scoped to the execution Host; Dexie is not an authority for this data.
+
 ### Bounded by construction
 
 Each provider has `maxConcurrent`, `maxLifetimeSecs` (default 7200) and `idleTimeoutSecs` (default 600).

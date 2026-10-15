@@ -119,6 +119,7 @@ export function SandboxPlacementBadge({ agentId, className }: SandboxPlacementBa
 
 function Sandboxed({ report, className }: { report: SandboxPlacementReport; className?: string }) {
   const t = useTranslations("externalAgent.placement")
+  const tDelivery = useTranslations("externalAgent.delivery")
   const tTier = useTranslations("projectEnvironment.runtime.tier")
   const notReported = t("tooltip.notReported")
   const tier = report.tier ? tTier(report.tier) : undefined
@@ -143,6 +144,8 @@ function Sandboxed({ report, className }: { report: SandboxPlacementReport; clas
         : undefined,
     report.credentialsMode ? t("tooltip.credentials", { mode: report.credentialsMode }) : undefined,
     ...remoteLines(report, t),
+    report.deliveryRecordError ? tDelivery("persistFailed") : undefined,
+    report.delivery ? tDelivery(`cleanup.${report.delivery.cleanupState}`) : undefined,
   ].filter((line): line is string => line !== undefined)
 
   const provider = report.provider

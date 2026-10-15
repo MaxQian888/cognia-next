@@ -95,6 +95,14 @@ provider 无法强制执行的 allowlist：强制隔离时以 `sandbox_egress_un
 - **未推送的工作不会随实例一起销毁。** 驱动先把远端没有的所有提交导出为 git bundle，连同一份 JSON 清单写到 host 的 `<data_dir>/sandbox-recovery/`，报告在 `recovery.bundle` 中给出路径。导出也失败时实例进入 `held`：越过空闲上限保留，由清扫每分钟重试交付；保留到截止时间仍未交付，则报告 `discarded`。同一工作区的交付一次只跑一个；复用 held 持久工作区的会话会把先前的工作一并交付。held 状态只在内存中，host 重启后 held 的 ephemeral 实例会和其他孤儿一样被回收，所以 bundle 导出放在最前面。
 - **provider 账户凭据**（E2B key、kubeconfig）：只在 host 上解析。
 
+### 交付记录归 Host 所有
+
+每次远程会话在 `<data_dir>/sandbox-deliveries/` 中保存一条持久化任务交付记录，与恢复 bundle 并列。原子替换文件并同步文件及目录后才发送发布事件。记录包含会话、agent、可选 gateway task、provider、实例、分支和 commit；发布状态（`running`、`pushed`、`savedBundle`、`held`、`discarded`、`nothingToPublish`、`failed`）与清理状态（`retained`、`pending`、`destroyRetrying`、`destroyed`）彼此独立。删除失败不会覆盖已保存工作的结果，持久实例也不会被误报为已销毁。
+
+agent id 可以复用，因此只用于筛选，不能作为记录主键。每次会话保留独立记录、创建时间和递增 revision。交付重试更新原记录，实例清理更新关联的全部记录；启动协调记录孤儿清理和丢失工作，但历史记录不重建 git proxy 或恢复会话。记录不保存凭证、spawn 环境变量、仓库 URL 或原始 git stderr。
+
+`environment_delivery_list` 通过现有 `host.observe` companion 授权和桌面 `environment_local_call` 提供按 `agentId`、`taskId` 筛选的分页读取。pool 关闭后仍可读取。badge 和 agent 检查器中的交付历史在刷新页面后读取 Host 账本，并在打开期间刷新。实时事件携带 revision，避免旧查询覆盖新事件；客户端投影按执行 Host 隔离，Dexie 不承担此数据的权威存储。
+
 ### 上限是结构性的
 
 每个 provider 有三个上限：`maxConcurrent`、`maxLifetimeSecs`（默认 7200）、`idleTimeoutSecs`（默认 600）。
