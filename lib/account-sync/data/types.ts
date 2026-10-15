@@ -20,7 +20,9 @@ export interface AccountSyncOutboxRow {
   deleted: boolean
   /** Send every synced field: the row survived a remote delete (protocol §9). */
   resend?: boolean
-  /** Bumped on every capture; a push removes the row only if it is unchanged. */
+  /** Unique identity of this queued mutation; absent only in older databases. */
+  mutationId?: string
+  /** Bumped on every capture, retained for compatibility with older writers. */
   rev: number
   /** First capture since the last push, ms. */
   since: number

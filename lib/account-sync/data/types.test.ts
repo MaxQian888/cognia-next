@@ -50,6 +50,10 @@ describe("account sync row types", () => {
       rev: 1,
       since: 0,
     }
+    // Existing databases keep legacy rows until the pusher adopts them.
+    expect(outbox.mutationId).toBeUndefined()
+    const identified: AccountSyncOutboxRow = { ...outbox, mutationId: "mutation-1" }
+    expect(identified.mutationId).toBe("mutation-1")
     const clocks: SyncFieldClocksRow = {
       table: "sessions",
       rowId: "s1",

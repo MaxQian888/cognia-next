@@ -8,8 +8,8 @@
  * Ops are sealed under the list's current epoch, take consecutive device
  * sequence numbers from the cursor, and are pushed at most 256 at a time and
  * within the push size limit. An outbox entry is removed only if nothing
- * changed it while its push was in flight (`rev`), and only if the server
- * stored its op: ops under sequence numbers the server already holds (a push
+ * changed it while its push was in flight (`mutationId` and `rev`), and only
+ * if the server stored its op: ops under sequence numbers the server already holds (a push
  * whose answer was lost, then rebuilt from newer values) are acknowledged but
  * not stored, so their entries stay and go out again under fresh numbers.
  */
@@ -210,7 +210,14 @@ async function settle(db: CogniaDB, entries: readonly AccountSyncOutboxRow[]): P
   await db.transaction("rw", db.accountSyncOutbox, async () => {
     const keys = entries.map((entry) => [entry.table, entry.rowId] as [string, string])
     const current = await db.accountSyncOutbox.bulkGet(keys)
-    const done = keys.filter((_, index) => current[index]?.rev === entries[index]!.rev)
+    const done = keys.filter((_, index) => {
+      const sent = entries[index]!
+      return (
+        Boolean(sent.mutationId) &&
+        current[index]?.mutationId === sent.mutationId &&
+        current[index]?.rev === sent.rev
+      )
+    })
     await db.accountSyncOutbox.bulkDelete(done)
   })
 }
@@ -220,16 +227,23 @@ export async function pushOutbox(deps: PushDeps): Promise<PushResult> {
   const result: PushResult = { pushed: 0, dropped: 0, tooLarge: [] }
   const skipped = new Set<string>()
   for (;;) {
-    const pending = deps.db.accountSyncOutbox.orderBy("[table+rowId]")
-    // Bound materialization, including when oversized rows must be passed over.
-    // Keep the unfiltered bulk-read path until this round has skipped a row.
-    const entries = await (
-      skipped.size
-        ? pending.filter((entry) => !skipped.has(`${entry.table}\u0000${entry.rowId}`))
-        : pending
-    )
-      .limit(OUTBOX_PAGE)
-      .toArray()
+    const entries = await deps.db.transaction("rw", deps.db.accountSyncOutbox, async () => {
+      const pending = deps.db.accountSyncOutbox.orderBy("[table+rowId]")
+      // Bound materialization, including when oversized rows must be passed over.
+      const rows = await (
+        skipped.size
+          ? pending.filter((entry) => !skipped.has(`${entry.table}\u0000${entry.rowId}`))
+          : pending
+      )
+        .limit(OUTBOX_PAGE)
+        .toArray()
+      // Adopt legacy entries atomically before sending. A later legacy writer
+      // dropping the identity cannot accidentally match this push's ACK.
+      const adopted = rows.filter((entry) => !entry.mutationId)
+      for (const entry of adopted) entry.mutationId = crypto.randomUUID()
+      if (adopted.length) await deps.db.accountSyncOutbox.bulkPut(adopted)
+      return rows
+    })
     if (entries.length === 0) return result
     const read = await readOutgoing(deps.db, entries)
     const empty = entries.filter((_, index) => read[index] === null)

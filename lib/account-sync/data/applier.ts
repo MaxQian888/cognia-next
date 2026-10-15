@@ -141,6 +141,7 @@ async function markResend(db: CogniaDB, table: SyncedTableName, rowId: string, n
     fields: queued && !queued.deleted ? queued.fields : [],
     deleted: false,
     resend: true,
+    mutationId: crypto.randomUUID(),
     rev: (queued?.rev ?? 0) + 1,
     since: queued?.since ?? now,
   }

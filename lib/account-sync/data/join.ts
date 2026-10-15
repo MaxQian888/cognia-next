@@ -176,6 +176,7 @@ function resendEntry(
     fields: table === "settings" ? [SETTINGS_VALUE_FIELD] : [],
     deleted: false,
     ...(table === "settings" ? {} : { resend: true }),
+    mutationId: crypto.randomUUID(),
     rev: (previous?.rev ?? 0) + 1,
     since: previous?.since ?? now,
   }

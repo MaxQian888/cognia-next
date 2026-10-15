@@ -262,6 +262,8 @@ describe("capture over an encrypted account database", () => {
     await db.sessions.put(session("s1", { title: "Secret plan" }))
     await db.sessions.put(session("s1", { title: "Secret plan v2" }))
     expect((await db.accountSyncOutbox.get(["sessions", "s1"]))!.fields).toContain("title")
+    expect(await db.sessionList.get("s1")).toMatchObject({ title: "Secret plan v2" })
+    expect((await db.accountSyncOutbox.toArray()).map((row) => row.table)).toEqual(["sessions"])
     expect(await db.syncFieldClocks.get(["sessions", "s1"])).toMatchObject({ table: "sessions" })
     const raw = new Dexie(name)
     await raw.open()
@@ -271,7 +273,154 @@ describe("capture over an encrypted account database", () => {
     >
     expect(stored.fields).toBeUndefined()
     expect(stored.__cogniaEncryptedContent).toBeDefined()
+    const projected = await raw.table("sessionList").get("s1")
+    expect(projected.title).toBeUndefined()
+    expect(projected.__cogniaEncryptedContent).toBeDefined()
     raw.close()
     db.close()
   })
+})
+
+it("does not capture failed duplicate rows when a partial bulkAdd is caught", async () => {
+  const db = await freshDb()
+  await arm(db)
+  try {
+    await db.sessions.put(session("existing", { title: "Original" }))
+    await db.accountSyncOutbox.clear()
+    const before = await db.syncFieldClocks.get(["sessions", "existing"])
+    await db.transaction("rw", db.sessions, async () => {
+      await db.sessions
+        .bulkAdd([
+          session("existing", { title: "Rejected title" }),
+          session("new", { title: "Inserted" }),
+        ])
+        .catch((error) => {
+          expect(error).toBeInstanceOf(Dexie.BulkError)
+        })
+    })
+    expect((await db.sessions.get("existing"))?.title).toBe("Original")
+    expect((await db.sessions.get("new"))?.title).toBe("Inserted")
+    expect((await db.sessionList.get("existing"))?.title).toBe("Original")
+    expect(await db.syncFieldClocks.get(["sessions", "existing"])).toEqual(before)
+    expect(await db.accountSyncOutbox.get(["sessions", "existing"])).toBeUndefined()
+    expect(await db.accountSyncOutbox.get(["sessions", "new"])).toBeDefined()
+  } finally {
+    db.close()
+  }
+}, 30000)
+
+it("leaves clocks, queue and capture state unchanged when every caught bulk operation fails", async () => {
+  const db = await freshDb()
+  await arm(db)
+  try {
+    await db.sessions.put(session("existing"))
+    const queued = await db.accountSyncOutbox.toArray()
+    const clocks = await db.syncFieldClocks.toArray()
+    const capture = await db.accountSyncState.get("capture")
+    await db.transaction("rw", db.sessions, async () => {
+      await expect(
+        db.sessions.bulkAdd([
+          session("existing", { title: "Rejected" }),
+          session("existing", { pinned: true }),
+        ])
+      ).rejects.toBeInstanceOf(Dexie.BulkError)
+    })
+    expect(await db.accountSyncOutbox.toArray()).toEqual(queued)
+    expect(await db.syncFieldClocks.toArray()).toEqual(clocks)
+    expect(await db.accountSyncState.get("capture")).toEqual(capture)
+  } finally {
+    db.close()
+  }
+})
+
+it("captures only the accepted operation when duplicate keys occur within one bulkAdd", async () => {
+  const db = await freshDb()
+  await arm(db)
+  try {
+    await db.transaction("rw", db.sessions, async () => {
+      await expect(
+        db.sessions.bulkAdd([
+          session("duplicate", { title: "Accepted" }),
+          session("duplicate", { title: "Rejected", pinned: true }),
+          session("other", { title: "Other" }),
+        ])
+      ).rejects.toBeInstanceOf(Dexie.BulkError)
+    })
+    expect(await db.sessions.get("duplicate")).toMatchObject({ title: "Accepted" })
+    const queued = await db.accountSyncOutbox.get(["sessions", "duplicate"])
+    expect(queued).toMatchObject({ rev: 1, fields: ["createdAt", "title", "updatedAt"] })
+    expect((await db.syncFieldClocks.get(["sessions", "duplicate"]))!.fields.pinned).toBeUndefined()
+    expect(await db.accountSyncOutbox.get(["sessions", "other"])).toBeDefined()
+  } finally {
+    db.close()
+  }
+})
+
+it("keeps clocks for intermediate changes when a repeated-key bulkPut restores the old value", async () => {
+  const db = await freshDb()
+  await arm(db)
+  try {
+    await db.sessions.put(session("s1", { title: "Original" }))
+    const previous = await db.syncFieldClocks.get(["sessions", "s1"])
+    await db.accountSyncOutbox.clear()
+    await db.sessions.bulkPut([
+      session("s1", { title: "Intermediate", pinned: true }),
+      session("s1", { title: "Original" }),
+    ])
+    expect(await db.sessions.get("s1")).toMatchObject({ title: "Original" })
+    expect((await db.sessions.get("s1"))!.pinned).toBeUndefined()
+    expect((await db.accountSyncOutbox.get(["sessions", "s1"]))!.fields).toEqual([
+      "pinned",
+      "title",
+    ])
+    const current = await db.syncFieldClocks.get(["sessions", "s1"])
+    expect(current!.fields.title > previous!.fields.title).toBe(true)
+    expect(current!.fields.pinned).toBeDefined()
+  } finally {
+    db.close()
+  }
+})
+
+it("aborts source and outbox writes if a clock-side mutation fails even when the caller catches it", async () => {
+  const db = await freshDb()
+  await arm(db)
+  db.close()
+  db.use({
+    stack: "dbcore",
+    name: "RejectClockCaptureForTest",
+    level: 2.5,
+    create(down) {
+      return {
+        ...down,
+        table(name) {
+          const table = down.table(name)
+          if (name !== "syncFieldClocks") return table
+          return {
+            ...table,
+            mutate: () =>
+              Promise.resolve({
+                numFailures: 1,
+                failures: { 0: new Error("clock storage failed") },
+                results: [],
+                lastResult: undefined,
+              }),
+          }
+        },
+      }
+    },
+  })
+  await db.open()
+  try {
+    await expect(
+      db.transaction("rw", db.sessions, async () => {
+        await db.sessions.put(session("s1")).catch(() => undefined)
+      })
+    ).rejects.toBeDefined()
+    expect(await db.sessions.get("s1")).toBeUndefined()
+    expect(await db.sessionList.get("s1")).toBeUndefined()
+    expect(await db.accountSyncOutbox.count()).toBe(0)
+    expect(await db.syncFieldClocks.count()).toBe(0)
+  } finally {
+    db.close()
+  }
 })

@@ -87,6 +87,8 @@ export function markRemoteTransaction(trans: object): void {
 }
 
 interface RowChange {
+  /** Source request position, used to exclude failed bulk operations. */
+  index: number
   rowId: string
   /** Changed synced fields; ignored when `deleted`. */
   fields: string[]
@@ -145,7 +147,7 @@ async function changesOf(
     // A wiped settings row is a local reset, never a remote delete of every key.
     if (policy.table === "settings") return []
     const keys = request.type === "delete" ? request.keys : await keysInRange(table, request, zone)
-    return keys.map((key) => ({ rowId: String(key), fields: [], deleted: true }))
+    return keys.map((key, index) => ({ index, rowId: String(key), fields: [], deleted: true }))
   }
   const values = request.values as Record<string, unknown>[]
   const keys =
@@ -171,9 +173,9 @@ async function changesOf(
         : fields.filter((name) => value[name] !== undefined)
     if (policy.table === "settings") {
       for (const key of changed)
-        changes.push({ rowId: key, fields: [SETTINGS_VALUE_FIELD], deleted: false })
+        changes.push({ index, rowId: key, fields: [SETTINGS_VALUE_FIELD], deleted: false })
     } else if (changed.length > 0) {
-      changes.push({ rowId: String(keys[index]), fields: changed, deleted: false })
+      changes.push({ index, rowId: String(keys[index]), fields: changed, deleted: false })
     }
   })
   return changes
@@ -215,6 +217,7 @@ async function record(
         rowId: change.rowId,
         fields: [],
         deleted: true,
+        mutationId: crypto.randomUUID(),
         rev: (before?.rev ?? 0) + 1,
         since: before?.since ?? now,
       }
@@ -228,6 +231,7 @@ async function record(
         fields: [...fields].sort(),
         deleted: false,
         ...(before?.resend ? { resend: true } : {}),
+        mutationId: crypto.randomUUID(),
         rev: (before?.rev ?? 0) + 1,
         since: before?.since ?? now,
       }
@@ -247,7 +251,8 @@ async function record(
       down.table("accountSyncState").mutate({ type: "put", trans, values: [captured.state] })
     ),
   ]
-  await Promise.all(writes)
+  const results = await Promise.all(writes)
+  for (const result of results) if (result.numFailures) throw Object.values(result.failures)[0]
 }
 
 export function createAccountSyncCaptureMiddleware(): Middleware<DBCore> {
@@ -294,12 +299,26 @@ export function createAccountSyncCaptureMiddleware(): Middleware<DBCore> {
                   // Another capture in this transaction may have read (and advanced) it meanwhile.
                   if (stored && !own.state) own.state = stored
                 }
-                if (own.state && classOn(own.state, policy)) {
-                  const changes = await changesOf(table, policy, request, zone)
-                  if (changes.length > 0)
-                    await record(down, request.trans, name, changes, own, zone)
+                if (!own.state || !classOn(own.state, policy))
+                  return zone(() => table.mutate(request))
+                // Read whole-row and range-delete preimages before mutating,
+                // but only stamp operations the source actually accepted.
+                const changes = await changesOf(table, policy, request, zone)
+                const result = await zone(() => table.mutate(request))
+                const accepted = changes.filter((change) =>
+                  request.type === "deleteRange"
+                    ? !result.numFailures
+                    : !result.failures[change.index]
+                )
+                if (accepted.length > 0) {
+                  try {
+                    await record(down, request.trans, name, accepted, own, zone)
+                  } catch (error) {
+                    request.trans.abort()
+                    throw error
+                  }
                 }
-                return zone(() => table.mutate(request))
+                return result
               })()
             },
           }

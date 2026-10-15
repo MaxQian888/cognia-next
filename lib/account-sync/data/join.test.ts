@@ -108,9 +108,11 @@ describe("armAndSeed", () => {
     expect(await a.db.accountSyncOutbox.get(["sessions", "s1"])).toMatchObject({
       resend: true,
       fields: [],
+      mutationId: expect.any(String),
     })
     expect(await a.db.accountSyncOutbox.get(["settings", "profile"])).toMatchObject({
       fields: ["value"],
+      mutationId: expect.any(String),
     })
     expect((await a.db.syncFieldClocks.get(["settings", "profile"]))!.fields.value).toBe(
       encodeHlc({ ms: 3_000, c: 0, deviceId })

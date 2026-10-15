@@ -130,6 +130,7 @@ describe("applyBatches", () => {
     expect(await a.db.accountSyncOutbox.get(["sessions", "new"])).toMatchObject({
       resend: true,
       deleted: false,
+      mutationId: expect.any(String),
     })
 
     // An upsert older than the tombstone does not bring the row back; a newer one does.

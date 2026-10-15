@@ -1,11 +1,19 @@
 import "fake-indexeddb/auto"
 
-import { MAX_OPS_PER_PUSH, decryptOpPayload, opKey, type Op } from "@cognia/sync-protocol"
+import {
+  MAX_OPS_PER_PUSH,
+  encodeHlc,
+  decryptOpPayload,
+  opKey,
+  type Op,
+} from "@cognia/sync-protocol"
 
 import { TEST_SPACE } from "../enrollment/test-support"
 import { __clearAccountSyncKeyCache } from "../vault-store"
+import { applyBatches } from "./applier"
+import { createOpOriginChecker } from "./op-origin"
 import { pushOutbox, type PushDeps } from "./pusher"
-import { closeAll, syncedDevices, verifiedKeys, type SyncDevice } from "./test-support"
+import { closeAll, sealedOp, syncedDevices, verifiedKeys, type SyncDevice } from "./test-support"
 
 beforeEach(() => __clearAccountSyncKeyCache())
 
@@ -371,4 +379,119 @@ performanceExperiment(
     )
   },
   600_000
+)
+
+it("does not acknowledge a recreated outbox entry with a stale equal revision", async () => {
+  const { devices } = await syncedDevices(["aba-a", "aba-b"])
+  const [a, b] = devices as [SyncDevice, SyncDevice]
+  try {
+    const verified = await verifiedKeys(a)
+    await a.db.sessions.put(session("s1", { title: "Original" }))
+    expect((await a.db.accountSyncOutbox.get(["sessions", "s1"]))?.rev).toBe(1)
+    const deletionMs = Date.now() + 1000,
+      bId = (await b.keys()).deviceId
+    const deletion = await sealedOp(
+      b,
+      {
+        t: "sessions",
+        id: "s1",
+        k: "delete",
+        at: encodeHlc({ ms: deletionMs, c: 0, deviceId: bId }),
+      },
+      { deviceSeq: 1, hlc: { ms: deletionMs, c: 0 } }
+    )
+    const sent: Op[] = []
+    let serverSeq = 0,
+      first = true
+    await pushOutbox({
+      db: a.db,
+      spaceId: TEST_SPACE,
+      device: verified.keys,
+      chain: verified.chain,
+      epoch: verified.registry.state.epoch,
+      push: async (ops) => {
+        sent.push(...ops)
+        if (first) {
+          first = false
+          await applyBatches(
+            {
+              db: a.db,
+              spaceId: TEST_SPACE,
+              deviceId: verified.keys.deviceId,
+              registry: verified.registry,
+              chain: verified.chain,
+              origin: createOpOriginChecker(verified.registry),
+              now: () => deletionMs,
+            },
+            [{ firstSeq: 1, lastSeq: 1, ops: [deletion] }]
+          )
+          expect(await a.db.sessions.get("s1")).toBeUndefined()
+          expect(await a.db.accountSyncOutbox.get(["sessions", "s1"])).toBeUndefined()
+          await a.db.sessions.put(session("s1", { title: "Recreated" }))
+          expect((await a.db.accountSyncOutbox.get(["sessions", "s1"]))?.rev).toBe(1)
+        }
+        const firstSeq = serverSeq + 1
+        serverSeq += ops.length
+        return { deviceSeq: ops.at(-1)!.deviceSeq, firstSeq, lastSeq: serverSeq }
+      },
+    })
+    expect((await a.db.sessions.get("s1"))?.title).toBe("Recreated")
+    expect((await a.db.sessionList.get("s1"))?.title).toBe("Recreated")
+    const titles = []
+    for (const op of sent) {
+      const payload = await decryptOpPayload(
+        await opKey(verified.chain.get(op.epoch)!, TEST_SPACE),
+        TEST_SPACE,
+        op
+      )
+      if (payload.k === "upsert") titles.push(payload.f.title?.[0])
+    }
+    expect(titles).toEqual(["Original", "Recreated"])
+  } finally {
+    closeAll(devices)
+  }
+}, 30000)
+
+it.each([false, true])(
+  "adopts legacy outbox rows and rejects an identity removed during push (legacy initial: %s)",
+  async (legacyInitial) => {
+    const { a, devices, deps, titleOf, stored } = await setup()
+    try {
+      await a.db.sessions.put(session("s1", { title: "Original" }))
+      if (legacyInitial) {
+        const { mutationId: _mutationId, ...legacy } = (await a.db.accountSyncOutbox.get([
+          "sessions",
+          "s1",
+        ]))!
+        await a.db.accountSyncOutbox.put(legacy)
+      }
+      const sent: Op[] = []
+      let first = true
+      await pushOutbox(
+        deps({
+          push: async (ops) => {
+            sent.push(...ops)
+            if (first) {
+              first = false
+              const before = (await a.db.accountSyncOutbox.get(["sessions", "s1"]))!
+              expect(before.mutationId).toEqual(expect.any(String))
+              await a.db.sessions.update("s1", { title: "Legacy writer changed it" })
+              const { mutationId: _mutationId, ...legacy } = (await a.db.accountSyncOutbox.get([
+                "sessions",
+                "s1",
+              ]))!
+              // An older writer recreates an entry at the same revision without
+              // knowing the new identity field; the first ACK must not delete it.
+              await a.db.accountSyncOutbox.put({ ...legacy, rev: before.rev })
+            }
+            return stored(ops)
+          },
+        })
+      )
+      expect(await Promise.all(sent.map(titleOf))).toEqual(["Original", "Legacy writer changed it"])
+      expect(await a.db.accountSyncOutbox.count()).toBe(0)
+    } finally {
+      closeAll(devices)
+    }
+  }
 )
