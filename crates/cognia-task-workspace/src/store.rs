@@ -112,7 +112,321 @@ impl WorkspaceStore {
             decoded: None,
         };
         store.apply_registry_migration()?;
+        store.apply_changeset_migration()?;
         Ok(store)
+    }
+
+    fn apply_changeset_migration(&self) -> Result<(), String> {
+        self.connection
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS agent_changesets (
+               changeset_id TEXT PRIMARY KEY,
+               repo_common_dir TEXT NOT NULL,
+               target_ref TEXT NOT NULL,
+               owner_ref TEXT,
+               session_id TEXT,
+               state TEXT NOT NULL,
+               version INTEGER NOT NULL,
+               updated_at INTEGER NOT NULL,
+               payload TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_agent_changesets_repo
+               ON agent_changesets(repo_common_dir, target_ref, state);
+             CREATE INDEX IF NOT EXISTS idx_agent_changesets_owner
+               ON agent_changesets(owner_ref, session_id);
+             CREATE INDEX IF NOT EXISTS idx_agent_changesets_retention
+               ON agent_changesets(state, updated_at);
+             CREATE TABLE IF NOT EXISTS integration_runs (
+               integration_id TEXT PRIMARY KEY,
+               repo_common_dir TEXT NOT NULL,
+               target_ref TEXT NOT NULL,
+               state TEXT NOT NULL,
+               updated_at INTEGER NOT NULL,
+               provisioning TEXT,
+               payload TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_integration_runs_repo
+               ON integration_runs(repo_common_dir, updated_at);
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_runs_active_target
+               ON integration_runs(repo_common_dir, target_ref)
+               WHERE state IN ('preparing', 'prepared', 'publishing');
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_runs_active_worktree
+               ON integration_runs(repo_common_dir)
+               WHERE state IN ('preparing', 'prepared', 'publishing');",
+            )
+            .map_err(|error| format!("apply changeset migration: {error}"))
+    }
+
+    pub fn insert_changeset(
+        &self,
+        record: &crate::AgentChangeset,
+    ) -> Result<(), crate::ChangesetError> {
+        let payload = serde_json::to_string(record)
+            .map_err(|error| crate::ChangesetError::Store(error.to_string()))?;
+        let state = serialize_enum(&record.state, "changeset state")
+            .map_err(crate::ChangesetError::Store)?;
+        self.connection.execute(
+            "INSERT INTO agent_changesets(changeset_id,repo_common_dir,target_ref,owner_ref,session_id,state,version,updated_at,payload)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![record.changeset_id, record.repo_common_dir, record.target_ref, record.owner_ref,
+                record.session_id, state, record.version, record.updated_at, payload],
+        ).map_err(|error| crate::ChangesetError::Store(format!("insert changeset: {error}")))?;
+        Ok(())
+    }
+
+    pub fn get_changeset(&self, id: &str) -> Result<Option<crate::AgentChangeset>, String> {
+        json_optional(
+            self.connection
+                .query_row(
+                    "SELECT payload FROM agent_changesets WHERE changeset_id=?1",
+                    [id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| format!("get changeset: {error}"))?,
+        )
+    }
+
+    pub fn list_changesets(
+        &self,
+        filter: &crate::ChangesetFilter,
+    ) -> Result<Vec<crate::AgentChangeset>, String> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT payload FROM agent_changesets WHERE (?1 IS NULL OR repo_common_dir=?1)
+             AND (?2 IS NULL OR owner_ref=?2) AND (?3 IS NULL OR session_id=?3) ORDER BY rowid",
+            )
+            .map_err(|error| format!("prepare changesets: {error}"))?;
+        let rows = statement
+            .query_map(
+                params![filter.repo_common_dir, filter.owner_ref, filter.session_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| format!("list changesets: {error}"))?;
+        let mut records = Vec::new();
+        for row in rows {
+            let payload = row.map_err(|error| error.to_string())?;
+            let record: crate::AgentChangeset =
+                serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+            if filter
+                .states
+                .as_ref()
+                .is_none_or(|states| states.contains(&record.state))
+            {
+                records.push(record);
+            }
+        }
+        Ok(records)
+    }
+
+    pub fn update_changeset(
+        &self,
+        record: &crate::AgentChangeset,
+        expected_version: u64,
+    ) -> Result<(), crate::ChangesetError> {
+        write_changeset(&self.connection, record, expected_version)
+    }
+
+    pub fn latest_workspace_run(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<(TaskRun, Option<String>)>, String> {
+        let row: Option<(String, Option<String>)> = self
+            .connection
+            .query_row(
+                "SELECT r.payload, t.session_id FROM task_runs r
+             LEFT JOIN task_workspaces t ON t.task_id=r.task_id
+             WHERE json_extract(r.payload, '$.workspaceId')=?1
+             ORDER BY json_extract(r.payload, '$.createdAt') DESC, r.rowid DESC LIMIT 1",
+                [workspace_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("get changeset task run: {error}"))?;
+        row.map(|(payload, session)| {
+            serde_json::from_str(&payload)
+                .map(|run| (run, session))
+                .map_err(|error| error.to_string())
+        })
+        .transpose()
+    }
+
+    pub fn earliest_workspace_run(&self, workspace_id: &str) -> Result<Option<TaskRun>, String> {
+        json_optional(
+            self.connection
+                .query_row(
+                    "SELECT payload FROM task_runs
+                     WHERE json_extract(payload, '$.workspaceId')=?1
+                     ORDER BY json_extract(payload, '$.createdAt') ASC, rowid ASC LIMIT 1",
+                    [workspace_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| format!("get original workspace run: {error}"))?,
+        )
+    }
+    pub fn get_integration(&self, id: &str) -> Result<Option<crate::IntegrationRun>, String> {
+        json_optional(
+            self.connection
+                .query_row(
+                    "SELECT payload FROM integration_runs WHERE integration_id=?1",
+                    [id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| format!("get integration: {error}"))?,
+        )
+    }
+
+    pub fn list_integrations(&self) -> Result<Vec<crate::IntegrationRun>, String> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT payload FROM integration_runs ORDER BY rowid")
+            .map_err(|error| format!("prepare integrations: {error}"))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("list integrations: {error}"))?;
+        rows.map(|row| {
+            serde_json::from_str(&row.map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())
+        })
+        .collect()
+    }
+
+    pub fn integration_provisioning(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::WorkspaceProvisioning>, String> {
+        let payload: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT provisioning FROM integration_runs WHERE integration_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("get integration provisioning: {error}"))?;
+        json_optional(payload)
+    }
+
+    /// Keep a new process from reserving the shared checkout between the
+    /// ownership check and a reset/removal after a run becomes terminal.
+    pub fn with_integration_worktree<T>(
+        &mut self,
+        repo: &str,
+        owner_id: Option<&str>,
+        idle_before: Option<i64>,
+        action: impl FnOnce() -> Result<T, crate::IntegrationError>,
+    ) -> Result<Option<T>, crate::IntegrationError> {
+        use crate::IntegrationError;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| IntegrationError::Store(error.to_string()))?;
+        let protected: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM integration_runs WHERE repo_common_dir=?1 AND
+             ((state IN ('preparing','prepared','publishing') AND (?2 IS NULL OR integration_id<>?2))
+              OR (?3 IS NOT NULL AND updated_at>=?3)))",
+            params![repo, owner_id, idle_before], |row| row.get(0),
+        ).map_err(|error| IntegrationError::Store(error.to_string()))?;
+        if protected {
+            return Ok(None);
+        }
+        let result = action()?;
+        transaction
+            .commit()
+            .map_err(|error| IntegrationError::Store(error.to_string()))?;
+        Ok(Some(result))
+    }
+
+    /// Reserve the shared worktree and advance its changesets in the same
+    /// transaction. The payload comparison prevents a second service handle
+    /// from overwriting a newer run even when both read the same state.
+    pub fn save_integration(
+        &mut self,
+        run: &crate::IntegrationRun,
+        previous: Option<&crate::IntegrationRun>,
+        changesets: &[(crate::AgentChangeset, u64)],
+        provisioning: Option<&crate::WorkspaceProvisioning>,
+    ) -> Result<(), crate::IntegrationError> {
+        use crate::IntegrationError;
+        let payload = serde_json::to_string(run)
+            .map_err(|error| IntegrationError::Store(error.to_string()))?;
+        let state =
+            serialize_enum(&run.state, "integration state").map_err(IntegrationError::Store)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| IntegrationError::Store(format!("begin integration: {error}")))?;
+        if matches!(
+            run.state,
+            crate::IntegrationState::Preparing
+                | crate::IntegrationState::Prepared
+                | crate::IntegrationState::Publishing
+        ) {
+            let active: Option<String> = transaction
+                .query_row(
+                    "SELECT integration_id FROM integration_runs WHERE repo_common_dir=?1
+                 AND integration_id<>?2 AND state IN ('preparing','prepared','publishing') LIMIT 1",
+                    params![run.repo_common_dir, run.integration_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| IntegrationError::Store(error.to_string()))?;
+            if let Some(integration_id) = active {
+                return Err(IntegrationError::Busy { integration_id });
+            }
+        }
+        if let Some(previous) = previous {
+            // Compare typed payloads so additive serde defaults do not make
+            // rows written by an older service look like concurrent updates.
+            let expected: Option<String> = transaction
+                .query_row(
+                    "SELECT payload FROM integration_runs WHERE integration_id=?1",
+                    params![run.integration_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| IntegrationError::Store(error.to_string()))?;
+            let current = expected
+                .as_deref()
+                .map(serde_json::from_str::<crate::IntegrationRun>)
+                .transpose()
+                .map_err(|error| IntegrationError::Store(error.to_string()))?;
+            if current.as_ref() != Some(previous) {
+                return Err(IntegrationError::Conflict {
+                    integration_id: run.integration_id.clone(),
+                });
+            }
+            let changed = transaction
+                .execute(
+                    "UPDATE integration_runs SET state=?2,updated_at=?3,payload=?4
+                 WHERE integration_id=?1 AND payload=?5",
+                    params![run.integration_id, state, run.updated_at, payload, expected],
+                )
+                .map_err(|error| IntegrationError::Store(format!("update integration: {error}")))?;
+            if changed != 1 {
+                return Err(IntegrationError::Conflict {
+                    integration_id: run.integration_id.clone(),
+                });
+            }
+        } else {
+            let provisioning = provisioning
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| IntegrationError::Store(error.to_string()))?;
+            transaction.execute(
+                "INSERT INTO integration_runs(integration_id,repo_common_dir,target_ref,state,updated_at,provisioning,payload)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7)",
+                params![run.integration_id, run.repo_common_dir, run.target_ref, state, run.updated_at, provisioning, payload],
+            ).map_err(|error| IntegrationError::Store(format!("insert integration: {error}")))?;
+        }
+        for (changeset, expected_version) in changesets {
+            write_changeset(&transaction, changeset, *expected_version)?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| IntegrationError::Store(format!("commit integration: {error}")))
     }
 
     /// Idempotently create the ADR-0111 Managed Workspace Registry tables.
@@ -252,9 +566,33 @@ impl WorkspaceStore {
                    created_at INTEGER NOT NULL,
                    FOREIGN KEY(workspace_id) REFERENCES workspace_registry(workspace_id)
                      ON DELETE CASCADE
+                 );
+                 CREATE TABLE IF NOT EXISTS workspace_capture_baselines (
+                   workspace_id TEXT PRIMARY KEY,
+                   snapshot TEXT NOT NULL,
+                   policy TEXT NOT NULL,
+                   acquisition_commit TEXT,
+                   FOREIGN KEY(workspace_id) REFERENCES workspace_registry(workspace_id)
+                     ON DELETE CASCADE
                  );",
             )
             .map_err(|error| format!("apply workspace registry migration: {error}"))?;
+        let has_acquisition_commit: bool = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('workspace_capture_baselines') WHERE name='acquisition_commit')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("inspect workspace acquisition commit: {error}"))?;
+        if !has_acquisition_commit {
+            self.connection
+                .execute(
+                    "ALTER TABLE workspace_capture_baselines ADD COLUMN acquisition_commit TEXT",
+                    [],
+                )
+                .map_err(|error| format!("add workspace acquisition commit: {error}"))?;
+        }
         let has_environment_kind: bool = self
             .connection
             .query_row(
@@ -1031,6 +1369,7 @@ impl WorkspaceStore {
             "task_resources:payload",
             "task_patch_sets:payload",
             "workspace_archives:payload",
+            "workspace_capture_baselines:snapshot",
         ] {
             let (table, column) = table_column.split_once(':').expect("static table column");
             let sql = format!("SELECT {column} FROM {table}");
@@ -1703,6 +2042,63 @@ impl WorkspaceStore {
             .map_err(|error| format!("delete workspace bundle {bundle_id}: {error}"))
     }
 
+    /// Preserve the acquisition snapshot independently of later run baselines
+    /// and archive snapshots. Reusing a workspace never changes this origin.
+    pub fn put_workspace_capture_baseline(
+        &self,
+        workspace_id: &str,
+        snapshot: &crate::snapshot::WorkspaceSnapshot,
+        policy: &crate::ResourceTrackingPolicy,
+        acquisition_commit: Option<&str>,
+    ) -> Result<(), String> {
+        let snapshot = serde_json::to_string(snapshot).map_err(|error| {
+            format!("encode workspace capture baseline {workspace_id}: {error}")
+        })?;
+        let policy = serde_json::to_string(policy)
+            .map_err(|error| format!("encode workspace capture policy {workspace_id}: {error}"))?;
+        self.connection
+            .execute(
+                "INSERT INTO workspace_capture_baselines(workspace_id, snapshot, policy, acquisition_commit)
+                 VALUES(?1, ?2, ?3, ?4) ON CONFLICT(workspace_id) DO NOTHING",
+                params![workspace_id, snapshot, policy, acquisition_commit],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("put workspace capture baseline {workspace_id}: {error}"))
+    }
+
+    pub fn get_workspace_capture_baseline(
+        &self,
+        workspace_id: &str,
+    ) -> Result<
+        Option<(
+            crate::snapshot::WorkspaceSnapshot,
+            crate::ResourceTrackingPolicy,
+            Option<String>,
+        )>,
+        String,
+    > {
+        let row: Option<(String, String, Option<String>)> = self
+            .connection
+            .query_row(
+                "SELECT snapshot, policy, acquisition_commit FROM workspace_capture_baselines WHERE workspace_id=?1",
+                [workspace_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|error| format!("get workspace capture baseline {workspace_id}: {error}"))?;
+        row.map(|(snapshot, policy, acquisition_commit)| {
+            Ok((
+                serde_json::from_str(&snapshot).map_err(|error| {
+                    format!("decode workspace capture baseline {workspace_id}: {error}")
+                })?,
+                serde_json::from_str(&policy).map_err(|error| {
+                    format!("decode workspace capture policy {workspace_id}: {error}")
+                })?,
+                acquisition_commit,
+            ))
+        })
+        .transpose()
+    }
     pub fn put_workspace_archive(
         &self,
         workspace_id: &str,
@@ -1819,6 +2215,34 @@ impl WorkspaceStore {
             .map(|_| ())
             .map_err(|error| format!("append sensitive audit: {error}"))
     }
+}
+
+fn write_changeset(
+    connection: &Connection,
+    record: &crate::AgentChangeset,
+    expected_version: u64,
+) -> Result<(), crate::ChangesetError> {
+    use crate::ChangesetError;
+    if expected_version.checked_add(1) != Some(record.version) {
+        return Err(ChangesetError::Conflict {
+            changeset_id: record.changeset_id.clone(),
+        });
+    }
+    let payload =
+        serde_json::to_string(record).map_err(|error| ChangesetError::Store(error.to_string()))?;
+    let state = serialize_enum(&record.state, "changeset state").map_err(ChangesetError::Store)?;
+    let changed = connection.execute(
+        "UPDATE agent_changesets SET repo_common_dir=?2,target_ref=?3,owner_ref=?4,session_id=?5,
+         state=?6,version=?7,updated_at=?8,payload=?9 WHERE changeset_id=?1 AND version=?10",
+        params![record.changeset_id,record.repo_common_dir,record.target_ref,record.owner_ref,
+            record.session_id,state,record.version,record.updated_at,payload,expected_version],
+    ).map_err(|error| ChangesetError::Store(format!("update changeset: {error}")))?;
+    if changed != 1 {
+        return Err(ChangesetError::Conflict {
+            changeset_id: record.changeset_id.clone(),
+        });
+    }
+    Ok(())
 }
 
 fn restore_tombstones(tombstones: &[(PathBuf, PathBuf)]) {
@@ -1989,6 +2413,361 @@ mod tests {
         ResourceTrackingPolicy, TaskWorkspaceState,
     };
     use tempfile::TempDir;
+
+    fn sample_changeset(id: &str) -> crate::AgentChangeset {
+        crate::AgentChangeset {
+            changeset_id: id.into(),
+            run_id: Some("run-1".into()),
+            task_id: Some("task-1".into()),
+            session_id: Some("session-1".into()),
+            agent_id: Some("agent-1".into()),
+            agent_kind: Some("test".into()),
+            owner_ref: Some("session-1".into()),
+            workspace_id: "workspace-1".into(),
+            execution_root: "/exec/workspace-1".into(),
+            repo_common_dir: "/repo/.git".into(),
+            source_root: "/repo".into(),
+            target_ref: "refs/heads/main".into(),
+            base_sha: "a".repeat(40),
+            head_sha: "b".repeat(40),
+            change_ref: format!("refs/cognia/changesets/{id}"),
+            title: format!("Change {id}"),
+            files: vec![crate::ChangesetFile {
+                path: "src/renamed.rs".into(),
+                old_path: Some("src/original.rs".into()),
+                status: crate::ChangesetFileStatus::Renamed,
+                insertions: Some(3),
+                deletions: Some(1),
+                binary: false,
+                sensitive: false,
+                excluded: false,
+            }],
+            depends_on: vec!["earlier-changeset".into()],
+            state: crate::ChangesetState::Ready,
+            review: None,
+            checks: vec![crate::ChangesetCheck {
+                head_sha: "b".repeat(40),
+                profile_id: "unit".into(),
+                outcome: crate::ChangesetCheckOutcome::Passed,
+                tier: Some("sandbox".into()),
+                report_digest: Some("report-digest".into()),
+                log_tail: Some("all checks passed".into()),
+                ran_at: 100,
+            }],
+            required_checks: vec!["unit".into()],
+            approval: None,
+            integration_id: None,
+            merged_sha: None,
+            version: 1,
+            created_at: 100,
+            updated_at: 100,
+        }
+    }
+
+    fn sample_integration(id: &str) -> crate::IntegrationRun {
+        crate::IntegrationRun {
+            integration_id: id.into(),
+            repo_common_dir: "/repo/.git".into(),
+            target_ref: "refs/heads/main".into(),
+            strategy: crate::IntegrationStrategy::Merge,
+            on_conflict: crate::IntegrationConflictPolicy::Skip,
+            expected_old_sha: "a".repeat(40),
+            candidate_sha: None,
+            result_sha: None,
+            state: crate::IntegrationState::Planned,
+            items: vec![crate::IntegrationItem {
+                changeset_id: "changeset-1".into(),
+                head_sha: "b".repeat(40),
+                outcome: crate::IntegrationItemOutcome::Pending,
+                conflict_files: Vec::new(),
+                commit_sha: None,
+            }],
+            worktree_path: Some("/data/integration/repo-key".into()),
+            attempt: 1,
+            op_log: Vec::new(),
+            checks: Vec::new(),
+            required_checks: Vec::new(),
+            requested_checks: Vec::new(),
+            error: None,
+            created_at: 100,
+            updated_at: 100,
+        }
+    }
+
+    #[test]
+    fn changeset_and_integration_migration_preserves_existing_data_across_reopen() {
+        let dir = TempDir::new().unwrap();
+        let task = TaskWorkspace {
+            task_id: "task-1".into(),
+            session_id: "session-1".into(),
+            workspace_root: "/repo".into(),
+            state: TaskWorkspaceState::Active,
+            revision: 7,
+            created_at: 1,
+            expires_at: 1_000,
+            pinned: true,
+        };
+        {
+            let legacy = Connection::open(dir.path().join("task-workspaces.sqlite")).unwrap();
+            legacy
+                .execute_batch(
+                    "CREATE TABLE task_workspaces (
+                       task_id TEXT PRIMARY KEY,
+                       session_id TEXT NOT NULL,
+                       workspace_root TEXT NOT NULL,
+                       payload TEXT NOT NULL
+                     );",
+                )
+                .unwrap();
+            legacy
+                .execute(
+                    "INSERT INTO task_workspaces VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        task.task_id,
+                        task.session_id,
+                        task.workspace_root,
+                        serde_json::to_string(&task).unwrap()
+                    ],
+                )
+                .unwrap();
+        }
+        let changeset = sample_changeset("changeset-1");
+        let integration = sample_integration("integration-1");
+        let provisioning = crate::WorkspaceProvisioning {
+            sparse_paths: vec!["src".into()],
+            include: vec!["local-settings.json".into()],
+            ..crate::WorkspaceProvisioning::default()
+        };
+        {
+            let mut store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+            assert_eq!(store.get_task(&task.task_id).unwrap(), Some(task.clone()));
+            store.insert_changeset(&changeset).unwrap();
+            store
+                .save_integration(&integration, None, &[], Some(&provisioning))
+                .unwrap();
+        }
+        for _ in 0..2 {
+            let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+            assert_eq!(store.get_task(&task.task_id).unwrap(), Some(task.clone()));
+            assert_eq!(
+                store.get_changeset(&changeset.changeset_id).unwrap(),
+                Some(changeset.clone())
+            );
+            assert_eq!(
+                store
+                    .list_changesets(&crate::ChangesetFilter::default())
+                    .unwrap(),
+                vec![changeset.clone()]
+            );
+            assert_eq!(
+                store.list_integrations().unwrap(),
+                vec![integration.clone()]
+            );
+            assert_eq!(
+                store
+                    .integration_provisioning(&integration.integration_id)
+                    .unwrap(),
+                Some(provisioning.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn changeset_cas_preserves_the_newer_review_when_another_handle_is_stale() {
+        let dir = TempDir::new().unwrap();
+        let first = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let original = sample_changeset("changeset-1");
+        first.insert_changeset(&original).unwrap();
+        let second = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let mut stale = second
+            .get_changeset(&original.changeset_id)
+            .unwrap()
+            .unwrap();
+        let mut reviewed = original.clone();
+        reviewed.state = crate::ChangesetState::Approved;
+        reviewed.version += 1;
+        reviewed.updated_at += 1;
+        reviewed.review = Some(crate::ChangesetReview {
+            head_sha: reviewed.head_sha.clone(),
+            verdict: crate::ChangesetReviewVerdict::Approve,
+            reviewer: crate::ChangesetReviewer::User,
+            risk_tier: crate::ChangesetRiskTier::Low,
+            reasons: vec!["Verified the rename and tests".into()],
+            findings: Vec::new(),
+            requires_human_approval: false,
+            recorded_at: reviewed.updated_at,
+        });
+        first.update_changeset(&reviewed, original.version).unwrap();
+
+        stale.version += 1;
+        stale.title = "Stale editor changed the title".into();
+        stale.state = crate::ChangesetState::Draft;
+        let error = second
+            .update_changeset(&stale, original.version)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::ChangesetError::Conflict { changeset_id } if changeset_id == original.changeset_id
+        ));
+        assert_eq!(
+            second.get_changeset(&original.changeset_id).unwrap(),
+            Some(reviewed.clone())
+        );
+        assert_eq!(
+            first
+                .list_changesets(&crate::ChangesetFilter {
+                    repo_common_dir: Some(reviewed.repo_common_dir.clone()),
+                    owner_ref: reviewed.owner_ref.clone(),
+                    session_id: reviewed.session_id.clone(),
+                    states: Some(vec![crate::ChangesetState::Approved]),
+                })
+                .unwrap(),
+            vec![reviewed]
+        );
+    }
+
+    #[test]
+    fn integration_reservation_serializes_targets_that_share_the_repository_worktree() {
+        for state in [
+            crate::IntegrationState::Preparing,
+            crate::IntegrationState::Prepared,
+            crate::IntegrationState::Publishing,
+        ] {
+            let dir = TempDir::new().unwrap();
+            let mut first = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+            let mut active = sample_integration("active");
+            active.state = state;
+            first.save_integration(&active, None, &[], None).unwrap();
+            let mut second = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+            for (id, target) in [
+                ("same-target", "refs/heads/main"),
+                ("other-target", "refs/heads/release"),
+            ] {
+                let mut contender = sample_integration(id);
+                contender.target_ref = target.into();
+                contender.state = crate::IntegrationState::Preparing;
+                let error = second
+                    .save_integration(&contender, None, &[], None)
+                    .unwrap_err();
+                assert!(matches!(
+                    error,
+                    crate::IntegrationError::Busy { integration_id } if integration_id == "active"
+                ));
+                assert!(second.get_integration(id).unwrap().is_none());
+            }
+            let mut other_repo = sample_integration("other-repository");
+            other_repo.repo_common_dir = "/other-repo/.git".into();
+            other_repo.state = crate::IntegrationState::Preparing;
+            second
+                .save_integration(&other_repo, None, &[], None)
+                .unwrap();
+
+            let mut published = active.clone();
+            published.state = crate::IntegrationState::Published;
+            published.updated_at += 1;
+            first
+                .save_integration(&published, Some(&active), &[], None)
+                .unwrap();
+            let mut next = sample_integration("next");
+            next.state = crate::IntegrationState::Preparing;
+            second.save_integration(&next, None, &[], None).unwrap();
+            assert_eq!(second.get_integration("next").unwrap(), Some(next));
+        }
+    }
+
+    #[test]
+    fn integration_changeset_updates_roll_back_together_on_a_stale_version() {
+        let dir = TempDir::new().unwrap();
+        let mut store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let first = sample_changeset("changeset-1");
+        let second = sample_changeset("changeset-2");
+        store.insert_changeset(&first).unwrap();
+        store.insert_changeset(&second).unwrap();
+        let original = sample_integration("integration-1");
+        store.save_integration(&original, None, &[], None).unwrap();
+        let mut newer_second = second.clone();
+        newer_second.version += 1;
+        newer_second.title = "Newer review must survive".into();
+        store
+            .update_changeset(&newer_second, second.version)
+            .unwrap();
+        let mut first_update = first.clone();
+        first_update.version += 1;
+        first_update.state = crate::ChangesetState::Integrating;
+        let mut stale_second_update = second.clone();
+        stale_second_update.version += 1;
+        stale_second_update.state = crate::ChangesetState::Integrating;
+        let updates = [
+            (first_update, first.version),
+            (stale_second_update, second.version),
+        ];
+
+        for insert in [false, true] {
+            let mut preparing = original.clone();
+            preparing.state = crate::IntegrationState::Preparing;
+            preparing.updated_at += 1;
+            if insert {
+                preparing.integration_id = "new-integration".into();
+            }
+            let error = store
+                .save_integration(&preparing, (!insert).then_some(&original), &updates, None)
+                .unwrap_err();
+            assert!(matches!(
+                error,
+                crate::IntegrationError::Changeset(crate::ChangesetError::Conflict { changeset_id })
+                    if changeset_id == second.changeset_id
+            ));
+            assert_eq!(
+                store.get_changeset(&first.changeset_id).unwrap(),
+                Some(first.clone())
+            );
+            assert_eq!(
+                store.get_changeset(&second.changeset_id).unwrap(),
+                Some(newer_second.clone())
+            );
+            assert_eq!(store.list_integrations().unwrap(), vec![original.clone()]);
+        }
+    }
+
+    #[test]
+    fn integration_payload_cas_refuses_a_lost_race_without_overwriting_the_candidate() {
+        let dir = TempDir::new().unwrap();
+        let mut first = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let original = sample_integration("integration-1");
+        first.save_integration(&original, None, &[], None).unwrap();
+        let mut second = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let stale = second
+            .get_integration(&original.integration_id)
+            .unwrap()
+            .unwrap();
+        let mut prepared = original.clone();
+        prepared.state = crate::IntegrationState::Prepared;
+        prepared.candidate_sha = Some("c".repeat(40));
+        prepared.items[0].outcome = crate::IntegrationItemOutcome::Merged;
+        prepared.items[0].commit_sha = prepared.candidate_sha.clone();
+        prepared.updated_at += 1;
+        first
+            .save_integration(&prepared, Some(&original), &[], None)
+            .unwrap();
+        let mut competing = stale.clone();
+        competing.state = crate::IntegrationState::Failed;
+        competing.error = Some(crate::IntegrationFailure {
+            code: "stale-worker".into(),
+            message: "An older worker attempted to replace the result".into(),
+        });
+        let error = second
+            .save_integration(&competing, Some(&stale), &[], None)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::IntegrationError::Conflict { integration_id }
+                if integration_id == original.integration_id
+        ));
+        assert_eq!(
+            second.get_integration(&original.integration_id).unwrap(),
+            Some(prepared)
+        );
+    }
 
     #[test]
     fn resource_index_rows_carry_their_conversation_and_run() {
@@ -2577,5 +3356,156 @@ mod tests {
             store.get_workspace_lifecycle_policy().unwrap(),
             Some(policy)
         );
+    }
+
+    #[test]
+    fn changeset_capture_baseline_is_original_survives_reopen_and_retains_blobs() {
+        let data = TempDir::new().unwrap();
+        let source = TempDir::new().unwrap();
+        fs::write(
+            source.path().join("original.txt"),
+            "original acquisition bytes",
+        )
+        .unwrap();
+        let policy = ResourceTrackingPolicy {
+            generated_output_roots: vec!["generated".into()],
+            auto_detect: false,
+            self_contained: false,
+        };
+        let (snapshot, blobs) =
+            crate::snapshot::capture_with_policy(source.path(), &policy).unwrap();
+        let acquisition_commit = "1".repeat(40);
+        {
+            let mut store = WorkspaceStore::open(data.path(), 1024 * 1024).unwrap();
+            store.put_workspace(&sample_record("ws-baseline")).unwrap();
+            assert_eq!(
+                store.get_workspace_capture_baseline("ws-baseline").unwrap(),
+                None
+            );
+            for (hash, bytes) in &blobs {
+                store.put_blob(hash, bytes, 1).unwrap();
+            }
+            store
+                .put_workspace_capture_baseline(
+                    "ws-baseline",
+                    &snapshot,
+                    &policy,
+                    Some(&acquisition_commit),
+                )
+                .unwrap();
+            store
+                .put_workspace_capture_baseline(
+                    "ws-baseline",
+                    &crate::snapshot::WorkspaceSnapshot::default(),
+                    &ResourceTrackingPolicy::default(),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                store.get_workspace_capture_baseline("ws-baseline").unwrap(),
+                Some((
+                    snapshot.clone(),
+                    policy.clone(),
+                    Some(acquisition_commit.clone())
+                ))
+            );
+            assert!(store
+                .get_workspace_archive("ws-baseline")
+                .unwrap()
+                .is_none());
+            assert!(store
+                .get_workspace("ws-baseline")
+                .unwrap()
+                .unwrap()
+                .snapshot_task_id
+                .is_none());
+            store.put_blob(&"f".repeat(64), b"unreferenced", 1).unwrap();
+        }
+        let mut reopened = WorkspaceStore::open(data.path(), 1024 * 1024).unwrap();
+        assert_eq!(
+            reopened
+                .get_workspace_capture_baseline("ws-baseline")
+                .unwrap(),
+            Some((snapshot.clone(), policy, Some(acquisition_commit)))
+        );
+        assert_eq!(reopened.prune_unreferenced_blobs().unwrap().0, 1);
+        for (hash, bytes) in &blobs {
+            assert_eq!(reopened.get_blob(hash, 2).unwrap(), *bytes);
+        }
+        reopened.delete_workspace("ws-baseline").unwrap();
+        assert!(reopened
+            .get_workspace_capture_baseline("ws-baseline")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            reopened.prune_unreferenced_blobs().unwrap().0,
+            blobs.len() as u64
+        );
+    }
+
+    #[test]
+    fn changeset_capture_baseline_migrates_without_guessing_an_acquisition_commit() {
+        let data = TempDir::new().unwrap();
+        let snapshot = crate::snapshot::WorkspaceSnapshot::default();
+        let policy = ResourceTrackingPolicy::default();
+        {
+            let store = WorkspaceStore::open(data.path(), 1024 * 1024).unwrap();
+            store
+                .put_workspace(&sample_record("ws-legacy-baseline"))
+                .unwrap();
+            store
+                .put_workspace_capture_baseline("ws-legacy-baseline", &snapshot, &policy, None)
+                .unwrap();
+            store
+                .connection
+                .execute(
+                    "ALTER TABLE workspace_capture_baselines DROP COLUMN acquisition_commit",
+                    [],
+                )
+                .unwrap();
+        }
+        let reopened = WorkspaceStore::open(data.path(), 1024 * 1024).unwrap();
+        assert_eq!(
+            reopened
+                .get_workspace_capture_baseline("ws-legacy-baseline")
+                .unwrap(),
+            Some((snapshot, policy, None))
+        );
+    }
+
+    #[test]
+    fn integration_additive_check_fields_keep_legacy_rows_updatable() {
+        let dir = TempDir::new().unwrap();
+        let mut store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let original = sample_integration("legacy-checks");
+        store.save_integration(&original, None, &[], None).unwrap();
+        let mut payload = serde_json::to_value(&original).unwrap();
+        payload.as_object_mut().unwrap().remove("requiredChecks");
+        payload.as_object_mut().unwrap().remove("requestedChecks");
+        store
+            .connection
+            .execute(
+                "UPDATE integration_runs SET payload=?1 WHERE integration_id=?2",
+                params![payload.to_string(), original.integration_id],
+            )
+            .unwrap();
+        let previous = store
+            .get_integration(&original.integration_id)
+            .unwrap()
+            .unwrap();
+        assert!(previous.required_checks.is_empty() && previous.requested_checks.is_empty());
+        let mut updated = previous.clone();
+        updated.state = crate::IntegrationState::Aborted;
+        store
+            .save_integration(&updated, Some(&previous), &[], None)
+            .unwrap();
+        assert_eq!(
+            store.get_integration(&original.integration_id).unwrap(),
+            Some(updated.clone())
+        );
+        assert!(matches!(
+            store.save_integration(&original, Some(&previous), &[], None),
+            Err(crate::IntegrationError::Conflict { .. })
+        ));
     }
 }

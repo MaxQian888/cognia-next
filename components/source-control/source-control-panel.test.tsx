@@ -137,6 +137,15 @@ jest.mock("./changes-view", () => ({
   ),
 }))
 jest.mock("./diff-pane", () => ({ DiffPane: () => <div data-testid="diff-pane-stub" /> }))
+jest.mock("./agent-changes/agent-changes-view", () => ({
+  AgentChangesView: ({ rootDir, projectId }: { rootDir: string; projectId: string | null }) => (
+    <div
+      data-testid="agent-changes-view-stub"
+      data-root={rootDir}
+      data-project={projectId ?? "none"}
+    />
+  ),
+}))
 jest.mock("./conflict-resolver", () => ({
   ConflictResolver: ({ onResolve }: { onResolve?: (resolution: string) => void }) => (
     <button
@@ -364,6 +373,7 @@ import {
   SourceControlPanel,
 } from "./source-control-panel"
 import { useGitStore } from "@/stores/git/git-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import type { GitStatus } from "@/types/git"
 
 /** Tooltips need their provider, which the app mounts in its root layout. */
@@ -395,6 +405,7 @@ beforeEach(() => {
   actionCfg.sequencerAbort.mockReset().mockResolvedValue(null)
   actionCfg.can.mockReset().mockReturnValue(true)
   act(() => {
+    useProjectStore.setState({ activeProjectId: null, projects: [] })
     useGitStore.getState().reset()
     useGitStore.setState({ rootDir: "/repo" })
     useGitStore.getState().setRepoState({
@@ -409,6 +420,34 @@ beforeEach(() => {
 })
 
 describe("SourceControlPanel", () => {
+  it("opens the agent view for the panel repository and active project", () => {
+    useProjectStore.setState({
+      activeProjectId: "project-1",
+      projects: [{ id: "project-1", roots: [] } as never],
+    })
+    render(<SourceControlPanel />)
+    fireEvent.click(screen.getByTestId("sc-view-agents"))
+    expect(screen.getByTestId("sc-view-agents")).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByTestId("agent-changes-view-stub")).toHaveAttribute("data-root", "/repo")
+    expect(screen.getByTestId("agent-changes-view-stub")).toHaveAttribute(
+      "data-project",
+      "project-1"
+    )
+    expect(screen.getByTestId("sc-view-body-agents")).toContainElement(
+      screen.getByTestId("agent-changes-view-stub")
+    )
+  })
+
+  it("passes no project when none is active and hides agents without a Git bridge", () => {
+    const { rerender } = render(<SourceControlPanel />)
+    fireEvent.click(screen.getByTestId("sc-view-agents"))
+    expect(screen.getByTestId("agent-changes-view-stub")).toHaveAttribute("data-project", "none")
+    repoCfg.available = false
+    rerender(<SourceControlPanel />)
+    expect(screen.queryByTestId("sc-view-agents")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("agent-changes-view-stub")).not.toBeInTheDocument()
+  })
+
   it("shows the desktop-only state on web", () => {
     repoCfg.available = false
     render(<SourceControlPanel />)

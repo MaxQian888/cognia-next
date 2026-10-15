@@ -110,16 +110,60 @@ describe("action.team.reconcile executor", () => {
     })
   })
 
-  it("rejects merge-all until the host provides atomic Registry promotion", async () => {
+  it("runs merge-all through the integration queue with the team's policy and task graph", async () => {
+    const reconcile = jest.fn(async () => ({
+      mode: "merge-all",
+      branches: ["refs/heads/agent/run_test/integrated"],
+      handles: [],
+      summary: "2 changeset(s) integrated",
+    }))
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    jest.spyOn(useAgentTeamStore.getState(), "getTeamTasks").mockReturnValue([
+      { id: "t1", dependencies: [] },
+      { id: "t2", dependencies: ["t1"] },
+    ] as never)
     getTeamRunContextMock.mockReturnValue({
       runId: "run_test",
-      team: { config: { workspaceIsolation: { reconcile: "manual" } } },
-      workspaceController: { reconcile: jest.fn() },
+      team: {
+        id: "team-1",
+        projectId: "project-1",
+        config: {
+          workspaceIsolation: {
+            reconcile: "manual",
+            integration: { target: "base", onConflict: "stop", requiredChecks: ["unit"] },
+          },
+        },
+      },
+      workspaceController: { reconcile },
     })
     const exec = getExecutor("action.team.reconcile", 1)!
+    const res = await exec.execute(makeCtx("action.team.reconcile", { mode: "merge-all" }))
 
-    await expect(
-      exec.execute(makeCtx("action.team.reconcile", { mode: "merge-all" }))
-    ).rejects.toThrow(/host-side atomic Registry promotion/)
+    expect((res.output as { reconciled: boolean }).reconciled).toBe(true)
+    const [options] = reconcile.mock.calls[0] as unknown as [
+      {
+        mode: string
+        mergeAll: { config: unknown; dependencies: unknown; deps: Record<string, unknown> }
+      },
+    ]
+    expect(options.mode).toBe("merge-all")
+    expect(options.mergeAll.config).toEqual({
+      target: "base",
+      strategy: "merge",
+      onConflict: "stop",
+      requiredChecks: ["unit"],
+    })
+    expect(options.mergeAll.dependencies).toEqual({ t1: [], t2: ["t1"] })
+    for (const port of [
+      "host",
+      "review",
+      "integrate",
+      "currentBranch",
+      "branchExists",
+      "createBranch",
+      "signal",
+    ]) {
+      expect(options.mergeAll.deps[port]).toBeDefined()
+    }
   })
 })

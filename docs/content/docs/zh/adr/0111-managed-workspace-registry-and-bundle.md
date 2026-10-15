@@ -11,6 +11,10 @@ description: 在复用现有 Task Workspace patch 引擎的前提下，统一 wo
 
 ADR-0111 **尚未接受**。只有“验证”章节的端到端矩阵全部通过后才能接受，其中包括后台隔离、两种 handoff、archive/restore、imported discovery 与真实 Tauri smoke。
 
+## 实现更新（2026-10-15）
+
+本 ADR 遗留的“宿主侧 Agent Team merge-all 晋升事务”由 ADR-0227 的集成队列提供。Agent Team 的 `merge-all` 不再失败关闭：每个成功的环境被捕获为钉住到某个提交的 changeset（会扣除 `workingState` 叠加层，用户未提交的工作绝不会随之带走），针对其 head 进行审查与检查，在宿主所有的集成工作树中组合（锁原因为 `cognia-integration:<repo>`，对账、保留、接管与手动删除都不会触碰它），按组合结果验证，并以比较并交换方式发布，同时记录可回滚的操作。
+
 ## 实现更新（2026-08-24）
 
 2026-08-13 关于 Registry storage、bundle、scheduler isolation 与 AgentTeam lease 已实现的表述不准确。当前代码已经具备持久化 Registry/Bundle 行、带签名锁的原子 Git 创建、事务式多根申请（含非 Git shadow）、canonical session binding、仓库配置校验、生命周期策略持久化与容量门禁、archive/restore/delete、受保护的 permanent/imported 分类、启动导入与显式 Adopt、provider-neutral PR base resolution、服务端计算动作的统一环境清单、multi-root Bundle Turn lease、持久化原子 handoff/retry/undo、Tauri/Companion 命令、生成的 headless/OpenAPI/CLI 契约一致性，以及宿主启动时与每 24 小时一次的维护。Chat、Scheduler、Agent Team、external agent、connector 与 local Tauri execution 现已统一申请 Registry Bundle，失败时关闭执行，不再回退写入 live project root。旧 Agent Team allocator/reconciler/judge 已删除。手动 Worktree 面板读取 Registry ownership 并拒绝移除受管或 imported 行，host 在 reconcile 后重复执行同一保护。

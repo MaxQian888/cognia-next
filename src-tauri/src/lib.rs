@@ -994,6 +994,26 @@ pub fn run() {
             task_workspace::task_workspace_managed_adopt,
             task_workspace::task_workspace_environment_adopt,
             task_workspace::task_workspace_environment_create_branch,
+            task_workspace::task_workspace_environment_delete_branch,
+            task_workspace::task_workspace_changeset_get,
+            task_workspace::task_workspace_changeset_list,
+            task_workspace::task_workspace_changeset_eligibility,
+            task_workspace::task_workspace_integration_analyze,
+            task_workspace::task_workspace_integration_get,
+            task_workspace::task_workspace_integration_list,
+            task_workspace::task_workspace_changeset_capture,
+            task_workspace::task_workspace_changeset_mark_ready,
+            task_workspace::task_workspace_changeset_record_review,
+            task_workspace::task_workspace_changeset_record_check,
+            task_workspace::task_workspace_changeset_approve,
+            task_workspace::task_workspace_changeset_abandon,
+            task_workspace::task_workspace_integration_prepare,
+            task_workspace::task_workspace_integration_record_check,
+            task_workspace::task_workspace_integration_publish,
+            task_workspace::task_workspace_integration_rebuild,
+            task_workspace::task_workspace_integration_drop_item,
+            task_workspace::task_workspace_integration_abort,
+            task_workspace::task_workspace_integration_rollback,
             task_workspace::task_workspace_managed_archive,
             task_workspace::task_workspace_managed_restore,
             task_workspace::task_workspace_managed_delete,
@@ -2097,6 +2117,43 @@ mod tests {
             production_source.contains("companion_api::commands::restore_reachability("),
             "saved companion reachability must be restored from the Tauri setup hook"
         );
+    }
+
+    #[test]
+    fn changeset_and_integration_commands_are_registered_and_granted() {
+        let production_source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let grant = include_str!("../permissions/all-app-commands.toml");
+        for command in [
+            "task_workspace_changeset_get",
+            "task_workspace_changeset_list",
+            "task_workspace_changeset_eligibility",
+            "task_workspace_integration_analyze",
+            "task_workspace_integration_get",
+            "task_workspace_integration_list",
+            "task_workspace_changeset_capture",
+            "task_workspace_changeset_mark_ready",
+            "task_workspace_changeset_record_review",
+            "task_workspace_changeset_record_check",
+            "task_workspace_changeset_approve",
+            "task_workspace_changeset_abandon",
+            "task_workspace_integration_prepare",
+            "task_workspace_integration_record_check",
+            "task_workspace_integration_publish",
+            "task_workspace_integration_rebuild",
+            "task_workspace_integration_drop_item",
+            "task_workspace_integration_abort",
+            "task_workspace_integration_rollback",
+            "task_workspace_environment_delete_branch",
+        ] {
+            assert!(
+                production_source.contains(&format!("task_workspace::{command},")),
+                "{command} must remain in tauri::generate_handler!"
+            );
+            assert!(
+                grant.contains(&format!("\"{command}\"")),
+                "{command} must remain in the app ACL"
+            );
+        }
     }
 
     /// The app declares an ACL manifest (build.rs → AppManifest), which turns on

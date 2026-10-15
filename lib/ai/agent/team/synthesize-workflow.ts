@@ -142,6 +142,9 @@ export function validateTeamTaskGraph(
   }
 }
 
+/** The one integration node a `merge-all` team's workflow ends in. Not a task. */
+export const TEAM_RECONCILE_NODE_ID = "__team_reconcile__"
+
 export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult {
   validateTeamTaskGraph(input.tasks, input.satisfiedDependencyIds)
   const taskIdSet = new Set(input.tasks.map((task) => task.id))
@@ -253,6 +256,30 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
         id: `${gateOf(dep)}->${t.id}`,
         source: gateOf(dep),
         target: t.id,
+      } as WorkflowEdge)
+    }
+  }
+
+  // `merge-all` integrates through the host queue once every task of this
+  // workflow has passed its gate (ADR-0227 §5). One node, depending on every
+  // terminal gate, so the scheduler runs it last; under `errorPolicy: "stop"` a
+  // failed task stops the run before anything is integrated. With adaptive
+  // waves each wave integrates its own candidates onto the same run branch.
+  if (input.team.config?.workspaceIsolation?.reconcile === "merge-all" && input.tasks.length > 0) {
+    const dependedOn = new Set(input.tasks.flatMap((t) => t.dependencies.filter(isIntra)))
+    nodes.push({
+      id: TEAM_RECONCILE_NODE_ID,
+      type: "action.team.reconcile",
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: { label: "Integrate", params: { mode: "merge-all" } },
+    } as WorkflowNode)
+    for (const t of input.tasks) {
+      if (dependedOn.has(t.id)) continue
+      edges.push({
+        id: `${gateOf(t.id)}->${TEAM_RECONCILE_NODE_ID}`,
+        source: gateOf(t.id),
+        target: TEAM_RECONCILE_NODE_ID,
       } as WorkflowEdge)
     }
   }

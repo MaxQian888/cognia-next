@@ -813,7 +813,7 @@ fn validate_symlink_target(link_path: &Path, target: &Path) -> Result<(), String
     Ok(())
 }
 
-fn excluded(path: &Path, root: &Path, generated_roots: &[String]) -> bool {
+pub(crate) fn excluded(path: &Path, root: &Path, generated_roots: &[String]) -> bool {
     let Ok(rel) = path.strip_prefix(root) else {
         return true;
     };

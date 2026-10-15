@@ -13,6 +13,17 @@ ADR-0111 is **not accepted**. Acceptance requires the end-to-end matrix in
 Verification to pass, including background isolation, both handoff modes,
 archive/restore, imported discovery, and real Tauri smoke coverage.
 
+## Implementation update (2026-10-15)
+
+The "host-side Agent Team merge-all promotion transaction" this ADR left open
+is ADR-0227's integration queue. Agent Team `merge-all` no longer fails closed:
+each successful environment is captured as a changeset pinned to a commit
+(with a `workingState` overlay subtracted, so the user's uncommitted work never
+travels with it), reviewed and checked against its head, composed in a
+host-owned integration worktree (lock reason `cognia-integration:<repo>`, which
+reconcile, retention, adoption and manual removal all leave alone), verified as
+composed, and published by compare-and-swap with a recorded rollback.
+
 ## Implementation update (2026-08-24)
 
 The 2026-08-13 statement that Registry storage, bundles, scheduler isolation,

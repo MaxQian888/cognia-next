@@ -221,6 +221,7 @@
     "0223-files-is-a-space-you-manage",
     "0224-an-always-on-host-is-a-peer-the-user-brings",
     "0225-the-tray-panel-is-a-glance-surface-assembled-from-modules",
-    "0226-library-plugins-declare-contracts-over-ipc"
+    "0226-library-plugins-declare-contracts-over-ipc",
+    "0227-agent-changes-integrate-through-one-host-queue"
   ]
 }

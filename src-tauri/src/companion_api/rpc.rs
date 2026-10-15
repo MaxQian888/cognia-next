@@ -893,6 +893,26 @@ const KNOWN_COMMANDS: &[&str] = &[
     "task_workspace_managed_adopt",
     "task_workspace_environment_adopt",
     "task_workspace_environment_create_branch",
+    "task_workspace_environment_delete_branch",
+    "task_workspace_changeset_get",
+    "task_workspace_changeset_list",
+    "task_workspace_changeset_eligibility",
+    "task_workspace_integration_analyze",
+    "task_workspace_integration_get",
+    "task_workspace_integration_list",
+    "task_workspace_changeset_capture",
+    "task_workspace_changeset_mark_ready",
+    "task_workspace_changeset_record_review",
+    "task_workspace_changeset_record_check",
+    "task_workspace_changeset_approve",
+    "task_workspace_changeset_abandon",
+    "task_workspace_integration_prepare",
+    "task_workspace_integration_record_check",
+    "task_workspace_integration_publish",
+    "task_workspace_integration_rebuild",
+    "task_workspace_integration_drop_item",
+    "task_workspace_integration_abort",
+    "task_workspace_integration_rollback",
     "task_workspace_managed_restore",
     "task_workspace_managed_delete",
     "task_workspace_settle",
@@ -1275,6 +1295,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // deployment facts (`host.observe` / `host.admin`); the approvals and the
     // egress grants are workspace-scoped and carry their own ADR-0149
     // authority check on top of the capability.
+    "environment_delivery_list",
     "environment_catalog_list",
     "environment_catalog_get",
     "environment_catalog_create",
@@ -1525,6 +1546,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "task_workspace_bundle_turn_get",
     "task_workspace_policy_get",
     "task_workspace_maintenance_events",
+    "task_workspace_changeset_get",
+    "task_workspace_changeset_list",
+    "task_workspace_changeset_eligibility",
+    "task_workspace_integration_analyze",
+    "task_workspace_integration_get",
+    "task_workspace_integration_list",
     "task_workspace_get",
     "task_workspace_list",
     "task_workspace_list_runs",
@@ -1640,6 +1667,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // ADR-0059 W2: the brain's runtimes as they are now.
     "host_runtime_status",
     // Runtime environments — every read is a projection of stored state.
+    "environment_delivery_list",
     "environment_catalog_list",
     "environment_catalog_get",
     "environment_declaration_read",
@@ -1863,10 +1891,24 @@ const CONTROL_COMMANDS: &[&str] = &[
     "task_workspace_managed_adopt",
     "task_workspace_environment_adopt",
     "task_workspace_environment_create_branch",
+    "task_workspace_environment_delete_branch",
     "task_workspace_managed_restore",
     "task_workspace_managed_delete",
     "task_workspace_settle",
     "task_resource_upload_write_chunk",
+    "task_workspace_changeset_capture",
+    "task_workspace_changeset_mark_ready",
+    "task_workspace_changeset_record_review",
+    "task_workspace_changeset_record_check",
+    "task_workspace_changeset_approve",
+    "task_workspace_changeset_abandon",
+    "task_workspace_integration_prepare",
+    "task_workspace_integration_record_check",
+    "task_workspace_integration_publish",
+    "task_workspace_integration_rebuild",
+    "task_workspace_integration_drop_item",
+    "task_workspace_integration_abort",
+    "task_workspace_integration_rollback",
     "task_resource_upload_commit",
     "task_resource_upload_abort",
     "code_snapshot_upload_open",
@@ -3732,4 +3774,39 @@ fn scratch_ensure_is_registered_only_on_the_service_plane() {
     assert!(SERVICE_ONLY_COMMANDS.contains(&command));
     assert!(is_service_only_command(command));
     assert!(service_plane::COMMANDS.contains(&command));
+}
+#[cfg(test)]
+#[test]
+fn changeset_and_integration_commands_have_matching_remote_control_classification() {
+    for (command, read_only) in [
+        ("task_workspace_changeset_get", true),
+        ("task_workspace_changeset_list", true),
+        ("task_workspace_changeset_eligibility", true),
+        ("task_workspace_integration_analyze", true),
+        ("task_workspace_integration_get", true),
+        ("task_workspace_integration_list", true),
+        ("task_workspace_changeset_capture", false),
+        ("task_workspace_changeset_mark_ready", false),
+        ("task_workspace_changeset_record_review", false),
+        ("task_workspace_changeset_record_check", false),
+        ("task_workspace_changeset_approve", false),
+        ("task_workspace_changeset_abandon", false),
+        ("task_workspace_integration_prepare", false),
+        ("task_workspace_integration_record_check", false),
+        ("task_workspace_integration_publish", false),
+        ("task_workspace_integration_rebuild", false),
+        ("task_workspace_integration_drop_item", false),
+        ("task_workspace_integration_abort", false),
+        ("task_workspace_integration_rollback", false),
+    ] {
+        assert!(known_commands().contains(&command), "missing {command}");
+        assert_eq!(
+            READ_ONLY_COMMANDS_SET.contains(command),
+            read_only,
+            "{command}"
+        );
+        assert_eq!(is_control_command(command), !read_only, "{command}");
+        assert!(!is_service_only_command(command), "{command}");
+        assert!(filesystem::COMMANDS.contains(&command), "{command}");
+    }
 }

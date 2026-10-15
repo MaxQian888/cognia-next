@@ -64,6 +64,11 @@ jest.mock("@/lib/ai/agent/team/ledger/review-evidence", () => ({
   buildReviewEvidence: (...args: unknown[]) => buildReviewEvidence(...args),
 }))
 
+const gitStatus = jest.fn()
+jest.mock("@/lib/git/commands", () => ({
+  gitStatus: (...args: unknown[]) => gitStatus(...args),
+}))
+
 const listAgentTeamEvidence = jest.fn()
 jest.mock("@/lib/db/agent-team-runtime", () => ({
   listAgentTeamEvidence: (...args: unknown[]) => listAgentTeamEvidence(...args),
@@ -303,6 +308,47 @@ describe("reviewTeamTask", () => {
     await expect(reviewTeamTask(ctx(params, {}))).rejects.toThrow(
       /no output from dispatch node "dispatch"/
     )
+  })
+
+  describe("review base for an isolated workspace", () => {
+    const controller = (sourceRoot: string | undefined) => ({
+      getDispatchExecutionRoot: () => "/managed/b1/app",
+      getDispatchSourceRoot: () => sourceRoot,
+    })
+    const evidenceInput = () => buildReviewEvidence.mock.calls.at(-1)?.[0]
+
+    beforeEach(() => gitStatus.mockReset())
+
+    it("diffs against the configured base ref", async () => {
+      const teamCtx = reviewCtx({
+        team: { config: { workspaceIsolation: { baseRef: "release/1" } } },
+        workspaceController: controller("/repo/app"),
+      })
+      teamCtx.runLeadReview.mockResolvedValue({ verdict: "approved", feedback: "" })
+      await reviewTeamTask(ctx(params, upstream))
+      expect(evidenceInput()).toMatchObject({
+        workingDir: "/managed/b1/app",
+        workingDirBase: "release/1",
+      })
+      expect(gitStatus).not.toHaveBeenCalled()
+    })
+
+    it("falls back to the branch the source checkout is on", async () => {
+      gitStatus.mockResolvedValue({ branch: "main" })
+      const teamCtx = reviewCtx({ workspaceController: controller("/repo/app") })
+      teamCtx.runLeadReview.mockResolvedValue({ verdict: "approved", feedback: "" })
+      await reviewTeamTask(ctx(params, upstream))
+      expect(gitStatus).toHaveBeenCalledWith("/repo/app")
+      expect(evidenceInput()).toMatchObject({ workingDirBase: "main" })
+    })
+
+    it("reviews without a base when the source branch cannot be read", async () => {
+      gitStatus.mockRejectedValue(new Error("not a repository"))
+      const teamCtx = reviewCtx({ workspaceController: controller("/repo/app") })
+      teamCtx.runLeadReview.mockResolvedValue({ verdict: "approved", feedback: "" })
+      await reviewTeamTask(ctx(params, upstream))
+      expect(evidenceInput()).toEqual({ workingDir: "/managed/b1/app", taskId: "t1" })
+    })
   })
 
   it("approves with the task's durable evidence and completes the card", async () => {

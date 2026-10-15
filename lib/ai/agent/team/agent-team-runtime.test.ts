@@ -29,7 +29,7 @@ jest.mock("@/lib/db/agent-team-runtime", () => ({
 }))
 jest.mock("./workspace/registry-controller", () => ({
   AgentTeamRegistryWorkspaceController: class FakeController {
-    constructor(public readonly options: { roots: unknown[] }) {}
+    constructor(public readonly options: { roots: unknown[]; deleteBranch?: unknown }) {}
     async openDispatch(input: { taskId: string }) {
       return {
         primaryAlias: `/alias/${input.taskId}`,
@@ -484,6 +484,10 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     ).resolves.toMatchObject({ status: "completed" })
     expect(observed).toHaveLength(1)
     expect(observed[0]).toBeDefined()
+    // `select` can roll back the branches it made.
+    expect((observed[0] as { options: { deleteBranch?: unknown } }).options.deleteBranch).toEqual(
+      expect.any(Function)
+    )
   })
 
   it("omits triggeredBy for non-IM (UI/API) runs", async () => {
@@ -1114,6 +1118,29 @@ describe("runTeamLifecycle — ultracode orchestration", () => {
     expect(deps._messages.some((m) => m.content === "Final report.")).toBe(true)
     // Planner + sweep finder + synthesize all dispatched through executeAgent.
     expect((executeAgent as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it("warns that a merge-all ultracode run is not integrated automatically", async () => {
+    wireUltracodeMock()
+    const team = ultracodeTeam()
+    const isolated = {
+      ...team,
+      config: {
+        ...team.config,
+        workingDir: "/repo",
+        workspaceIsolation: { enabled: true, reconcile: "merge-all" },
+      },
+    } as AgentTeam
+    const deps = buildDeps(isolated, [], [lead, worker("w1"), worker("w2")])
+    const toast = jest.fn()
+    deps.notifierDeps = { ...deps.notifierDeps, toast }
+
+    await runTeamLifecycle("team-1", deps, undefined)
+
+    expect(toast).toHaveBeenCalledWith(
+      "Workspace promotion requires review",
+      expect.objectContaining({ description: expect.stringMatching(/Ultracode runs/) })
+    )
   })
 
   it("honours ultracodeOverride='off' to force the flat task DAG", async () => {

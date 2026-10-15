@@ -403,8 +403,10 @@ export async function reviewTeamTask(ctx: StepExecutionContext): Promise<StepExe
 
   for (let revision = 0; revision <= maxRevisions; revision++) {
     const executionRoot = teamCtx.workspaceController?.getDispatchExecutionRoot(taskId)
+    const workingDirBase = executionRoot ? await reviewBaseFor(teamCtx, taskId) : null
     const evidence = await buildReviewEvidence({
       ...(executionRoot ? { workingDir: executionRoot } : {}),
+      ...(workingDirBase ? { workingDirBase } : {}),
       taskId,
     })
     const durableEvidence = await (
@@ -523,7 +525,77 @@ export async function reviewTeamTask(ctx: StepExecutionContext): Promise<StepExe
   )
 }
 
+/**
+ * The ref a task's Registry environment forked from, for the lead's evidence:
+ * the run's `baseRef`, else the branch the source checkout is on. The diff is
+ * three-dot, so a source branch that moved on since the fork still yields only
+ * the environment's own commits. Null (no base) keeps the working-tree rung.
+ */
+async function reviewBaseFor(
+  teamCtx: import("@/lib/ai/agent/team/team-run-context").TeamRunContext,
+  taskId: string
+): Promise<string | null> {
+  const configured = teamCtx.team.config.workspaceIsolation?.baseRef
+  if (configured) return configured
+  const sourceRoot = teamCtx.workspaceController?.getDispatchSourceRoot(taskId)
+  if (!sourceRoot) return null
+  try {
+    const { gitStatus } = await import("@/lib/git/commands")
+    return (await gitStatus(sourceRoot)).branch
+  } catch {
+    return null
+  }
+}
+
 // ── action.team.reconcile ─────────────────────────────────────────────────
+
+/**
+ * What `merge-all` integrates with (ADR-0227 §5): the production changeset
+ * pipeline for the team's project, the run's integration policy, and the task
+ * graph so each changeset declares the ones it depends on.
+ */
+async function mergeAllOptions(
+  ctx: StepExecutionContext,
+  team: import("@/types/agent/agent-team").AgentTeam
+): Promise<import("@/lib/ai/agent/team/workspace/registry-controller").AgentTeamMergeAllOptions> {
+  const [
+    { createScmRuntime, scmGitPortsFor },
+    { DEFAULT_AGENT_TEAM_INTEGRATION },
+    { useSettingsStore },
+    { useAgentTeamStore },
+  ] = await Promise.all([
+    import("@/lib/scm/runtime"),
+    import("@/lib/ai/agent/team/workspace/integrate-team-run"),
+    import("@/stores/settings/settings-store"),
+    import("@/stores/agent/agent-team-store"),
+  ])
+  const configured = team.config.workspaceIsolation?.integration ?? {}
+  const runtime = createScmRuntime({
+    projectId: ctx.projectId ?? team.projectId ?? null,
+    appSettings: useSettingsStore.getState().settings,
+  })
+  const dependencies: Record<string, string[]> = {}
+  for (const task of useAgentTeamStore.getState().getTeamTasks(team.id)) {
+    dependencies[task.id] = [...task.dependencies]
+  }
+  return {
+    config: {
+      target: configured.target ?? DEFAULT_AGENT_TEAM_INTEGRATION.target,
+      strategy: configured.strategy ?? DEFAULT_AGENT_TEAM_INTEGRATION.strategy,
+      onConflict: configured.onConflict ?? DEFAULT_AGENT_TEAM_INTEGRATION.onConflict,
+      requiredChecks: configured.requiredChecks ?? [],
+    },
+    dependencies,
+    deps: {
+      host: runtime.host,
+      review: (changesetId) => runtime.review(changesetId, ctx.signal),
+      integrate: (input) => runtime.integrate(input),
+      ...scmGitPortsFor(),
+      signal: ctx.signal,
+    },
+  }
+}
+
 // Explicit promotion checkpoint for Registry-managed Agent Team environments.
 export async function reconcileTeamRun(ctx: StepExecutionContext): Promise<StepExecutionResult> {
   const params = ctx.params as {
@@ -541,9 +613,11 @@ export async function reconcileTeamRun(ctx: StepExecutionContext): Promise<StepE
   }
   const mode = params.mode ?? teamCtx.team.config.workspaceIsolation?.reconcile ?? "manual"
   if (mode === "merge-all") {
-    throw nonRetryable(
-      "action.team.reconcile: merge-all requires a host-side atomic Registry promotion transaction"
-    )
+    const result = await teamCtx.workspaceController.reconcile({
+      mode,
+      mergeAll: await mergeAllOptions(ctx, teamCtx.team),
+    })
+    return { output: { reconciled: true, ...result } }
   }
   const selectStrategy =
     params.selectStrategy ?? teamCtx.team.config.workspaceIsolation?.selectStrategy

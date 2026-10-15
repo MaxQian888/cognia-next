@@ -811,6 +811,18 @@ export function createWorkspaceBranch(
   return transport.call("task_workspace_environment_create_branch", { workspaceId, branch })
 }
 
+/**
+ * Delete a branch {@link createWorkspaceBranch} made, leaving the environment
+ * detached at the same commit. A branch the environment does not record, or a
+ * repeat, answers the record unchanged.
+ */
+export function deleteWorkspaceBranch(
+  workspaceId: string,
+  branch: string
+): Promise<ManagedWorkspaceRecord> {
+  return transport.call("task_workspace_environment_delete_branch", { workspaceId, branch })
+}
+
 export function adoptManagedWorkspace(workspaceId: string): Promise<ManagedWorkspaceRecord> {
   return transport.call("task_workspace_managed_adopt", { workspaceId })
 }

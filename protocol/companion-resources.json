@@ -529,6 +529,7 @@
     },
     "environment": {
       "children": {
+        "delivery": {},
         "approval": {},
         "catalog": {},
         "declaration": {},
@@ -1168,12 +1169,18 @@
                 "turn": {}
               }
             },
+            "changeset": {
+              "children": {
+                "eligibility": {}
+              }
+            },
             "conflict": {},
             "environment": {
               "children": {
                 "branch": {}
               }
             },
+            "integration": {},
             "maintenance": {},
             "maintenance_event": {},
             "managed": {},

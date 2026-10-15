@@ -415,11 +415,18 @@ export async function runTeamLifecycle(
     let workspaceController:
       import("./workspace/registry-controller").AgentTeamRegistryWorkspaceController | undefined
     if (configuredRoots.length > 0) {
-      const { AgentTeamRegistryWorkspaceController } =
-        await import("./workspace/registry-controller")
+      const [{ AgentTeamRegistryWorkspaceController }, { deleteWorkspaceBranch }] =
+        await Promise.all([
+          import("./workspace/registry-controller"),
+          import("@/lib/task-workspace/client"),
+        ])
       workspaceController = new AgentTeamRegistryWorkspaceController({
         runId,
         roots: configuredRoots,
+        // `select` rolls back the branches it made when a later one fails.
+        deleteBranch: async (workspaceId, branch) => {
+          await deleteWorkspaceBranch(workspaceId, branch)
+        },
         base: isoCfg?.baseRef
           ? { kind: "gitRef", gitRef: isoCfg.baseRef }
           : origin === "interactive"
@@ -1020,11 +1027,20 @@ export async function runTeamLifecycle(
     // ── Workspace isolation: one Registry/Bundle authority ──
     // A tool-capable local dispatch may only receive a Registry alias. Browser
     // text-only execution does not touch the filesystem and needs no controller.
-    if (isoCfg?.enabled && isoCfg.reconcile && !["manual", "pipeline"].includes(isoCfg.reconcile)) {
+    // `merge-all` is applied by the synthesized reconcile node (ADR-0227) of
+    // the task DAG; an ultracode pattern workflow has no task gates to hang it
+    // on, so there it is promoted for review like `select`.
+    if (
+      isoCfg?.enabled &&
+      (isoCfg.reconcile === "select" || (isoCfg.reconcile === "merge-all" && ultracodeActive))
+    ) {
       notifier.notify({
         level: "warn",
         title: "Workspace promotion requires review",
-        body: `The ${isoCfg.reconcile} reconcile mode is not applied automatically to detached Registry environments. Review and promote the result explicitly.`,
+        body:
+          isoCfg.reconcile === "merge-all"
+            ? "Ultracode runs do not integrate teammate workspaces automatically. Review the agent changes and integrate them explicitly."
+            : `The ${isoCfg.reconcile} reconcile mode is not applied automatically to detached Registry environments. Review and promote the result explicitly.`,
         runId,
         teamId,
         dedupeKey: `wsiso-promotion:${runId}`,

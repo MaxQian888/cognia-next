@@ -44,6 +44,7 @@ sha2.workspace = true
 # ADR-0224 A11b: a folder that is not a git checkout reaches an always-on
 # host as a gzip tar (`code_snapshot`).
 tar.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v4", "v7"] }
 
@@ -54,9 +55,6 @@ uuid = { workspace = true, features = ["v4", "v7"] }
 # exposed through a stable API).
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
 
 [lints]
 workspace = true

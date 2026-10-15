@@ -9045,6 +9045,308 @@
         "additionalProperties": false
       }
     },
+    "task_workspace_changeset_abandon": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changesetId": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "changesetId",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_changeset_approve": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changesetId": {
+            "type": "string"
+          },
+          "headSha": {
+            "type": "string"
+          },
+          "approver": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "changesetId",
+          "headSha",
+          "approver",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_changeset_capture": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "workspaceId": {
+                "type": "string"
+              },
+              "targetRef": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "dependsOn": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "requiredChecks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "changesetId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "workspaceId",
+              "title"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "input",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_changeset_mark_ready": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changesetId": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "changesetId",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_changeset_record_check": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changesetId": {
+            "type": "string"
+          },
+          "check": {
+            "type": "object",
+            "properties": {
+              "headSha": {
+                "type": "string"
+              },
+              "profileId": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "inconclusive"
+                ]
+              },
+              "tier": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reportDigest": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "logTail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ranAt": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "headSha",
+              "profileId",
+              "outcome",
+              "ranAt"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "changesetId",
+          "check",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_changeset_record_review": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changesetId": {
+            "type": "string"
+          },
+          "review": {
+            "type": "object",
+            "properties": {
+              "headSha": {
+                "type": "string"
+              },
+              "verdict": {
+                "type": "string",
+                "enum": [
+                  "approve",
+                  "requestChanges",
+                  "comment",
+                  "unavailable"
+                ]
+              },
+              "reviewer": {
+                "type": "string",
+                "enum": [
+                  "agent",
+                  "user",
+                  "deterministic"
+                ]
+              },
+              "riskTier": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "info",
+                        "warning",
+                        "critical"
+                      ]
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "severity",
+                    "note"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "requiresHumanApproval": {
+                "type": "boolean"
+              },
+              "recordedAt": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "headSha",
+              "verdict",
+              "reviewer",
+              "riskTier",
+              "reasons",
+              "findings",
+              "requiresHumanApproval",
+              "recordedAt"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "changesetId",
+          "review",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
     "task_workspace_environment_adopt": {
       "inputSchemaSource": "contract",
       "inputSchema": {
@@ -9099,6 +9401,329 @@
             "minLength": 1
           }
         },
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_environment_delete_branch": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "workspaceId",
+          "branch",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_integration_abort": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "integrationId",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_integration_drop_item": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string"
+          },
+          "changesetId": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "integrationId",
+          "changesetId",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_integration_prepare": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "changesetIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "requiredChecks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "targetRef": {
+                "type": "string"
+              },
+              "strategy": {
+                "type": "string",
+                "enum": [
+                  "merge",
+                  "rebase"
+                ]
+              },
+              "onConflict": {
+                "type": "string",
+                "enum": [
+                  "skip",
+                  "stop"
+                ]
+              },
+              "provisioning": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "sparsePaths": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "cacheLinks": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "source": {
+                              "type": "string"
+                            },
+                            "target": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "source",
+                            "target"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "include": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "integrationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "changesetIds",
+              "targetRef",
+              "strategy",
+              "onConflict"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "input",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_integration_publish": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string"
+          },
+          "candidateSha": {
+            "type": "string"
+          },
+          "requiredChecks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "integrationId",
+          "candidateSha",
+          "requiredChecks",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_integration_rebuild": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "integrationId",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_integration_record_check": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string"
+          },
+          "candidateSha": {
+            "type": "string"
+          },
+          "check": {
+            "type": "object",
+            "properties": {
+              "headSha": {
+                "type": "string"
+              },
+              "profileId": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "inconclusive"
+                ]
+              },
+              "tier": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reportDigest": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "logTail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ranAt": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "headSha",
+              "profileId",
+              "outcome",
+              "ranAt"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "integrationId",
+          "candidateSha",
+          "check",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "task_workspace_integration_rollback": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "integrationId",
+          "adminLease"
+        ],
         "additionalProperties": false
       }
     },

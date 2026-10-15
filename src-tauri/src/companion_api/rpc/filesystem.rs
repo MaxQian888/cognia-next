@@ -43,6 +43,26 @@ pub(super) const COMMANDS: &[&str] = &[
     "task_workspace_managed_adopt",
     "task_workspace_environment_adopt",
     "task_workspace_environment_create_branch",
+    "task_workspace_environment_delete_branch",
+    "task_workspace_changeset_get",
+    "task_workspace_changeset_list",
+    "task_workspace_changeset_eligibility",
+    "task_workspace_integration_analyze",
+    "task_workspace_integration_get",
+    "task_workspace_integration_list",
+    "task_workspace_changeset_capture",
+    "task_workspace_changeset_mark_ready",
+    "task_workspace_changeset_record_review",
+    "task_workspace_changeset_record_check",
+    "task_workspace_changeset_approve",
+    "task_workspace_changeset_abandon",
+    "task_workspace_integration_prepare",
+    "task_workspace_integration_record_check",
+    "task_workspace_integration_publish",
+    "task_workspace_integration_rebuild",
+    "task_workspace_integration_drop_item",
+    "task_workspace_integration_abort",
+    "task_workspace_integration_rollback",
     "task_workspace_managed_restore",
     "task_workspace_managed_delete",
     "task_workspace_settle",
@@ -95,6 +115,50 @@ pub(super) const COMMANDS: &[&str] = &[
 // Bound disk work across all paired peers. A permit moves into the blocking
 // closure, so disconnecting a caller cannot free capacity while its I/O runs.
 static TRANSFER_IO_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+
+/// HTTP status for the changeset / integration rejections the shared
+/// problem table does not know: a state race is a conflict, an unmet gate is
+/// unprocessable, a malformed reference is a bad request.
+fn scm_status(code: &str) -> Option<StatusCode> {
+    Some(match code {
+        "busy"
+        | "stale_head"
+        | "stale_candidate"
+        | "target_moved"
+        | "illegal_transition"
+        | "changeset_state"
+        | "invalid_state"
+        | "dependency"
+        | "rollback_conflict"
+        | "target_checked_out_dirty"
+        | "overlay_conflict" => StatusCode::CONFLICT,
+        "checks"
+        | "ineligible"
+        | "attempts_exhausted"
+        | "cycles"
+        | "nothing_to_capture"
+        | "sensitive_history"
+        | "overlay_unsupported" => StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_input" | "invalid_target" | "invalid_workspace" | "target_required" => {
+            StatusCode::BAD_REQUEST
+        }
+        _ => return None,
+    })
+}
+
+fn scm_command_error(
+    error: cognia_core::command_error::CommandError,
+) -> (StatusCode, Json<RpcError>) {
+    let problem: cognia_problem::Problem = error.into();
+    (
+        scm_status(&problem.code).unwrap_or_else(|| problem.status_code()),
+        Json(RpcError {
+            code: problem.code,
+            message: problem.detail,
+            retryable: problem.retryable,
+        }),
+    )
+}
 
 async fn run_transfer_io<T: Send + 'static>(
     operation: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -524,17 +588,10 @@ pub(super) async fn dispatch(
         "task_workspace_maintenance_run" => {
             let request: Option<cognia_task_workspace::WorkspaceMaintenanceRequest> =
                 optional(&args, "request")?;
-            tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.run_workspace_maintenance(
-                    request.unwrap_or(cognia_task_workspace::WorkspaceMaintenanceRequest {
-                        now: None,
-                    }),
-                )
-            })
-            .await
-            .map_err(|error| RpcError::internal(error.to_string()))?
-            .map_err(RpcError::internal)
-            .and_then(to_json)
+            crate::task_workspace::task_workspace_maintenance_run(request)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
         }
         "task_workspace_maintenance_events" => {
             let page = page_request(&args)?;
@@ -600,6 +657,172 @@ pub(super) async fn dispatch(
             crate::task_workspace::task_workspace_environment_create_branch(workspace_id, branch)
                 .await
                 .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_environment_delete_branch" => {
+            let workspace_id: String = required(&args, "workspaceId")?;
+            let branch: String = required(&args, "branch")?;
+            crate::task_workspace::task_workspace_environment_delete_branch(workspace_id, branch)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_changeset_get" => {
+            let changeset_id: String = required(&args, "changesetId")?;
+            crate::task_workspace::task_workspace_changeset_get(changeset_id)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_changeset_list" => {
+            let filter: cognia_task_workspace::ChangesetFilter = required(&args, "filter")?;
+            crate::task_workspace::task_workspace_changeset_list(filter)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_changeset_eligibility" => {
+            let changeset_id: String = required(&args, "changesetId")?;
+            crate::task_workspace::task_workspace_changeset_eligibility(changeset_id)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_integration_analyze" => {
+            let changeset_ids: Vec<String> = required(&args, "changesetIds")?;
+            let target_ref: Option<String> = optional(&args, "targetRef")?;
+            crate::task_workspace::task_workspace_integration_analyze(changeset_ids, target_ref)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_integration_get" => {
+            let integration_id: String = required(&args, "integrationId")?;
+            crate::task_workspace::task_workspace_integration_get(integration_id)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_integration_list" => {
+            let filter: crate::task_workspace::IntegrationRunFilter = required(&args, "filter")?;
+            crate::task_workspace::task_workspace_integration_list(filter)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_changeset_capture" => {
+            let input: cognia_task_workspace::CaptureChangeset = required(&args, "input")?;
+            crate::task_workspace::task_workspace_changeset_capture(input)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_changeset_mark_ready" => {
+            let changeset_id: String = required(&args, "changesetId")?;
+            crate::task_workspace::task_workspace_changeset_mark_ready(changeset_id)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_changeset_record_review" => {
+            let changeset_id: String = required(&args, "changesetId")?;
+            let review: cognia_task_workspace::ChangesetReview = required(&args, "review")?;
+            crate::task_workspace::task_workspace_changeset_record_review(changeset_id, review)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_changeset_record_check" => {
+            let changeset_id: String = required(&args, "changesetId")?;
+            let check: cognia_task_workspace::ChangesetCheck = required(&args, "check")?;
+            crate::task_workspace::task_workspace_changeset_record_check(changeset_id, check)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_changeset_approve" => {
+            let changeset_id: String = required(&args, "changesetId")?;
+            let head_sha: String = required(&args, "headSha")?;
+            let approver: String = required(&args, "approver")?;
+            crate::task_workspace::task_workspace_changeset_approve(
+                changeset_id,
+                head_sha,
+                approver,
+            )
+            .await
+            .map_err(scm_command_error)
+            .and_then(to_json)
+        }
+        "task_workspace_changeset_abandon" => {
+            let changeset_id: String = required(&args, "changesetId")?;
+            crate::task_workspace::task_workspace_changeset_abandon(changeset_id)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_integration_prepare" => {
+            let input: cognia_task_workspace::PrepareIntegration = required(&args, "input")?;
+            crate::task_workspace::task_workspace_integration_prepare(input)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_integration_record_check" => {
+            let integration_id: String = required(&args, "integrationId")?;
+            let candidate_sha: String = required(&args, "candidateSha")?;
+            let check: cognia_task_workspace::ChangesetCheck = required(&args, "check")?;
+            crate::task_workspace::task_workspace_integration_record_check(
+                integration_id,
+                candidate_sha,
+                check,
+            )
+            .await
+            .map_err(scm_command_error)
+            .and_then(to_json)
+        }
+        "task_workspace_integration_publish" => {
+            let integration_id: String = required(&args, "integrationId")?;
+            let candidate_sha: String = required(&args, "candidateSha")?;
+            let required_checks: Vec<String> = required(&args, "requiredChecks")?;
+            crate::task_workspace::task_workspace_integration_publish(
+                integration_id,
+                candidate_sha,
+                required_checks,
+            )
+            .await
+            .map_err(scm_command_error)
+            .and_then(to_json)
+        }
+        "task_workspace_integration_rebuild" => {
+            let integration_id: String = required(&args, "integrationId")?;
+            crate::task_workspace::task_workspace_integration_rebuild(integration_id)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_integration_drop_item" => {
+            let integration_id: String = required(&args, "integrationId")?;
+            let changeset_id: String = required(&args, "changesetId")?;
+            crate::task_workspace::task_workspace_integration_drop_item(
+                integration_id,
+                changeset_id,
+            )
+            .await
+            .map_err(scm_command_error)
+            .and_then(to_json)
+        }
+        "task_workspace_integration_abort" => {
+            let integration_id: String = required(&args, "integrationId")?;
+            crate::task_workspace::task_workspace_integration_abort(integration_id)
+                .await
+                .map_err(scm_command_error)
+                .and_then(to_json)
+        }
+        "task_workspace_integration_rollback" => {
+            let integration_id: String = required(&args, "integrationId")?;
+            crate::task_workspace::task_workspace_integration_rollback(integration_id)
+                .await
+                .map_err(scm_command_error)
                 .and_then(to_json)
         }
         "task_workspace_managed_restore" => {
@@ -1152,6 +1375,53 @@ pub(super) async fn dispatch(
 mod tests {
     use super::*;
 
+    #[test]
+    fn changeset_rejections_answer_a_client_status_not_a_server_fault() {
+        let status = |code: &str| {
+            scm_command_error(cognia_core::command_error::CommandError {
+                code: code.into(),
+                message: "m".into(),
+                retryable: false,
+            })
+            .0
+        };
+        assert_eq!(status("busy"), StatusCode::CONFLICT);
+        assert_eq!(status("stale_candidate"), StatusCode::CONFLICT);
+        assert_eq!(status("checks"), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(status("invalid_workspace"), StatusCode::BAD_REQUEST);
+        assert_eq!(status("not_found"), StatusCode::NOT_FOUND);
+        assert_eq!(
+            status("service_unavailable"),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(status("git"), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn changeset_command_error_keeps_its_code_and_retryability_on_the_wire() {
+        let error = cognia_task_workspace::IntegrationError::TargetMoved {
+            expected: "expected-tip".into(),
+            actual: Some("new-tip".into()),
+        };
+        let message = error.to_string();
+        let (status, Json(rpc_error)) =
+            scm_command_error(cognia_core::command_error::CommandError {
+                code: error.code().to_string(),
+                message: message.clone(),
+                retryable: error.retryable(),
+            });
+        // A target that moved is a state race, not a server fault.
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(
+            serde_json::to_value(rpc_error).unwrap(),
+            json!({
+                "code": "target_moved",
+                "message": message,
+                "retryable": true
+            })
+        );
+    }
+
     #[tokio::test]
     async fn cancelled_transfer_io_keeps_its_slot_until_disk_work_finishes() {
         let reserved = TRANSFER_IO_SLOTS.acquire_many(7).await.unwrap();
@@ -1208,6 +1478,26 @@ mod tests {
             "task_workspace_managed_adopt",
             "task_workspace_environment_adopt",
             "task_workspace_environment_create_branch",
+            "task_workspace_environment_delete_branch",
+            "task_workspace_changeset_get",
+            "task_workspace_changeset_list",
+            "task_workspace_changeset_eligibility",
+            "task_workspace_integration_analyze",
+            "task_workspace_integration_get",
+            "task_workspace_integration_list",
+            "task_workspace_changeset_capture",
+            "task_workspace_changeset_mark_ready",
+            "task_workspace_changeset_record_review",
+            "task_workspace_changeset_record_check",
+            "task_workspace_changeset_approve",
+            "task_workspace_changeset_abandon",
+            "task_workspace_integration_prepare",
+            "task_workspace_integration_record_check",
+            "task_workspace_integration_publish",
+            "task_workspace_integration_rebuild",
+            "task_workspace_integration_drop_item",
+            "task_workspace_integration_abort",
+            "task_workspace_integration_rollback",
             "task_workspace_managed_restore",
             "task_workspace_managed_delete",
         ] {

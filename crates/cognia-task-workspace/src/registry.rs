@@ -32,7 +32,7 @@ use crate::{
     WorkspaceOwnerType, WorkspaceRecord, WorkspaceState,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 /// Errors the Registry can emit. `String` messages are safe to display to
@@ -83,6 +83,13 @@ pub enum RegistryError {
     /// UI story explicit.
     #[error("workspace {0} is Cognia-owned; imported semantics rejected")]
     NotImported(String),
+
+    /// A caller named a branch the workspace does not record.
+    #[error("workspace {workspace_id} is not on branch {branch}")]
+    BranchMismatch {
+        workspace_id: String,
+        branch: String,
+    },
 
     /// Underlying store call failed. Preserves the message so callers see
     /// the SQLite / IO cause.
@@ -149,11 +156,17 @@ pub fn compose_lock_reason(workspace_id: &str) -> String {
     format!("cognia:{workspace_id}")
 }
 
-/// Split a lock reason back into the workspace id it references. Returns
-/// `None` for reasons the Registry did not author, so `remove` can refuse
-/// them.
+/// Split a Cognia lock reason into its workspace id or integration repo key.
+/// Returns `None` for reasons Cognia did not author.
 pub fn parse_lock_reason(reason: &str) -> Option<&str> {
-    reason.strip_prefix("cognia:")
+    reason
+        .strip_prefix("cognia:")
+        .or_else(|| parse_integration_lock_reason(reason))
+}
+
+/// Integration worktrees belong to the host queue, not to Registry lifecycle.
+pub fn parse_integration_lock_reason(reason: &str) -> Option<&str> {
+    reason.strip_prefix("cognia-integration:")
 }
 
 /// Outcome of one reconcile pass. Callers persist the changes; the
@@ -644,6 +657,30 @@ impl WorkspaceRegistry {
         Ok(record)
     }
 
+    /// Forget `branch` as the workspace's branch, after the host deleted it.
+    /// Refuses a branch the row does not name, so a caller can never clear a
+    /// branch someone else recorded.
+    pub fn clear_branch_metadata(
+        &self,
+        workspace_id: &str,
+        branch: &str,
+    ) -> Result<WorkspaceRecord, RegistryError> {
+        let store = self.store.lock();
+        let mut record = store
+            .get_workspace(workspace_id)
+            .map_err(RegistryError::Store)?
+            .ok_or_else(|| RegistryError::NotFound(workspace_id.to_string()))?;
+        if record.branch.as_deref() != Some(branch) {
+            return Err(RegistryError::BranchMismatch {
+                workspace_id: workspace_id.to_string(),
+                branch: branch.to_string(),
+            });
+        }
+        record.branch = None;
+        store.put_workspace(&record).map_err(RegistryError::Store)?;
+        Ok(record)
+    }
+
     /// Remove a Cognia-owned workspace. Refuses if the lock reason does not
     /// match. Callers must have separately transitioned the workspace to
     /// `Removing` first — this call finalizes it to `Removed` and deletes
@@ -786,6 +823,11 @@ pub fn plan_directory_reclaim(
                 && record.state.is_prunable()
                 && !record.pinned
                 && record.owner_type != WorkspaceOwnerType::Imported
+                && record
+                    .locked_by
+                    .as_deref()
+                    .and_then(parse_integration_lock_reason)
+                    .is_none()
         })
         .collect();
     candidates.sort_by_key(|record| record.last_used_at);
@@ -825,6 +867,11 @@ pub fn plan_snapshot_expiration(
         if record.environment_kind != WorkspaceEnvironmentKind::Managed
             || !record.state.is_prunable()
             || record.pinned
+            || record
+                .locked_by
+                .as_deref()
+                .and_then(parse_integration_lock_reason)
+                .is_some()
         {
             protected.insert(task_id.as_str());
             kept_bytes = kept_bytes.saturating_add(record.size_bytes.unwrap_or(0));
@@ -893,6 +940,22 @@ pub fn plan_reconcile(
     on_disk_execution_roots: &HashSet<String>,
     owner_still_alive: &dyn Fn(&WorkspaceRecord) -> bool,
 ) -> ReconcileOutcome {
+    plan_reconcile_with_locks(
+        records,
+        on_disk_execution_roots,
+        &HashMap::new(),
+        owner_still_alive,
+    )
+}
+
+/// Reconcile a Git inventory while leaving host integration worktrees to the
+/// integration queue. Lock reasons are keyed by the same execution paths.
+pub fn plan_reconcile_with_locks(
+    records: &[WorkspaceRecord],
+    on_disk_execution_roots: &HashSet<String>,
+    lock_reasons: &HashMap<String, String>,
+    owner_still_alive: &dyn Fn(&WorkspaceRecord) -> bool,
+) -> ReconcileOutcome {
     let mut reclaimed = Vec::new();
     let mut orphaned = Vec::new();
     let mut imported = Vec::new();
@@ -902,7 +965,17 @@ pub fn plan_reconcile(
         .map(|record| record.execution_root.as_str())
         .collect();
     for record in records {
-        if record.owner_type == WorkspaceOwnerType::Imported {
+        if record.owner_type == WorkspaceOwnerType::Imported
+            || record
+                .locked_by
+                .as_deref()
+                .and_then(parse_integration_lock_reason)
+                .is_some()
+            || lock_reasons
+                .get(&record.execution_root)
+                .and_then(|reason| parse_integration_lock_reason(reason))
+                .is_some()
+        {
             continue;
         }
         if !on_disk_execution_roots.contains(&record.execution_root) {
@@ -918,7 +991,12 @@ pub fn plan_reconcile(
         }
     }
     for path in on_disk_execution_roots {
-        if !known_roots.contains(path.as_str()) {
+        if !known_roots.contains(path.as_str())
+            && lock_reasons
+                .get(path)
+                .and_then(|reason| parse_integration_lock_reason(reason))
+                .is_none()
+        {
             imported.push(ImportedWorkspaceHint {
                 source_root: String::new(),
                 execution_root: path.clone(),
@@ -974,6 +1052,18 @@ mod tests {
         assert_eq!(reason, "cognia:ws-42");
         assert_eq!(parse_lock_reason(&reason), Some("ws-42"));
         assert_eq!(parse_lock_reason("other:ws-42"), None);
+    }
+
+    #[test]
+    fn integration_lock_reason_is_cognia_owned_but_not_a_workspace_lock() {
+        let reason = "cognia-integration:8ac56d0400ac184f";
+        assert_eq!(parse_lock_reason(reason), Some("8ac56d0400ac184f"));
+        assert_eq!(
+            parse_integration_lock_reason(reason),
+            Some("8ac56d0400ac184f")
+        );
+        assert_eq!(parse_integration_lock_reason("cognia:ws-42"), None);
+        assert_eq!(parse_integration_lock_reason("other:repo"), None);
     }
 
     #[test]
@@ -1523,9 +1613,71 @@ mod tests {
         assert!(plan.is_empty(), "Active-state snapshots must be protected");
     }
 
+    #[test]
+    fn integration_worktree_is_never_a_registry_retention_candidate() {
+        let mut integration = record(
+            "integration",
+            WorkspaceState::Archived,
+            WorkspaceOwnerType::User,
+        );
+        integration.locked_by = Some("cognia-integration:repo-key".into());
+        integration.snapshot_task_id = Some("integration-snapshot".into());
+        integration.size_bytes = Some(100);
+        let mut eligible = record(
+            "eligible",
+            WorkspaceState::Archived,
+            WorkspaceOwnerType::User,
+        );
+        eligible.snapshot_task_id = Some("eligible-snapshot".into());
+        eligible.size_bytes = Some(100);
+        let records = [
+            record("active", WorkspaceState::Active, WorkspaceOwnerType::User),
+            integration,
+            eligible,
+        ];
+        let policy = WorkspaceLifecyclePolicy {
+            active_directory_cap: 0,
+            snapshot_retention_days: 30,
+            blob_budget_bytes: 0,
+        };
+        let directories = plan_directory_reclaim(&records, policy);
+        assert_eq!(directories.len(), 1);
+        assert_eq!(directories[0].workspace_id, "eligible");
+        for now in [1, 45 * 24 * 60 * 60 * 1_000] {
+            let snapshots = plan_snapshot_expiration(&records, policy, now);
+            assert_eq!(snapshots.len(), 1);
+            assert_eq!(snapshots[0].workspace_id, "eligible");
+        }
+    }
+
     // ---------------------------------------------------------------
     // Reconcile
     // ---------------------------------------------------------------
+
+    #[test]
+    fn reconcile_excludes_host_integration_worktrees_from_import_and_orphaning() {
+        let on_disk = HashSet::from(["/tmp/integration".to_string(), "/tmp/manual".to_string()]);
+        let lock_reasons = HashMap::from([(
+            "/tmp/integration".to_string(),
+            "cognia-integration:repo-key".to_string(),
+        )]);
+        let outcome = plan_reconcile_with_locks(&[], &on_disk, &lock_reasons, &|_| false);
+        assert!(outcome.reclaimed.is_empty());
+        assert!(outcome.orphaned.is_empty());
+        assert_eq!(outcome.imported.len(), 1);
+        assert_eq!(outcome.imported[0].execution_root, "/tmp/manual");
+
+        let mut integration = record(
+            "integration",
+            WorkspaceState::Archived,
+            WorkspaceOwnerType::User,
+        );
+        integration.locked_by = Some("cognia-integration:repo-key".into());
+        let outcome = plan_reconcile(&[integration], &HashSet::new(), &|_| false);
+        assert!(outcome.reclaimed.is_empty());
+        assert!(outcome.orphaned.is_empty());
+        assert!(outcome.imported.is_empty());
+    }
 
     #[test]
     fn reconcile_classifies_rows_by_disk_presence_and_owner_liveness() {

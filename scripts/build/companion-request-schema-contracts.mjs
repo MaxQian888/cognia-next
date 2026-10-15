@@ -312,7 +312,112 @@ const mediaClip = z.object({
 })
 const mediaClips = z.array(mediaClip).min(1).max(64)
 
+// ADR-0227: match the camelCase serde records in cognia-task-workspace and
+// the fixed command arguments in lib/scm/host.ts on both host planes.
+const changesetState = z.enum([
+  "draft", "ready", "approved", "changesRequested", "queued", "integrating",
+  "merged", "conflicted", "failed", "rolledBack", "abandoned",
+])
+const integrationState = z.enum([
+  "planned", "preparing", "prepared", "publishing", "published", "stale",
+  "conflicted", "failed", "aborted", "interrupted", "rolledBack",
+])
+const changesetReference = z.object({ changesetId: z.string() })
+const integrationReference = z.object({ integrationId: z.string() })
+const changesetCheck = z.object({
+  headSha: z.string(),
+  profileId: z.string(),
+  outcome: z.enum(["passed", "failed", "inconclusive"]),
+  tier: z.string().nullable().optional(),
+  reportDigest: z.string().nullable().optional(),
+  logTail: z.string().nullable().optional(),
+  ranAt: z.number().int(),
+})
+const changesetReview = z.object({
+  headSha: z.string(),
+  verdict: z.enum(["approve", "requestChanges", "comment", "unavailable"]),
+  reviewer: z.enum(["agent", "user", "deterministic"]),
+  riskTier: z.enum(["low", "medium", "high"]),
+  reasons: stringArray,
+  findings: z.array(z.object({
+    path: z.string(),
+    severity: z.enum(["info", "warning", "critical"]),
+    note: z.string(),
+  })),
+  requiresHumanApproval: z.boolean(),
+  recordedAt: z.number().int(),
+})
+const workspaceProvisioning = z.object({
+  sparsePaths: stringArray.optional(),
+  cacheLinks: z.array(z.object({ source: z.string(), target: z.string() })).optional(),
+  include: stringArray.optional(),
+})
+
 const schemas = {
+  task_workspace_changeset_get: changesetReference,
+  task_workspace_changeset_list: z.object({
+    filter: z.object({
+      repoCommonDir: z.string().nullable().optional(),
+      ownerRef: z.string().nullable().optional(),
+      sessionId: z.string().nullable().optional(),
+      states: changesetState.array().nullable().optional(),
+    }),
+  }),
+  task_workspace_changeset_eligibility: changesetReference,
+  task_workspace_changeset_capture: z.object({
+    input: z.object({
+      workspaceId: z.string(),
+      targetRef: z.string().nullable().optional(),
+      title: z.string(),
+      dependsOn: stringArray.optional(),
+      requiredChecks: stringArray.optional(),
+      changesetId: z.string().nullable().optional(),
+    }),
+  }),
+  task_workspace_changeset_mark_ready: changesetReference,
+  task_workspace_changeset_record_review: changesetReference.extend({ review: changesetReview }),
+  task_workspace_changeset_record_check: changesetReference.extend({ check: changesetCheck }),
+  task_workspace_changeset_approve: changesetReference.extend({ headSha: z.string(), approver: z.string() }),
+  task_workspace_changeset_abandon: changesetReference,
+  task_workspace_integration_analyze: z.object({
+    changesetIds: stringArray,
+    targetRef: z.string().nullable().optional(),
+  }),
+  task_workspace_integration_get: integrationReference,
+  task_workspace_integration_list: z.object({
+    filter: z.object({
+      repoCommonDir: z.string().nullable().optional(),
+      targetRef: z.string().nullable().optional(),
+      states: integrationState.array().nullable().optional(),
+    }),
+  }),
+  task_workspace_integration_prepare: z.object({
+    input: z.object({
+      changesetIds: stringArray,
+      requiredChecks: stringArray.optional(),
+      targetRef: z.string(),
+      strategy: z.enum(["merge", "rebase"]),
+      onConflict: z.enum(["skip", "stop"]),
+      provisioning: workspaceProvisioning.nullable().optional(),
+      integrationId: z.string().nullable().optional(),
+    }),
+  }),
+  task_workspace_integration_record_check: integrationReference.extend({
+    candidateSha: z.string(),
+    check: changesetCheck,
+  }),
+  task_workspace_integration_publish: integrationReference.extend({
+    candidateSha: z.string(),
+    requiredChecks: stringArray,
+  }),
+  task_workspace_integration_rebuild: integrationReference,
+  task_workspace_integration_drop_item: integrationReference.extend({ changesetId: z.string() }),
+  task_workspace_integration_abort: integrationReference,
+  task_workspace_integration_rollback: integrationReference,
+  task_workspace_environment_delete_branch: z.object({
+    workspaceId: z.string().min(1),
+    branch: z.string().min(1),
+  }),
   video_get_info: z.object({ filePath: z.string().min(1) }),
   plugin_media_get_video_frame: z.object({
     sourceToken: z.string().min(1),

@@ -5,9 +5,12 @@
 //! Companion transport surfaces.
 
 mod bundle;
+mod changeset;
 mod code_result;
 mod code_snapshot;
 mod confine;
+mod integration;
+mod integration_lock;
 mod ledger;
 mod lifecycle;
 mod project_source;
@@ -30,10 +33,14 @@ pub use bundle::{
     execute_bundle_apply, plan_bundle_apply, plan_bundle_composition, ApplyStep, BundleApplier,
     BundleApplyPlan, BundleError, PhysicalLeaseGroup, RootRequest,
 };
+pub use changeset::{
+    capture_changeset_core, changeset_eligibility, validate_changeset_transition, ChangesetError,
+};
 pub use confine::{
     normalize_workspace_path, ConfinedRoot, ConfinedTarget, PathPurpose, TargetKind,
     WorkspaceRefusal, WorkspaceRefusalCode, CREDENTIAL_DIRECTORIES, UNCOVERED_DIRECTORIES,
 };
+pub use integration::{analyze_changesets, IntegrationError};
 pub use lifecycle::{
     WorktreeLifecycleEmitter, WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
@@ -45,6 +52,15 @@ pub use revision_patch::{
     DEFAULT_REPORT_BYTES, MAX_CONFINED_READ_BYTES, MAX_LIST_LIMIT, MAX_PATCH_FILES,
     MAX_PATCH_FILE_BYTES, MAX_PATCH_TOTAL_BYTES, MAX_REPORT_BYTES, REVISION_PATCH_FORMAT,
     REVISION_SCHEME,
+};
+pub use types::{
+    AgentChangeset, CaptureChangeset, ChangesetApproval, ChangesetCheck, ChangesetCheckOutcome,
+    ChangesetFile, ChangesetFileStatus, ChangesetFilter, ChangesetFinding,
+    ChangesetFindingSeverity, ChangesetReview, ChangesetReviewVerdict, ChangesetReviewer,
+    ChangesetRiskTier, ChangesetState, EligibilityGap, IntegrationAnalysis,
+    IntegrationConflictPolicy, IntegrationFailure, IntegrationItem, IntegrationItemOutcome,
+    IntegrationOverlap, IntegrationPrediction, IntegrationRun, IntegrationState,
+    IntegrationStrategy, PrepareIntegration, RefTransition,
 };
 // ADR-0176. The mirror moved to `cognia-git-mirror`, a leaf `cognia-git` can
 // also depend on. The algorithm is unchanged and these aliases are unchanged,
@@ -61,10 +77,10 @@ pub use cognia_git_mirror::plan::{
 // ADR-0176. Supplying a workspace from a remote, for a host with nobody at a
 // terminal to clone it first.
 pub use registry::{
-    compose_lock_reason, parse_lock_reason, plan_directory_reclaim, plan_reconcile,
-    plan_snapshot_expiration, validate_state_transition, DirectoryReclaimCandidate,
-    DirectoryReclaimReason, ImportedWorkspaceHint, ReconcileOutcome, RegistryError,
-    SnapshotExpirationCandidate, SnapshotExpirationReason, WorkspaceRegistry,
+    compose_lock_reason, parse_integration_lock_reason, parse_lock_reason, plan_directory_reclaim,
+    plan_reconcile, plan_reconcile_with_locks, plan_snapshot_expiration, validate_state_transition,
+    DirectoryReclaimCandidate, DirectoryReclaimReason, ImportedWorkspaceHint, ReconcileOutcome,
+    RegistryError, SnapshotExpirationCandidate, SnapshotExpirationReason, WorkspaceRegistry,
 };
 pub use code_result::{
     result_branch as code_result_branch, validate_result_agent as validate_code_result_agent,

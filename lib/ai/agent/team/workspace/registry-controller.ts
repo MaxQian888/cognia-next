@@ -16,6 +16,13 @@ import type {
   WorkspaceProvisioning,
 } from "@/lib/task-workspace/types"
 import { provisioningForWorkspaceRoot } from "@/lib/task-workspace/workspace-provisioning"
+import {
+  integrateTeamRun,
+  type AgentTeamIntegrationConfig,
+  type AgentTeamIntegrationDeps,
+  type AgentTeamIntegrationResult,
+  type TeamIntegrationCandidate,
+} from "./integrate-team-run"
 import { sanitizePromotionSegment, type PromotionWorkspaceHandle } from "./promotion"
 
 export interface AgentTeamWorkspaceRoot {
@@ -51,6 +58,11 @@ export interface AgentTeamRegistryWorkspaceControllerOptions {
   createBranch?: CreateBranch
   /** Test seam; production reads the approved declaration + local consent. */
   resolveProvisioning?: ResolveProvisioning
+  /**
+   * Removes a branch `reconcile` created, when a later branch in the same
+   * reconcile fails. Without it a partial reconcile leaves stray branches.
+   */
+  deleteBranch?: DeleteBranch
 }
 
 export type AgentTeamWorkspaceReconcileMode = "manual" | "merge-all" | "select" | "pipeline"
@@ -62,8 +74,20 @@ export interface AgentTeamWorkspaceReconcileResult {
   handles: PromotionWorkspaceHandle[]
   winnerKey?: string
   resultBranch?: string
+  /** `merge-all`: what the integration queue did, per repository (ADR-0227). */
+  integration?: AgentTeamIntegrationResult
   summary: string
 }
+
+/** What `merge-all` needs: the queue's ports, the run's policy, and the task graph. */
+export interface AgentTeamMergeAllOptions {
+  config: AgentTeamIntegrationConfig
+  deps: AgentTeamIntegrationDeps
+  /** taskId → the taskIds it depends on, from the run's task list. */
+  dependencies: Record<string, string[]>
+}
+
+type DeleteBranch = (workspaceId: string, branch: string) => Promise<void>
 
 interface DispatchCandidate {
   bundleTurnId: string
@@ -73,6 +97,8 @@ interface DispatchCandidate {
   taskId: string
   teammateName: string
   executionRoot: string
+  /** The source checkout the dispatch's primary root was cut from. */
+  sourceRoot: string
   ok?: boolean
   output?: string
 }
@@ -94,6 +120,7 @@ export class AgentTeamRegistryWorkspaceController {
   private readonly openTurn: OpenTurn
   private readonly createBranch: CreateBranch
   private readonly resolveProvisioning: ResolveProvisioning
+  private readonly deleteBranch: DeleteBranch | undefined
   private readonly bundles = new Map<string, Promise<WorkspaceBundle>>()
   private readonly attempts = new Map<string, number>()
   private readonly candidates = new Map<string, DispatchCandidate>()
@@ -116,6 +143,7 @@ export class AgentTeamRegistryWorkspaceController {
     this.openTurn = options.openTurn ?? openWorkspaceBundleTurnLease
     this.createBranch = options.createBranch ?? createWorkspaceBranch
     this.resolveProvisioning = options.resolveProvisioning ?? provisioningForWorkspaceRoot
+    this.deleteBranch = options.deleteBranch
   }
 
   async openDispatch(input: OpenAgentTeamWorkspaceDispatch): Promise<WorkspaceBundleTurnLease> {
@@ -198,6 +226,7 @@ export class AgentTeamRegistryWorkspaceController {
       taskId: input.taskId,
       teammateName: input.teammateName ?? input.teammateId,
       executionRoot: lease.primaryAlias,
+      sourceRoot: primary.sourceRoot,
     })
     return lease
   }
@@ -207,6 +236,12 @@ export class AgentTeamRegistryWorkspaceController {
     if (!candidate) return
     candidate.ok = result.ok
     candidate.output = result.output
+  }
+
+  /** The source checkout a task's latest dispatch forked from (its review base lives there). */
+  getDispatchSourceRoot(taskId: string): string | undefined {
+    return [...this.candidates.values()].reverse().find((candidate) => candidate.taskId === taskId)
+      ?.sourceRoot
   }
 
   getDispatchExecutionRoot(taskId: string): string | undefined {
@@ -220,11 +255,16 @@ export class AgentTeamRegistryWorkspaceController {
     judge?: (
       candidates: Array<{ key: string; ok: boolean; output?: string }>
     ) => Promise<string | null>
+    /** Required for `merge-all`; without it the mode fails closed. */
+    mergeAll?: AgentTeamMergeAllOptions
   }): Promise<AgentTeamWorkspaceReconcileResult> {
     if (options.mode === "merge-all") {
-      throw new Error(
-        "Agent Team merge-all requires a host-side atomic Registry promotion transaction; client-side git merge is intentionally disabled"
-      )
+      if (!options.mergeAll) {
+        throw new Error(
+          "Agent Team merge-all needs the integration queue (ADR-0227); client-side git merge is intentionally disabled"
+        )
+      }
+      return this.mergeAll(options.mergeAll)
     }
     const all = [...this.candidates.values()]
     let selected = all
@@ -257,18 +297,30 @@ export class AgentTeamRegistryWorkspaceController {
     }
     const unique = [...uniqueByWorkspace.values()]
     const handles: PromotionWorkspaceHandle[] = []
-    for (const { candidate, workspace } of unique) {
-      const branch = `agent/${sanitizePromotionSegment(this.runId)}/${sanitizePromotionSegment(candidate.teammateName)}/${sanitizePromotionSegment(candidate.taskId)}`
-      const record = await this.createBranch(workspace.workspaceId, branch)
-      handles.push({
-        key: candidate.key,
-        logicalRootId: workspace.logicalRootId,
-        runId: this.runId,
-        teammateName: candidate.teammateName,
-        taskId: candidate.taskId,
-        branch: record.branch ?? branch,
-        path: record.executionRoot,
-      })
+    const created: Array<{ workspaceId: string; branch: string }> = []
+    try {
+      for (const { candidate, workspace } of unique) {
+        const branch = `agent/${sanitizePromotionSegment(this.runId)}/${sanitizePromotionSegment(candidate.teammateName)}/${sanitizePromotionSegment(candidate.taskId)}`
+        const record = await this.createBranch(workspace.workspaceId, branch)
+        created.push({ workspaceId: workspace.workspaceId, branch: record.branch ?? branch })
+        handles.push({
+          key: candidate.key,
+          logicalRootId: workspace.logicalRootId,
+          runId: this.runId,
+          teammateName: candidate.teammateName,
+          taskId: candidate.taskId,
+          branch: record.branch ?? branch,
+          path: record.executionRoot,
+        })
+      }
+    } catch (error) {
+      // All or nothing: a reconcile that stopped halfway must not leave the
+      // branches it already made behind. Candidates are kept so it can be
+      // retried.
+      for (const { workspaceId, branch } of created.reverse()) {
+        await this.deleteBranch?.(workspaceId, branch).catch(() => undefined)
+      }
+      throw error
     }
     this.candidates.clear()
     const branches = handles.map((handle) => handle.branch)
@@ -279,6 +331,56 @@ export class AgentTeamRegistryWorkspaceController {
       ...(winnerKey ? { winnerKey } : {}),
       ...(branches.length === 1 ? { resultBranch: branches[0] } : {}),
       summary: `${branches.length} Registry environment(s) promoted for ${options.mode}`,
+    }
+  }
+
+  /**
+   * `merge-all` through the integration queue (ADR-0227 §5). Only successful
+   * dispatches are candidates; each workspace once per repository.
+   */
+  private async mergeAll(
+    options: AgentTeamMergeAllOptions
+  ): Promise<AgentTeamWorkspaceReconcileResult> {
+    const integrationCandidates: TeamIntegrationCandidate[] = []
+    const seen = new Set<string>()
+    for (const candidate of this.candidates.values()) {
+      if (candidate.ok !== true) continue
+      for (const workspace of candidate.workspaces) {
+        if (seen.has(workspace.workspaceId)) continue
+        seen.add(workspace.workspaceId)
+        const root = this.rootsById.get(workspace.logicalRootId)
+        if (!root) continue
+        integrationCandidates.push({
+          key: `${candidate.key}:${workspace.logicalRootId}`,
+          taskId: candidate.taskId,
+          teammateName: candidate.teammateName,
+          logicalRootId: workspace.logicalRootId,
+          sourceRoot: root.sourceRoot,
+          workspaceId: workspace.workspaceId,
+        })
+      }
+    }
+    const integration = await integrateTeamRun(
+      this.runId,
+      integrationCandidates,
+      options.dependencies,
+      options.config,
+      options.deps
+    )
+    this.candidates.clear()
+    const branches = integration.roots.map((root) => root.targetRef).filter((ref) => ref.length > 0)
+    const merged = integration.roots.reduce((sum, root) => sum + root.merged.length, 0)
+    const waiting = integration.roots.reduce(
+      (sum, root) => sum + root.awaitingApproval.length + root.changesRequested.length,
+      0
+    )
+    return {
+      mode: "merge-all",
+      branches,
+      handles: [],
+      integration,
+      ...(branches.length === 1 ? { resultBranch: branches[0] } : {}),
+      summary: `${merged} changeset(s) integrated, ${waiting} awaiting review, across ${integration.roots.length} repository(ies)`,
     }
   }
 }

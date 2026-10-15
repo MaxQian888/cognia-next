@@ -487,6 +487,7 @@
     "timelineView": "Timeline view"
   },
   "views": {
+    "agents": "Agent changes",
     "browse": "Browse",
     "changes": "Changes",
     "label": "View"

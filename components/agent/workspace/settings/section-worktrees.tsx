@@ -3,17 +3,20 @@
 /**
  * Workspace settings → Worktree isolation section (ADR-0022 workspace-isolation
  * addendum). Toggles per-dispatch git-worktree isolation and picks how the
- * per-dispatch agent branches are reconciled once the run settles. Eager-saves
- * the team config in place, matching the ultracode/governance sections.
+ * per-dispatch agent branches are reconciled once the run settles — for
+ * `merge-all`, where and how the host integration queue lands them
+ * (ADR-0227). Eager-saves the team config in place, matching the
+ * ultracode/governance sections.
  *
  * Desktop + git-repo only at runtime; the card renders everywhere but the
  * behavior no-ops off-desktop (surfaced by the caveat text).
  */
 
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Card } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -50,6 +53,26 @@ const RETAIN_POLICIES: ReadonlyArray<NonNullable<IsolationConfig["retain"]>> = [
   "all",
 ]
 
+type IntegrationConfig = NonNullable<IsolationConfig["integration"]>
+
+const INTEGRATION_TARGETS: ReadonlyArray<NonNullable<IntegrationConfig["target"]>> = [
+  "branch",
+  "base",
+]
+const INTEGRATION_STRATEGIES: ReadonlyArray<NonNullable<IntegrationConfig["strategy"]>> = [
+  "merge",
+  "rebase",
+]
+const CONFLICT_POLICIES: ReadonlyArray<NonNullable<IntegrationConfig["onConflict"]>> = [
+  "skip",
+  "stop",
+]
+
+/** Comma- or whitespace-separated profile ids, de-duplicated, in order. */
+export function parseRequiredChecks(text: string): string[] {
+  return [...new Set(text.split(/[\s,]+/).filter(Boolean))]
+}
+
 export function WorktreesSection({ team }: WorktreesSectionProps) {
   const t = useTranslations("agentTeamsWorkspace.settings.worktrees")
   const updateTeamConfig = useAgentTeamStore((s) => s.updateTeamConfig)
@@ -57,6 +80,16 @@ export function WorktreesSection({ team }: WorktreesSectionProps) {
   const iso: IsolationConfig = team.config.workspaceIsolation ?? {}
   const enabled = iso.enabled === true
   const mode = iso.reconcile ?? "manual"
+  const integration: IntegrationConfig = iso.integration ?? {}
+  const target = integration.target ?? "branch"
+  const savedChecks = (integration.requiredChecks ?? []).join(", ")
+  const [checksDraft, setChecksDraft] = useState(savedChecks)
+  // Follow a save made elsewhere (another window, a preset) without an effect.
+  const [draftBase, setDraftBase] = useState(savedChecks)
+  if (draftBase !== savedChecks) {
+    setDraftBase(savedChecks)
+    setChecksDraft(savedChecks)
+  }
 
   const patch = useCallback(
     (next: Partial<IsolationConfig>) => {
@@ -68,6 +101,18 @@ export function WorktreesSection({ team }: WorktreesSectionProps) {
     },
     [team.config, team.id, updateTeamConfig]
   )
+
+  const patchIntegration = useCallback(
+    (next: Partial<IntegrationConfig>) =>
+      patch({ integration: { ...team.config.workspaceIsolation?.integration, ...next } }),
+    [patch, team.config.workspaceIsolation?.integration]
+  )
+
+  const commitChecks = () => {
+    const ids = parseRequiredChecks(checksDraft)
+    if (ids.join(", ") === savedChecks) return
+    patchIntegration({ requiredChecks: ids })
+  }
 
   return (
     <Card className="space-y-4 p-4">
@@ -103,6 +148,98 @@ export function WorktreesSection({ team }: WorktreesSectionProps) {
         </Select>
         <p className="text-[11px] text-muted-foreground">{t(`reconcile.hint.${mode}`)}</p>
       </div>
+
+      {mode === "merge-all" && (
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-xs">{t("integration.target.label")}</Label>
+            <Select
+              value={target}
+              onValueChange={(v) => patchIntegration({ target: v as IntegrationConfig["target"] })}
+              disabled={!enabled}
+            >
+              <SelectTrigger className="h-8 text-xs" aria-label={t("integration.target.label")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {INTEGRATION_TARGETS.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {t(`integration.target.option.${v}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              {t(`integration.target.hint.${target}`)}
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">{t("integration.strategy.label")}</Label>
+            <Select
+              value={integration.strategy ?? "merge"}
+              onValueChange={(v) =>
+                patchIntegration({ strategy: v as IntegrationConfig["strategy"] })
+              }
+              disabled={!enabled}
+            >
+              <SelectTrigger className="h-8 text-xs" aria-label={t("integration.strategy.label")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {INTEGRATION_STRATEGIES.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {t(`integration.strategy.option.${v}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">{t("integration.onConflict.label")}</Label>
+            <Select
+              value={integration.onConflict ?? "skip"}
+              onValueChange={(v) =>
+                patchIntegration({ onConflict: v as IntegrationConfig["onConflict"] })
+              }
+              disabled={!enabled}
+            >
+              <SelectTrigger className="h-8 text-xs" aria-label={t("integration.onConflict.label")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CONFLICT_POLICIES.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {t(`integration.onConflict.option.${v}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs" htmlFor={`required-checks-${team.id}`}>
+              {t("integration.requiredChecks.label")}
+            </Label>
+            <Input
+              id={`required-checks-${team.id}`}
+              className="h-8 text-xs"
+              value={checksDraft}
+              placeholder={t("integration.requiredChecks.placeholder")}
+              onChange={(e) => setChecksDraft(e.target.value)}
+              onBlur={commitChecks}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitChecks()
+              }}
+              disabled={!enabled}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {t("integration.requiredChecks.hint")}
+            </p>
+          </div>
+        </div>
+      )}
 
       {mode === "select" && (
         <div className="space-y-1">

@@ -1,6 +1,840 @@
 {
   "schemaVersion": 1,
   "$defs": {
+    "TaskDeliveryRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "cleanupState": {
+          "$ref": "#/$defs/CleanupState"
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "createdAt": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "publish": {
+          "$ref": "#/$defs/DurablePublish"
+        },
+        "publishState": {
+          "$ref": "#/$defs/PublishState"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "taskId": {
+          "type": ["string", "null"]
+        },
+        "updatedAt": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "agentId",
+        "providerId",
+        "instanceId",
+        "branch",
+        "publishState",
+        "cleanupState",
+        "publish",
+        "createdAt",
+        "updatedAt",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "PublishState": {
+      "enum": [
+        "running",
+        "pushed",
+        "savedBundle",
+        "held",
+        "discarded",
+        "nothingToPublish",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "DurableRecovery": {
+      "additionalProperties": false,
+      "properties": {
+        "bundle": {
+          "type": ["string", "null"]
+        },
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "code": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "commits": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "manifest": {
+          "type": ["string", "null"]
+        }
+      },
+      "type": "object"
+    },
+    "DurablePublish": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "type": ["string", "null"]
+        },
+        "code": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "discarded": {
+          "type": ["boolean", "null"]
+        },
+        "held": {
+          "type": ["boolean", "null"]
+        },
+        "pushed": {
+          "type": "boolean"
+        },
+        "recovery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DurableRecovery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["pushed"],
+      "type": "object"
+    },
+    "CleanupState": {
+      "enum": ["retained", "pending", "destroyRetrying", "destroyed"],
+      "type": "string"
+    },
+    "AgentChangeset": {
+      "additionalProperties": false,
+      "properties": {
+        "agentId": {
+          "type": ["string", "null"]
+        },
+        "agentKind": {
+          "type": ["string", "null"]
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangesetApproval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseSha": {
+          "type": "string"
+        },
+        "changeRef": {
+          "type": "string"
+        },
+        "changesetId": {
+          "type": "string"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/ChangesetCheck"
+          },
+          "type": "array"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "dependsOn": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "executionRoot": {
+          "type": "string"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/ChangesetFile"
+          },
+          "type": "array"
+        },
+        "headSha": {
+          "type": "string"
+        },
+        "integrationId": {
+          "type": ["string", "null"]
+        },
+        "mergedSha": {
+          "type": ["string", "null"]
+        },
+        "ownerRef": {
+          "type": ["string", "null"]
+        },
+        "repoCommonDir": {
+          "type": "string"
+        },
+        "requiredChecks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangesetReview"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "type": ["string", "null"]
+        },
+        "sessionId": {
+          "type": ["string", "null"]
+        },
+        "sourceRoot": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ChangesetState"
+        },
+        "targetRef": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": ["string", "null"]
+        },
+        "title": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "version": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentId",
+        "agentKind",
+        "approval",
+        "baseSha",
+        "changeRef",
+        "changesetId",
+        "checks",
+        "createdAt",
+        "dependsOn",
+        "executionRoot",
+        "files",
+        "headSha",
+        "integrationId",
+        "mergedSha",
+        "ownerRef",
+        "repoCommonDir",
+        "requiredChecks",
+        "review",
+        "runId",
+        "sessionId",
+        "sourceRoot",
+        "state",
+        "targetRef",
+        "taskId",
+        "title",
+        "updatedAt",
+        "version",
+        "workspaceId"
+      ],
+      "type": "object"
+    },
+    "ChangesetApproval": {
+      "additionalProperties": false,
+      "properties": {
+        "approvedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "approver": {
+          "type": "string"
+        },
+        "headSha": {
+          "type": "string"
+        }
+      },
+      "required": ["approvedAt", "approver", "headSha"],
+      "type": "object"
+    },
+    "ChangesetCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "headSha": {
+          "type": "string"
+        },
+        "logTail": {
+          "type": ["string", "null"]
+        },
+        "outcome": {
+          "$ref": "#/$defs/ChangesetCheckOutcome"
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "ranAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "reportDigest": {
+          "type": ["string", "null"]
+        },
+        "tier": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["headSha", "logTail", "outcome", "profileId", "ranAt", "reportDigest", "tier"],
+      "type": "object"
+    },
+    "ChangesetCheckOutcome": {
+      "enum": ["passed", "failed", "inconclusive"],
+      "type": "string"
+    },
+    "ChangesetEligibility": {
+      "additionalProperties": false,
+      "properties": {
+        "eligible": {
+          "type": "boolean"
+        },
+        "gaps": {
+          "items": {
+            "$ref": "#/$defs/EligibilityGap"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["eligible", "gaps"],
+      "type": "object"
+    },
+    "ChangesetFile": {
+      "additionalProperties": false,
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "deletions": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "excluded": {
+          "type": "boolean"
+        },
+        "insertions": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "oldPath": {
+          "type": ["string", "null"]
+        },
+        "path": {
+          "type": "string"
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/ChangesetFileStatus"
+        }
+      },
+      "required": [
+        "binary",
+        "deletions",
+        "excluded",
+        "insertions",
+        "oldPath",
+        "path",
+        "sensitive",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ChangesetFileStatus": {
+      "enum": ["added", "modified", "deleted", "renamed", "typeChanged"],
+      "type": "string"
+    },
+    "ChangesetFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/ChangesetFindingSeverity"
+        }
+      },
+      "required": ["note", "path", "severity"],
+      "type": "object"
+    },
+    "ChangesetFindingSeverity": {
+      "enum": ["info", "warning", "critical"],
+      "type": "string"
+    },
+    "ChangesetReview": {
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ChangesetFinding"
+          },
+          "type": "array"
+        },
+        "headSha": {
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recordedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "requiresHumanApproval": {
+          "type": "boolean"
+        },
+        "reviewer": {
+          "$ref": "#/$defs/ChangesetReviewer"
+        },
+        "riskTier": {
+          "$ref": "#/$defs/ChangesetRiskTier"
+        },
+        "verdict": {
+          "$ref": "#/$defs/ChangesetReviewVerdict"
+        }
+      },
+      "required": [
+        "findings",
+        "headSha",
+        "reasons",
+        "recordedAt",
+        "requiresHumanApproval",
+        "reviewer",
+        "riskTier",
+        "verdict"
+      ],
+      "type": "object"
+    },
+    "ChangesetReviewVerdict": {
+      "enum": ["approve", "requestChanges", "comment", "unavailable"],
+      "type": "string"
+    },
+    "ChangesetReviewer": {
+      "enum": ["agent", "user", "deterministic"],
+      "type": "string"
+    },
+    "ChangesetRiskTier": {
+      "enum": ["low", "medium", "high"],
+      "type": "string"
+    },
+    "ChangesetState": {
+      "enum": [
+        "draft",
+        "ready",
+        "approved",
+        "changesRequested",
+        "queued",
+        "integrating",
+        "merged",
+        "conflicted",
+        "failed",
+        "rolledBack",
+        "abandoned"
+      ],
+      "type": "string"
+    },
+    "EligibilityGap": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "missingReview",
+              "type": "string"
+            }
+          },
+          "required": ["kind"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "reviewNotApproved",
+              "type": "string"
+            }
+          },
+          "required": ["kind"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "missingCheck",
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            }
+          },
+          "required": ["kind", "profile"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "checkNotPassed",
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/$defs/ChangesetCheckOutcome"
+            },
+            "profile": {
+              "type": "string"
+            }
+          },
+          "required": ["kind", "profile", "outcome"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "missingHumanApproval",
+              "type": "string"
+            }
+          },
+          "required": ["kind"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "staleHead",
+              "type": "string"
+            }
+          },
+          "required": ["kind"],
+          "type": "object"
+        }
+      ]
+    },
+    "IntegrationAnalysis": {
+      "additionalProperties": false,
+      "properties": {
+        "cycles": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "overlaps": {
+          "items": {
+            "$ref": "#/$defs/IntegrationOverlap"
+          },
+          "type": "array"
+        },
+        "predictedConflicts": {
+          "items": {
+            "$ref": "#/$defs/IntegrationOverlap"
+          },
+          "type": "array"
+        },
+        "prediction": {
+          "$ref": "#/$defs/IntegrationPrediction"
+        }
+      },
+      "required": ["cycles", "order", "overlaps", "predictedConflicts", "prediction"],
+      "type": "object"
+    },
+    "IntegrationConflictPolicy": {
+      "enum": ["skip", "stop"],
+      "type": "string"
+    },
+    "IntegrationFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["code", "message"],
+      "type": "object"
+    },
+    "IntegrationItem": {
+      "additionalProperties": false,
+      "properties": {
+        "changesetId": {
+          "type": "string"
+        },
+        "commitSha": {
+          "type": ["string", "null"]
+        },
+        "conflictFiles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "headSha": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/IntegrationItemOutcome"
+        }
+      },
+      "required": ["changesetId", "commitSha", "conflictFiles", "headSha", "outcome"],
+      "type": "object"
+    },
+    "IntegrationItemOutcome": {
+      "enum": ["pending", "merged", "rerereResolved", "conflicted", "skipped", "dropped"],
+      "type": "string"
+    },
+    "IntegrationOverlap": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "type": "string"
+        },
+        "b": {
+          "type": "string"
+        },
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["a", "b", "files"],
+      "type": "object"
+    },
+    "IntegrationPrediction": {
+      "enum": ["mergeTree", "overlapOnly"],
+      "type": "string"
+    },
+    "IntegrationRun": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "candidateSha": {
+          "type": ["string", "null"]
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/ChangesetCheck"
+          },
+          "type": "array"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntegrationFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedOldSha": {
+          "type": "string"
+        },
+        "integrationId": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/IntegrationItem"
+          },
+          "type": "array"
+        },
+        "onConflict": {
+          "$ref": "#/$defs/IntegrationConflictPolicy"
+        },
+        "opLog": {
+          "items": {
+            "$ref": "#/$defs/RefTransition"
+          },
+          "type": "array"
+        },
+        "repoCommonDir": {
+          "type": "string"
+        },
+        "requestedChecks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requiredChecks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resultSha": {
+          "type": ["string", "null"]
+        },
+        "state": {
+          "$ref": "#/$defs/IntegrationState"
+        },
+        "strategy": {
+          "$ref": "#/$defs/IntegrationStrategy"
+        },
+        "targetRef": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "worktreePath": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "attempt",
+        "candidateSha",
+        "checks",
+        "createdAt",
+        "error",
+        "expectedOldSha",
+        "integrationId",
+        "items",
+        "onConflict",
+        "opLog",
+        "repoCommonDir",
+        "requestedChecks",
+        "requiredChecks",
+        "resultSha",
+        "state",
+        "strategy",
+        "targetRef",
+        "updatedAt",
+        "worktreePath"
+      ],
+      "type": "object"
+    },
+    "IntegrationState": {
+      "enum": [
+        "planned",
+        "preparing",
+        "prepared",
+        "publishing",
+        "published",
+        "stale",
+        "conflicted",
+        "failed",
+        "aborted",
+        "interrupted",
+        "rolledBack"
+      ],
+      "type": "string"
+    },
+    "IntegrationStrategy": {
+      "enum": ["merge", "rebase"],
+      "type": "string"
+    },
+    "RefTransition": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "newSha": {
+          "type": "string"
+        },
+        "oldSha": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "refName": {
+          "type": "string"
+        }
+      },
+      "required": ["at", "newSha", "oldSha", "reason", "refName"],
+      "type": "object"
+    },
     "HostUpdateIdleReport": {
       "type": "object",
       "required": ["jobs", "workerSlots", "mutations", "adminLeases"],
@@ -11911,6 +12745,100 @@
     }
   },
   "commands": {
+    "environment_delivery_list": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskDeliveryRecord"
+          }
+        },
+        "nextPageToken": {
+          "type": ["string", "null"],
+          "description": "Present exactly when another page exists."
+        }
+      },
+      "required": ["items"]
+    },
+    "task_workspace_changeset_abandon": {
+      "$ref": "#/$defs/AgentChangeset"
+    },
+    "task_workspace_changeset_approve": {
+      "$ref": "#/$defs/AgentChangeset"
+    },
+    "task_workspace_changeset_capture": {
+      "$ref": "#/$defs/AgentChangeset"
+    },
+    "task_workspace_changeset_eligibility": {
+      "$ref": "#/$defs/ChangesetEligibility"
+    },
+    "task_workspace_changeset_get": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentChangeset"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_workspace_changeset_list": {
+      "items": {
+        "$ref": "#/$defs/AgentChangeset"
+      },
+      "type": "array"
+    },
+    "task_workspace_changeset_mark_ready": {
+      "$ref": "#/$defs/AgentChangeset"
+    },
+    "task_workspace_changeset_record_check": {
+      "$ref": "#/$defs/AgentChangeset"
+    },
+    "task_workspace_changeset_record_review": {
+      "$ref": "#/$defs/AgentChangeset"
+    },
+    "task_workspace_integration_abort": {
+      "$ref": "#/$defs/IntegrationRun"
+    },
+    "task_workspace_integration_analyze": {
+      "$ref": "#/$defs/IntegrationAnalysis"
+    },
+    "task_workspace_integration_drop_item": {
+      "$ref": "#/$defs/IntegrationRun"
+    },
+    "task_workspace_integration_get": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IntegrationRun"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_workspace_integration_list": {
+      "items": {
+        "$ref": "#/$defs/IntegrationRun"
+      },
+      "type": "array"
+    },
+    "task_workspace_integration_prepare": {
+      "$ref": "#/$defs/IntegrationRun"
+    },
+    "task_workspace_integration_publish": {
+      "$ref": "#/$defs/IntegrationRun"
+    },
+    "task_workspace_integration_rebuild": {
+      "$ref": "#/$defs/IntegrationRun"
+    },
+    "task_workspace_integration_record_check": {
+      "$ref": "#/$defs/IntegrationRun"
+    },
+    "task_workspace_integration_rollback": {
+      "$ref": "#/$defs/IntegrationRun"
+    },
     "host_update_configure": {
       "$ref": "#/$defs/HostUpdateStatus"
     },
@@ -14746,6 +15674,9 @@
       "$ref": "#/$defs/WorkspaceRecord"
     },
     "task_workspace_environment_create_branch": {
+      "$ref": "#/$defs/WorkspaceRecord"
+    },
+    "task_workspace_environment_delete_branch": {
       "$ref": "#/$defs/WorkspaceRecord"
     },
     "task_workspace_environment_list": {

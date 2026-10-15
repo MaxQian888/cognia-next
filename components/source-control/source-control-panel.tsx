@@ -13,6 +13,7 @@ import { LayoutGroup, motion } from "motion/react"
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
+  BotIcon,
   DownloadIcon,
   FileDiffIcon,
   FileSearchIcon,
@@ -53,6 +54,7 @@ import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
 import { useGitStore } from "@/stores/git/git-store"
 import { BranchHeader } from "./branch-header"
 import { ChangesView } from "./changes-view"
+import { AgentChangesView } from "./agent-changes/agent-changes-view"
 import { CommitDetail } from "./commit-detail"
 import { CompareRefsSheet } from "./compare-refs-sheet"
 import { ConflictResolver } from "./conflict-resolver"
@@ -101,9 +103,9 @@ export const SOURCE_CONTROL_DENSE_WIDTH = 960
 export const SOURCE_CONTROL_LIST_WIDTH = { default: 340, min: 260, max: "50%" } as const
 
 /** Which body the panel is showing. */
-export type SourceControlView = "changes" | "browse"
+export type SourceControlView = "changes" | "browse" | "agents"
 
-export const SOURCE_CONTROL_VIEWS: readonly SourceControlView[] = ["changes", "browse"]
+export const SOURCE_CONTROL_VIEWS: readonly SourceControlView[] = ["changes", "browse", "agents"]
 
 export function SourceControlPanel() {
   const t = useTranslations("sourceControl")
@@ -405,6 +407,8 @@ export function SourceControlPanel() {
                   )}
                   {candidate === "changes" ? (
                     <FileSearchIcon aria-hidden className="size-3.5" />
+                  ) : candidate === "agents" ? (
+                    <BotIcon aria-hidden className="size-3.5" />
                   ) : (
                     <GitBranchIcon aria-hidden className="size-3.5" />
                   )}
@@ -539,7 +543,9 @@ export function SourceControlPanel() {
           className="flex min-h-0 flex-1 flex-col"
           data-testid={`sc-view-body-${view}`}
         >
-          {view === "browse" ? (
+          {view === "agents" ? (
+            <AgentChangesView rootDir={rootDir} projectId={activeProject?.id ?? null} />
+          ) : view === "browse" ? (
             <RepositoryNavigator
               rootDir={rootDir}
               branches={branches}

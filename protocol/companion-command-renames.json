@@ -3485,11 +3485,41 @@
     "task_workspace_bundle_turn_settle": {
       "to": "task.workspace.bundle.turn.settle"
     },
+    "task_workspace_changeset_abandon": {
+      "to": "task.workspace.changeset.cancel"
+    },
+    "task_workspace_changeset_approve": {
+      "to": "task.workspace.changeset.approve"
+    },
+    "task_workspace_changeset_capture": {
+      "to": "task.workspace.changeset.capture"
+    },
+    "task_workspace_changeset_eligibility": {
+      "to": "task.workspace.changeset.eligibility.get"
+    },
+    "task_workspace_changeset_get": {
+      "to": "task.workspace.changeset.get"
+    },
+    "task_workspace_changeset_list": {
+      "to": "task.workspace.changeset.query"
+    },
+    "task_workspace_changeset_mark_ready": {
+      "to": "task.workspace.changeset.mark_ready"
+    },
+    "task_workspace_changeset_record_check": {
+      "to": "task.workspace.changeset.record_check"
+    },
+    "task_workspace_changeset_record_review": {
+      "to": "task.workspace.changeset.record_review"
+    },
     "task_workspace_environment_adopt": {
       "to": "task.workspace.environment.adopt"
     },
     "task_workspace_environment_create_branch": {
       "to": "task.workspace.environment.branch.create"
+    },
+    "task_workspace_environment_delete_branch": {
+      "to": "task.workspace.environment.branch.delete"
     },
     "task_workspace_environment_list": {
       "to": "task.workspace.environment.list"
@@ -3508,6 +3538,36 @@
     },
     "task_workspace_get_resource_summary": {
       "to": "task.workspace.resource_summary.get"
+    },
+    "task_workspace_integration_abort": {
+      "to": "task.workspace.integration.cancel"
+    },
+    "task_workspace_integration_analyze": {
+      "to": "task.workspace.integration.analyze"
+    },
+    "task_workspace_integration_drop_item": {
+      "to": "task.workspace.integration.drop_item"
+    },
+    "task_workspace_integration_get": {
+      "to": "task.workspace.integration.get"
+    },
+    "task_workspace_integration_list": {
+      "to": "task.workspace.integration.query"
+    },
+    "task_workspace_integration_prepare": {
+      "to": "task.workspace.integration.prepare"
+    },
+    "task_workspace_integration_publish": {
+      "to": "task.workspace.integration.publish"
+    },
+    "task_workspace_integration_rebuild": {
+      "to": "task.workspace.integration.rebuild"
+    },
+    "task_workspace_integration_record_check": {
+      "to": "task.workspace.integration.record_check"
+    },
+    "task_workspace_integration_rollback": {
+      "to": "task.workspace.integration.rollback"
     },
     "task_workspace_list": {
       "to": "task.workspace.list"

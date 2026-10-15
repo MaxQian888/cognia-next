@@ -6,27 +6,31 @@
 //! command attributes and the four commands that watch a run through the
 //! `AppHandle`. The desktop re-exports this module as `task_workspace`.
 
+use cognia_core::command_error::CommandError;
 use cognia_task_workspace::{
-    apply_revision_patch, read_confined_text, read_report_file, workspace_revision,
-    AcquireWorkspaceBundle, AppliedCodeResult, ApplyCodeResult, ApplyCodeSnapshot, ApplyOutcome,
-    BeginTaskRun, BeginWorkspaceBundleTurn, BundleHandoffOutcome, BundleHandoffRequest,
-    BundleHandoffUndoOutcome, CodeCheckout, CodeResult, CodeSnapshotLimits, CodeSnapshotUpload,
-    CommittedCodeSnapshot, ConfinedFileRead, ConflictResolution, CreateCodeSnapshot,
-    CreatedCodeSnapshot, DownloadHandle, EnsureProjectSource, EnsureRemoteSource,
-    EnsureSessionScratchWorkspace, ExportCodeCheckout, PatchSelection, PatchSet, ProjectSource,
-    PruneOutcome, ReconcileOutcome, RemoteSourceCheckout, ResourceCaptureChunk, ResourceChange,
-    ResourceEvent, ResourceEventKind, ResourceIndexEntry, ResourceRead, ResourceTrackingPolicy,
-    RevisionApplyOutcome, RevisionPatch, RunState, ServiceConfig, TaskResourceManifest,
-    TaskResourceSummary, TaskRun, TaskWorkspace, TaskWorkspaceEventSink,
-    TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle,
-    WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome, WorkspaceEnvironmentSummary,
-    WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent, WorkspaceMaintenanceRequest,
-    WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision, WorktreeLifecycleEvent,
-    WorktreeLifecycleKind, WorktreeLifecycleSink,
+    apply_revision_patch, changeset_eligibility, read_confined_text, read_report_file,
+    workspace_revision, AcquireWorkspaceBundle, AgentChangeset, AppliedCodeResult, ApplyCodeResult,
+    ApplyCodeSnapshot, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn, BundleHandoffOutcome,
+    BundleHandoffRequest, BundleHandoffUndoOutcome, CaptureChangeset, ChangesetCheck,
+    ChangesetError, ChangesetFilter, ChangesetReview, CodeCheckout, CodeResult, CodeSnapshotLimits,
+    CodeSnapshotUpload, CommittedCodeSnapshot, ConfinedFileRead, ConflictResolution,
+    CreateCodeSnapshot, CreatedCodeSnapshot, DownloadHandle, EligibilityGap, EnsureProjectSource,
+    EnsureRemoteSource, EnsureSessionScratchWorkspace, ExportCodeCheckout, IntegrationAnalysis,
+    IntegrationError, IntegrationRun, IntegrationState, PatchSelection, PatchSet,
+    PrepareIntegration, ProjectSource, PruneOutcome, ReconcileOutcome, RemoteSourceCheckout,
+    ResourceCaptureChunk, ResourceChange, ResourceEvent, ResourceEventKind, ResourceIndexEntry,
+    ResourceRead, ResourceTrackingPolicy, RevisionApplyOutcome, RevisionPatch, RunState,
+    ServiceConfig, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
+    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
+    UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome,
+    WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
+    WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision,
+    WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -201,10 +205,102 @@ async fn discard_cache_at(legacy: &Path) {
 
 async fn run_workspace_maintenance_once() -> Result<WorkspaceMaintenanceResult, String> {
     tokio::task::spawn_blocking(|| {
-        service()?.run_workspace_maintenance(WorkspaceMaintenanceRequest { now: None })
+        maintain_workspaces(&*service()?, WorkspaceMaintenanceRequest { now: None })
     })
     .await
     .map_err(|error| format!("task workspace maintenance panicked: {error}"))?
+}
+
+/// Only Registry-owned worktrees authorize maintenance of their source. Resolve
+/// aliases before deduplicating, and leave bare mirrors to the mirror sweep.
+fn source_maintenance_common_dirs(records: &[WorkspaceRecord]) -> BTreeSet<PathBuf> {
+    use cognia_task_workspace::{
+        IsolationKind, WorkspaceEnvironmentKind, WorkspaceOwnerType, WorkspaceState,
+    };
+
+    let mut directories = BTreeSet::new();
+    for record in records {
+        if record.environment_kind != WorkspaceEnvironmentKind::Managed
+            || record.owner_type == WorkspaceOwnerType::Imported
+            || record.isolation_kind != IsolationKind::GitWorktree
+            || !matches!(
+                record.state,
+                WorkspaceState::Active | WorkspaceState::Archived
+            )
+        {
+            continue;
+        }
+        let Some(common_dir) = record.git_common_dir.as_deref() else {
+            continue;
+        };
+        match Path::new(common_dir).canonicalize() {
+            Ok(path) => {
+                directories.insert(path);
+            }
+            Err(error) => log::warn!("source maintenance skipped {common_dir}: {error}"),
+        }
+    }
+    directories.retain(|directory| {
+        match std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(directory)
+            .args(["rev-parse", "--is-bare-repository"])
+            .output()
+        {
+            Ok(output) if output.status.success() => output.stdout == b"false\n",
+            Ok(output) => {
+                log::warn!(
+                    "source maintenance could not inspect {}: {}",
+                    directory.display(),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                false
+            }
+            Err(error) => {
+                log::warn!(
+                    "source maintenance could not inspect {}: {error}",
+                    directory.display()
+                );
+                false
+            }
+        }
+    });
+    directories
+}
+
+fn maintain_workspaces(
+    service: &TaskWorkspaceService,
+    request: WorkspaceMaintenanceRequest,
+) -> Result<WorkspaceMaintenanceResult, String> {
+    let mut outcome = service.run_workspace_maintenance(request)?;
+    let records = service.list_managed_workspaces()?;
+    for (index, common_dir) in source_maintenance_common_dirs(&records)
+        .into_iter()
+        .enumerate()
+    {
+        let success = cognia_git_mirror::run_source_maintenance(&common_dir);
+        let detail = format!(
+            "source commit-graph maintenance: repository={}, success={success}",
+            common_dir.display()
+        );
+        if success {
+            log::info!("{detail}");
+        } else {
+            log::warn!("{detail}");
+        }
+        outcome.events.push(WorkspaceMaintenanceEvent {
+            event_id: format!("source-maintenance-{}-{index}", outcome.started_at),
+            kind: if success {
+                cognia_task_workspace::WorkspaceMaintenanceEventKind::Reconciled
+            } else {
+                cognia_task_workspace::WorkspaceMaintenanceEventKind::Failed
+            },
+            workspace_id: None,
+            occurred_at: outcome.finished_at,
+            detail,
+        });
+    }
+    Ok(outcome)
 }
 
 /// Runs the `WorktreeCreate` / `WorktreeRemove` lifecycle hooks for a
@@ -811,8 +907,10 @@ pub async fn task_workspace_maintenance_run(
     request: Option<WorkspaceMaintenanceRequest>,
 ) -> Result<WorkspaceMaintenanceResult, String> {
     blocking(move |service| {
-        service
-            .run_workspace_maintenance(request.unwrap_or(WorkspaceMaintenanceRequest { now: None }))
+        maintain_workspaces(
+            service,
+            request.unwrap_or(WorkspaceMaintenanceRequest { now: None }),
+        )
     })
     .await
 }
@@ -931,6 +1029,370 @@ pub async fn task_workspace_environment_create_branch(
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct ChangesetEligibility {
+    pub eligible: bool,
+    pub gaps: Vec<EligibilityGap>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationRunFilter {
+    pub repo_common_dir: Option<String>,
+    pub target_ref: Option<String>,
+    pub states: Option<Vec<IntegrationState>>,
+}
+
+impl IntegrationRunFilter {
+    fn matches(&self, run: &IntegrationRun) -> bool {
+        self.repo_common_dir
+            .as_ref()
+            .is_none_or(|dir| dir == &run.repo_common_dir)
+            && self
+                .target_ref
+                .as_ref()
+                .is_none_or(|target| target == &run.target_ref)
+            && self
+                .states
+                .as_ref()
+                .is_none_or(|states| states.contains(&run.state))
+    }
+}
+
+fn changeset_command_error(error: ChangesetError) -> CommandError {
+    let mut command = CommandError::new(error.code(), error.to_string());
+    command.retryable = error.retryable();
+    command
+}
+
+fn integration_command_error(error: IntegrationError) -> CommandError {
+    let mut command = CommandError::new(error.code(), error.to_string());
+    command.retryable = error.retryable();
+    command
+}
+
+/// Keep the service-slot guard inside `service()` and all git/SQLite work on
+/// the blocking pool, preserving typed rejections across both transports.
+async fn scm_blocking<T, F>(operation: F) -> Result<T, CommandError>
+where
+    T: Send + 'static,
+    F: FnOnce(&TaskWorkspaceService) -> Result<T, CommandError> + Send + 'static,
+{
+    let service =
+        service().map_err(|error| CommandError::retryable("service_unavailable", error))?;
+    tokio::task::spawn_blocking(move || operation(&service))
+        .await
+        .map_err(|error| {
+            CommandError::new(
+                "internal_error",
+                format!("task workspace operation panicked: {error}"),
+            )
+        })?
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_changeset_capture(
+    input: CaptureChangeset,
+) -> Result<AgentChangeset, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .capture_changeset(input)
+            .map_err(changeset_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_changeset_get(
+    changeset_id: String,
+) -> Result<Option<AgentChangeset>, CommandError> {
+    scm_blocking(move |service| match service.get_changeset(&changeset_id) {
+        Ok(changeset) => Ok(Some(changeset)),
+        Err(ChangesetError::NotFound(_)) => Ok(None),
+        Err(error) => Err(changeset_command_error(error)),
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_changeset_list(
+    filter: ChangesetFilter,
+) -> Result<Vec<AgentChangeset>, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .list_changesets(filter)
+            .map_err(changeset_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_changeset_mark_ready(
+    changeset_id: String,
+) -> Result<AgentChangeset, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .mark_changeset_ready(&changeset_id)
+            .map_err(changeset_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_changeset_record_review(
+    changeset_id: String,
+    review: ChangesetReview,
+) -> Result<AgentChangeset, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .record_changeset_review(&changeset_id, review)
+            .map_err(changeset_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_changeset_record_check(
+    changeset_id: String,
+    check: ChangesetCheck,
+) -> Result<AgentChangeset, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .record_changeset_check(&changeset_id, check)
+            .map_err(changeset_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_changeset_approve(
+    changeset_id: String,
+    head_sha: String,
+    approver: String,
+) -> Result<AgentChangeset, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .approve_changeset(&changeset_id, &head_sha, &approver)
+            .map_err(changeset_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_changeset_abandon(
+    changeset_id: String,
+) -> Result<AgentChangeset, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .abandon_changeset(&changeset_id)
+            .map_err(changeset_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_changeset_eligibility(
+    changeset_id: String,
+) -> Result<ChangesetEligibility, CommandError> {
+    scm_blocking(move |service| {
+        let changeset = service
+            .get_changeset(&changeset_id)
+            .map_err(changeset_command_error)?;
+        let gaps = changeset_eligibility(&changeset).err().unwrap_or_default();
+        Ok(ChangesetEligibility {
+            eligible: gaps.is_empty(),
+            gaps,
+        })
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_analyze(
+    changeset_ids: Vec<String>,
+    target_ref: Option<String>,
+) -> Result<IntegrationAnalysis, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .analyze_integration(changeset_ids, target_ref)
+            .map_err(integration_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_prepare(
+    input: PrepareIntegration,
+) -> Result<IntegrationRun, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .prepare_integration(input)
+            .map_err(integration_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_get(
+    integration_id: String,
+) -> Result<Option<IntegrationRun>, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .get_integration(&integration_id)
+            .map_err(integration_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_list(
+    filter: IntegrationRunFilter,
+) -> Result<Vec<IntegrationRun>, CommandError> {
+    scm_blocking(move |service| {
+        let mut runs = service
+            .list_integrations()
+            .map_err(integration_command_error)?;
+        runs.retain(|run| filter.matches(run));
+        Ok(runs)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_record_check(
+    integration_id: String,
+    candidate_sha: String,
+    check: ChangesetCheck,
+) -> Result<IntegrationRun, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .record_integration_check(&integration_id, &candidate_sha, check)
+            .map_err(integration_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_publish(
+    integration_id: String,
+    candidate_sha: String,
+    required_checks: Vec<String>,
+) -> Result<IntegrationRun, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .publish_integration(&integration_id, &candidate_sha, required_checks)
+            .map_err(integration_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_rebuild(
+    integration_id: String,
+) -> Result<IntegrationRun, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .rebuild_integration(&integration_id)
+            .map_err(integration_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_drop_item(
+    integration_id: String,
+    changeset_id: String,
+) -> Result<IntegrationRun, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .drop_integration_item(&integration_id, &changeset_id)
+            .map_err(integration_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_abort(
+    integration_id: String,
+) -> Result<IntegrationRun, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .abort_integration(&integration_id)
+            .map_err(integration_command_error)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_integration_rollback(
+    integration_id: String,
+) -> Result<IntegrationRun, CommandError> {
+    scm_blocking(move |service| {
+        service
+            .rollback_integration(&integration_id)
+            .map_err(integration_command_error)
+    })
+    .await
+}
+
+/// Delete a branch `task_workspace_environment_create_branch` made, leaving
+/// the environment detached at the same commit, so nothing the agent made is
+/// lost. Agent Team `select` uses it to roll back a promotion that failed
+/// part way. Only the branch the environment's row records is deleted; any
+/// other name, or a repeat, answers the record unchanged.
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_environment_delete_branch(
+    workspace_id: String,
+    branch: String,
+) -> Result<WorkspaceRecord, String> {
+    let id = workspace_id.clone();
+    let record = blocking(move |service| {
+        service
+            .get_managed_workspace(&id)?
+            .ok_or_else(|| format!("workspace {id} not found"))
+    })
+    .await?;
+    if record.branch.as_deref() != Some(branch.as_str()) {
+        // Already forgotten (a repeat), or never this environment's branch:
+        // either way nothing here is ours to delete.
+        return Ok(record);
+    }
+    let id = workspace_id.clone();
+    let execution_root = blocking(move |service| service.workspace_branch_target(&id)).await?;
+    delete_workspace_branch(&execution_root, &branch).await?;
+    blocking(move |service| service.forget_workspace_branch(&workspace_id, &branch)).await
+}
+
+async fn delete_workspace_branch(execution_root: &str, branch: &str) -> Result<(), String> {
+    let root = Path::new(execution_root);
+    let (attached, current, _) =
+        cognia_git::exec::capture_output(root, ["symbolic-ref", "--quiet", "--short", "HEAD"])
+            .await
+            .map_err(|error| error.to_string())?;
+    let on_branch = attached && current.trim() == branch;
+    if on_branch {
+        cognia_git::exec::run(root, ["checkout", "--detach", "HEAD"])
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    let local_ref = format!("refs/heads/{branch}");
+    let (exists, _, _) =
+        cognia_git::exec::capture_output(root, ["rev-parse", "--verify", "--quiet", &local_ref])
+            .await
+            .map_err(|error| error.to_string())?;
+    if !exists {
+        return Ok(());
+    }
+    // Detached at the branch tip, HEAD keeps every commit, so force is safe.
+    // An environment that moved off the branch gets the merged-only delete,
+    // which refuses rather than strand commits only the branch holds.
+    cognia_git::branch::delete(execution_root, branch, on_branch)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 async fn rollback_workspace_branch(
@@ -1550,6 +2012,388 @@ mod tests {
     }
 
     #[test]
+    fn source_maintenance_writes_the_managed_repository_commit_graph() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        run_git(repository.path(), &["init"]);
+        run_git(repository.path(), &["config", "user.name", "Cognia Test"]);
+        run_git(
+            repository.path(),
+            &["config", "user.email", "cognia@example.com"],
+        );
+        run_git(
+            repository.path(),
+            &["commit", "--allow-empty", "-m", "seed"],
+        );
+        let service = Arc::new(
+            TaskWorkspaceService::open(ServiceConfig::new(data.path().to_path_buf())).unwrap(),
+        );
+        service
+            .begin_run(begin_input(&repository, "maintenance-run"))
+            .unwrap();
+        let managed = service.list_managed_workspaces().unwrap().remove(0);
+        let mut archived_alias = managed.clone();
+        archived_alias.state = cognia_task_workspace::WorkspaceState::Archived;
+        archived_alias.git_common_dir =
+            Some(format!("{}/.", managed.git_common_dir.as_ref().unwrap()));
+        let imported_repo = TempDir::new().unwrap();
+        run_git(imported_repo.path(), &["init"]);
+        let mut imported = managed.clone();
+        imported.owner_type = cognia_task_workspace::WorkspaceOwnerType::Imported;
+        imported.git_common_dir = Some(
+            imported_repo
+                .path()
+                .join(".git")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let bare = TempDir::new().unwrap();
+        run_git(bare.path(), &["init", "--bare"]);
+        let mut mirror = managed.clone();
+        mirror.git_common_dir = Some(bare.path().to_string_lossy().into_owned());
+        assert_eq!(
+            source_maintenance_common_dirs(&[
+                managed.clone(),
+                archived_alias,
+                imported.clone(),
+                mirror
+            ]),
+            BTreeSet::from([repository.path().join(".git").canonicalize().unwrap()])
+        );
+        assert!(source_maintenance_common_dirs(&[imported]).is_empty());
+        for state in [
+            cognia_task_workspace::WorkspaceState::Provisioning,
+            cognia_task_workspace::WorkspaceState::Restorable,
+            cognia_task_workspace::WorkspaceState::Conflict,
+            cognia_task_workspace::WorkspaceState::Removing,
+            cognia_task_workspace::WorkspaceState::Removed,
+        ] {
+            let mut excluded = managed.clone();
+            excluded.state = state;
+            assert!(source_maintenance_common_dirs(&[excluded]).is_empty());
+        }
+        for kind in [
+            cognia_task_workspace::WorkspaceEnvironmentKind::Imported,
+            cognia_task_workspace::WorkspaceEnvironmentKind::Permanent,
+        ] {
+            let mut excluded = managed.clone();
+            excluded.environment_kind = kind;
+            assert!(source_maintenance_common_dirs(&[excluded]).is_empty());
+        }
+        *slot().write() = Some(service);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let outcome = runtime.block_on(run_workspace_maintenance_once()).unwrap();
+        assert_eq!(
+            outcome
+                .events
+                .iter()
+                .filter(|event| event.detail.starts_with("source commit-graph maintenance:"))
+                .count(),
+            1
+        );
+        assert!(repository
+            .path()
+            .join(".git/objects/info/commit-graphs/commit-graph-chain")
+            .is_file());
+        assert!(!imported_repo
+            .path()
+            .join(".git/objects/info/commit-graphs/commit-graph-chain")
+            .exists());
+    }
+
+    #[test]
+    fn target_moved_retains_its_code_and_retryability_on_both_transports() {
+        let error = integration_command_error(IntegrationError::TargetMoved {
+            expected: "old".into(),
+            actual: Some("new".into()),
+        });
+        assert_eq!(
+            serde_json::to_value(&error).unwrap(),
+            serde_json::json!({
+                "code": "target_moved", "message": "target moved: expected old, actual Some(\"new\")", "retryable": true,
+            })
+        );
+        let problem: cognia_problem::Problem = error.into();
+        let value = serde_json::to_value(problem).unwrap();
+        assert_eq!(value["code"], "target_moved");
+        assert_eq!(value["retryable"], true);
+        let error = changeset_command_error(ChangesetError::StaleHead {
+            expected: "old".into(),
+            actual: "new".into(),
+        });
+        assert_eq!(error.code, "stale_head");
+        assert!(!error.retryable);
+    }
+
+    #[test]
+    fn scm_host_commands_capture_gate_publish_and_rollback() {
+        use cognia_task_workspace::{
+            ChangesetCheckOutcome, ChangesetReviewVerdict, ChangesetReviewer, ChangesetRiskTier,
+            ChangesetState, IntegrationConflictPolicy, IntegrationStrategy,
+        };
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        run_git(repository.path(), &["init", "-b", "main"]);
+        run_git(repository.path(), &["config", "user.name", "Cognia Test"]);
+        run_git(
+            repository.path(),
+            &["config", "user.email", "cognia@example.com"],
+        );
+        run_git(
+            repository.path(),
+            &["commit", "--allow-empty", "-m", "seed"],
+        );
+        let service = Arc::new(
+            TaskWorkspaceService::open(ServiceConfig::new(data.path().to_path_buf())).unwrap(),
+        );
+        let run = service
+            .begin_run(begin_input(&repository, "scm-run"))
+            .unwrap();
+        std::fs::write(
+            Path::new(&run.execution_root).join("change.txt"),
+            "agent change\n",
+        )
+        .unwrap();
+        *slot().write() = Some(service);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            assert!(task_workspace_changeset_get("missing".into())
+                .await
+                .unwrap()
+                .is_none());
+            assert!(task_workspace_integration_get("missing".into())
+                .await
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                task_workspace_changeset_eligibility("missing".into())
+                    .await
+                    .unwrap_err()
+                    .code,
+                "not_found"
+            );
+            let captured = task_workspace_changeset_capture(CaptureChangeset {
+                workspace_id: run.workspace_id.clone().unwrap(),
+                target_ref: Some("refs/heads/main".into()),
+                title: "Agent change".into(),
+                depends_on: vec![],
+                required_checks: vec!["test".into()],
+                changeset_id: None,
+            })
+            .await
+            .unwrap();
+            let id = captured.changeset_id.clone();
+            let eligibility = task_workspace_changeset_eligibility(id.clone())
+                .await
+                .unwrap();
+            assert!(!eligibility.eligible);
+            assert!(eligibility.gaps.contains(&EligibilityGap::MissingReview));
+            assert!(serde_json::to_value(&eligibility).unwrap().is_object());
+            assert_eq!(
+                task_workspace_changeset_get(id.clone()).await.unwrap(),
+                Some(captured.clone())
+            );
+            assert_eq!(
+                task_workspace_changeset_list(ChangesetFilter::default())
+                    .await
+                    .unwrap(),
+                vec![captured.clone()]
+            );
+            task_workspace_changeset_mark_ready(id.clone())
+                .await
+                .unwrap();
+            task_workspace_changeset_record_review(
+                id.clone(),
+                ChangesetReview {
+                    head_sha: captured.head_sha.clone(),
+                    verdict: ChangesetReviewVerdict::Approve,
+                    reviewer: ChangesetReviewer::User,
+                    risk_tier: ChangesetRiskTier::Low,
+                    reasons: vec![],
+                    findings: vec![],
+                    requires_human_approval: true,
+                    recorded_at: 1,
+                },
+            )
+            .await
+            .unwrap();
+            let check = |sha: &str| ChangesetCheck {
+                head_sha: sha.into(),
+                profile_id: "test".into(),
+                outcome: ChangesetCheckOutcome::Passed,
+                tier: None,
+                report_digest: None,
+                log_tail: None,
+                ran_at: 1,
+            };
+            let stale = task_workspace_changeset_record_check(id.clone(), check("stale"))
+                .await
+                .unwrap_err();
+            assert_eq!(stale.code, "stale_head");
+            task_workspace_changeset_record_check(id.clone(), check(&captured.head_sha))
+                .await
+                .unwrap();
+            task_workspace_changeset_approve(
+                id.clone(),
+                captured.head_sha.clone(),
+                "reviewer".into(),
+            )
+            .await
+            .unwrap();
+            assert!(
+                task_workspace_changeset_eligibility(id.clone())
+                    .await
+                    .unwrap()
+                    .eligible
+            );
+            let analysis = task_workspace_integration_analyze(vec![id.clone()], None)
+                .await
+                .unwrap();
+            assert_eq!(analysis.order, vec![id.clone()]);
+            let prepared = task_workspace_integration_prepare(PrepareIntegration {
+                changeset_ids: vec![id.clone()],
+                required_checks: Vec::new(),
+                target_ref: "refs/heads/main".into(),
+                strategy: IntegrationStrategy::Merge,
+                on_conflict: IntegrationConflictPolicy::Stop,
+                provisioning: None,
+                integration_id: None,
+            })
+            .await
+            .unwrap();
+            let integration_id = prepared.integration_id.clone();
+            assert_eq!(
+                task_workspace_integration_get(integration_id.clone())
+                    .await
+                    .unwrap(),
+                Some(prepared.clone())
+            );
+            for filter in [
+                serde_json::json!({}),
+                serde_json::json!({"repoCommonDir": captured.repo_common_dir}),
+                serde_json::json!({"targetRef": "refs/heads/main", "states": ["prepared"]}),
+            ] {
+                assert_eq!(
+                    task_workspace_integration_list(serde_json::from_value(filter).unwrap())
+                        .await
+                        .unwrap(),
+                    vec![prepared.clone()]
+                );
+            }
+            for filter in [
+                serde_json::json!({"repoCommonDir":"elsewhere"}),
+                serde_json::json!({"targetRef":"refs/heads/other"}),
+                serde_json::json!({"states": []}),
+                serde_json::json!({"states":["published"]}),
+            ] {
+                assert!(
+                    task_workspace_integration_list(serde_json::from_value(filter).unwrap())
+                        .await
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+            let candidate = prepared.candidate_sha.unwrap();
+            assert_eq!(
+                task_workspace_integration_publish(integration_id.clone(), "stale".into(), vec![])
+                    .await
+                    .unwrap_err()
+                    .code,
+                "stale_candidate"
+            );
+            assert_eq!(
+                task_workspace_integration_publish(
+                    integration_id.clone(),
+                    candidate.clone(),
+                    vec!["test".into()]
+                )
+                .await
+                .unwrap_err()
+                .code,
+                "checks"
+            );
+            task_workspace_integration_record_check(
+                integration_id.clone(),
+                candidate.clone(),
+                check(&candidate),
+            )
+            .await
+            .unwrap();
+            let published = task_workspace_integration_publish(
+                integration_id.clone(),
+                candidate,
+                vec!["test".into()],
+            )
+            .await
+            .unwrap();
+            assert_eq!(published.state, IntegrationState::Published);
+            assert_eq!(
+                std::fs::read_to_string(repository.path().join("change.txt")).unwrap(),
+                "agent change\n"
+            );
+            let rolled_back = task_workspace_integration_rollback(integration_id)
+                .await
+                .unwrap();
+            assert_eq!(rolled_back.state, IntegrationState::RolledBack);
+            assert!(!repository.path().join("change.txt").exists());
+            assert_eq!(
+                task_workspace_changeset_get(id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .state,
+                ChangesetState::RolledBack
+            );
+            let abandoned = task_workspace_changeset_capture(CaptureChangeset {
+                workspace_id: run.workspace_id.unwrap(),
+                target_ref: Some("refs/heads/main".into()),
+                title: "Abandoned change".into(),
+                depends_on: vec![],
+                required_checks: vec![],
+                changeset_id: None,
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                task_workspace_changeset_abandon(abandoned.changeset_id)
+                    .await
+                    .unwrap()
+                    .state,
+                ChangesetState::Abandoned
+            );
+            assert_eq!(
+                task_workspace_integration_rebuild("missing".into())
+                    .await
+                    .unwrap_err()
+                    .code,
+                "not_found"
+            );
+            assert_eq!(
+                task_workspace_integration_drop_item("missing".into(), "missing".into())
+                    .await
+                    .unwrap_err()
+                    .code,
+                "not_found"
+            );
+            assert_eq!(
+                task_workspace_integration_abort("missing".into())
+                    .await
+                    .unwrap_err()
+                    .code,
+                "not_found"
+            );
+        });
+    }
+
+    #[test]
     fn worktree_hook_fields_carry_the_documented_wire_names() {
         let event = WorktreeLifecycleEvent {
             kind: WorktreeLifecycleKind::Created,
@@ -1679,6 +2523,69 @@ mod tests {
                 .await
                 .unwrap();
         assert!(branch.trim().is_empty());
+    }
+
+    #[tokio::test]
+    async fn branch_delete_detaches_at_the_same_commit_and_is_idempotent() {
+        let repository = TempDir::new().unwrap();
+        run_git(repository.path(), &["init"]);
+        run_git(repository.path(), &["config", "user.name", "Cognia Test"]);
+        run_git(
+            repository.path(),
+            &["config", "user.email", "cognia@example.com"],
+        );
+        std::fs::write(repository.path().join("README.md"), "seed\n").unwrap();
+        run_git(repository.path(), &["add", "README.md"]);
+        run_git(repository.path(), &["commit", "-m", "seed"]);
+        let root = repository.path().to_string_lossy().into_owned();
+        cognia_git::worktree::create_branch_here(&root, "agent/run/alice/task")
+            .await
+            .unwrap();
+        std::fs::write(repository.path().join("work.txt"), "agent\n").unwrap();
+        run_git(repository.path(), &["add", "work.txt"]);
+        run_git(repository.path(), &["commit", "-m", "agent work"]);
+        let head = cognia_git::exec::capture(repository.path(), ["rev-parse", "HEAD"])
+            .await
+            .unwrap();
+
+        delete_workspace_branch(&root, "agent/run/alice/task")
+            .await
+            .unwrap();
+
+        let current = cognia_git::exec::capture(repository.path(), ["rev-parse", "HEAD"])
+            .await
+            .unwrap();
+        assert_eq!(current.trim(), head.trim());
+        let branch = cognia_git::exec::capture(
+            repository.path(),
+            ["branch", "--list", "agent/run/alice/task"],
+        )
+        .await
+        .unwrap();
+        assert!(branch.trim().is_empty());
+        // A retry after the branch is gone still succeeds.
+        delete_workspace_branch(&root, "agent/run/alice/task")
+            .await
+            .unwrap();
+
+        // Off the branch, commits only the branch holds are never stranded.
+        cognia_git::worktree::create_branch_here(&root, "agent/run/bob/task")
+            .await
+            .unwrap();
+        std::fs::write(repository.path().join("bob.txt"), "bob\n").unwrap();
+        run_git(repository.path(), &["add", "bob.txt"]);
+        run_git(repository.path(), &["commit", "-m", "bob work"]);
+        run_git(repository.path(), &["checkout", "--detach", head.trim()]);
+        assert!(delete_workspace_branch(&root, "agent/run/bob/task")
+            .await
+            .is_err());
+        let kept = cognia_git::exec::capture(
+            repository.path(),
+            ["branch", "--list", "agent/run/bob/task"],
+        )
+        .await
+        .unwrap();
+        assert!(!kept.trim().is_empty());
     }
 
     fn turn_envelope(workspace: &TempDir, run_id: &str) -> TaskWorkspaceTurnEnvelope {

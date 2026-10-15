@@ -286,7 +286,7 @@
     "reconcile": {
       "hint": {
         "manual": "Leave every branch for you to review and merge.",
-        "merge-all": "Merge all successful branches into one integration branch; a conflict stops and reports (never your real branch).",
+        "merge-all": "Capture each successful agent's changes, review and verify them, and integrate the ones that pass through the host queue. Conflicting changes are skipped or stop the run, as you choose.",
         "pipeline": "Sequential dispatches share one branch.",
         "select": "Keep one branch and discard the rest."
       },
@@ -314,6 +314,38 @@
         "manual": "I choose"
       }
     },
-    "title": "Worktree isolation"
+    "title": "Worktree isolation",
+    "integration": {
+      "target": {
+        "label": "Integrate into",
+        "option": {
+          "branch": "A run branch (agent/'<'run'>'/integrated)",
+          "base": "The branch the checkout is on"
+        },
+        "hint": {
+          "branch": "Your branch is never moved; merge the run branch yourself.",
+          "base": "Your branch moves only if nobody else moved it and the checkout has no uncommitted changes."
+        }
+      },
+      "strategy": {
+        "label": "How to combine",
+        "option": {
+          "merge": "Merge commits",
+          "rebase": "Rebase onto the target"
+        }
+      },
+      "onConflict": {
+        "label": "On a conflict",
+        "option": {
+          "skip": "Skip that change and continue",
+          "stop": "Stop the run"
+        }
+      },
+      "requiredChecks": {
+        "label": "Required checks",
+        "placeholder": "acceptance profile ids, comma-separated",
+        "hint": "Every change must pass these approved acceptance profiles, in addition to the target branch's .cognia/workspace.json review.requiredChecks."
+      }
+    }
   }
 }

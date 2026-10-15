@@ -83,6 +83,7 @@ import {
   downloadTaskResource,
   uploadTaskResource,
   createWorkspaceBranch,
+  deleteWorkspaceBranch,
   makeManagedWorkspacePermanent,
   setWorkspaceLifecyclePolicy,
   runWorkspaceMaintenance,
@@ -1103,6 +1104,17 @@ describe("task workspace client", () => {
     expect(call).toHaveBeenCalledWith("task_workspace_environment_create_branch", {
       workspaceId: "ws-1",
       branch: "feature/review",
+    })
+  })
+
+  it("rolls a promotion branch back through the ownership-validated host command", async () => {
+    call.mockResolvedValueOnce({ workspaceId: "ws-1", branch: null })
+
+    await deleteWorkspaceBranch("ws-1", "agent/run/alice/task")
+
+    expect(call).toHaveBeenCalledWith("task_workspace_environment_delete_branch", {
+      workspaceId: "ws-1",
+      branch: "agent/run/alice/task",
     })
   })
 

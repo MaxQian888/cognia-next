@@ -639,18 +639,20 @@ export interface AgentTeamConfig {
    */
   workingDir?: string
   /**
-   * Per-dispatch git-worktree isolation. When `enabled`, each teammate dispatch
-   * runs in its own `git worktree` + branch (`agent/<runId>/<teammate>/<taskId>`)
-   * branched off `workingDir`'s HEAD, so parallel agents never share a working
-   * tree / index / branch. Off by default → identical to today's shared-dir
-   * behavior. Desktop-only (git ops run in Rust/Tauri); a no-op on web/mobile.
+   * Per-dispatch git-worktree isolation. Every teammate dispatch into a
+   * writable repository runs in its own detached, Registry-owned worktree
+   * (ADR-0111), whatever `enabled` says: parallel agents never share a working
+   * tree / index / branch. Desktop-only (git ops run in Rust/Tauri); a no-op on
+   * web/mobile.
    *
-   * `reconcile` decides how the per-dispatch branches are integrated once the
-   * run (or a fan-out group) settles:
-   *   - `"manual"` (default): leave the branches for the user to review/merge.
-   *   - `"merge-all"`: merge each branch into a fresh integration branch off
-   *     `baseRef`; a conflict aborts and is reported (never touches the user's
-   *     real branch).
+   * `reconcile` decides how the per-dispatch environments are integrated once
+   * the run (or a fan-out group) settles:
+   *   - `"manual"` (default): branch each environment for the user to review/merge.
+   *   - `"merge-all"`: capture each successful environment as a changeset,
+   *     review and verify it, and integrate the ones that pass through the
+   *     host queue (ADR-0227) into `integration.target`; a conflicting
+   *     changeset is skipped (or stops the run) and reported, and the user's
+   *     branch is only moved when `integration.target` is `"base"`.
    *   - `"select"`: keep one branch per `selectStrategy`, discard the rest per
    *     `retain`.
    *   - `"pipeline"`: sequential dispatches share one worktree/branch.
@@ -666,6 +668,20 @@ export interface AgentTeamConfig {
     retain?: "all" | "keep-winner" | "prune-losers"
     baseRef?: string
     backend?: "local"
+    /**
+     * `merge-all` through the host integration queue (ADR-0227 §5). `target`
+     * `"branch"` (default) publishes to `agent/<run>/integrated`; `"base"`
+     * integrates into the branch the source checkout is on. `strategy`
+     * defaults to `"merge"`, `onConflict` to `"skip"`. `requiredChecks` are
+     * acceptance profile ids every changeset of the run owes, on top of the
+     * target's `.cognia/workspace.json` `review.requiredChecks`.
+     */
+    integration?: {
+      target?: "branch" | "base"
+      strategy?: "merge" | "rebase"
+      onConflict?: "skip" | "stop"
+      requiredChecks?: string[]
+    }
   }
   /**
    * Stage-checkpoint adaptive re-planning (model-in-the-loop). When `enabled`,

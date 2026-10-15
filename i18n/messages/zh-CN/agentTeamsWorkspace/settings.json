@@ -286,7 +286,7 @@
     "reconcile": {
       "hint": {
         "manual": "保留所有分支，交由你审阅合并。",
-        "merge-all": "把所有成功分支合并到一条集成分支；冲突则停止并报告（绝不改动你的真实分支）。",
+        "merge-all": "捕获每个成功智能体的改动，经审查与验证后，把通过的改动经主机集成队列合入。冲突的改动按你的选择跳过或停止运行。",
         "pipeline": "顺序派发共用一条分支。",
         "select": "保留一条分支，丢弃其余。"
       },
@@ -314,6 +314,38 @@
         "manual": "我来选"
       }
     },
-    "title": "工作树隔离"
+    "title": "工作树隔离",
+    "integration": {
+      "target": {
+        "label": "合入目标",
+        "option": {
+          "branch": "运行分支（agent/'<'run'>'/integrated）",
+          "base": "检出所在的分支"
+        },
+        "hint": {
+          "branch": "绝不移动你的分支；运行分支由你自行合并。",
+          "base": "仅当没有其他人移动过该分支、且检出没有未提交改动时，才会移动你的分支。"
+        }
+      },
+      "strategy": {
+        "label": "合并方式",
+        "option": {
+          "merge": "合并提交",
+          "rebase": "变基到目标"
+        }
+      },
+      "onConflict": {
+        "label": "遇到冲突时",
+        "option": {
+          "skip": "跳过该改动并继续",
+          "stop": "停止运行"
+        }
+      },
+      "requiredChecks": {
+        "label": "必需检查",
+        "placeholder": "验收配置 id，用逗号分隔",
+        "hint": "每项改动除需通过目标分支 .cognia/workspace.json 中的 review.requiredChecks 外，还须通过这些已批准的验收配置。"
+      }
+    }
   }
 }

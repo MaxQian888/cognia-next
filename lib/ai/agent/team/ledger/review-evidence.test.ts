@@ -211,6 +211,111 @@ describe("buildReviewEvidence — shared working dir (isolation off)", () => {
   })
 })
 
+describe("buildReviewEvidence — Registry environment with a base", () => {
+  it("shows what a teammate committed itself, not an empty working tree", async () => {
+    const git = makeGit({
+      diffRefsFiles: jest.fn(async () => [change("c.ts")]),
+      diffRefsFile: jest.fn(async () => diff("c.ts", "@@ -1 +1 @@\n-old\n+committed")),
+      status: jest.fn(async () => status()),
+    })
+    const ev = await buildReviewEvidence({
+      workingDir: "/env",
+      workingDirBase: "main",
+      taskId: "t1",
+      git,
+    })
+    expect(git.diffRefsFiles).toHaveBeenCalledWith("/env", "main", "HEAD")
+    expect(ev.kind).toBe("commit")
+    expect(ev.files).toEqual(["c.ts"])
+    expect(ev.diff).toContain("+committed")
+  })
+
+  it("adds uncommitted edits after the committed ones, labelling a file edited twice", async () => {
+    const git = makeGit({
+      diffRefsFiles: jest.fn(async () => [change("c.ts")]),
+      diffRefsFile: jest.fn(async () => diff("c.ts", "@@ -1 +1 @@\n-old\n+committed")),
+      status: jest.fn(async () => status({ changes: [change("c.ts"), change("d.ts")] })),
+      diffFile: jest.fn(async (_dir: string, path: string) =>
+        diff(path, `@@ -1 +1 @@\n-x\n+dirty-${path}`)
+      ),
+    })
+    const ev = await buildReviewEvidence({
+      workingDir: "/env",
+      workingDirBase: "main",
+      taskId: "t1",
+      git,
+    })
+    expect(ev.files).toEqual(["c.ts", "c.ts (uncommitted)", "d.ts"])
+    expect(ev.diff).toContain("+dirty-d.ts")
+  })
+
+  it("keeps the uncommitted half when the committed diff fails", async () => {
+    const git = makeGit({
+      diffRefsFiles: jest.fn(async () => {
+        throw new Error("unknown revision main")
+      }),
+      status: jest.fn(async () => status({ changes: [change("d.ts")] })),
+    })
+    const ev = await buildReviewEvidence({
+      workingDir: "/env",
+      workingDirBase: "main",
+      taskId: "t1",
+      git,
+    })
+    expect(ev.kind).toBe("worktree")
+    expect(ev.files).toEqual(["d.ts"])
+  })
+
+  it("falls back to text when the environment changed nothing", async () => {
+    const ev = await buildReviewEvidence({
+      workingDir: "/env",
+      workingDirBase: "main",
+      taskId: "t1",
+      git: makeGit(),
+    })
+    expect(ev.kind).toBe("text")
+  })
+})
+
+describe("buildReviewEvidence — what may reach the lead's model", () => {
+  it("never includes a credential file, and says how many were withheld", async () => {
+    const git = makeGit({
+      status: jest.fn(async () => status({ changes: [change(".env"), change("src/a.ts")] })),
+      diffFile: jest.fn(async (_dir: string, path: string) =>
+        diff(path, `@@ -1 +1 @@\n-x\n+${path}-changed`)
+      ),
+    })
+    const ev = await buildReviewEvidence({ workingDir: "/env", taskId: "t1", git })
+    expect(ev.files).toEqual(["src/a.ts"])
+    expect(ev.diff).not.toContain(".env-changed")
+    expect(ev.diff).toContain("1 file(s) withheld")
+  })
+
+  it("redacts personal data in a patch before the lead sees it", async () => {
+    const git = makeGit({
+      status: jest.fn(async () => status({ changes: [change("src/a.ts")] })),
+      diffFile: jest.fn(async () =>
+        diff("src/a.ts", "@@ -1 +1 @@\n-x\n+const owner = 'alice.smith@example.com'")
+      ),
+    })
+    const ev = await buildReviewEvidence({ workingDir: "/env", taskId: "t1", git })
+    expect(ev.files).toEqual(["src/a.ts"])
+    expect(ev.diff).not.toContain("alice.smith@example.com")
+  })
+
+  it("withholds a file whose path carries personal data", async () => {
+    const git = makeGit({
+      status: jest.fn(async () =>
+        status({ changes: [change("customers/jane.doe@acme.com.md"), change("src/a.ts")] })
+      ),
+      diffFile: jest.fn(async (_dir: string, path: string) => diff(path, "@@ -1 +1 @@\n-x\n+y")),
+    })
+    const ev = await buildReviewEvidence({ workingDir: "/env", taskId: "t1", git })
+    expect(ev.files).toEqual(["src/a.ts"])
+    expect(ev.diff).not.toContain("jane.doe@acme.com")
+  })
+})
+
 describe("buildReviewEvidence — default git wiring", () => {
   // The seam defaults to the real `lib/git/commands` wrappers. Those are inert
   // off-desktop (no git bridge), which is exactly why this degrades to text

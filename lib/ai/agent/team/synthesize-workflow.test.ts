@@ -3,6 +3,7 @@ import {
   synthesizeTeamWorkflow,
   SynthesizeError,
   resolveRetryPolicy,
+  TEAM_RECONCILE_NODE_ID,
 } from "./synthesize-workflow"
 import { DEFAULT_RETRY_POLICY } from "@/types/workflow/visual"
 import type { AgentTeam, AgentTeamConfig, AgentTeamTask } from "@/types/agent/agent-team"
@@ -191,6 +192,59 @@ describe("synthesizeTeamWorkflow — blocking lead review (ADR-0071)", () => {
     })
     expect(nodeIdToTaskId.get("review:t1")).toBe("t1")
     expect(nodeIdToTaskId.get("t1")).toBe("t1")
+  })
+})
+
+describe("synthesizeTeamWorkflow — merge-all integration (ADR-0227)", () => {
+  const mergeAllTeam = (extra: Partial<AgentTeamConfig> = {}): AgentTeam =>
+    ({
+      ...team,
+      config: { ...team.config, workspaceIsolation: { reconcile: "merge-all" }, ...extra },
+    }) as AgentTeam
+  const synth = (t: AgentTeam, tasks: AgentTeamTask[]) =>
+    synthesizeTeamWorkflow({ team: t, tasks, initialConcurrency: 2 })
+
+  it("ends the workflow in one reconcile node gated on every terminal task", () => {
+    const { workflow, nodeIdToTaskId } = synth(mergeAllTeam(), [
+      task("a"),
+      task("b", ["a"]),
+      task("c"),
+    ])
+    const reconcile = workflow.nodes.find((node) => node.id === TEAM_RECONCILE_NODE_ID)
+    expect(reconcile?.type).toBe("action.team.reconcile")
+    expect(reconcile?.data.params).toEqual({ mode: "merge-all" })
+    const into = workflow.edges
+      .filter((edge) => edge.target === TEAM_RECONCILE_NODE_ID)
+      .map((edge) => edge.source)
+    // `a` is depended on by `b`, so only the terminal `b` and `c` gate it.
+    expect(into.sort()).toEqual(["b", "c"])
+    expect(nodeIdToTaskId.has(TEAM_RECONCILE_NODE_ID)).toBe(false)
+  })
+
+  it("gates on the review node when lead review is on", () => {
+    const t = mergeAllTeam({ taskReview: { enabled: true } } as Partial<AgentTeamConfig>)
+    const { workflow } = synth(t, [task("a")])
+    const into = workflow.edges
+      .filter((edge) => edge.target === TEAM_RECONCILE_NODE_ID)
+      .map((edge) => edge.source)
+    expect(into).toHaveLength(1)
+    expect(into[0]).not.toBe("a")
+    expect(workflow.nodes.find((node) => node.id === into[0])?.type).toBe("action.team.task.review")
+  })
+
+  it("emits nothing for other reconcile modes", () => {
+    for (const reconcile of ["manual", "select", "pipeline"] as const) {
+      const t = {
+        ...team,
+        config: { ...team.config, workspaceIsolation: { reconcile } },
+      } as AgentTeam
+      expect(
+        synth(t, [task("a")]).workflow.nodes.some((node) => node.id === TEAM_RECONCILE_NODE_ID)
+      ).toBe(false)
+    }
+    expect(
+      synth(team, [task("a")]).workflow.nodes.some((node) => node.id === TEAM_RECONCILE_NODE_ID)
+    ).toBe(false)
   })
 })
 

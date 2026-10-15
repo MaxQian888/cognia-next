@@ -2238,6 +2238,230 @@
       "notInBuildHint": "设备密钥和批准功能是预览功能，仅在测试版中提供。"
     }
   },
+  "agentChanges": {
+    "actions": {
+      "abandon": "放弃",
+      "abort": "中止",
+      "approve": "批准",
+      "integrate": "集成",
+      "requestChanges": "要求修改",
+      "review": "审查",
+      "rollback": "回滚"
+    },
+    "cancel": "取消",
+    "checkOutcomes": {
+      "failed": "失败",
+      "inconclusive": "结果不确定",
+      "passed": "通过"
+    },
+    "close": "关闭",
+    "confirm": {
+      "abandonDescription": "此操作会将更改集移出队列，并解除对其提交的保留。",
+      "abandonTitle": "放弃此更改集？",
+      "approveDescription": "批准仅适用于提交 {sha}。继续前请确认风险原因。",
+      "approveTitle": "批准此提交？",
+      "continue": "确认",
+      "rollbackDescription": "主机将恢复或撤销已发布到 {ref} 的更改。",
+      "rollbackTitle": "回滚此次集成？"
+    },
+    "detail": {
+      "approvalHead": "{approver} 批准了提交 {sha}",
+      "binary": "二进制文件",
+      "changeNote": "修改意见",
+      "checkTier": "沙箱级别：{tier}",
+      "checks": "检查",
+      "eligibility": "集成条件",
+      "eligible": "已满足主机核验的全部集成条件。",
+      "files": "文件",
+      "head": "当前提交：{sha}",
+      "humanApprovalRequired": "此提交需要人工明确批准。",
+      "logTail": "查看检查日志末尾",
+      "noChecks": "尚未记录检查。",
+      "noReview": "此更改集尚未审查。",
+      "renamedFrom": "原路径：{path}",
+      "review": "审查",
+      "reviewHead": "审查对应提交 {sha}",
+      "title": "更改集详情",
+      "unknownTier": "不可用",
+      "withheldSensitive": "敏感内容已排除"
+    },
+    "empty": "此仓库还没有智能体更改集。",
+    "errors": {
+      "action": "操作未完成，请刷新后重试。",
+      "eligibility": "无法检查集成条件。",
+      "load": "无法加载智能体更改，请重试刷新。",
+      "preview": "无法加载分支或分析集成。"
+    },
+    "excluded": "已排除敏感文件",
+    "fileCount": "{count} 个文件",
+    "fileStatus": {
+      "added": "新增",
+      "deleted": "删除",
+      "modified": "修改",
+      "renamed": "重命名",
+      "typeChanged": "类型变更"
+    },
+    "gaps": {
+      "checkNotPassed": "检查 {profile}：{outcome}",
+      "missingCheck": "缺少必需检查：{profile}",
+      "missingHumanApproval": "当前提交需要人工批准。",
+      "missingReview": "需要审查。",
+      "reviewNotApproved": "审查尚未批准此更改。",
+      "staleHead": "现有证据对应其他提交，请重新审查当前提交。"
+    },
+    "groups": {
+      "done": "已结束（{count}）",
+      "open": "进行中的更改集"
+    },
+    "integrate": {
+      "between": "{a} ↔ {b}",
+      "chooseBranch": "选择分支",
+      "conflictedItem": "有冲突：{title}",
+      "description": "发布到本地分支前，请确认集成顺序和预测冲突。",
+      "dropped": "因检查失败而移除的更改",
+      "merge": "合并",
+      "noBranches": "没有可用的本地分支。",
+      "none": "未预测到。",
+      "onConflict": "发生冲突时",
+      "order": "集成顺序",
+      "overlapOnly": "此主机只能预测文件重叠，仍可能发生其他合并冲突。",
+      "overlaps": "重叠文件",
+      "predictedConflicts": "预测冲突",
+      "rebase": "变基",
+      "running": "正在集成…",
+      "skip": "跳过冲突更改",
+      "stop": "停止集成",
+      "strategy": "集成方式",
+      "target": "目标分支",
+      "targetTip": "目标分支最新提交",
+      "title": "集成智能体更改"
+    },
+    "integrateSelected": "集成所选更改（{count}）",
+    "integrationReasons": {
+      "aborted": "集成已取消。",
+      "attempts_exhausted": "已达到重试次数上限，请刷新后重新开始。",
+      "busy": "此仓库正在执行其他集成，请等待完成。",
+      "changeset_state": "当前更改集状态不允许此操作。",
+      "checks": "必需检查尚未通过。",
+      "checks_unmet": "候选提交未通过全部必需检查。",
+      "conflict": "Git 报告了冲突。",
+      "cycles": "更改集依赖存在循环，请先解决循环依赖。",
+      "dependency": "某个更改集依赖不可用或尚未满足。",
+      "host_error": "主机未能完成集成，请刷新后重试。",
+      "ineligible": "某个更改集不满足主机的集成条件。",
+      "invalid_request": "主机拒绝了请求，请刷新并检查选择。",
+      "invalid_state": "当前集成状态不允许此操作。",
+      "not_found": "请求的更改集或集成记录已不存在。",
+      "nothing_to_capture": "没有可捕获的更改。",
+      "rollback_conflict": "回滚发生冲突，请检查仓库后重试。",
+      "stale_candidate": "候选集成提交已过期，请刷新后重试。",
+      "stale_head": "更改集的提交已变更，请重新审查。",
+      "target_checked_out_dirty": "目标工作区存在未提交的更改，请先提交或暂存到 stash。",
+      "target_moved": "目标分支已变更，请刷新后重试。",
+      "unknown": "集成已停止：{code}"
+    },
+    "itemOutcomes": {
+      "conflicted": "有冲突",
+      "dropped": "已移除",
+      "merged": "已合并",
+      "pending": "待处理",
+      "rerereResolved": "已复用历史方案解决冲突",
+      "skipped": "已跳过"
+    },
+    "lineTotals": "+{insertions} / −{deletions}",
+    "loading": "正在加载智能体更改…",
+    "noProject": "此面板未关联项目。必需检查将记录为结果不确定，集成无法通过这些检查。",
+    "outcomes": {
+      "blocked": "集成受阻",
+      "conflicted": "集成存在冲突",
+      "failed": "集成失败",
+      "published": "集成已发布"
+    },
+    "reasons": {
+      "agentFailed": "审查智能体执行失败。",
+      "binaryChange": "修改了二进制文件。",
+      "dependencyChange": "修改了依赖清单或锁文件。",
+      "humanApprovalAlways": "仓库策略要求每次更改都经人工批准。",
+      "incomplete": "智能体未能审查全部更改。",
+      "largeChange": "更改行数较多。",
+      "massDeletion": "删除了大量文件或代码行。",
+      "noModel": "尚未配置审查模型。",
+      "protectedCi": "修改了受保护的 CI 配置。",
+      "protectedCogniaConfig": "修改了受保护的 Cognia 配置。",
+      "protectedDeploy": "修改了受保护的部署配置。",
+      "protectedHooks": "修改了受保护的 Git 钩子。",
+      "protectedMigrations": "修改了受保护的数据迁移。",
+      "protectedOwnership": "修改了仓库所有权规则。",
+      "protectedRepositoryPolicy": "修改了仓库策略保护的路径。",
+      "reviewAgentRedacted": "发送给审查智能体的敏感内容已脱敏。",
+      "reviewPolicyInvalid": "无法验证审查策略（{code}）。",
+      "sensitiveWithheld": "敏感文件已从更改集中排除。",
+      "unknown": "未知审查原因：{code}",
+      "unparseable": "审查智能体返回的结果无法解析。"
+    },
+    "refresh": "刷新",
+    "retry": "重试",
+    "reviewers": {
+      "agent": "智能体审查",
+      "deterministic": "规则审查",
+      "user": "人工审查"
+    },
+    "risk": {
+      "high": "高风险",
+      "low": "低风险",
+      "medium": "中风险",
+      "unassessed": "尚未评估风险"
+    },
+    "runStates": {
+      "aborted": "已中止",
+      "conflicted": "有冲突",
+      "failed": "失败",
+      "interrupted": "已中断",
+      "planned": "已计划",
+      "prepared": "已准备",
+      "preparing": "准备中",
+      "published": "已发布",
+      "publishing": "发布中",
+      "rolledBack": "已回滚",
+      "stale": "目标已变更"
+    },
+    "runs": {
+      "attempt": "第 {attempt} 次尝试",
+      "empty": "此仓库还没有集成记录。",
+      "opLog": "操作日志",
+      "operation": "{reason, select, publish {已发布到目标} rollbackSwap {已通过恢复先前提交回滚} rollbackRevert {已通过还原提交回滚} other {主机操作}}",
+      "result": "结果提交：{sha}",
+      "title": "集成记录",
+      "transition": "{ref}：{old} → {next}"
+    },
+    "selectChangeset": "选择 {title}",
+    "severity": {
+      "critical": "严重问题",
+      "info": "提示",
+      "warning": "警告"
+    },
+    "states": {
+      "abandoned": "已放弃",
+      "approved": "已批准",
+      "changesRequested": "需要修改",
+      "conflicted": "有冲突",
+      "draft": "草稿",
+      "failed": "失败",
+      "integrating": "集成中",
+      "merged": "已合入",
+      "queued": "排队中",
+      "ready": "待审查",
+      "rolledBack": "已回滚"
+    },
+    "title": "智能体更改",
+    "unknownAgent": "未知智能体",
+    "verdicts": {
+      "approve": "通过",
+      "comment": "仅评论",
+      "requestChanges": "需要修改",
+      "unavailable": "审查不可用"
+    }
+  },
   "agentComposition": {
     "advanced": "高级",
     "advancedHint": "独立调整权限、工具呈现与编排方式，不受预置限制。",
@@ -3938,10 +4162,42 @@
         "caveat": "工作树从工作目录当前提交（HEAD）切出，因此其中未提交的改动对 agent 不可见。",
         "description": "为每个成员派发分配独立的 git worktree + 分支，让并行 agent 不再互相覆盖对方的改动或 git 状态。默认关闭；仅桌面应用 + git 仓库可用。",
         "enabled": "启用每 agent 工作树",
+        "integration": {
+          "onConflict": {
+            "label": "遇到冲突时",
+            "option": {
+              "skip": "跳过该改动并继续",
+              "stop": "停止运行"
+            }
+          },
+          "requiredChecks": {
+            "hint": "每项改动除需通过目标分支 .cognia/workspace.json 中的 review.requiredChecks 外，还须通过这些已批准的验收配置。",
+            "label": "必需检查",
+            "placeholder": "验收配置 id，用逗号分隔"
+          },
+          "strategy": {
+            "label": "合并方式",
+            "option": {
+              "merge": "合并提交",
+              "rebase": "变基到目标"
+            }
+          },
+          "target": {
+            "hint": {
+              "base": "仅当没有其他人移动过该分支、且检出没有未提交改动时，才会移动你的分支。",
+              "branch": "绝不移动你的分支；运行分支由你自行合并。"
+            },
+            "label": "合入目标",
+            "option": {
+              "base": "检出所在的分支",
+              "branch": "运行分支（agent/'<'run'>'/integrated）"
+            }
+          }
+        },
         "reconcile": {
           "hint": {
             "manual": "保留所有分支，交由你审阅合并。",
-            "merge-all": "把所有成功分支合并到一条集成分支；冲突则停止并报告（绝不改动你的真实分支）。",
+            "merge-all": "捕获每个成功智能体的改动，经审查与验证后，把通过的改动经主机集成队列合入。冲突的改动按你的选择跳过或停止运行。",
             "pipeline": "顺序派发共用一条分支。",
             "select": "保留一条分支，丢弃其余。"
           },
@@ -55733,6 +55989,7 @@
       "timelineView": "时间线视图"
     },
     "views": {
+      "agents": "智能体改动",
       "browse": "浏览",
       "changes": "改动",
       "label": "视图"

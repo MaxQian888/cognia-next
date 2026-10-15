@@ -2238,6 +2238,230 @@
       "notInBuildHint": "Device keys and approvals are a preview available in staging builds."
     }
   },
+  "agentChanges": {
+    "actions": {
+      "abandon": "Abandon",
+      "abort": "Abort",
+      "approve": "Approve",
+      "integrate": "Integrate",
+      "requestChanges": "Request changes",
+      "review": "Review",
+      "rollback": "Roll back"
+    },
+    "cancel": "Cancel",
+    "checkOutcomes": {
+      "failed": "Failed",
+      "inconclusive": "Inconclusive",
+      "passed": "Passed"
+    },
+    "close": "Close",
+    "confirm": {
+      "abandonDescription": "This removes the changeset from the queue and releases its pinned commit.",
+      "abandonTitle": "Abandon this changeset?",
+      "approveDescription": "Your approval applies only to commit {sha}. Review the risk reasons before continuing.",
+      "approveTitle": "Approve this head commit?",
+      "continue": "Confirm",
+      "rollbackDescription": "The host will restore or revert the published changes on {ref}.",
+      "rollbackTitle": "Roll back this integration?"
+    },
+    "detail": {
+      "approvalHead": "Approved by {approver} at {sha}",
+      "binary": "Binary",
+      "changeNote": "Requested changes",
+      "checkTier": "Sandbox tier: {tier}",
+      "checks": "Checks",
+      "eligibility": "Integration eligibility",
+      "eligible": "All host eligibility checks passed.",
+      "files": "Files",
+      "head": "Head commit: {sha}",
+      "humanApprovalRequired": "Explicit human approval is required for this head commit.",
+      "logTail": "Show check log tail",
+      "noChecks": "No checks recorded.",
+      "noReview": "This changeset has not been reviewed.",
+      "renamedFrom": "Renamed from {path}",
+      "review": "Review",
+      "reviewHead": "Review bound to {sha}",
+      "title": "Changeset details",
+      "unknownTier": "Unavailable",
+      "withheldSensitive": "Sensitive content withheld"
+    },
+    "empty": "No agent changesets for this repository yet.",
+    "errors": {
+      "action": "The action did not complete. Refresh and try again.",
+      "eligibility": "Could not check integration eligibility.",
+      "load": "Could not load agent changes. Try refreshing.",
+      "preview": "Could not load branches or analyze the integration."
+    },
+    "excluded": "Sensitive files excluded",
+    "fileCount": "{count, plural, one {# file} other {# files}}",
+    "fileStatus": {
+      "added": "Added",
+      "deleted": "Deleted",
+      "modified": "Modified",
+      "renamed": "Renamed",
+      "typeChanged": "Type changed"
+    },
+    "gaps": {
+      "checkNotPassed": "Check {profile}: {outcome}",
+      "missingCheck": "Required check missing: {profile}",
+      "missingHumanApproval": "Human approval is required for the current head.",
+      "missingReview": "A review is required.",
+      "reviewNotApproved": "The review has not approved this change.",
+      "staleHead": "The evidence is for a different head commit. Review the current head again."
+    },
+    "groups": {
+      "done": "Done ({count})",
+      "open": "Open changesets"
+    },
+    "integrate": {
+      "between": "{a} ↔ {b}",
+      "chooseBranch": "Choose a branch",
+      "conflictedItem": "Conflicted: {title}",
+      "description": "Review the order and predicted conflicts before publishing to a local branch.",
+      "dropped": "Dropped verification culprits",
+      "merge": "Merge",
+      "noBranches": "No local branches are available.",
+      "none": "None predicted.",
+      "onConflict": "On conflict",
+      "order": "Integration order",
+      "overlapOnly": "This host can only predict file overlaps. Other merge conflicts may still occur.",
+      "overlaps": "Overlapping files",
+      "predictedConflicts": "Predicted conflicts",
+      "rebase": "Rebase",
+      "running": "Integrating…",
+      "skip": "Skip conflicting changes",
+      "stop": "Stop integration",
+      "strategy": "Strategy",
+      "target": "Target branch",
+      "targetTip": "Target branch tip",
+      "title": "Integrate agent changes"
+    },
+    "integrateSelected": "Integrate selected ({count})",
+    "integrationReasons": {
+      "aborted": "The integration was cancelled.",
+      "attempts_exhausted": "The retry limit was reached. Refresh before starting again.",
+      "busy": "Another integration is using this repository. Wait for it to finish.",
+      "changeset_state": "A changeset state no longer permits this action.",
+      "checks": "Required checks have not passed.",
+      "checks_unmet": "The candidate did not pass all required checks.",
+      "conflict": "Git reported a conflict.",
+      "cycles": "Changeset dependencies contain a cycle. Resolve it before integrating.",
+      "dependency": "A changeset dependency is unavailable or not satisfied.",
+      "host_error": "The host could not complete the integration. Refresh and retry.",
+      "ineligible": "A changeset does not meet the host eligibility requirements.",
+      "invalid_request": "The host rejected the request. Refresh and check your selection.",
+      "invalid_state": "The integration state no longer permits this action.",
+      "not_found": "The requested changeset or integration no longer exists.",
+      "nothing_to_capture": "There are no changes to capture.",
+      "rollback_conflict": "Rollback conflicted. Inspect the repository before retrying.",
+      "stale_candidate": "The integration candidate is outdated. Refresh and retry.",
+      "stale_head": "A changeset head changed. Review it again.",
+      "target_checked_out_dirty": "The target checkout has uncommitted changes. Commit or stash them first.",
+      "target_moved": "The target branch moved. Refresh and retry.",
+      "unknown": "Integration stopped: {code}"
+    },
+    "itemOutcomes": {
+      "conflicted": "Conflicted",
+      "dropped": "Dropped",
+      "merged": "Merged",
+      "pending": "Pending",
+      "rerereResolved": "Resolved using recorded resolution",
+      "skipped": "Skipped"
+    },
+    "lineTotals": "+{insertions} / −{deletions}",
+    "loading": "Loading agent changes…",
+    "noProject": "No project is associated with this panel. Required checks are recorded as inconclusive and integration cannot pass them.",
+    "outcomes": {
+      "blocked": "Integration blocked",
+      "conflicted": "Integration conflicted",
+      "failed": "Integration failed",
+      "published": "Integration published"
+    },
+    "reasons": {
+      "agentFailed": "The review agent failed.",
+      "binaryChange": "Changes binary files.",
+      "dependencyChange": "Changes dependency manifests or lockfiles.",
+      "humanApprovalAlways": "Repository policy always requires human approval.",
+      "incomplete": "The agent could not review the entire change.",
+      "largeChange": "Contains a large number of changed lines.",
+      "massDeletion": "Deletes a large number of files or lines.",
+      "noModel": "No review model is configured.",
+      "protectedCi": "Changes protected CI configuration.",
+      "protectedCogniaConfig": "Changes protected Cognia configuration.",
+      "protectedDeploy": "Changes protected deployment configuration.",
+      "protectedHooks": "Changes protected Git hooks.",
+      "protectedMigrations": "Changes protected data migrations.",
+      "protectedOwnership": "Changes repository ownership rules.",
+      "protectedRepositoryPolicy": "Changes a path protected by repository policy.",
+      "reviewAgentRedacted": "Sensitive content was redacted before agent review.",
+      "reviewPolicyInvalid": "The review policy could not be validated ({code}).",
+      "sensitiveWithheld": "Sensitive files were withheld from the changeset.",
+      "unknown": "Unrecognized review reason: {code}",
+      "unparseable": "The review agent returned an unreadable result."
+    },
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "reviewers": {
+      "agent": "Agent reviewer",
+      "deterministic": "Rule-based review",
+      "user": "Human reviewer"
+    },
+    "risk": {
+      "high": "High risk",
+      "low": "Low risk",
+      "medium": "Medium risk",
+      "unassessed": "Risk not assessed"
+    },
+    "runStates": {
+      "aborted": "Aborted",
+      "conflicted": "Conflicted",
+      "failed": "Failed",
+      "interrupted": "Interrupted",
+      "planned": "Planned",
+      "prepared": "Prepared",
+      "preparing": "Preparing",
+      "published": "Published",
+      "publishing": "Publishing",
+      "rolledBack": "Rolled back",
+      "stale": "Target moved"
+    },
+    "runs": {
+      "attempt": "Attempt {attempt}",
+      "empty": "No integration runs for this repository.",
+      "opLog": "Operation log",
+      "operation": "{reason, select, publish {Published to the target} rollbackSwap {Rolled back by restoring the previous commit} rollbackRevert {Rolled back with a revert commit} other {Host operation}}",
+      "result": "Result commit: {sha}",
+      "title": "Integration runs",
+      "transition": "{ref}: {old} → {next}"
+    },
+    "selectChangeset": "Select {title}",
+    "severity": {
+      "critical": "Critical findings",
+      "info": "Information",
+      "warning": "Warnings"
+    },
+    "states": {
+      "abandoned": "Abandoned",
+      "approved": "Approved",
+      "changesRequested": "Changes requested",
+      "conflicted": "Conflicted",
+      "draft": "Draft",
+      "failed": "Failed",
+      "integrating": "Integrating",
+      "merged": "Merged",
+      "queued": "Queued",
+      "ready": "Ready for review",
+      "rolledBack": "Rolled back"
+    },
+    "title": "Agent changes",
+    "unknownAgent": "Unknown agent",
+    "verdicts": {
+      "approve": "Approved",
+      "comment": "Comment only",
+      "requestChanges": "Changes requested",
+      "unavailable": "Review unavailable"
+    }
+  },
   "agentComposition": {
     "advanced": "Advanced",
     "advancedHint": "Adjust permission, tool presentation, and orchestration independently of the preset.",
@@ -3938,10 +4162,42 @@
         "caveat": "Worktrees branch off the working directory's current commit (HEAD), so uncommitted changes there are not visible to agents.",
         "description": "Give each teammate dispatch its own git worktree + branch so parallel agents never overwrite each other's work or git state. Off by default; desktop app + git repository only.",
         "enabled": "Enable per-agent worktrees",
+        "integration": {
+          "onConflict": {
+            "label": "On a conflict",
+            "option": {
+              "skip": "Skip that change and continue",
+              "stop": "Stop the run"
+            }
+          },
+          "requiredChecks": {
+            "hint": "Every change must pass these approved acceptance profiles, in addition to the target branch's .cognia/workspace.json review.requiredChecks.",
+            "label": "Required checks",
+            "placeholder": "acceptance profile ids, comma-separated"
+          },
+          "strategy": {
+            "label": "How to combine",
+            "option": {
+              "merge": "Merge commits",
+              "rebase": "Rebase onto the target"
+            }
+          },
+          "target": {
+            "hint": {
+              "base": "Your branch moves only if nobody else moved it and the checkout has no uncommitted changes.",
+              "branch": "Your branch is never moved; merge the run branch yourself."
+            },
+            "label": "Integrate into",
+            "option": {
+              "base": "The branch the checkout is on",
+              "branch": "A run branch (agent/'<'run'>'/integrated)"
+            }
+          }
+        },
         "reconcile": {
           "hint": {
             "manual": "Leave every branch for you to review and merge.",
-            "merge-all": "Merge all successful branches into one integration branch; a conflict stops and reports (never your real branch).",
+            "merge-all": "Capture each successful agent's changes, review and verify them, and integrate the ones that pass through the host queue. Conflicting changes are skipped or stop the run, as you choose.",
             "pipeline": "Sequential dispatches share one branch.",
             "select": "Keep one branch and discard the rest."
           },
@@ -55733,6 +55989,7 @@
       "timelineView": "Timeline view"
     },
     "views": {
+      "agents": "Agent changes",
       "browse": "Browse",
       "changes": "Changes",
       "label": "View"

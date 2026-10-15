@@ -31,6 +31,8 @@ pub mod github;
 pub mod history;
 pub mod interactive_rebase;
 pub mod merge;
+// ADR-0227 §6 — immutable-key history/blame cache.
+pub mod query_cache;
 pub mod read;
 pub mod remote;
 pub mod repo;

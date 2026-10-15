@@ -3,7 +3,10 @@
 
 use git2::{Commit, DiffOptions, Repository, Sort};
 
+use std::sync::Arc;
+
 use super::error::Result;
+use super::query_cache::{self, QueryKey};
 use super::read::open_repo;
 use super::types::{GitCommit, GitRef, GitRefKind};
 
@@ -69,7 +72,25 @@ pub fn log(
     path: Option<&str>,
 ) -> Result<Vec<GitCommit>> {
     let repo = open_repo(repo_path)?;
-    log_for(&repo, max_count, skip, path)
+    // Unborn HEAD: nothing to key on, and `log_for` answers empty anyway.
+    let Some(head) = repo.head().ok().and_then(|head| head.target()) else {
+        return log_for(&repo, max_count, skip, path);
+    };
+    // ADR-0227 §6: the walk is a function of the HEAD commit, so the commit id
+    // is the key and nothing is ever invalidated.
+    let key = QueryKey::Log {
+        common_dir: query_cache::common_dir_of(&repo),
+        head: head.to_string(),
+        path: path.map(str::to_string),
+        skip,
+        max_count,
+    };
+    if let Some(hit) = query_cache::cached_log(&key) {
+        return Ok(hit.as_ref().clone());
+    }
+    let commits = log_for(&repo, max_count, skip, path)?;
+    query_cache::store_log(key, Arc::new(commits.clone()));
+    Ok(commits)
 }
 
 fn log_for(
@@ -221,6 +242,25 @@ mod tests {
         assert_eq!(a_log.len(), 1);
         assert_eq!(a_log[0].summary, "touch a");
         let _ = tmp;
+    }
+
+    #[test]
+    fn cached_log_sees_a_new_commit_because_the_head_is_the_key() {
+        let (tmp, repo) = init();
+        let root = tmp.path().to_str().unwrap().to_string();
+        fs::write(tmp.path().join("a.txt"), "1\n").unwrap();
+        commit_all(&repo, "first", 1000);
+        assert_eq!(log(&root, 10, 0, None).unwrap().len(), 1);
+        // Served from the cache: same HEAD, same answer.
+        assert_eq!(log(&root, 10, 0, None).unwrap()[0].summary, "first");
+        fs::write(tmp.path().join("a.txt"), "2\n").unwrap();
+        commit_all(&repo, "second", 2000);
+        let fresh = log(&root, 10, 0, None).unwrap();
+        assert_eq!(fresh.len(), 2);
+        assert_eq!(fresh[0].summary, "second");
+        // Per-file history keys on the path as well as the head.
+        assert_eq!(log(&root, 10, 0, Some("a.txt")).unwrap().len(), 2);
+        assert!(log(&root, 10, 0, Some("missing.txt")).unwrap().is_empty());
     }
 
     #[test]

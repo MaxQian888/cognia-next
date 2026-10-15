@@ -735,6 +735,26 @@ mod tests {
         ("task_workspace_managed_adopt", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
         ("task_workspace_environment_adopt", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
         ("task_workspace_environment_create_branch", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
+        ("task_workspace_environment_delete_branch", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
+        ("task_workspace_changeset_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::AgentChangeset>", schema: schema_of::<Option<cognia_task_workspace::AgentChangeset>> })),
+        ("task_workspace_changeset_list", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::AgentChangeset>", schema: schema_of::<Vec<cognia_task_workspace::AgentChangeset>> })),
+        ("task_workspace_changeset_eligibility", OutputShape::Derived(DerivedOutput { rust_type: "crate::task_workspace::ChangesetEligibility", schema: schema_of::<crate::task_workspace::ChangesetEligibility> })),
+        ("task_workspace_integration_analyze", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::IntegrationAnalysis", schema: schema_of::<cognia_task_workspace::IntegrationAnalysis> })),
+        ("task_workspace_integration_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::IntegrationRun>", schema: schema_of::<Option<cognia_task_workspace::IntegrationRun>> })),
+        ("task_workspace_integration_list", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::IntegrationRun>", schema: schema_of::<Vec<cognia_task_workspace::IntegrationRun>> })),
+        ("task_workspace_changeset_capture", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::AgentChangeset", schema: schema_of::<cognia_task_workspace::AgentChangeset> })),
+        ("task_workspace_changeset_mark_ready", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::AgentChangeset", schema: schema_of::<cognia_task_workspace::AgentChangeset> })),
+        ("task_workspace_changeset_record_review", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::AgentChangeset", schema: schema_of::<cognia_task_workspace::AgentChangeset> })),
+        ("task_workspace_changeset_record_check", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::AgentChangeset", schema: schema_of::<cognia_task_workspace::AgentChangeset> })),
+        ("task_workspace_changeset_approve", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::AgentChangeset", schema: schema_of::<cognia_task_workspace::AgentChangeset> })),
+        ("task_workspace_changeset_abandon", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::AgentChangeset", schema: schema_of::<cognia_task_workspace::AgentChangeset> })),
+        ("task_workspace_integration_prepare", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::IntegrationRun", schema: schema_of::<cognia_task_workspace::IntegrationRun> })),
+        ("task_workspace_integration_record_check", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::IntegrationRun", schema: schema_of::<cognia_task_workspace::IntegrationRun> })),
+        ("task_workspace_integration_publish", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::IntegrationRun", schema: schema_of::<cognia_task_workspace::IntegrationRun> })),
+        ("task_workspace_integration_rebuild", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::IntegrationRun", schema: schema_of::<cognia_task_workspace::IntegrationRun> })),
+        ("task_workspace_integration_drop_item", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::IntegrationRun", schema: schema_of::<cognia_task_workspace::IntegrationRun> })),
+        ("task_workspace_integration_abort", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::IntegrationRun", schema: schema_of::<cognia_task_workspace::IntegrationRun> })),
+        ("task_workspace_integration_rollback", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::IntegrationRun", schema: schema_of::<cognia_task_workspace::IntegrationRun> })),
         ("task_workspace_managed_restore", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
         ("task_workspace_managed_delete", OutputShape::Scalar(ScalarShape::Null)),
         ("task_workspace_settle", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::ResourceChange>", schema: schema_of::<Vec<cognia_task_workspace::ResourceChange>> })),
@@ -967,6 +987,7 @@ mod tests {
         // and `cognia-environment`, they already carry `JsonSchema`, and the
         // catalog a console renders is the same struct admission reads. There
         // is no hand-written shape here for either side to drift from.
+        ("environment_delivery_list", OutputShape::Derived(DerivedOutput { rust_type: "cognia_problem::paging::Page<cognia_sandbox_pool::delivery::TaskDeliveryRecord>", schema: schema_of::<cognia_problem::paging::Page<cognia_sandbox_pool::delivery::TaskDeliveryRecord>> })),
         ("environment_catalog_list", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::CatalogPage", schema: schema_of::<crate::companion_api::environment_pool::CatalogPage> })),
         ("environment_catalog_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<crate::companion_api::environment_pool::CatalogEntryView>", schema: schema_of::<Option<crate::companion_api::environment_pool::CatalogEntryView>> })),
         ("environment_catalog_create", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::catalog::CatalogEntry", schema: schema_of::<cognia_environment::catalog::CatalogEntry> })),
@@ -1253,6 +1274,30 @@ mod tests {
              the struct:\n  {}",
             wrong.join("\n  ")
         );
+    }
+
+    #[test]
+    fn changeset_and_integration_schemas_match_the_published_contract() {
+        let published = published();
+        let commands: Vec<_> = OUTPUT_SHAPES
+            .iter()
+            .filter(|(arm, _)| {
+                arm.starts_with("task_workspace_changeset_")
+                    || arm.starts_with("task_workspace_integration_")
+            })
+            .collect();
+        assert_eq!(commands.len(), 19);
+        for (arm, output) in commands {
+            let OutputShape::Derived(derived) = output else {
+                panic!("{arm} must derive its response contract from the Rust type");
+            };
+            let generated = serde_json::to_value((derived.schema)()).unwrap();
+            assert_eq!(
+                shape(&generated, &generated["$defs"]),
+                shape(&published["commands"][*arm], &published["$defs"]),
+                "{arm} must publish the shape its host command actually returns"
+            );
+        }
     }
 
     #[test]

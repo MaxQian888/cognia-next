@@ -79,8 +79,9 @@ pub fn execution_root_from(raw: Option<&str>) -> Result<Option<PathBuf>, String>
 }
 
 pub struct TaskWorkspaceService {
-    store: Arc<Mutex<WorkspaceStore>>,
-    registry: WorkspaceRegistry,
+    pub(crate) store: Arc<Mutex<WorkspaceStore>>,
+    pub(crate) registry: WorkspaceRegistry,
+    pub(crate) integration_dir: PathBuf,
     execution_dir: PathBuf,
     /// Managed source checkouts supplied from a remote (ADR-0176).
     ///
@@ -130,6 +131,9 @@ pub struct TaskWorkspaceService {
     code_result_outbox: crate::CodeSnapshotOutbox,
     /// Work coming back to this device, and the worktrees it became.
     code_result_inbox: crate::CodeSnapshotInbox,
+    /// Rows open-time recovery could not repair, reported (once) by the next
+    /// maintenance pass.
+    open_recovery_failures: Mutex<Vec<String>>,
 }
 
 #[derive(Clone)]
@@ -340,6 +344,7 @@ impl TaskWorkspaceService {
         let service = Self {
             store,
             registry,
+            integration_dir: config.data_dir.join("integration"),
             execution_dir,
             sources_dir,
             mirrors_dir,
@@ -356,9 +361,28 @@ impl TaskWorkspaceService {
             code_snapshot_inbox,
             code_result_outbox: crate::CodeSnapshotOutbox::new(snapshots_dir.join("results")),
             code_result_inbox,
+            open_recovery_failures: Mutex::new(Vec::new()),
         };
         service.recover_incomplete_runs()?;
         service.recover_workspace_bundle_turns()?;
+        // Per-row recovery failures (an offline or broken repository) never
+        // keep the service from opening; the next maintenance pass reports
+        // them, and the next open retries them.
+        let integration_failures = service
+            .recover_integrations()
+            .map_err(|error| error.to_string())?;
+        let pin_failures = service
+            .recover_changeset_pins()
+            .map_err(|error| error.to_string())?;
+        *service.open_recovery_failures.lock() = integration_failures
+            .into_iter()
+            .map(|(id, error)| format!("integration {id} not recovered: {error}"))
+            .chain(
+                pin_failures
+                    .into_iter()
+                    .map(|(id, error)| format!("changeset {id} pin not repaired: {error}")),
+            )
+            .collect();
         service.reconcile_known_worktrees()?;
         Ok(service)
     }
@@ -1569,6 +1593,37 @@ impl TaskWorkspaceService {
                 return Err(error);
             }
         }
+        if let Some(workspace_id) = workspace_id.as_deref().filter(|_| {
+            owns_execution
+                && isolation_kind == IsolationKind::GitWorktree
+                && base == WorkspaceBaseSpec::WorkingState
+        }) {
+            let persisted = crate::changeset::git_text(
+                &execution_root,
+                &["rev-parse", "--verify", "HEAD^{commit}"],
+            )
+            .map_err(|error| error.to_string())
+            .and_then(|acquisition_commit| {
+                store.put_workspace_capture_baseline(
+                    workspace_id,
+                    &baseline,
+                    &tracking_policy,
+                    Some(&acquisition_commit),
+                )
+            });
+            if let Err(error) = persisted {
+                drop(store);
+                self.rollback_managed_execution(
+                    Some(workspace_id),
+                    &root,
+                    &execution_root,
+                    isolation_kind,
+                    None,
+                    now,
+                );
+                return Err(error);
+            }
+        }
         let mut task = store.get_task(&input.task_id)?.unwrap_or(TaskWorkspace {
             task_id: input.task_id.clone(),
             session_id: input.session_id.clone(),
@@ -1677,6 +1732,19 @@ impl TaskWorkspaceService {
         self.validate_workspace_branch_target(workspace_id)?;
         self.registry
             .set_branch_metadata(workspace_id, branch.to_string(), head.map(str::to_string))
+            .map_err(|error| error.to_string())
+    }
+
+    /// Forget a branch the host deleted from the environment (a `select`
+    /// promotion rolled back). Only the branch the row records may be cleared.
+    pub fn forget_workspace_branch(
+        &self,
+        workspace_id: &str,
+        branch: &str,
+    ) -> Result<WorkspaceRecord, String> {
+        self.validate_workspace_branch_target(workspace_id)?;
+        self.registry
+            .clear_branch_metadata(workspace_id, branch)
             .map_err(|error| error.to_string())
     }
 
@@ -1835,6 +1903,14 @@ impl TaskWorkspaceService {
         if normalized_path_key(&row.path) == normalized_path_key(&source_root) {
             return Err("the main worktree cannot be adopted".into());
         }
+        if row
+            .lock_reason
+            .as_deref()
+            .and_then(crate::registry::parse_integration_lock_reason)
+            .is_some()
+        {
+            return Err("host integration worktrees cannot be adopted".into());
+        }
         let expected_environment_id = format!("git:{}", storage_key(&target_key));
         if environment_id != expected_environment_id {
             return Err("workspace environment identity changed; refresh the inventory".into());
@@ -1929,6 +2005,22 @@ impl TaskWorkspaceService {
         self.reconcile_git_source(&source_root, &records, &mut outcome)?;
 
         let target_key = normalized_path_key(&target);
+        if read_git_worktree_inventory(&source_root)?
+            .iter()
+            .any(|row| {
+                normalized_path_key(&row.path) == target_key
+                    && row
+                        .lock_reason
+                        .as_deref()
+                        .and_then(crate::registry::parse_integration_lock_reason)
+                        .is_some()
+            })
+        {
+            return Err(format!(
+                "worktree {} is owned by the host integration queue; manual removal is not allowed",
+                target.display()
+            ));
+        }
         if let Some(record) = self
             .registry
             .list()
@@ -2037,7 +2129,14 @@ impl TaskWorkspaceService {
         let source_key = normalized_path_key(&source_root);
         for row in inventory {
             let path_key = normalized_path_key(&row.path);
-            if path_key == source_key || existing_paths.contains(&path_key) {
+            if path_key == source_key
+                || existing_paths.contains(&path_key)
+                || row
+                    .lock_reason
+                    .as_deref()
+                    .and_then(crate::registry::parse_integration_lock_reason)
+                    .is_some()
+            {
                 continue;
             }
             let hint = crate::ImportedWorkspaceHint {
@@ -2630,8 +2729,8 @@ impl TaskWorkspaceService {
                 .join(storage_key(&bundle.bundle_id))
                 .join(storage_key(&workspace_id));
             let provisioned = (|| {
-                let (mut baseline, blobs) =
-                    capture_with_policy(source_root, &crate::ResourceTrackingPolicy::default())?;
+                let tracking_policy = crate::ResourceTrackingPolicy::default();
+                let (mut baseline, blobs) = capture_with_policy(source_root, &tracking_policy)?;
                 baseline.generated_entries.clear();
                 let record = self
                     .registry
@@ -2672,7 +2771,7 @@ impl TaskWorkspaceService {
                         record.locked_by.as_deref(),
                         input.provisioning.as_ref(),
                         requested_name.as_deref(),
-                        &crate::ResourceTrackingPolicy::default(),
+                        &tracking_policy,
                     )
                 };
                 let (_isolation, requested_branch) = match created {
@@ -2682,6 +2781,38 @@ impl TaskWorkspaceService {
                         return Err(error);
                     }
                 };
+                if root.isolation == IsolationKind::GitWorktree
+                    && input.base == WorkspaceBaseSpec::WorkingState
+                {
+                    let persisted = (|| {
+                        let acquisition_commit = crate::changeset::git_text(
+                            &execution_root,
+                            &["rev-parse", "--verify", "HEAD^{commit}"],
+                        )
+                        .map_err(|error| error.to_string())?;
+                        let mut store = self.store.lock();
+                        for (hash, bytes) in &blobs {
+                            store.put_blob(hash, bytes, now)?;
+                        }
+                        store.put_workspace_capture_baseline(
+                            &record.workspace_id,
+                            &baseline,
+                            &tracking_policy,
+                            Some(&acquisition_commit),
+                        )
+                    })();
+                    if let Err(error) = persisted {
+                        self.rollback_managed_execution(
+                            Some(&record.workspace_id),
+                            source_root,
+                            &execution_root,
+                            root.isolation,
+                            requested_branch.as_deref(),
+                            now,
+                        );
+                        return Err(error);
+                    }
+                }
                 let record = match self.registry.transition(
                     &record.workspace_id,
                     record.owner_type,
@@ -2807,6 +2938,15 @@ impl TaskWorkspaceService {
         request: crate::WorkspaceMaintenanceRequest,
     ) -> Result<crate::WorkspaceMaintenanceResult, String> {
         let started_at = request.now.unwrap_or_else(now_ms);
+        let recovery_failures = std::mem::take(&mut *self.open_recovery_failures.lock())
+            .into_iter()
+            .chain(
+                self.recover_integrations()
+                    .map_err(|error| error.to_string())?
+                    .into_iter()
+                    .map(|(id, error)| format!("integration {id} not recovered: {error}")),
+            )
+            .collect::<Vec<_>>();
         let reconcile = self.reconcile_known_worktrees()?;
         let mut events = vec![crate::WorkspaceMaintenanceEvent {
             event_id: Uuid::now_v7().to_string(),
@@ -2820,7 +2960,17 @@ impl TaskWorkspaceService {
                 reconcile.imported.len()
             ),
         }];
+        events.extend(recovery_failures.into_iter().map(|detail| {
+            crate::WorkspaceMaintenanceEvent {
+                event_id: Uuid::now_v7().to_string(),
+                kind: crate::WorkspaceMaintenanceEventKind::Failed,
+                workspace_id: None,
+                occurred_at: started_at,
+                detail,
+            }
+        }));
         let policy = self.registry.policy();
+        events.extend(self.maintain_integrations(started_at, policy));
         let records = self.registry.list().map_err(|error| error.to_string())?;
         let protected_workspace_ids = self.workspace_ids_with_unsettled_or_unapplied_tasks()?;
         let directory_candidates = crate::plan_directory_reclaim(&records, policy)
@@ -3415,7 +3565,7 @@ impl TaskWorkspaceService {
     /// Returns an owned handle rather than a guard so the caller decides the
     /// hold: the registry lock must never be held across it, or two threads
     /// taking the pair in opposite orders would deadlock.
-    fn git_admin_lock(&self, workspace_root: &Path) -> Option<Arc<Mutex<()>>> {
+    pub(crate) fn git_admin_lock(&self, workspace_root: &Path) -> Option<Arc<Mutex<()>>> {
         let key = git_common_dir(workspace_root)?;
         let mut locks = self.git_admin_locks.lock();
         Some(Arc::clone(
@@ -3543,6 +3693,12 @@ impl TaskWorkspaceService {
         ));
         changes.sort_by(|left, right| left.path.cmp(&right.path));
         drop(origin_hints);
+        let source_changes = changes
+            .iter()
+            .filter(|change| change.capture_class == ResourceCaptureClass::Source)
+            .cloned()
+            .collect::<Vec<_>>();
+        persist_patch_blobs(&mut store, &source_changes, &execution_root_path, now)?;
         run.state = RunState::Ready;
         run.settled_at = Some(now);
         task.expires_at = now + self.retention.as_millis() as i64;
@@ -3552,11 +3708,6 @@ impl TaskWorkspaceService {
             .parent()
             .unwrap_or(&self.execution_dir)
             .join("scratch");
-        let source_changes = changes
-            .iter()
-            .filter(|change| change.capture_class == ResourceCaptureClass::Source)
-            .cloned()
-            .collect::<Vec<_>>();
         let patch = ledger::build_patch_set(
             &task.task_id,
             &run.run_id,
@@ -4761,7 +4912,7 @@ fn validate_event_relative_path(path: &str) -> Result<(), String> {
 /// already rejects `..` and absolute paths, but this function is reachable from
 /// any caller of the acquire command — a plugin, the CLI, a paired device — and
 /// "someone upstream checked it" is how a path traversal ships.
-fn apply_provisioning(
+pub(crate) fn apply_provisioning(
     workspace_root: &Path,
     execution_root: &Path,
     provisioning: &WorkspaceProvisioning,
@@ -5411,16 +5562,18 @@ fn managed_git_lock_reason(
     Ok(None)
 }
 
-struct GitWorktreeInventoryRow {
-    path: PathBuf,
-    branch: Option<String>,
-    head: Option<String>,
-    lock_reason: Option<String>,
+pub(crate) struct GitWorktreeInventoryRow {
+    pub(crate) path: PathBuf,
+    pub(crate) branch: Option<String>,
+    pub(crate) head: Option<String>,
+    pub(crate) lock_reason: Option<String>,
     prunable: bool,
     prune_reason: Option<String>,
 }
 
-fn read_git_worktree_inventory(source_root: &Path) -> Result<Vec<GitWorktreeInventoryRow>, String> {
+pub(crate) fn read_git_worktree_inventory(
+    source_root: &Path,
+) -> Result<Vec<GitWorktreeInventoryRow>, String> {
     let output = Command::new("git")
         .args(["-C"])
         .arg(source_root)
@@ -6154,9 +6307,42 @@ fn resolve_blob(context: &mut ReconcileContext<'_>, hash: &str) -> Result<Vec<u8
     }
 }
 
+/// Patch application and undo use the ledger after the execution may be gone.
+/// Persist only referenced content; unchanged Git-backed entries stay in Git.
+fn persist_patch_blobs(
+    store: &mut WorkspaceStore,
+    changes: &[ResourceChange],
+    git_root: &Path,
+    now: i64,
+) -> Result<(), String> {
+    let hashes: std::collections::BTreeSet<_> = changes
+        .iter()
+        .flat_map(|change| change.before_hash.iter().chain(change.hash.iter()))
+        .collect();
+    let mut missing = Vec::new();
+    for hash in hashes {
+        match store.get_blob(hash, now) {
+            Ok(_) => {}
+            Err(error) if error == format!("missing blob {hash}") => missing.push(hash.clone()),
+            Err(error) => return Err(error),
+        }
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut from_git = crate::snapshot::git_read_blobs(git_root, &missing)?;
+    for hash in missing {
+        let bytes = from_git
+            .remove(&hash)
+            .ok_or_else(|| format!("missing blob {hash}"))?;
+        store.put_blob(&hash, &bytes, now)?;
+    }
+    Ok(())
+}
+
 /// Bytes for every entry of `snapshot`, taking what the blob store has and
 /// asking `git_root` for the rest in a single batch.
-fn hydrate_snapshot_blobs(
+pub(crate) fn hydrate_snapshot_blobs(
     store: &mut WorkspaceStore,
     snapshot: &crate::snapshot::WorkspaceSnapshot,
     git_root: &Path,
@@ -6350,7 +6536,7 @@ fn load_or_create_manifest_key(service_dir: &Path) -> Result<Vec<u8>, String> {
     Ok(key)
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -7551,6 +7737,63 @@ mod tests {
     }
 
     #[test]
+    fn registry_integration_worktree_stays_host_owned() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        let worktrees = TempDir::new().unwrap();
+        let integration = worktrees.path().join("integration");
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+        let add = Command::new("git")
+            .arg("-C")
+            .arg(repository.path())
+            .args([
+                "worktree",
+                "add",
+                "--detach",
+                "--lock",
+                "--reason",
+                "cognia-integration:repo-key",
+            ])
+            .arg(&integration)
+            .output()
+            .unwrap();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        {
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            service
+                .bind_workspace_source("repository:integration:test", repository.path(), 10)
+                .unwrap();
+            let outcome = service.reconcile_known_worktrees().unwrap();
+            assert!(outcome.imported.is_empty());
+            assert!(service.list_managed_workspaces().unwrap().is_empty());
+
+            let error = service
+                .ensure_manual_worktree_removal_allowed(repository.path(), &integration)
+                .unwrap_err();
+            assert!(error.contains("owned by the host integration queue"));
+            let environment_id = format!("git:{}", storage_key(&normalized_path_key(&integration)));
+            let error = service
+                .adopt_workspace_environment(&environment_id, repository.path(), &integration)
+                .unwrap_err();
+            assert!(error.contains("host integration worktrees cannot be adopted"));
+            assert!(service.list_managed_workspaces().unwrap().is_empty());
+        }
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        assert!(reopened.list_managed_workspaces().unwrap().is_empty());
+        assert_eq!(
+            managed_git_lock_reason(repository.path(), &integration).unwrap(),
+            Some("cognia-integration:repo-key".into())
+        );
+        assert!(integration.join("README.md").is_file());
+    }
+
+    #[test]
     fn manual_removal_imports_and_blocks_an_unknown_external_worktree() {
         let data = TempDir::new().unwrap();
         let repository = TempDir::new().unwrap();
@@ -8269,6 +8512,348 @@ mod tests {
         );
     }
 
+    fn settle_git(root: &Path, args: &[&str]) -> String {
+        crate::changeset::git_text(root, args).unwrap()
+    }
+
+    fn settle_text_regression(dirty_baseline: bool, commit: bool) {
+        let data = TempDir::new().unwrap();
+        let source = TempDir::new().unwrap();
+        git2::Repository::init(source.path()).unwrap();
+        seed_git_repository(source.path());
+        fs::write(source.path().join("tracked.txt"), "committed baseline\n").unwrap();
+        fs::write(
+            source.path().join("unrelated.bin"),
+            vec![b'x'; 2 * 1024 * 1024],
+        )
+        .unwrap();
+        settle_git(source.path(), &["add", "-A"]);
+        settle_git(source.path(), &["commit", "-m", "tracked baseline"]);
+        let unrelated = settle_git(source.path(), &["rev-parse", "HEAD:unrelated.bin"]);
+        if dirty_baseline {
+            fs::write(source.path().join("tracked.txt"), "user baseline\n").unwrap();
+        }
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let mut request = input(&source, "settle-text", "settle-text-run");
+        request.tracking_policy.auto_detect = false;
+        let run = service.begin_run(request).unwrap();
+        let before = service
+            .store
+            .lock()
+            .get_run::<WorkspaceSnapshot>(&run.run_id)
+            .unwrap()
+            .unwrap()
+            .1
+            .entries["tracked.txt"]
+            .hash
+            .clone();
+        let execution = Path::new(&run.execution_root);
+        fs::write(execution.join("tracked.txt"), "agent after\n").unwrap();
+        if commit {
+            settle_git(execution, &["add", "-A"]);
+            settle_git(execution, &["commit", "-m", "agent changes"]);
+        }
+        let after = settle_git(execution, &["hash-object", "tracked.txt"]);
+        let settled = service.settle_run(&run.run_id);
+        assert!(
+            settled.is_ok(),
+            "dirty={dirty_baseline}, commit={commit}, before={before}, after={after}: {settled:?}"
+        );
+        assert_eq!(settled.unwrap().len(), 1);
+        assert_eq!(
+            service.store.lock().get_blob(&unrelated, now_ms()),
+            Err(format!("missing blob {unrelated}"))
+        );
+        drop(service);
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        assert_eq!(
+            reopened.apply_patch_set(&run.run_id, &[]).unwrap().state,
+            crate::PatchState::Applied
+        );
+        assert_eq!(
+            fs::read(source.path().join("tracked.txt")).unwrap(),
+            b"agent after\n"
+        );
+        assert_eq!(
+            reopened.undo_patch_set(&run.run_id).unwrap().state,
+            crate::PatchState::Reverted
+        );
+        assert_eq!(
+            fs::read(source.path().join("tracked.txt")).unwrap(),
+            if dirty_baseline {
+                b"user baseline\n".as_slice()
+            } else {
+                b"committed baseline\n".as_slice()
+            }
+        );
+        assert_eq!(
+            reopened.store.lock().get_blob(&unrelated, now_ms()),
+            Err(format!("missing blob {unrelated}"))
+        );
+    }
+
+    #[test]
+    fn settle_git_clean_baseline_committed_edit_retains_patch_blobs() {
+        settle_text_regression(false, true);
+    }
+
+    #[test]
+    fn settle_git_dirty_baseline_committed_edit_retains_patch_blobs() {
+        settle_text_regression(true, true);
+    }
+
+    #[test]
+    fn settle_git_clean_baseline_uncommitted_edit_retains_patch_blobs() {
+        settle_text_regression(false, false);
+    }
+
+    #[test]
+    fn settle_blob_capacity_failure_publishes_nothing_and_can_be_retried() {
+        let data = TempDir::new().unwrap();
+        let source = TempDir::new().unwrap();
+        git2::Repository::init(source.path()).unwrap();
+        seed_git_repository(source.path());
+        let mut config = ServiceConfig::new(data.path().into());
+        config.max_blob_bytes = 1;
+        let service = TaskWorkspaceService::open(config).unwrap();
+        let mut request = input(&source, "settle-capacity", "settle-capacity-run");
+        request.tracking_policy.auto_detect = false;
+        let run = service.begin_run(request).unwrap();
+        let execution = Path::new(&run.execution_root);
+        fs::write(execution.join("README.md"), "committed agent edit\n").unwrap();
+        settle_git(execution, &["add", "-A"]);
+        settle_git(execution, &["commit", "-m", "agent edit"]);
+        let error = service.settle_run(&run.run_id).unwrap_err();
+        assert!(
+            error.starts_with("task workspace ledger capacity exceeded:"),
+            "{error}"
+        );
+        assert_eq!(
+            service
+                .store
+                .lock()
+                .get_run::<WorkspaceSnapshot>(&run.run_id)
+                .unwrap()
+                .unwrap()
+                .0
+                .state,
+            RunState::Settling
+        );
+        assert!(service.list_resources(&run.task_id).unwrap().is_empty());
+        assert!(service.get_patch_set(&run.run_id).unwrap().is_none());
+        assert_eq!(service.get_task(&run.task_id).unwrap().unwrap().revision, 0);
+        drop(service);
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let changes = reopened.settle_run(&run.run_id).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            reopened.get_task(&run.task_id).unwrap().unwrap().revision,
+            1
+        );
+        assert_eq!(
+            reopened.apply_patch_set(&run.run_id, &[]).unwrap().state,
+            crate::PatchState::Applied
+        );
+        assert_eq!(
+            fs::read(source.path().join("README.md")).unwrap(),
+            b"committed agent edit\n"
+        );
+        assert_eq!(
+            reopened.undo_patch_set(&run.run_id).unwrap().state,
+            crate::PatchState::Reverted
+        );
+        assert_eq!(
+            fs::read(source.path().join("README.md")).unwrap(),
+            b"seed\n"
+        );
+    }
+
+    #[test]
+    fn settle_patch_blob_retention_preserves_storage_errors_and_missing_objects() {
+        for fault in ["read", "decompress", "missing-object"] {
+            let data = TempDir::new().unwrap();
+            let source = TempDir::new().unwrap();
+            git2::Repository::init(source.path()).unwrap();
+            seed_git_repository(source.path());
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            let mut request = input(&source, "settle-storage", "settle-storage-run");
+            request.tracking_policy.auto_detect = false;
+            let run = service.begin_run(request).unwrap();
+            let execution = Path::new(&run.execution_root);
+            fs::write(execution.join("asset.png"), vec![0; 10_000]).unwrap();
+            settle_git(execution, &["add", "-A"]);
+            settle_git(execution, &["commit", "-m", "binary output"]);
+            let mut changes = service.settle_run(&run.run_id).unwrap();
+            changes.push(changes[0].clone());
+            // Existing content must not require a Git repository, even when
+            // multiple patch entries reference the same object.
+            persist_patch_blobs(
+                &mut service.store.lock(),
+                &changes,
+                &source.path().join("not-a-repository"),
+                now_ms(),
+            )
+            .unwrap();
+            let hash = changes[0].hash.as_deref().unwrap();
+            let blob = data
+                .path()
+                .join("task-workspaces/blobs")
+                .join(format!("{hash}.gz"));
+            assert!(blob.is_file());
+            match fault {
+                "read" => fs::remove_file(&blob).unwrap(),
+                "decompress" => fs::write(&blob, b"invalid gzip").unwrap(),
+                "missing-object" => {
+                    let hash = "f".repeat(40);
+                    for change in &mut changes {
+                        change.hash = Some(hash.clone());
+                    }
+                }
+                _ => unreachable!(),
+            }
+            let error =
+                persist_patch_blobs(&mut service.store.lock(), &changes, execution, now_ms())
+                    .unwrap_err();
+            match fault {
+                "read" => {
+                    assert!(error.starts_with("read blob "), "{error}");
+                    assert!(!blob.exists());
+                }
+                "decompress" => {
+                    assert!(error.starts_with("decompress blob "), "{error}");
+                    assert_eq!(fs::read(&blob).unwrap(), b"invalid gzip");
+                }
+                "missing-object" => assert_eq!(error, format!("missing blob {}", "f".repeat(40))),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn settle_git_patch_kinds_apply_and_undo_after_reopening() {
+        let mut failures = Vec::new();
+        let kinds = [
+            "added",
+            "deleted",
+            "renamed",
+            "binary",
+            #[cfg(unix)]
+            "symlink",
+        ];
+        for kind in kinds {
+            let data = TempDir::new().unwrap();
+            let source = TempDir::new().unwrap();
+            git2::Repository::init(source.path()).unwrap();
+            seed_git_repository(source.path());
+            let file_name = if kind == "binary" {
+                "change.png"
+            } else {
+                "change"
+            };
+            let path = source.path().join(file_name);
+            match kind {
+                "added" => {}
+                "binary" => fs::write(&path, [0, 1, 2, 3]).unwrap(),
+                #[cfg(unix)]
+                "symlink" => std::os::unix::fs::symlink("target-one", &path).unwrap(),
+                _ => fs::write(&path, "original\n").unwrap(),
+            }
+            settle_git(source.path(), &["add", "-A"]);
+            settle_git(
+                source.path(),
+                &["commit", "--allow-empty", "-m", "patch baseline"],
+            );
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            let mut request = input(&source, "settle-kind", "settle-kind-run");
+            request.tracking_policy.auto_detect = false;
+            let run = service.begin_run(request).unwrap();
+            let execution = Path::new(&run.execution_root);
+            let changed = execution.join(file_name);
+            match kind {
+                "added" => fs::write(&changed, "created\n").unwrap(),
+                "deleted" => fs::remove_file(&changed).unwrap(),
+                "renamed" => fs::rename(&changed, execution.join("renamed")).unwrap(),
+                "binary" => fs::write(&changed, [0, 4, 5, 6]).unwrap(),
+                #[cfg(unix)]
+                "symlink" => {
+                    fs::remove_file(&changed).unwrap();
+                    std::os::unix::fs::symlink("target-two", &changed).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            settle_git(execution, &["add", "-A"]);
+            settle_git(execution, &["commit", "-m", "agent change"]);
+            let result = (|| -> Result<(), String> {
+                let changes = service
+                    .settle_run(&run.run_id)
+                    .map_err(|error| format!("settle: {error}"))?;
+                let expected = match kind {
+                    "added" => ChangeKind::Created,
+                    "deleted" => ChangeKind::Deleted,
+                    "renamed" => ChangeKind::Renamed,
+                    _ => ChangeKind::Modified,
+                };
+                assert_eq!(changes.len(), 1, "{kind}: {changes:?}");
+                assert_eq!(changes[0].kind, expected, "{kind}");
+                if kind == "binary" {
+                    assert!(changes[0].binary);
+                }
+                drop(service);
+                let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into()))?;
+                let applied = reopened
+                    .apply_patch_set(&run.run_id, &[])
+                    .map_err(|error| format!("apply: {error}"))?;
+                assert_eq!(
+                    applied.state,
+                    crate::PatchState::Applied,
+                    "{kind}: {applied:?}"
+                );
+                match kind {
+                    "added" => assert_eq!(fs::read(&path).unwrap(), b"created\n"),
+                    "deleted" => assert!(!path.exists()),
+                    "renamed" => {
+                        assert!(!path.exists());
+                        assert_eq!(
+                            fs::read(source.path().join("renamed")).unwrap(),
+                            b"original\n"
+                        );
+                    }
+                    "binary" => assert_eq!(fs::read(&path).unwrap(), [0, 4, 5, 6]),
+                    #[cfg(unix)]
+                    "symlink" => {
+                        assert_eq!(fs::read_link(&path).unwrap(), PathBuf::from("target-two"))
+                    }
+                    _ => unreachable!(),
+                }
+                let undone = reopened
+                    .undo_patch_set(&run.run_id)
+                    .map_err(|error| format!("undo: {error}"))?;
+                assert_eq!(
+                    undone.state,
+                    crate::PatchState::Reverted,
+                    "{kind}: {undone:?}"
+                );
+                match kind {
+                    "added" => assert!(!path.exists()),
+                    "binary" => assert_eq!(fs::read(&path).unwrap(), [0, 1, 2, 3]),
+                    #[cfg(unix)]
+                    "symlink" => {
+                        assert_eq!(fs::read_link(&path).unwrap(), PathBuf::from("target-one"))
+                    }
+                    _ => assert_eq!(fs::read(&path).unwrap(), b"original\n"),
+                }
+                assert!(!source.path().join("renamed").exists());
+                Ok(())
+            })();
+            if let Err(error) = result {
+                failures.push(format!("{kind}: {error}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
     #[test]
     fn overlapping_apply_conflict_is_fail_closed() {
         let data = TempDir::new().unwrap();
@@ -8643,6 +9228,296 @@ mod tests {
         assert_eq!(changes[0].path, "stage-2.txt");
     }
 
+    #[test]
+    fn changeset_capture_baseline_preserves_original_acquisition_across_pipeline_runs() {
+        let data = TempDir::new().unwrap();
+        let source = TempDir::new().unwrap();
+        git2::Repository::init(source.path()).unwrap();
+        seed_git_repository(source.path());
+        fs::write(source.path().join("README.md"), "dirty acquisition\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let mut first_request = input(&source, "baseline-pipeline", "baseline-first");
+        first_request.workspace_key = Some("pipeline".into());
+        first_request.tracking_policy.auto_detect = false;
+        let first = service.begin_run(first_request).unwrap();
+        let workspace_id = first.workspace_id.as_deref().unwrap();
+        let original = service
+            .store
+            .lock()
+            .get_workspace_capture_baseline(workspace_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(original.1, first.tracking_policy);
+        assert!(matches!(
+            original.0.base,
+            crate::snapshot::SnapshotBase::GitCommit { .. }
+        ));
+        let execution_repository = git2::Repository::open(&first.execution_root).unwrap();
+        let acquisition_commit = execution_repository.head().unwrap().target().unwrap();
+        assert_eq!(original.2, Some(acquisition_commit.to_string()));
+        assert_eq!(
+            service
+                .store
+                .lock()
+                .get_blob(&original.0.entries["README.md"].hash, now_ms())
+                .unwrap(),
+            b"dirty acquisition\n"
+        );
+        fs::write(
+            Path::new(&first.execution_root).join("README.md"),
+            "agent later\n",
+        )
+        .unwrap();
+        service.settle_run(&first.run_id).unwrap();
+        let mut second_request = input(&source, "baseline-pipeline", "baseline-second");
+        second_request.workspace_key = Some("pipeline".into());
+        second_request.tracking_policy.auto_detect = false;
+        let second = service.begin_run(second_request).unwrap();
+        assert_eq!(second.workspace_id, first.workspace_id);
+        assert_eq!(
+            service
+                .store
+                .lock()
+                .get_workspace_capture_baseline(workspace_id)
+                .unwrap(),
+            Some(original.clone())
+        );
+        let second_baseline = service
+            .store
+            .lock()
+            .get_run::<WorkspaceSnapshot>(&second.run_id)
+            .unwrap()
+            .unwrap()
+            .1;
+        assert_ne!(
+            second_baseline.entries["README.md"].hash,
+            original.0.entries["README.md"].hash
+        );
+        assert_eq!(
+            service
+                .store
+                .lock()
+                .earliest_workspace_run(workspace_id)
+                .unwrap()
+                .unwrap()
+                .run_id,
+            first.run_id
+        );
+        service.settle_run(&second.run_id).unwrap();
+        let mut index = execution_repository.index().unwrap();
+        index.add_path(Path::new("README.md")).unwrap();
+        index.write().unwrap();
+        let tree = execution_repository
+            .find_tree(index.write_tree().unwrap())
+            .unwrap();
+        let parent = execution_repository
+            .find_commit(acquisition_commit)
+            .unwrap();
+        let signature = git2::Signature::now("Agent", "agent@example.com").unwrap();
+        let agent_commit = execution_repository
+            .commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "agent commit after acquisition",
+                &tree,
+                &[&parent],
+            )
+            .unwrap();
+        assert_ne!(agent_commit, acquisition_commit);
+        assert_eq!(
+            service
+                .store
+                .lock()
+                .get_workspace_capture_baseline(workspace_id)
+                .unwrap(),
+            Some(original.clone())
+        );
+        drop(service);
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        assert_eq!(
+            reopened
+                .store
+                .lock()
+                .get_workspace_capture_baseline(workspace_id)
+                .unwrap(),
+            Some(original)
+        );
+    }
+
+    #[test]
+    fn changeset_capture_baseline_is_persisted_before_a_bundles_first_turn() {
+        let data = TempDir::new().unwrap();
+        let source = TempDir::new().unwrap();
+        git2::Repository::init(source.path()).unwrap();
+        seed_git_repository(source.path());
+        fs::write(source.path().join("README.md"), "bundle acquisition\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-1".into()),
+                project_id: None,
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: source.path().to_string_lossy().into_owned(),
+                }],
+                provisioning: None,
+                requested_name: None,
+            })
+            .unwrap();
+        let lease = &bundle.leases[0];
+        let original = service
+            .store
+            .lock()
+            .get_workspace_capture_baseline(&lease.workspace_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            original.2,
+            Some(
+                git2::Repository::open(&lease.alias_path)
+                    .unwrap()
+                    .head()
+                    .unwrap()
+                    .target()
+                    .unwrap()
+                    .to_string()
+            )
+        );
+        assert!(service
+            .store
+            .lock()
+            .earliest_workspace_run(&lease.workspace_id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            service
+                .store
+                .lock()
+                .get_blob(&original.0.entries["README.md"].hash, now_ms())
+                .unwrap(),
+            b"bundle acquisition\n"
+        );
+        assert!(service
+            .store
+            .lock()
+            .get_workspace_archive(&lease.workspace_id)
+            .unwrap()
+            .is_none());
+        assert!(service
+            .registry
+            .get(&lease.workspace_id)
+            .unwrap()
+            .unwrap()
+            .snapshot_task_id
+            .is_none());
+        fs::write(
+            Path::new(&lease.alias_path).join("agent-only.txt"),
+            "agent work\n",
+        )
+        .unwrap();
+        let repository = git2::Repository::open(source.path()).unwrap();
+        let target_ref = repository.head().unwrap().name().unwrap().to_string();
+        let captured = service
+            .capture_changeset(crate::CaptureChangeset {
+                workspace_id: lease.workspace_id.clone(),
+                target_ref: Some(target_ref),
+                title: "Agent change before the first turn".into(),
+                depends_on: Vec::new(),
+                required_checks: Vec::new(),
+                changeset_id: None,
+            })
+            .unwrap();
+        assert_eq!(
+            captured
+                .files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["agent-only.txt"]
+        );
+        let captured_commit = repository
+            .find_commit(git2::Oid::from_str(&captured.head_sha).unwrap())
+            .unwrap();
+        let captured_tree = captured_commit.tree().unwrap();
+        let readme = captured_tree.get_path(Path::new("README.md")).unwrap();
+        assert_eq!(
+            repository.find_blob(readme.id()).unwrap().content(),
+            b"seed\n"
+        );
+        assert_eq!(
+            fs::read_to_string(source.path().join("README.md")).unwrap(),
+            "bundle acquisition\n"
+        );
+        assert_eq!(
+            fs::read_to_string(Path::new(&lease.alias_path).join("README.md")).unwrap(),
+            "bundle acquisition\n"
+        );
+        assert!(!source.path().join("agent-only.txt").exists());
+        fs::write(
+            Path::new(&lease.alias_path).join("README.md"),
+            "changed before first turn\n",
+        )
+        .unwrap();
+        let turn = service
+            .begin_workspace_bundle_turn(
+                &bundle.bundle_id,
+                crate::BeginWorkspaceBundleTurn {
+                    primary_logical_root_id: "primary".into(),
+                    run: input(&source, "baseline-bundle-task", "baseline-bundle-run"),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .store
+                .lock()
+                .get_workspace_capture_baseline(&lease.workspace_id)
+                .unwrap(),
+            Some(original)
+        );
+        service
+            .abort_workspace_bundle_turn(&turn.bundle_turn_id)
+            .unwrap();
+    }
+
+    #[test]
+    fn changeset_capture_baseline_storage_failure_rolls_back_bundle_acquisition() {
+        let data = TempDir::new().unwrap();
+        let source = TempDir::new().unwrap();
+        git2::Repository::init(source.path()).unwrap();
+        seed_git_repository(source.path());
+        fs::write(
+            source.path().join("README.md"),
+            "dirty acquisition that exceeds one byte\n",
+        )
+        .unwrap();
+        let mut config = ServiceConfig::new(data.path().into());
+        config.max_blob_bytes = 1;
+        let service = TaskWorkspaceService::open(config).unwrap();
+        let result = service.acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+            owner_type: WorkspaceOwnerType::Session,
+            owner_ref: Some("session-1".into()),
+            project_id: None,
+            environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+            base: WorkspaceBaseSpec::WorkingState,
+            roots: vec![crate::WorkspaceBundleRootInput {
+                logical_root_id: "primary".into(),
+                role: crate::WorkspaceRootRole::Primary,
+                source_root: source.path().to_string_lossy().into_owned(),
+            }],
+            provisioning: None,
+            requested_name: None,
+        });
+        assert!(result.unwrap_err().contains("capacity exceeded"));
+        assert!(service.registry.list().unwrap().is_empty());
+        assert!(service.list_workspace_bundles().unwrap().is_empty());
+        assert_eq!(read_git_worktree_inventory(source.path()).unwrap().len(), 1);
+    }
     #[test]
     fn restores_a_historical_post_run_snapshot_into_the_reused_worktree() {
         let data = TempDir::new().unwrap();
@@ -10099,6 +10974,19 @@ mod tests {
         );
         assert_eq!(recorded.branch.as_deref(), Some("feature/managed"));
         assert_eq!(recorded.head.as_deref(), Some("0123456789abcdef"));
+
+        let workspace_id = &bundle.leases[0].workspace_id;
+        assert!(service
+            .forget_workspace_branch(workspace_id, "feature/other")
+            .is_err());
+        let forgotten = service
+            .forget_workspace_branch(workspace_id, "feature/managed")
+            .unwrap();
+        assert_eq!(forgotten.branch, None);
+        assert_eq!(forgotten.head.as_deref(), Some("0123456789abcdef"));
+        assert!(service
+            .forget_workspace_branch(workspace_id, "feature/managed")
+            .is_err());
     }
 
     #[test]

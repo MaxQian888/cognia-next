@@ -414,6 +414,24 @@ pub fn maintenance_commands() -> Vec<Vec<String>> {
     ]
 }
 
+/// Commands that keep a SOURCE repository cheap to query (ADR-0227 §6).
+///
+/// The repositories agents work in are the user's, not ours, so this is the
+/// smallest write that pays: a split commit-graph with changed-path Bloom
+/// filters, which turns `log -- <path>`, merge-base and ancestry walks into
+/// lookups. It is a cache file under `objects/info/` that `git gc` writes
+/// itself (`gc.writeCommitGraph` defaults on); no config is touched, no
+/// multi-pack-index is added, no schedule is registered.
+pub fn source_maintenance_commands() -> Vec<Vec<String>> {
+    vec![vec![
+        "commit-graph".to_string(),
+        "write".to_string(),
+        "--reachable".to_string(),
+        "--split".to_string(),
+        "--changed-paths".to_string(),
+    ]]
+}
+
 /// Mirrors under `root` whose last fetch is older than `max_age`, oldest first.
 ///
 /// Age, not size: a mirror nobody has asked for in a month is the one to drop,
@@ -708,6 +726,19 @@ mod tests {
             commands[0][..2],
             ["commit-graph".to_string(), "write".to_string()]
         );
+    }
+
+    #[test]
+    fn source_maintenance_writes_only_a_commit_graph_and_no_config() {
+        let commands = source_maintenance_commands();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0][..2], ["commit-graph".to_string(), "write".to_string()]);
+        assert!(commands[0].iter().any(|arg| arg == "--changed-paths"));
+        for command in &commands {
+            assert_ne!(command.first().map(String::as_str), Some("maintenance"));
+            assert_ne!(command.first().map(String::as_str), Some("config"));
+            assert_ne!(command.first().map(String::as_str), Some("multi-pack-index"));
+        }
     }
 
     #[test]

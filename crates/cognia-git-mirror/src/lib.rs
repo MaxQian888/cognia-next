@@ -373,6 +373,24 @@ pub fn run_maintenance(mirror: &Path) {
     }
 }
 
+/// Wall-clock limit for one source repository's commit-graph write. The first
+/// write with Bloom filters on a large history is the slow one; later split
+/// writes only add the new commits.
+pub const SOURCE_MAINTENANCE_BUDGET: Duration = Duration::from_secs(120);
+
+/// Keep a source repository's commit-graph current (ADR-0227 §6). Returns
+/// whether every command succeeded. Best effort: a failure costs speed, never
+/// correctness, so the caller records it and moves on.
+pub fn run_source_maintenance(common_dir: &Path) -> bool {
+    let mut ok = true;
+    for args in plan::source_maintenance_commands() {
+        let mut full = vec![format!("--git-dir={}", common_dir.display())];
+        full.extend(args);
+        ok &= run_git_quietly(GitRun::new(common_dir, &full).budget(SOURCE_MAINTENANCE_BUDGET));
+    }
+    ok
+}
+
 /// Delete mirrors nothing has fetched in `max_age`. Returns how many.
 ///
 /// By age rather than by size: a mirror nobody has asked for in a month is the
@@ -414,6 +432,39 @@ mod tests {
         sh(dir, &["add", "."]);
         sh(dir, &["commit", "-m", "first"]);
         format!("file://{}", dir.display())
+    }
+
+    #[test]
+    fn source_maintenance_writes_a_bloom_commit_graph_and_leaves_config_alone() {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        upstream(&repo);
+        std::fs::write(repo.join("b.txt"), "b\n").unwrap();
+        sh(&repo, &["add", "."]);
+        sh(&repo, &["commit", "-m", "second"]);
+        let config_before = std::fs::read_to_string(repo.join(".git/config")).unwrap();
+
+        assert!(run_source_maintenance(&repo.join(".git")));
+
+        let chain = repo.join(".git/objects/info/commit-graphs/commit-graph-chain");
+        assert!(chain.exists(), "split commit-graph chain written");
+        let graph = std::fs::read_dir(repo.join(".git/objects/info/commit-graphs"))
+            .unwrap()
+            .flatten()
+            .find(|entry| entry.path().extension().is_some_and(|ext| ext == "graph"))
+            .expect("a graph layer");
+        // Changed-path Bloom filters live in the BIDX/BDAT chunks.
+        let bytes = std::fs::read(graph.path()).unwrap();
+        assert!(bytes.windows(4).any(|w| w == b"BDAT"), "Bloom data chunk present");
+        assert_eq!(std::fs::read_to_string(repo.join(".git/config")).unwrap(), config_before);
+        // Idempotent: a second run on an up-to-date graph succeeds too.
+        assert!(run_source_maintenance(&repo.join(".git")));
+    }
+
+    #[test]
+    fn source_maintenance_reports_failure_on_a_non_repository() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!run_source_maintenance(tmp.path()));
     }
 
     #[test]

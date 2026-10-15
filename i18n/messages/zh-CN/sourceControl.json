@@ -487,6 +487,7 @@
     "timelineView": "时间线视图"
   },
   "views": {
+    "agents": "智能体改动",
     "browse": "浏览",
     "changes": "改动",
     "label": "视图"

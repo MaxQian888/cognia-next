@@ -1064,6 +1064,147 @@ impl Default for WorkspaceLifecyclePolicy {
     }
 }
 
+// ADR-0227 host-owned integration transactions.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum IntegrationStrategy {
+    Merge,
+    Rebase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum IntegrationConflictPolicy {
+    Skip,
+    Stop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum IntegrationState {
+    Planned,
+    Preparing,
+    Prepared,
+    Publishing,
+    Published,
+    Stale,
+    Conflicted,
+    Failed,
+    Aborted,
+    Interrupted,
+    RolledBack,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum IntegrationItemOutcome {
+    Pending,
+    Merged,
+    RerereResolved,
+    Conflicted,
+    Skipped,
+    Dropped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum IntegrationPrediction {
+    MergeTree,
+    OverlapOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct IntegrationRun {
+    pub integration_id: String,
+    pub repo_common_dir: String,
+    pub target_ref: String,
+    pub strategy: IntegrationStrategy,
+    pub on_conflict: IntegrationConflictPolicy,
+    pub expected_old_sha: String,
+    pub candidate_sha: Option<String>,
+    pub result_sha: Option<String>,
+    pub state: IntegrationState,
+    pub items: Vec<IntegrationItem>,
+    pub worktree_path: Option<String>,
+    pub attempt: u32,
+    pub op_log: Vec<RefTransition>,
+    pub checks: Vec<ChangesetCheck>,
+    #[serde(default)]
+    pub required_checks: Vec<String>,
+    /// Explicit prepare-time checks, retained when items are dropped or rebuilt.
+    #[serde(default)]
+    pub requested_checks: Vec<String>,
+    pub error: Option<IntegrationFailure>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct IntegrationItem {
+    pub changeset_id: String,
+    pub head_sha: String,
+    pub outcome: IntegrationItemOutcome,
+    pub conflict_files: Vec<String>,
+    pub commit_sha: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct RefTransition {
+    pub ref_name: String,
+    pub old_sha: String,
+    pub new_sha: String,
+    pub reason: String,
+    pub at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct IntegrationFailure {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct IntegrationAnalysis {
+    pub order: Vec<String>,
+    pub predicted_conflicts: Vec<IntegrationOverlap>,
+    pub overlaps: Vec<IntegrationOverlap>,
+    pub prediction: IntegrationPrediction,
+    pub cycles: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct IntegrationOverlap {
+    pub a: String,
+    pub b: String,
+    pub files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct PrepareIntegration {
+    pub changeset_ids: Vec<String>,
+    #[serde(default)]
+    pub required_checks: Vec<String>,
+    pub target_ref: String,
+    pub strategy: IntegrationStrategy,
+    pub on_conflict: IntegrationConflictPolicy,
+    pub provisioning: Option<WorkspaceProvisioning>,
+    pub integration_id: Option<String>,
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1215,4 +1356,206 @@ mod tests {
         assert_eq!(policy.snapshot_retention_days, 30);
         assert_eq!(policy.blob_budget_bytes, 1 << 30);
     }
+}
+
+// ADR-0227 pinned changesets and head-bound gate evidence.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangesetState {
+    Draft,
+    Ready,
+    Approved,
+    ChangesRequested,
+    Queued,
+    Integrating,
+    Merged,
+    Conflicted,
+    Failed,
+    RolledBack,
+    Abandoned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangesetFileStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    TypeChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct ChangesetFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: ChangesetFileStatus,
+    pub insertions: Option<u32>,
+    pub deletions: Option<u32>,
+    pub binary: bool,
+    pub sensitive: bool,
+    pub excluded: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangesetReviewVerdict {
+    Approve,
+    RequestChanges,
+    Comment,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangesetReviewer {
+    Agent,
+    User,
+    Deterministic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangesetRiskTier {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangesetFindingSeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct ChangesetFinding {
+    pub path: String,
+    pub severity: ChangesetFindingSeverity,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct ChangesetReview {
+    pub head_sha: String,
+    pub verdict: ChangesetReviewVerdict,
+    pub reviewer: ChangesetReviewer,
+    pub risk_tier: ChangesetRiskTier,
+    pub reasons: Vec<String>,
+    pub findings: Vec<ChangesetFinding>,
+    pub requires_human_approval: bool,
+    pub recorded_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangesetCheckOutcome {
+    Passed,
+    Failed,
+    Inconclusive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct ChangesetCheck {
+    pub head_sha: String,
+    pub profile_id: String,
+    pub outcome: ChangesetCheckOutcome,
+    pub tier: Option<String>,
+    pub report_digest: Option<String>,
+    pub log_tail: Option<String>,
+    pub ran_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct ChangesetApproval {
+    pub head_sha: String,
+    pub approver: String,
+    pub approved_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct AgentChangeset {
+    pub changeset_id: String,
+    pub run_id: Option<String>,
+    pub task_id: Option<String>,
+    pub session_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub agent_kind: Option<String>,
+    pub owner_ref: Option<String>,
+    pub workspace_id: String,
+    pub execution_root: String,
+    pub repo_common_dir: String,
+    pub source_root: String,
+    pub target_ref: String,
+    pub base_sha: String,
+    pub head_sha: String,
+    pub change_ref: String,
+    pub title: String,
+    pub files: Vec<ChangesetFile>,
+    pub depends_on: Vec<String>,
+    pub state: ChangesetState,
+    pub review: Option<ChangesetReview>,
+    pub checks: Vec<ChangesetCheck>,
+    pub required_checks: Vec<String>,
+    pub approval: Option<ChangesetApproval>,
+    pub integration_id: Option<String>,
+    pub merged_sha: Option<String>,
+    pub version: u64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct CaptureChangeset {
+    pub workspace_id: String,
+    pub target_ref: Option<String>,
+    pub title: String,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub required_checks: Vec<String>,
+    pub changeset_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct ChangesetFilter {
+    pub repo_common_dir: Option<String>,
+    pub owner_ref: Option<String>,
+    pub session_id: Option<String>,
+    pub states: Option<Vec<ChangesetState>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum EligibilityGap {
+    MissingReview,
+    ReviewNotApproved,
+    MissingCheck {
+        profile: String,
+    },
+    CheckNotPassed {
+        profile: String,
+        outcome: ChangesetCheckOutcome,
+    },
+    MissingHumanApproval,
+    StaleHead,
 }

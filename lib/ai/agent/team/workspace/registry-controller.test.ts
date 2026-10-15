@@ -352,6 +352,8 @@ describe("AgentTeamRegistryWorkspaceController", () => {
     controller.recordDispatchResult(lease.bundleTurnId, { ok: true, output: "done" })
     expect(controller.getDispatchExecutionRoot("build docs")).toBe("/managed/bundle-promote/app")
     expect(controller.getDispatchExecutionRoot("missing")).toBeUndefined()
+    expect(controller.getDispatchSourceRoot("build docs")).toBe("/repo/app")
+    expect(controller.getDispatchSourceRoot("missing")).toBeUndefined()
 
     const result = await controller.reconcile({ mode: "manual" })
 
@@ -497,7 +499,7 @@ describe("AgentTeamRegistryWorkspaceController", () => {
     expect(result.winnerKey).toBe("app:second")
   })
 
-  it("rejects client-side merge-all promotion", async () => {
+  it("keeps merge-all fail-closed when no integration queue is supplied", async () => {
     const controller = new AgentTeamRegistryWorkspaceController({
       runId: "run-1",
       base: { kind: "localHead" },
@@ -505,7 +507,148 @@ describe("AgentTeamRegistryWorkspaceController", () => {
     })
 
     await expect(controller.reconcile({ mode: "merge-all" })).rejects.toThrow(
-      /host-side atomic Registry promotion transaction/
+      /needs the integration queue/
     )
+  })
+
+  function dispatchingController(extra: Record<string, unknown> = {}) {
+    let sequence = 0
+    const acquireBundle = jest.fn(async () => bundle(`bundle-${++sequence}`, "app"))
+    const openTurn = jest.fn(async (workspaceBundle, primaryLogicalRootId, _input) => {
+      const lease = turnLease(workspaceBundle.bundleId, primaryLogicalRootId)
+      // Each dispatch gets its own workspace id so dedupe is observable.
+      lease.runs[0].workspaceId = `workspace-${workspaceBundle.bundleId}`
+      return {
+        ...lease,
+        run: lease.runs[0].run,
+        settle: jest.fn(async () => []),
+        abort: jest.fn(async () => []),
+      }
+    })
+    const controller = new AgentTeamRegistryWorkspaceController({
+      runId: "run-1",
+      base: { kind: "localHead" },
+      roots: [{ logicalRootId: "app", sourceRoot: "/repo/app" }],
+      acquireBundle,
+      openTurn,
+      ...extra,
+    })
+    return controller
+  }
+
+  it("hands only successful dispatches to the integration queue, each workspace once", async () => {
+    const controller = dispatchingController()
+    const ok = await controller.openDispatch({
+      taskId: "a",
+      teammateId: "alice",
+      repositoryId: "app",
+    })
+    const failed = await controller.openDispatch({
+      taskId: "b",
+      teammateId: "bob",
+      repositoryId: "app",
+    })
+    controller.recordDispatchResult(ok.bundleTurnId, { ok: true })
+    controller.recordDispatchResult(failed.bundleTurnId, { ok: false })
+
+    const captureChangeset = jest.fn(async (input: { workspaceId: string }) => ({
+      changesetId: `cs-${input.workspaceId}`,
+      headSha: "h",
+      dependsOn: [],
+      requiredChecks: [],
+      checks: [],
+      review: null,
+    }))
+    const review = jest.fn(async (changesetId: string) => ({
+      changeset: {
+        changesetId,
+        headSha: "h",
+        requiredChecks: [],
+        checks: [],
+        dependsOn: [],
+        review: { headSha: "h", verdict: "approve", requiresHumanApproval: false },
+      },
+      policy: null,
+      risk: null,
+      agent: null,
+      checks: [],
+    }))
+    const integrate = jest.fn(async (input: { changesetIds: string[] }) => ({
+      kind: "published" as const,
+      analysis: {
+        order: input.changesetIds,
+        predictedConflicts: [],
+        overlaps: [],
+        prediction: "mergeTree" as const,
+        cycles: [],
+      },
+      run: {
+        integrationId: "int-1",
+        resultSha: "r1",
+        items: input.changesetIds.map((changesetId) => ({ changesetId, outcome: "merged" })),
+      },
+      dropped: [],
+    }))
+
+    const result = await controller.reconcile({
+      mode: "merge-all",
+      mergeAll: {
+        config: { target: "branch", strategy: "merge", onConflict: "skip", requiredChecks: [] },
+        dependencies: {},
+        deps: {
+          host: { captureChangeset } as never,
+          review: review as never,
+          integrate: integrate as never,
+          currentBranch: async () => "main",
+          branchExists: async () => false,
+          createBranch: jest.fn(async () => undefined),
+          signal: new AbortController().signal,
+        },
+      },
+    })
+
+    expect(captureChangeset).toHaveBeenCalledTimes(1)
+    expect(captureChangeset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-bundle-1",
+        targetRef: "refs/heads/agent/run-1/integrated",
+      })
+    )
+    expect(result.mode).toBe("merge-all")
+    expect(result.resultBranch).toBe("refs/heads/agent/run-1/integrated")
+    expect(result.integration?.roots[0]).toEqual(
+      expect.objectContaining({
+        outcome: "published",
+        merged: ["cs-workspace-bundle-1"],
+        resultSha: "r1",
+      })
+    )
+    expect(result.summary).toBe(
+      "1 changeset(s) integrated, 0 awaiting review, across 1 repository(ies)"
+    )
+  })
+
+  it("removes the branches a select already made when a later one fails", async () => {
+    const createBranch = jest
+      .fn()
+      .mockResolvedValueOnce(managedRecord("workspace-bundle-1", "agent/run-1/alice/a"))
+      .mockRejectedValueOnce(new Error("branch exists"))
+    const deleteBranch = jest.fn(async () => undefined)
+    const controller = dispatchingController({ createBranch, deleteBranch })
+    const first = await controller.openDispatch({
+      taskId: "a",
+      teammateId: "alice",
+      repositoryId: "app",
+    })
+    const second = await controller.openDispatch({
+      taskId: "b",
+      teammateId: "bob",
+      repositoryId: "app",
+    })
+    controller.recordDispatchResult(first.bundleTurnId, { ok: true })
+    controller.recordDispatchResult(second.bundleTurnId, { ok: true })
+
+    await expect(controller.reconcile({ mode: "manual" })).rejects.toThrow("branch exists")
+    expect(deleteBranch).toHaveBeenCalledWith("workspace-bundle-1", "agent/run-1/alice/a")
   })
 })
