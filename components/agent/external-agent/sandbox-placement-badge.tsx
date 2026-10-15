@@ -213,7 +213,27 @@ function remoteLines(
         ? t("tooltip.workspaceUnreported", { branch })
         : undefined,
     outcome,
+    publish ? keptLine(publish, t) : undefined,
   ]
+}
+
+/**
+ * Where undelivered work is: a bundle on the Host, the instance kept while
+ * the push is retried, or gone because the deadline came first.
+ */
+function keptLine(
+  publish: NonNullable<SandboxPlacementReport["publish"]>,
+  t: ReturnType<typeof useTranslations<"externalAgent.placement">>
+): string | undefined {
+  if (publish.recovery?.bundle) {
+    return t("tooltip.recoverySaved", {
+      count: publish.recovery.commits ?? 1,
+      path: publish.recovery.bundle,
+    })
+  }
+  if (publish.discarded) return t("tooltip.publishDiscarded")
+  if (publish.held) return t("tooltip.publishHeld")
+  return undefined
 }
 
 function Labeled({

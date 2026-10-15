@@ -210,6 +210,49 @@ describe("remote placements (ADR-0221)", () => {
     recordWorkspacePublish("late", { pushed: true })
     expect(sandboxPlacementReport("late")?.publish).toEqual({ pushed: true })
   })
+
+  it("keeps where undelivered work went, and drops recovery fields of the wrong type", () => {
+    // `preserve_workspace` and the held/discarded flags in remote_prep.rs.
+    expect(
+      readWorkspacePublishEvent({
+        agentId: "a1",
+        publish: {
+          pushed: false,
+          code: "sandbox_workspace_push_refused",
+          recovery: {
+            bundle: "/data/sandbox-recovery/a1.bundle",
+            commit: "b".repeat(40),
+            commits: 2,
+            bytes: 512,
+            extra: true,
+          },
+        },
+      })?.publish
+    ).toEqual({
+      pushed: false,
+      code: "sandbox_workspace_push_refused",
+      recovery: {
+        bundle: "/data/sandbox-recovery/a1.bundle",
+        commit: "b".repeat(40),
+        commits: 2,
+        bytes: 512,
+      },
+    })
+    expect(
+      readWorkspacePublishEvent({
+        agentId: "a1",
+        publish: {
+          held: true,
+          discarded: "yes",
+          recovery: { code: "sandbox_workspace_recovery_failed", commits: -1, bytes: 1.5 },
+        },
+      })?.publish
+    ).toEqual({ held: true, recovery: { code: "sandbox_workspace_recovery_failed" } })
+    expect(
+      readWorkspacePublishEvent({ agentId: "a1", publish: { discarded: true, recovery: "x" } })
+        ?.publish
+    ).toEqual({ discarded: true })
+  })
 })
 
 describe("the per-agent record", () => {

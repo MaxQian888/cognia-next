@@ -249,6 +249,43 @@ describe("SandboxPlacementBadge", () => {
       expect(await tooltipText("sandbox-placement-sandboxed")).toContain(line)
     })
 
+    it.each([
+      [
+        {
+          pushed: false,
+          code: "sandbox_workspace_push_refused",
+          message: "non-fast-forward",
+          recovery: { bundle: "/data/sandbox-recovery/a1.bundle", commits: 2 },
+        },
+        "2 commits were saved on the host: /data/sandbox-recovery/a1.bundle",
+      ],
+      [
+        { pushed: false, code: "sandbox_workspace_publish_failed", held: true },
+        en.placement.tooltip.publishHeld,
+      ],
+      [
+        { pushed: false, code: "sandbox_workspace_publish_failed", discarded: true },
+        en.placement.tooltip.publishDiscarded,
+      ],
+    ])("says where undelivered work is (%o)", async (publish, line) => {
+      renderBadge()
+      act(() => recordPlacementReport({ ...remote, publish: { branch: "cognia/a1", ...publish } }))
+      expect(await tooltipText("sandbox-placement-sandboxed")).toContain(line)
+    })
+
+    it("adds no recovery line when the work was pushed", async () => {
+      renderBadge()
+      act(() =>
+        recordPlacementReport({
+          ...remote,
+          publish: { branch: "cognia/a1", pushed: true, commit: "b".repeat(40) },
+        })
+      )
+      const text = await tooltipText("sandbox-placement-sandboxed")
+      expect(text).not.toContain(en.placement.tooltip.publishHeld)
+      expect(text).not.toContain("saved on the host")
+    })
+
     it("adds nothing remote to a local sandbox", async () => {
       renderBadge()
       act(() => recordPlacementReport({ agentId: "a1", kind: "sandbox", tier: "container" }))

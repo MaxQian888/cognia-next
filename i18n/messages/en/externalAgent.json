@@ -374,7 +374,10 @@
       "nothingToPublish": "No changes to push to {branch}",
       "pushRefused": "The remote refused the push to {branch}: {message}",
       "publishFailed": "The work was not pushed ({code}): {message}",
-      "publishPending": "The work is pushed when the session ends"
+      "publishPending": "The work is pushed when the session ends",
+      "recoverySaved": "{count, plural, one {# commit was} other {# commits were}} saved on the host: {path}",
+      "publishHeld": "The sandbox is kept and the push retried until its deadline",
+      "publishDiscarded": "The sandbox reached its deadline before the work could be pushed or saved; those changes are lost"
     },
     "unknown": "Placement not recognized"
   },

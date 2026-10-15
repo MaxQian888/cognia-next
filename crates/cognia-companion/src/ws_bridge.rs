@@ -183,6 +183,14 @@ pub enum BridgeFrame {
             skip_serializing_if = "Option::is_none"
         )]
         active_runs: Option<u32>,
+        /// Headless runtimes that failed to start (ADR-0059 W2); absent when
+        /// none did and from the server's own pongs.
+        #[serde(
+            rename = "failedRuntimes",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        failed_runtimes: Option<Vec<String>>,
     },
     /// server → brain: a re-minted service token (12h refresh, R8).
     TokenRefresh { v: u32, token: String },
@@ -403,6 +411,28 @@ static BRAIN_LAST_FLUSH_AT: AtomicI64 = AtomicI64::new(0);
 static BRAIN_ACTIVE_RUNS: AtomicI64 = AtomicI64::new(-1);
 /// When it last reported them (epoch ms).
 static BRAIN_ACTIVITY_AT: AtomicI64 = AtomicI64::new(0);
+/// Headless runtimes the connected brain reported failed to start.
+static BRAIN_FAILED_RUNTIMES: parking_lot::Mutex<Vec<String>> = parking_lot::Mutex::new(Vec::new());
+
+/// Longest runtime name kept from a pong, and how many names.
+const MAX_RUNTIME_NAME: usize = 64;
+const MAX_FAILED_RUNTIMES: usize = 64;
+
+/// The headless runtimes the connected brain could not start: it runs
+/// degraded without them. Empty while no brain is connected.
+pub fn brain_failed_runtimes() -> Vec<String> {
+    BRAIN_FAILED_RUNTIMES.lock().clone()
+}
+
+fn record_failed_runtimes(names: Vec<String>) {
+    let names = names
+        .into_iter()
+        .filter(|name| !name.is_empty())
+        .map(|name| name.chars().take(MAX_RUNTIME_NAME).collect())
+        .take(MAX_FAILED_RUNTIMES)
+        .collect();
+    *BRAIN_FAILED_RUNTIMES.lock() = names;
+}
 
 /// What the connected brain last said it was doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,6 +459,7 @@ fn reset_brain_gauges() {
     BRAIN_LAST_FLUSH_AT.store(0, Ordering::SeqCst);
     BRAIN_ACTIVE_RUNS.store(-1, Ordering::SeqCst);
     BRAIN_ACTIVITY_AT.store(0, Ordering::SeqCst);
+    BRAIN_FAILED_RUNTIMES.lock().clear();
 }
 
 /// Install a new connection as the process-wide socket bridge, closing any
@@ -1007,10 +1038,13 @@ fn handle_brain_frame(
             rss_bytes,
             last_flush_at,
             active_runs,
+            failed_runtimes,
             ..
         } => {
             BRAIN_RSS_BYTES.store(rss_bytes, Ordering::SeqCst);
             BRAIN_LAST_FLUSH_AT.store(last_flush_at, Ordering::SeqCst);
+            // Every brain pong carries the full list; absence means none.
+            record_failed_runtimes(failed_runtimes.unwrap_or_default());
             if let Some(runs) = active_runs {
                 BRAIN_ACTIVE_RUNS.store(i64::from(runs), Ordering::SeqCst);
                 BRAIN_ACTIVITY_AT.store(now_ms(), Ordering::SeqCst);
@@ -1023,6 +1057,7 @@ fn handle_brain_frame(
                 rss_bytes: 0,
                 last_flush_at: 0,
                 active_runs: None,
+                failed_runtimes: None,
             });
         }
         BridgeFrame::WorkerFrame {
@@ -1387,6 +1422,11 @@ pub mod test_support {
     /// Clear the slot regardless of owner. Hold the slot lock first.
     pub fn clear_refusal_for_testing() {
         BRAIN_REFUSAL.write().take();
+    }
+
+    /// Record runtimes as if the connected brain had reported them failed.
+    pub fn report_failed_runtimes_for_testing(names: &[&str]) {
+        record_failed_runtimes(names.iter().map(|name| (*name).to_string()).collect());
     }
 
     /// Record a refusal as if a brain had just been refused.
@@ -2081,6 +2121,55 @@ mod tests {
         wait_disconnected().await;
         assert_eq!(brain_rss_bytes(), 0);
         assert_eq!(brain_activity(), None);
+    }
+
+    #[tokio::test]
+    async fn pong_reports_failed_runtimes_until_one_omits_them_or_the_brain_leaves() {
+        let _guard = lock_slot().await;
+        let state = test_state();
+        let addr = serve_bridge(state).await;
+        let mut ws = connect(addr, &service_token()).await;
+        handshake(&mut ws).await;
+        wait_connected().await;
+
+        let pong = |extra: Value| {
+            let mut frame = json!({
+                "v": BRIDGE_PROTOCOL_VERSION, "type": "pong", "ts": 1, "rssBytes": 1, "lastFlushAt": 0
+            });
+            if let (Some(frame), Some(extra)) = (frame.as_object_mut(), extra.as_object()) {
+                frame.extend(extra.clone());
+            }
+            serde_json::to_string(&frame).unwrap()
+        };
+        let until = |expected: Vec<String>| async move {
+            for _ in 0..100 {
+                if brain_failed_runtimes() == expected {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("failed runtimes never became {expected:?}: {:?}", brain_failed_runtimes());
+        };
+
+        let long = "x".repeat(200);
+        ws.send(WsMessage::Text(
+            pong(json!({ "failedRuntimes": ["connector-runtime", "", long] })).into(),
+        ))
+        .await
+        .unwrap();
+        until(vec!["connector-runtime".to_string(), "x".repeat(MAX_RUNTIME_NAME)]).await;
+
+        // Each pong carries the whole list: one without it means none failed.
+        ws.send(WsMessage::Text(pong(json!({})).into())).await.unwrap();
+        until(Vec::new()).await;
+
+        ws.send(WsMessage::Text(pong(json!({ "failedRuntimes": ["room-runner"] })).into()))
+            .await
+            .unwrap();
+        until(vec!["room-runner".to_string()]).await;
+        ws.close(None).await.ok();
+        wait_disconnected().await;
+        assert!(brain_failed_runtimes().is_empty(), "an absent brain reports nothing");
     }
 
     // ── resolve_bridge_transport ordering ─────────────────────────────────────

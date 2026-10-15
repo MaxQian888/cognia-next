@@ -26,6 +26,7 @@
 //! had no session for [`RemoteLimits::idle_timeout`]; every instance is
 //! destroyed at its deadline whatever it is doing.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::persistent::{
@@ -66,6 +67,18 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(600);
 const REAP_INTERVAL: Duration = Duration::from_secs(15);
 /// How long a deadline waits for sessions to exit before destroying anyway.
 const DEADLINE_GRACE: Duration = Duration::from_secs(30);
+/// The first wait before retrying a destroy the provider refused; it doubles
+/// up to [`DESTROY_RETRY_MAX`].
+const DESTROY_RETRY_BASE: Duration = Duration::from_secs(15);
+const DESTROY_RETRY_MAX: Duration = Duration::from_secs(600);
+/// How often a held instance retries delivering its workspace.
+const PUBLISH_RETRY_INTERVAL: Duration = Duration::from_secs(60);
+/// Exporting a workspace bundle to the Host.
+const BUNDLE_TIMEOUT: Duration = Duration::from_secs(1800);
+/// The largest bundle the Host keeps for one session.
+const MAX_RECOVERY_BUNDLE: u64 = 512 * 1024 * 1024;
+/// Where undelivered workspaces are kept, under the Host's data directory.
+pub const RECOVERY_DIR: &str = "sandbox-recovery";
 
 fn refused(code: &str, message: impl Into<String>) -> SandboxSpawnError {
     SandboxSpawnError::refused(code, message.into())
@@ -91,6 +104,9 @@ pub(crate) struct RemoteParts {
     slots: Arc<tokio::sync::Semaphore>,
     instances: Mutex<HashMap<String, Instance>>,
     reaper: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Where a workspace that could not be pushed is exported to; unset, a
+    /// failed publish can only hold its instance until the deadline.
+    recovery_dir: std::sync::OnceLock<PathBuf>,
 }
 
 impl Drop for RemoteParts {
@@ -116,6 +132,72 @@ struct Instance {
     /// generation closes on its next tick.
     link_generation: u64,
     workspace: Option<Arc<WorkspaceLink>>,
+    /// What its workspace is, kept apart from the link so a publish can still
+    /// commit and export after the link is gone.
+    checkout: Option<Checkout>,
+    /// The provider refused to delete it. It stays tracked, slot held, since
+    /// it may still be running and billed, and the sweep retries.
+    destroy_retry: Option<DestroyRetry>,
+    /// Its workspace was neither pushed nor exported. It is kept past its
+    /// idle limit, the sweep retrying delivery, until the work is delivered
+    /// or its deadline passes.
+    held: Option<HeldPublish>,
+    /// One delivery (commit, push, export) at a time in its workspace: a
+    /// session's end, a retry and the deadline's last attempt never run git
+    /// side by side.
+    delivery: Arc<tokio::sync::Mutex<()>>,
+}
+
+#[derive(Clone)]
+struct Checkout {
+    source: RemoteWorkspaceSource,
+    user: UserSpec,
+    /// The commit the workspace was cloned at; `None` for an instance adopted
+    /// after a Host restart, whose clone predates this process.
+    base_commit: Option<String>,
+}
+
+struct DestroyRetry {
+    attempts: u32,
+    next_at: tokio::time::Instant,
+}
+
+impl DestroyRetry {
+    fn after(attempts: u32) -> Self {
+        let delay = DESTROY_RETRY_BASE
+            .saturating_mul(1u32 << attempts.saturating_sub(1).min(16))
+            .min(DESTROY_RETRY_MAX);
+        Self {
+            attempts,
+            next_at: tokio::time::Instant::now() + delay,
+        }
+    }
+}
+
+/// Who to tell when a held workspace is finally delivered.
+struct HeldPublish {
+    /// Every session whose work is in it, oldest first: a persistent
+    /// instance reused while held carries the earlier session's work too.
+    agents: Vec<(String, Arc<dyn ExternalAgentEventSink>)>,
+    next_at: tokio::time::Instant,
+    /// A delivery attempt is running off the sweep; it decides what happens
+    /// next, so the sweep leaves the instance alone until it finishes.
+    in_flight: bool,
+    /// The bundle exceeded [`MAX_RECOVERY_BUNDLE`]; retries only push, so a
+    /// too-large export is not rewritten every minute.
+    export_too_large: bool,
+}
+
+impl HeldPublish {
+    fn notify(&self, publish: &Value) {
+        for (agent_id, sink) in &self.agents {
+            sink.workspace_published(agent_id, publish);
+        }
+    }
+
+    fn latest_agent(&self) -> String {
+        self.agents.last().map(|(id, _)| id.clone()).unwrap_or_default()
+    }
 }
 
 impl Instance {
@@ -134,7 +216,43 @@ impl Instance {
             stopping_since: None,
             link_generation: 0,
             workspace: None,
+            checkout: None,
+            destroy_retry: None,
+            held: None,
+            delivery: Arc::new(tokio::sync::Mutex::new(())),
         }
+    }
+}
+
+/// Why a bundle could not be streamed to the Host.
+enum ExportError {
+    /// Over [`MAX_RECOVERY_BUNDLE`]: retrying cannot help.
+    TooLarge(String),
+    Failed(String),
+}
+
+/// Whether a publish report means the work reached the branch, or there was
+/// none to deliver.
+fn delivered(publish: &Value) -> bool {
+    publish["pushed"] == true || publish["code"] == "nothing_to_publish"
+}
+
+/// Whether an undelivered publish was exported to the Host.
+fn preserved(publish: &Value) -> bool {
+    publish["recovery"]["bundle"].is_string()
+}
+
+/// A name component from an agent id: only characters safe in a file name.
+fn file_component(value: &str) -> String {
+    let cleaned: String = value
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .take(64)
+        .collect();
+    if cleaned.is_empty() {
+        "agent".to_string()
+    } else {
+        cleaned
     }
 }
 
@@ -142,10 +260,6 @@ impl Instance {
 /// inside the instance. Dropping it stops both.
 struct WorkspaceLink {
     source: RemoteWorkspaceSource,
-    user: UserSpec,
-    /// The commit the workspace was cloned at; `None` for an instance adopted
-    /// after a Host restart, whose clone predates this process.
-    base_commit: Mutex<Option<String>>,
     _proxy: GitProxy,
     stop: tokio::sync::watch::Sender<bool>,
     bridge: tokio::task::JoinHandle<()>,
@@ -298,6 +412,7 @@ impl RemoteParts {
             )),
             instances: Mutex::new(HashMap::new()),
             reaper: Mutex::new(None),
+            recovery_dir: std::sync::OnceLock::new(),
         }
     }
 
@@ -306,6 +421,13 @@ impl RemoteParts {
             .lock()
             .get(instance)
             .and_then(|entry| entry.workspace.clone())
+    }
+
+    fn checkout(&self, instance: &str) -> Option<Checkout> {
+        self.instances
+            .lock()
+            .get(instance)
+            .and_then(|entry| entry.checkout.clone())
     }
 
     /// Instances this process tracks, and how many sessions each has; for
@@ -368,6 +490,14 @@ impl DockerSandboxBackend {
             config,
             Some(RemoteParts::new(provider_id, provisioner, limits)),
         )
+    }
+
+    /// Export a workspace that cannot be pushed to `data_dir`'s
+    /// [`RECOVERY_DIR`] before its instance is destroyed. Set once, at boot.
+    pub fn configure_publish_recovery(&self, data_dir: &Path) {
+        if let Some(remote) = self.remote.as_ref() {
+            let _ = remote.recovery_dir.set(data_dir.join(RECOVERY_DIR));
+        }
     }
 
     /// Start the deadline and idle sweep once, from inside the runtime that
@@ -627,7 +757,7 @@ impl DockerSandboxBackend {
                 .release_supervisor(&instance, &request)
                 .await?;
         } else {
-            self.ensure_workspace_link(&instance, &source, &user, None)
+            self.ensure_workspace_link(&instance, &source, &user)
                 .await?;
         }
         self.await_supervisor(&instance, &key, boot.lifecycle_timeout_ms)
@@ -729,6 +859,40 @@ impl DockerSandboxBackend {
         let Some(existing) = matching.into_iter().next() else {
             return Ok(None);
         };
+        let still_removing = || {
+            fault(
+                "sandbox_persistent_runtime_failed",
+                "the previous instance for this workspace is still being removed",
+            )
+        };
+        let removing = remote
+            .instances
+            .lock()
+            .get(&existing.id)
+            .is_some_and(|entry| entry.destroy_retry.is_some());
+        if removing {
+            return if self.destroy_instance(&existing.id).await {
+                Ok(None)
+            } else {
+                Err(still_removing())
+            };
+        }
+        {
+            let mut instances = remote.instances.lock();
+            if let Some(entry) = instances.get_mut(&existing.id) {
+                if let Some(held) = entry.held.as_mut() {
+                    if held.in_flight {
+                        return Err(fault(
+                            "sandbox_persistent_runtime_failed",
+                            "the previous session's work in this workspace is still being delivered",
+                        ));
+                    }
+                    // The new session's own end delivers this work with
+                    // its own; no retry may commit under a running agent.
+                    held.next_at = entry.deadline;
+                }
+            }
+        }
         let state = self
             .api
             .inspect_runtime(&existing.id)
@@ -744,8 +908,11 @@ impl DockerSandboxBackend {
                     remote.provisioner.kind(),
                     existing.id
                 );
-                self.destroy_instance(&existing.id).await;
-                return Ok(None);
+                return if self.destroy_instance(&existing.id).await {
+                    Ok(None)
+                } else {
+                    Err(still_removing())
+                };
             }
         }
         if !remote.instances.lock().contains_key(&existing.id) {
@@ -796,14 +963,42 @@ impl DockerSandboxBackend {
     }
 
     /// Destroy an instance and forget it, releasing its slot, proxy and
-    /// bridge. Idempotent.
-    async fn destroy_instance(&self, instance: &str) {
-        if let Err(error) = remove_owned(&self.container, instance).await {
+    /// bridge. Idempotent. When the provider refuses, the instance stays
+    /// tracked with its slot held (it may still be running and billed) and
+    /// the sweep retries with backoff; the provider's own TTL is the last
+    /// bound. Returns whether it is gone.
+    async fn destroy_instance(&self, instance: &str) -> bool {
+        let Err(error) = remove_owned(&self.container, instance).await else {
+            if let Some(remote) = self.remote.as_ref() {
+                remote.instances.lock().remove(instance);
+            }
+            return true;
+        };
+        let Some(remote) = self.remote.as_ref() else {
             log::warn!("remote instance {instance} could not be destroyed: {error}");
+            return false;
+        };
+        let mut instances = remote.instances.lock();
+        match instances.get_mut(instance) {
+            Some(entry) => {
+                let attempts = entry.destroy_retry.as_ref().map_or(0, |retry| retry.attempts) + 1;
+                let retry = DestroyRetry::after(attempts);
+                log::warn!(
+                    "remote instance {instance} could not be destroyed (attempt {attempts}): {error}; retrying in {}s",
+                    retry.next_at.saturating_duration_since(tokio::time::Instant::now()).as_secs()
+                );
+                entry.destroy_retry = Some(retry);
+                // Nothing may use an instance that is being removed.
+                entry.workspace = None;
+                entry.held = None;
+            }
+            None => {
+                log::warn!(
+                    "remote instance {instance} could not be destroyed: {error}; left to its TTL and the next reap"
+                );
+            }
         }
-        if let Some(remote) = self.remote.as_ref() {
-            remote.instances.lock().remove(instance);
-        }
+        false
     }
 
     async fn probe_remote(
@@ -872,7 +1067,6 @@ impl DockerSandboxBackend {
         instance: &str,
         source: &RemoteWorkspaceSource,
         user: &UserSpec,
-        base_commit: Option<String>,
     ) -> Result<Arc<WorkspaceLink>, SandboxSpawnError> {
         let remote = self.remote.as_ref().expect("a remote driver");
         if let Some(link) = remote.workspace(instance) {
@@ -929,6 +1123,17 @@ impl DockerSandboxBackend {
             };
             entry.link_generation += 1;
             entry.workspace = None;
+            // The same workspace keeps the commit it was cloned at.
+            let base_commit = entry
+                .checkout
+                .take()
+                .filter(|checkout| checkout.source == *source)
+                .and_then(|checkout| checkout.base_commit);
+            entry.checkout = Some(Checkout {
+                source: source.clone(),
+                user: user.clone(),
+                base_commit,
+            });
             entry.link_generation
         };
         let (stop, stopped) = tokio::sync::watch::channel(false);
@@ -951,8 +1156,6 @@ impl DockerSandboxBackend {
         ));
         let link = Arc::new(WorkspaceLink {
             source: source.clone(),
-            user: user.clone(),
-            base_commit: Mutex::new(base_commit),
             _proxy: proxy,
             stop,
             bridge,
@@ -986,8 +1189,9 @@ impl DockerSandboxBackend {
         source: &RemoteWorkspaceSource,
         user: &UserSpec,
     ) -> Result<(), SandboxSpawnError> {
-        let link = self
-            .ensure_workspace_link(instance, source, user, None)
+        // Held so the proxy stays up for the clone.
+        let _link = self
+            .ensure_workspace_link(instance, source, user)
             .await?;
         let env = git_runtime_env()?;
         let clone = self
@@ -1051,7 +1255,16 @@ impl DockerSandboxBackend {
                 format!("reading the cloned commit failed: {}", head.tail()),
             ));
         }
-        *link.base_commit.lock() = Some(base);
+        if let Some(remote) = self.remote.as_ref() {
+            if let Some(checkout) = remote
+                .instances
+                .lock()
+                .get_mut(instance)
+                .and_then(|entry| entry.checkout.as_mut())
+            {
+                checkout.base_commit = Some(base);
+            }
+        }
         Ok(())
     }
 
@@ -1098,29 +1311,18 @@ impl DockerSandboxBackend {
         }
     }
 
-    /// Commit and push the workspace to the task's branch through the proxy.
+    /// Commit the workspace, then push it to the task's branch through the
+    /// proxy. The commit comes before the link is re-established so a link
+    /// that cannot come back still leaves the work committed for
+    /// [`Self::preserve_workspace`] to export.
     async fn publish_workspace(&self, instance: &str) -> Value {
         let Some(remote) = self.remote.as_ref() else {
             return json!({ "pushed": false, "code": "sandbox_workspace_unavailable" });
         };
-        let Some(link) = remote.workspace(instance) else {
+        let Some(checkout) = remote.checkout(instance) else {
             return json!({ "pushed": false, "code": "sandbox_workspace_unavailable" });
         };
-        let branch = link.source.branch.clone();
-        let link = if link.alive() {
-            link
-        } else {
-            let base = link.base_commit.lock().clone();
-            match self
-                .ensure_workspace_link(instance, &link.source.clone(), &link.user.clone(), base)
-                .await
-            {
-                Ok(link) => link,
-                Err(error) => {
-                    return json!({ "branch": branch, "pushed": false, "code": error.code, "message": error.message })
-                }
-            }
-        };
+        let branch = checkout.source.branch.clone();
         let env = match git_runtime_env() {
             Ok(env) => env,
             Err(error) => {
@@ -1129,7 +1331,7 @@ impl DockerSandboxBackend {
         };
         let git = |args: Vec<String>| {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            git_invocation(&link.user, &args)
+            git_invocation(&checkout.user, &args)
         };
         let run = |command: Vec<String>| self.exec_collect(instance, command, env.clone(), GIT_TIMEOUT);
         let failed = |code: &str, detail: String| {
@@ -1183,8 +1385,14 @@ impl DockerSandboxBackend {
             Ok(output) => return failed("sandbox_workspace_publish_failed", output.tail()),
             Err(error) => return failed("sandbox_workspace_publish_failed", error),
         };
-        if link.base_commit.lock().as_deref() == Some(head.as_str()) {
+        if checkout.base_commit.as_deref() == Some(head.as_str()) {
             return json!({ "branch": branch, "pushed": false, "code": "nothing_to_publish", "commit": head });
+        }
+        if let Err(error) = self
+            .ensure_workspace_link(instance, &checkout.source, &checkout.user)
+            .await
+        {
+            return json!({ "branch": branch, "pushed": false, "commit": head, "code": error.code, "message": error.message });
         }
         let refspec = format!("HEAD:refs/heads/{branch}");
         match run(git(vec![
@@ -1203,12 +1411,270 @@ impl DockerSandboxBackend {
             Ok(output) => {
                 json!({ "branch": branch, "pushed": false, "commit": head, "code": "sandbox_workspace_push_refused", "message": output.tail() })
             }
-            Err(error) => failed("sandbox_workspace_publish_failed", error),
+            Err(error) => {
+                json!({ "branch": branch, "pushed": false, "commit": head, "code": "sandbox_workspace_publish_failed", "message": error })
+            }
         }
     }
 
+    /// Keep an undelivered workspace on the Host: a git bundle of every
+    /// commit not on the remote, in [`RECOVERY_DIR`], beside a manifest of
+    /// where it came from. Returns `publish` with a `recovery` object: its
+    /// `bundle` path when exported, `code: "nothing_to_preserve"` when every
+    /// commit is already on the remote, else the failure.
+    async fn preserve_workspace(&self, instance: &str, agent_id: &str, mut publish: Value) -> Value {
+        let recovery = self.export_workspace(instance, agent_id, &publish).await;
+        publish["recovery"] = match recovery {
+            Ok(recovery) => recovery,
+            Err((code, message)) => json!({ "code": code, "message": message }),
+        };
+        publish
+    }
+
+    async fn export_workspace(
+        &self,
+        instance: &str,
+        agent_id: &str,
+        publish: &Value,
+    ) -> Result<Value, (&'static str, String)> {
+        let failed = |message: String| ("sandbox_workspace_recovery_failed", message);
+        let remote = self.remote.as_ref().ok_or_else(|| failed("not a remote driver".into()))?;
+        let Some(dir) = remote.recovery_dir.get() else {
+            return Err((
+                "sandbox_workspace_recovery_unavailable",
+                "this Host keeps no recovery directory".into(),
+            ));
+        };
+        let checkout = remote
+            .checkout(instance)
+            .ok_or_else(|| failed("the workspace is no longer known".into()))?;
+        let env = git_runtime_env().map_err(|error| failed(error.message))?;
+        let git = |args: &[&str]| git_invocation(&checkout.user, args);
+
+        // A bundle holds commits only: changes the publish could not commit
+        // are not preserved by one, so they are not "nothing to preserve".
+        let status = self
+            .exec_collect(
+                instance,
+                git(&["-C", WORKSPACE_TARGET, "status", "--porcelain"]),
+                env.clone(),
+                GIT_TIMEOUT,
+            )
+            .await
+            .map_err(failed)?;
+        if !status.succeeded() {
+            return Err(failed(status.tail()));
+        }
+        if !status.stdout.iter().all(u8::is_ascii_whitespace) {
+            return Err(failed("the workspace has changes that could not be committed".into()));
+        }
+
+        // Everything not on a remote-tracking ref of the clone: the agent's
+        // own commits, whether or not this process saw the clone.
+        let count = self
+            .exec_collect(
+                instance,
+                git(&["-C", WORKSPACE_TARGET, "rev-list", "--count", "HEAD", "--not", "--remotes"]),
+                env.clone(),
+                GIT_TIMEOUT,
+            )
+            .await
+            .map_err(failed)?;
+        if !count.succeeded() {
+            return Err(failed(count.tail()));
+        }
+        let commits: u64 = String::from_utf8_lossy(&count.stdout)
+            .trim()
+            .parse()
+            .map_err(|_| failed("git did not report a commit count".into()))?;
+        if commits == 0 {
+            return Ok(json!({ "code": "nothing_to_preserve" }));
+        }
+        let head = self
+            .exec_collect(
+                instance,
+                git(&["-C", WORKSPACE_TARGET, "rev-parse", "HEAD"]),
+                env.clone(),
+                GIT_TIMEOUT,
+            )
+            .await
+            .map_err(failed)?;
+        let head = String::from_utf8_lossy(&head.stdout).trim().to_string();
+        if head.is_empty() {
+            return Err(failed("git did not report the workspace commit".into()));
+        }
+
+        tokio::fs::create_dir_all(dir)
+            .await
+            .map_err(|error| failed(error.to_string()))?;
+        let stem = format!(
+            "{}-{}-{}",
+            file_component(agent_id),
+            &head[..head.len().min(12)],
+            unix_now()
+        );
+        let bundle = dir.join(format!("{stem}.bundle"));
+        let partial = dir.join(format!("{stem}.bundle.partial"));
+        let bytes = self
+            .exec_to_file(
+                instance,
+                git(&["-C", WORKSPACE_TARGET, "bundle", "create", "-", "HEAD", "--not", "--remotes"]),
+                env,
+                &partial,
+            )
+            .await;
+        let bytes = match bytes {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&partial).await;
+                return Err(match error {
+                    ExportError::TooLarge(message) => ("sandbox_workspace_recovery_too_large", message),
+                    ExportError::Failed(message) => failed(message),
+                });
+            }
+        };
+        if let Err(error) = tokio::fs::rename(&partial, &bundle).await {
+            let _ = tokio::fs::remove_file(&partial).await;
+            return Err(failed(error.to_string()));
+        }
+        let branch = checkout.source.branch.as_str();
+        let manifest = json!({
+            "agentId": agent_id,
+            "provider": remote.provider_id,
+            "instance": instance,
+            "remoteUrl": checkout.source.remote_url,
+            "baseRef": checkout.source.base_ref,
+            "branch": branch,
+            "baseCommit": checkout.base_commit,
+            "commit": head,
+            "commits": commits,
+            "bytes": bytes,
+            "publish": { "code": publish["code"], "message": publish["message"] },
+            "createdAt": unix_now(),
+            "restore": format!("git fetch {} HEAD:{branch}", bundle.display()),
+        });
+        let manifest_path = dir.join(format!("{stem}.json"));
+        let written = match serde_json::to_vec_pretty(&manifest) {
+            Ok(body) => tokio::fs::write(&manifest_path, body)
+                .await
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        if let Err(error) = written {
+            // The bundle is the work; a missing manifest only loses context.
+            log::warn!("writing {} failed: {error}", manifest_path.display());
+        }
+        log::warn!(
+            "the workspace of {agent_id} could not be pushed; {commits} commit(s) kept in {}",
+            bundle.display()
+        );
+        Ok(json!({
+            "bundle": bundle.to_string_lossy(),
+            "commit": head,
+            "commits": commits,
+            "bytes": bytes,
+        }))
+    }
+
+    /// Run one command in an instance and stream its stdout into `path`, at
+    /// most [`MAX_RECOVERY_BUNDLE`] bytes. Returns how many were written.
+    async fn exec_to_file(
+        &self,
+        instance: &str,
+        command: Vec<String>,
+        env: Vec<String>,
+        path: &Path,
+    ) -> Result<u64, ExportError> {
+        use tokio::io::AsyncWriteExt;
+        let io = |error: std::io::Error| ExportError::Failed(error.to_string());
+        tokio::time::timeout(BUNDLE_TIMEOUT, async {
+            let mut file = tokio::fs::File::create(path).await.map_err(io)?;
+            let mut running = self
+                .api
+                .exec_runtime(RunnerExecSpec {
+                    container_id: instance.to_string(),
+                    command,
+                    env,
+                    working_dir: "/".to_string(),
+                })
+                .await
+                .map_err(ExportError::Failed)?;
+            drop(running.stdin);
+            let mut written: u64 = 0;
+            let mut stderr = Vec::new();
+            while let Some(event) = running.events.recv().await {
+                match event {
+                    RunnerEvent::Stdout(bytes) => {
+                        written += bytes.len() as u64;
+                        if written > MAX_RECOVERY_BUNDLE {
+                            return Err(ExportError::TooLarge(format!(
+                                "the bundle is larger than {} MiB",
+                                MAX_RECOVERY_BUNDLE / (1024 * 1024)
+                            )));
+                        }
+                        file.write_all(&bytes).await.map_err(io)?;
+                    }
+                    RunnerEvent::Stderr(bytes) => extend_capped(&mut stderr, &bytes),
+                    RunnerEvent::Exited { code: Some(0) } => {
+                        file.sync_all().await.map_err(io)?;
+                        return if written == 0 {
+                            Err(ExportError::Failed("git wrote an empty bundle".to_string()))
+                        } else {
+                            Ok(written)
+                        };
+                    }
+                    RunnerEvent::Exited { code } => {
+                        let output = ExecOutput { stdout: Vec::new(), stderr, code };
+                        return Err(ExportError::Failed(format!(
+                            "git bundle exited with {code:?}: {}",
+                            output.tail()
+                        )));
+                    }
+                }
+            }
+            Err(ExportError::Failed(
+                "the bundle stream ended without an exit".to_string(),
+            ))
+        })
+        .await
+        .map_err(|_| ExportError::Failed("exporting the bundle timed out".to_string()))?
+    }
+
+    /// Publish, and when that does not deliver, preserve. Returns the report
+    /// and whether the work is safe: delivered, exported, or nothing new.
+    /// Deliveries into one workspace run one at a time.
+    async fn deliver_workspace(&self, instance: &str, agent_id: &str, export: bool) -> (Value, bool) {
+        let delivery = self.remote.as_ref().and_then(|remote| {
+            remote
+                .instances
+                .lock()
+                .get(instance)
+                .map(|entry| Arc::clone(&entry.delivery))
+        });
+        let _turn = match delivery.as_ref() {
+            Some(delivery) => Some(delivery.lock().await),
+            None => None,
+        };
+        let publish = self.publish_workspace(instance).await;
+        if delivered(&publish) {
+            return (publish, true);
+        }
+        if !export {
+            let mut publish = publish;
+            publish["recovery"] = json!({
+                "code": "sandbox_workspace_recovery_too_large",
+                "message": "an earlier export was over the size limit",
+            });
+            return (publish, false);
+        }
+        let publish = self.preserve_workspace(instance, agent_id, publish).await;
+        let safe = preserved(&publish) || publish["recovery"]["code"] == "nothing_to_preserve";
+        (publish, safe)
+    }
+
     /// A session ended: publish, then destroy an ephemeral instance or mark a
-    /// persistent one idle.
+    /// persistent one idle. Work that was neither pushed nor exported holds
+    /// the instance, past its idle limit, while the sweep retries.
     async fn finish_remote_session(
         &self,
         instance: &str,
@@ -1219,11 +1685,18 @@ impl DockerSandboxBackend {
             return;
         };
         let tracked = remote.instances.lock().contains_key(instance);
+        let mut outcome = None;
         if tracked {
-            let publish = self.publish_workspace(instance).await;
+            let (mut publish, safe) = self.deliver_workspace(instance, agent_id, true).await;
+            if !safe {
+                // Kept on the instance until it is delivered or the deadline
+                // passes; the UI says so.
+                publish["held"] = json!(true);
+            }
             sink.workspace_published(agent_id, &publish);
+            outcome = Some((publish, safe));
         }
-        let destroy = {
+        let (destroy, earlier) = {
             let mut instances = remote.instances.lock();
             match instances.get_mut(instance) {
                 Some(entry) => {
@@ -1231,17 +1704,97 @@ impl DockerSandboxBackend {
                     if entry.sessions.is_empty() {
                         entry.idle_since = Some(tokio::time::Instant::now());
                     }
-                    !entry.persistent
+                    // Earlier sessions whose work was held here: this
+                    // delivery carried it too.
+                    let mut agents = match outcome {
+                        Some(_) => entry.held.take().map(|held| held.agents).unwrap_or_default(),
+                        None => Vec::new(),
+                    };
+                    agents.retain(|(id, _)| id != agent_id);
+                    let mut earlier = None;
+                    match outcome.as_ref() {
+                        Some((publish, false)) => {
+                            agents.push((agent_id.to_string(), Arc::clone(sink)));
+                            entry.held = Some(HeldPublish {
+                                agents,
+                                next_at: tokio::time::Instant::now() + PUBLISH_RETRY_INTERVAL,
+                                in_flight: false,
+                                export_too_large: publish["recovery"]["code"]
+                                    == "sandbox_workspace_recovery_too_large",
+                            });
+                        }
+                        Some((_, true)) => earlier = Some(agents),
+                        None => {}
+                    }
+                    (!entry.persistent && entry.held.is_none(), earlier)
                 }
-                None => false,
+                None => (false, None),
             }
         };
+        if let (Some(agents), Some((publish, _))) = (earlier, outcome.as_ref()) {
+            for (id, sink) in agents {
+                sink.workspace_published(&id, publish);
+            }
+        }
         if destroy {
             self.destroy_instance(instance).await;
         }
     }
 
-    /// Destroy instances past their deadline and persistent ones idle too long.
+    /// Retry delivering a held instance's workspace. Once it is safe, an
+    /// ephemeral instance is destroyed and a persistent one goes back to its
+    /// idle limit.
+    async fn retry_held_publish(&self, instance: &str) {
+        let Some(remote) = self.remote.as_ref() else {
+            return;
+        };
+        let Some((agent_id, export)) = remote
+            .instances
+            .lock()
+            .get(instance)
+            .and_then(|entry| entry.held.as_ref())
+            .map(|held| (held.latest_agent(), !held.export_too_large))
+        else {
+            return;
+        };
+        let (publish, safe) = self.deliver_workspace(instance, &agent_id, export).await;
+        let (destroy, delivered_to) = {
+            let mut instances = remote.instances.lock();
+            let Some(entry) = instances.get_mut(instance) else {
+                return;
+            };
+            let mut delivered_to = None;
+            if safe {
+                delivered_to = entry.held.take();
+                entry.idle_since = entry
+                    .sessions
+                    .is_empty()
+                    .then(tokio::time::Instant::now);
+            } else if let Some(held) = entry.held.as_mut() {
+                held.next_at = tokio::time::Instant::now() + PUBLISH_RETRY_INTERVAL;
+                held.in_flight = false;
+                held.export_too_large |=
+                    publish["recovery"]["code"] == "sandbox_workspace_recovery_too_large";
+            }
+            (safe && !entry.persistent && entry.sessions.is_empty(), delivered_to)
+        };
+        if let Some(held) = delivered_to {
+            held.notify(&publish);
+            if destroy {
+                self.destroy_instance(instance).await;
+            }
+        } else {
+            log::warn!(
+                "the workspace of {agent_id} is still undelivered ({}); retrying",
+                publish["code"]
+            );
+        }
+    }
+
+    /// Destroy instances past their deadline and persistent ones idle too
+    /// long, retry destroys the provider refused, and retry delivering held
+    /// workspaces. Deliveries run off the sweep: a push or an export can take
+    /// minutes, and the other instances' deadlines must not wait for it.
     pub(super) async fn sweep_remote_instances(&self) {
         let Some(remote) = self.remote.as_ref() else {
             return;
@@ -1249,9 +1802,30 @@ impl DockerSandboxBackend {
         let now = tokio::time::Instant::now();
         let mut stop_sessions = Vec::new();
         let mut destroy = Vec::new();
+        let mut retry_publish = Vec::new();
+        let mut held_at_deadline = Vec::new();
+        let mut overrun = Vec::new();
         {
             let mut instances = remote.instances.lock();
             for (id, entry) in instances.iter_mut() {
+                if let Some(retry) = entry.destroy_retry.as_ref() {
+                    if now >= retry.next_at {
+                        destroy.push(id.clone());
+                    }
+                    continue;
+                }
+                if entry.held.as_ref().is_some_and(|held| held.in_flight) {
+                    if now < entry.deadline + DEADLINE_GRACE {
+                        continue;
+                    }
+                    // A delivery still running past the deadline's grace: the
+                    // provider's TTL has ended the instance or is about to.
+                    if let Some(held) = entry.held.take() {
+                        overrun.push((id.clone(), held));
+                    }
+                    destroy.push(id.clone());
+                    continue;
+                }
                 if now >= entry.deadline {
                     match entry.stopping_since {
                         None if !entry.sessions.is_empty() => {
@@ -1259,7 +1833,18 @@ impl DockerSandboxBackend {
                             stop_sessions.extend(entry.sessions.iter().cloned());
                         }
                         Some(since) if now < since + DEADLINE_GRACE => {}
-                        _ => destroy.push(id.clone()),
+                        _ => match entry.held.as_mut() {
+                            Some(held) => {
+                                held.in_flight = true;
+                                held_at_deadline.push(id.clone());
+                            }
+                            None => destroy.push(id.clone()),
+                        },
+                    }
+                } else if let Some(held) = entry.held.as_mut() {
+                    if entry.sessions.is_empty() && now >= held.next_at {
+                        held.in_flight = true;
+                        retry_publish.push(id.clone());
                     }
                 } else if entry.persistent
                     && entry.sessions.is_empty()
@@ -1276,13 +1861,75 @@ impl DockerSandboxBackend {
                 log::warn!("stopping agent {agent} at its sandbox deadline failed: {error}");
             }
         }
+        for (instance, held) in overrun {
+            log::warn!("a delivery from instance {instance} outran its deadline; discarding it");
+            held.notify(&json!({
+                "pushed": false,
+                "code": "sandbox_workspace_deadline",
+                "message": "the sandbox reached its deadline while its work was being delivered",
+                "discarded": true,
+            }));
+        }
+        for instance in retry_publish {
+            let backend = self.own.clone();
+            tokio::spawn(async move {
+                if let Some(backend) = backend.upgrade() {
+                    backend.retry_held_publish(&instance).await;
+                }
+            });
+        }
+        for instance in held_at_deadline {
+            let backend = self.own.clone();
+            tokio::spawn(async move {
+                if let Some(backend) = backend.upgrade() {
+                    backend.last_delivery(&instance).await;
+                    log::info!("destroying held instance {instance} at its deadline");
+                    backend.destroy_instance(&instance).await;
+                }
+            });
+        }
         for instance in destroy {
             log::info!(
-                "destroying {} instance {instance} (deadline or idle limit)",
+                "destroying {} instance {instance} (deadline, idle limit or a retried removal)",
                 remote.provisioner.kind()
             );
             self.destroy_instance(&instance).await;
         }
+    }
+
+    /// Before a held instance is destroyed at its deadline: one more attempt,
+    /// and if the work is still undelivered, say it is being discarded. The
+    /// hold stays (in flight) until the attempt returns, so no sweep destroys
+    /// the instance under it.
+    async fn last_delivery(&self, instance: &str) {
+        let Some(remote) = self.remote.as_ref() else {
+            return;
+        };
+        let Some((agent_id, export)) = remote
+            .instances
+            .lock()
+            .get(instance)
+            .and_then(|entry| entry.held.as_ref())
+            .map(|held| (held.latest_agent(), !held.export_too_large))
+        else {
+            return;
+        };
+        let (mut publish, safe) = self.deliver_workspace(instance, &agent_id, export).await;
+        let Some(held) = remote
+            .instances
+            .lock()
+            .get_mut(instance)
+            .and_then(|entry| entry.held.take())
+        else {
+            return;
+        };
+        if !safe {
+            publish["discarded"] = json!(true);
+            log::warn!(
+                "the workspace of {agent_id} was never delivered; its instance {instance} reached its deadline"
+            );
+        }
+        held.notify(&publish);
     }
 
     /// After a restart: track this deployment's persistent instances so their
@@ -1708,6 +2355,374 @@ mod tests {
             .git_calls()
             .iter()
             .any(|call| call.contains(&"push".to_string())));
+    }
+
+    fn answer(stdout: &str, code: i64) -> GitAnswer {
+        GitAnswer { stdout: stdout.into(), code }
+    }
+
+    /// A workspace the agent changed: cloned at `a…`, committed as `b…`,
+    /// clean once the publish has committed it.
+    fn changed_workspace(fake: &FakeRemote) {
+        fake.answer_git(
+            "rev-parse",
+            vec![answer(&format!("{}\n", "a".repeat(40)), 0), answer(&format!("{}\n", "b".repeat(40)), 0)],
+        );
+        fake.answer_git("status", vec![answer(" M src/main.rs\n", 0), answer("", 0)]);
+    }
+
+    fn recovery_files(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir.join(RECOVERY_DIR))
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.file_name().to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    #[tokio::test]
+    async fn a_refused_push_keeps_the_work_in_a_host_bundle_before_the_instance_goes() {
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        let data = tempfile::tempdir().unwrap();
+        remote.backend.configure_publish_recovery(data.path());
+        changed_workspace(&remote.fake);
+        remote.fake.answer_git("push", vec![answer("! [rejected] (non-fast-forward)", 1)]);
+        remote.fake.answer_git("rev-list", vec![answer("2\n", 0)]);
+        remote.fake.answer_git("bundle", vec![answer("# v2 git bundle\n", 0)]);
+        remote.spawn(remote_config("agent/1", &environment)).await.unwrap();
+        remote.exit_session();
+        remote
+            .until("the instance to be released", |remote| {
+                remote.fake.removed.lock().contains(&"instance-1".to_string())
+            })
+            .await;
+
+        let publish = &remote.events(WORKSPACE_PUBLISH_CHANNEL)[0]["publish"];
+        assert_eq!(publish["pushed"], false);
+        assert_eq!(publish["code"], "sandbox_workspace_push_refused");
+        assert!(publish.get("held").is_none(), "kept work does not hold the instance");
+        let recovery = &publish["recovery"];
+        assert_eq!(recovery["commit"], "b".repeat(40));
+        assert_eq!(recovery["commits"], 2);
+        let bundle = PathBuf::from(recovery["bundle"].as_str().unwrap());
+        assert!(bundle.starts_with(data.path().join(RECOVERY_DIR)));
+        assert_eq!(std::fs::read(&bundle).unwrap(), b"# v2 git bundle\n");
+
+        let manifest: Value =
+            serde_json::from_slice(&std::fs::read(bundle.with_extension("json")).unwrap()).unwrap();
+        assert_eq!(manifest["agentId"], "agent/1");
+        assert_eq!(manifest["branch"], "cognia/task-1");
+        assert_eq!(manifest["remoteUrl"], "https://github.com/acme/app.git");
+        assert_eq!(manifest["baseCommit"], "a".repeat(40));
+        assert_eq!(manifest["publish"]["code"], "sandbox_workspace_push_refused");
+        assert!(manifest["restore"].as_str().unwrap().ends_with("HEAD:cognia/task-1"));
+        assert!(!manifest.to_string().contains(TOKEN), "the upstream credential stays out");
+        // Exactly the bundle and its manifest, named from a sanitized id.
+        let files = recovery_files(data.path());
+        assert_eq!(files.len(), 2, "{files:?}");
+        assert!(files.iter().all(|name| name.starts_with("agent_1-bbbbbbbbbbbb-")));
+
+        let bundle_call = remote
+            .fake
+            .git_calls()
+            .into_iter()
+            .find(|call| call.contains(&"bundle".to_string()))
+            .unwrap();
+        assert!(bundle_call
+            .windows(6)
+            .any(|args| args == ["bundle", "create", "-", "HEAD", "--not", "--remotes"]));
+    }
+
+    #[tokio::test]
+    async fn a_failed_bundle_leaves_no_partial_file_and_holds_the_instance() {
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        let data = tempfile::tempdir().unwrap();
+        remote.backend.configure_publish_recovery(data.path());
+        changed_workspace(&remote.fake);
+        remote.fake.answer_git("push", vec![answer("", 1)]);
+        remote.fake.answer_git("rev-list", vec![answer("1\n", 0)]);
+        remote.fake.answer_git("bundle", vec![answer("partial", 128)]);
+        remote.spawn(remote_config("agent-1", &environment)).await.unwrap();
+        remote.exit_session();
+        remote
+            .until("the publish report", |remote| {
+                !remote.events(WORKSPACE_PUBLISH_CHANNEL).is_empty()
+            })
+            .await;
+        let publish = &remote.events(WORKSPACE_PUBLISH_CHANNEL)[0]["publish"];
+        assert_eq!(publish["held"], true);
+        assert_eq!(publish["recovery"]["code"], "sandbox_workspace_recovery_failed");
+        assert!(recovery_files(data.path()).is_empty(), "no partial bundle is left behind");
+        assert!(remote.fake.removed.lock().is_empty());
+        remote.backend.kill_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn changes_that_could_not_be_committed_are_not_nothing_to_preserve() {
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        let data = tempfile::tempdir().unwrap();
+        remote.backend.configure_publish_recovery(data.path());
+        // The commit fails, so the tree stays dirty and nothing is ahead of
+        // the remote: a bundle would hold none of the agent's work.
+        remote.fake.answer_git("status", vec![answer(" M src/main.rs\n", 0)]);
+        remote.fake.answer_git("commit", vec![answer("fatal: unable to write index", 128)]);
+        remote.fake.answer_git("rev-list", vec![answer("0\n", 0)]);
+        remote.spawn(remote_config("agent-1", &environment)).await.unwrap();
+        remote.exit_session();
+        remote
+            .until("the publish report", |remote| {
+                !remote.events(WORKSPACE_PUBLISH_CHANNEL).is_empty()
+            })
+            .await;
+        let publish = &remote.events(WORKSPACE_PUBLISH_CHANNEL)[0]["publish"];
+        assert_eq!(publish["code"], "sandbox_workspace_publish_failed");
+        assert_eq!(publish["recovery"]["code"], "sandbox_workspace_recovery_failed");
+        assert_eq!(publish["held"], true);
+        assert!(remote.fake.removed.lock().is_empty(), "uncommitted work is not destroyed");
+        remote.backend.kill_all().await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_session_that_reuses_a_held_workspace_delivers_the_earlier_work_too() {
+        let mut environment = spec(EgressTier::Off, None);
+        environment.lifecycle = SandboxLifecycleKind::Persistent;
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 2);
+        changed_workspace(&remote.fake);
+        remote
+            .fake
+            .answer_git("push", vec![answer("unable to access", 128), answer("", 0)]);
+        remote.spawn(remote_config("agent-1", &environment)).await.unwrap();
+        remote.exit_session();
+        remote
+            .until("the first publish report", |remote| {
+                !remote.events(WORKSPACE_PUBLISH_CHANNEL).is_empty()
+            })
+            .await;
+        assert_eq!(remote.events(WORKSPACE_PUBLISH_CHANNEL)[0]["publish"]["held"], true);
+
+        remote.spawn(remote_config("agent-2", &environment)).await.unwrap();
+        assert_eq!(remote.fake.provisions.lock().len(), 1, "the held workspace is reused");
+        // No retry runs under the new session, even past the retry interval.
+        tokio::time::advance(PUBLISH_RETRY_INTERVAL * 2).await;
+        remote.backend.sweep_remote_instances().await;
+        let pushes = || {
+            remote
+                .fake
+                .git_calls()
+                .iter()
+                .filter(|call| call.contains(&"push".to_string()))
+                .count()
+        };
+        assert_eq!(pushes(), 1);
+
+        remote.exit_session();
+        remote
+            .until("both sessions to hear of the push", |remote| {
+                remote.events(WORKSPACE_PUBLISH_CHANNEL).len() == 3
+            })
+            .await;
+        let events = remote.events(WORKSPACE_PUBLISH_CHANNEL);
+        let mut delivered: Vec<&str> = events[1..]
+            .iter()
+            .map(|event| {
+                assert_eq!(event["publish"]["pushed"], true);
+                event["agentId"].as_str().unwrap()
+            })
+            .collect();
+        delivered.sort();
+        assert_eq!(delivered, vec!["agent-1", "agent-2"]);
+        assert!(remote.backend.remote.as_ref().unwrap().instances.lock()["instance-1"]
+            .held
+            .is_none());
+        remote.backend.kill_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn work_already_on_the_remote_needs_no_bundle() {
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        let data = tempfile::tempdir().unwrap();
+        remote.backend.configure_publish_recovery(data.path());
+        changed_workspace(&remote.fake);
+        remote.fake.answer_git("push", vec![answer("", 1)]);
+        remote.fake.answer_git("rev-list", vec![answer("0\n", 0)]);
+        remote.spawn(remote_config("agent-1", &environment)).await.unwrap();
+        remote.exit_session();
+        remote
+            .until("the instance to be released", |remote| {
+                remote.fake.removed.lock().contains(&"instance-1".to_string())
+            })
+            .await;
+        let publish = &remote.events(WORKSPACE_PUBLISH_CHANNEL)[0]["publish"];
+        assert_eq!(publish["recovery"]["code"], "nothing_to_preserve");
+        assert!(recovery_files(data.path()).is_empty());
+        assert!(!remote
+            .fake
+            .git_calls()
+            .iter()
+            .any(|call| call.contains(&"bundle".to_string())));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn undelivered_work_holds_the_instance_until_a_retry_pushes_it() {
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        changed_workspace(&remote.fake);
+        // No recovery directory: the work exists only on the instance.
+        remote
+            .fake
+            .answer_git("push", vec![answer("unable to access", 128), answer("", 0)]);
+        remote.spawn(remote_config("agent-1", &environment)).await.unwrap();
+        remote.exit_session();
+        remote
+            .until("the first publish report", |remote| {
+                !remote.events(WORKSPACE_PUBLISH_CHANNEL).is_empty()
+            })
+            .await;
+        let first = &remote.events(WORKSPACE_PUBLISH_CHANNEL)[0]["publish"];
+        assert_eq!(first["pushed"], false);
+        assert_eq!(first["held"], true);
+        assert_eq!(first["recovery"]["code"], "sandbox_workspace_recovery_unavailable");
+        assert!(remote.fake.removed.lock().is_empty(), "the only copy is not destroyed");
+
+        tokio::time::advance(PUBLISH_RETRY_INTERVAL + Duration::from_secs(1)).await;
+        remote.backend.sweep_remote_instances().await;
+        remote
+            .until("the retried push and the release", |remote| {
+                remote.events(WORKSPACE_PUBLISH_CHANNEL).len() == 2
+                    && remote.fake.removed.lock().contains(&"instance-1".to_string())
+            })
+            .await;
+        let second = &remote.events(WORKSPACE_PUBLISH_CHANNEL)[1]["publish"];
+        assert_eq!(second["pushed"], true);
+        assert_eq!(second["commit"], "b".repeat(40));
+        assert_eq!(remote.backend.remote.as_ref().unwrap().snapshot(), (0, 0));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn held_work_still_undelivered_at_the_deadline_is_reported_discarded() {
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        changed_workspace(&remote.fake);
+        remote.fake.answer_git("push", vec![answer("unable to access", 128)]);
+        remote.spawn(remote_config("agent-1", &environment)).await.unwrap();
+        remote.exit_session();
+        remote
+            .until("the first publish report", |remote| {
+                !remote.events(WORKSPACE_PUBLISH_CHANNEL).is_empty()
+            })
+            .await;
+        tokio::time::advance(Duration::from_secs(3601)).await;
+        remote.backend.sweep_remote_instances().await;
+        remote
+            .until("the instance to be destroyed", |remote| {
+                remote.fake.removed.lock().contains(&"instance-1".to_string())
+            })
+            .await;
+        let events = remote.events(WORKSPACE_PUBLISH_CHANNEL);
+        assert_eq!(events.len(), 2, "a failed retry is silent; the discard is not");
+        assert_eq!(events[1]["publish"]["discarded"], true);
+        assert_eq!(events[1]["publish"]["pushed"], false);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_refused_destroy_keeps_the_slot_and_is_retried() {
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        *remote.fake.remove_failures.lock() = 2;
+        remote.spawn(remote_config("agent-1", &environment)).await.unwrap();
+        remote.exit_session();
+        remote
+            .until("the first destroy attempt", |remote| *remote.fake.remove_failures.lock() == 1)
+            .await;
+        let parts = remote.backend.remote.as_ref().unwrap();
+        assert_eq!(parts.snapshot(), (1, 0), "still tracked: it may still be billed");
+        assert_eq!(parts.slots.available_permits(), 0, "its slot stays taken");
+        assert!(remote.fake.instances.lock().contains_key("instance-1"));
+
+        tokio::time::advance(DESTROY_RETRY_BASE + Duration::from_secs(1)).await;
+        remote.backend.sweep_remote_instances().await;
+        remote
+            .until("the second attempt", |remote| *remote.fake.remove_failures.lock() == 0)
+            .await;
+        assert_eq!(parts.snapshot(), (1, 0));
+        let retry = parts.instances.lock()["instance-1"]
+            .destroy_retry
+            .as_ref()
+            .map(|retry| retry.attempts);
+        assert_eq!(retry, Some(2));
+
+        tokio::time::advance(DESTROY_RETRY_BASE * 2 + Duration::from_secs(1)).await;
+        remote.backend.sweep_remote_instances().await;
+        remote
+            .until("the instance to be destroyed", |remote| {
+                remote.fake.removed.lock().contains(&"instance-1".to_string())
+            })
+            .await;
+        assert_eq!(parts.snapshot(), (0, 0));
+        assert_eq!(parts.slots.available_permits(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_workspace_whose_instance_is_still_being_removed_is_not_reused() {
+        let mut environment = spec(EgressTier::Off, None);
+        environment.lifecycle = SandboxLifecycleKind::Persistent;
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 2);
+        remote.spawn(remote_config("agent-1", &environment)).await.unwrap();
+        remote.exit_session();
+        remote
+            .until("the first session to finish", |remote| {
+                !remote.events(WORKSPACE_PUBLISH_CHANNEL).is_empty()
+            })
+            .await;
+        *remote.fake.remove_failures.lock() = 2;
+        tokio::time::advance(Duration::from_secs(601)).await;
+        remote.backend.sweep_remote_instances().await;
+        remote
+            .until("the idle destroy to be refused", |remote| {
+                *remote.fake.remove_failures.lock() == 1
+            })
+            .await;
+
+        let error = remote
+            .spawn(remote_config("agent-2", &environment))
+            .await
+            .expect_err("an instance being removed is not handed out");
+        assert_eq!(error.code, "sandbox_persistent_runtime_failed");
+        assert_eq!(remote.fake.provisions.lock().len(), 1, "nor duplicated");
+
+        remote.spawn(remote_config("agent-3", &environment)).await.unwrap();
+        assert!(remote.fake.removed.lock().contains(&"instance-1".to_string()));
+        assert_eq!(remote.fake.provisions.lock().len(), 2);
+        remote.backend.kill_all().await.unwrap();
+    }
+
+    #[test]
+    fn destroy_retries_back_off_to_a_ceiling() {
+        let delay = |attempts| {
+            DestroyRetry::after(attempts)
+                .next_at
+                .saturating_duration_since(tokio::time::Instant::now())
+                .as_secs()
+        };
+        assert!((14..=15).contains(&delay(1)));
+        assert!((29..=30).contains(&delay(2)));
+        assert!((59..=60).contains(&delay(3)));
+        assert!((599..=600).contains(&delay(40)));
+    }
+
+    #[test]
+    fn recovery_file_names_keep_only_safe_characters() {
+        assert_eq!(file_component("agent/../1"), "agent____1");
+        assert_eq!(file_component(""), "agent");
+        assert_eq!(file_component(&"x".repeat(100)).len(), 64);
     }
 
     #[tokio::test(start_paused = true)]

@@ -338,6 +338,20 @@ describe("BridgeClient", () => {
     })
   })
 
+  it("names the runtimes that failed to start on each pong", async () => {
+    let failed: string[] = []
+    const h = makeClient({ failedRuntimes: () => failed })
+    await handshake(h)
+    h.sockets[0].serverSend({ v: BRIDGE_PROTOCOL_VERSION, type: "ping", ts: 42 })
+    expect(h.sockets[0].lastSent()).not.toHaveProperty("failedRuntimes")
+    failed = ["connector-runtime", "room-runner"]
+    h.sockets[0].serverSend({ v: BRIDGE_PROTOCOL_VERSION, type: "ping", ts: 43 })
+    expect(h.sockets[0].lastSent()).toMatchObject({
+      type: "pong",
+      failedRuntimes: ["connector-runtime", "room-runner"],
+    })
+  })
+
   it("reports no runs, never a negative or fractional count", async () => {
     const h = makeClient({ activeRuns: () => -3.7 })
     await handshake(h)

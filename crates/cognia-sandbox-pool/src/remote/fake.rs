@@ -54,6 +54,9 @@ pub(crate) struct FakeRemote {
     pub released: Mutex<Vec<String>>,
     pub execs: Mutex<Vec<RunnerExecSpec>>,
     pub removed: Mutex<Vec<String>>,
+    /// How many more removals the provider refuses (a provider API that is
+    /// down or rate-limiting).
+    pub remove_failures: Mutex<u32>,
     /// Instance name → its labels and whether it is running.
     pub instances: Mutex<BTreeMap<String, FakeInstance>>,
     pub sessions: Mutex<HashMap<String, Arc<FakeExec>>>,
@@ -91,6 +94,7 @@ impl FakeRemote {
             released: Mutex::new(Vec::new()),
             execs: Mutex::new(Vec::new()),
             removed: Mutex::new(Vec::new()),
+            remove_failures: Mutex::new(0),
             instances: Mutex::new(BTreeMap::new()),
             sessions: Mutex::new(HashMap::new()),
             bridges: Mutex::new(Vec::new()),
@@ -224,6 +228,13 @@ impl ContainerApi for FakeRemote {
         self.remove(id).await
     }
     async fn remove(&self, id: &str) -> Result<(), String> {
+        {
+            let mut failures = self.remove_failures.lock();
+            if *failures > 0 {
+                *failures -= 1;
+                return Err("the provider refused the deletion".into());
+            }
+        }
         if self.instances.lock().remove(id).is_some() {
             self.removed.lock().push(id.to_string());
         }

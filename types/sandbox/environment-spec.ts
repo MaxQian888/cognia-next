@@ -354,11 +354,35 @@ export type SandboxPlacementPayload =
  * (ADR-0221 D6): `pushed` with the commit, or a code saying why not —
  * `nothing_to_publish` when the agent changed nothing. Every field optional,
  * for the same reason as {@link SandboxPlacementPayload}.
+ *
+ * Work that was not pushed is never silently dropped with its instance: it is
+ * exported to the Host (`recovery.bundle`), or the instance is `held` while
+ * the push is retried, and a report with `discarded` says the deadline came
+ * first.
  */
 export interface WorkspacePublishReport {
   branch?: string
   pushed?: boolean
   commit?: string
+  code?: string
+  message?: string
+  /** What the Host kept when the push did not deliver. */
+  recovery?: WorkspacePublishRecovery
+  /** The instance is kept while the push is retried, until its deadline. */
+  held?: boolean
+  /** The deadline came before the work could be pushed or exported. */
+  discarded?: boolean
+}
+
+/** The Host's copy of an undelivered workspace. */
+export interface WorkspacePublishRecovery {
+  /** Host path of a git bundle with every commit not on the remote. */
+  bundle?: string
+  commit?: string
+  /** How many commits the bundle holds. */
+  commits?: number
+  bytes?: number
+  /** `nothing_to_preserve` when the remote already has every commit; else why the export failed. */
   code?: string
   message?: string
 }

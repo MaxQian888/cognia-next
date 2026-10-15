@@ -92,6 +92,7 @@ provider 无法强制执行的 allowlist：强制隔离时以 `sandbox_egress_un
 - **模型访问**：沿用现有的托管网关租约，经 exec 通道桥接进沙箱。原先只要带 placement 就拒绝网关任务的检查，现在在后端会路由沙箱时放行。
 - **git**：走 host 侧 **git 代理**，每个任务一个，只绑定一个上游仓库，经同一条桥在沙箱内暴露为回环端口。凭据由 host 附加：优先用 brain 随 spawn 发来的凭据，否则用 host 自己对该上游执行的 `git credential fill`（禁用交互提示，带超时）。代理只转发 upload-pack/receive-pack，push 只能更新本任务自己的分支，且不能删除。
 - **会话结束时**：驱动经代理提交并推送工作区，结果发在 `external-agent://workspace-publish` 上。
+- **未推送的工作不会随实例一起销毁。** 驱动先把远端没有的所有提交导出为 git bundle，连同一份 JSON 清单写到 host 的 `<data_dir>/sandbox-recovery/`，报告在 `recovery.bundle` 中给出路径。导出也失败时实例进入 `held`：越过空闲上限保留，由清扫每分钟重试交付；保留到截止时间仍未交付，则报告 `discarded`。同一工作区的交付一次只跑一个；复用 held 持久工作区的会话会把先前的工作一并交付。held 状态只在内存中，host 重启后 held 的 ephemeral 实例会和其他孤儿一样被回收，所以 bundle 导出放在最前面。
 - **provider 账户凭据**（E2B key、kubeconfig）：只在 host 上解析。
 
 ### 上限是结构性的
@@ -99,6 +100,7 @@ provider 无法强制执行的 allowlist：强制隔离时以 `sandbox_egress_un
 每个 provider 有三个上限：`maxConcurrent`、`maxLifetimeSecs`（默认 7200）、`idleTimeoutSecs`（默认 600）。
 
 - 寿命同时写入 provider 自身的 TTL（E2B `timeout`、Pod `activeDeadlineSeconds`），host 崩溃也不会泄漏计费中的沙箱。
+- provider 拒绝删除时，实例保持跟踪并继续占用名额（它可能仍在运行、仍在计费），清扫以 15 秒起、最长 10 分钟的退避重试删除；正在删除的实例不会被新的 spawn 复用。provider TTL 是最后的上限。
 - 拿不到并发槽位属于 fault，由 ADR-0182 的故障规则决定是否回退，规则本身不变。
 - 启动时回收本部署孤立的 ephemeral 实例，并按 runtime key 接管持久实例。
 

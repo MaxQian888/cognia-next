@@ -33,6 +33,7 @@
 import type {
   EgressTier,
   IsolationTier,
+  WorkspacePublishRecovery,
   WorkspacePublishReport,
 } from "@/types/sandbox/environment-spec"
 import {
@@ -97,6 +98,9 @@ export interface SandboxPlacementReport {
 
 const text = (value: unknown): string | undefined =>
   typeof value === "string" && value !== "" ? value : undefined
+
+const count = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined
 
 const object = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {}
@@ -196,6 +200,17 @@ export function readWorkspacePublishEvent(
   if (text(raw.commit)) publish.commit = text(raw.commit)
   if (text(raw.code)) publish.code = text(raw.code)
   if (text(raw.message)) publish.message = text(raw.message)
+  if (raw.held === true) publish.held = true
+  if (raw.discarded === true) publish.discarded = true
+  const rawRecovery = object(raw.recovery)
+  const recovery: WorkspacePublishRecovery = {}
+  if (text(rawRecovery.bundle)) recovery.bundle = text(rawRecovery.bundle)
+  if (text(rawRecovery.commit)) recovery.commit = text(rawRecovery.commit)
+  if (count(rawRecovery.commits) !== undefined) recovery.commits = count(rawRecovery.commits)
+  if (count(rawRecovery.bytes) !== undefined) recovery.bytes = count(rawRecovery.bytes)
+  if (text(rawRecovery.code)) recovery.code = text(rawRecovery.code)
+  if (text(rawRecovery.message)) recovery.message = text(rawRecovery.message)
+  if (Object.keys(recovery).length > 0) publish.recovery = recovery
   return { agentId, publish }
 }
 

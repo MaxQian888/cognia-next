@@ -197,6 +197,8 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
         .catch(() => undefined)
     },
   })
+  // Filled once the runtimes have started (step 6); reported on every pong.
+  let failedRuntimes: string[] = []
   const bridge = new BridgeClient({
     url: bridgeUrl,
     token: currentToken,
@@ -217,6 +219,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     rss: () => durability.rss(),
     // Every agent run and chat turn holds an execution-broker lease.
     activeRuns: () => getExecutionBroker().countRunning(),
+    failedRuntimes: () => failedRuntimes,
     log: (level, message) => {
       if (level === "error") out.error(`serve: ${message}\n`)
       else out.write(`serve: ${message}\n`)
@@ -255,6 +258,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
       else out.write(`serve: ${message}\n`)
     },
   })
+  failedRuntimes = runtimes.failed.map((failure) => failure.name)
   out.write(
     `serve: runtimes up (${runtimes.started.join(", ") || "none"})` +
       (runtimes.failed.length

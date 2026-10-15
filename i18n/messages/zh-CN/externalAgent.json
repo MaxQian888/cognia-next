@@ -374,7 +374,10 @@
       "nothingToPublish": "没有需要推送到 {branch} 的更改",
       "pushRefused": "远端拒绝了推送到 {branch}：{message}",
       "publishFailed": "工作未能推送（{code}）：{message}",
-      "publishPending": "会话结束时推送工作"
+      "publishPending": "会话结束时推送工作",
+      "recoverySaved": "已在主机上保存 {count} 个提交：{path}",
+      "publishHeld": "沙箱会保留到截止时间，并持续重试推送",
+      "publishDiscarded": "沙箱在工作推送或保存之前到达截止时间，这些更改已丢失"
     },
     "unknown": "无法识别的放置结果"
   },

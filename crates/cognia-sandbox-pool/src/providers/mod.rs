@@ -9,6 +9,7 @@
 pub mod config;
 pub mod set;
 
+use std::path::Path;
 use std::sync::Arc;
 
 pub use config::{
@@ -30,12 +31,14 @@ pub struct CredentialLookups<'a> {
 
 /// One configured provider as a member of the set. Performs no network I/O:
 /// every provider client connects on first use, so a provider that is down at
-/// boot is a status the console shows, not a Host that cannot start.
+/// boot is a status the console shows, not a Host that cannot start. A
+/// workspace it cannot push is kept under `data_dir` (ADR-0221).
 pub fn remote_member(
     provider: &ProviderConfig,
     admission: Arc<dyn SandboxAdmission>,
     driver_config: DockerSandboxConfig,
     lookups: &CredentialLookups<'_>,
+    data_dir: &Path,
 ) -> Result<ProviderMember, String> {
     let credential = provider
         .credential
@@ -53,6 +56,7 @@ pub fn remote_member(
         admission,
         driver_config,
     );
+    backend.configure_publish_recovery(data_dir);
     Ok(ProviderMember {
         id: provider.id.clone(),
         label: provider.label.clone(),

@@ -59,6 +59,15 @@ describe("bridge protocol golden fixtures", () => {
     expect(pong).toEqual(fixtures.frames.pong)
   })
 
+  it("names failed runtimes on a pong only when there are some", () => {
+    expect(buildPong(1, 2, 3, 0, [])).not.toHaveProperty("failedRuntimes")
+    const names = ["connector-runtime"]
+    const pong = buildPong(1, 2, 3, 0, names)
+    expect(pong.failedRuntimes).toEqual(["connector-runtime"])
+    names.push("later")
+    expect(pong.failedRuntimes).toEqual(["connector-runtime"])
+  })
+
   it("rejects malformed and unknown frames without throwing", () => {
     expect(parseBridgeFrame("not json")).toBeNull()
     expect(parseBridgeFrame("42")).toBeNull()

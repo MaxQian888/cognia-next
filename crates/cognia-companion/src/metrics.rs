@@ -581,6 +581,13 @@ pub fn render_prometheus() -> String {
         );
         push_metric(
             &mut out,
+            "cognia_brain_failed_runtimes",
+            "gauge",
+            "Headless runtimes the brain reported failed to start.",
+            super::ws_bridge::brain_failed_runtimes().len(),
+        );
+        push_metric(
+            &mut out,
             "cognia_brain_parked",
             "gauge",
             "1 when the server refused the brain and the supervisor stopped respawning it.",

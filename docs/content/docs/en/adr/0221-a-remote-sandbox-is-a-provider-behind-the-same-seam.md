@@ -69,6 +69,7 @@ An allowlist the provider cannot enforce is refused (`sandbox_egress_unenforceab
 - **Model access:** the existing managed gateway lease, bridged into the sandbox over the exec channel. The guard that refused gateway tasks with a placement now admits them when the backend routes sandboxes.
 - **Git:** goes through a Host-side **git proxy**, one per task, bound to one upstream repository. It is exposed inside the sandbox as a loopback port over the same bridge. The Host adds the credential: the one the brain sent with the spawn, else the Host's own `git credential fill` for that upstream (prompts disabled, bounded by a timeout). The proxy forwards only upload-pack and receive-pack, and a push may only update the task's own branch, never delete it.
 - **When a session ends:** the driver commits and pushes the workspace through the proxy, and reports the outcome on `external-agent://workspace-publish`.
+- **Work that was not pushed is never destroyed with its instance.** The driver first exports every commit not on the remote as a git bundle, with a JSON manifest, to `<data_dir>/sandbox-recovery/` on the Host. The report carries the bundle's path as `recovery.bundle`. If the export fails too, the instance is `held`: it stays past its idle limit while the sweep retries delivery every minute. A held instance that reaches its deadline is reported `discarded`. Deliveries into one workspace run one at a time. A session that reuses a held persistent workspace delivers the earlier work with its own. The hold lives in memory only, so a Host restart reaps a held ephemeral instance like any other orphan. That is why the bundle export comes first.
 - **Provider account credentials:** the E2B key and the kubeconfig are resolved on the Host only.
 
 ### Bounded by construction
@@ -76,6 +77,7 @@ An allowlist the provider cannot enforce is refused (`sandbox_egress_unenforceab
 Each provider has `maxConcurrent`, `maxLifetimeSecs` (default 7200) and `idleTimeoutSecs` (default 600).
 
 - The lifetime is also written into the provider's own TTL: E2B `timeout` and Pod `activeDeadlineSeconds`. A Host that dies cannot leak a billed sandbox.
+- If the provider refuses a delete, the instance stays tracked and keeps its slot, because it may still be running and billed. The sweep retries the delete with backoff from 15 s up to 10 min. A spawn will not reuse an instance that is still being removed. The provider TTL is the last bound.
 - A spawn that cannot get a slot is a fault, so the ADR-0182 fault rule decides fallback, unchanged.
 - Boot reaps this deployment's orphaned ephemeral instances and adopts persistent ones by runtime key.
 

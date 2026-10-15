@@ -88,6 +88,12 @@ export interface PongFrame {
    * nothing is running (ADR-0224 A10); its own pongs leave this out.
    */
   activeRuns?: number
+  /**
+   * Headless runtimes whose start failed (ADR-0059 W2): the brain keeps
+   * running without them, and the server reports itself degraded. Names
+   * only; the reasons are in the brain's log. Absent when none failed.
+   */
+  failedRuntimes?: string[]
 }
 
 export interface TokenRefreshFrame {
@@ -229,9 +235,19 @@ export function buildPong(
   ts: number,
   rssBytes: number,
   lastFlushAt: number,
-  activeRuns: number
+  activeRuns: number,
+  failedRuntimes: readonly string[] = []
 ): PongFrame {
-  return { v: BRIDGE_PROTOCOL_VERSION, type: "pong", ts, rssBytes, lastFlushAt, activeRuns }
+  const pong: PongFrame = {
+    v: BRIDGE_PROTOCOL_VERSION,
+    type: "pong",
+    ts,
+    rssBytes,
+    lastFlushAt,
+    activeRuns,
+  }
+  if (failedRuntimes.length > 0) pong.failedRuntimes = [...failedRuntimes]
+  return pong
 }
 
 export function buildWorkerFrame(connectionId: string, frame: string): WorkerFrame {

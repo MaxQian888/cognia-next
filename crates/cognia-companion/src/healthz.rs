@@ -102,6 +102,14 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
     if let Some(refusal) = super::ws_bridge::brain_refusal() {
         body["brainRefusal"] = serde_json::to_value(refusal).unwrap_or_default();
     }
+    // A runtime that failed to start leaves the brain serving everything
+    // else (ADR-0059 W2), so it degrades the server without failing
+    // readiness; restarting the brain retries it.
+    let failed_runtimes = super::ws_bridge::brain_failed_runtimes();
+    if !failed_runtimes.is_empty() {
+        body["degraded"] = json!(true);
+        body["failedRuntimes"] = json!(failed_runtimes);
+    }
     (status, Json(body)).into_response()
 }
 
@@ -160,6 +168,12 @@ pub async fn healthz_handler(State(state): State<SharedState>) -> Response {
         );
         // ADR-0090 Phase 2 — headless LLM Gateway health.
         obj.insert("gateway".to_string(), services.gateway_health());
+        // ADR-0059 W2 — the brain's headless runtimes that failed to start.
+        let failed = super::ws_bridge::brain_failed_runtimes();
+        obj.insert(
+            "runtimes".to_string(),
+            json!({ "degraded": !failed.is_empty(), "failed": failed }),
+        );
     }
     (StatusCode::OK, Json(payload)).into_response()
 }
@@ -308,6 +322,7 @@ mod tests {
             body.get("sidecar").is_none(),
             "desktop must not report sidecar"
         );
+        assert!(body.get("runtimes").is_none(), "desktop has no headless runtimes");
 
         crate::runtime::test_support::install_fake_headless();
         let router = build_router(test_state());
@@ -324,6 +339,7 @@ mod tests {
         );
         assert_eq!(body["sidecar"]["ready"], false);
         assert!(body["sidecar"]["restart_count"].is_number());
+        assert_eq!(body["runtimes"], json!({ "degraded": false, "failed": [] }));
 
         crate::runtime::test_support::clear_headless();
     }
@@ -428,5 +444,40 @@ mod tests {
 
         crate::ws_bridge::test_support::clear_refusal_for_testing();
         assert!(readyz().await.get("brainRefusal").is_none());
+    }
+
+    #[tokio::test]
+    async fn failed_runtimes_degrade_readyz_without_failing_it() {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                crate::ws_bridge::test_support::report_failed_runtimes_for_testing(&[]);
+            }
+        }
+        let _guard = crate::ws_bridge::test_support::lock_slot().await;
+        let _reset = Reset;
+        crate::server::set_draining_for_test(false);
+        let readyz = || async {
+            build_router(test_state())
+                .oneshot(
+                    Request::builder()
+                        .uri("/readyz")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+        };
+        let healthy = body_json(readyz().await).await;
+        assert!(healthy.get("degraded").is_none());
+        assert!(healthy.get("failedRuntimes").is_none());
+
+        crate::ws_bridge::test_support::report_failed_runtimes_for_testing(&["connector-runtime"]);
+        let response = readyz().await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["status"], "ready");
+        assert_eq!(body["degraded"], true);
+        assert_eq!(body["failedRuntimes"], json!(["connector-runtime"]));
     }
 }

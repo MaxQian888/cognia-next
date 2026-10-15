@@ -120,6 +120,8 @@ export interface BridgeClientOptions {
   rss?: () => { rssBytes: number; lastFlushAt: number }
   /** Runs executing now, for pong frames (the host's idle check). */
   activeRuns?: () => number
+  /** Headless runtimes that failed to start, for pong frames. */
+  failedRuntimes?: () => readonly string[]
   log?: (level: "info" | "warn" | "error", message: string) => void
 }
 
@@ -438,9 +440,12 @@ export class BridgeClient implements RuntimeBridge {
         case "ping": {
           const rss = this.opts.rss?.() ?? { rssBytes: 0, lastFlushAt: 0 }
           const activeRuns = Math.max(0, Math.trunc(this.opts.activeRuns?.() ?? 0))
+          const failedRuntimes = this.opts.failedRuntimes?.() ?? []
           try {
             socket.send(
-              serializeBridgeFrame(buildPong(this.now(), rss.rssBytes, rss.lastFlushAt, activeRuns))
+              serializeBridgeFrame(
+                buildPong(this.now(), rss.rssBytes, rss.lastFlushAt, activeRuns, failedRuntimes)
+              )
             )
           } catch {
             // socket raced shut; the close handler reconnects.

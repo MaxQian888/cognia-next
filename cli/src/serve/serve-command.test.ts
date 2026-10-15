@@ -49,10 +49,15 @@ jest.mock("@/lib/headless/bootstrap", () => {
   const actual = jest.requireActual("@/lib/headless/bootstrap")
   return {
     ...actual,
-    bootstrapHeadlessRuntimes: (context: HeadlessRuntimeContext) => {
+    bootstrapHeadlessRuntimes: async (context: HeadlessRuntimeContext) => {
       expect(context.collab).toBe(mockCollabAdapter)
       mockBootOrder.push("runtimes-started")
-      return actual.bootstrapHeadlessRuntimes(context)
+      const result = await actual.bootstrapHeadlessRuntimes(context)
+      // One runtime that cannot start, so the boot reports it degraded.
+      return {
+        ...result,
+        failed: [...result.failed, { name: "broken-runtime", error: new Error("no backend") }],
+      }
     },
   }
 })
@@ -285,6 +290,14 @@ describe("serveCommand", () => {
           expect(respond.payload.error).toBeNull()
           const delta = respond.payload.delta as { rows: Array<{ id: string }> }
           expect(delta.rows.some((row) => row.id === "s-e2e")).toBe(true)
+
+          // The server's heartbeat learns which runtimes did not start.
+          server.serverSend({ v: BRIDGE_PROTOCOL_VERSION, type: "ping", ts: 7 })
+          const pong = server.sent
+            .map((s) => JSON.parse(s) as { type: string; failedRuntimes?: string[] })
+            .filter((f) => f.type === "pong")
+            .at(-1)
+          expect(pong?.failedRuntimes).toContain("broken-runtime")
           releaseShutdown()
           return
         }

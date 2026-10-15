@@ -286,6 +286,7 @@ pub fn install_with_inputs(
             Arc::clone(&admission) as Arc<dyn SandboxAdmission>,
             crate::docker::DockerSandboxConfig::remote(default_deployment_id)?,
             &inputs.lookups,
+            data_dir,
         )?);
     }
     // A Host with exactly one remote provider places `auto` there without
