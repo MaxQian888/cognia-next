@@ -64,6 +64,11 @@ it("says so and starts nothing where there is no host secret store", async () =>
   mockDeps = null
   const log = jest.fn()
   const result = await bootstrapHeadlessRuntimes(context(log))
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "host-provider-keys", criticality: "required" }),
+    ])
+  )
   expect(result.failed).toEqual([])
   expect(installHostProviderKeys).not.toHaveBeenCalled()
   expect(log).toHaveBeenCalledWith("warn", expect.stringContaining("no host secret store"))

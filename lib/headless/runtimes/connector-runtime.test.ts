@@ -25,7 +25,10 @@ import { connectorListen } from "@/lib/connectors/events"
 // seam so this suite can assert the options the runtime passes it.
 const mockDispose = jest.fn()
 jest.mock("@/lib/connectors/bootstrap/install-connector-runtime", () => ({
-  installConnectorRuntime: jest.fn(() => mockDispose),
+  installConnectorRuntime: jest.fn((options) => {
+    options.onBootstrapped?.({ ok: true })
+    return mockDispose
+  }),
 }))
 const mockInstall = installConnectorRuntime as jest.MockedFunction<typeof installConnectorRuntime>
 
@@ -383,3 +386,28 @@ describe("connector-runtime (headless)", () => {
     expect(mockSubscribe).not.toHaveBeenCalled()
   })
 })
+
+it("reports installation failures and restores transport seams before a restart", async () => {
+  mockInstall.mockImplementationOnce((options) => {
+    options?.onBootstrapped?.({ ok: false, error: new Error("runtime install failed") })
+    return mockDispose
+  })
+  const result = await bootstrapHeadlessRuntimes(makeCtx())
+  expect(result.status()[0]).toMatchObject({ criticality: "required", state: "failed" })
+  expect(mockDispose).toHaveBeenCalledTimes(1)
+  await expect(result.restart("connector-runtime")).resolves.toMatchObject({ state: "running" })
+  await result.stop()
+})
+
+it.each(["unavailable", "busy"])(
+  "rejects installation when the connector lease is %s",
+  async (condition) => {
+    mockCall.mockImplementation(async () => {
+      if (condition === "unavailable") throw new Error("companion offline")
+      return false
+    })
+    const { createHeadlessConnectorRuntimeLease } = await import("./connector-runtime")
+    const acquire = createHeadlessConnectorRuntimeLease(jest.fn(), jest.fn(), jest.fn())
+    await expect(acquire(new AbortController().signal)).rejects.toThrow("lease is unavailable")
+  }
+)

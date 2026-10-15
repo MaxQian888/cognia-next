@@ -26,8 +26,9 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "scheduler",
+  criticality: "required",
   hosts: ["brain"],
-  start: async (ctx) => {
+  start: async () => {
     const [{ useSchedulerStore }, { stopSchedulerSystem }, { installExecutionEventBridge }] =
       await Promise.all([
         import("@/stores/scheduler"),
@@ -39,10 +40,10 @@ registerHeadlessRuntime({
       await useSchedulerStore.getState().initialize()
       useSchedulerStore.getState().setSchedulerStatus("running")
     } catch (error) {
-      ctx.log(
-        "error",
-        `scheduler initialize failed: ${error instanceof Error ? error.message : String(error)}`
-      )
+      teardownBridge()
+      stopSchedulerSystem()
+      useSchedulerStore.getState().setSchedulerStatus("stopped")
+      throw error
     }
     return () => {
       teardownBridge()
@@ -54,10 +55,16 @@ registerHeadlessRuntime({
 
 // ── A7: workflow runtime (TS-hook triggers + trigger sync + resume) ─────────
 
+// A failed start cannot return its teardown to the registry. Keep unfinished
+// cleanup here so another start cannot install over partially live resources.
+let pendingWorkflowCleanup: (() => Promise<void>) | undefined
+
 registerHeadlessRuntime({
   name: "workflow-runtime",
+  criticality: "required",
   hosts: ["brain"],
   start: async (ctx) => {
+    await pendingWorkflowCleanup?.()
     // Composition root for the brain: install the Agent Team's workflow node
     // implementations before any trigger or resumed run (ADR-0217).
     const { installTeamWorkflowNodeRuntime } =
@@ -95,54 +102,78 @@ registerHeadlessRuntime({
       import("@/lib/thread-handoff/delivery"),
     ])
 
-    const unregisterScheduleHandoff = registerScheduleHandoffDelivery()
-    const unregisterThreadHandoff = registerThreadHandoffDelivery()
-    const hostDispatchRuntime = installHostDispatchRuntime({ accountId: ctx.localAccountId })
-    initTriggerSubscriptions()
-    initPetEventTrigger()
-    initIssueEventTrigger()
-    initPlanEventTrigger()
-    initMemoryWrittenTrigger()
-    initPluginTriggerLifecycle()
-    try {
-      const all = await listWorkflows()
-      await Promise.allSettled(
-        all.map(async (workflow) => {
-          const deployed = await resolveWorkflowDeployment(workflow.id)
-          if (deployed) await syncWorkflowTriggers(deployed.workflow)
-          else await unsyncWorkflowTriggers(workflow)
-        })
-      )
-    } catch (error) {
-      ctx.log(
-        "warn",
-        `workflow trigger sync failed: ${error instanceof Error ? error.message : String(error)}`
-      )
+    const cleanups: Array<() => void | Promise<void>> = []
+    const stop = async () => {
+      const errors: unknown[] = []
+      for (let index = cleanups.length - 1; index >= 0; index -= 1) {
+        try {
+          await cleanups[index]()
+          cleanups.splice(index, 1)
+        } catch (error) {
+          errors.push(error)
+        }
+      }
+      if (errors.length) throw new AggregateError(errors, "workflow runtime cleanup failed")
+      if (pendingWorkflowCleanup === stop) pendingWorkflowCleanup = undefined
     }
+    pendingWorkflowCleanup = stop
     try {
-      await resumeInFlightRuns()
+      cleanups.push(registerScheduleHandoffDelivery())
+      cleanups.push(registerThreadHandoffDelivery())
+      const hostDispatchRuntime = installHostDispatchRuntime({ accountId: ctx.localAccountId })
+      cleanups.push(() => hostDispatchRuntime.stop())
+      cleanups.push(disposeTriggerSubscriptions)
+      initTriggerSubscriptions()
+      cleanups.push(disposePetEventTrigger)
+      initPetEventTrigger()
+      cleanups.push(disposeIssueEventTrigger)
+      initIssueEventTrigger()
+      cleanups.push(disposePlanEventTrigger)
+      initPlanEventTrigger()
+      cleanups.push(disposeMemoryWrittenTrigger)
+      initMemoryWrittenTrigger()
+      cleanups.push(disposePluginTriggerLifecycle)
+      initPluginTriggerLifecycle()
+      try {
+        const all = await listWorkflows()
+        await Promise.allSettled(
+          all.map(async (workflow) => {
+            try {
+              const deployed = await resolveWorkflowDeployment(workflow.id)
+              if (deployed) await syncWorkflowTriggers(deployed.workflow)
+              else await unsyncWorkflowTriggers(workflow)
+            } catch (error) {
+              ctx.log(
+                "warn",
+                `workflow trigger sync failed for ${workflow.id}: ${error instanceof Error ? error.message : String(error)}`
+              )
+            }
+          })
+        )
+      } catch (error) {
+        ctx.log(
+          "warn",
+          `workflow trigger sync failed: ${error instanceof Error ? error.message : String(error)}`
+        )
+      }
+      try {
+        await resumeInFlightRuns()
+      } catch (error) {
+        ctx.log(
+          "warn",
+          `workflow resume failed: ${error instanceof Error ? error.message : String(error)}`
+        )
+      }
+      await reconcilePendingGoalVerifications().catch((error) =>
+        ctx.log(
+          "warn",
+          `goal verification reconcile failed: ${error instanceof Error ? error.message : String(error)}`
+        )
+      )
+      return stop
     } catch (error) {
-      ctx.log(
-        "warn",
-        `workflow resume failed: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-    await reconcilePendingGoalVerifications().catch((error) =>
-      ctx.log(
-        "warn",
-        `goal verification reconcile failed: ${error instanceof Error ? error.message : String(error)}`
-      )
-    )
-    return async () => {
-      disposeTriggerSubscriptions()
-      disposePetEventTrigger()
-      disposeIssueEventTrigger()
-      disposePlanEventTrigger()
-      disposeMemoryWrittenTrigger()
-      await disposePluginTriggerLifecycle()
-      await hostDispatchRuntime.stop()
-      unregisterScheduleHandoff()
-      unregisterThreadHandoff()
+      await stop().catch((cleanupError) => ctx.log("warn", String(cleanupError)))
+      throw error
     }
   },
 })
@@ -151,6 +182,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "workflow-exit-lease-release",
+  criticality: "required",
   hosts: ["brain"],
   start: async () => {
     const { installExitLeaseRelease, releaseHeldLeasesForExit } =
@@ -178,6 +210,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "agent-team-runtime",
+  criticality: "optional",
   hosts: ["brain"],
   start: async (ctx) => {
     const { runSquadBootstrap } = await import("@/lib/agent-team/bootstrap")
@@ -195,6 +228,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "external-agent",
+  criticality: "required",
   hosts: ["brain"],
   start: async () => {
     const [
@@ -219,6 +253,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "ocr-runtime",
+  criticality: "optional",
   hosts: ["brain"],
   start: async () => {
     const [{ installOcrRuntime, __resetOcrRuntime }, { __resetSharedOcrRegistry }] =
@@ -235,6 +270,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "automation-policy",
+  criticality: "required",
   hosts: ["brain"],
   start: async () => {
     const { hydrateAutomationPolicy } = await import("@/lib/automation/policy")
@@ -246,6 +282,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "audit-retention",
+  criticality: "optional",
   hosts: ["brain"],
   start: async () => {
     const { startAuditRetentionSweeper } = await import("@/lib/automation/audit-retention")
@@ -255,6 +292,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "storage-retention",
+  criticality: "optional",
   hosts: ["brain"],
   start: async () => {
     const { startStorageRetentionSweeper } = await import("@/lib/storage/retention")
@@ -264,6 +302,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "template-trust-reconciliation",
+  criticality: "required",
   hosts: ["brain"],
   start: async () => {
     const { getTemplateRuntime } = await import("@/lib/templates/runtime")
@@ -282,6 +321,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "desktop-network-runtime",
+  criticality: "optional",
   hosts: ["brain"],
   start: async () => {
     const { installDesktopNetworkRuntime, __resetDesktopNetworkRuntime } =
@@ -295,6 +335,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "provider-core-runtime",
+  criticality: "required",
   hosts: ["brain"],
   start: async () => {
     const [{ setProviderCoreRuntimeAdapters }, { buildProviderCoreRuntimeAdapters }] =
@@ -310,6 +351,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "routing-runtime",
+  criticality: "required",
   hosts: ["brain"],
   start: async () => {
     const [{ setProviderRoutingRuntimeAdapters }, { buildRoutingRuntimeAdapters }] =
@@ -325,6 +367,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "background-task",
+  criticality: "required",
   hosts: ["brain"],
   start: async () => {
     const { startBackgroundTaskRecovery } = await import("@/lib/background-tasks/redispatch")
@@ -334,6 +377,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "provider-cost-mirror",
+  criticality: "optional",
   hosts: ["brain"],
   start: async () => {
     const RETENTION_DAYS = 90
@@ -362,6 +406,7 @@ registerHeadlessRuntime({
 
 registerHeadlessRuntime({
   name: "work-submission-outbox",
+  criticality: "required",
   hosts: ["brain"],
   start: async () => {
     const { startHeadlessWorkOutbox } = await import("@/lib/work-submission/bootstrap")

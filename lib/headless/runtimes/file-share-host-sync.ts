@@ -19,6 +19,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "file-share-host-sync",
+  criticality: "optional",
   hosts: ["brain"],
   start: (ctx) => {
     const sync = createFileShareHostSync({

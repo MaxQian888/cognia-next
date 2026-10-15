@@ -77,6 +77,12 @@ export interface PingFrame {
   ts: number
 }
 
+export interface RuntimeHealthReport {
+  bootstrapped: boolean
+  failedRequiredRuntimes: readonly string[]
+  restartingRequiredRuntimes: readonly string[]
+}
+
 export interface PongFrame {
   v: number
   type: "pong"
@@ -94,6 +100,10 @@ export interface PongFrame {
    * only; the reasons are in the brain's log. Absent when none failed.
    */
   failedRuntimes?: string[]
+  /** Absent on legacy brains; false until every runtime has attempted startup. */
+  bootstrapped?: boolean
+  failedRequiredRuntimes?: string[]
+  restartingRequiredRuntimes?: string[]
 }
 
 export interface TokenRefreshFrame {
@@ -236,7 +246,8 @@ export function buildPong(
   rssBytes: number,
   lastFlushAt: number,
   activeRuns: number,
-  failedRuntimes: readonly string[] = []
+  failedRuntimes: readonly string[] = [],
+  runtimeHealth?: RuntimeHealthReport
 ): PongFrame {
   const pong: PongFrame = {
     v: BRIDGE_PROTOCOL_VERSION,
@@ -247,6 +258,11 @@ export function buildPong(
     activeRuns,
   }
   if (failedRuntimes.length > 0) pong.failedRuntimes = [...failedRuntimes]
+  if (runtimeHealth) {
+    pong.bootstrapped = runtimeHealth.bootstrapped
+    pong.failedRequiredRuntimes = [...runtimeHealth.failedRequiredRuntimes]
+    pong.restartingRequiredRuntimes = [...runtimeHealth.restartingRequiredRuntimes]
+  }
   return pong
 }
 

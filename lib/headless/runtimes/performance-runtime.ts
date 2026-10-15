@@ -4,6 +4,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "performance-host",
+  criticality: "optional",
   hosts: ["brain"],
   start: async (ctx) => {
     const provider = await createNativeNodePerformanceProvider()

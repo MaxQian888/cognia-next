@@ -102,6 +102,11 @@ it("starts once, serializes same-account changes, and tears down the adapter", a
   }
   const { ctx, logs } = context(adapter)
   const result = await bootstrapHeadlessRuntimes(ctx)
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "plugin-runtime", criticality: "required" }),
+    ])
+  )
 
   expect(result.failed).toEqual([])
   expect(adapter.start).toHaveBeenCalledTimes(1)

@@ -363,16 +363,25 @@ How an update runs:
    itself, refuses if it finds another version, and confirms that the Compose
    files take the server image from `COGNIA_SERVER_IMAGE`. Then it pulls
    `repository@digest`.
-3. It pins the digest in `.env` and runs
-   `docker compose up -d --no-deps --wait cognia-server`. It uses the files,
+3. It records the old version's failed required runtimes, pins the digest in
+   `.env`, and runs `docker compose up -d --no-deps cognia-server`. It uses the files,
    working directory and env files Compose recorded on the server container,
    with a cleared environment, so nothing but your own files decides the
    result.
-4. It probes `/readyz` from inside the new container. Ready for 30 seconds
-   commits the update. A refused brain (a server and brain from different
-   builds), or not ready within ten minutes, rolls back: the old digest is
-   pinned again and the server recreated. **Host updates** on the owner's
-   device shows the outcome.
+4. It probes `/readyz` from inside the new container. Bootstrap completion,
+   a healthy bridge, and no new required-runtime failures for 30 seconds commit
+   the update. Required failures already present in the old version still make
+   public readiness return 503, but do not block this trial. A refused brain
+   (a server and brain from different builds), or failure to complete the trial
+   within ten minutes, rolls back: the old digest is pinned again and the server
+   recreated. **Host updates** on the owner's device shows the outcome.
+
+Compose healthchecks use `/readyz` to gate `docker compose up --wait`. A failed
+healthcheck does not restart the container: `restart: unless-stopped` reacts to
+process exits, and no autoheal watcher is configured. The update agent deliberately
+omits `--wait` so its trial can account for the pre-update failure baseline.
+Use `/livez` for any external probe that restarts containers; a required-runtime
+restart temporarily makes readiness fail without making the process dead.
 
 What the agent may touch, and why it is safe to leave running:
 

@@ -150,6 +150,44 @@ async function handshake(h: Harness): Promise<void> {
 }
 
 describe("BridgeClient", () => {
+  it("announces bootstrap-aware health before readiness and publishes changes immediately", async () => {
+    let health = {
+      bootstrapped: false,
+      failedRequiredRuntimes: [] as string[],
+      restartingRequiredRuntimes: [] as string[],
+    }
+    const h = makeClient({ runtimeHealth: () => health })
+    await handshake(h)
+    expect(JSON.parse(h.sockets[0].sent[0]).capabilities).toContain("runtime-health")
+    expect(h.sockets[0].lastSent()).toMatchObject({ type: "pong", bootstrapped: false })
+    health = {
+      bootstrapped: true,
+      failedRequiredRuntimes: ["scheduler"],
+      restartingRequiredRuntimes: [],
+    }
+    h.client.publishRuntimeStatus()
+    expect(h.sockets[0].lastSent()).toMatchObject({
+      bootstrapped: true,
+      failedRequiredRuntimes: ["scheduler"],
+    })
+    health = { ...health, failedRequiredRuntimes: [], restartingRequiredRuntimes: ["scheduler"] }
+    h.client.publishRuntimeStatus()
+    expect(h.sockets[0].lastSent()).toMatchObject({
+      failedRequiredRuntimes: [],
+      restartingRequiredRuntimes: ["scheduler"],
+    })
+    h.sockets[0].close()
+    expect(() => h.client.publishRuntimeStatus()).not.toThrow()
+    h.scheduled[h.scheduled.length - 1].fn()
+    h.sockets[1].fire("open", {})
+    h.sockets[1].serverSend(helloAck())
+    expect(h.sockets[1].lastSent()).toMatchObject({
+      bootstrapped: true,
+      restartingRequiredRuntimes: ["scheduler"],
+    })
+    h.client.close()
+  })
+
   it("sends hello on open and resolves connect on hello_ack", async () => {
     const h = makeClient()
     await handshake(h)

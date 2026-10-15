@@ -9,9 +9,10 @@
 //!    `COGNIA_SERVER_IMAGE` (otherwise nothing the agent pins would run).
 //!    The swap is recorded, then the host is told `accepted`.
 //! 3. **Switch**: pin the digest in the project's env file and recreate only
-//!    the server container (`up --no-deps --wait`).
+//!    the server container (`up --no-deps`).
 //! 4. **Prove it** like a native host proves a new version: commit once
-//!    `/readyz` has stayed ready for the settle period; roll back on a refused
+//!    readiness checks, excluding pre-existing required failures, stay healthy
+//!    for the settle period; roll back on a refused
 //!    brain or at the deadline, by pinning the old build again and recreating.
 
 use std::sync::Arc;
@@ -227,6 +228,8 @@ impl HostUpdateAgent {
         let previous_env = std::fs::read_to_string(&env_file)
             .ok()
             .and_then(|content| read_var(&content, SERVER_IMAGE_VAR));
+        let baseline_failed_required_runtimes =
+            self.compose.readiness(&at).await.failed_required()?;
         let now = self.now();
         let pending = PendingSwap {
             attempt_id: format!("{now:x}-{:x}", std::process::id()),
@@ -239,6 +242,7 @@ impl HostUpdateAgent {
             started_at_ms: now,
             deadline_ms: now + self.timing.trial_window.as_millis() as i64,
             activated: false,
+            baseline_failed_required_runtimes,
         };
         state.pending = Some(pending.clone());
         self.state.save(&state)?;
@@ -346,7 +350,7 @@ impl HostUpdateAgent {
                 Ok(_) => Readiness::NotReady("the server is not running".into()),
                 Err(error) => Readiness::NotReady(error),
             };
-            match readiness {
+            match readiness.for_trial(&pending.baseline_failed_required_runtimes) {
                 Readiness::Refused(reason) => {
                     return self
                         .roll_back(pending, format!("its server refused its brain ({reason})"))
@@ -358,7 +362,9 @@ impl HostUpdateAgent {
                         return self.commit(pending);
                     }
                 }
-                Readiness::NotReady(_) => ready_since = None,
+                Readiness::NotReady(_)
+                | Readiness::Unavailable(_)
+                | Readiness::RuntimeHealth { .. } => ready_since = None,
             }
             if now > pending.deadline_ms {
                 return self
@@ -706,6 +712,80 @@ pub(crate) mod tests {
         assert_eq!(status.image.as_deref(), Some(digest_ref('b').as_str()));
         assert!(status.trial.is_none());
         assert_eq!(status.last_outcome.unwrap().result, UpdateResult::Installed);
+    }
+
+    fn runtime_failures(names: &[&str], otherwise_ready: bool) -> Readiness {
+        Readiness::RuntimeHealth {
+            baseline_ready: true,
+            failed_required: names.iter().map(|name| (*name).to_owned()).collect(),
+            otherwise_ready,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn existing_required_failures_are_persisted_before_replacement_and_do_not_roll_back() {
+        let h = harness();
+        *h.compose.readiness.lock() = vec![runtime_failures(&["connector-runtime"], true)];
+        h.agent.update(&request("1.5.0")).await.unwrap();
+        assert!(h.compose.recreates.lock().is_empty());
+        let pending = h.agent.state.load().unwrap().pending.unwrap();
+        assert_eq!(
+            pending.baseline_failed_required_runtimes,
+            vec!["connector-runtime"]
+        );
+        let outcome = h.agent.activate().await.unwrap();
+        assert_eq!(outcome.result, UpdateResult::Installed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unavailable_baseline_does_not_replace_the_server() {
+        let h = harness();
+        *h.compose.readiness.lock() = vec![Readiness::Unavailable("connection refused".into())];
+        let error = h.agent.update(&request("1.5.0")).await.unwrap_err();
+        assert!(error.contains("could not record required runtime failures"));
+        assert!(h.agent.state.load().unwrap().pending.is_none());
+        assert!(h.compose.recreates.lock().is_empty());
+        assert_eq!(*h.compose.running.lock(), digest_ref('a'));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn newly_failed_required_runtimes_roll_back_at_the_deadline() {
+        let h = harness();
+        *h.compose.readiness.lock() = vec![runtime_failures(&["connector-runtime"], true)];
+        h.agent.update(&request("1.5.0")).await.unwrap();
+        *h.compose.readiness.lock() =
+            vec![runtime_failures(&["connector-runtime", "scheduler"], true)];
+        let outcome = h.agent.activate().await.unwrap();
+        assert_eq!(outcome.result, UpdateResult::RolledBack);
+        assert!(outcome.reason.unwrap().contains("in time"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_recovered_required_failure_restarts_the_settle_period() {
+        let h = harness();
+        h.agent.update(&request("1.5.0")).await.unwrap();
+        // A new failure interrupts a partially elapsed settle period. It
+        // recovers after 15 seconds, and must then settle for a fresh 30.
+        *h.compose.readiness.lock() = vec![
+            Readiness::Ready,
+            Readiness::Ready,
+            runtime_failures(&["scheduler"], true),
+            Readiness::Ready,
+        ];
+        let before = h.agent.now();
+        let outcome = h.agent.activate().await.unwrap();
+        assert_eq!(outcome.result, UpdateResult::Installed);
+        assert!(h.agent.now() - before >= 45_000);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn baseline_failures_do_not_allow_other_unhealthy_checks_to_commit() {
+        let h = harness();
+        *h.compose.readiness.lock() = vec![runtime_failures(&["connector-runtime"], true)];
+        h.agent.update(&request("1.5.0")).await.unwrap();
+        *h.compose.readiness.lock() = vec![runtime_failures(&["connector-runtime"], false)];
+        let outcome = h.agent.activate().await.unwrap();
+        assert_eq!(outcome.result, UpdateResult::RolledBack);
     }
 
     #[tokio::test(start_paused = true)]

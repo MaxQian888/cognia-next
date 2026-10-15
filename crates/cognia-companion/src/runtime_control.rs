@@ -132,7 +132,9 @@ pub async fn request(
     };
     PENDING.lock().remove(&request_id);
     match outcome {
-        None => Err(unavailable("the brain disconnected before it answered".into())),
+        None => Err(unavailable(
+            "the brain disconnected before it answered".into(),
+        )),
         Some(Err(_)) => Err(RuntimeControlError::new(
             "brain_timeout",
             format!("the brain did not answer within {}s", timeout.as_secs()),
@@ -201,7 +203,9 @@ mod tests {
 
     impl BridgeTransport for ScriptedBrain {
         fn emit(&self, channel: &str, payload: Value) -> Result<(), String> {
-            self.sent.lock().push((channel.to_string(), payload.clone()));
+            self.sent
+                .lock()
+                .push((channel.to_string(), payload.clone()));
             if let Some(answer) = (self.answer)(&payload) {
                 // Answer after the emit returns, as a real brain would.
                 tokio::spawn(async move {
@@ -253,7 +257,7 @@ mod tests {
         assert_eq!(sent[0].0, REQUEST_EVENT);
         assert_eq!(sent[0].1["action"], "restart");
         assert_eq!(sent[0].1["name"], "room-runner");
-        assert!(PENDING.lock().is_empty());
+        assert!(!PENDING.lock().contains_key(&id(&sent[0].1)));
     }
 
     #[tokio::test]
@@ -273,6 +277,20 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.code, "runtime_not_restartable");
         assert_eq!(error.message, "no teardown");
+    }
+
+    #[test]
+    fn runtime_criticality_is_preserved_and_legacy_answers_remain_valid() {
+        for criticality in [Some("required"), Some("optional"), None] {
+            let mut runtime = json!({ "name": "scheduler", "state": "failed", "restartable": true, "restarts": 0 });
+            if let Some(criticality) = criticality {
+                runtime["criticality"] = json!(criticality);
+            }
+            let result =
+                interpret(json!({ "runtimes": [runtime.clone()], "runtime": runtime })).unwrap();
+            assert_eq!(result["runtime"], runtime);
+            assert_eq!(result["runtimes"][0], runtime);
+        }
     }
 
     #[tokio::test]

@@ -72,6 +72,11 @@ beforeEach(() => {
 
 it("registers on the brain and feeds every sidecar frame to the host runner", async () => {
   const result = await bootstrapHeadlessRuntimes(context())
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "room-runner", criticality: "optional" }),
+    ])
+  )
   expect(result.failed).toEqual([])
   expect(result.started).toEqual(["room-runner"])
   const frame = { type: "event", sessionId: "room-1::char::a::t1", event: {} }

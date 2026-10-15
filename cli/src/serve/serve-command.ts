@@ -198,8 +198,9 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
         .catch(() => undefined)
     },
   })
-  // Set once the runtimes have started (step 6); every pong reports the ones
-  // that are down, so a restart clears its name on the next heartbeat.
+  // Hello advertises runtime-health before bootstrap; publish changes immediately.
+  let bootstrapped = false
+  let currentRuntimeStatus: HeadlessRuntimeStatus[] = []
   let runtimeStatus: (() => HeadlessRuntimeStatus[]) | null = null
   const bridge = new BridgeClient({
     url: bridgeUrl,
@@ -221,8 +222,17 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     rss: () => durability.rss(),
     // Every agent run and chat turn holds an execution-broker lease.
     activeRuns: () => getExecutionBroker().countRunning(),
+    runtimeHealth: () => ({
+      bootstrapped,
+      failedRequiredRuntimes: (runtimeStatus?.() ?? currentRuntimeStatus)
+        .filter((runtime) => runtime.criticality === "required" && runtime.state === "failed")
+        .map((runtime) => runtime.name),
+      restartingRequiredRuntimes: (runtimeStatus?.() ?? currentRuntimeStatus)
+        .filter((runtime) => runtime.criticality === "required" && runtime.state === "restarting")
+        .map((runtime) => runtime.name),
+    }),
     failedRuntimes: () =>
-      (runtimeStatus?.() ?? [])
+      (runtimeStatus?.() ?? currentRuntimeStatus)
         .filter((runtime) => runtime.state === "failed")
         .map((runtime) => runtime.name),
     log: (level, message) => {
@@ -248,22 +258,31 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     env,
     backup: brainBackup({ filesystem: backupFilesystem, fallbackDir: path.join(home, "backups") }),
   })
-  const runtimes = await bootstrapHeadlessRuntimes({
-    host: "brain",
-    localAccountId,
-    bridge,
-    notifyDbWrite: durability.notifyDbWrite,
-    backupFilesystem,
-    ...(accountSync ? { accountSync } : {}),
-    ...(collabReader?.runtime ? { collab: collabReader.runtime } : {}),
-    pluginRuntime: createNodePluginRuntimeAdapter(),
-    resolveMessage,
-    log: (level, message) => {
-      if (level === "error") out.error(`serve: ${message}\n`)
-      else out.write(`serve: ${message}\n`)
+  const runtimes = await bootstrapHeadlessRuntimes(
+    {
+      host: "brain",
+      localAccountId,
+      bridge,
+      notifyDbWrite: durability.notifyDbWrite,
+      backupFilesystem,
+      ...(accountSync ? { accountSync } : {}),
+      ...(collabReader?.runtime ? { collab: collabReader.runtime } : {}),
+      pluginRuntime: createNodePluginRuntimeAdapter(),
+      resolveMessage,
+      log: (level, message) => {
+        if (level === "error") out.error(`serve: ${message}\n`)
+        else out.write(`serve: ${message}\n`)
+      },
     },
-  })
+    Date.now,
+    (statuses) => {
+      currentRuntimeStatus = statuses
+      bridge.publishRuntimeStatus()
+    }
+  )
   runtimeStatus = runtimes.status
+  bootstrapped = true
+  bridge.publishRuntimeStatus()
   const uninstallRuntimeControl = await installRuntimeControl(
     bridge,
     runtimes,

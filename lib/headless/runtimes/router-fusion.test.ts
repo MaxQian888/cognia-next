@@ -86,6 +86,11 @@ beforeEach(() => {
 it("sweeps and schedules retention from the account's stored settings", async () => {
   const bootstrap = await loadFresh()
   const result = await bootstrap(makeContext())
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "router-fusion", criticality: "optional" }),
+    ])
+  )
   expect(result.failed).toEqual([])
   expect(result.started).toContain("router-fusion")
 

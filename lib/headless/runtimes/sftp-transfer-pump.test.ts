@@ -40,6 +40,11 @@ beforeEach(() => {
 
 it("drains the brain's own queue without waiting for an approval nobody is there to give", async () => {
   const result = await bootstrapHeadlessRuntimes(context())
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "sftp-transfer-pump", criticality: "optional" }),
+    ])
+  )
 
   expect(result.failed).toEqual([])
   expect(result.started).toEqual(["sftp-transfer-pump"])

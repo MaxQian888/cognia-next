@@ -1,6 +1,16 @@
 import type { HeadlessRuntime, HeadlessRuntimeContext, RuntimeBridge } from "./types"
 
 describe("headless runtime contracts", () => {
+  it("requires every registration to explicitly choose criticality", () => {
+    // @ts-expect-error A missing classification must fail type checking.
+    const unclassified: HeadlessRuntime = {
+      name: "missing",
+      hosts: ["brain"],
+      start: () => undefined,
+    }
+    expect(unclassified).not.toHaveProperty("criticality")
+  })
+
   it("accepts the bridge, context, runtime, and teardown shapes used by the brain", async () => {
     const bridge: RuntimeBridge = {
       listen: async () => () => undefined,
@@ -24,6 +34,7 @@ describe("headless runtime contracts", () => {
     const teardown = jest.fn()
     const runtime: HeadlessRuntime = {
       name: "contract-test",
+      criticality: "optional",
       hosts: ["brain"],
       start: async (received) => {
         expect(received).toBe(context)

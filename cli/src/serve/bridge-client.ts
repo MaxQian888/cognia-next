@@ -33,6 +33,8 @@ import {
   parseBridgeFrame,
   serializeBridgeFrame,
   MEDIA_RESPONSE_COMMAND,
+  DEFAULT_BRAIN_CAPABILITIES,
+  type RuntimeHealthReport,
 } from "./protocol"
 
 export type BridgeClientState = "idle" | "connecting" | "connected" | "reconnecting" | "closed"
@@ -122,6 +124,8 @@ export interface BridgeClientOptions {
   activeRuns?: () => number
   /** Headless runtimes that failed to start, for pong frames. */
   failedRuntimes?: () => readonly string[]
+  /** Presence advertises runtime-health in hello, closing the first-pong startup window. */
+  runtimeHealth?: () => RuntimeHealthReport
   log?: (level: "info" | "warn" | "error", message: string) => void
 }
 
@@ -296,6 +300,29 @@ export class BridgeClient implements RuntimeBridge {
     this.socket.send(serializeBridgeFrame(buildWorkerFrame(connectionId, frame)))
   }
 
+  /** Publish a complete snapshot on startup, reconnect and runtime state changes. */
+  publishRuntimeStatus(): void {
+    if (this.state !== "connected" || !this.socket) return
+    const rss = this.opts.rss?.() ?? { rssBytes: 0, lastFlushAt: 0 }
+    const activeRuns = Math.max(0, Math.trunc(this.opts.activeRuns?.() ?? 0))
+    try {
+      this.socket.send(
+        serializeBridgeFrame(
+          buildPong(
+            this.now(),
+            rss.rssBytes,
+            rss.lastFlushAt,
+            activeRuns,
+            this.opts.failedRuntimes?.() ?? [],
+            this.opts.runtimeHealth?.()
+          )
+        )
+      )
+    } catch {
+      // The close handler reconnects and publishes a fresh snapshot.
+    }
+  }
+
   // ── Internals ───────────────────────────────────────────────────────────────
 
   private setState(state: BridgeClientState): void {
@@ -338,7 +365,14 @@ export class BridgeClient implements RuntimeBridge {
           buildHello({
             brainVersion: this.opts.brainVersion ?? "0.0.0",
             accountId: this.opts.accountId,
-            capabilities: this.opts.capabilities,
+            capabilities: this.opts.runtimeHealth
+              ? [
+                  ...new Set([
+                    ...(this.opts.capabilities ?? DEFAULT_BRAIN_CAPABILITIES),
+                    "runtime-health",
+                  ]),
+                ]
+              : this.opts.capabilities,
           })
         )
       )
@@ -387,6 +421,7 @@ export class BridgeClient implements RuntimeBridge {
           cancelAckTimeout?.()
           this.attempts = 0
           this.setState("connected")
+          if (this.opts.runtimeHealth) this.publishRuntimeStatus()
           this.connectResolve?.()
           this.connectResolve = null
           this.connectReject = null
@@ -438,18 +473,7 @@ export class BridgeClient implements RuntimeBridge {
           break
         }
         case "ping": {
-          const rss = this.opts.rss?.() ?? { rssBytes: 0, lastFlushAt: 0 }
-          const activeRuns = Math.max(0, Math.trunc(this.opts.activeRuns?.() ?? 0))
-          const failedRuntimes = this.opts.failedRuntimes?.() ?? []
-          try {
-            socket.send(
-              serializeBridgeFrame(
-                buildPong(this.now(), rss.rssBytes, rss.lastFlushAt, activeRuns, failedRuntimes)
-              )
-            )
-          } catch {
-            // socket raced shut; the close handler reconnects.
-          }
+          this.publishRuntimeStatus()
           break
         }
         case "token_refresh": {

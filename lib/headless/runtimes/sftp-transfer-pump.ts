@@ -23,6 +23,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "sftp-transfer-pump",
+  criticality: "optional",
   hosts: ["brain"],
   start: () => startSftpTransferPump({ requiresApproval: false }),
 })

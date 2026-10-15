@@ -123,6 +123,7 @@ function startSwitchesPublisher(
 
 registerHeadlessRuntime({
   name: "router-fusion",
+  criticality: "optional",
   hosts: ["brain"],
   start: async (ctx) => {
     const [{ recoverRouterFusionRuns, startRouterFusionRetention }, { getSettings }] =

@@ -19110,7 +19110,10 @@
             }
           },
           "nextPageToken": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Present exactly when another page exists."
           }
         },
@@ -37899,6 +37902,14 @@
                 "name": {
                   "type": "string"
                 },
+                "criticality": {
+                  "type": "string",
+                  "enum": [
+                    "required",
+                    "optional"
+                  ],
+                  "description": "Absent on legacy brains; failures then retain the legacy degraded behavior."
+                },
                 "state": {
                   "type": "string",
                   "enum": [
@@ -37937,6 +37948,14 @@
             "properties": {
               "name": {
                 "type": "string"
+              },
+              "criticality": {
+                "type": "string",
+                "enum": [
+                  "required",
+                  "optional"
+                ],
+                "description": "Absent on legacy brains; failures then retain the legacy degraded behavior."
               },
               "state": {
                 "type": "string",
@@ -38010,6 +38029,14 @@
                 "name": {
                   "type": "string"
                 },
+                "criticality": {
+                  "type": "string",
+                  "enum": [
+                    "required",
+                    "optional"
+                  ],
+                  "description": "Absent on legacy brains; failures then retain the legacy degraded behavior."
+                },
                 "state": {
                   "type": "string",
                   "enum": [
@@ -38048,6 +38075,14 @@
             "properties": {
               "name": {
                 "type": "string"
+              },
+              "criticality": {
+                "type": "string",
+                "enum": [
+                  "required",
+                  "optional"
+                ],
+                "description": "Absent on legacy brains; failures then retain the legacy degraded behavior."
               },
               "state": {
                 "type": "string",
@@ -86987,5 +87022,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "657509753abac85e476f880d07af4f7634cd710364c7c5678cdd226a182f697b"
+  "catalogHash": "ebdcbaa12dd348f2078234e3e73cd42034658ca13056179fec6522e5546acd00"
 }

@@ -36,6 +36,8 @@ impl IdleReport {
 
 pub trait IdleProbe: Send + Sync {
     fn report(&self, now_ms: i64) -> IdleReport;
+    /// A completed runtime snapshot immediately before replacing this host.
+    fn runtime_baseline(&self) -> Result<Vec<String>, String>;
 }
 
 /// The brain's run count, as the idle check reads it: zero when no brain is
@@ -68,7 +70,21 @@ impl LiveIdleProbe {
     }
 }
 
+fn runtime_baseline(health: Option<ws_bridge::BrainRuntimeHealth>) -> Result<Vec<String>, String> {
+    let health = health.ok_or("cannot record runtime failures while the brain is disconnected")?;
+    if health.bootstrapped == Some(false) || !health.restarting_required.is_empty() {
+        return Err(
+            "cannot record runtime failures until bootstrap and required restarts complete".into(),
+        );
+    }
+    Ok(health.failed_required)
+}
+
 impl IdleProbe for LiveIdleProbe {
+    fn runtime_baseline(&self) -> Result<Vec<String>, String> {
+        runtime_baseline(ws_bridge::connected_brain_runtime_health())
+    }
+
     fn report(&self, now_ms: i64) -> IdleReport {
         IdleReport {
             active_runs: brain_runs(
@@ -94,6 +110,37 @@ mod tests {
             active_runs: runs,
             reported_at_ms: at,
         })
+    }
+
+    #[test]
+    fn update_baselines_require_a_connected_completed_runtime_report() {
+        assert!(runtime_baseline(None).is_err());
+        assert!(runtime_baseline(Some(ws_bridge::BrainRuntimeHealth {
+            bootstrapped: Some(false),
+            ..Default::default()
+        }))
+        .is_err());
+        assert!(runtime_baseline(Some(ws_bridge::BrainRuntimeHealth {
+            bootstrapped: Some(true),
+            restarting_required: vec!["scheduler".into()],
+            ..Default::default()
+        }))
+        .is_err());
+        assert_eq!(
+            runtime_baseline(Some(ws_bridge::BrainRuntimeHealth {
+                bootstrapped: Some(true),
+                failed_required: vec!["scheduler".into()],
+                ..Default::default()
+            }))
+            .unwrap(),
+            vec!["scheduler"]
+        );
+        assert!(
+            runtime_baseline(Some(Default::default()))
+                .unwrap()
+                .is_empty(),
+            "legacy connected brains retain their behavior"
+        );
     }
 
     #[test]

@@ -12,6 +12,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "account-sync",
+  criticality: "optional",
   hosts: ["brain"],
   start: (ctx) => {
     const host = ctx.accountSync

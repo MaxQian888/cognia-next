@@ -14,7 +14,12 @@
  */
 import { installVectorRuntimeAdapters } from "@/lib/vector/runtime-adapters"
 import { listHeadlessRuntimes } from "./registry"
-import type { HeadlessRuntime, HeadlessRuntimeContext, HeadlessTeardown } from "./types"
+import type {
+  HeadlessRuntime,
+  HeadlessRuntimeContext,
+  HeadlessRuntimeCriticality,
+  HeadlessTeardown,
+} from "./types"
 
 /** Where one runtime is now. */
 export type HeadlessRuntimeState = "running" | "failed" | "restarting"
@@ -22,6 +27,7 @@ export type HeadlessRuntimeState = "running" | "failed" | "restarting"
 /** One runtime as an operator sees it. */
 export interface HeadlessRuntimeStatus {
   name: string
+  criticality: HeadlessRuntimeCriticality
   state: HeadlessRuntimeState
   /** Why its last start (or the teardown of a restart) failed. */
   error?: string
@@ -85,6 +91,7 @@ function describe(error: unknown): string {
 function snapshot(record: RuntimeRecord): HeadlessRuntimeStatus {
   const status: HeadlessRuntimeStatus = {
     name: record.runtime.name,
+    criticality: record.runtime.criticality,
     state: record.state,
     restartable:
       record.state === "failed" || (record.state === "running" && Boolean(record.teardown)),
@@ -97,12 +104,21 @@ function snapshot(record: RuntimeRecord): HeadlessRuntimeStatus {
 
 export async function bootstrapHeadlessRuntimes(
   ctx: HeadlessRuntimeContext,
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  onStatusChange?: (statuses: HeadlessRuntimeStatus[]) => void
 ): Promise<BootstrapResult> {
   installVectorRuntimeAdapters()
   const started: string[] = []
   const failed: Array<{ name: string; error: unknown }> = []
   const records = new Map<string, RuntimeRecord>()
+
+  function notifyStatusChange(): void {
+    try {
+      onStatusChange?.(Array.from(records.values(), snapshot))
+    } catch (error) {
+      ctx.log("warn", `headless runtime status notification failed: ${describe(error)}`)
+    }
+  }
 
   async function start(record: RuntimeRecord): Promise<unknown> {
     const { name } = record.runtime
@@ -160,8 +176,8 @@ export async function bootstrapHeadlessRuntimes(
     }
     record.restarting = (async () => {
       record.restarts += 1
-      const previous = record.state
       record.state = "restarting"
+      notifyStatusChange()
       if (record.teardown) {
         try {
           await record.teardown()
@@ -169,7 +185,7 @@ export async function bootstrapHeadlessRuntimes(
         } catch (error) {
           // Half stopped: starting it again could run it twice. Keep the
           // teardown so the next restart tries it again.
-          record.state = previous === "running" ? "running" : "failed"
+          record.state = "failed"
           record.error = `teardown failed: ${describe(error)}`
           ctx.log("warn", `headless runtime restart aborted: ${name}: ${describe(error)}`)
           return snapshot(record)
@@ -181,6 +197,7 @@ export async function bootstrapHeadlessRuntimes(
       return snapshot(record)
     })().finally(() => {
       record.restarting = undefined
+      notifyStatusChange()
     })
     return record.restarting
   }

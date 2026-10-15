@@ -36,7 +36,7 @@ import { Button } from "@/components/ui/button"
 import { useHostRuntimes, type UseHostRuntimesDeps } from "@/hooks/remote-host/use-host-runtimes"
 import { managementRefOf } from "@/lib/devices/section-plan"
 import type { DeviceRow } from "@/lib/devices/types"
-import { failedHostRuntimes, type HostRuntime } from "@/lib/remote-host/host-runtimes"
+import type { HostRuntime } from "@/lib/remote-host/host-runtimes"
 import { cn } from "@/lib/utils"
 
 import { DeviceSection } from "../device-section"
@@ -94,7 +94,11 @@ export function HostRuntimesSection({ row, deps }: { row: DeviceRow; deps?: UseH
     </Button>
   )
 
-  const failedCount = runtimes ? failedHostRuntimes(runtimes).length : 0
+  const unavailableRuntimes =
+    runtimes?.filter((runtime) => runtime.state !== "running" || restarting === runtime.name) ?? []
+  const requiredCount = unavailableRuntimes.filter(
+    (runtime) => runtime.criticality === "required"
+  ).length
 
   return (
     <DeviceSection id="host-runtimes" title={t("title")} icon={BoxesIcon} meta={refresh} wide>
@@ -110,14 +114,21 @@ export function HostRuntimesSection({ row, deps }: { row: DeviceRow; deps?: UseH
         ) : (
           <>
             <p
-              className={cn(failedCount > 0 ? "text-destructive" : "text-muted-foreground")}
+              className={cn(
+                unavailableRuntimes.length > 0 ? "text-destructive" : "text-muted-foreground"
+              )}
               data-testid="host-runtimes-summary"
             >
               {runtimes.length === 0
                 ? t("summary.none")
-                : failedCount > 0
-                  ? t("summary.failed", { failed: failedCount, total: runtimes.length })
-                  : t("summary.allRunning", { total: runtimes.length })}
+                : requiredCount > 0
+                  ? t("summary.notReady", { required: requiredCount })
+                  : unavailableRuntimes.length > 0
+                    ? t("summary.degraded", {
+                        unavailable: unavailableRuntimes.length,
+                        total: runtimes.length,
+                      })
+                    : t("summary.allRunning", { total: runtimes.length })}
             </p>
             {error ? (
               <p className="text-xs text-muted-foreground">{t("staleList", { error })}</p>
@@ -135,6 +146,9 @@ export function HostRuntimesSection({ row, deps }: { row: DeviceRow; deps?: UseH
                     <div className="min-w-0 space-y-0.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-mono text-xs">{runtime.name}</span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {t(`criticality.${runtime.criticality ?? "optional"}`)}
+                        </Badge>
                         <Badge
                           variant={runtime.state === "failed" ? "destructive" : "secondary"}
                           className="text-[10px]"
@@ -142,6 +156,12 @@ export function HostRuntimesSection({ row, deps }: { row: DeviceRow; deps?: UseH
                           {t(`state.${runtime.state}`)}
                         </Badge>
                       </div>
+                      {runtime.state === "failed" && runtime.name === "backup-scheduler" ? (
+                        <p className="text-xs text-destructive">{t("warnings.backup")}</p>
+                      ) : null}
+                      {runtime.state === "failed" && runtime.name === "storage-retention" ? (
+                        <p className="text-xs text-destructive">{t("warnings.retention")}</p>
+                      ) : null}
                       {runtime.error ? (
                         <p className="text-xs break-words text-destructive">{runtime.error}</p>
                       ) : null}
@@ -190,7 +210,10 @@ export function HostRuntimesSection({ row, deps }: { row: DeviceRow; deps?: UseH
             <AlertDialogTitle>
               {t("confirm.title", { name: confirming?.name ?? "" })}
             </AlertDialogTitle>
-            <AlertDialogDescription>{t("confirm.body")}</AlertDialogDescription>
+            <AlertDialogDescription>
+              {t("confirm.body")}
+              {confirming?.criticality === "required" ? ` ${t("confirm.required")}` : null}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("confirm.cancel")}</AlertDialogCancel>

@@ -44,6 +44,11 @@ beforeEach(() => {
 
 it("syncs the brain's own account against its own server", async () => {
   const result = await bootstrapHeadlessRuntimes(context())
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "file-share-host-sync", criticality: "optional" }),
+    ])
+  )
   expect(result.failed).toEqual([])
   expect(result.started).toEqual(["file-share-host-sync"])
   const deps = mockCreate.mock.calls[0]![0]

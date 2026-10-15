@@ -3415,6 +3415,13 @@ export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {
               description:
                 "Runs executing in the brain; a host updates only at 0 (ADR-0224 A10).",
             },
+            failedRuntimes: { type: "array", items: { type: "string" } },
+            bootstrapped: {
+              type: "boolean",
+              description: "Bootstrap complete; legacy brains omit this field.",
+            },
+            failedRequiredRuntimes: { type: "array", items: { type: "string" } },
+            restartingRequiredRuntimes: { type: "array", items: { type: "string" } },
           },
         }),
         BridgeTokenRefreshFrame: message("BridgeTokenRefreshFrame", {

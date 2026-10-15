@@ -9,6 +9,7 @@ import {
 
 const running: HeadlessRuntimeStatus = {
   name: "connector-runtime",
+  criticality: "optional",
   state: "running",
   restartable: true,
   restarts: 1,
@@ -16,6 +17,7 @@ const running: HeadlessRuntimeStatus = {
 }
 const failed: HeadlessRuntimeStatus = {
   name: "room-runner",
+  criticality: "required",
   state: "failed",
   error: "no backend",
   restartable: true,

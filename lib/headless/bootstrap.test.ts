@@ -28,6 +28,7 @@ describe("bootstrapHeadlessRuntimes", () => {
     resetVectorRuntimeAdaptersForTesting()
     registerHeadlessRuntime({
       name: "vector-consumer",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => {
         expect(getVectorRuntimeAdapters().isTauri()).toBe(false)
@@ -42,6 +43,7 @@ describe("bootstrapHeadlessRuntimes", () => {
     const order: string[] = []
     registerHeadlessRuntime({
       name: "first",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => {
         order.push("start:first")
@@ -52,6 +54,7 @@ describe("bootstrapHeadlessRuntimes", () => {
     })
     registerHeadlessRuntime({
       name: "second",
+      criticality: "optional",
       hosts: ["brain"],
       start: async () => {
         order.push("start:second")
@@ -76,6 +79,7 @@ describe("bootstrapHeadlessRuntimes", () => {
   it("isolates a failing runtime and keeps starting the rest", async () => {
     registerHeadlessRuntime({
       name: "boom",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => {
         throw new Error("kaput")
@@ -84,6 +88,7 @@ describe("bootstrapHeadlessRuntimes", () => {
     const stopped: string[] = []
     registerHeadlessRuntime({
       name: "survivor",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => () => {
         stopped.push("survivor")
@@ -104,6 +109,7 @@ describe("bootstrapHeadlessRuntimes", () => {
     const stopped: string[] = []
     registerHeadlessRuntime({
       name: "fragile",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => () => {
         throw new Error("teardown boom")
@@ -111,6 +117,7 @@ describe("bootstrapHeadlessRuntimes", () => {
     })
     registerHeadlessRuntime({
       name: "sturdy",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => () => {
         stopped.push("sturdy")
@@ -126,6 +133,7 @@ describe("bootstrapHeadlessRuntimes", () => {
   it("runtimes without a teardown still count as started", async () => {
     registerHeadlessRuntime({
       name: "fire-and-forget",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => undefined,
     })
@@ -142,6 +150,7 @@ describe("restarting one runtime", () => {
     let attempts = 0
     registerHeadlessRuntime({
       name: "flaky",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => {
         attempts += 1
@@ -153,6 +162,7 @@ describe("restarting one runtime", () => {
     expect(result.status()).toEqual([
       {
         name: "flaky",
+        criticality: "optional",
         state: "failed",
         error: "backend not ready",
         restartable: true,
@@ -163,6 +173,7 @@ describe("restarting one runtime", () => {
     const after = await result.restart("flaky")
     expect(after).toEqual({
       name: "flaky",
+      criticality: "optional",
       state: "running",
       restartable: true,
       restarts: 1,
@@ -178,6 +189,7 @@ describe("restarting one runtime", () => {
     let generation = 0
     registerHeadlessRuntime({
       name: "worker",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => {
         const mine = ++generation
@@ -198,6 +210,7 @@ describe("restarting one runtime", () => {
     const starts: number[] = []
     registerHeadlessRuntime({
       name: "slow",
+      criticality: "optional",
       hosts: ["brain"],
       start: async () => {
         starts.push(starts.length + 1)
@@ -217,7 +230,12 @@ describe("restarting one runtime", () => {
   })
 
   it("refuses a running runtime without a teardown, an unknown name, and any restart after stop", async () => {
-    registerHeadlessRuntime({ name: "no-teardown", hosts: ["brain"], start: () => undefined })
+    registerHeadlessRuntime({
+      name: "no-teardown",
+      criticality: "optional",
+      hosts: ["brain"],
+      start: () => undefined,
+    })
     const result = await bootstrapHeadlessRuntimes(ctx())
     expect(result.status()[0]).toMatchObject({ state: "running", restartable: false })
     await expect(result.restart("no-teardown")).rejects.toMatchObject({
@@ -235,6 +253,7 @@ describe("restarting one runtime", () => {
     let teardowns = 0
     registerHeadlessRuntime({
       name: "stuck",
+      criticality: "optional",
       hosts: ["brain"],
       start: () => {
         starts += 1
@@ -247,7 +266,7 @@ describe("restarting one runtime", () => {
     const result = await bootstrapHeadlessRuntimes(ctx())
     const after = await result.restart("stuck")
     expect(after).toMatchObject({
-      state: "running",
+      state: "failed",
       error: "teardown failed: socket busy",
       restartable: true,
     })
@@ -259,9 +278,15 @@ describe("restarting one runtime", () => {
   })
 
   it("lists only the runtimes this host started", async () => {
-    registerHeadlessRuntime({ name: "here", hosts: ["brain"], start: () => () => undefined })
+    registerHeadlessRuntime({
+      name: "here",
+      criticality: "optional",
+      hosts: ["brain"],
+      start: () => () => undefined,
+    })
     registerHeadlessRuntime({
       name: "elsewhere",
+      criticality: "optional",
       hosts: [] as unknown as ["brain"],
       start: () => () => undefined,
     })
@@ -270,5 +295,67 @@ describe("restarting one runtime", () => {
     await expect(result.restart("elsewhere")).rejects.toMatchObject({
       code: "runtime_not_found",
     })
+  })
+})
+
+describe("runtime readiness notifications", () => {
+  beforeEach(() => __resetHeadlessRuntimesForTesting())
+
+  it("publishes required restarting and terminal states immediately", async () => {
+    let release: () => void = () => undefined
+    let starts = 0
+    registerHeadlessRuntime({
+      name: "required-service",
+      criticality: "required",
+      hosts: ["brain"],
+      start: async () => {
+        starts += 1
+        if (starts > 1)
+          await new Promise<void>((resolve) => {
+            release = resolve
+          })
+        if (starts === 3) throw new Error("cannot reinstall")
+        return () => undefined
+      },
+    })
+    const notify = jest.fn()
+    const result = await bootstrapHeadlessRuntimes(ctx(), () => 123, notify)
+    expect(result.status()[0]).toMatchObject({ criticality: "required", state: "running" })
+    const pending = result.restart("required-service")
+    expect(notify).toHaveBeenLastCalledWith([
+      expect.objectContaining({ criticality: "required", state: "restarting" }),
+    ])
+    await Promise.resolve()
+    release()
+    await pending
+    expect(notify).toHaveBeenLastCalledWith([
+      expect.objectContaining({ state: "running", restarts: 1 }),
+    ])
+    const failed = result.restart("required-service")
+    await Promise.resolve()
+    release()
+    await failed
+    expect(notify).toHaveBeenLastCalledWith([
+      expect.objectContaining({ state: "failed", error: "cannot reinstall" }),
+    ])
+    expect(notify).toHaveBeenCalledTimes(4)
+    await result.stop()
+  })
+
+  it("keeps restart functional when a status observer throws", async () => {
+    registerHeadlessRuntime({
+      name: "service",
+      criticality: "required",
+      hosts: ["brain"],
+      start: () => () => undefined,
+    })
+    const context = ctx()
+    context.log = jest.fn()
+    const result = await bootstrapHeadlessRuntimes(context, Date.now, () => {
+      throw new Error("bridge disconnected")
+    })
+    await expect(result.restart("service")).resolves.toMatchObject({ state: "running" })
+    expect(context.log).toHaveBeenCalledWith("warn", expect.stringContaining("notification failed"))
+    await result.stop()
   })
 })

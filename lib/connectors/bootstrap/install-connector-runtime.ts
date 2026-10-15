@@ -120,6 +120,9 @@ import { isOwnedElsewhere, runsHere } from "@/lib/placement/ownership"
 export type ConnectorRuntimeLogLevel = "info" | "warn" | "error"
 
 export interface InstallConnectorRuntimeOptions {
+  /** Installation result only: individual adapter failures remain isolated. */
+  onBootstrapped?: (result: { ok: true } | { ok: false; error: unknown }) => void
+
   /**
    * Keep only the rows this host can run. Rows filtered out are logged
    * (never silently dropped) and their adapters are neither built nor
@@ -308,7 +311,10 @@ export function adapterRuntimeFingerprint(row: AdapterInstanceRow): string {
 export function installConnectorRuntime(
   opts: InstallConnectorRuntimeOptions = {}
 ): () => Promise<void> {
-  if (!opts.skipHostGate && !isTauri()) return async () => undefined
+  if (!opts.skipHostGate && !isTauri()) {
+    opts.onBootstrapped?.({ ok: true })
+    return async () => undefined
+  }
   const log = opts.log ?? consoleLog
   // A placeholder for an instance that moved to a paired host (ADR-0224) is
   // never built here, whichever host this is; the caller's filter narrows
@@ -545,7 +551,7 @@ export function installConnectorRuntime(
     return teardownPromise
   }
 
-  void (async () => {
+  const bootstrap = (async () => {
     // Single-runtime guard: the entire runtime assumes exactly one main-role
     // webview owns it. If another already holds the lock, do NOT boot a second
     // instance (it would double-send outbound, double-fire schedules, and
@@ -616,7 +622,9 @@ export function installConnectorRuntime(
             "IndexedDB schema is out of date. Reload the app to let Dexie " +
             "finish migrating to v18."
         )
-        return
+        // A missing table prevents installation, unlike one adapter's bad
+        // credentials. Let headless readiness observe that boot failure.
+        throw err
       }
       throw err
     }
@@ -678,95 +686,107 @@ export function installConnectorRuntime(
     // A2UI surface and drive a fresh AI-loop turn through the digest runner.
     bus.callbackHandler = defaultConnectorCallbackHandler
 
-    // A remote host handoff suspends plugin-owned transports without
-    // discarding their restart closures. Resume them only after the local
-    // runtime and callback routes are installed, so no early inbound event is
-    // dropped during the hand-back.
-    await resumeSuspendedAdaptersByOwner("plugin")
-    if (cancelled) return
-
-    // Instantiate and register each enabled adapter.
-    // Whether any enabled adapter receives inbound events over the Rust axum
-    // server (webhook / reverse-WS) is derived from `serverAdapterIds`, which
-    // `bootAdapter` populates as it registers each such adapter. The server
-    // is started once, after the boot loop, only when the set is non-empty —
-    // long-poll / gateway adapters dial out and need no local listener.
-    await Promise.all(
-      enabled.map(async (row) => {
-        await reconcilePresenceSchedule(row.id)
-        if (cancelled) return
-        const booted = await bootAdapter(undefined, row, bus)
-        if (!booted) {
-          const reason = supervisor.getSnapshot(row.id)?.reasonCode ?? "unknown"
-          log("error", `[connector-bus] adapter ${row.id} failed to boot: ${reason}`)
-        }
+    // Adapter startup and recovery may wait on remote platforms. Install the
+    // process-wide wiring first; these per-item operations cannot determine
+    // whether the required connector runtime itself is installed.
+    const recoverAdapters = async (): Promise<void> => {
+      // A remote host handoff suspends plugin-owned transports without
+      // discarding their restart closures. Resume them only after the local
+      // runtime and callback routes are installed, so no early inbound event is
+      // dropped during the hand-back.
+      await resumeSuspendedAdaptersByOwner("plugin").catch((error) => {
+        log("error", `[connector-bus] plugin adapter recovery failed: ${String(error)}`)
       })
-    )
+      if (cancelled) return
 
-    if (cancelled) return
-
-    // Reclaim messages durably accepted before the previous process stopped.
-    // This runs only after every enabled adapter is registered so recovered
-    // jobs resolve the same capabilities and delivery paths as live traffic.
-    // Stale running leases are surfaced as recovery-required and are never
-    // replayed automatically by the bus.
-    await bus.resumeDurableInboundJobs({ reclaimRunning: true }).catch((error) => {
-      log(
-        "error",
-        `[connector-bus] durable inbound recovery failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+      // Instantiate and register each enabled adapter.
+      // Whether any enabled adapter receives inbound events over the Rust axum
+      // server (webhook / reverse-WS) is derived from `serverAdapterIds`, which
+      // `bootAdapter` populates as it registers each such adapter. The server
+      // is started once, after the boot loop, only when the set is non-empty —
+      // long-poll / gateway adapters dial out and need no local listener.
+      await Promise.all(
+        enabled.map(async (row) => {
+          try {
+            await reconcilePresenceSchedule(row.id)
+            if (cancelled) return
+            const booted = await bootAdapter(undefined, row, bus)
+            if (!booted) {
+              const reason = supervisor.getSnapshot(row.id)?.reasonCode ?? "unknown"
+              log("error", `[connector-bus] adapter ${row.id} failed to boot: ${reason}`)
+            }
+          } catch (error) {
+            log("error", `[connector-bus] adapter ${row.id} failed to boot: ${String(error)}`)
+          }
+        })
       )
-    })
 
-    await bus.recoverActiveConversationHistory().catch((error) => {
-      log(
-        "error",
-        `[connector-bus] active conversation history recovery failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      )
-    })
+      if (cancelled) return
 
-    // Start the Rust axum inbound server iff a webhook / reverse-WS adapter
-    // is enabled. Bind loopback-only — public reachability for webhook
-    // adapters comes from the cloudflared tunnel, never a bound public
-    // interface. The Rust command is idempotent (returns an "already
-    // running" Err if a handle exists), which we treat as success so a
-    // StrictMode double-mount can't spuriously audit a failure.
-    if (!cancelled && serverAdapterIds.size > 0) {
-      try {
-        await connectorsStartServer(CONNECTORS_SERVER_PORT, true)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        if (!/already running/i.test(message)) {
-          log("error", `[connector-bus] inbound server failed to start: ${message}`)
-          await appendAudit({
-            adapterId: "__connectors_server__",
-            kind: "adapter.error",
-            at: Date.now(),
-            reason: "server_start_failed",
-            message,
-          }).catch(() => undefined)
+      // Reclaim messages durably accepted before the previous process stopped.
+      // This runs only after every enabled adapter is registered so recovered
+      // jobs resolve the same capabilities and delivery paths as live traffic.
+      // Stale running leases are surfaced as recovery-required and are never
+      // replayed automatically by the bus.
+      await bus.resumeDurableInboundJobs({ reclaimRunning: true }).catch((error) => {
+        log(
+          "error",
+          `[connector-bus] durable inbound recovery failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        )
+      })
+
+      if (cancelled) return
+      await bus.recoverActiveConversationHistory().catch((error) => {
+        log(
+          "error",
+          `[connector-bus] active conversation history recovery failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        )
+      })
+
+      // Start the Rust axum inbound server iff a webhook / reverse-WS adapter
+      // is enabled. Bind loopback-only — public reachability for webhook
+      // adapters comes from the cloudflared tunnel, never a bound public
+      // interface. The Rust command is idempotent (returns an "already
+      // running" Err if a handle exists), which we treat as success so a
+      // StrictMode double-mount can't spuriously audit a failure.
+      if (!cancelled && serverAdapterIds.size > 0) {
+        try {
+          await connectorsStartServer(CONNECTORS_SERVER_PORT, true)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          if (!/already running/i.test(message)) {
+            log("error", `[connector-bus] inbound server failed to start: ${message}`)
+            await appendAudit({
+              adapterId: "__connectors_server__",
+              kind: "adapter.error",
+              at: Date.now(),
+              reason: "server_start_failed",
+              message,
+            }).catch(() => undefined)
+          }
         }
       }
+      if (cancelled) return
+      // Live adapter lookup for the outbound runner — resolved through the
+      // bus registry per delivery so a credential-rotation rebuild (which
+      // re-registers a fresh instance) or a post-boot registration is picked
+      // up immediately; a boot-time Map snapshot kept delivering through the
+      // stale instance forever.
+      const adapters = { get: (adapterId: string) => bus.getAdapter(adapterId) }
+      // `onDelivered` feeds the bus's `cooldown-after-bot-reply` bookkeeping —
+      // the delivery choke point is the only place every reply path (ai-run /
+      // team / workflow / digest) converges, so recording here makes the
+      // default group-chat cooldown blocker actually fire.
+      void startOutboundRunner({
+        adapters,
+        signal: ac.signal,
+        onDelivered: (conversationKey) => bus.recordBotReply(conversationKey),
+      })
     }
-
-    // Live adapter lookup for the outbound runner — resolved through the
-    // bus registry per delivery so a credential-rotation rebuild (which
-    // re-registers a fresh instance) or a post-boot registration is picked
-    // up immediately; a boot-time Map snapshot kept delivering through the
-    // stale instance forever.
-    const adapters = { get: (adapterId: string) => bus.getAdapter(adapterId) }
-    // `onDelivered` feeds the bus's `cooldown-after-bot-reply` bookkeeping —
-    // the delivery choke point is the only place every reply path (ai-run /
-    // team / workflow / digest) converges, so recording here makes the
-    // default group-chat cooldown blocker actually fire.
-    void startOutboundRunner({
-      adapters,
-      signal: ac.signal,
-      onDelivered: (conversationKey) => bus.recordBotReply(conversationKey),
-    })
 
     // Low-frequency retention sweeps run through one durable scheduler clock.
     // The 5-second adapter/presentation heartbeats remain local intervals:
@@ -902,7 +922,9 @@ export function installConnectorRuntime(
     // by id-set, so unrelated row writes (presence, capability refresh,
     // heartbeat metadata) reconcile to a no-op and never churn a live adapter.
     if (!cancelled) {
-      let reconcileRunning = false
+      // Changes observed during the initial item pass are replayed afterward,
+      // preserving the supervisor's initial-registration ordering.
+      let reconcileRunning = true
       let reconcilePending = false
 
       const reconcileEnabledAdapters = async (): Promise<void> => {
@@ -998,15 +1020,31 @@ export function installConnectorRuntime(
       const subscribeChanges = opts.subscribeAdapterChanges ?? defaultSubscribeAdapterChanges
       const unsubscribeChanges = subscribeChanges(runReconcile)
       ac.signal.addEventListener("abort", unsubscribeChanges, { once: true })
+      void recoverAdapters()
+        .catch((error) => {
+          log("error", `[connector-bus] adapter recovery failed: ${String(error)}`)
+        })
+        .finally(() => {
+          reconcileRunning = false
+          if (reconcilePending && !cancelled) {
+            reconcilePending = false
+            runReconcile()
+          }
+        })
     }
-  })().catch((err: unknown) => {
-    log(
-      "error",
-      `[connector-bus] runtime bootstrap failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    )
-  })
+  })()
+  void bootstrap.then(
+    () => opts.onBootstrapped?.({ ok: true }),
+    (error: unknown) => {
+      log(
+        "error",
+        `[connector-bus] runtime bootstrap failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+      opts.onBootstrapped?.({ ok: false, error })
+    }
+  )
 
   return async () => {
     await teardownRuntime("unmount")

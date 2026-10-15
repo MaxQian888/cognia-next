@@ -26,6 +26,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "issue-tracker",
+  criticality: "optional",
   hosts: ["brain"],
   start: async (ctx) => {
     const { bootIssueTracker } = await import("@/lib/issues/boot")

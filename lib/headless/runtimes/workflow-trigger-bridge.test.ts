@@ -52,13 +52,17 @@ it("installs the workflow trigger bridge in the brain and disposes it on stop", 
   expect(dispose).toHaveBeenCalledTimes(1)
 })
 
-it("keeps the roster healthy when the bridge cannot install", async () => {
+it("reports an installation failure as required and allows recovery", async () => {
   installTriggerBridgeMock.mockRejectedValue(new Error("no events plane"))
   const bootstrap = await loadFresh()
   const context = makeContext()
   const result = await bootstrap(context)
-  expect(result.failed).toEqual([])
-  expect(result.started).toContain("workflow-trigger-bridge")
+  expect(result.failed[0]?.name).toBe("workflow-trigger-bridge")
+  expect(result.status()[0]).toMatchObject({ criticality: "required", state: "failed" })
   expect(context.log).toHaveBeenCalledWith("error", expect.stringMatching(/no events plane/))
+  installTriggerBridgeMock.mockResolvedValue(() => undefined)
+  await expect(result.restart("workflow-trigger-bridge")).resolves.toMatchObject({
+    state: "running",
+  })
   await expect(result.stop()).resolves.toBeUndefined()
 })

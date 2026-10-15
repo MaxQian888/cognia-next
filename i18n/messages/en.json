@@ -14721,8 +14721,13 @@
       "confirm": {
         "body": "It stops what it is doing and starts again. Work it was handling may be interrupted; everything else on the host keeps running.",
         "cancel": "Cancel",
+        "required": "The host will be not ready until this required runtime starts again.",
         "restart": "Restart",
         "title": "Restart {name}?"
+      },
+      "criticality": {
+        "optional": "Optional",
+        "required": "Required"
       },
       "loading": "Reading the host's runtimes…",
       "noReason": "the host gave no reason",
@@ -14743,15 +14748,20 @@
       },
       "summary": {
         "allRunning": "All {total} runtimes are running.",
-        "failed": "{failed} of {total} runtimes failed to start. The host keeps serving everything else.",
-        "none": "This host runs no background runtimes."
+        "degraded": "The host is degraded: {unavailable} of {total} runtimes are unavailable. Required functions remain ready.",
+        "none": "This host runs no background runtimes.",
+        "notReady": "The host is not ready: {required} required runtimes failed or are restarting."
       },
       "title": "Runtimes",
       "unavailable": {
         "not-headless": "This host is the desktop app, which runs these in its window. Restart the app to restart them.",
         "outdated": "This host is from before runtime control. Update it to see and restart its runtimes."
       },
-      "unreachable": "Could not read the host's runtimes: {error}"
+      "unreachable": "Could not read the host's runtimes: {error}",
+      "warnings": {
+        "backup": "Scheduled backups are unavailable until this runtime recovers.",
+        "retention": "Storage cleanup is unavailable. If this persists, the disk may fill up."
+      }
     },
     "hostSecrets": {
       "add": {

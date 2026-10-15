@@ -234,7 +234,13 @@ Langfuse 只接收 AI trace。它与 brain 单一 NodeSDK 中的通用 OTLP、Po
 
 - 桌面和云共享一个业务代码库和一个协议;功能默认都存在于两者中。成本是一条硬性规则：**新的运行时副作用必须通过无头自助注册表注册，而非原始提供商效应**——通过接线审计执行。
 - 启动失败的运行时不会拖垮 brain，但也不会被隐藏：
-  - brain 的 pong 会列出启动失败的运行时。`/readyz` 将其报告为 `degraded`，但不影响就绪状态；`/healthz` 和 `cognia_brain_failed_runtimes` 指标中也能看到它们。
+  - 每个注册项都必须明确选择 `criticality: "required" | "optional"`。19 个必需运行时包括权威数据面（`desktop-sync-source`、`desktop-message-source`、`host-event-publisher`），凭据、提供方与路由（`host-provider-keys`、`provider-core-runtime`、`routing-runtime`），执行策略与模板信任（`automation-policy`、`template-trust-reconciliation`），持久化工作（`scheduler`、`workflow-runtime`、`workflow-trigger-bridge`、`workflow-exit-lease-release`、`work-submission-outbox`、`background-task`），以及主机执行集成（`connector-runtime`、`bot-delivery-runner`、`plugin-runtime`、`plugin-tool-dispatch`、`external-agent`）。模板信任恢复失败可能保留之前持久化的信任，因此属于必需。没有配置外部 agent 时，`external-agent` 空启动并成功。
+  - 其余 22 个运行时可选：`behavior-telemetry`、`performance-host`、`provider-cost-mirror`、`audit-retention`、`storage-retention`、`backup-scheduler`、`account-sync`、`collab-runtime`、`collab-refresh`、`agent-team-runtime`、`room-runner`、`plan-notification`、`integration-runtime`、`issue-tracker`、`file-share-host-sync`、`sftp-transfer-pump`、`managed-ide-broker`、`ocr-runtime`、`memory-job-worker`、`a2ui-dispatch`、`router-fusion` 和 `desktop-network-runtime`。最后一项在 Node 上安装原生 fetch adapter，其回退本来就使用原生 fetch，不会移除已安装的 Rust 代理或出网策略。备份和清理失败需明确提示定时备份不可用、磁盘可能写满。
+  - brain 的 pong 保留 `failedRuntimes`，并增加必需运行时失败名称和 bootstrap 完成信号。新版 brain 完成 bootstrap 前始终未就绪；bootstrap 完成、重启状态变化时立即推送状态，心跳也继续携带状态。必需运行时失败或正在重启时，`/readyz` 返回 HTTP 503 `not_ready`，名称放在 `checks` 中。可选运行时失败保持 `degraded`，不影响就绪状态。旧 brain 缺少新字段时维持原有降级行为；客户端将缺少分类的旧运行时按可选处理。
+  - `/healthz` 保持诊断用途和 HTTP 200，报告必需运行时就绪状态、失败项及维护警告。指标保留失败运行时总数，并单独暴露必需运行时失败数。设备页区分必需失败（主机未就绪）与可选失败（功能降级）。
+  - 只有安装级错误才使整个运行时失败，例如 trigger bridge 无法安装或调度器无法启动。单个工作流同步或恢复失败、单个 connector 凭据错误、单个插件激活失败仍隔离并记录日志。
+  - ADR-0224 更新试运行在替换旧版本前记录其已经失败的必需运行时名称。只有新出现的必需运行时失败才阻止健康计时完成，持续不恢复才最终触发回滚。既有失败仍使公开就绪检查失败，但不归咎于新版本，也不反复触发回滚。bootstrap 完成和 bridge 健康仍是必要条件。原生及 Compose 更新试运行采用相同规则。
+  - tier-2 smoke 和 Compose 健康检查使用 `/readyz`；`/healthz` 只做诊断。Kubernetes 启动及存活探针使用 `/livez`，就绪探针使用 `/readyz`。Compose 的 `restart: unless-stopped` 只响应进程退出，不因健康检查失败而重启，也没有配置 autoheal watcher。因此手动重启必需运行时只会短暂失去就绪状态，不会重启容器。
   - 主机所有者可以按名称用 `host_runtime_restart` 重启单个运行时，用 `host_runtime_status` 读取状态。两者都是 host-admin 命令，可在主机设备页（**运行时**）或通过 `cognia host call` 使用。
   - 失败的运行时会直接重新启动；运行中的运行时先停止再启动。
   - 没有返回 teardown 的运行中运行时会被标为不可重启，因为第二次启动会让它的副作用重复执行。所以新的运行时应当提供 teardown。

@@ -33,6 +33,9 @@ pub struct PendingSwap {
     pub deadline_ms: i64,
     /// The env file is pinned and the server recreated (or being recreated).
     pub activated: bool,
+    /// Failures already present on the old version, persisted before replacement.
+    #[serde(default)]
+    pub baseline_failed_required_runtimes: Vec<String>,
 }
 
 impl PendingSwap {
@@ -113,6 +116,7 @@ mod tests {
             started_at_ms: 1,
             deadline_ms: 2,
             activated: false,
+            baseline_failed_required_runtimes: vec!["connector-runtime".into()],
         }
     }
 
@@ -132,6 +136,16 @@ mod tests {
             file.trust_path(),
             tmp.path().join("state").join("trust.json")
         );
+    }
+
+    #[test]
+    fn old_pending_swaps_default_to_no_known_runtime_failures() {
+        let mut old = serde_json::to_value(swap()).unwrap();
+        old.as_object_mut()
+            .unwrap()
+            .remove("baselineFailedRequiredRuntimes");
+        let pending: PendingSwap = serde_json::from_value(old).unwrap();
+        assert!(pending.baseline_failed_required_runtimes.is_empty());
     }
 
     #[test]

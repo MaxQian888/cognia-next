@@ -19,6 +19,8 @@ export type HostRuntimeState = "running" | "failed" | "restarting"
 export interface HostRuntime {
   name: string
   state: HostRuntimeState
+  /** Older hosts omit this and retain optional/degraded behavior. */
+  criticality?: "required" | "optional"
   /** Why its last start, or the teardown of a restart, failed. */
   error?: string
   /** Whether a restart can act on it now. */

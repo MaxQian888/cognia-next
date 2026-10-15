@@ -10,6 +10,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "backup-scheduler",
+  criticality: "optional",
   hosts: ["brain"],
   start: (ctx) => {
     if (!ctx.backupFilesystem) {

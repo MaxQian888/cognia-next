@@ -81,7 +81,23 @@ describe("initializer batch headless smoke", () => {
     __resetHeadlessRuntimesForTesting()
     await import("./initializers")
 
+    const { useExternalAgentStore } = await import("@/stores/agent/external-agent-store")
+    expect(useExternalAgentStore.getState().getAllAgents()).toEqual([])
     const result = await bootstrapHeadlessRuntimes(makeCtx())
+    expect(result.status()).toContainEqual(
+      expect.objectContaining({
+        name: "external-agent",
+        criticality: "required",
+        state: "running",
+      })
+    )
+    expect(result.status()).toContainEqual(
+      expect.objectContaining({
+        name: "desktop-network-runtime",
+        criticality: "optional",
+        state: "running",
+      })
+    )
     expect(mockStartBackgroundRecovery).toHaveBeenCalledTimes(1)
     const failures = result.failed.map(
       (f) => `${f.name}: ${f.error instanceof Error ? f.error.message : String(f.error)}`

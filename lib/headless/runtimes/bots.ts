@@ -22,6 +22,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "bot-delivery-runner",
+  criticality: "required",
   hosts: ["brain"],
   start: (ctx) => {
     // Namespaced by host kind AND account, so two brains serving different

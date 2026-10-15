@@ -704,7 +704,8 @@
     "summary": {
       "none": "This host runs no background runtimes.",
       "allRunning": "All {total} runtimes are running.",
-      "failed": "{failed} of {total} runtimes failed to start. The host keeps serving everything else."
+      "notReady": "The host is not ready: {required} required runtimes failed or are restarting.",
+      "degraded": "The host is degraded: {unavailable} of {total} runtimes are unavailable. Required functions remain ready."
     },
     "state": {
       "running": "Running",
@@ -724,7 +725,16 @@
       "title": "Restart {name}?",
       "body": "It stops what it is doing and starts again. Work it was handling may be interrupted; everything else on the host keeps running.",
       "cancel": "Cancel",
-      "restart": "Restart"
+      "restart": "Restart",
+      "required": "The host will be not ready until this required runtime starts again."
+    },
+    "criticality": {
+      "required": "Required",
+      "optional": "Optional"
+    },
+    "warnings": {
+      "backup": "Scheduled backups are unavailable until this runtime recovers.",
+      "retention": "Storage cleanup is unavailable. If this persists, the disk may fill up."
     }
   },
   "hostUpdates": {

@@ -4,6 +4,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "plugin-tool-dispatch",
+  criticality: "required",
   hosts: ["brain"],
   start: () => subscribePluginToolDispatchBridge(),
 })

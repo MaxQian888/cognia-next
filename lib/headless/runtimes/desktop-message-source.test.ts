@@ -62,6 +62,11 @@ describe("desktop-message-source headless smoke", () => {
 
     const { bridge, listeners, invocations } = makeBridge()
     const result = await bootstrapHeadlessRuntimes(makeCtx(bridge))
+    expect(result.status()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "desktop-message-source", criticality: "required" }),
+      ])
+    )
     expect(result.failed).toEqual([])
     expect(result.started).toContain("desktop-message-source")
 

@@ -40,6 +40,11 @@ it("boots the issue tracker in the brain and tears it down on stop", async () =>
   bootIssueTrackerMock.mockResolvedValue(dispose)
   const bootstrap = await loadFresh()
   const result = await bootstrap(makeContext())
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "issue-tracker", criticality: "optional" }),
+    ])
+  )
 
   expect(result.failed).toEqual([])
   expect(result.started).toContain("issue-tracker")

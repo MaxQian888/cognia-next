@@ -87,6 +87,12 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
             "headlessContract": contract_ready,
         });
     }
+    let runtime_health = super::ws_bridge::brain_runtime_health();
+    ready &= runtime_health.required_ready();
+    checks["bootstrapped"] = json!(runtime_health.bootstrapped != Some(false));
+    checks["requiredRuntimes"] = json!(runtime_health.required_ready());
+    checks["failedRequiredRuntimes"] = json!(runtime_health.failed_required);
+    checks["restartingRequiredRuntimes"] = json!(runtime_health.restarting_required);
     let status = if ready {
         StatusCode::OK
     } else {
@@ -102,10 +108,8 @@ pub async fn readyz_handler(State(_state): State<SharedState>, headers: HeaderMa
     if let Some(refusal) = super::ws_bridge::brain_refusal() {
         body["brainRefusal"] = serde_json::to_value(refusal).unwrap_or_default();
     }
-    // A runtime that failed to start leaves the brain serving everything
-    // else (ADR-0059 W2), so it degrades the server without failing
-    // readiness; restarting the brain retries it.
-    let failed_runtimes = super::ws_bridge::brain_failed_runtimes();
+    // Preserve the legacy failure list; only required failures block readiness.
+    let failed_runtimes = runtime_health.failed;
     if !failed_runtimes.is_empty() {
         body["degraded"] = json!(true);
         body["failedRuntimes"] = json!(failed_runtimes);
@@ -169,10 +173,27 @@ pub async fn healthz_handler(State(state): State<SharedState>) -> Response {
         // ADR-0090 Phase 2 — headless LLM Gateway health.
         obj.insert("gateway".to_string(), services.gateway_health());
         // ADR-0059 W2 — the brain's headless runtimes that failed to start.
-        let failed = super::ws_bridge::brain_failed_runtimes();
+        let runtime_health = super::ws_bridge::brain_runtime_health();
+        let warnings: Vec<&str> = runtime_health
+            .failed
+            .iter()
+            .filter_map(|name| match name.as_str() {
+                "backup-scheduler" => Some("scheduled_backups_unavailable"),
+                "storage-retention" => Some("storage_cleanup_unavailable_disk_may_fill"),
+                _ => None,
+            })
+            .collect();
         obj.insert(
             "runtimes".to_string(),
-            json!({ "degraded": !failed.is_empty(), "failed": failed }),
+            json!({
+                "degraded": !runtime_health.failed.is_empty(),
+                "ready": runtime_health.required_ready(),
+                "bootstrapped": runtime_health.bootstrapped,
+                "failed": runtime_health.failed,
+                "failedRequired": runtime_health.failed_required,
+                "restartingRequired": runtime_health.restarting_required,
+                "warnings": warnings,
+            }),
         );
     }
     (StatusCode::OK, Json(payload)).into_response()
@@ -322,7 +343,10 @@ mod tests {
             body.get("sidecar").is_none(),
             "desktop must not report sidecar"
         );
-        assert!(body.get("runtimes").is_none(), "desktop has no headless runtimes");
+        assert!(
+            body.get("runtimes").is_none(),
+            "desktop has no headless runtimes"
+        );
 
         crate::runtime::test_support::install_fake_headless();
         let router = build_router(test_state());
@@ -339,7 +363,9 @@ mod tests {
         );
         assert_eq!(body["sidecar"]["ready"], false);
         assert!(body["sidecar"]["restart_count"].is_number());
-        assert_eq!(body["runtimes"], json!({ "degraded": false, "failed": [] }));
+        assert_eq!(body["runtimes"]["degraded"], false);
+        assert_eq!(body["runtimes"]["ready"], true);
+        assert_eq!(body["runtimes"]["failed"], json!([]));
 
         crate::runtime::test_support::clear_headless();
     }
@@ -444,6 +470,107 @@ mod tests {
 
         crate::ws_bridge::test_support::clear_refusal_for_testing();
         assert!(readyz().await.get("brainRefusal").is_none());
+    }
+
+    #[tokio::test]
+    async fn required_health_blocks_readiness_but_never_liveness() {
+        use crate::ws_bridge::{test_support, BrainRuntimeHealth};
+        let _guard = test_support::lock_slot().await;
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                crate::ws_bridge::test_support::report_runtime_health_for_testing(
+                    Default::default(),
+                );
+                crate::runtime::test_support::clear_headless();
+            }
+        }
+        let _reset = Reset;
+        crate::server::set_draining_for_test(false);
+        for (health, ready) in [
+            (BrainRuntimeHealth::default(), true),
+            (
+                BrainRuntimeHealth {
+                    bootstrapped: Some(false),
+                    ..Default::default()
+                },
+                false,
+            ),
+            (
+                BrainRuntimeHealth {
+                    bootstrapped: Some(true),
+                    failed: vec!["scheduler".into()],
+                    failed_required: vec!["scheduler".into()],
+                    ..Default::default()
+                },
+                false,
+            ),
+            (
+                BrainRuntimeHealth {
+                    bootstrapped: Some(true),
+                    restarting_required: vec!["scheduler".into()],
+                    ..Default::default()
+                },
+                false,
+            ),
+            (
+                BrainRuntimeHealth {
+                    bootstrapped: Some(true),
+                    failed: vec!["backup-scheduler".into(), "storage-retention".into()],
+                    ..Default::default()
+                },
+                true,
+            ),
+        ] {
+            test_support::report_runtime_health_for_testing(health.clone());
+            let response = build_router(test_state())
+                .oneshot(
+                    Request::builder()
+                        .uri("/readyz")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if ready {
+                    StatusCode::OK
+                } else {
+                    StatusCode::SERVICE_UNAVAILABLE
+                }
+            );
+            let body = body_json(response).await;
+            assert_eq!(
+                body["checks"]["failedRequiredRuntimes"],
+                json!(health.failed_required)
+            );
+            assert_eq!(
+                body["checks"]["restartingRequiredRuntimes"],
+                json!(health.restarting_required)
+            );
+            assert_eq!(livez_handler().await.status(), StatusCode::OK);
+        }
+        crate::runtime::test_support::install_fake_headless();
+        let response = build_router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(
+            body["runtimes"]["warnings"],
+            json!([
+                "scheduled_backups_unavailable",
+                "storage_cleanup_unavailable_disk_may_fill"
+            ])
+        );
+        assert_eq!(body["runtimes"]["degraded"], true);
     }
 
     #[tokio::test]

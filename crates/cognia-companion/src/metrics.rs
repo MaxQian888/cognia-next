@@ -579,13 +579,7 @@ pub fn render_prometheus() -> String {
             "Brain RSS from its bridge pong frames (0 = unknown).",
             status.rss_bytes,
         );
-        push_metric(
-            &mut out,
-            "cognia_brain_failed_runtimes",
-            "gauge",
-            "Headless runtimes the brain reported failed to start.",
-            super::ws_bridge::brain_failed_runtimes().len(),
-        );
+        push_runtime_metrics(&mut out, &super::ws_bridge::brain_runtime_health());
         push_metric(
             &mut out,
             "cognia_brain_parked",
@@ -618,9 +612,41 @@ pub async fn metrics_handler() -> Response {
         .into_response()
 }
 
+fn push_runtime_metrics(out: &mut String, health: &super::ws_bridge::BrainRuntimeHealth) {
+    for (name, help, value) in [
+        ("cognia_brain_failed_runtimes", "Headless runtimes the brain reported failed to start.", health.failed.len()),
+        ("cognia_brain_failed_required_runtimes", "Required runtimes the brain reported failed to start.", health.failed_required.len()),
+        ("cognia_brain_restarting_required_runtimes", "Required runtimes restarting now.", health.restarting_required.len()),
+        ("cognia_brain_required_runtimes_ready", "1 when bootstrap completed and required runtimes are running; legacy brains retain readiness.", usize::from(health.required_ready())),
+    ] { push_metric(out, name, "gauge", help, value); }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_metrics_distinguish_required_failures_and_restarts() {
+        let health = crate::ws_bridge::BrainRuntimeHealth {
+            bootstrapped: Some(true),
+            failed: vec!["scheduler".into(), "backup-scheduler".into()],
+            failed_required: vec!["scheduler".into()],
+            restarting_required: vec!["desktop-sync-source".into()],
+        };
+        let mut out = String::new();
+        push_runtime_metrics(&mut out, &health);
+        for expected in [
+            "cognia_brain_failed_runtimes 2",
+            "cognia_brain_failed_required_runtimes 1",
+            "cognia_brain_restarting_required_runtimes 1",
+            "cognia_brain_required_runtimes_ready 0",
+        ] {
+            assert!(out.contains(expected), "{out}");
+        }
+        let mut recovered = String::new();
+        push_runtime_metrics(&mut recovered, &Default::default());
+        assert!(recovered.contains("cognia_brain_required_runtimes_ready 1"));
+    }
 
     #[test]
     fn exposition_carries_the_core_series_and_reacts_to_counters() {

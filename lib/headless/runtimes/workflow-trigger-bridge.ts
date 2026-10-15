@@ -22,6 +22,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "workflow-trigger-bridge",
+  criticality: "required",
   hosts: ["brain"],
   start: async (ctx) => {
     const { installTriggerBridge } = await import("@/lib/workflow/runtime/trigger-bridge")
@@ -34,6 +35,7 @@ registerHeadlessRuntime({
         "error",
         `workflow trigger bridge failed to install: ${error instanceof Error ? error.message : String(error)}`
       )
+      throw error
     }
     return () => {
       dispose?.()

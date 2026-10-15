@@ -916,6 +916,11 @@
         "name": {
           "type": "string"
         },
+        "criticality": {
+          "type": "string",
+          "enum": ["required", "optional"],
+          "description": "Absent on legacy brains; failures then retain the legacy degraded behavior."
+        },
         "state": {
           "type": "string",
           "enum": ["running", "failed", "restarting"]

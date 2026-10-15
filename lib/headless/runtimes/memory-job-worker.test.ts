@@ -15,7 +15,11 @@ describe("memory job worker headless runtime", () => {
     await import("./memory-job-worker")
     const runtime = listHeadlessRuntimes().find(({ name }) => name === "memory-job-worker")
 
-    expect(runtime).toMatchObject({ name: "memory-job-worker", hosts: ["brain"] })
+    expect(runtime).toMatchObject({
+      name: "memory-job-worker",
+      criticality: "optional",
+      hosts: ["brain"],
+    })
     await runtime!.start({} as never)
     expect(startMemoryJobWorker).toHaveBeenCalledWith({ workerId: "headless-memory-job-worker" })
   })

@@ -63,6 +63,7 @@ describe("bridge protocol golden fixtures", () => {
   it("builds the runtime control answer the server routes", () => {
     const runtime = {
       name: "connector-runtime",
+      criticality: "required" as const,
       state: "running" as const,
       restartable: true,
       restarts: 1,
@@ -85,6 +86,26 @@ describe("bridge protocol golden fixtures", () => {
     expect(pong.failedRuntimes).toEqual(["connector-runtime"])
     names.push("later")
     expect(pong.failedRuntimes).toEqual(["connector-runtime"])
+  })
+
+  it("keeps legacy pongs unchanged and copies the full new health report", () => {
+    expect(buildPong(1, 2, 3, 0)).not.toHaveProperty("bootstrapped")
+    const report = {
+      bootstrapped: false,
+      failedRequiredRuntimes: ["scheduler"],
+      restartingRequiredRuntimes: ["desktop-sync-source"],
+    }
+    const pong = buildPong(
+      1751400000000,
+      123456789,
+      1751399990000,
+      2,
+      ["scheduler", "backup-scheduler"],
+      report
+    )
+    expect(pong).toEqual(fixtures.frames.pongRuntimeHealth)
+    report.failedRequiredRuntimes.length = 0
+    expect(pong.failedRequiredRuntimes).toEqual(["scheduler"])
   })
 
   it("rejects malformed and unknown frames without throwing", () => {

@@ -67,3 +67,15 @@ it("says why a host cannot report runtimes, and passes other errors through", as
 it("picks out the runtimes that failed", () => {
   expect(failedHostRuntimes([running, failed])).toEqual([failed])
 })
+
+it("preserves criticality from current hosts and accepts legacy responses without it", async () => {
+  const required = { ...failed, criticality: "required" as const }
+  const optional = { ...running, criticality: "optional" as const }
+  call.mockResolvedValue({ runtimes: [required, optional, failed] })
+  const result = await readHostRuntimes(HOST, deps())
+  expect(result.runtimes.map((runtime) => runtime.criticality)).toEqual([
+    "required",
+    "optional",
+    undefined,
+  ])
+})

@@ -20,6 +20,7 @@ describe("Integration headless runtime", () => {
     expect(registerHeadlessRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "integration-runtime",
+        criticality: "optional",
         hosts: ["brain"],
         start: expect.any(Function),
       })

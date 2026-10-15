@@ -104,7 +104,11 @@ describe("behavior telemetry headless runtime", () => {
     mockGetPersisted.mockResolvedValue({ behaviorTelemetry: policy } as never)
     const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
 
-    expect(runtime).toMatchObject({ name: "behavior-telemetry", hosts: ["brain"] })
+    expect(runtime).toMatchObject({
+      name: "behavior-telemetry",
+      criticality: "optional",
+      hosts: ["brain"],
+    })
     const stop = await runtime!.start({} as never)
     expect(mockConfigure).toHaveBeenCalledWith(policy)
     expect(mockSubscribe).toHaveBeenCalledTimes(1)

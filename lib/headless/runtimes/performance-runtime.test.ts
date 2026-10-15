@@ -28,6 +28,11 @@ it("registers the Node performance host in the headless runtime roster", async (
     log: jest.fn(),
   }
   const result = await bootstrapHeadlessRuntimes(context)
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "performance-host", criticality: "optional" }),
+    ])
+  )
   expect(result.failed).toEqual([])
   expect(result.started).toContain("performance-host")
   expect(getPerformanceHostAdapter()).toBeDefined()

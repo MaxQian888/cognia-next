@@ -68,6 +68,7 @@ it("registers brain work using the host credentials and durable cursor adapter",
     local: { getItem: jest.fn(), setItem: jest.fn(), removeItem: jest.fn() },
   }
   const runtime = listHeadlessRuntimes().find((entry) => entry.name === "collab-runtime")!
+  expect(runtime.criticality).toBe("optional")
   const stop = await runtime.start({
     localAccountId: "brain-account",
     collab: adapter,

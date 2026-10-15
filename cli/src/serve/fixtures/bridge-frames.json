@@ -16,7 +16,7 @@
         "media",
         "filespace"
       ],
-      "catalogHash": "657509753abac85e476f880d07af4f7634cd710364c7c5678cdd226a182f697b",
+      "catalogHash": "ebdcbaa12dd348f2078234e3e73cd42034658ca13056179fec6522e5546acd00",
       "contractVersion": 3
     },
     "helloAck": {
@@ -25,7 +25,7 @@
       "serverVersion": "0.9.0",
       "protocol": 3,
       "accountId": "local_acct_a",
-      "catalogHash": "657509753abac85e476f880d07af4f7634cd710364c7c5678cdd226a182f697b",
+      "catalogHash": "ebdcbaa12dd348f2078234e3e73cd42034658ca13056179fec6522e5546acd00",
       "contractVersion": 3
     },
     "helloRefused": {
@@ -34,7 +34,7 @@
       "reason": "contract_mismatch",
       "serverVersion": "0.9.0",
       "protocol": 3,
-      "catalogHash": "657509753abac85e476f880d07af4f7634cd710364c7c5678cdd226a182f697b",
+      "catalogHash": "ebdcbaa12dd348f2078234e3e73cd42034658ca13056179fec6522e5546acd00",
       "contractVersion": 3
     },
     "eventSyncPull": {
@@ -131,7 +131,8 @@
           "state": "running",
           "restartable": true,
           "restarts": 1,
-          "startedAt": 1751400000000
+          "startedAt": 1751400000000,
+          "criticality": "required"
         },
         "runtimes": [
           {
@@ -139,7 +140,8 @@
             "state": "running",
             "restartable": true,
             "restarts": 1,
-            "startedAt": 1751400000000
+            "startedAt": 1751400000000,
+            "criticality": "required"
           }
         ]
       }
@@ -184,6 +186,43 @@
       "connectionId": "connection-1",
       "hostRef": "device:worker-a",
       "reason": "socket_closed"
+    },
+    "pongRuntimeHealth": {
+      "v": 3,
+      "type": "pong",
+      "ts": 1751400000000,
+      "rssBytes": 123456789,
+      "lastFlushAt": 1751399990000,
+      "activeRuns": 2,
+      "bootstrapped": false,
+      "failedRuntimes": [
+        "scheduler",
+        "backup-scheduler"
+      ],
+      "failedRequiredRuntimes": [
+        "scheduler"
+      ],
+      "restartingRequiredRuntimes": [
+        "desktop-sync-source"
+      ]
+    },
+    "helloRuntimeHealth": {
+      "v": 3,
+      "type": "hello",
+      "role": "brain",
+      "brainVersion": "0.1.0",
+      "protocol": 3,
+      "accountId": "local_acct_a",
+      "capabilities": [
+        "sync",
+        "messages",
+        "writes",
+        "media",
+        "filespace",
+        "runtime-health"
+      ],
+      "catalogHash": "4a78ec07c0114573c7cef3d7eb6fa3bd12062c10edf4e99958ddabd5815b6f60",
+      "contractVersion": 3
     }
   }
 }

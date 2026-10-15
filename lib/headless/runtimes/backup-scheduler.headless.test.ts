@@ -46,6 +46,11 @@ beforeEach(() => {
 it("boots the shared backup scheduler with the Node host filesystem and translated messages", async () => {
   const ctx = context()
   const result = await bootstrapHeadlessRuntimes(ctx)
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "backup-scheduler", criticality: "optional" }),
+    ])
+  )
 
   expect(result.failed).toEqual([])
   expect(result.started).toEqual(["backup-scheduler"])

@@ -64,6 +64,7 @@ export function startCollabRuntime(
 
 registerHeadlessRuntime({
   name: "collab-runtime",
+  criticality: "optional",
   hosts: ["brain"],
   start: (ctx) => {
     const adapter = ctx.collab

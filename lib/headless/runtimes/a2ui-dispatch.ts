@@ -12,6 +12,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "a2ui-dispatch",
+  criticality: "optional",
   hosts: ["brain"],
   start: (ctx) => subscribeA2UIDispatch({ bridge: ctx.bridge }),
 })

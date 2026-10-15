@@ -19,6 +19,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "host-provider-keys",
+  criticality: "required",
   hosts: ["brain"],
   start: async (ctx) => {
     const deps = defaultHostProviderKeyDeps()

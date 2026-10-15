@@ -3,7 +3,7 @@ info:
   title: Cognia Headless Service Event and Bridge API
   version: "3"
   description: Generated WebSocket contract for the existing Headless event stream and Brain data-plane bridge.
-  x-cognia-catalog-hash: 657509753abac85e476f880d07af4f7634cd710364c7c5678cdd226a182f697b
+  x-cognia-catalog-hash: ebdcbaa12dd348f2078234e3e73cd42034658ca13056179fec6522e5546acd00
 servers:
   loopback:
     host: 127.0.0.1:{port}
@@ -285,7 +285,7 @@ components:
               type: string
           catalogHash:
             type: string
-            const: 657509753abac85e476f880d07af4f7634cd710364c7c5678cdd226a182f697b
+            const: ebdcbaa12dd348f2078234e3e73cd42034658ca13056179fec6522e5546acd00
           contractVersion:
             type: integer
             const: 3
@@ -318,7 +318,7 @@ components:
             type: string
           catalogHash:
             type: string
-            const: 657509753abac85e476f880d07af4f7634cd710364c7c5678cdd226a182f697b
+            const: ebdcbaa12dd348f2078234e3e73cd42034658ca13056179fec6522e5546acd00
           contractVersion:
             type: integer
             const: 3
@@ -354,7 +354,7 @@ components:
             const: 3
           catalogHash:
             type: string
-            const: 657509753abac85e476f880d07af4f7634cd710364c7c5678cdd226a182f697b
+            const: ebdcbaa12dd348f2078234e3e73cd42034658ca13056179fec6522e5546acd00
           contractVersion:
             type: integer
             const: 3
@@ -449,6 +449,21 @@ components:
             type: integer
             minimum: 0
             description: Runs executing in the brain; a host updates only at 0 (ADR-0224 A10).
+          failedRuntimes:
+            type: array
+            items:
+              type: string
+          bootstrapped:
+            type: boolean
+            description: Bootstrap complete; legacy brains omit this field.
+          failedRequiredRuntimes:
+            type: array
+            items:
+              type: string
+          restartingRequiredRuntimes:
+            type: array
+            items:
+              type: string
         additionalProperties: false
     BridgeTokenRefreshFrame:
       name: BridgeTokenRefreshFrame

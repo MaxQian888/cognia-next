@@ -259,8 +259,9 @@ services:
       # Tuned profile lets bwrap (ADR-0028 sandbox) create user namespaces in a
       # stock container. On AppArmor hosts (Ubuntu) also add: apparmor=unconfined.
       - seccomp=./seccomp/cognia-userns.json
+    # Readiness gates compose --wait; unhealthy alone never restarts a container.
     healthcheck:
-      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/healthz"]
+      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/readyz"]
       interval: 30s
       timeout: 5s
       retries: 3

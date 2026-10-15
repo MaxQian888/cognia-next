@@ -43,6 +43,7 @@ beforeEach(() => {
 it("does nothing when the serve process left account sync off", async () => {
   const entry = await runtime()
   expect(entry.hosts).toEqual(["brain"])
+  expect(entry.criticality).toBe("optional")
   expect(await entry.start(context())).toBeUndefined()
   expect(startHeadlessAccountSync).not.toHaveBeenCalled()
 })

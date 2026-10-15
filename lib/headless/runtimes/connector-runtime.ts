@@ -261,7 +261,7 @@ export function createHeadlessConnectorRuntimeLease(
   onLeaseLost: () => void | Promise<void>,
   onLeaseAcquired: () => void
 ): (signal: AbortSignal) => Promise<boolean> {
-  return createConnectorRuntimeLease({
+  const acquire = createConnectorRuntimeLease({
     ownerClass: "brain",
     ports: {
       acquire: (ownerId, ttlMs) =>
@@ -279,12 +279,19 @@ export function createHeadlessConnectorRuntimeLease(
     onLeaseAcquired,
     onUnavailable: "block",
   })
+  return async (signal) => {
+    if (!(await acquire(signal))) {
+      throw new Error("Connector runtime lease is unavailable or owned by another brain")
+    }
+    return true
+  }
 }
 
 registerHeadlessRuntime({
   name: "connector-runtime",
+  criticality: "required",
   hosts: ["brain"],
-  start: (ctx) => {
+  start: async (ctx) => {
     const prevInvoker = setConnectorCommandInvoker(headlessConnectorInvoker)
     const prevListen = setConnectorListen(headlessConnectorListen)
     let dispose: () => Promise<void> = async () => undefined
@@ -303,22 +310,35 @@ registerHeadlessRuntime({
         )
       }
     )
-    dispose = installConnectorRuntime({
-      skipHostGate: true,
-      log: (level, message) => ctx.log(level, message),
-      acquireRuntimeLock,
-    })
-    // Lark entry surface intents (plan 2026-07-24 P3): the companion front
-    // door parks surface resolves / consumption reports on the event bus;
-    // this brain-side handler answers them (membership checks + ledger).
-    const disposeLarkIntents = installLarkIntentHandler(headlessConnectorListen)
-    return async () => {
+    let disposeLarkIntents: () => void = () => undefined
+    const stop = async () => {
       disposeLarkOAuth()
       disposeConnectorOAuth()
       disposeLarkIntents()
-      await dispose()
-      setConnectorCommandInvoker(prevInvoker)
-      setConnectorListen(prevListen)
+      try {
+        await dispose()
+      } finally {
+        setConnectorCommandInvoker(prevInvoker)
+        setConnectorListen(prevListen)
+      }
+    }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        dispose = installConnectorRuntime({
+          skipHostGate: true,
+          log: (level, message) => ctx.log(level, message),
+          acquireRuntimeLock,
+          onBootstrapped: (result) => (result.ok ? resolve() : reject(result.error)),
+        })
+      })
+      // Lark entry surface intents (plan 2026-07-24 P3): the companion front
+      // door parks surface resolves / consumption reports on the event bus;
+      // this brain-side handler answers them (membership checks + ledger).
+      disposeLarkIntents = installLarkIntentHandler(headlessConnectorListen)
+      return stop
+    } catch (error) {
+      await stop()
+      throw error
     }
   },
 })

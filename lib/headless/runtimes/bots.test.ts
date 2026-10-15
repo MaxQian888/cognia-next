@@ -60,6 +60,7 @@ describe("bot-delivery-runner headless runtime", () => {
     startBotDeliveryRunner.mockReturnValue({ stop })
 
     const runtime = await loadRuntime()
+    expect(runtime.criticality).toBe("required")
     const { isBotRunnerOwnedHere } = await import("@/lib/bot/runtime/runner-owner")
     expect(isBotRunnerOwnedHere()).toBe(false)
     const dispose = await runtime.start(context())

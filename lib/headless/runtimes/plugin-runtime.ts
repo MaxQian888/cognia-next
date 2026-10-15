@@ -61,6 +61,7 @@ function parsePluginChange(payload: unknown): HeadlessPluginChange | null {
 
 registerHeadlessRuntime({
   name: "plugin-runtime",
+  criticality: "required",
   hosts: ["brain"],
   start: async (ctx) => {
     const runtime = ctx.pluginRuntime

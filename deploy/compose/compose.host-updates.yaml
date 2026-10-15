@@ -10,7 +10,9 @@
 # The agent checks the signed catalog and the rollout gate itself, pulls the
 # release by digest, pins it as COGNIA_SERVER_IMAGE in this directory's .env,
 # recreates only cognia-server, and rolls back if the new version does not
-# prove itself (a refused brain, or /readyz not ready within ten minutes).
+# prove itself (a refused brain, incomplete bootstrap, or new required-runtime
+# failures that prevent the trial from settling within ten minutes). Required
+# failures recorded before the update remain unready but do not blame this release.
 #
 # Requirements:
 #   - COGNIA_COMPOSE_DIR in .env: the absolute path of this directory. The

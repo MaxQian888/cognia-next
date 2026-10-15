@@ -37,6 +37,11 @@ describe("host-event-publisher runtime", () => {
 
     await import("./host-event-publisher")
     const result = await bootstrapHeadlessRuntimes(ctx)
+    expect(result.status()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "host-event-publisher", criticality: "required" }),
+      ])
+    )
     expect(result.started).toEqual(["host-event-publisher"])
 
     await publishHostEvent("sync://invalidate", { table: "workflowRuns" })

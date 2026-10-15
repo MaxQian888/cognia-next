@@ -7,6 +7,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "managed-ide-broker",
+  criticality: "optional",
   hosts: ["brain"],
   start: async () => {
     const {

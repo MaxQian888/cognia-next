@@ -293,7 +293,7 @@ impl WriteGate for LiveWriteGate {
 
 /// What a trial reads about its own health.
 pub trait TrialHealth: Send + Sync {
-    fn signal(&self) -> TrialSignal;
+    fn signal(&self, baseline_failed_required: &[String]) -> TrialSignal;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,16 +309,35 @@ pub enum TrialSignal {
 pub struct LiveTrialHealth;
 
 impl TrialHealth for LiveTrialHealth {
-    fn signal(&self) -> TrialSignal {
+    fn signal(&self, baseline_failed_required: &[String]) -> TrialSignal {
         if let Some(refusal) = crate::ws_bridge::brain_refusal() {
             return TrialSignal::Refused(refusal.reason);
         }
-        if crate::ws_bridge::bridge_ready() {
+        if crate::ws_bridge::bridge_ready()
+            && trial_runtimes_ready(
+                &crate::ws_bridge::brain_runtime_health(),
+                baseline_failed_required,
+            )
+        {
             TrialSignal::Healthy
         } else {
             TrialSignal::Waiting
         }
     }
+}
+
+/// Existing external outages must not be attributed to the new build. A
+/// bootstrap or restart still needs to finish before any trial can settle.
+fn trial_runtimes_ready(
+    health: &crate::ws_bridge::BrainRuntimeHealth,
+    baseline_failed_required: &[String],
+) -> bool {
+    health.bootstrapped != Some(false)
+        && health.restarting_required.is_empty()
+        && health
+            .failed_required
+            .iter()
+            .all(|name| baseline_failed_required.contains(name))
 }
 
 pub struct HostUpdaterDeps {
@@ -856,8 +875,9 @@ impl HostUpdater {
         let now = self.now();
         let to = release.version.clone();
         let switch_home = home.clone();
+        let baseline = self.deps.idle.runtime_baseline()?;
         let pending = tokio::task::spawn_blocking(move || {
-            switch_home.begin_switch(&to, now, TRIAL_WINDOW.as_millis() as i64)
+            switch_home.begin_switch(&to, now, TRIAL_WINDOW.as_millis() as i64, baseline)
         })
         .await
         .map_err(|error| error.to_string())?
@@ -930,7 +950,7 @@ impl HostUpdater {
         let mut healthy_since: Option<i64> = None;
         let outcome = loop {
             let now = self.now();
-            match health.signal() {
+            match health.signal(&pending.baseline_failed_required_runtimes) {
                 TrialSignal::Refused(reason) => {
                     break self.finish_trial(
                         &home,
@@ -1016,9 +1036,9 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        ComposeAgent, DetectInput, HostInstall, HostUpdater, HostUpdaterDeps, InstallKind,
-        TrialHealth, TrialSignal, UnmanagedReason, UpdateAgent, UpdatePhase, WriteGate,
-        ACTIVATION_GRACE,
+        trial_runtimes_ready, ComposeAgent, DetectInput, HostInstall, HostUpdater, HostUpdaterDeps,
+        InstallKind, TrialHealth, TrialSignal, UnmanagedReason, UpdateAgent, UpdatePhase,
+        WriteGate, ACTIVATION_GRACE,
     };
     use crate::host_update::idle::{IdleProbe, IdleReport};
     use crate::host_update::network::{RolloutAnswer, RolloutQuery, UpdateNetwork};
@@ -1056,7 +1076,7 @@ mod tests {
     }
 
     /// Reports in order, repeating the last one.
-    struct FakeIdle(Mutex<Vec<IdleReport>>);
+    struct FakeIdle(Mutex<Vec<IdleReport>>, Mutex<Result<Vec<String>, String>>);
 
     impl FakeIdle {
         fn set(&self, reports: Vec<IdleReport>) {
@@ -1065,6 +1085,9 @@ mod tests {
     }
 
     impl IdleProbe for FakeIdle {
+        fn runtime_baseline(&self) -> Result<Vec<String>, String> {
+            self.1.lock().clone()
+        }
         fn report(&self, _now_ms: i64) -> IdleReport {
             let mut reports = self.0.lock();
             if reports.len() > 1 {
@@ -1105,7 +1128,7 @@ mod tests {
     struct FixedHealth(TrialSignal);
 
     impl TrialHealth for FixedHealth {
-        fn signal(&self) -> TrialSignal {
+        fn signal(&self, _: &[String]) -> TrialSignal {
             self.0.clone()
         }
     }
@@ -1158,7 +1181,10 @@ mod tests {
             digest: Some(archive_sha.clone()),
         });
         *network.archive.lock() = Some(archive);
-        let idle = Arc::new(FakeIdle(Mutex::new(vec![quiet()])));
+        let idle = Arc::new(FakeIdle(
+            Mutex::new(vec![quiet()]),
+            Mutex::new(Ok(Vec::new())),
+        ));
         let writes = Arc::new(FakeWrites::default());
         let restarts = Arc::new(AtomicUsize::new(0));
         let start = tokio::time::Instant::now();
@@ -1314,6 +1340,35 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_switch_persists_the_pre_update_required_failure_baseline() {
+        let h = harness();
+        *h.idle.1.lock() = Ok(vec!["connector-runtime".into()]);
+        h.updater.request_install().await.unwrap();
+        h.updater.tick().await;
+        assert_eq!(h.home.current_version().as_deref(), Some("1.5.0"));
+        assert_eq!(
+            h.home.pending().unwrap().baseline_failed_required_runtimes,
+            vec!["connector-runtime"]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unavailable_runtime_baseline_does_not_switch_or_hold_writes() {
+        let h = harness();
+        *h.idle.1.lock() = Err("runtime baseline unavailable".into());
+        h.updater.request_install().await.unwrap();
+        h.updater.tick().await;
+        assert_eq!(h.home.current_version().as_deref(), Some("1.4.0"));
+        assert!(h.home.pending().is_none());
+        assert_eq!(h.restarts.load(Ordering::SeqCst), 0);
+        assert_eq!(h.writes.held(), 0);
+        assert_eq!(
+            h.updater.status().last_error.as_deref(),
+            Some("runtime baseline unavailable")
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_host_that_turns_busy_at_the_last_gate_keeps_the_staged_version() {
         let h = harness();
         h.updater.request_install().await.unwrap();
@@ -1370,7 +1425,7 @@ mod tests {
             )
             .unwrap();
         h.home
-            .begin_switch("1.5.0", BASE_MS, 10 * 60 * 1000)
+            .begin_switch("1.5.0", BASE_MS, 10 * 60 * 1000, Vec::new())
             .unwrap()
     }
 
@@ -1392,6 +1447,109 @@ mod tests {
         assert_eq!(h.home.pending(), None);
         assert_eq!(h.restarts.load(Ordering::SeqCst), 0);
         assert_eq!(h.updater.status().last_outcome.unwrap().to, "1.5.0");
+    }
+
+    fn runtime_health(failed: &[&str]) -> crate::ws_bridge::BrainRuntimeHealth {
+        crate::ws_bridge::BrainRuntimeHealth {
+            bootstrapped: Some(true),
+            failed: failed.iter().map(|name| (*name).to_owned()).collect(),
+            failed_required: failed.iter().map(|name| (*name).to_owned()).collect(),
+            restarting_required: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn native_trial_requires_bootstrap_and_restart_completion_but_exempts_old_failures() {
+        let baseline = vec!["connector-runtime".into()];
+        let mut health = runtime_health(&["connector-runtime"]);
+        assert!(trial_runtimes_ready(&health, &baseline));
+        assert!(!trial_runtimes_ready(&health, &[]));
+        health.failed_required.push("scheduler".into());
+        assert!(!trial_runtimes_ready(&health, &baseline));
+        health.failed_required.pop();
+        health.bootstrapped = Some(false);
+        assert!(!trial_runtimes_ready(&health, &baseline));
+        health.bootstrapped = Some(true);
+        health.restarting_required.push("connector-runtime".into());
+        assert!(!trial_runtimes_ready(&health, &baseline));
+        let mut legacy = runtime_health(&[]);
+        legacy.bootstrapped = None;
+        legacy.failed = vec!["scheduler".into()];
+        assert!(trial_runtimes_ready(&legacy, &[]));
+        let mut optional = runtime_health(&[]);
+        optional.failed = vec!["backup-scheduler".into()];
+        assert!(trial_runtimes_ready(&optional, &[]));
+    }
+
+    struct RuntimeHealthSequence(Mutex<Vec<crate::ws_bridge::BrainRuntimeHealth>>);
+
+    impl TrialHealth for RuntimeHealthSequence {
+        fn signal(&self, baseline: &[String]) -> TrialSignal {
+            let mut remaining = self.0.lock();
+            let health = if remaining.len() > 1 {
+                remaining.remove(0)
+            } else {
+                remaining[0].clone()
+            };
+            if trial_runtimes_ready(&health, baseline) {
+                TrialSignal::Healthy
+            } else {
+                TrialSignal::Waiting
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn native_trial_ignores_only_failures_recorded_before_the_switch() {
+        for (failed, expected) in [
+            (vec!["connector-runtime"], UpdateResult::Installed),
+            (
+                vec!["connector-runtime", "scheduler"],
+                UpdateResult::RolledBack,
+            ),
+        ] {
+            let h = harness();
+            let mut pending = switched(&h);
+            pending.baseline_failed_required_runtimes = vec!["connector-runtime".into()];
+            let outcome = Arc::clone(&h.updater)
+                .supervise_trial(
+                    h.home.clone(),
+                    pending,
+                    Arc::new(RuntimeHealthSequence(Mutex::new(vec![runtime_health(
+                        &failed,
+                    )]))),
+                    Duration::from_secs(5),
+                    Duration::from_secs(30),
+                )
+                .await;
+            assert_eq!(outcome.result, expected);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn native_trial_waits_for_recovery_and_a_new_settle_period() {
+        let h = harness();
+        let pending = switched(&h);
+        let mut starting = runtime_health(&[]);
+        starting.bootstrapped = Some(false);
+        let before = h.updater.now();
+        let outcome = Arc::clone(&h.updater)
+            .supervise_trial(
+                h.home.clone(),
+                pending,
+                Arc::new(RuntimeHealthSequence(Mutex::new(vec![
+                    starting,
+                    runtime_health(&[]),
+                    runtime_health(&[]),
+                    runtime_health(&["scheduler"]),
+                    runtime_health(&[]),
+                ]))),
+                Duration::from_secs(5),
+                Duration::from_secs(30),
+            )
+            .await;
+        assert_eq!(outcome.result, UpdateResult::Installed);
+        assert!(h.updater.now() - before >= 50_000);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1581,7 +1739,10 @@ mod tests {
             digest: Some(digest),
         });
         let agent = Arc::new(FakeAgent::idle());
-        let idle = Arc::new(FakeIdle(Mutex::new(vec![quiet()])));
+        let idle = Arc::new(FakeIdle(
+            Mutex::new(vec![quiet()]),
+            Mutex::new(Ok(Vec::new())),
+        ));
         let writes = Arc::new(FakeWrites::default());
         let restarts = Arc::new(AtomicUsize::new(0));
         let restart_count = Arc::clone(&restarts);

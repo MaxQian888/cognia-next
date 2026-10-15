@@ -191,6 +191,20 @@ pub enum BridgeFrame {
             skip_serializing_if = "Option::is_none"
         )]
         failed_runtimes: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bootstrapped: Option<bool>,
+        #[serde(
+            rename = "failedRequiredRuntimes",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        failed_required_runtimes: Option<Vec<String>>,
+        #[serde(
+            rename = "restartingRequiredRuntimes",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        restarting_required_runtimes: Option<Vec<String>>,
     },
     /// server → brain: a re-minted service token (12h refresh, R8).
     TokenRefresh { v: u32, token: String },
@@ -411,27 +425,75 @@ static BRAIN_LAST_FLUSH_AT: AtomicI64 = AtomicI64::new(0);
 static BRAIN_ACTIVE_RUNS: AtomicI64 = AtomicI64::new(-1);
 /// When it last reported them (epoch ms).
 static BRAIN_ACTIVITY_AT: AtomicI64 = AtomicI64::new(0);
-/// Headless runtimes the connected brain reported failed to start.
-static BRAIN_FAILED_RUNTIMES: parking_lot::Mutex<Vec<String>> = parking_lot::Mutex::new(Vec::new());
+/// One atomic runtime-health snapshot, replaced by each pong.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BrainRuntimeHealth {
+    /// None identifies legacy brains. Advertised runtime-health starts at false.
+    pub bootstrapped: Option<bool>,
+    pub failed: Vec<String>,
+    pub failed_required: Vec<String>,
+    pub restarting_required: Vec<String>,
+}
 
-/// Longest runtime name kept from a pong, and how many names.
+impl BrainRuntimeHealth {
+    pub fn required_ready(&self) -> bool {
+        self.bootstrapped != Some(false)
+            && self.failed_required.is_empty()
+            && self.restarting_required.is_empty()
+    }
+}
+
+static BRAIN_RUNTIME_HEALTH: Lazy<parking_lot::Mutex<BrainRuntimeHealth>> =
+    Lazy::new(|| parking_lot::Mutex::new(BrainRuntimeHealth::default()));
 const MAX_RUNTIME_NAME: usize = 64;
 const MAX_FAILED_RUNTIMES: usize = 64;
 
-/// The headless runtimes the connected brain could not start: it runs
-/// degraded without them. Empty while no brain is connected.
-pub fn brain_failed_runtimes() -> Vec<String> {
-    BRAIN_FAILED_RUNTIMES.lock().clone()
+pub fn brain_runtime_health() -> BrainRuntimeHealth {
+    BRAIN_RUNTIME_HEALTH.lock().clone()
 }
 
-fn record_failed_runtimes(names: Vec<String>) {
-    let names = names
-        .into_iter()
-        .filter(|name| !name.is_empty())
-        .map(|name| name.chars().take(MAX_RUNTIME_NAME).collect())
-        .take(MAX_FAILED_RUNTIMES)
-        .collect();
-    *BRAIN_FAILED_RUNTIMES.lock() = names;
+/// Read connection presence and its report under the same slot lock, so an
+/// update never mistakes a disconnect's cleared gauges for a healthy baseline.
+pub fn connected_brain_runtime_health() -> Option<BrainRuntimeHealth> {
+    let slot = SOCKET_BRIDGE.read();
+    slot.as_ref().map(|_| brain_runtime_health())
+}
+
+pub fn brain_failed_runtimes() -> Vec<String> {
+    brain_runtime_health().failed
+}
+
+fn runtime_names(names: Vec<String>) -> Vec<String> {
+    let mut result = Vec::new();
+    for name in names.into_iter().filter(|name| !name.is_empty()) {
+        let name: String = name.chars().take(MAX_RUNTIME_NAME).collect();
+        if !result.contains(&name) {
+            result.push(name);
+        }
+        if result.len() == MAX_FAILED_RUNTIMES {
+            break;
+        }
+    }
+    result
+}
+
+fn record_runtime_health(
+    failed: Vec<String>,
+    bootstrapped: Option<bool>,
+    failed_required: Vec<String>,
+    restarting_required: Vec<String>,
+) {
+    let mut health = BRAIN_RUNTIME_HEALTH.lock();
+    // An advertised new brain may not erase the bootstrap gate by omitting it.
+    health.bootstrapped = bootstrapped.or(health.bootstrapped);
+    health.failed_required = runtime_names(failed_required);
+    health.restarting_required = runtime_names(restarting_required);
+    health.failed = runtime_names(
+        failed
+            .into_iter()
+            .chain(health.failed_required.clone())
+            .collect(),
+    );
 }
 
 /// What the connected brain last said it was doing.
@@ -454,12 +516,15 @@ pub fn brain_activity() -> Option<BrainActivity> {
 /// How often the server pings the brain, so a reader can tell a stale report.
 pub const BRAIN_HEARTBEAT: Duration = Duration::from_secs(HEARTBEAT_SECS);
 
-fn reset_brain_gauges() {
+fn reset_brain_gauges(bootstrapped: Option<bool>) {
     BRAIN_RSS_BYTES.store(0, Ordering::SeqCst);
     BRAIN_LAST_FLUSH_AT.store(0, Ordering::SeqCst);
     BRAIN_ACTIVE_RUNS.store(-1, Ordering::SeqCst);
     BRAIN_ACTIVITY_AT.store(0, Ordering::SeqCst);
-    BRAIN_FAILED_RUNTIMES.lock().clear();
+    *BRAIN_RUNTIME_HEALTH.lock() = BrainRuntimeHealth {
+        bootstrapped,
+        ..Default::default()
+    };
 }
 
 /// Install a new connection as the process-wide socket bridge, closing any
@@ -472,6 +537,15 @@ fn install_socket_bridge(
 ) {
     let old = {
         let mut slot = SOCKET_BRIDGE.write();
+        // Publish the replacement's bootstrap gate in the same write that
+        // clears the old report. Readers must never see a legacy-ready default
+        // between these transitions while the previous bridge is still ready.
+        let bootstrapped = hello
+            .capabilities
+            .iter()
+            .any(|capability| capability == "runtime-health")
+            .then_some(false);
+        reset_brain_gauges(bootstrapped);
         slot.replace(BridgeSlot {
             transport,
             shutdown,
@@ -500,6 +574,7 @@ fn clear_socket_bridge_if(conn_id: u64) {
             .unwrap_or(false)
         {
             slot.take();
+            reset_brain_gauges(None);
             true
         } else {
             false
@@ -507,7 +582,6 @@ fn clear_socket_bridge_if(conn_id: u64) {
     };
     if cleared {
         let _ = READY.0.send(false);
-        reset_brain_gauges();
     }
 }
 
@@ -1039,12 +1113,28 @@ fn handle_brain_frame(
             last_flush_at,
             active_runs,
             failed_runtimes,
+            bootstrapped,
+            failed_required_runtimes,
+            restarting_required_runtimes,
             ..
         } => {
+            // A replaced socket must not overwrite its successor's health.
+            let slot = SOCKET_BRIDGE.read();
+            if !slot
+                .as_ref()
+                .is_some_and(|slot| slot.transport.conn_id == transport.conn_id)
+            {
+                return;
+            }
             BRAIN_RSS_BYTES.store(rss_bytes, Ordering::SeqCst);
             BRAIN_LAST_FLUSH_AT.store(last_flush_at, Ordering::SeqCst);
             // Every brain pong carries the full list; absence means none.
-            record_failed_runtimes(failed_runtimes.unwrap_or_default());
+            record_runtime_health(
+                failed_runtimes.unwrap_or_default(),
+                bootstrapped,
+                failed_required_runtimes.unwrap_or_default(),
+                restarting_required_runtimes.unwrap_or_default(),
+            );
             if let Some(runs) = active_runs {
                 BRAIN_ACTIVE_RUNS.store(i64::from(runs), Ordering::SeqCst);
                 BRAIN_ACTIVITY_AT.store(now_ms(), Ordering::SeqCst);
@@ -1058,6 +1148,9 @@ fn handle_brain_frame(
                 last_flush_at: 0,
                 active_runs: None,
                 failed_runtimes: None,
+                bootstrapped: None,
+                failed_required_runtimes: None,
+                restarting_required_runtimes: None,
             });
         }
         BridgeFrame::WorkerFrame {
@@ -1428,8 +1521,17 @@ pub mod test_support {
     }
 
     /// Record runtimes as if the connected brain had reported them failed.
+    pub fn report_runtime_health_for_testing(health: BrainRuntimeHealth) {
+        *BRAIN_RUNTIME_HEALTH.lock() = health;
+    }
+
     pub fn report_failed_runtimes_for_testing(names: &[&str]) {
-        record_failed_runtimes(names.iter().map(|name| (*name).to_string()).collect());
+        record_runtime_health(
+            names.iter().map(|name| (*name).to_string()).collect(),
+            None,
+            vec![],
+            vec![],
+        );
     }
 
     /// Record a refusal as if a brain had just been refused.
@@ -1451,7 +1553,7 @@ pub mod test_support {
     pub fn clear_socket_for_testing() {
         SOCKET_BRIDGE.write().take();
         let _ = READY.0.send(false);
-        super::reset_brain_gauges();
+        super::reset_brain_gauges(None);
     }
 
     /// Pretend the brain reported `runs` active runs just now.
@@ -1461,7 +1563,7 @@ pub mod test_support {
                 super::BRAIN_ACTIVE_RUNS.store(i64::from(runs), Ordering::SeqCst);
                 super::BRAIN_ACTIVITY_AT.store(super::now_ms(), Ordering::SeqCst);
             }
-            None => super::reset_brain_gauges(),
+            None => super::reset_brain_gauges(None),
         }
     }
 }
@@ -2090,6 +2192,71 @@ mod tests {
         assert!(socket_bridge_transport().is_none());
     }
 
+    #[tokio::test]
+    async fn resetting_a_modern_brain_never_publishes_legacy_ready_health() {
+        let _guard = test_support::lock_slot().await;
+        reset_brain_gauges(Some(false));
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                for _ in 0..10_000 {
+                    reset_brain_gauges(Some(false));
+                }
+            });
+            for _ in 0..10_000 {
+                assert!(!brain_runtime_health().required_ready());
+            }
+        });
+        reset_brain_gauges(None);
+        assert!(brain_runtime_health().required_ready());
+    }
+
+    #[tokio::test]
+    async fn bootstrap_health_is_gated_from_hello_and_replacement_resets_it() {
+        let _guard = test_support::lock_slot().await;
+        let state = test_state();
+        let _receiver =
+            test_support::install_socket_with_capabilities_for_testing(&state, &["runtime-health"]);
+        let transport = socket_bridge_transport().unwrap();
+        assert_eq!(brain_runtime_health().bootstrapped, Some(false));
+        assert!(!brain_runtime_health().required_ready());
+        let report = |extra: Value| {
+            let mut pong = json!({ "v": BRIDGE_PROTOCOL_VERSION, "type": "pong", "ts": 1 });
+            pong.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            handle_brain_frame(&state, &pong.to_string(), &transport, ACCOUNT_ID);
+        };
+        report(json!({}));
+        assert!(
+            !brain_runtime_health().required_ready(),
+            "new brains cannot erase their bootstrap gate"
+        );
+        report(
+            json!({ "bootstrapped": true, "failedRequiredRuntimes": ["scheduler", "scheduler", ""], "failedRuntimes": ["backup-scheduler"], "restartingRequiredRuntimes": ["desktop-sync-source"] }),
+        );
+        assert_eq!(brain_runtime_health().failed_required, vec!["scheduler"]);
+        assert_eq!(
+            brain_runtime_health().restarting_required,
+            vec!["desktop-sync-source"]
+        );
+        assert!(!brain_runtime_health().required_ready());
+        report(json!({ "bootstrapped": true }));
+        assert!(brain_runtime_health().required_ready());
+        let _replacement =
+            test_support::install_socket_with_capabilities_for_testing(&state, &["runtime-health"]);
+        assert_eq!(brain_runtime_health().bootstrapped, Some(false));
+        report(json!({ "bootstrapped": true }));
+        assert_eq!(
+            brain_runtime_health().bootstrapped,
+            Some(false),
+            "replaced socket cannot mark its successor ready"
+        );
+        let _legacy = test_support::install_socket_for_testing(&state);
+        assert_eq!(brain_runtime_health().bootstrapped, None);
+        assert!(brain_runtime_health().required_ready());
+        test_support::clear_socket_for_testing();
+    }
+
     // ── Pong metrics ──────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -2151,7 +2318,10 @@ mod tests {
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            panic!("failed runtimes never became {expected:?}: {:?}", brain_failed_runtimes());
+            panic!(
+                "failed runtimes never became {expected:?}: {:?}",
+                brain_failed_runtimes()
+            );
         };
 
         let long = "x".repeat(200);
@@ -2160,19 +2330,30 @@ mod tests {
         ))
         .await
         .unwrap();
-        until(vec!["connector-runtime".to_string(), "x".repeat(MAX_RUNTIME_NAME)]).await;
+        until(vec![
+            "connector-runtime".to_string(),
+            "x".repeat(MAX_RUNTIME_NAME),
+        ])
+        .await;
 
         // Each pong carries the whole list: one without it means none failed.
-        ws.send(WsMessage::Text(pong(json!({})).into())).await.unwrap();
-        until(Vec::new()).await;
-
-        ws.send(WsMessage::Text(pong(json!({ "failedRuntimes": ["room-runner"] })).into()))
+        ws.send(WsMessage::Text(pong(json!({})).into()))
             .await
             .unwrap();
+        until(Vec::new()).await;
+
+        ws.send(WsMessage::Text(
+            pong(json!({ "failedRuntimes": ["room-runner"] })).into(),
+        ))
+        .await
+        .unwrap();
         until(vec!["room-runner".to_string()]).await;
         ws.close(None).await.ok();
         wait_disconnected().await;
-        assert!(brain_failed_runtimes().is_empty(), "an absent brain reports nothing");
+        assert!(
+            brain_failed_runtimes().is_empty(),
+            "an absent brain reports nothing"
+        );
     }
 
     // ── resolve_bridge_transport ordering ─────────────────────────────────────

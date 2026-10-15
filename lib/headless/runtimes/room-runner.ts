@@ -77,6 +77,7 @@ export function diffMemberStatus(
 
 registerHeadlessRuntime({
   name: "room-runner",
+  criticality: "optional",
   hosts: ["brain"],
   start: async (ctx) => {
     const runner = getHostRoomRunner()

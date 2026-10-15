@@ -41,6 +41,11 @@ describe("a2ui-dispatch headless smoke", () => {
     }
 
     const result = await bootstrapHeadlessRuntimes(ctx)
+    expect(result.status()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "a2ui-dispatch", criticality: "optional" }),
+      ])
+    )
     expect(result.failed).toEqual([])
     expect(result.started).toContain("a2ui-dispatch")
     expect(listeners.has("a2ui://dispatch")).toBe(true)

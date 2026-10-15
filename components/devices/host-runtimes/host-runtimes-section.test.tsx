@@ -57,7 +57,7 @@ describe("HostRuntimesSection", () => {
   it("leads with the runtimes that failed and says how many", async () => {
     renderSection([bots, initializers, roomRunner])
     expect(await screen.findByTestId("host-runtimes-summary")).toHaveTextContent(
-      "1 of 3 runtimes failed to start"
+      "The host is degraded: 1 of 3 runtimes are unavailable"
     )
     const items = within(screen.getByTestId("host-runtimes-list")).getAllByRole("listitem")
     expect(items.map((item) => item.getAttribute("data-testid"))).toEqual([
@@ -71,6 +71,46 @@ describe("HostRuntimesSection", () => {
       "only restarting the host restarts it"
     )
     expect(screen.getByTestId("host-runtime-restart-initializers")).toBeDisabled()
+  })
+
+  it.each(["failed", "restarting"] as const)(
+    "reports a required runtime that is %s as host not ready",
+    async (state) => {
+      renderSection([runtime("scheduler", { criticality: "required", state })])
+      expect(await screen.findByText(/The host is not ready/)).toBeInTheDocument()
+      expect(screen.getByText("Required")).toBeInTheDocument()
+      expect(screen.queryByText(/The host is degraded/)).not.toBeInTheDocument()
+    }
+  )
+
+  it("keeps optional and legacy failures degraded, and explains maintenance risks", async () => {
+    renderSection([
+      runtime("backup-scheduler", { criticality: "optional", state: "failed" }),
+      runtime("storage-retention", { criticality: "optional", state: "failed" }),
+      roomRunner,
+    ])
+    expect(await screen.findByText(/The host is degraded: 3 of 3/)).toBeInTheDocument()
+    expect(screen.getAllByText("Optional")).toHaveLength(3)
+    expect(screen.queryByText(/The host is not ready/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Scheduled backups are unavailable/)).toBeInTheDocument()
+    expect(screen.getByText(/disk may fill up/)).toBeInTheDocument()
+  })
+
+  it("shows not ready while a local required restart is still pending", async () => {
+    const scheduler = runtime("scheduler", { criticality: "required" })
+    let finish!: (value: HostRuntimes) => void
+    const restart = jest.fn(
+      () =>
+        new Promise<HostRuntimes>((resolve) => {
+          finish = resolve
+        })
+    )
+    renderSection([scheduler], { restart })
+    await userEvent.click(await screen.findByRole("button", { name: "Restart" }))
+    await userEvent.click(screen.getByRole("button", { name: "Restart" }))
+    expect(await screen.findByText(/The host is not ready/)).toBeInTheDocument()
+    finish({ runtime: scheduler, runtimes: [scheduler] })
+    expect(await screen.findByText("All 1 runtimes are running.")).toBeInTheDocument()
   })
 
   it("restarts a failed runtime directly and shows it running", async () => {

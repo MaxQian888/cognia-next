@@ -6,7 +6,7 @@ import {
 import type { HeadlessRuntime } from "./types"
 
 function runtime(name: string): HeadlessRuntime {
-  return { name, hosts: ["brain"], start: () => undefined }
+  return { name, criticality: "optional", hosts: ["brain"], start: () => undefined }
 }
 
 describe("headless runtime registry", () => {

@@ -6,6 +6,41 @@ describe("headless runtime roster", () => {
       await import("./index")
       const names = registry.listHeadlessRuntimes().map((runtime) => runtime.name)
 
+      const required = registry
+        .listHeadlessRuntimes()
+        .filter((runtime) => runtime.criticality === "required")
+        .map((runtime) => runtime.name)
+      expect(required.sort()).toEqual(
+        [
+          "automation-policy",
+          "background-task",
+          "bot-delivery-runner",
+          "connector-runtime",
+          "desktop-message-source",
+          "desktop-sync-source",
+          "external-agent",
+          "host-event-publisher",
+          "host-provider-keys",
+          "plugin-runtime",
+          "plugin-tool-dispatch",
+          "provider-core-runtime",
+          "routing-runtime",
+          "scheduler",
+          "template-trust-reconciliation",
+          "work-submission-outbox",
+          "workflow-exit-lease-release",
+          "workflow-runtime",
+          "workflow-trigger-bridge",
+        ].sort()
+      )
+      expect(
+        registry
+          .listHeadlessRuntimes()
+          .every(
+            (runtime) => runtime.criticality === "required" || runtime.criticality === "optional"
+          )
+      ).toBe(true)
+      expect(names).toHaveLength(41)
       expect(names[0]).toBe("host-event-publisher")
       // Sealed provider keys are loaded before anything that can start a run.
       expect(names.indexOf("host-provider-keys")).toBeGreaterThan(0)

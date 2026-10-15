@@ -805,7 +805,8 @@ describe("installConnectorRuntime", () => {
 
     const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
 
-    install()
+    const onBootstrapped = jest.fn()
+    install({ onBootstrapped })
 
     await waitFor(() => {
       expect(failAdapter.start).toHaveBeenCalledTimes(1)
@@ -823,7 +824,109 @@ describe("installConnectorRuntime", () => {
       expect.objectContaining({ adapterId: okRow.id, kind: "adapter.started" })
     )
     expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(onBootstrapped).toHaveBeenCalledWith({ ok: true }))
     errSpy.mockRestore()
+  })
+
+  it("finishes installation while an individual adapter is still starting", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_deferred_start")
+    const adapter = makeFakeAdapter(row.id)
+    let finishStart!: () => void
+    adapter.start.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStart = resolve
+        })
+    )
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    const onBootstrapped = jest.fn()
+    const subscribeAdapterChanges = jest.fn(() => jest.fn())
+    install({ onBootstrapped, subscribeAdapterChanges })
+
+    try {
+      await waitFor(() => expect(adapter.start).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(onBootstrapped).toHaveBeenCalledWith({ ok: true }))
+      expect(subscribeAdapterChanges).toHaveBeenCalledTimes(1)
+      // The runner deadletters unknown adapters, so queued messages must wait
+      // until the initial adapter pass has settled even though installation is ready.
+      expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+      expect(mockStartWorkflowBridge).toHaveBeenCalledTimes(1)
+      expect(mockRegisterAdapter).not.toHaveBeenCalled()
+    } finally {
+      finishStart()
+    }
+    await waitFor(() => expect(mockRegisterAdapter).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1))
+  })
+
+  it("does not wait for item recovery before reporting installation success", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockListEnabled.mockResolvedValue([])
+    let finishRecovery!: () => void
+    mockResumeDurableInboundJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRecovery = () => resolve({ resumed: 0, recoveryRequired: 0 })
+        })
+    )
+    const onBootstrapped = jest.fn()
+    const dispose = install({ onBootstrapped })
+    try {
+      await waitFor(() => expect(mockResumeDurableInboundJobs).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(onBootstrapped).toHaveBeenCalledWith({ ok: true }))
+      await dispose()
+    } finally {
+      finishRecovery()
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockRecoverActiveConversationHistory).not.toHaveBeenCalled()
+    expect(mockStartServer).not.toHaveBeenCalled()
+    expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+  })
+
+  it("reports a global subscription installation failure before starting individual adapters", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockListEnabled.mockResolvedValue([makeTelegramRow("cai_uninstalled")])
+    const onBootstrapped = jest.fn()
+    const error = new Error("adapter watcher unavailable")
+    install({
+      onBootstrapped,
+      log: jest.fn(),
+      subscribeAdapterChanges: () => {
+        throw error
+      },
+    })
+    await waitFor(() => expect(onBootstrapped).toHaveBeenCalledWith({ ok: false, error }))
+    expect(onBootstrapped).not.toHaveBeenCalledWith({ ok: true })
+    expect(mockBuildAdapterFromRow).not.toHaveBeenCalled()
+  })
+
+  it("fences an adapter that finishes starting after runtime disposal", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_disposed_start")
+    const adapter = makeFakeAdapter(row.id)
+    let finishStart!: () => void
+    adapter.start.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStart = resolve
+        })
+    )
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    const onBootstrapped = jest.fn()
+    const dispose = install({ onBootstrapped })
+    await waitFor(() => expect(adapter.start).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(onBootstrapped).toHaveBeenCalledWith({ ok: true }))
+    const disposed = dispose()
+    finishStart()
+    await disposed
+    expect(mockRegisterAdapter).not.toHaveBeenCalled()
+    expect(adapter.stop).toHaveBeenCalled()
+    expect(mockResumeDurableInboundJobs).not.toHaveBeenCalled()
+    expect(mockStartOutboundRunner).not.toHaveBeenCalled()
   })
 
   it("calls adapter.stop() on dispose for every started adapter", async () => {
@@ -1370,8 +1473,10 @@ describe("installConnectorRuntime", () => {
   it("reports a detached bootstrap failure through the log sink", async () => {
     mockedIsTauri.mockReturnValue(true)
     const log = jest.fn()
+    const onBootstrapped = jest.fn()
     install({
       log,
+      onBootstrapped,
       acquireRuntimeLock: async () => {
         throw new Error("lock failed")
       },
@@ -1382,6 +1487,7 @@ describe("installConnectorRuntime", () => {
         expect.stringContaining("runtime bootstrap failed: lock failed")
       )
     )
+    expect(onBootstrapped).toHaveBeenCalledWith({ ok: false, error: expect.any(Error) })
   })
 
   describe("hot-reconciles the enabled-adapter set (no restart)", () => {

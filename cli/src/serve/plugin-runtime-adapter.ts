@@ -1,5 +1,7 @@
 /** Node adapter for the headless PluginManager lifecycle. */
 
+import { loggers } from "@cognia/logging"
+
 import type { HeadlessPluginRuntimeAdapter } from "@/lib/headless/types"
 import type { PluginManifest } from "@/types/plugin"
 
@@ -123,7 +125,11 @@ export function createNodePluginRuntimeAdapter(
           entry.manifest.type === "hybrid" ||
           entry.manifest.type === "vscode-extension"
         ) {
-          await reconcile({ action: "installed", pluginId: entry.id })
+          try {
+            await reconcile({ action: "installed", pluginId: entry.id })
+          } catch (error) {
+            loggers.plugin.error(`Headless plugin activation failed: ${entry.id}`, error)
+          }
         }
       }
     },

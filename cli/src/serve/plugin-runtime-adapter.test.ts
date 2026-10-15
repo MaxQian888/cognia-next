@@ -175,3 +175,28 @@ it("rejects a missing or unsupported installed manifest instead of silently degr
     unsupported.adapter.reconcile({ action: "installed", pluginId: "demo" })
   ).rejects.toThrow('Plugin type "future-native" is unavailable')
 })
+
+it("isolates one native plugin activation failure and continues booting other plugins", async () => {
+  const entries: DiskPluginEntry[] = ["broken", "healthy"].map((id) => ({
+    id,
+    dir: `/data/${id}`,
+    supported: false,
+    manifest: { ...manifest, id, type: "python", pythonMain: "main.py" },
+  }))
+  const enablePlugin = jest.fn(async (id: string) => {
+    if (id === "broken") throw new Error("plugin activation failed")
+  })
+  const adapter = createNodePluginRuntimeAdapter({
+    ensure: async () => ({ ok: true, toolCount: 0 }),
+    discover: async () => entries,
+    manager: async () => ({
+      registerDiskPlugin: jest.fn(),
+      loadPlugin: jest.fn(),
+      enablePlugin,
+      unloadPlugin: jest.fn(),
+    }),
+    store: async () => ({ plugins: {}, uninstallPlugin: jest.fn() }),
+  })
+  await expect(adapter.start()).resolves.toBeUndefined()
+  expect(enablePlugin.mock.calls).toEqual([["broken"], ["healthy"]])
+})

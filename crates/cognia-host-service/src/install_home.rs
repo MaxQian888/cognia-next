@@ -153,6 +153,9 @@ pub struct PendingUpdate {
     /// Boots of `to` so far.
     #[serde(default)]
     pub boots: u32,
+    /// Required runtime failures observed before replacing the old version.
+    #[serde(default)]
+    pub baseline_failed_required_runtimes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -404,6 +407,7 @@ impl InstallHome {
         to: &str,
         now_ms: i64,
         trial_ms: i64,
+        baseline_failed_required_runtimes: Vec<String>,
     ) -> Result<PendingUpdate, InstallHomeError> {
         let from = self
             .current_version()
@@ -421,6 +425,7 @@ impl InstallHome {
             started_at_ms: now_ms,
             deadline_ms: now_ms + trial_ms,
             boots: 0,
+            baseline_failed_required_runtimes,
         };
         write_json(&self.root.join(PENDING_FILE), &pending)?;
         if let Err(error) = self.point_current_at(to) {
@@ -800,7 +805,9 @@ mod tests {
             .unwrap();
         std::fs::create_dir_all(home.version_dir("1.3.0")).unwrap();
 
-        let pending = home.begin_switch(VERSION_B, 1_000, 60_000).unwrap();
+        let pending = home
+            .begin_switch(VERSION_B, 1_000, 60_000, vec!["connector-runtime".into()])
+            .unwrap();
         assert_eq!(
             (pending.from.as_str(), pending.to.as_str()),
             (VERSION_A, VERSION_B)
@@ -812,6 +819,14 @@ mod tests {
             panic!("expected a trial");
         };
         assert_eq!(trial.boots, 1);
+        assert_eq!(
+            trial.baseline_failed_required_runtimes,
+            vec!["connector-runtime"]
+        );
+        assert_eq!(
+            home.pending().unwrap().baseline_failed_required_runtimes,
+            trial.baseline_failed_required_runtimes
+        );
         let outcome = home.commit(3_000).unwrap().unwrap();
         assert_eq!(outcome.result, UpdateResult::Installed);
         assert_eq!(home.pending(), None);
@@ -821,12 +836,23 @@ mod tests {
     }
 
     #[test]
+    fn old_pending_updates_default_to_no_known_runtime_failures() {
+        let pending: PendingUpdate = serde_json::from_value(serde_json::json!({
+            "attemptId": "old", "from": VERSION_A, "to": VERSION_B,
+            "startedAtMs": 1, "deadlineMs": 2, "boots": 0
+        }))
+        .unwrap();
+        assert!(pending.baseline_failed_required_runtimes.is_empty());
+    }
+
+    #[test]
     fn a_failed_trial_rolls_current_back() {
         let (tmp, home) = adopted();
         let (archive, sha) = write_archive(tmp.path(), VERSION_B, |_| {});
         home.stage_archive(&archive, &expected(VERSION_B, sha))
             .unwrap();
-        home.begin_switch(VERSION_B, 1_000, 60_000).unwrap();
+        home.begin_switch(VERSION_B, 1_000, 60_000, Vec::new())
+            .unwrap();
         let outcome = home
             .roll_back("the brain was refused", 2_000)
             .unwrap()
@@ -846,7 +872,8 @@ mod tests {
         home.stage_archive(&archive, &expected(VERSION_B, sha))
             .unwrap();
 
-        home.begin_switch(VERSION_B, 1_000, 60_000).unwrap();
+        home.begin_switch(VERSION_B, 1_000, 60_000, Vec::new())
+            .unwrap();
         for boot in 1..=MAX_TRIAL_BOOTS {
             assert!(
                 matches!(home.boot(VERSION_B, 2_000).unwrap(), BootDecision::Trial(p) if p.boots == boot)
@@ -858,7 +885,8 @@ mod tests {
         assert!(outcome.reason.unwrap().contains("kept exiting"));
         assert_eq!(home.current_version().as_deref(), Some(VERSION_A));
 
-        home.begin_switch(VERSION_B, 10_000, 60_000).unwrap();
+        home.begin_switch(VERSION_B, 10_000, 60_000, Vec::new())
+            .unwrap();
         let BootDecision::RolledBack(outcome) = home.boot(VERSION_B, 80_000).unwrap() else {
             panic!("expected a rollback");
         };
@@ -871,7 +899,8 @@ mod tests {
         let (archive, sha) = write_archive(tmp.path(), VERSION_B, |_| {});
         home.stage_archive(&archive, &expected(VERSION_B, sha))
             .unwrap();
-        home.begin_switch(VERSION_B, 1_000, 60_000).unwrap();
+        home.begin_switch(VERSION_B, 1_000, 60_000, Vec::new())
+            .unwrap();
         // The old binary came up instead of the new one.
         assert_eq!(home.boot(VERSION_A, 2_000).unwrap(), BootDecision::Steady);
         assert_eq!(home.current_version().as_deref(), Some(VERSION_A));
@@ -885,8 +914,8 @@ mod tests {
     #[test]
     fn a_switch_needs_a_staged_version_and_a_different_one() {
         let (_tmp, home) = adopted();
-        assert!(home.begin_switch(VERSION_A, 0, 1).is_err());
-        assert!(home.begin_switch(VERSION_B, 0, 1).is_err());
+        assert!(home.begin_switch(VERSION_A, 0, 1, Vec::new()).is_err());
+        assert!(home.begin_switch(VERSION_B, 0, 1, Vec::new()).is_err());
         assert!(home.point_current_at("../escape").is_err());
         assert_eq!(home.pending(), None);
     }

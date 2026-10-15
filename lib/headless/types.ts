@@ -114,9 +114,13 @@ export interface HeadlessPluginRuntimeAdapter {
   stop?(): Promise<void> | void
 }
 
+export type HeadlessRuntimeCriticality = "required" | "optional"
+
 export interface HeadlessRuntime {
   /** Unique name (kebab-case), e.g. `"desktop-sync-source"`. */
   name: string
+  /** Required runtimes gate host readiness; optional failures reduce functionality. */
+  criticality: HeadlessRuntimeCriticality
   /** Hosts this runtime starts on. */
   hosts: HeadlessHost[]
   /**

@@ -465,16 +465,23 @@ async function waitForServerHealthz() {
   fatal(`${SERVER_URL}/healthz did not become healthy in 120s`)
 }
 
-async function waitForBrainReady() {
-  for (let i = 0; i < 60; i++) {
-    const res = await fetch(`${SERVER_URL}/healthz`).catch(() => null)
-    if (res?.ok) {
+/** Readiness includes bootstrap completion and required runtimes, unlike bridge hello. */
+export async function waitForBrainReady({ tries = 60, intervalMs = 2000 } = {}) {
+  let lastChecks
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch(`${SERVER_URL}/readyz`)
       const body = await res.json()
-      if (body?.brain?.ready === true) return body
+      if (res.ok && body?.status === "ready") return body
+      lastChecks = body?.checks
+    } catch {
+      // The HTTP server or its brain may still be starting.
     }
-    await delay(2000)
+    await delay(intervalMs)
   }
-  fatal("brain never completed the bridge hello (healthz brain.ready stayed false)")
+  throw new Error(
+    `host required runtimes never became ready (/readyz): ${JSON.stringify(lastChecks ?? {})}`
+  )
 }
 
 async function pairDevice() {
@@ -1057,9 +1064,10 @@ async function tierServer() {
   )
   check(health?.brain?.configured === true, "healthz reports a configured brain")
   const ready = await waitForBrainReady()
-  check(ready.brain.ready === true, "brain completed the bridge hello")
-  check(typeof ready.sidecar?.restart_count === "number", "healthz reports the sidecar block")
-  await headlessContractGuards(ready)
+  check(ready.status === "ready", "host bootstrap and required runtimes are ready")
+  const diagnostics = await waitForServerHealthz()
+  check(typeof diagnostics.sidecar?.restart_count === "number", "healthz reports the sidecar block")
+  await headlessContractGuards(diagnostics)
 
   const auth = await pairDevice()
   if (!auth) {

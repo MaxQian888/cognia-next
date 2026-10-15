@@ -157,6 +157,7 @@ function configureHeadlessExporters(environment: Env): HeadlessExporters {
 
 registerHeadlessRuntime({
   name: "behavior-telemetry",
+  criticality: "optional",
   hosts: ["brain"],
   start: async (ctx) => {
     const { remoteConfigured: remoteExporterConfigured, posthogSkipped } =

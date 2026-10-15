@@ -39,6 +39,11 @@ it("registers the plan.respond command in the brain and unregisters it on stop",
   installPlanNotificationActionsMock.mockReturnValue(dispose)
   const bootstrap = await loadFresh()
   const result = await bootstrap(makeContext())
+  expect(result.status()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "plan-notification", criticality: "optional" }),
+    ])
+  )
 
   expect(result.failed).toEqual([])
   expect(result.started).toContain("plan-notification")

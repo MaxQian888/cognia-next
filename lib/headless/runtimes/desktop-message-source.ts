@@ -14,6 +14,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "desktop-message-source",
+  criticality: "required",
   hosts: ["brain"],
   start: async (ctx) => {
     const unsubMessages = await installDesktopMessageSource({ bridge: ctx.bridge })

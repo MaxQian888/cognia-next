@@ -11,6 +11,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "host-event-publisher",
+  criticality: "required",
   hosts: ["brain"],
   start: (ctx) =>
     setHostEventPublisher(async (topic, event) => {

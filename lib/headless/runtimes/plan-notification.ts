@@ -19,6 +19,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "plan-notification",
+  criticality: "optional",
   hosts: ["brain"],
   start: async () => {
     const { installPlanNotificationActions } = await import("@/lib/agent/plan/notify")

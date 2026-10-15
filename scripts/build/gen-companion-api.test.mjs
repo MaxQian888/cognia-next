@@ -521,6 +521,28 @@ test("refuses to emit an AsyncAPI that does not cover every bridge frame", () =>
   )
 })
 
+test("runtime health schemas admit legacy and bootstrap-aware brains", () => {
+  const inspected = inspectCommittedContract()
+  const asyncApi = parseYaml(inspected.desiredHeadlessAsyncApiSource)
+  const fixtures = JSON.parse(inspected.desiredBridgeFixtureSource).frames
+  const validatePong = new Ajv2020({ strict: false }).compile(
+    asyncApi.components.messages.BridgePongFrame.payload,
+  )
+  for (const pong of [fixtures.pong, fixtures.pongRuntimeHealth]) {
+    assert.equal(validatePong(pong), true, JSON.stringify(validatePong.errors))
+  }
+  assert.equal(validatePong({ ...fixtures.pong, bootstrapped: "yes" }), false)
+  const responses = JSON.parse(readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"))
+  const runtimeSchema = responses.$defs.HostRuntime
+  const validateRuntime = new Ajv2020({ strict: false }).compile(runtimeSchema)
+  const runtime = { name: "scheduler", state: "failed", restartable: true, restarts: 0 }
+  for (const criticality of [undefined, "required", "optional"]) {
+    assert.equal(validateRuntime({ ...runtime, ...(criticality ? { criticality } : {}) }), true)
+  }
+  assert.equal(validateRuntime({ ...runtime, criticality: "unknown" }), false)
+  assert.equal(validateRuntime({ ...runtime, unexpected: true }), false)
+})
+
 test("generates one drift-free identity for HTTP, WebSocket, CLI, and bridge consumers", () => {
   const inspected = inspectCommittedContract()
   const catalog = inspected.desiredHostCommandCatalog

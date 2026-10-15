@@ -70,6 +70,11 @@ describe("desktop-sync-source headless smoke", () => {
 
       const { bridge, listeners, invocations } = makeBridge()
       const result = await bootstrapHeadlessRuntimes(makeCtx(bridge))
+      expect(result.status()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "desktop-sync-source", criticality: "required" }),
+        ])
+      )
       expect(result.failed).toEqual([])
       expect(result.started).toContain("desktop-sync-source")
       expect(listeners.has("companion://sync-pull-request")).toBe(true)

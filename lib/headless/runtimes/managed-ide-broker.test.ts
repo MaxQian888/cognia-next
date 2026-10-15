@@ -51,6 +51,7 @@ describe("managed IDE headless runtime", () => {
 
     expect(registration).toMatchObject({
       name: "managed-ide-broker",
+      criticality: "optional",
       hosts: ["brain"],
     })
     expect(ManagedIdeBrokerRuntime).toHaveBeenCalledWith(

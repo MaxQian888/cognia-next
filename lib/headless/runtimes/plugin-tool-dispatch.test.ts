@@ -11,12 +11,21 @@ jest.mock("@/lib/claude/plugin-tool-dispatch-bridge", () => ({
 it("awaits the shared bridge before connector startup and stops it before the plugin host", async () => {
   const order: string[] = []
   let installed!: (stop: () => void) => void
-  jest
-    .mocked(subscribePluginToolDispatchBridge)
-    .mockImplementation(() => new Promise((resolve) => (installed = resolve)))
+  let reachedBridge!: () => void
+  const bridgeInstalling = new Promise<void>((resolve) => {
+    reachedBridge = resolve
+  })
+  jest.mocked(subscribePluginToolDispatchBridge).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        installed = resolve
+        reachedBridge()
+      })
+  )
   __resetHeadlessRuntimesForTesting()
   registerHeadlessRuntime({
     name: "plugin-runtime",
+    criticality: "required",
     hosts: ["brain"],
     start: () => {
       order.push("plugins:start")
@@ -28,6 +37,7 @@ it("awaits the shared bridge before connector startup and stops it before the pl
   await import("./plugin-tool-dispatch")
   registerHeadlessRuntime({
     name: "connector-runtime",
+    criticality: "required",
     hosts: ["brain"],
     start: () => {
       order.push("connectors:start")
@@ -49,7 +59,7 @@ it("awaits the shared bridge before connector startup and stops it before the pl
     log: () => {},
   }
   const booting = bootstrapHeadlessRuntimes(ctx)
-  await Promise.resolve()
+  await bridgeInstalling
   expect(order).toEqual(["plugins:start"])
   expect(subscribePluginToolDispatchBridge).toHaveBeenCalledTimes(1)
   order.push("bridge:start")
@@ -58,6 +68,7 @@ it("awaits the shared bridge before connector startup and stops it before the pl
   })
   const runtime = await booting
   expect(runtime.failed).toEqual([])
+  expect(runtime.status().every((entry) => entry.criticality === "required")).toBe(true)
   expect(runtime.started).toEqual(["plugin-runtime", "plugin-tool-dispatch", "connector-runtime"])
   await runtime.stop()
   await runtime.stop()

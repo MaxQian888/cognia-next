@@ -28,6 +28,7 @@ import { registerHeadlessRuntime } from "../registry"
 
 registerHeadlessRuntime({
   name: "collab-refresh",
+  criticality: "optional",
   hosts: ["brain"],
   start: (ctx) => {
     let stopped = false

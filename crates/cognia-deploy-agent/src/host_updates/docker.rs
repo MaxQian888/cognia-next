@@ -36,8 +36,6 @@ const DOCKER_ENV: [&str; 8] = [
     "DOCKER_TLS_VERIFY",
     "XDG_RUNTIME_DIR",
 ];
-/// `up --wait` gives the server this long to report healthy.
-const UP_WAIT_SECS: &str = "300";
 
 /// The server container, and how Compose started it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,11 +114,50 @@ pub fn repository_of(reference: &str) -> &str {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Readiness {
     Ready,
+    /// A modern response separates runtime failures from all other checks.
+    RuntimeHealth {
+        failed_required: Vec<String>,
+        otherwise_ready: bool,
+        baseline_ready: bool,
+    },
     /// Its brain was refused: a server and brain from different builds,
     /// which waiting will not fix (ADR-0224 A10a).
     Refused(String),
-    /// Not ready yet, or not answering.
+    /// A valid response says the server is not ready yet.
     NotReady(String),
+    /// No trustworthy status was received; never assume its failure baseline is empty.
+    Unavailable(String),
+}
+
+impl Readiness {
+    pub fn failed_required(&self) -> Result<Vec<String>, String> {
+        match self {
+            Self::RuntimeHealth { failed_required, baseline_ready: true, .. } => Ok(failed_required.clone()),
+            Self::RuntimeHealth { .. } => Err("cannot record runtime failures until the brain is connected, bootstrapped and required restarts complete".into()),
+            Self::Unavailable(reason) => Err(format!(
+                "could not record required runtime failures before update: {reason}"
+            )),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// Exempt only the named failures observed before the update. Bootstrap,
+    /// restart, storage, drain, bridge and every other readiness check still apply.
+    pub fn for_trial(self, baseline: &[String]) -> Self {
+        match self {
+            Self::RuntimeHealth {
+                failed_required,
+                otherwise_ready,
+                ..
+            } if otherwise_ready && failed_required.iter().all(|name| baseline.contains(name)) => {
+                Self::Ready
+            }
+            Self::RuntimeHealth { .. } => {
+                Self::NotReady("required runtime or host checks are not ready".into())
+            }
+            other => other,
+        }
+    }
 }
 
 /// Read `/readyz`'s JSON body.
@@ -132,10 +169,97 @@ pub fn readiness_of(body: &Value) -> Readiness {
             .unwrap_or("refused");
         return Readiness::Refused(reason.to_owned());
     }
+    if !matches!(
+        body.get("status").and_then(Value::as_str),
+        Some("ready" | "not_ready")
+    ) {
+        return Readiness::Unavailable("readyz answered without a recognized status".into());
+    }
+    if let Some(checks) = body.get("checks").and_then(Value::as_object) {
+        if [
+            "bootstrapped",
+            "requiredRuntimes",
+            "failedRequiredRuntimes",
+            "restartingRequiredRuntimes",
+        ]
+        .iter()
+        .any(|name| checks.contains_key(*name))
+        {
+            let Some(failed_required) = checks
+                .get("failedRequiredRuntimes")
+                .and_then(Value::as_array)
+                .and_then(|names| {
+                    names
+                        .iter()
+                        .map(|name| name.as_str().map(str::to_owned))
+                        .collect::<Option<Vec<_>>>()
+                })
+            else {
+                return Readiness::Unavailable(
+                    "readyz answered with invalid required failures".into(),
+                );
+            };
+            if checks
+                .get("bootstrapped")
+                .and_then(Value::as_bool)
+                .is_none()
+                || checks
+                    .get("requiredRuntimes")
+                    .and_then(Value::as_bool)
+                    .is_none()
+                || !checks
+                    .get("restartingRequiredRuntimes")
+                    .and_then(Value::as_array)
+                    .is_some_and(|names| names.iter().all(Value::is_string))
+            {
+                return Readiness::Unavailable(
+                    "readyz answered with incomplete runtime health".into(),
+                );
+            }
+            // Require the entire known check set and validate future checks too:
+            // a baseline must never mask a different reason for not being ready.
+            let otherwise_ready = [
+                "acceptingWrites",
+                "storage",
+                "brain",
+                "sidecar",
+                "gateway",
+                "configRevision",
+                "headlessContract",
+                "bootstrapped",
+            ]
+            .iter()
+            .all(|name| checks.get(*name).and_then(Value::as_bool) == Some(true))
+                && checks.get("draining").and_then(Value::as_bool) == Some(false)
+                && checks.get("requiredRuntimes").and_then(Value::as_bool)
+                    == Some(failed_required.is_empty())
+                && checks.iter().all(|(name, value)| match name.as_str() {
+                    "failedRequiredRuntimes" | "requiredRuntimes" => true,
+                    "restartingRequiredRuntimes" => value.as_array().is_some_and(Vec::is_empty),
+                    "draining" => value.as_bool() == Some(false),
+                    _ => value.as_bool() == Some(true),
+                })
+                && checks
+                    .get("restartingRequiredRuntimes")
+                    .and_then(Value::as_array)
+                    .is_some_and(Vec::is_empty);
+            return Readiness::RuntimeHealth {
+                failed_required,
+                otherwise_ready,
+                baseline_ready: checks.get("brain").and_then(Value::as_bool) == Some(true)
+                    && checks.get("bootstrapped").and_then(Value::as_bool) == Some(true)
+                    && checks
+                        .get("restartingRequiredRuntimes")
+                        .and_then(Value::as_array)
+                        .is_some_and(Vec::is_empty),
+            };
+        }
+    }
     match body.get("status").and_then(Value::as_str) {
         Some("ready") => Readiness::Ready,
-        Some(other) => Readiness::NotReady(other.to_owned()),
-        None => Readiness::NotReady("readyz answered without a status".into()),
+        Some("not_ready") => Readiness::NotReady("not_ready".into()),
+        Some(other) => Readiness::Unavailable(format!("unknown readyz status: {other}")),
+        None => Readiness::Unavailable("readyz answered without a status".into()),
     }
 }
 
@@ -205,7 +329,7 @@ pub trait ComposeHost: Send + Sync {
     async fn resolved_image(&self, at: &ServerContainer, image: &str) -> Result<String, String>;
     async fn pull(&self, at: &ServerContainer, image: &str) -> Result<(), String>;
     /// Recreate only the server, with `image` pinned (or the env file's own
-    /// value when `None`), and wait for its health check.
+    /// value when `None`). The trial supervisor owns readiness and its deadline.
     async fn recreate(&self, at: &ServerContainer, image: Option<&str>) -> Result<(), String>;
     /// Ask the running server's `/readyz` from inside its container.
     async fn readiness(&self, at: &ServerContainer) -> Readiness;
@@ -365,16 +489,10 @@ impl ComposeHost for DockerCli {
 
     async fn recreate(&self, at: &ServerContainer, image: Option<&str>) -> Result<(), String> {
         let mut command = self.compose(at, image);
+        // Waiting on Compose health here would reject a pre-existing required
+        // failure before the baseline-aware trial gets a chance to assess it.
         command
-            .args([
-                "up",
-                "-d",
-                "--no-deps",
-                "--no-build",
-                "--wait",
-                "--wait-timeout",
-            ])
-            .arg(UP_WAIT_SECS)
+            .args(["up", "-d", "--no-deps", "--no-build"])
             .arg(&at.service);
         run(command, Duration::from_secs(10 * 60)).await.map(|_| ())
     }
@@ -389,9 +507,9 @@ impl ComposeHost for DockerCli {
         match run(command, Duration::from_secs(20)).await {
             Ok(body) => match serde_json::from_str::<Value>(&body) {
                 Ok(body) => readiness_of(&body),
-                Err(_) => Readiness::NotReady("readyz did not answer JSON".into()),
+                Err(_) => Readiness::Unavailable("readyz did not answer JSON".into()),
             },
-            Err(error) => Readiness::NotReady(error),
+            Err(error) => Readiness::Unavailable(error),
         }
     }
 }
@@ -498,7 +616,143 @@ mod tests {
             readiness_of(&json!({"status": "not_ready"})),
             Readiness::NotReady(_)
         ));
-        assert!(matches!(readiness_of(&json!({})), Readiness::NotReady(_)));
+        assert!(matches!(
+            readiness_of(&json!({})),
+            Readiness::Unavailable(_)
+        ));
+    }
+
+    fn required_failure() -> Value {
+        json!({ "status": "not_ready", "checks": {
+            "draining": false, "acceptingWrites": true, "storage": true,
+            "brain": true, "sidecar": true, "gateway": true,
+            "configRevision": true, "headlessContract": true, "bootstrapped": true,
+            "requiredRuntimes": false, "failedRequiredRuntimes": ["connector-runtime"],
+            "restartingRequiredRuntimes": []
+        }})
+    }
+
+    #[test]
+    fn only_baseline_required_failures_are_exempted_for_trials() {
+        let response = required_failure();
+        let readiness = readiness_of(&response);
+        assert_eq!(
+            readiness.failed_required().unwrap(),
+            vec!["connector-runtime"]
+        );
+        assert_eq!(
+            readiness.clone().for_trial(&["connector-runtime".into()]),
+            Readiness::Ready
+        );
+        assert!(matches!(readiness.for_trial(&[]), Readiness::NotReady(_)));
+        let mut new_failure = response;
+        new_failure["checks"]["failedRequiredRuntimes"] = json!(["connector-runtime", "scheduler"]);
+        assert!(matches!(
+            readiness_of(&new_failure).for_trial(&["connector-runtime".into()]),
+            Readiness::NotReady(_)
+        ));
+    }
+
+    #[test]
+    fn baseline_failures_do_not_mask_bootstrap_restarts_or_other_checks() {
+        let baseline = vec!["connector-runtime".into()];
+        for (name, value) in [
+            ("bootstrapped", json!(false)),
+            ("brain", json!(false)),
+            ("storage", json!(false)),
+            ("acceptingWrites", json!(false)),
+            ("draining", json!(true)),
+            ("configRevision", json!(false)),
+            ("headlessContract", json!(false)),
+            ("sidecar", json!(false)),
+            ("gateway", json!(false)),
+            ("futureCheck", json!(false)),
+            ("restartingRequiredRuntimes", json!(["connector-runtime"])),
+        ] {
+            let mut response = required_failure();
+            response["checks"][name] = value;
+            assert!(
+                matches!(
+                    readiness_of(&response).for_trial(&baseline),
+                    Readiness::NotReady(_)
+                ),
+                "{name}"
+            );
+        }
+        let mut malformed = required_failure();
+        malformed["checks"]["failedRequiredRuntimes"] = json!([1]);
+        assert!(matches!(
+            readiness_of(&malformed).for_trial(&baseline),
+            Readiness::Unavailable(_)
+        ));
+        let mut missing_failures = required_failure();
+        missing_failures["checks"]
+            .as_object_mut()
+            .unwrap()
+            .remove("failedRequiredRuntimes");
+        assert!(readiness_of(&missing_failures).failed_required().is_err());
+        let mut missing_bootstrap = required_failure();
+        missing_bootstrap["checks"]
+            .as_object_mut()
+            .unwrap()
+            .remove("bootstrapped");
+        assert!(readiness_of(&missing_bootstrap).failed_required().is_err());
+        let mut missing_status = required_failure();
+        missing_status.as_object_mut().unwrap().remove("status");
+        assert!(readiness_of(&missing_status).failed_required().is_err());
+        let mut missing_check = required_failure();
+        missing_check["checks"]
+            .as_object_mut()
+            .unwrap()
+            .remove("storage");
+        assert!(matches!(
+            readiness_of(&missing_check).for_trial(&baseline),
+            Readiness::NotReady(_)
+        ));
+    }
+
+    #[test]
+    fn incomplete_runtime_reports_cannot_be_saved_as_update_baselines() {
+        for (name, value) in [
+            ("bootstrapped", json!(false)),
+            ("brain", json!(false)),
+            ("restartingRequiredRuntimes", json!(["scheduler"])),
+        ] {
+            let mut response = required_failure();
+            response["checks"][name] = value;
+            assert!(readiness_of(&response).failed_required().is_err(), "{name}");
+        }
+        let mut drained = required_failure();
+        drained["checks"]["draining"] = json!(true);
+        drained["checks"]["acceptingWrites"] = json!(false);
+        assert_eq!(
+            readiness_of(&drained).failed_required().unwrap(),
+            vec!["connector-runtime"]
+        );
+    }
+
+    #[test]
+    fn legacy_and_optional_failures_keep_their_readiness_behavior() {
+        let legacy =
+            json!({ "status": "ready", "degraded": true, "failedRuntimes": ["scheduler"] });
+        assert_eq!(readiness_of(&legacy).for_trial(&[]), Readiness::Ready);
+        // Older servers can be drained while recording the update baseline.
+        let old_draining = json!({ "status": "not_ready", "checks": { "draining": true, "acceptingWrites": false } });
+        assert!(readiness_of(&old_draining)
+            .failed_required()
+            .unwrap()
+            .is_empty());
+        assert!(matches!(
+            readiness_of(&old_draining).for_trial(&[]),
+            Readiness::NotReady(_)
+        ));
+        let mut optional = required_failure();
+        optional["status"] = json!("ready");
+        optional["checks"]["requiredRuntimes"] = json!(true);
+        optional["checks"]["failedRequiredRuntimes"] = json!([]);
+        optional["failedRuntimes"] = json!(["backup-scheduler"]);
+        optional["degraded"] = json!(true);
+        assert_eq!(readiness_of(&optional).for_trial(&[]), Readiness::Ready);
     }
 
     #[test]
