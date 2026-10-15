@@ -1414,8 +1414,32 @@ test("Git fetch admits exact SHA acquisition on the service and device contracts
     for (const refspec of [undefined, "a".repeat(40), "b".repeat(64)]) {
       assert.equal(validate({ ...base, remote: "origin", ...(refspec ? { refspec } : {}) }), true, JSON.stringify(validate.errors))
     }
-    for (const refspec of ["main", "HEAD:refs/heads/main", "--upload-pack=evil", "", null]) {
+    for (const refspec of ["HEAD:refs/heads/main", "--upload-pack=evil", "", null]) {
       assert.equal(validate({ ...base, refspec }), false)
     }
+  }
+})
+
+
+test("Git fetch admits credentialed branch and PR-head targets only on the service contract", () => {
+  const catalog = JSON.parse(readFileSync(new URL("../../protocol/companion-request-schemas.json", import.meta.url), "utf8"))
+  const service = new Ajv2020({ strict: false }).compile(catalog.servicePlaneCommands.git_fetch)
+  const device = new Ajv2020({ strict: false }).compile(catalog.commands.git_fetch)
+  const serviceBase = { repoPath: "/host/workspaces/run", remote: "origin", token: "test-token" }
+  const deviceBase = { workspaceId: "workspace", adminLease: "approved-lease", remote: "origin" }
+
+  // Credentialed service fetches use FetchTarget; the device contract stays
+  // SHA-only and never admits the service's one-shot credential.
+  for (const refspec of ["main", "feature/fix", "refs/heads/feature/fix", "refs/pull/7/head"]) {
+    assert.equal(service({ ...serviceBase, refspec }), true, JSON.stringify(service.errors))
+    assert.equal(device({ ...deviceBase, refspec }), false, refspec)
+    assert.equal(device({ ...deviceBase, refspec, token: "test-token" }), false, refspec)
+  }
+  for (const refspec of ["a".repeat(40), "b".repeat(64)]) {
+    assert.equal(service({ ...serviceBase, refspec }), true, JSON.stringify(service.errors))
+    assert.equal(device({ ...deviceBase, refspec, token: "test-token" }), false)
+  }
+  for (const refspec of ["HEAD:refs/heads/main", "--upload-pack=evil", "", null]) {
+    assert.equal(service({ ...serviceBase, refspec }), false, String(refspec))
   }
 })
