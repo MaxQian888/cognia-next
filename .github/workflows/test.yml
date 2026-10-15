@@ -182,7 +182,7 @@ jobs:
           retention-days: 1
       - name: Setup Rust for selected native integration tests
         if: steps.plan.outputs.native-helpers == 'true'
-        uses: dtolnay/rust-toolchain@1.99.0
+        uses: dtolnay/rust-toolchain@1.120.0
       - name: Cache Jest native helpers
         if: steps.plan.outputs.native-helpers == 'true'
         uses: Swatinem/rust-cache@v2
