@@ -1,0 +1,91 @@
+---
+title: "Side chat"
+description: "Ask a question beside a conversation without adding turns to it or interrupting its agent."
+---
+
+# Side chat
+
+A side chat is a small conversation attached to the one you are in. Use it to check something
+adjacent — "what did that grep find?", "is this the right file?" — without spending a turn in the
+main thread, adding noise to its history, or stopping an agent that is still working.
+
+The design follows Claude Code's `/btw`, the Codex app's `/side` and Cursor's side chats. Side
+chats are a desktop and web feature; the phone app does not have them.
+
+## Opening one
+
+| Way                         | What happens                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------ |
+| `/btw <question>`           | Opens the side chat and asks the question there. Works while the main agent is mid-turn.         |
+| `/side <question>`          | Same as `/btw`.                                                                                  |
+| `/btw` with no question     | Opens the side chat and puts the cursor in its composer.                                         |
+| <kbd>⌘</kbd> <kbd>;</kbd>   | Opens the side chat and focuses it; pressed inside the side chat, returns to the main composer. |
+| **Side chat** tab           | The tab in the chat's right-hand panel (also on the New Tab page).                               |
+| **Ask in an aside**         | Select text in a message; the passage is quoted into the side chat's composer.                   |
+| Branch dialog → **A new aside on this conversation** | Branches into a side chat instead of a new conversation. |
+
+On Windows and Linux the shortcut is <kbd>Ctrl</kbd> <kbd>;</kbd>. `/btw` and `/side` are not offered
+inside a side chat — side chats do not nest.
+
+## What the side chat knows
+
+Each side chat turn carries the recent part of the main conversation as reference material: the
+last 24 messages that say something, up to about 8,000 characters, with each tool call reduced to
+one line (what was called on what, and an excerpt of the result). The side chat is told that this
+transcript is reference only, and that it must answer your side question rather than continue the
+main task.
+
+The context is delivered incrementally. The first turn sends a snapshot; later turns send only what
+the main conversation said since, or nothing when it said nothing. A reply the main agent is still
+writing is marked as in progress and sent again once it is final. If the main conversation was
+edited, branched or cleared since, or the side chat was cleared, the side chat gets a fresh
+snapshot. This keeps every side chat turn cheap and lets the provider reuse its prompt cache.
+
+The transcript is sent to the model only. It is not stored in the side chat's messages, and it
+passes the same PII gate as every other model call.
+
+## Which agent answers
+
+A side chat runs on the same agent and model as its conversation, in the same working directory
+and sandbox, with the same tool and skill settings. It does not run teams or squads: a side chat
+always answers directly.
+
+### Read-only by default
+
+A new side chat is **read-only**: it can read, search and fetch, but cannot edit files, run
+commands, use MCP servers or start subagents. The toggle in the side chat's header switches it to
+**Can edit**, after a confirmation the first time. An editing side chat gets the main
+conversation's permissions — never more — and the choice is remembered per side chat.
+
+When the conversation runs on an [external agent](./external-agents), the side chat uses that
+agent's own read-only (plan) mode when the agent can enforce it. When it cannot, a read-only side
+chat runs on the built-in agent instead, and the header says so. Once editing is enabled, the side
+chat runs on the external agent with the conversation's permissions.
+
+## Bringing an answer back
+
+Every reply in a side chat has two actions:
+
+- **Bring back to the main conversation** quotes the reply into the main conversation's composer for you to edit and send.
+- **Send to main thread** sends the quoted reply as your message. If the main agent is running, it
+  arrives as a follow-up exactly like one you typed (delivered live where the agent supports it,
+  queued otherwise).
+
+If the main conversation's composer is not open, the text is saved to that conversation's draft
+and the notification says it was not sent.
+
+## Managing side chats
+
+A conversation can have several side chats; the switcher at the top of the panel lists them. Each
+can be renamed, cleared (its messages and delivered context are dropped, its settings kept),
+deleted, or **promoted** to an ordinary conversation in the sidebar. Promoting the first side chat
+keeps it as a conversation, and the next time you open the side chat a new one starts.
+
+Deleting a conversation deletes its side chats with it. Archiving keeps them for when the
+conversation is restored.
+
+## Related
+
+- [Slash commands](./slash-commands)
+- [References](./references) — quoting and **Ask in an aside**
+- [Context workbench](../ui/context-workbench) — the right-hand panel and its tabs

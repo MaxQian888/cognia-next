@@ -265,6 +265,7 @@ The slash-command subsystem **does not write to Dexie**. Three data sources:
 | `/reset`                   | Action   | Alias for `/clear` (CLI habit).                                                                                                 |
 | `/sessions`                | Action   | List all sessions (sorted by updatedAt descending), markdown table.                                                             |
 | `/resume <id or title>`    | Action   | Switch session by id / title substring.                                                                                         |
+| `/btw <question?>`         | Action   | Ask in the conversation's [side chat](./side-chat) without adding a turn here; works mid-turn. Alias: `/side`. Desktop and web. |
 | `/status`                  | Action   | Show effective config for current session + sidecar / API key / OAuth / MCP server health.                                      |
 | `/cost`                    | Action   | Cumulative tokens + estimated cost (USD) for current session.                                                                   |
 | `/context`                 | Action   | Message + token overview for current session.                                                                                   |

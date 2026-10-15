@@ -2776,6 +2776,132 @@ describe("execute / cancel", () => {
   })
 
   it.each(["execute", "streaming"])(
+    "%s clamps a resumed aside to its hard plan ceiling",
+    async (execution) => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ defaultPermissionMode: "bypassPermissions" }))
+      const existing = await currentMock.createSession()
+      existing.permissionMode = "bypassPermissions"
+      const options = {
+        sessionId: existing.id,
+        permissionMode: "bypassPermissions" as const,
+        permissionCeiling: { permissionMode: "plan" as const },
+      }
+      const execute = jest.spyOn(currentMock, "execute")
+      const prompt = jest.spyOn(currentMock, "prompt")
+      if (execution === "streaming") {
+        for await (const event of manager.executeStreaming("agent-1", "Question", options))
+          void event
+        expect(prompt).toHaveBeenCalledWith(
+          existing.id,
+          expect.anything(),
+          expect.objectContaining({ permissionMode: "plan" })
+        )
+      } else {
+        await manager.execute("agent-1", "Question", options)
+        expect(execute).toHaveBeenCalledWith(
+          existing.id,
+          expect.anything(),
+          expect.objectContaining({ permissionMode: "plan" })
+        )
+      }
+      expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith(existing.id, "plan")
+      expect(currentMock.sessions.size).toBe(1)
+    }
+  )
+
+  it("refuses an incapable hard-plan adapter before creating a session or dispatching", async () => {
+    const manager = freshManager()
+    currentMock.capabilities = { permissionModes: ["default"] } as never
+    await manager.addAgent(buildBaseConfig())
+    const execute = jest.spyOn(currentMock, "execute")
+    await expect(
+      manager.execute("agent-1", "Question", {
+        permissionCeiling: { permissionMode: "plan" },
+      })
+    ).rejects.toThrow("cannot enforce")
+    expect(currentMock.sessions.size).toBe(0)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it.each(["execute", "streaming"])(
+    "%s records a failed ceiling change before any prompt can run",
+    async (execution) => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig())
+      currentMock.setSessionModeImpl.mockRejectedValue(new Error("Mode refused"))
+      const execute = jest.spyOn(currentMock, "execute")
+      const prompt = jest.spyOn(currentMock, "prompt")
+      const options = { permissionCeiling: { permissionMode: "plan" as const } }
+      const dispatch = async () => {
+        if (execution === "streaming") {
+          for await (const event of manager.executeStreaming("agent-1", "Question", options))
+            void event
+        } else {
+          await manager.execute("agent-1", "Question", options)
+        }
+      }
+      await expect(dispatch()).rejects.toThrow("Mode refused")
+      expect(manager.getAgent("agent-1")?.status).toBe("failed")
+      expect(execute).not.toHaveBeenCalled()
+      expect(prompt).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["execute", "streaming"])(
+    "%s relocks Pi through its per-prompt policy without a mode setter",
+    async (execution) => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("pi-rpc", () => currentMock as never)
+      ;(currentMock as unknown as { setSessionMode: undefined }).setSessionMode = undefined
+      await manager.addAgent(
+        buildBaseConfig({ protocol: "pi-rpc", defaultPermissionMode: "acceptEdits" })
+      )
+      const existing = await currentMock.createSession()
+      existing.permissionMode = "acceptEdits"
+      const execute = jest.spyOn(currentMock, "execute")
+      const prompt = jest.spyOn(currentMock, "prompt")
+      const options = {
+        sessionId: existing.id,
+        permissionCeiling: { permissionMode: "plan" as const },
+      }
+      if (execution === "streaming") {
+        for await (const event of manager.executeStreaming("agent-1", "Read only", options))
+          void event
+        expect(prompt).toHaveBeenCalledWith(
+          existing.id,
+          expect.anything(),
+          expect.objectContaining({ permissionMode: "plan" })
+        )
+      } else {
+        await manager.execute("agent-1", "Read only", options)
+        expect(execute).toHaveBeenCalledWith(
+          existing.id,
+          expect.anything(),
+          expect.objectContaining({ permissionMode: "plan" })
+        )
+      }
+      expect(currentMock.setSessionModeImpl).not.toHaveBeenCalled()
+    }
+  )
+
+  it("refuses a resumed hard ceiling when the adapter cannot apply the new mode", async () => {
+    const manager = freshManager()
+    currentMock.capabilities = { permissionModes: ["plan"] } as never
+    await manager.addAgent(buildBaseConfig())
+    const existing = await currentMock.createSession()
+    ;(currentMock as unknown as { setSessionMode: undefined }).setSessionMode = undefined
+    const execute = jest.spyOn(currentMock, "execute")
+    await expect(
+      manager.execute("agent-1", "Read only", {
+        sessionId: existing.id,
+        permissionCeiling: { permissionMode: "plan" },
+      })
+    ).rejects.toThrow("cannot apply")
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it.each(["execute", "streaming"])(
     "%s sends the adapted Aider policy to the turn as well as the session",
     async (execution) => {
       const manager = freshManager()
@@ -3562,6 +3688,34 @@ describe("Cognia gateway task lifecycle", () => {
     }))
     return { manager, children, restorePlane }
   }
+
+  it.each(["execute", "streaming"])(
+    "%s preserves the aside's hard ceiling on the gateway child",
+    async (execution) => {
+      const { manager, children, restorePlane } = prepare()
+      try {
+        await manager.addAgent(managedConfig())
+        const options = {
+          permissionMode: "bypassPermissions" as const,
+          permissionCeiling: { permissionMode: "plan" as const },
+          context: { custom: { chatSessionId: "aside" } },
+        }
+        if (execution === "streaming") {
+          for await (const event of manager.executeStreaming("managed", "Question", options))
+            void event
+        } else {
+          await manager.execute("managed", "Question", options)
+        }
+        const child = children.at(-1)!
+        expect(children.length).toBeGreaterThan(1)
+        expect(child.lastSessionOptions?.permissionMode).toBe("plan")
+        expect(child.setSessionModeImpl).toHaveBeenCalledWith("s_1", "plan")
+        expect(mockGatewayRevoke).toHaveBeenCalled()
+      } finally {
+        restorePlane()
+      }
+    }
+  )
 
   it("hands a requested ticket ceiling to the gateway lease and only then", async () => {
     const { manager, restorePlane } = prepare()

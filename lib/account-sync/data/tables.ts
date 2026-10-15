@@ -123,6 +123,10 @@ const SESSION_FIELDS = {
   executionContext: "local",
   surfaceBinding: "local",
   surfaceBindingKey: "local",
+  // A side chat's edit grant and the parent context its SDK session already
+  // holds are both about this device's run, like the binding above.
+  asideWriteAccess: "local",
+  asideContextCursor: "local",
   powerPolicy: "local",
   sandboxEnabled: "local",
   workspaceConfinementEnabled: "local",

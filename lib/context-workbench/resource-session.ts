@@ -1,5 +1,9 @@
 import type { ChatSession, SessionSurfaceBinding } from "@cognia/agent-config-types"
 import type { ContextResource } from "@/types/context-workbench"
+import {
+  inheritableSessionConfig,
+  missingInheritedSessionConfig,
+} from "@/lib/chat/session-config-inheritance"
 
 export interface ResourceSessionRepository {
   get: (id: string) => Promise<ChatSession | undefined>
@@ -101,14 +105,28 @@ function bindingParts(binding: SessionSurfaceBinding): string[] {
  * `workbenchInstanceId`: the same conversation opened in a desktop dock and a
  * mobile sheet must land on the same thread, and every row written before
  * multi-aside support uses exactly this form. Additional asides get a minted id
- * from {@link newResourceWorkbenchSessionId} instead, so the primary one stays
- * addressable without a lookup.
+ * from {@link newResourceWorkbenchSessionId} instead. After promotion, ensure
+ * probes deterministic generation suffixes without modifying the promoted row.
  */
 export function resourceWorkbenchSessionId(
   binding: SessionSurfaceBinding,
   _workbenchInstanceId?: string
 ): string {
   return `resource-workbench:${surfaceBindingKey(binding)}`
+}
+
+/** Primary generations retain the initial primary's lifecycle protections. */
+export function isPrimaryResourceWorkbenchSessionId(
+  binding: SessionSurfaceBinding,
+  sessionId: string
+): boolean {
+  const primaryId = resourceWorkbenchSessionId(binding)
+  if (sessionId === primaryId) return true
+  const generationPrefix = `${primaryId}#primary:`
+  return (
+    sessionId.startsWith(generationPrefix) &&
+    /^[1-9]\d*$/.test(sessionId.slice(generationPrefix.length))
+  )
 }
 
 /**
@@ -143,15 +161,49 @@ export function promoteEmbeddedSessionPatch(): Partial<ChatSession> {
   }
 }
 
+/** Opening a legacy aside fills configuration gaps without resetting user choices. */
+export async function fillResourceSessionConfigGaps(
+  session: ChatSession,
+  binding: SessionSurfaceBinding,
+  repository: Pick<ResourceSessionRepository, "get" | "update">
+): Promise<ChatSession> {
+  if (binding.kind !== "session") return session
+  const parent = await repository.get(binding.sessionId)
+  if (!parent) return session
+  const patch = missingInheritedSessionConfig(session, parent)
+  if (Object.keys(patch).length === 0) return session
+  await repository.update(session.id, patch)
+  return { ...session, ...patch }
+}
+
+function wasPromoted(session: ChatSession): boolean {
+  return (
+    session.kind !== "resource-workbench" && !session.surfaceBinding && !session.surfaceBindingKey
+  )
+}
+
 export async function ensureResourceWorkbenchSession(
   binding: SessionSurfaceBinding,
   title: string,
   repository: ResourceSessionRepository,
   workbenchInstanceId?: string
 ): Promise<ChatSession> {
-  const id = resourceWorkbenchSessionId(binding, workbenchInstanceId)
+  const primaryId = resourceWorkbenchSessionId(binding, workbenchInstanceId)
+  let id = primaryId
   const bindingKey = surfaceBindingKey(binding)
-  const existing = (await repository.get(id)) ?? (await repository.findByBinding?.(binding))
+  let existing = await repository.get(id)
+  // Promotion preserves the old row and its permalinks. Deterministic generation
+  // ids let separate windows converge on the next primary without resurrecting
+  // any promoted conversation or selecting an unrelated additional aside.
+  let generation = 0
+  while (existing && wasPromoted(existing)) {
+    id = `${primaryId}#primary:${++generation}`
+    existing = await repository.get(id)
+  }
+  if (!existing && generation === 0) {
+    const bound = await repository.findByBinding?.(binding)
+    if (bound && !wasPromoted(bound)) existing = bound
+  }
   if (existing) {
     // `surfaceBindingKey` and `projectId` join the drift check: a row written
     // before v131 carries neither, and the workbench is the only place that
@@ -178,13 +230,15 @@ export async function ensureResourceWorkbenchSession(
         if (projectId !== undefined) patch.projectId = projectId
       }
       await repository.update(existing.id, patch)
-      return { ...existing, ...patch }
+      return fillResourceSessionConfigGaps({ ...existing, ...patch }, binding, repository)
     }
-    return existing
+    return fillResourceSessionConfigGaps(existing, binding, repository)
   }
 
   const now = repository.now?.() ?? Date.now()
+  const parent = binding.kind === "session" ? await repository.get(binding.sessionId) : undefined
   const session: ChatSession = {
+    ...(parent ? inheritableSessionConfig(parent, "aside") : {}),
     id,
     title,
     kind: "resource-workbench",

@@ -1,3 +1,4 @@
+import { attachResourceContext } from "./provider-context"
 import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 
@@ -12,19 +13,6 @@ export class WorkbenchPiiGateBlocked extends Error {
     super("Context Workbench provider payload failed the PII gate")
     this.name = "WorkbenchPiiGateBlocked"
   }
-}
-
-/**
- * Add private resource context to the provider-bound prompt. Callers must only
- * use this after plugin prompt hooks and visible-message construction so the
- * resource body never becomes part of the persisted user message.
- */
-function attachResourceContext(content: SendContent, resourceContext: string): SendContent {
-  if (!resourceContext) return content
-  const contextBlock = `[Current resource context]\n${resourceContext}\n\n[User instruction]\n`
-  return typeof content === "string"
-    ? `${contextBlock}${content}`
-    : [{ type: "text", text: contextBlock }, ...content]
 }
 
 function redactValue(value: unknown, seen: WeakMap<object, unknown>): unknown {
@@ -57,10 +45,11 @@ function redactValue(value: unknown, seen: WeakMap<object, unknown>): unknown {
  */
 export function gateWorkbenchProviderPayload<TMessage>(
   payload: WorkbenchProviderPayload<TMessage>,
-  resourceContext = ""
+  resourceContext = "",
+  header = "Current resource context"
 ): WorkbenchProviderPayload<TMessage> {
   const content = redactValue(
-    attachResourceContext(payload.content, resourceContext),
+    attachResourceContext(payload.content, resourceContext, header),
     new WeakMap()
   ) as SendContent
   const messages = redactValue(payload.messages, new WeakMap()) as TMessage[]

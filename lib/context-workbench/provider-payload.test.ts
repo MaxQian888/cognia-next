@@ -54,3 +54,16 @@ describe("Context Workbench provider payload PII gate", () => {
     ).toThrow(WorkbenchPiiGateBlocked)
   })
 })
+
+it("gates session reference headers and leaves persisted source messages unchanged", () => {
+  const source = { content: "question", messages: [{ content: "visible" }], sendOptions: {} }
+  const result = gateWorkbenchProviderPayload(
+    source,
+    "parent",
+    "Main conversation — reference only"
+  )
+  expect(result.content).toContain("[Main conversation — reference only]")
+  expect(result.content).not.toContain("[Current resource context]")
+  expect(source.content).toBe("question")
+  expect(source.messages).toEqual([{ content: "visible" }])
+})

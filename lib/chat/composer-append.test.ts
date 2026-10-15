@@ -39,3 +39,22 @@ describe("composerAppendHasContent", () => {
     expect(composerAppendHasContent({ replyTo: { messageId: "m", preview: "p" } })).toBe(true)
   })
 })
+
+it("carries an explicit submit request and its acknowledgement to the claiming bridge", () => {
+  const onSubmitted = jest.fn()
+  const listener = (event: Event) => {
+    const detail = (event as CustomEvent<ComposerAppendDetail>).detail
+    expect(detail.submit).toBe(true)
+    detail.claimed = true
+    detail.onSubmitted?.(false)
+  }
+  window.addEventListener(COMPOSER_APPEND_EVENT, listener)
+  try {
+    expect(
+      dispatchComposerAppend({ sessionId: "main", text: "quote", submit: true, onSubmitted })
+    ).toBe(true)
+    expect(onSubmitted).toHaveBeenCalledWith(false)
+  } finally {
+    window.removeEventListener(COMPOSER_APPEND_EVENT, listener)
+  }
+})

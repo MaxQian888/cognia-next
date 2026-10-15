@@ -19,6 +19,11 @@ import { deleteSession, updateSession } from "./sessions"
 import { invalidatePersistSnapshot } from "./messages"
 import { resolveScopeProjectId } from "./project-scope"
 import {
+  invalidateTranscriptRuntime,
+  withTranscriptRuntimeLock,
+} from "@/lib/chat/transcript/revision-events"
+import { inheritableSessionConfig } from "@/lib/chat/session-config-inheritance"
+import {
   newResourceWorkbenchSessionId,
   promoteEmbeddedSessionPatch,
   surfaceBindingKey,
@@ -46,8 +51,8 @@ export function createResourceSessionRepository(): ResourceSessionRepository {
  *
  * Order is by creation, not recency: these render as a stable list the user
  * picks from, and re-sorting on every send would move the entry under the
- * cursor. The primary aside — created by `ensureResourceWorkbenchSession` —
- * always sorts first because it necessarily existed before any extra one.
+ * cursor. A replacement primary created after promotion sorts at its new
+ * creation time, preserving the order of any additional asides.
  */
 export async function listResourceWorkbenchSessions(
   binding: SessionSurfaceBinding
@@ -73,10 +78,8 @@ export async function createResourceWorkbenchSession(
   title: string
 ): Promise<ChatSession> {
   const db = getDb()
-  const projectId =
-    binding.kind === "session"
-      ? ((await db.sessions.get(binding.sessionId))?.projectId ?? (await resolveScopeProjectId()))
-      : await resolveScopeProjectId()
+  const parent = binding.kind === "session" ? await db.sessions.get(binding.sessionId) : undefined
+  const projectId = parent?.projectId ?? (await resolveScopeProjectId())
 
   // Strictly after every existing aside, not merely `Date.now()`. Two asides
   // created inside the same millisecond — one double-click on "+" — would
@@ -88,6 +91,7 @@ export async function createResourceWorkbenchSession(
   const now = Math.max(Date.now(), newest + 1)
 
   const session: ChatSession = {
+    ...(parent ? inheritableSessionConfig(parent, "aside") : {}),
     id: newResourceWorkbenchSessionId(binding),
     projectId,
     title,
@@ -102,6 +106,28 @@ export async function createResourceWorkbenchSession(
   // Fresh row — make sure no stale persist snapshot lingers under a recycled id.
   invalidatePersistSnapshot(session.id)
   return session
+}
+
+/** Record delivered provider context only while its SDK history is still current. */
+export async function advanceResourceAsideContextCursor(
+  id: string,
+  cursor: NonNullable<ChatSession["asideContextCursor"]>
+): Promise<void> {
+  await getDb()
+    .sessions.where("id")
+    .equals(id)
+    .modify((session) => {
+      // Clear, promotion, or a replacement SDK can race an accepted dispatch.
+      // Check and write in one IndexedDB transaction so stale events cannot
+      // restore a cursor after the history it described has been discarded.
+      if (
+        session.kind === "resource-workbench" &&
+        session.surfaceBinding?.kind === "session" &&
+        session.sdkSessionId === cursor.sdkSessionId
+      ) {
+        session.asideContextCursor = cursor
+      }
+    })
 }
 
 /** Rename an aside. Trimmed; an empty name is rejected rather than persisted. */
@@ -120,14 +146,28 @@ export async function renameResourceWorkbenchSession(id: string, title: string):
  */
 export async function clearResourceWorkbenchSession(id: string): Promise<void> {
   const db = getDb()
-  await db.transaction("rw", db.messages, db.sessions, async () => {
-    await db.messages.where("sessionId").equals(id).delete()
-    await db.sessions.update(id, {
-      sdkSessionId: undefined,
-      forkedFromSdkSessionId: undefined,
-      lastMessagePreview: undefined,
-      lastMessageAt: undefined,
-      updatedAt: Date.now(),
+  await withTranscriptRuntimeLock(id, async () => {
+    // Retire the live provider loop and fence its queued frames before clearing
+    // local rows; otherwise a late reply can repopulate the deleted thread.
+    await invalidateTranscriptRuntime(id)
+    await db.transaction("rw", db.messages, db.sessions, async () => {
+      await db.messages.where("sessionId").equals(id).delete()
+      await db.sessions.update(id, {
+        sdkSessionId: undefined,
+        forkedFromSdkSessionId: undefined,
+        sdkSessionStorage: undefined,
+        externalAgentSession: undefined,
+        externalAgentGatewaySessions: undefined,
+        branchSeed: undefined,
+        spawnedTask: undefined,
+        asideContextCursor: undefined,
+        runtimeTranscriptInvalidated: undefined,
+        workingSet: undefined,
+        activeBranchByGroup: undefined,
+        lastMessagePreview: undefined,
+        lastMessageAt: undefined,
+        updatedAt: Date.now(),
+      })
     })
   })
   invalidatePersistSnapshot(id)

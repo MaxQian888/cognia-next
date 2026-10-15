@@ -35,6 +35,7 @@ import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { persistMessages, invalidatePersistSnapshot } from "@/lib/db/messages"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { emptyWorkingSet } from "@/lib/chat/working-set"
+import { inheritableSessionConfig } from "@/lib/chat/session-config-inheritance"
 import type { CompleteSessionHistory } from "@/lib/sync/session-history"
 
 export type BranchMode = "direct" | "summary"
@@ -254,43 +255,7 @@ function buildChildRow(
     // `surfaceBindingKey` are deliberately absent below, so the branch is a
     // plain standalone conversation however it was started.
     kind: parent.kind && EMBEDDED_KINDS.has(parent.kind) ? "direct" : parent.kind,
-    characterId: parent.characterId,
-    teamId: parent.teamId,
-    // Inherited alongside the other two identity columns: a branch continues
-    // the same conversation, so it continues to run on the same executor.
-    squadId: parent.squadId,
-    disabledSkillIds: parent.disabledSkillIds,
-    messageDisplayOverride: parent.messageDisplayOverride,
-    model: parent.model,
-    providerOverride: parent.providerOverride,
-    accountId: parent.accountId,
-    // Which models each external agent runs on is configuration, so a branch
-    // keeps it. The gateway task links (`externalAgentSession`,
-    // `externalAgentGatewaySessions`) are NOT copied: a task's native history
-    // belongs to one conversation, and two rows resuming it would interleave
-    // two threads in one memory, and deleting either would delete the other's.
-    externalAgentModels: parent.externalAgentModels,
-    sandboxEnabled: parent.sandboxEnabled,
-    computerUseTarget: parent.computerUseTarget,
-    // The third sandbox column, and the one that kept being missed. Without it
-    // a branch re-resolves its tier from whatever `AppSettings.sandboxTier` says
-    // *now* (`lib/sandbox/binding.ts`), so a child of a `microvm` conversation
-    // can silently run on `os`. Isolation must never decrease unannounced.
-    sandboxTier: parent.sandboxTier,
-    // And the release that goes with it: a child of a conversation told to
-    // follow the default must not be pinned on its first send.
-    sandboxTierFollowsDefault: parent.sandboxTierFollowsDefault,
-    systemPrompt: parent.systemPrompt,
-    activePresetId: parent.activePresetId,
-    workingDir: parent.workingDir,
-    permissionMode: parent.permissionMode,
-    bareMode: parent.bareMode,
-    debugMode: parent.debugMode,
-    briefMode: parent.briefMode,
-    outputStyle: parent.outputStyle,
-    customOutputStyle: parent.customOutputStyle,
-    maxThinkingTokens: parent.maxThinkingTokens,
-    toolFilter: parent.toolFilter,
+    ...inheritableSessionConfig(parent),
     parentSessionId: parent.id,
     branchedFromMessageId,
     branchKind: kind,

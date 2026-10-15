@@ -45,6 +45,10 @@ export interface ComposerAppendDetail {
    * composer was mounted for that conversation.
    */
   claimed?: boolean
+  /** Append, then use the claiming composer's normal guarded submit path. */
+  submit?: boolean
+  /** False means the text remains a draft (blocked or cancelled), not sent. */
+  onSubmitted?: (sent: boolean) => void
 }
 
 /** Whether a detail carries anything a composer would stage. */

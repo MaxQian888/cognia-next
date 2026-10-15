@@ -5,6 +5,7 @@ import type { ChatSession, SessionSurfaceBinding } from "@cognia/agent-config-ty
 import { getDb } from "@/lib/db/schema"
 import {
   ensureResourceWorkbenchSession,
+  fillResourceSessionConfigGaps,
   migrateResourceSessionBinding,
   surfaceBindingForContextResource,
 } from "@/lib/context-workbench/resource-session"
@@ -17,8 +18,7 @@ export function useResourceWorkbenchSession(
   enabled: boolean,
   workbenchInstanceId: string
 ): ChatSession | null {
-  // `session` resources have no binding — they are already a chat session and
-  // never own a nested resource-workbench session.
+  // Main conversations can own an aside; embedded asides cannot nest another.
   const surfaceBinding = surfaceBindingForContextResource(resource)
   const bindingKey = surfaceBinding ? JSON.stringify(surfaceBinding) : null
   const binding = useMemo(
@@ -42,7 +42,11 @@ export function useResourceWorkbenchSession(
         const overridden = await db.sessions.get(sessionOverrideId)
         if (overridden?.kind === "resource-workbench") {
           await migrateResourceSessionBinding(sessionOverrideId, binding, repository)
-          return { ...overridden, surfaceBinding: binding }
+          return fillResourceSessionConfigGaps(
+            { ...overridden, surfaceBinding: binding },
+            binding,
+            repository
+          )
         }
         setSessionOverride(resourceKey, null)
       }

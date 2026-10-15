@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ResourceWorkbenchChatPanel } from "./resource-workbench-chat-panel"
 import { useChatStore } from "@/stores/chat"
 import { listMessages } from "@/lib/db/messages"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 
 const send = jest.fn().mockResolvedValue(undefined)
 const stop = jest.fn()
@@ -20,12 +21,54 @@ const templateRun = {
 const attachmentManifest: readonly AttachmentManifestEntry[] = [
   { filename: "report.txt", mediaType: "text/plain", kind: "document" },
 ]
+let mockScopeId = "resource-session"
 let mockResource: Record<string, unknown> = { kind: "project-file", relPath: "src/a.ts" }
 let mockSession: Record<string, unknown> = { id: "resource-session", title: "Resource" }
 const updateSession = jest.fn().mockResolvedValue(undefined)
 const setSessionOverride = jest.fn()
+let mockParentSession: Record<string, unknown> | undefined
+let mockParentRuntime: AgentRuntimeRef = { kind: "builtin" }
+let mockParentFusionMode = "auto"
+const mockRuntimeState = {
+  sessionCompositions: {} as Record<string, { presetId: string; orchestration?: string }>,
+  defaultComposition: { presetId: "standard" },
+}
+const mockExternalState = {
+  agents: {} as Record<string, { name: string; protocol: string }>,
+  connectionStatus: {} as Record<string, string>,
+}
+const mockAppSettings = { permissionMode: "default" }
+const resolveParentPermission = jest.fn()
+const resolveAsideReadOnly = jest.fn()
+const resolveAsideRuntime = jest.fn()
 
-jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, values?: { agent?: string }) =>
+    values?.agent ? `${key}:${values.agent}` : key,
+}))
+jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  useRuntimeRefForSession: () => mockParentRuntime,
+  useAgentRuntimeStore: (selector: (state: typeof mockRuntimeState) => unknown) =>
+    selector(mockRuntimeState),
+}))
+jest.mock("@/stores/chat/fusion-mode-store", () => ({
+  useChatFusionMode: () => mockParentFusionMode,
+}))
+jest.mock("@/stores/agent", () => ({
+  useExternalAgentStore: (selector: (state: typeof mockExternalState) => unknown) =>
+    selector(mockExternalState),
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: { settings: typeof mockAppSettings }) => unknown) =>
+    selector({ settings: mockAppSettings }),
+}))
+jest.mock("@/lib/claude/build-options", () => ({
+  resolveSessionAsideParentPermission: (...args: unknown[]) => resolveParentPermission(...args),
+  resolveSessionAsideReadOnly: (...args: unknown[]) => resolveAsideReadOnly(...args),
+}))
+jest.mock("@/lib/context-workbench/session-aside-runtime", () => ({
+  resolveSessionAsideRuntimeWithAgent: (...args: unknown[]) => resolveAsideRuntime(...args),
+}))
 jest.mock("@/hooks/data/use-single-export", () => ({
   useSingleExport: () => ({ run: exportRun, busy: false }),
 }))
@@ -36,7 +79,7 @@ jest.mock("./context-workbench", () => ({
 }))
 
 jest.mock("@/components/chat/chat-scope-provider", () => ({
-  useChatScope: () => ({ sessionId: "resource-session" }),
+  useChatScope: () => ({ sessionId: mockScopeId }),
 }))
 jest.mock("@/hooks/chat/use-claude-chat", () => ({
   useClaudeChat: () => ({
@@ -47,7 +90,8 @@ jest.mock("@/hooks/chat/use-claude-chat", () => ({
   }),
 }))
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => mockSession,
+  useLiveQuery: (_query: unknown, dependencies: unknown[]) =>
+    dependencies[0] === mockScopeId ? mockSession : mockParentSession,
 }))
 jest.mock("@/lib/db/messages", () => ({ listMessages: jest.fn() }))
 jest.mock("@/lib/db/sessions", () => ({
@@ -153,9 +197,31 @@ jest.mock("@/components/chat/chat-view", () => ({
 
 const mockListMessages = listMessages as jest.MockedFunction<typeof listMessages>
 
+beforeEach(() => {
+  mockParentSession = undefined
+  mockParentRuntime = { kind: "builtin" }
+  mockParentFusionMode = "auto"
+  mockRuntimeState.sessionCompositions = {}
+  mockExternalState.agents = {}
+  mockExternalState.connectionStatus = {}
+  resolveParentPermission.mockReset().mockResolvedValue({ permissionMode: "default" })
+  resolveAsideReadOnly
+    .mockReset()
+    .mockImplementation(
+      async (session, permission) =>
+        session.asideWriteAccess !== true || permission?.permissionMode === "plan"
+    )
+  resolveAsideRuntime.mockReset().mockResolvedValue({
+    runtimeRef: { kind: "builtin" },
+    usesBuiltinFallback: false,
+    permissionCeiling: { permissionMode: "plan" },
+  })
+})
+
 describe("ResourceWorkbenchChatPanel", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockScopeId = "resource-session"
     mockListMessages.mockResolvedValue([])
     ;(useChatStore.getState().setPendingArtifactEditTarget as jest.Mock).mockClear()
     mockSession = { id: "resource-session", title: "Resource" }
@@ -357,7 +423,7 @@ describe("ResourceWorkbenchChatPanel", () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it("keeps spawned tasks isolated from the main thread's live resource context", async () => {
+  it("supplies parent context again after a spawned task first prompt is consumed", async () => {
     mockSession = {
       id: "resource-session",
       title: "Fix the stream",
@@ -369,7 +435,7 @@ describe("ResourceWorkbenchChatPanel", () => {
 
     expect(send).toHaveBeenCalledWith("hello", undefined, {
       sessionId: "resource-session",
-      resourceContext: "",
+      resourceContext: "main thread transcript",
       attachmentManifest,
     })
   })
@@ -408,5 +474,340 @@ describe("ResourceWorkbenchChatPanel", () => {
       /ResourceWorkbenchChatPanel|AsideSwitcher/.test(fs.readFileSync(f, "utf8"))
     )
     expect(hosts).toEqual([])
+  })
+})
+
+it("requires confirmation before enabling edits and persists the per-aside choice", async () => {
+  jest.clearAllMocks()
+  mockResource = { kind: "session", sessionId: "main" }
+  mockSession = { id: "resource-session", title: "Aside" }
+  const view = render(<ResourceWorkbenchChatPanel />)
+  await userEvent.click(screen.getByRole("button", { name: "asides.readOnly" }))
+  expect(updateSession).not.toHaveBeenCalled()
+  expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+  await userEvent.click(screen.getByRole("button", { name: "asides.enableEditing" }))
+  expect(updateSession).toHaveBeenCalledWith("resource-session", { asideWriteAccess: true })
+  mockSession = { ...mockSession, asideWriteAccess: true }
+  view.rerender(<ResourceWorkbenchChatPanel />)
+  await userEvent.click(screen.getByRole("button", { name: "asides.canEdit" }))
+  expect(updateSession).toHaveBeenLastCalledWith("resource-session", { asideWriteAccess: false })
+})
+
+it("regenerates session-bound asides without replacing the controller's cached context", async () => {
+  jest.clearAllMocks()
+  mockResource = { kind: "session", sessionId: "main" }
+  mockSession = { id: "resource-session", title: "Aside" }
+  const read = jest.fn(() => "changed parent")
+  render(<ResourceWorkbenchChatPanel getResourceContext={read} />)
+  await userEvent.click(await screen.findByRole("button", { name: "regenerate" }))
+  expect(regenerate).toHaveBeenCalledWith("resource-session", undefined)
+  expect(read).not.toHaveBeenCalled()
+})
+
+it("does not carry an editing confirmation to another aside", async () => {
+  jest.clearAllMocks()
+  mockScopeId = "resource-session"
+  mockResource = { kind: "session", sessionId: "main" }
+  mockSession = { id: mockScopeId, title: "Aside" }
+  const view = render(<ResourceWorkbenchChatPanel />)
+  await userEvent.click(screen.getByRole("button", { name: "asides.readOnly" }))
+  expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+  mockScopeId = "other-aside"
+  mockSession = { id: mockScopeId, title: "Other" }
+  view.rerender(<ResourceWorkbenchChatPanel />)
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  expect(updateSession).not.toHaveBeenCalled()
+  mockScopeId = "resource-session"
+})
+
+describe("side-chat runtime note", () => {
+  beforeEach(() => {
+    mockScopeId = "resource-session"
+    mockResource = { kind: "session", sessionId: "main" }
+    mockSession = {
+      id: mockScopeId,
+      title: "Aside",
+      kind: "resource-workbench",
+      surfaceBinding: { kind: "session", sessionId: "main" },
+    }
+    mockParentSession = { id: "main", title: "Main" }
+    mockParentRuntime = { kind: "external", agentId: "codex" }
+    mockExternalState.agents.codex = { name: "My Codex", protocol: "codex-app-server" }
+    mockExternalState.connectionStatus.codex = "connected"
+    mockListMessages.mockResolvedValue([])
+  })
+
+  it("shows the main agent name only when the shared resolver chooses a read-only built-in fallback", async () => {
+    resolveAsideRuntime.mockResolvedValue({
+      runtimeRef: { kind: "builtin" },
+      usesBuiltinFallback: true,
+      permissionCeiling: { permissionMode: "plan" },
+    })
+    render(<ResourceWorkbenchChatPanel />)
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "asides.differentAgentReadOnly:My Codex"
+    )
+    expect(screen.getByRole("button", { name: "asides.readOnly" })).toBeInTheDocument()
+    expect(resolveParentPermission).toHaveBeenCalledWith(mockParentSession, mockAppSettings)
+    expect(resolveAsideRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: { ...mockSession, asideWriteAccess: false },
+        parentRuntimeRef: mockParentRuntime,
+        parentPermission: { permissionMode: "default" },
+        forceBuiltin: false,
+      })
+    )
+  })
+
+  it.each([false, true])(
+    "does not show a different-agent note when the same external agent is used (unlocked=%s)",
+    async (unlocked) => {
+      mockSession = { ...mockSession, asideWriteAccess: unlocked }
+      resolveAsideRuntime.mockResolvedValue({
+        runtimeRef: mockParentRuntime,
+        usesBuiltinFallback: false,
+        permissionCeiling: { permissionMode: unlocked ? "default" : "plan" },
+      })
+      render(<ResourceWorkbenchChatPanel />)
+      await waitFor(() => expect(resolveAsideRuntime).toHaveBeenCalled())
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    }
+  )
+
+  it("uses the shared parent ceiling when an unlocked aside still has read-only permissions", async () => {
+    mockSession = { ...mockSession, asideWriteAccess: true }
+    resolveParentPermission.mockResolvedValue({ permissionMode: "plan" })
+    resolveAsideRuntime.mockResolvedValue({
+      runtimeRef: { kind: "builtin" },
+      usesBuiltinFallback: true,
+      permissionCeiling: { permissionMode: "plan" },
+    })
+    render(<ResourceWorkbenchChatPanel />)
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "asides.differentAgentReadOnly:My Codex"
+    )
+    expect(resolveAsideRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentPermission: { permissionMode: "plan" },
+      })
+    )
+  })
+
+  it("uses the aside's own effective Plan mode before deciding a fallback", async () => {
+    mockSession = { ...mockSession, asideWriteAccess: true }
+    const ownComposition = { presetId: "plan", authority: "plan" }
+    mockRuntimeState.sessionCompositions[mockScopeId] = ownComposition
+    resolveAsideReadOnly.mockResolvedValue(true)
+    resolveAsideRuntime.mockResolvedValue({
+      runtimeRef: { kind: "builtin" },
+      usesBuiltinFallback: true,
+      permissionCeiling: { permissionMode: "plan" },
+    })
+    render(<ResourceWorkbenchChatPanel />)
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "asides.differentAgentReadOnly:My Codex"
+    )
+    expect(resolveAsideReadOnly).toHaveBeenCalledWith(
+      mockSession,
+      { permissionMode: "default" },
+      mockAppSettings,
+      { compositionSelection: ownComposition }
+    )
+    expect(resolveAsideRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: { ...mockSession, asideWriteAccess: false },
+      })
+    )
+  })
+
+  it("labels a non-direct fallback without claiming read-only after editing is enabled", async () => {
+    mockSession = { ...mockSession, asideWriteAccess: true }
+    mockRuntimeState.sessionCompositions.main = { presetId: "standard", orchestration: "team" }
+    resolveAsideRuntime.mockResolvedValue({
+      runtimeRef: { kind: "builtin" },
+      usesBuiltinFallback: true,
+      permissionCeiling: { permissionMode: "acceptEdits" },
+    })
+    render(<ResourceWorkbenchChatPanel />)
+    expect(await screen.findByRole("status")).toHaveTextContent("asides.differentAgent:My Codex")
+    expect(resolveAsideRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ forceBuiltin: true })
+    )
+  })
+
+  it.each(["teamId", "squadId"])(
+    "uses the parent's %s when deciding the fallback",
+    async (executor) => {
+      mockParentSession = { ...mockParentSession, [executor]: "main-executor" }
+      resolveAsideRuntime.mockResolvedValue({
+        runtimeRef: { kind: "builtin" },
+        usesBuiltinFallback: true,
+        permissionCeiling: { permissionMode: "plan" },
+      })
+      render(<ResourceWorkbenchChatPanel />)
+      await screen.findByRole("status")
+      expect(resolveAsideRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({ forceBuiltin: true })
+      )
+    }
+  )
+
+  it("refreshes the fallback when the parent's Fusion mode changes", async () => {
+    resolveAsideRuntime.mockResolvedValue({
+      runtimeRef: mockParentRuntime,
+      usesBuiltinFallback: false,
+      permissionCeiling: { permissionMode: "plan" },
+    })
+    const view = render(<ResourceWorkbenchChatPanel />)
+    await waitFor(() =>
+      expect(resolveAsideRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({ forceBuiltin: false })
+      )
+    )
+    resolveAsideRuntime.mockResolvedValue({
+      runtimeRef: { kind: "builtin" },
+      usesBuiltinFallback: true,
+      permissionCeiling: { permissionMode: "plan" },
+    })
+    mockParentFusionMode = "panel"
+    view.rerender(<ResourceWorkbenchChatPanel />)
+    expect(await screen.findByRole("status")).toHaveTextContent("My Codex")
+    expect(resolveAsideRuntime).toHaveBeenLastCalledWith(
+      expect.objectContaining({ forceBuiltin: true })
+    )
+  })
+
+  it("refreshes the note after external capabilities are renegotiated", async () => {
+    resolveAsideRuntime.mockResolvedValue({
+      runtimeRef: { kind: "builtin" },
+      usesBuiltinFallback: true,
+      permissionCeiling: { permissionMode: "plan" },
+    })
+    const view = render(<ResourceWorkbenchChatPanel />)
+    expect(await screen.findByRole("status")).toHaveTextContent("My Codex")
+    resolveAsideRuntime.mockResolvedValue({
+      runtimeRef: mockParentRuntime,
+      usesBuiltinFallback: false,
+      permissionCeiling: { permissionMode: "plan" },
+    })
+    mockExternalState.connectionStatus.codex = "reconnected"
+    view.rerender(<ResourceWorkbenchChatPanel />)
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument())
+  })
+
+  it("uses a host agent's display name for an unattested read-only fallback", async () => {
+    mockParentRuntime = {
+      kind: "host",
+      configId: "host-codex",
+      revision: "1",
+      lifecycleGeneration: 1,
+      name: "Host Codex",
+    }
+    resolveAsideRuntime.mockResolvedValue({
+      runtimeRef: { kind: "builtin" },
+      usesBuiltinFallback: true,
+      permissionCeiling: { permissionMode: "plan" },
+    })
+    render(<ResourceWorkbenchChatPanel />)
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "asides.differentAgentReadOnly:Host Codex"
+    )
+  })
+
+  it("omits the note for a main conversation already using the built-in agent", async () => {
+    mockParentRuntime = { kind: "builtin" }
+    render(<ResourceWorkbenchChatPanel />)
+    await screen.findByTestId("chat-pane")
+    expect(resolveAsideRuntime).not.toHaveBeenCalled()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+})
+
+describe("explicit side chat requests", () => {
+  beforeEach(async () => {
+    jest.clearAllMocks()
+    mockScopeId = "chosen-aside"
+    mockSession = { id: mockScopeId, kind: "resource-workbench" }
+    mockResource = { kind: "session", sessionId: "main" }
+    mockListMessages.mockResolvedValue([])
+    send.mockResolvedValue(undefined)
+    const { useSideChatRequestStore } = await import("@/stores/chat/side-chat-request-store")
+    useSideChatRequestStore.setState({ pending: {} })
+  })
+
+  it("submits staged questions once through the normal panel send with fresh parent context", async () => {
+    const { useSideChatRequestStore } = await import("@/stores/chat/side-chat-request-store")
+    const { StrictMode } = await import("react")
+    useSideChatRequestStore.getState().enqueue("chosen-aside", "first question")
+    useSideChatRequestStore.getState().enqueue("chosen-aside", "second question")
+    useSideChatRequestStore.getState().enqueue("other-aside", "do not send")
+    const context = jest.fn().mockResolvedValue("latest parent context")
+    const { rerender } = render(
+      <StrictMode>
+        <ResourceWorkbenchChatPanel asideTargetSessionId="main" getResourceContext={context} />
+      </StrictMode>
+    )
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+    expect(send).toHaveBeenNthCalledWith(
+      1,
+      "first question",
+      undefined,
+      expect.objectContaining({
+        sessionId: "chosen-aside",
+        resourceContext: "latest parent context",
+      })
+    )
+    expect(send).toHaveBeenNthCalledWith(
+      2,
+      "second question",
+      undefined,
+      expect.objectContaining({ sessionId: "chosen-aside" })
+    )
+    rerender(
+      <StrictMode>
+        <ResourceWorkbenchChatPanel asideTargetSessionId="main" getResourceContext={context} />
+      </StrictMode>
+    )
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(stop).not.toHaveBeenCalled()
+    expect(useSideChatRequestStore.getState().pending["other-aside"]).toHaveLength(1)
+  })
+
+  it("waits for transcript hydration before claiming a staged question", async () => {
+    const { useSideChatRequestStore } = await import("@/stores/chat/side-chat-request-store")
+    let finishLoad!: (messages: never[]) => void
+    mockListMessages.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishLoad = resolve
+      })
+    )
+    useSideChatRequestStore.getState().enqueue("chosen-aside", "after hydration")
+    render(<ResourceWorkbenchChatPanel asideTargetSessionId="main" />)
+    await screen.findByTestId("chat-pane")
+    expect(send).not.toHaveBeenCalled()
+    expect(useSideChatRequestStore.getState().pending["chosen-aside"]).toHaveLength(1)
+    await act(async () => finishLoad([]))
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        "after hydration",
+        undefined,
+        expect.objectContaining({ sessionId: "chosen-aside" })
+      )
+    )
+  })
+
+  it("keeps a failed request as an editable draft instead of dropping it", async () => {
+    const { useSideChatRequestStore } = await import("@/stores/chat/side-chat-request-store")
+    const { useComposerIntentStore } = await import("@/stores/chat/composer-intent-store")
+    useComposerIntentStore.setState({ pendingBySession: {} })
+    send.mockRejectedValueOnce(new Error("send failed"))
+    useSideChatRequestStore.getState().enqueue("chosen-aside", "recover me")
+    render(<ResourceWorkbenchChatPanel asideTargetSessionId="main" />)
+    await waitFor(() =>
+      expect(useComposerIntentStore.getState().pendingBySession["chosen-aside"]?.prompt).toBe(
+        "recover me"
+      )
+    )
+    expect(useSideChatRequestStore.getState().pending["chosen-aside"]).toHaveLength(0)
   })
 })

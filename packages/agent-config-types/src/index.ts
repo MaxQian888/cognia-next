@@ -2509,6 +2509,15 @@ export interface ChatSession {
    * column. Absent on non-embedded sessions.
    */
   surfaceBindingKey?: string
+  /** Session-bound aside only. Absent/false is read-only; true uses the parent's permission ceiling. */
+  asideWriteAccess?: boolean
+  /** Provider-only parent context already delivered to this aside's SDK history; not indexed. */
+  asideContextCursor?: {
+    /** Null acknowledges an empty parent snapshot. */
+    parentMessageId: string | null
+    tailFingerprint: string
+    sdkSessionId: string
+  }
   /** Direct sessions: the persona driving replies. */
   characterId?: string
   /** Team sessions: the team whose members reply. */

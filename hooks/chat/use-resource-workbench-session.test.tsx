@@ -192,8 +192,8 @@ it("leaves workflow session ownership to the workflow editor", () => {
   expect(get).not.toHaveBeenCalled()
 })
 
-it("gives a conversation its own sidechat session", () => {
-  renderHook(() =>
+it("gives a conversation its own sidechat session", async () => {
+  const { result } = renderHook(() =>
     useResourceWorkbenchSession(
       {
         kind: "session",
@@ -206,6 +206,7 @@ it("gives a conversation its own sidechat session", () => {
   )
 
   // A conversation CAN own an aside — that is the workbench sidechat.
+  await waitFor(() => expect(result.current?.kind).toBe("resource-workbench"))
   expect(get).toHaveBeenCalledWith("resource-workbench:session:s")
 })
 
@@ -258,4 +259,42 @@ it("does not create a session before an AI panel is activated", () => {
 
   expect(result.current).toBeNull()
   expect(get).not.toHaveBeenCalled()
+})
+
+it("fills legacy additional-aside configuration when an override is opened", async () => {
+  get.mockImplementation(async (id: string) =>
+    id === "main-1"
+      ? {
+          id,
+          title: "Main",
+          model: "parent-model",
+          accountId: "parent-account",
+          teamId: "team",
+          squadId: "squad",
+        }
+      : id === "extra"
+        ? {
+            id,
+            title: "Aside",
+            kind: "resource-workbench",
+            model: "chosen",
+            surfaceBinding: { kind: "session", sessionId: "main-1" },
+            createdAt: 1,
+            updatedAt: 1,
+          }
+        : undefined
+  )
+  useContextWorkbenchStore.getState().setSessionOverride("session:main-1", "extra")
+  const { result } = renderHook(() =>
+    useResourceWorkbenchSession(
+      { kind: "session", capabilities: ["ai"], sessionId: "main-1" },
+      true,
+      "window-a"
+    )
+  )
+  await waitFor(() => expect(result.current?.accountId).toBe("parent-account"))
+  expect(result.current?.model).toBe("chosen")
+  expect(result.current?.teamId).toBeUndefined()
+  expect(result.current?.squadId).toBeUndefined()
+  expect(update).toHaveBeenCalledWith("extra", { accountId: "parent-account" })
 })

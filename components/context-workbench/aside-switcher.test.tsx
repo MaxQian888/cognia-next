@@ -200,3 +200,11 @@ describe("AsideSwitcher", () => {
     await waitFor(() => expect(mockRename).toHaveBeenCalledWith("extra-1", "Dependency audit"))
   })
 })
+
+it("protects a replacement primary after the original aside was promoted", async () => {
+  const replacement = `${PRIMARY}#primary:1`
+  asides = [aside(replacement, "New primary", 2)]
+  renderSwitcher(replacement)
+  await userEvent.click(screen.getByRole("button", { name: "Aside actions" }))
+  expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("data-disabled")
+})

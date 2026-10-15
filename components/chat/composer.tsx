@@ -302,6 +302,7 @@ import {
 } from "@/stores/agent/agent-runtime-store"
 import { ExternalAgentExtensionUi } from "@/components/agent/external/extension-ui"
 import { mergeComposerIntentPrompt } from "@/lib/chat/merge-composer-intent"
+import { useSidechatShortcut } from "@/hooks/chat/use-sidechat-shortcut"
 import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
 import { DraftRestoredAttachments } from "./composer/draft-restored-attachments"
 import { OcrResultBubble } from "./composer/ocr-result-bubble"
@@ -1005,13 +1006,17 @@ function ComposerInner(props: InnerProps) {
   // enabling/disabling adds/removes its commands live.
   const pluginCommands = usePluginSlashCommands()
 
+  const isAside = props.session?.kind === "resource-workbench"
   const slashCommands = useMemo(
     // Deduped by name — `record-skill` is declared by both the builtin table
     // and the skill-recorder plugin; the picker keys rows `slash-${name}`, so
     // an undeduped merge rendered duplicate React keys (and two identical
     // rows). Last-wins matches `commandMap`'s submit-time precedence below.
-    () => mergeSlashCommands(BUILTIN_SLASH_COMMANDS, customCommands, pluginCommands),
-    [customCommands, pluginCommands]
+    () =>
+      mergeSlashCommands(BUILTIN_SLASH_COMMANDS, customCommands, pluginCommands).filter(
+        (command) => !isAside || !["btw", "side"].includes(command.name)
+      ),
+    [customCommands, pluginCommands, isAside]
   )
 
   // Name → command map for submit-time multi-command dispatch. Built from the
@@ -1020,9 +1025,11 @@ function ComposerInner(props: InnerProps) {
   const commandMap = useMemo(
     () =>
       new Map(
-        [...BUILTIN_SLASH_COMMANDS, ...customCommands, ...pluginCommands].map((c) => [c.name, c])
+        [...BUILTIN_SLASH_COMMANDS, ...customCommands, ...pluginCommands]
+          .filter((command) => !isAside || !["btw", "side"].includes(command.name))
+          .map((c) => [c.name, c])
       ),
-    [customCommands, pluginCommands]
+    [customCommands, pluginCommands, isAside]
   )
   // Name → provenance for the chip overlay's pill tint. A callback (not the
   // map) so the overlay never holds the command objects, only the answer.
@@ -1911,24 +1918,41 @@ function ComposerInner(props: InnerProps) {
   )
 
   // --- Submit handler ----------------------------------------------------
-  const submit = useCallback(async () => {
+  const localActionInFlightRef = useRef(false)
+  const submit = useCallback(async (): Promise<boolean> => {
     const text = textInput.value
-    if (props.disabled || outboundBlocked) return
-    if (attachmentPrepareCountRef.current > 0) return
+    // These local actions must remain available during a main-turn approval
+    // wait. They never enter the main send lane or consume staged attachments.
+    const asideCommand = text.trim().match(/^\/(btw|side)(?:\s+([\s\S]*))?$/)
+    if (asideCommand) {
+      if (localActionInFlightRef.current) return false
+      const command = commandMap.get(asideCommand[1])
+      if (!command) return false
+      localActionInFlightRef.current = true
+      try {
+        const handled = await props.onCommand(command, asideCommand[2] ?? "")
+        if (handled && textInput.value === text) textInput.setInput("")
+        return handled
+      } finally {
+        localActionInFlightRef.current = false
+      }
+    }
+    if (props.disabled || outboundBlocked) return false
+    if (attachmentPrepareCountRef.current > 0) return false
     // Re-entrancy guard (send protection): reject a second dispatch while one is
     // already in flight — covers the window between the click and the store
     // flipping to "streaming", where a fast Enter could otherwise double-send.
     // Once the turn is live, its own still-pending dispatch no longer blocks a
     // follow-up: that send joins the running turn instead of starting one.
     const liveTurn = props.status === "streaming"
-    if (followUpInFlightRef.current) return
-    if (turnInFlightRef.current && !liveTurn) return
+    if (followUpInFlightRef.current) return false
+    if (turnInFlightRef.current && !liveTurn) return false
 
     // Emptiness is decided from the synchronous attachment count (blob→data-url
     // conversion below preserves count) so the guard can be armed BEFORE the
     // first await, leaving no race for a concurrent submit to slip through.
     const empty = text.trim().length === 0 && attachments.files.length === 0
-    if (empty) return
+    if (empty) return false
 
     // Validate before arming send protection: this return never enters the
     // dispatch's try/finally, and the user must be able to fill a chip and retry.
@@ -1943,7 +1967,7 @@ function ComposerInner(props: InnerProps) {
         setCaret(first.start)
         setActiveParamId(first.paramId)
       }
-      return
+      return false
     }
 
     const lane = liveTurn ? "followUp" : "turn"
@@ -2109,7 +2133,7 @@ function ComposerInner(props: InnerProps) {
         )
         if (ok === false) restoreInputAfterFailure()
         else finalizeSend()
-        return
+        return ok !== false
       }
 
       // ── `!shell` / `#memory` first-line modes ────────────────────────────
@@ -2208,7 +2232,7 @@ function ComposerInner(props: InnerProps) {
           }
         )
         const remainingFiles = filesToSend.filter((file) => !file.id || !consumed.has(file.id))
-        if (cancelled) return
+        if (cancelled) return false
         useChatStore.getState().setPendingCommandOverrides(overrides)
         // A failed command in a batch used to vanish: `runSegments` isolates the
         // throw into `errors` precisely so the rest of the batch still runs, but
@@ -2242,21 +2266,21 @@ function ComposerInner(props: InnerProps) {
           // nothing was dispatched, so restore the optimistically-cleared input
           // rather than lose it.
           restoreInputAfterFailure()
-          return
+          return false
         }
         if (sent) finalizeSend()
         else {
           restoreInputAfterFailure()
           if (nativeMobile) void notify("error")
         }
-        return
+        return sent
       }
 
       // A first-line mode that consumed the entire input has already done its
       // work — don't also send an empty turn.
       if (modeRan && pipelineText.trim().length === 0 && filesToSend.length === 0) {
         finalizeSend()
-        return
+        return true
       }
 
       const outgoing = restoreText(pipelineText)
@@ -2273,6 +2297,7 @@ function ComposerInner(props: InnerProps) {
         restoreInputAfterFailure()
         if (nativeMobile) void notify("error")
       }
+      return sent
     } catch (err) {
       // A thrown send must not leave the user's text lost — restore the
       // optimistically-cleared input and surface the failure (don't rethrow
@@ -2280,6 +2305,7 @@ function ComposerInner(props: InnerProps) {
       restoreInputAfterFailure()
       if (nativeMobile) void notify("error")
       loggers.chat.error("composer send failed", err)
+      return false
     } finally {
       // Always release the guard. On a successful send the store has already
       // flipped to "streaming" (so the button stays in stop state); on a
@@ -2815,7 +2841,11 @@ function ComposerInner(props: InnerProps) {
   // A ref, not state: this is a one-shot latch between two effects, and a
   // `useState` write inside an effect body is a cascading render
   // (`react-hooks/set-state-in-effect`). See the handshake below.
-  const pendingAutoSendRef = useRef<string | null>(null)
+  const pendingAutoSendRef = useRef<{
+    text: string
+    sessionId: string | null
+    onSubmitted?: (sent: boolean) => void
+  } | null>(null)
   // See `restoredAttachments` above: only the ones we could not bring back.
   const tDraft = useTranslations("chat.composer.draftRestore")
   // The next-intl translator isn't a stable reference, so we read it through a
@@ -3007,7 +3037,7 @@ function ComposerInner(props: InnerProps) {
       // turn from the committed input and its derived state (segments, param
       // tokens, folded pastes), none of which has caught up with this write
       // until the next commit.
-      if (intent.autoSend) pendingAutoSendRef.current = merged
+      if (intent.autoSend) pendingAutoSendRef.current = { text: merged, sessionId }
     }
     if (intent.images?.length) {
       const identity = intentIdentity
@@ -3056,10 +3086,15 @@ function ComposerInner(props: InnerProps) {
   useEffect(() => {
     const pending = pendingAutoSendRef.current
     if (pending === null) return
-    if (textValue !== pending) return
+    if (sessionId !== pending.sessionId) {
+      pendingAutoSendRef.current = null
+      pending.onSubmitted?.(false)
+      return
+    }
+    if (textValue !== pending.text) return
     pendingAutoSendRef.current = null
-    void submit()
-  }, [textValue, submit])
+    void submit().then((sent) => pending.onSubmitted?.(sent))
+  }, [textValue, submit, sessionId])
 
   useEffect(() => {
     if (!persistDrafts) return
@@ -3431,6 +3466,10 @@ function ComposerInner(props: InnerProps) {
                 sessionId={props.session?.id}
                 textInput={textInput}
                 addFiles={addStagedFiles}
+                requestSubmit={(text, onSubmitted) => {
+                  pendingAutoSendRef.current?.onSubmitted?.(false)
+                  pendingAutoSendRef.current = { text, sessionId, onSubmitted }
+                }}
               />
             </>
           }
@@ -3654,31 +3693,36 @@ const ComposerAppendBridge = memo(function ComposerAppendBridge({
   sessionId,
   textInput,
   addFiles,
+  requestSubmit,
 }: {
   sessionId?: string
   /** The composer's stable text handle — see `VoiceTranscriptionBridge`. */
   textInput: TextInputContext
   /** Stage files the way a drop or paste does. */
   addFiles: (files: File[]) => void
+  requestSubmit: (text: string, onSubmitted?: (sent: boolean) => void) => void
 }) {
   const t = useTranslations("chat.composer.putBack")
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   useEffect(() => {
     const onAppend = (e: Event) => {
       const detail = (e as CustomEvent<ComposerAppendDetail>).detail
-      if (!composerAppendHasContent(detail)) return
+      if (!composerAppendHasContent(detail) || detail.claimed) return
       // Addressed events go to exactly one composer. An un-addressed event is
       // legacy shorthand for "the active session", which keeps the single-pane
       // callers working without making every composer echo it.
       const target = detail.sessionId ?? activeSessionId
-      if (target && sessionId && target !== sessionId) return
+      if (target && target !== sessionId) return
       detail.claimed = true
       const text = detail.text
+      let appended = textInput.value
       if (text && text.trim()) {
         const cur = textInput.value
         const sep = cur && !cur.endsWith(" ") ? " " : ""
-        textInput.setInput(`${cur}${sep}${text}`)
+        appended = `${cur}${sep}${text}`
+        textInput.setInput(appended)
       }
+      if (detail.submit) requestSubmit(appended, detail.onSubmitted)
       if (detail.files?.length) addFiles([...detail.files])
       const chat = useChatStore.getState()
       const slice = sessionId ?? null
@@ -3695,7 +3739,7 @@ const ComposerAppendBridge = memo(function ComposerAppendBridge({
     }
     window.addEventListener(COMPOSER_APPEND_EVENT, onAppend)
     return () => window.removeEventListener(COMPOSER_APPEND_EVENT, onAppend)
-  }, [textInput, activeSessionId, sessionId, addFiles, t])
+  }, [textInput, activeSessionId, sessionId, addFiles, requestSubmit, t])
   return null
 })
 
@@ -3884,11 +3928,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     cancel: cancelPluginCommand,
   } = usePluginSlashCommandExecution(session?.id ?? null)
 
+  useSidechatShortcut(session?.id, session?.kind === "resource-workbench")
+
   const handleSlashCommand = useCallback(
     async (cmd: SlashCommand, args: string, staged?: SlashStagedFiles): Promise<boolean> => {
       if (cmd.handler) {
         const ctx: SlashContext = {
           args,
+          isAside: session?.kind === "resource-workbench",
+          // The compact shell has no dock, so `/btw` reports desktop-only there too.
+          isMobile: isMobileShell,
           activeSessionId: session?.id ?? null,
           chatStatus: status,
           // Read AND written against this composer's conversation. The mode
@@ -3952,6 +4001,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       pushSystemMessage,
       tCommands,
       runPluginCommand,
+      isMobileShell,
     ]
   )
 
@@ -4492,6 +4542,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // The anchor the composer's popovers resolve their collision boundary
       // from (`COMPOSER_ROOT_ATTRIBUTE` in `composer/composer-popover-boundary.ts`).
       data-composer-root=""
+      data-composer-session={session?.id}
       data-placement={placement}
       // `composer-scrim` (app/globals.css §4d) owns the fade from the message
       // list into the input box. It replaces a Tailwind gradient +

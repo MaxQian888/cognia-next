@@ -1,5 +1,7 @@
 "use client"
 
+import { withWorkbenchMessageContext } from "@/lib/context-workbench/provider-context"
+
 import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/config/preset-identity"
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -102,6 +104,7 @@ import { recordChatToolApprovalDecision } from "@/lib/policy/action-review/chat-
 import { recordChatCanonicalEvents } from "@/lib/chat/canonical-sink"
 import { isEmbeddedSession } from "@/lib/chat/session-exposure"
 import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
+import { sessionAsideSystemPrompt, resolvedSessionAsideRuntime } from "@/lib/claude/build-options"
 import { clearSessionGrants } from "@/lib/claude/computer-use-session-grants"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import {
@@ -220,6 +223,13 @@ import {
   dispatchOnMessageSend as dispatchPluginMessageSend,
   hasPostToolUseListeners,
 } from "@/lib/claude/adapter-hooks"
+import {
+  prepareAsideContext,
+  ASIDE_REFERENCE_HEADER,
+  type AsideContextDelivery,
+} from "@/lib/chat/session-aside-context"
+import { createAsideContextDispatch } from "@/lib/context-workbench/aside-context-dispatch"
+import { advanceResourceAsideContextCursor } from "@/lib/db/resource-workbench-sessions"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
 import { runStandaloneTurn } from "@/lib/ai/chat/standalone-engine"
 import type {
@@ -328,6 +338,39 @@ import {
 const sharedReferenceWarnedSessions = new Set<string>()
 
 /** Plugins receive only the user-authored block following the attachment manifest. */
+/** Reissued turns can reuse only the context captured for their own user row. */
+export function asideContextForRegenerate(
+  cached: (AsideContextDelivery & { messageId: string }) | undefined,
+  anchorId: string | undefined
+): AsideContextDelivery | undefined {
+  return anchorId && cached?.messageId === anchorId ? cached : undefined
+}
+
+/** Only native Claude has a context cursor tied to an acknowledged SDK session. */
+export function asideProviderHistoryMode(
+  options: SendOptions,
+  standalone: boolean
+): "sdk-resume" | "rebuild" | "unsupported" {
+  const adapter =
+    options.execution?.runtimeAdapter ??
+    (!options.provider || options.provider === "anthropic" ? "claude-agent-sdk" : "ai-sdk")
+  if (options.routerFusionRun || !["claude-agent-sdk", "ai-sdk", "external"].includes(adapter))
+    return "unsupported"
+  // External dispatch can switch between a native session, a gateway task and
+  // a remote host, including rebinding during dispatch. Those ids are not the
+  // SDK acknowledgement the cursor tracks: deliver a full snapshot each turn.
+  if (adapter === "external") return "rebuild"
+  return !standalone && adapter === "claude-agent-sdk" ? "sdk-resume" : "rebuild"
+}
+
+/** External adapters all read the turn prompt; not all honor system-prompt overrides. */
+export function externalAsideTurnContent(content: SendContent, readOnly: boolean): SendContent {
+  const framing = sessionAsideSystemPrompt(readOnly)
+  return typeof content === "string"
+    ? `${framing}\n\n${content}`
+    : [{ type: "text", text: framing }, ...content]
+}
+
 export function userPromptText(content: SendContent, attachmentCount = 0): string {
   if (typeof content === "string") return content
   const block = content.find((entry, index) => index >= attachmentCount && entry.type === "text")
@@ -744,6 +787,7 @@ export function useClaudeChat() {
   const store = useChatStore
   const tRouting = useTranslations("providers.routingView")
   const tInlineErr = useTranslations("chat.inlineError")
+  const tAside = useTranslations("contextWorkbench.asides")
   const tDiagnostics = useTranslations("diagnostics")
   const tPiPackages = useTranslations("plugins.piPackages")
   const tVideo = useTranslations("chat.composer.attachments.video")
@@ -912,7 +956,12 @@ export function useClaudeChat() {
   >(new Map())
   // Private resource context is kept outside the message log. It is reused for
   // regenerate/edit-resend, but is only attached after plugin prompt hooks.
-  const lastResourceContextRef = useRef<Map<string, string>>(new Map())
+  const lastResourceContextRef = useRef<Map<string, AsideContextDelivery & { messageId: string }>>(
+    new Map()
+  )
+  const asideContextDispatchRef = useRef(
+    new Map<string, ReturnType<typeof createAsideContextDispatch>>()
+  )
   /** Retry/regenerate keeps turnId stable and advances only attemptId. */
   const skillAttemptByTurnRef = useRef<Map<string, number>>(new Map())
   /**
@@ -1344,6 +1393,13 @@ export function useClaudeChat() {
             }
           )
         )
+        .then(async () => {
+          if (evt.type === "sdk_session_id") {
+            await asideContextDispatchRef.current
+              .get(evt.sessionId)
+              ?.acknowledgeSdk(evt.sdkSessionId, (evt as typeof evt & { turnId?: string }).turnId)
+          }
+        })
         .catch((err) => {
           console.error("handleEvent failed", err)
         })
@@ -2020,7 +2076,14 @@ export function useClaudeChat() {
         }
         routeLane = lane
       }
-      const turnLane: AgentRuntimeRef = routeLane?.runtimeRef ?? sessionLane
+      let turnLane: AgentRuntimeRef = routeLane?.runtimeRef ?? sessionLane
+      const isSessionAside =
+        session?.kind === "resource-workbench" && session.surfaceBinding?.kind === "session"
+      if (isSessionAside && session?.surfaceBinding?.kind === "session") {
+        // The resolver chooses the safe lane and returns its exact decision.
+        // Until then use the parent's runtime rather than the app-wide default.
+        turnLane = runtimeRefForSession(session.surfaceBinding.sessionId)
+      }
       // Claim imported history before summary generation or editor writes, so a
       // concurrent source watcher cannot replace the snapshot being continued.
       if (sessionId.startsWith("import:") && session?.importOwnership !== "native-bound") {
@@ -2186,6 +2249,7 @@ export function useClaudeChat() {
       // other send pays nothing; the hand-off below re-checks with the final
       // content and options.
       const hostStateForeseen =
+        !isSessionAside &&
         !opts &&
         routerFusionGate(useSettingsStore.getState().settings, "chat") === "on" &&
         hostStateSendEligible({
@@ -2220,7 +2284,7 @@ export function useClaudeChat() {
       let sendOptions: SendOptions
       try {
         sendOptions =
-          opts ??
+          (isSessionAside ? undefined : opts) ??
           (await buildSendOptions(
             session,
             userMessageText,
@@ -2254,26 +2318,28 @@ export function useClaudeChat() {
             // `skipUserAppend`, and a shared-queue drain is a collaborator's
             // request, not this user's.
             {
-              ...(turnRoute ? {} : { routerFusionSurface: "chat" as const }),
+              ...(turnRoute || isSessionAside ? {} : { routerFusionSurface: "chat" as const }),
               ...(hostStateForeseen ? { hostState: true } : {}),
               interactive:
                 !callOptions?.sharedRequest &&
                 (!callOptions?.skipUserAppend || Boolean(callOptions?.regenerateBranch)),
             },
-            routeLane
-              ? routeLane.member
-                ? (() => {
-                    // Answered AS the member: its persona, and its own model
-                    // when it has one — for this turn only.
-                    const character = routeCharacter(routeLane.member)
-                    return {
-                      runtimeRef: routeLane.runtimeRef,
-                      character,
-                      clearSessionModel: Boolean(character.model),
-                    }
-                  })()
-                : { runtimeRef: routeLane.runtimeRef }
-              : undefined
+            isSessionAside
+              ? { runtimeRef: turnLane }
+              : routeLane
+                ? routeLane.member
+                  ? (() => {
+                      // Answered AS the member: its persona, and its own model
+                      // when it has one — for this turn only.
+                      const character = routeCharacter(routeLane.member)
+                      return {
+                        runtimeRef: routeLane.runtimeRef,
+                        character,
+                        clearSessionModel: Boolean(character.model),
+                      }
+                    })()
+                  : { runtimeRef: routeLane.runtimeRef }
+                : undefined
           ))
       } catch (err) {
         // RoutingNoCandidatesError (alias matched, every deployment down)
@@ -2289,6 +2355,30 @@ export function useClaudeChat() {
           )
         throw error
       }
+      // Resolution rechecks current capabilities and the parent's effective
+      // authority. Its final adapter is authoritative if those changed while
+      // resolving, so a fallback must dispatch on the built-in lane too.
+      if (isSessionAside) {
+        turnLane = resolvedSessionAsideRuntime(sendOptions) ?? { kind: "builtin" }
+      }
+      if (
+        isSessionAside &&
+        asideProviderHistoryMode(sendOptions, isStandaloneChatMode()) === "unsupported"
+      ) {
+        store.getState().setSessionError(sessionId, tAside("unsupportedReadOnlyLane"))
+        rejectSend(tAside("unsupportedReadOnlyLane"))
+        return
+      }
+      if (isSessionAside) {
+        // Native links are filtered by the session's runtime, not by this
+        // function's local lane. Bind only the aside so later turns and live
+        // steering can find its own session without borrowing its parent's.
+        useAgentRuntimeStore.getState().setSessionRuntimeRef(sessionId, turnLane)
+      }
+      const asideToolCeiling =
+        isSessionAside && turnLane.kind === "builtin" && sendOptions.permissionMode === "plan"
+          ? new Set(sendOptions.allowedTools ?? [])
+          : undefined
       if (builtinHandoffContext !== undefined) {
         // Explicit send overrides must not smuggle the external runtime handle
         // into the builtin SDK. The resolver may already have injected the seed.
@@ -2725,7 +2815,7 @@ export function useClaudeChat() {
       }
       // The reply line goes to the provider only. The transcript row above
       // keeps the typed text and carries the reference in its metadata.
-      const providerContent = prefixForeignTurnsContext(
+      let providerContent = prefixForeignTurnsContext(
         callOptions?.replyTo
           ? prefixReplyContext(routedContent, callOptions.replyTo)
           : routedContent,
@@ -2733,16 +2823,68 @@ export function useClaudeChat() {
         // A reply line leads the turn ahead of any files; the handoff joins it.
         callOptions?.replyTo ? 0 : (turnManifest?.length ?? 0)
       )
+      if (isSessionAside && turnLane.kind !== "builtin") {
+        providerContent = externalAsideTurnContent(
+          providerContent,
+          sendOptions.permissionMode === "plan"
+        )
+      }
+      // Validate every later transform against the resolved grant; never repair
+      // a widened SendOptions by patching it after the capability finalizer.
+      if (
+        asideToolCeiling &&
+        sendOptions.allowedTools?.some((tool) => !asideToolCeiling.has(tool))
+      ) {
+        store.getState().setSessionError(sessionId, tAside("unsupportedReadOnlyLane"))
+        rejectSend(tAside("unsupportedReadOnlyLane"))
+        return
+      }
       const shouldGateWorkbenchPayload =
         callOptions?.resourceContext !== undefined || isEmbeddedSession(session ?? {})
       // The transcript a provider reads whole (the standalone engine) gets every
       // reply line rebuilt from `metadata.replyTo`; `providerContent` above only
       // reaches a provider that reads the content of the turn being sent.
-      const providerMessages = withReplyContextLines(next)
+      const parentSlice =
+        isSessionAside && session?.surfaceBinding?.kind === "session"
+          ? store.getState().sessions[session.surfaceBinding.sessionId]
+          : undefined
+      const parentMessages = parentSlice
+        ? selectVisibleMessages(parentSlice.messages, parentSlice.activeBranchByGroup)
+        : []
+      const inProgressMessageId =
+        parentSlice &&
+        (parentSlice.status === "streaming" || parentSlice.status === "awaiting_approval")
+          ? parentMessages.findLast((message) => message.role === "assistant")?.id
+          : undefined
+      const seededFirstTurn =
+        isSessionAside &&
+        Boolean(session?.spawnedTask?.pendingPrompt) &&
+        session?.lastMessageAt === undefined &&
+        !session?.forkedFromSdkSessionId
+      const cachedAsideContext = asideContextForRegenerate(
+        lastResourceContextRef.current.get(sessionId),
+        callOptions?.regenerateBranch?.anchorId
+      )
+      // Capture once at send time. The final SDK resume id is checked again
+      // after transcript preparation, which may replace provider history.
+      let resourceDelivery: AsideContextDelivery =
+        cachedAsideContext ??
+        (isSessionAside && !seededFirstTurn
+          ? prepareAsideContext(parentMessages, { inProgressMessageId })
+          : {
+              context: callOptions?.resourceContext ?? "",
+              header: isSessionAside ? ASIDE_REFERENCE_HEADER : "Current resource context",
+            })
+      const providerMessages = withWorkbenchMessageContext(
+        withReplyContextLines(next),
+        resourceDelivery.context,
+        resourceDelivery.header
+      )
       const providerPayload = shouldGateWorkbenchPayload
         ? gateWorkbenchProviderPayload(
             { content: providerContent, sendOptions, messages: providerMessages },
-            callOptions?.resourceContext
+            resourceDelivery.context,
+            resourceDelivery.header
           )
         : { content: providerContent, sendOptions, messages: providerMessages }
       if (callOptions?.sharedRequest) {
@@ -2778,20 +2920,22 @@ export function useClaudeChat() {
       // A sealed Router + Fusion turn (one the check before the build did not
       // foresee as host-state) is dispatched here, where its run is created:
       // host-state sends never stamp (ADR-0188 B1).
-      const hostStateEligible = hostStateSendEligible({
-        pairedHost: turnsRunOnPairedHost(),
-        fusionRun: Boolean(sendOptions.routerFusionRun),
-        routerFusionStamped: Boolean(sendOptions.routerFusion),
-        skipAppend,
-        contentIsString: typeof effectiveContent === "string",
-        hasResourceContext: callOptions?.resourceContext !== undefined,
-        attachmentCount: turnManifest?.length ?? 0,
-        builtinLane: turnLane.kind === "builtin",
-        addressed: Boolean(turnRoute),
-        carriesForeignTurns: Boolean(foreignTurnsContext),
-        collaboration: Boolean(session?.collaboration),
-        standalone: isStandaloneChatMode(),
-      })
+      const hostStateEligible =
+        !isSessionAside &&
+        hostStateSendEligible({
+          pairedHost: turnsRunOnPairedHost(),
+          fusionRun: Boolean(sendOptions.routerFusionRun),
+          routerFusionStamped: Boolean(sendOptions.routerFusion),
+          skipAppend,
+          contentIsString: typeof effectiveContent === "string",
+          hasResourceContext: callOptions?.resourceContext !== undefined,
+          attachmentCount: turnManifest?.length ?? 0,
+          builtinLane: turnLane.kind === "builtin",
+          addressed: Boolean(turnRoute),
+          carriesForeignTurns: Boolean(foreignTurnsContext),
+          collaboration: Boolean(session?.collaboration),
+          standalone: isStandaloneChatMode(),
+        })
       if (hostStateEligible) {
         try {
           const queued = await enqueueHostStateIntentIfAvailable({
@@ -2948,9 +3092,11 @@ export function useClaudeChat() {
         content: displayContent,
         manifest: turnManifest,
       })
-      if (callOptions?.resourceContext !== undefined) {
-        lastResourceContextRef.current.set(sessionId, callOptions.resourceContext)
-      }
+      if (shouldGateWorkbenchPayload)
+        lastResourceContextRef.current.set(sessionId, {
+          ...resourceDelivery,
+          messageId: callOptions?.regenerateBranch?.anchorId ?? userMsg.id,
+        })
       // Plugin bus: the turn has committed (past the prompt-submit block gate).
       // ids only — never the prompt text (PII red-line). Covers all run paths
       // (external + SDK) since this is upstream of the branch below.
@@ -2986,12 +3132,13 @@ export function useClaudeChat() {
       // An addressed turn is one direct turn by definition, so it opts out of
       // the Squad binding (`resolveTurnSquad`: any non-team orchestration on
       // the turn override beats the session's Squad).
-      const turnComposition = turnRoute
-        ? {
-            ...(callOptions?.compositionOverride ?? compositionForSession(sessionId)),
-            orchestration: "direct" as const,
-          }
-        : (callOptions?.compositionOverride ?? null)
+      const turnComposition =
+        isSessionAside || turnRoute
+          ? {
+              ...(callOptions?.compositionOverride ?? compositionForSession(sessionId)),
+              orchestration: "direct" as const,
+            }
+          : (callOptions?.compositionOverride ?? null)
       const squadDecision = resolveTurnSquad({
         turnOverride: turnComposition,
         session,
@@ -3258,6 +3405,7 @@ export function useClaudeChat() {
       if (
         !hasNoToolSurface &&
         !manualExternal &&
+        !isSessionAside &&
         !callOptions?.skipUserAppend &&
         !callOptions?.bypassDelegation &&
         // An addressed turn already names who answers; a delegation rule
@@ -4026,6 +4174,39 @@ export function useClaudeChat() {
             })
             return
           }
+        }
+        let asideExternalPermission:
+          | import("@/lib/ai/agent/external/policy/permission-ceiling").PermissionBoundExternalExecutionOptions
+          | undefined
+        if (isSessionAside && !hostSelection) {
+          const [{ getExternalAgentManager }, { attestsExternalPermissionMode }] =
+            await Promise.all([
+              import("@/lib/ai/agent/external/manager"),
+              import("@/lib/ai/agent/external/policy/permission-ceiling"),
+            ])
+          const manager = getExternalAgentManager()
+          const agent = manager.getAgent(extAgentId)
+          const mode =
+            sendOptions.permissionMode === "auto" ? "default" : sendOptions.permissionMode
+          if (
+            mode &&
+            (mode === "plan" ||
+              (agent &&
+                attestsExternalPermissionMode(
+                  agent.config.protocol,
+                  agent.capabilities,
+                  mode,
+                  manager.getAgentCapabilityProfile(extAgentId)
+                )))
+          ) {
+            asideExternalPermission = {
+              permissionMode: mode,
+              permissionCeiling: { permissionMode: mode },
+            }
+          }
+          // An opaque adapter has no permission override to enforce. After an
+          // explicit unlock it uses this same agent's configured default, just
+          // as the main conversation does. A plan turn always has a hard ceiling.
         }
         // The text sent to the external agent: the PII-filtered prompt when
         // delegated by rule, else the turn as `externalTurnPrompt` reads it —
@@ -4812,9 +4993,16 @@ export function useClaudeChat() {
           }
           // All adapters consume prompt text. The custom context field alone
           // is only understood by some runtimes and cannot carry the handoff.
-          const externalExecutionPrompt = externalContinuationContext
+          const assembledExternalPrompt = externalContinuationContext
             ? `${externalContinuationContext}\n\nCurrent user request:\n${externalSendText}`
             : externalSendText
+          const externalExecutionPrompt = isSessionAside
+            ? (gateWorkbenchProviderPayload({
+                content: assembledExternalPrompt,
+                messages: [],
+                sendOptions,
+              }).content as string)
+            : assembledExternalPrompt
           // The turn's images (attached, or sampled from a video), in a format
           // agents read. The local lane asks this agent and its model what they
           // can see before sending; a Host lane hands them to the Host, which
@@ -4879,6 +5067,9 @@ export function useClaudeChat() {
           const result =
             hostSelection && executeOnRemoteHostAgent && remoteRunId
               ? await executeOnRemoteHostAgent(externalExecutionPrompt, {
+                  // The host's closed turn protocol has no permission override.
+                  // Read-only asides fall back before here; unlocked asides use
+                  // the same config stamp/default authority as their main chat.
                   stamp: {
                     configId: hostSelection.configId,
                     revision: hostSelection.revision,
@@ -4913,6 +5104,7 @@ export function useClaudeChat() {
                 })
               : await executeOnExternalAgent(externalExecutionPrompt, {
                   agentId: extAgentId,
+                  ...asideExternalPermission,
                   ...(gatewayController ? { signal: gatewayController.signal } : {}),
                   ...(!resetExternalSession && modelSelection.gatewayLink
                     ? { sessionId: modelSelection.gatewayLink }
@@ -5326,12 +5518,47 @@ export function useClaudeChat() {
             currentMessageId:
               callOptions?.regenerateBranch?.anchorId ??
               (skipAppend ? turnMessageId(previousMessages) : userMsg.id),
-            replacesHistory: Boolean(callOptions?.branchTag || callOptions?.regenerateBranch),
+            // The AI SDK retained loop ignores new options. Rebuild aside runs
+            // so permission changes take effect and full parent snapshots do not accumulate.
+            replacesHistory: Boolean(
+              callOptions?.branchTag ||
+              callOptions?.regenerateBranch ||
+              (isSessionAside &&
+                !standaloneEngineTurn &&
+                asideProviderHistoryMode(sendOptions, false) === "rebuild")
+            ),
             skipHydration: standaloneEngineTurn || Boolean(callOptions?.sharedRequest),
             activeBranchByGroup:
               useChatStore.getState().sessions[sessionId]?.activeBranchByGroup ??
               session?.activeBranchByGroup,
           })
+          const asideSdkTurn =
+            isSessionAside &&
+            asideProviderHistoryMode(sendOptions, standaloneEngineTurn) === "sdk-resume"
+          if (asideSdkTurn && !seededFirstTurn && !cachedAsideContext) {
+            resourceDelivery = prepareAsideContext(parentMessages, {
+              cursor: session?.asideContextCursor,
+              resumeSdkSessionId: sendOptions.resumeSessionId,
+              inProgressMessageId,
+            })
+            effectiveContent = gateWorkbenchProviderPayload(
+              { content: providerContent, messages: [], sendOptions },
+              resourceDelivery.context,
+              resourceDelivery.header
+            ).content
+          }
+          asideContextDispatchRef.current.get(sessionId)?.cancel()
+          asideContextDispatchRef.current.delete(sessionId)
+          const asideDispatch =
+            asideSdkTurn && !callOptions?.regenerateBranch && resourceDelivery.cursor
+              ? createAsideContextDispatch(
+                  resourceDelivery.cursor,
+                  (cursor) => advanceResourceAsideContextCursor(sessionId, cursor),
+                  sendOptions.resumeSessionId,
+                  sendOptions.turnId
+                )
+              : undefined
+          if (asideDispatch) asideContextDispatchRef.current.set(sessionId, asideDispatch)
           await bindChatTurnContext({
             runId: executionRunId,
             context: {
@@ -5416,6 +5643,14 @@ export function useClaudeChat() {
               })
             }
           }
+          if (shouldGateWorkbenchPayload)
+            lastResourceContextRef.current.set(sessionId, {
+              ...resourceDelivery,
+              messageId: callOptions?.regenerateBranch?.anchorId ?? userMsg.id,
+            })
+          await asideDispatch
+            ?.dispatched()
+            .catch((error) => console.error("Failed to acknowledge aside parent context", error))
         })
         // The host owns the turn now; its `session_ended` seals the run.
         routerFusionAwaitingDispatch = false
@@ -5452,6 +5687,8 @@ export function useClaudeChat() {
             .begin(sessionId, sendOptions.provider, { modelId: sendOptions.model })
         }
       } catch (err) {
+        asideContextDispatchRef.current.get(sessionId)?.cancel()
+        asideContextDispatchRef.current.delete(sessionId)
         const error = err instanceof Error ? err : new Error(String(err))
         const sendFailureCode = explainedSendFailure?.code ?? "send_failed"
         if (routerFusionAwaitingDispatch) {
@@ -5499,6 +5736,7 @@ export function useClaudeChat() {
       store,
       tRouting,
       tInlineErr,
+      tAside,
       tDiagnostics,
       tPiPackages,
       tVideo,
@@ -6473,7 +6711,7 @@ export function useClaudeChat() {
         ...(editedManifest?.length ? { attachmentManifest: editedManifest } : {}),
         citations: chipCitationsOf(edited.metadata),
         ...(promptPreamble ? { promptPreamble } : {}),
-        resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
+        resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId)?.context,
         // The replacement is a *user* message, created inside `send` itself,
         // so it is tagged there rather than through the assistant-event path
         // `regenerate` uses.
@@ -6546,7 +6784,7 @@ export function useClaudeChat() {
         skipUserAppend: true,
         sessionId,
         ...(manifest?.length ? { attachmentManifest: manifest } : {}),
-        resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
+        resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId)?.context,
         // The replies become siblings, and the next one's slot is armed, only
         // once the send has passed every gate that can refuse it.
         regenerateBranch: { anchorId: anchor.id },

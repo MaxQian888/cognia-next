@@ -8,6 +8,7 @@ import type {
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 import { renderBranchSeed } from "./branch-session"
+import { inheritableSessionConfig } from "./session-config-inheritance"
 import { createResourceWorkbenchSession } from "@/lib/db/resource-workbench-sessions"
 import { listMessages } from "@/lib/db/messages"
 import { deleteSession, getSession, listSessionBranches, updateSession } from "@/lib/db/sessions"
@@ -132,6 +133,9 @@ export async function createAttachedSession(
   // An independent child keeps whatever placement its creator already gave it
   // (a thread's own managed worktree); only a shared child borrows the parent's.
   const patch: Partial<ChatSession> = {
+    ...(child.kind === "resource-workbench" && child.surfaceBinding?.kind === "session"
+      ? inheritableSessionConfig(parent, "aside")
+      : {}),
     ...input.extra,
     parentSessionId,
     attachedChild,
@@ -144,9 +148,10 @@ export async function createAttachedSession(
       pendingPrompt: prompt,
     },
   }
-  if (input.context.mode === "full" && parent.sdkSessionId) {
-    patch.forkedFromSdkSessionId = parent.sdkSessionId
-  } else if (inheritedContent) {
+  // The SDK's retained history includes native tool payloads and may outlive
+  // edits or truncation of the persisted transcript. Gating our local mirror
+  // cannot certify that opaque history, so inherit only the gated rendering.
+  if (inheritedContent) {
     patch.branchSeed = { kind: "transcript", content: inheritedContent }
   }
   try {

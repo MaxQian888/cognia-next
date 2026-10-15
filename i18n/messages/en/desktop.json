@@ -551,6 +551,7 @@
       "squads": "Squads"
     },
     "shortcut": {
+      "cmdOrCtrlSemicolon": "⌘; / Ctrl+;",
       "cmdOrCtrl0": "Ctrl+0",
       "cmdOrCtrlAltI": "Ctrl+Alt+I",
       "cmdOrCtrlB": "Ctrl+B",
@@ -591,6 +592,7 @@
       "sidecarRestartToastFail": "Sidecar restart failed: {message}"
     },
     "view": {
+      "toggleSidechat": "Focus side chat / main conversation",
       "commandPalette": "Command Palette…",
       "guildRailFolded": "folded into the sidebar",
       "label": "View",

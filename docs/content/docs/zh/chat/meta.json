@@ -8,6 +8,7 @@
     "external-agents",
     "slash-commands",
     "references",
+    "side-chat",
     "goal-command",
     "provider-system",
     "claude-subscription-oauth",

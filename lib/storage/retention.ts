@@ -32,6 +32,7 @@ import { pruneOnlineEvalData } from "@/lib/db/eval-online"
 import { pruneMemoryGovernanceData } from "@/lib/db/memory-governance"
 import { pruneRetrievalControlData } from "@/lib/db/retrieval-control"
 import { pruneSettledVideoJobs } from "@/lib/db/media-generation-jobs"
+import { purgeOrphanedSessionSideChats } from "@/lib/db/session-aside-orphans"
 import { pruneNotificationDelivery } from "@/lib/db/notification-delivery-retention"
 import { resolvePreferences } from "@/lib/notifications/preferences"
 import {
@@ -282,6 +283,11 @@ async function sweepOnce(): Promise<void> {
   await pruneRetainedTables(windows.traceRetentionDays, RETENTION_TARGETS, {
     ocrResults: windows.ocrCacheTtlDays,
   })
+  // Referential, not time-windowed, so it is not a governed target: a side
+  // chat has no age limit, only a conversation it belongs to.
+  await purgeOrphanedSessionSideChats().catch((err) =>
+    console.warn("orphaned side chat sweep failed", err)
+  )
 }
 
 /**

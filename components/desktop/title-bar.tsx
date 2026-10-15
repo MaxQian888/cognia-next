@@ -1538,6 +1538,7 @@ const SHORTCUT_ROWS: Array<{ labelKey: string; shortcutKey: string }> = [
   { labelKey: "file.openLogs", shortcutKey: "shortcut.cmdOrCtrlShiftL" },
   { labelKey: "edit.find", shortcutKey: "shortcut.cmdOrCtrlF" },
   { labelKey: "view.commandPalette", shortcutKey: "shortcut.cmdOrCtrlShiftP" },
+  { labelKey: "view.toggleSidechat", shortcutKey: "shortcut.cmdOrCtrlSemicolon" },
   { labelKey: "view.toggleSidebar", shortcutKey: "shortcut.cmdOrCtrlB" },
   { labelKey: "view.reload", shortcutKey: "shortcut.cmdOrCtrlR" },
   { labelKey: "view.toggleDevtools", shortcutKey: "shortcut.cmdOrCtrlAltI" },

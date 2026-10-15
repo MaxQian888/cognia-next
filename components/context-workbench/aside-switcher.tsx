@@ -54,6 +54,7 @@ import {
   promoteResourceWorkbenchSession,
   renameResourceWorkbenchSession,
 } from "@/lib/db/resource-workbench-sessions"
+import { isPrimaryResourceWorkbenchSessionId } from "@/lib/context-workbench/resource-session"
 import { useChatStore } from "@/stores/chat"
 import { createLogger } from "@cognia/logging"
 
@@ -241,7 +242,11 @@ export function AsideSwitcher({ binding, activeId, onSelect, primaryId }: Props)
             // Deleting the primary aside would only make the panel mint it
             // again on the next open, so the action is withheld rather than
             // being a no-op that looks broken.
-            disabled={!active || active.id === primaryId}
+            disabled={
+              !active ||
+              active.id === primaryId ||
+              isPrimaryResourceWorkbenchSessionId(binding, active.id)
+            }
             onSelect={() =>
               active && setPending({ kind: "delete", id: active.id, title: active.title })
             }

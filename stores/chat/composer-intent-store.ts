@@ -46,15 +46,17 @@ export const useComposerIntentStore = create<ComposerIntentState>((set, get) => 
   stage: (sessionId, intent) =>
     set((state) => {
       const pending = state.pendingBySession[sessionId]
+      if (pending && intent.prompt === null && !intent.images?.length) return state
       const sameRuntime =
-        pending?.externalSession &&
-        intent.externalSession &&
-        pending.externalSession.agentId === intent.externalSession.agentId &&
-        pending.externalSession.sessionId === intent.externalSession.sessionId
-      // A cancelled queue belongs to the human. Preserve its append when an
-      // extension also replaces the editor before the composer can consume it.
+        (!pending?.externalSession && !intent.externalSession) ||
+        (pending?.externalSession &&
+          intent.externalSession &&
+          pending.externalSession.agentId === intent.externalSession.agentId &&
+          pending.externalSession.sessionId === intent.externalSession.sessionId)
+      // Preserve returned quotes and cancelled queue text when another intent
+      // arrives before the composer mounts or consumes the pending draft.
       const combined =
-        sameRuntime && (pending.mode === "append" || intent.mode === "append")
+        pending && sameRuntime && (pending.mode === "append" || intent.mode === "append")
           ? {
               ...intent,
               mode:

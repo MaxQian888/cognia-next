@@ -43,11 +43,19 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
   })),
 }))
 
-import { fireEvent, render, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, waitFor } from "@testing-library/react"
 import { stripPromptPreamble } from "@/lib/chat/prompt-preamble"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
+import { dispatchComposerAppend } from "@/lib/chat/composer-append"
+import { dispatchSideChat } from "@/lib/slash-commands/actions/side-chat"
+import type { ComponentProps } from "react"
+
+jest.mock("@/lib/slash-commands/actions/side-chat", () => ({
+  dispatchSideChat: jest.fn(async () => {}),
+  openSideChat: jest.fn(async () => {}),
+}))
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { selectComposerWebSearchOn, useChatStore } from "@/stores/chat"
@@ -96,7 +104,11 @@ function setBehavior(behavior: NonNullable<AppSettings["composerBehavior"]>): vo
   useSettingsStore.setState({ settings: { composerBehavior: behavior } as never })
 }
 
-function renderComposer(session: ChatSession, onSend = jest.fn(async () => undefined)) {
+function renderComposer(
+  session: ChatSession,
+  onSend = jest.fn(async () => undefined),
+  props: Partial<ComponentProps<typeof Composer>> = {}
+) {
   const Wrapper = withAdapter(makeAdapter())
   render(
     <Wrapper>
@@ -106,6 +118,7 @@ function renderComposer(session: ChatSession, onSend = jest.fn(async () => undef
         onOpenSettings={() => undefined}
         onSend={onSend}
         onStop={async () => undefined}
+        {...props}
       />
     </Wrapper>
   )
@@ -329,5 +342,121 @@ describe("composer web pre-search", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalled())
     expect(searchWithAppSettings).not.toHaveBeenCalled()
     expect(selectComposerWebSearchOn(useChatStore.getState(), session.id)).toBe(false)
+  })
+})
+
+describe("side chat local entry and return path", () => {
+  beforeEach(() => {
+    jest.mocked(dispatchSideChat).mockClear()
+    setBehavior({ persistDrafts: false })
+  })
+
+  it("withholds nested side chat commands and their hints inside an aside", async () => {
+    const { ta, onSend } = renderComposer(mkSession({ kind: "resource-workbench" }))
+    fireEvent.change(ta, { target: { value: "/btw nested question" } })
+    fireEvent.keyDown(ta, { key: "Enter", code: "Enter" })
+    await act(async () => {})
+    expect(dispatchSideChat).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(document.body.textContent).not.toContain(
+      "Ask a question in the conversation's side chat"
+    )
+  })
+
+  it.each(["streaming", "awaiting_approval"] as const)(
+    "runs btw locally during %s",
+    async (status) => {
+      const session = mkSession()
+      const stop = jest.fn()
+      const { ta, onSend } = renderComposer(session, undefined, { status, onStop: stop })
+      fireEvent.change(ta, { target: { value: "/btw explain this" } })
+      fireEvent.keyDown(ta, { key: "Enter", code: "Enter" })
+      await waitFor(() =>
+        expect(dispatchSideChat).toHaveBeenCalledWith(
+          expect.objectContaining({ args: "explain this", activeSessionId: session.id })
+        )
+      )
+      expect(onSend).not.toHaveBeenCalled()
+      expect(stop).not.toHaveBeenCalled()
+      await waitFor(() => expect(ta.value).toBe(""))
+      expect(useChatStore.getState().sessions[session.id]?.messages ?? []).toHaveLength(0)
+    }
+  )
+
+  it("handles side locally even while the main send promise is unresolved", async () => {
+    let resolveSend!: () => void
+    const pending = jest.fn(
+      () =>
+        new Promise<undefined>((resolve) => {
+          resolveSend = () => resolve(undefined)
+        })
+    )
+    const { ta } = renderComposer(mkSession(), pending)
+    fireEvent.change(ta, { target: { value: "main task" } })
+    fireEvent.keyDown(ta, { key: "Enter", code: "Enter" })
+    await waitFor(() => expect(pending).toHaveBeenCalledTimes(1))
+    fireEvent.change(ta, { target: { value: "/side separate question" } })
+    fireEvent.keyDown(ta, { key: "Enter", code: "Enter" })
+    await waitFor(() =>
+      expect(dispatchSideChat).toHaveBeenCalledWith(
+        expect.objectContaining({ args: "separate question" })
+      )
+    )
+    expect(pending).toHaveBeenCalledTimes(1)
+    await act(async () => resolveSend())
+  })
+
+  it.each(["idle", "streaming", "awaiting_approval"] as const)(
+    "submits an appended quote through onSend during %s",
+    async (status) => {
+      const session = mkSession()
+      const { ta, onSend } = renderComposer(session, undefined, { status })
+      const onSubmitted = jest.fn()
+      fireEvent.change(ta, { target: { value: "existing draft" } })
+      act(() => {
+        expect(
+          dispatchComposerAppend({
+            sessionId: session.id,
+            text: "> aside reply",
+            submit: true,
+            onSubmitted,
+          })
+        ).toBe(true)
+      })
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+      expect(stripPromptPreamble((onSend.mock.calls[0] as unknown as [string])[0])).toBe(
+        "existing draft > aside reply"
+      )
+      await waitFor(() => expect(onSubmitted).toHaveBeenCalledWith(true))
+    }
+  )
+
+  it("keeps a submitted quote as a draft when the composer is disabled", async () => {
+    const session = mkSession()
+    const { ta, onSend } = renderComposer(session, undefined, { disabled: true })
+    const onSubmitted = jest.fn()
+    act(() => {
+      expect(
+        dispatchComposerAppend({
+          sessionId: session.id,
+          text: "> keep this",
+          submit: true,
+          onSubmitted,
+        })
+      ).toBe(true)
+    })
+    await waitFor(() => expect(onSubmitted).toHaveBeenCalledWith(false))
+    expect(ta.value).toBe("> keep this")
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("Bring back appends without sending", async () => {
+    const session = mkSession()
+    const { ta, onSend } = renderComposer(session)
+    act(() => {
+      dispatchComposerAppend({ sessionId: session.id, text: "> draft only" })
+    })
+    await waitFor(() => expect(ta.value).toBe("> draft only"))
+    expect(onSend).not.toHaveBeenCalled()
   })
 })

@@ -1,5 +1,7 @@
 import type { UIMessage } from "ai"
 import type { ChatSession } from "@cognia/agent-config-types"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { BRANCH_SEED_MAX_CHARS } from "@/lib/chat/branch-session"
 
 const defaultGetSession = jest.fn()
 const defaultCreateAside = jest.fn()
@@ -124,7 +126,7 @@ describe("dispatchSpawnTask", () => {
     expect(deps.createAside).not.toHaveBeenCalled()
   })
 
-  it("inherits an SDK session when the parent has one", async () => {
+  it("inherits gated text instead of an opaque SDK session even for a clean local mirror", async () => {
     const deps = dependencies({
       getSession: jest.fn(async () => session("parent-1", { sdkSessionId: "sdk-parent" })),
       listMessages: jest.fn(async (id) =>
@@ -141,8 +143,119 @@ describe("dispatchSpawnTask", () => {
     expect(deps.gateInheritedContent).toHaveBeenCalledWith("User: Safe context")
     expect(deps.updateSession).toHaveBeenCalledWith(
       "task-1",
-      expect.objectContaining({ forkedFromSdkSessionId: "sdk-parent" })
+      expect.objectContaining({ branchSeed: { kind: "transcript", content: "User: Safe context" } })
     )
+    expect(
+      (deps.updateSession as jest.Mock).mock.calls[0][1].forkedFromSdkSessionId
+    ).toBeUndefined()
+  })
+
+  it("inherits the parent config without carrying its team executor or write unlock", async () => {
+    const deps = dependencies({
+      getSession: jest.fn(async () =>
+        session("parent-1", {
+          model: "parent-model",
+          providerOverride: "anthropic",
+          accountId: "parent-account",
+          characterId: "character-parent",
+          teamId: "team-parent",
+          squadId: "squad-parent",
+          permissionMode: "acceptEdits",
+          workingDir: "/repo",
+          sandboxEnabled: true,
+          sandboxTier: "microvm",
+          systemPrompt: "Parent instructions",
+          asideWriteAccess: true,
+        })
+      ),
+    })
+
+    await dispatchSpawnTask("parent-1", brief, deps)
+
+    const patch = (deps.updateSession as jest.Mock).mock.calls[0][1]
+    expect(patch).toMatchObject({
+      model: "parent-model",
+      providerOverride: "anthropic",
+      accountId: "parent-account",
+      characterId: "character-parent",
+      permissionMode: "acceptEdits",
+      workingDir: "/repo",
+      sandboxEnabled: true,
+      sandboxTier: "microvm",
+      systemPrompt: "Parent instructions",
+    })
+    expect(patch.teamId).toBeUndefined()
+    expect(patch.squadId).toBeUndefined()
+    expect(patch.asideWriteAccess).toBeUndefined()
+  })
+
+  it("falls back to gated text when omitted tool payloads contain PII", async () => {
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "Safe question" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "lookup",
+            toolCallId: "lookup-1",
+            state: "output-available",
+            input: {},
+            output: { email: "alice@example.com" },
+          },
+        ],
+      },
+    ]
+    const deps = dependencies({
+      getSession: jest.fn(async () => session("parent-1", { sdkSessionId: "sdk-parent" })),
+      listMessages: jest.fn(async (id) => (id === "parent-1" ? messages : [])),
+      gateInheritedContent: hasNoLeakingPiiDeep,
+    })
+    expect(hasNoLeakingPiiDeep(messages)).toBe(false)
+
+    await dispatchSpawnTask("parent-1", { ...brief, mode: "inherit" }, deps)
+
+    const patch = (deps.updateSession as jest.Mock).mock.calls[0][1]
+    expect(patch.forkedFromSdkSessionId).toBeUndefined()
+    expect(patch.branchSeed).toEqual({ kind: "transcript", content: "User: Safe question" })
+    expect(hasNoLeakingPiiDeep(patch.branchSeed)).toBe(true)
+  })
+
+  it("cannot recover unsafe older messages through a fork after the renderer bounds the seed", async () => {
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "alice@example.com" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "text", text: "x".repeat(BRANCH_SEED_MAX_CHARS) }],
+      },
+    ]
+    const deps = dependencies({
+      getSession: jest.fn(async () => session("parent-1", { sdkSessionId: "sdk-parent" })),
+      listMessages: jest.fn(async (id) => (id === "parent-1" ? messages : [])),
+      gateInheritedContent: hasNoLeakingPiiDeep,
+    })
+
+    await dispatchSpawnTask("parent-1", { ...brief, mode: "inherit" }, deps)
+
+    const patch = (deps.updateSession as jest.Mock).mock.calls[0][1]
+    expect(patch.forkedFromSdkSessionId).toBeUndefined()
+    expect(patch.branchSeed.content).toHaveLength(BRANCH_SEED_MAX_CHARS)
+    expect(patch.branchSeed.content).not.toContain("alice@example.com")
+    expect(hasNoLeakingPiiDeep(patch.branchSeed)).toBe(true)
+  })
+
+  it("never forks retained SDK history when the local mirror is empty", async () => {
+    const deps = dependencies({
+      getSession: jest.fn(async () => session("parent-1", { sdkSessionId: "sdk-parent" })),
+    })
+
+    await dispatchSpawnTask("parent-1", { ...brief, mode: "inherit" }, deps)
+
+    const patch = (deps.updateSession as jest.Mock).mock.calls[0][1]
+    expect(patch.forkedFromSdkSessionId).toBeUndefined()
+    expect(patch.branchSeed).toBeUndefined()
   })
 
   it("inherits a bounded transcript when no SDK session exists", async () => {
@@ -167,28 +280,32 @@ describe("dispatchSpawnTask", () => {
     )
   })
 
-  it("blocks inherited local history before persisting it on the child", async () => {
-    const deps = dependencies({
-      listMessages: jest.fn(async (id) =>
-        id === "parent-1"
-          ? [
-              {
-                id: "m1",
-                role: "user",
-                parts: [{ type: "text", text: "alice@example.com" }],
-              } as UIMessage,
-            ]
-          : []
-      ),
-      gateInheritedContent: jest.fn(() => false),
-    })
+  it.each([undefined, "sdk-parent"])(
+    "blocks unsafe inherited text before creating a child (SDK session: %s)",
+    async (sdkSessionId) => {
+      const deps = dependencies({
+        getSession: jest.fn(async () => session("parent-1", { sdkSessionId })),
+        listMessages: jest.fn(async (id) =>
+          id === "parent-1"
+            ? [
+                {
+                  id: "m1",
+                  role: "user",
+                  parts: [{ type: "text", text: "alice@example.com" }],
+                } as UIMessage,
+              ]
+            : []
+        ),
+        gateInheritedContent: hasNoLeakingPiiDeep,
+      })
 
-    await expect(
-      dispatchSpawnTask("parent-1", { ...brief, mode: "inherit" }, deps)
-    ).rejects.toThrow("PII redaction gate")
-    expect(deps.createAside).not.toHaveBeenCalled()
-    expect(deps.updateSession).not.toHaveBeenCalled()
-  })
+      await expect(
+        dispatchSpawnTask("parent-1", { ...brief, mode: "inherit" }, deps)
+      ).rejects.toThrow("PII redaction gate")
+      expect(deps.createAside).not.toHaveBeenCalled()
+      expect(deps.updateSession).not.toHaveBeenCalled()
+    }
+  )
 
   it("refuses nested workbench tasks and a non-empty new task", async () => {
     const nested = dependencies({

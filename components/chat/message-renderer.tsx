@@ -198,6 +198,7 @@ import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-badge"
 import { TurnAdmissionBadge } from "@/components/chat/message-parts/turn-admission-badge"
 import { SessionPeerOriginBadge } from "@/components/chat/session-peer-origin-badge"
+import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
 import { dispatchComposerAppend } from "@/components/chat/composer"
 import { saveMessageAsMemory } from "@/lib/chat/save-message-as-memory"
 import { saveMessageAsIssue } from "@/lib/chat/save-message-as-issue"
@@ -702,19 +703,42 @@ function MessageRendererInner({
     }
   }, [messageShareContent, t])
 
-  const handleBringBack = useCallback(() => {
-    if (!handBackTargetId) return
-    const text = extractText(message).trim()
-    if (!text) return
-    dispatchComposerAppend({
-      text: `${text
+  const handBack = useCallback(
+    (submit: boolean) => {
+      const target = submit ? asideTargetSessionId : handBackTargetId
+      if (!target) return
+      const content = extractText(message).trim()
+      if (!content) return
+      const text = `${content
         .split("\n")
         .map((line) => `> ${line}`)
-        .join("\n")}\n\n`,
-      sessionId: handBackTargetId,
-    })
-    toast.success(t("bringBackDone"))
-  }, [handBackTargetId, message, t])
+        .join("\n")}\n\n`
+      const claimed = dispatchComposerAppend({
+        text,
+        sessionId: target,
+        submit,
+        ...(submit
+          ? {
+              onSubmitted: (sent: boolean) => {
+                if (sent) toast.success(t("sendToMainDone"))
+                else toast.info(t("sendToMainDraft"))
+              },
+            }
+          : {}),
+      })
+      if (!claimed) {
+        useComposerIntentStore.getState().stage(target, {
+          candidateId: crypto.randomUUID(),
+          prompt: text,
+          mode: "append",
+        })
+        toast.info(t(submit ? "sendToMainDraft" : "bringBackDraft"))
+      } else if (!submit) toast.success(t("bringBackDone"))
+    },
+    [asideTargetSessionId, handBackTargetId, message, t]
+  )
+  const handleBringBack = useCallback(() => handBack(false), [handBack])
+  const handleSendToMain = useCallback(() => handBack(true), [handBack])
 
   const handleSaveAsMemory = useCallback(async () => {
     if (!branchSessionId) return
@@ -773,16 +797,21 @@ function MessageRendererInner({
 
   const handleQuote = useCallback(() => {
     if (!branchSessionId) return
-    const text = extractText(message).trim()
-    if (!text) return
-    dispatchComposerAppend({
-      text: `${text
-        .split("\n")
-        .map((line) => `> ${line}`)
-        .join("\n")}\n\n`,
-      sessionId: branchSessionId,
-    })
-  }, [branchSessionId, message])
+    const content = extractText(message).trim()
+    if (!content) return
+    const text = `${content
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n")}\n\n`
+    if (!dispatchComposerAppend({ text, sessionId: branchSessionId })) {
+      useComposerIntentStore.getState().stage(branchSessionId, {
+        candidateId: crypto.randomUUID(),
+        prompt: text,
+        mode: "append",
+      })
+      toast.info(t("quoteDraft"))
+    }
+  }, [branchSessionId, message, t])
 
   // Aim the composer's next send at this row (ADR-0177 batch 2). The store
   // keeps one target per conversation, so a second click on another row simply
@@ -1395,6 +1424,12 @@ function MessageRendererInner({
                           {t("truncateFromLabel")}
                         </DropdownMenuItem>
                       )}
+                      {asideTargetSessionId && (
+                        <DropdownMenuItem onSelect={handleSendToMain}>
+                          <CornerUpLeftIcon className="size-4" />
+                          {t("sendToMainLabel")}
+                        </DropdownMenuItem>
+                      )}
                       {hasActionCommand("bringBack") && handBackTargetId && (
                         <DropdownMenuItem onSelect={handleBringBack}>
                           <CornerUpLeftIcon className="size-4" />
@@ -1623,8 +1658,16 @@ function MessageRendererInner({
                 branch hands back to the conversation it was cut from. Lineage
                 used to be one-way for branches — the chip could carry you to
                 the parent to look, but nothing brought a finding with you.
-                Deliberately not auto-sent — a conclusion reached elsewhere is
-                usually worth rewording before it costs a turn up there. */}
+                Bring back keeps a draft; session asides also offer an explicit send. */}
+                {asideTargetSessionId && (
+                  <MessageAction
+                    tooltip={t("sendToMainLabel")}
+                    label={t("sendToMainLabel")}
+                    onClick={handleSendToMain}
+                  >
+                    <CornerUpLeftIcon className="size-3.5" />
+                  </MessageAction>
+                )}
                 {handBackTargetId && (
                   <MessageAction
                     tooltip={t("bringBackTooltip")}

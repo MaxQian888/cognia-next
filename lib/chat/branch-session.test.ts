@@ -447,6 +447,19 @@ describe("branchSessionAtMessage — workspace scoping", () => {
 })
 
 describe("branchSessionAtMessage — direct", () => {
+  it("preserves team and squad executors when shared inheritance is used for a branch", async () => {
+    await seedSource({ teamId: "team-1", squadId: "squad-1", sandboxTierFollowsDefault: true })
+    const child = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: visible(),
+      messageId: "a1",
+      mode: "direct",
+    })
+    expect(child.teamId).toBe("team-1")
+    expect(child.squadId).toBe("squad-1")
+    expect(child.sandboxTierFollowsDefault).toBe(true)
+  })
+
   it("copies the truncated thread and inherits config + lineage", async () => {
     await seedSource()
     const child = await branchSessionAtMessage({

@@ -2675,3 +2675,70 @@ describe("turn changes card", () => {
     expect(screen.queryByTestId("turn-changes-card")).toBeNull()
   })
 })
+
+describe("aside return actions", () => {
+  it("stages Bring back and Send as drafts when the main composer is absent", async () => {
+    const { AsideTargetProvider } = await import("@/components/context-workbench/aside-target")
+    const { useComposerIntentStore } = await import("@/stores/chat/composer-intent-store")
+    const { toast } = await import("sonner")
+    useComposerIntentStore.setState({ pendingBySession: {} })
+    render(
+      <AsideTargetProvider sessionId="main">
+        <MessageRenderer message={assistantMsg("aside", "conclusion")} />
+      </AsideTargetProvider>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "bringBackTooltip" }))
+    expect(useComposerIntentStore.getState().pendingBySession.main).toMatchObject({
+      prompt: "> conclusion\n\n",
+      mode: "append",
+    })
+    expect(toast.info).toHaveBeenCalledWith("bringBackDraft")
+    fireEvent.click(screen.getByRole("button", { name: "sendToMainLabel" }))
+    expect(useComposerIntentStore.getState().pendingBySession.main.autoSend).not.toBe(true)
+    expect(toast.info).toHaveBeenCalledWith("sendToMainDraft")
+  })
+
+  it("acknowledges a claimed send only after the main composer reports acceptance", async () => {
+    const { AsideTargetProvider } = await import("@/components/context-workbench/aside-target")
+    const { COMPOSER_APPEND_EVENT } = await import("@/lib/chat/composer-append")
+    const { toast } = await import("sonner")
+    let detail: import("@/lib/chat/composer-append").ComposerAppendDetail | undefined
+    const listener = (event: Event) => {
+      detail = (event as CustomEvent).detail
+      detail!.claimed = true
+    }
+    window.addEventListener(COMPOSER_APPEND_EVENT, listener)
+    try {
+      render(
+        <AsideTargetProvider sessionId="main">
+          <MessageRenderer message={assistantMsg("aside", "conclusion")} />
+        </AsideTargetProvider>
+      )
+      jest.mocked(toast.success).mockClear()
+      fireEvent.click(screen.getByRole("button", { name: "sendToMainLabel" }))
+      expect(detail).toMatchObject({ sessionId: "main", text: "> conclusion\n\n", submit: true })
+      expect(toast.success).not.toHaveBeenCalled()
+      detail!.onSubmitted!(true)
+      expect(toast.success).toHaveBeenCalledWith("sendToMainDone")
+    } finally {
+      window.removeEventListener(COMPOSER_APPEND_EVENT, listener)
+    }
+  })
+
+  it("does not offer Send to main outside a session aside", () => {
+    render(<MessageRenderer message={assistantMsg()} />)
+    expect(screen.queryByRole("button", { name: "sendToMainLabel" })).not.toBeInTheDocument()
+  })
+
+  it("stages Quote for its own session when no composer claims it", async () => {
+    const { useComposerIntentStore } = await import("@/stores/chat/composer-intent-store")
+    useComposerIntentStore.setState({ pendingBySession: {} })
+    useChatStore.setState({ activeSessionId: "quote-session" })
+    render(<MessageRenderer message={assistantMsg("quote", "quote this")} />)
+    fireEvent.click(screen.getByRole("button", { name: "quoteLabel" }))
+    expect(useComposerIntentStore.getState().pendingBySession["quote-session"]).toMatchObject({
+      prompt: "> quote this\n\n",
+      mode: "append",
+    })
+  })
+})

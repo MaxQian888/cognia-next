@@ -291,6 +291,13 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     defaultChord: "",
   },
   {
+    id: "chat.sidechat.toggle",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.chatSidechatToggle",
+    category: "app.panels",
+    defaultChord: "ctrl+;",
+  },
+  {
     id: "artifacts.toggleDock",
     scope: "app",
     labelKey: "settings.shortcuts.catalog.artifactsToggleDock",

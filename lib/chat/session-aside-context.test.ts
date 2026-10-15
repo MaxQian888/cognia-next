@@ -4,6 +4,9 @@ import {
   ASIDE_TOOL_FACTS_PER_MESSAGE,
   ASIDE_TOOL_RESULT_EXCERPT_CHARS,
   buildAsideContext,
+  prepareAsideContext,
+  ASIDE_REFERENCE_HEADER,
+  ASIDE_DELTA_HEADER,
 } from "./session-aside-context"
 
 function msg(role: "user" | "assistant", text: string): UIMessage {
@@ -120,4 +123,95 @@ describe("buildAsideContext", () => {
     expect(out).toContain("…]")
     expect(out.length).toBeLessThan(big.length)
   })
+})
+
+describe("incremental aside delivery", () => {
+  const parent = [msg("user", "question"), msg("assistant", "answer")]
+  const full = prepareAsideContext(parent)
+  const cursor = { ...full.cursor!, sdkSessionId: "sdk" }
+  it("sends a full reference snapshot initially and nothing on an unchanged resume", () => {
+    expect(full.header).toBe(ASIDE_REFERENCE_HEADER)
+    expect(full.context).toContain("User: question")
+    expect(prepareAsideContext(parent, { cursor, resumeSdkSessionId: "sdk" })).toEqual({
+      header: ASIDE_DELTA_HEADER,
+      context: "",
+    })
+  })
+  it("sends only new messages on the same provider history", () => {
+    const delivery = prepareAsideContext([...parent, msg("user", "next")], {
+      cursor,
+      resumeSdkSessionId: "sdk",
+    })
+    expect(delivery.context).toBe("User: next")
+    expect(delivery.header).toBe(ASIDE_DELTA_HEADER)
+    expect(delivery.cursor?.parentMessageId).toBe("user-next")
+  })
+  it.each([undefined, "another-sdk"])(
+    "resends the snapshot on changed or cleared SDK identity: %s",
+    (resumeSdkSessionId) => {
+      expect(prepareAsideContext(parent, { cursor, resumeSdkSessionId }).context).toBe(full.context)
+    }
+  )
+  it("resends after edits, branch removal, truncation, or parent clearing", () => {
+    const edited = [{ ...parent[0], parts: [{ type: "text" as const, text: "edited" }] }, parent[1]]
+    for (const messages of [edited, parent.slice(0, 1), []]) {
+      const delivery = prepareAsideContext(messages, { cursor, resumeSdkSessionId: "sdk" })
+      expect(delivery.header).toBe(ASIDE_REFERENCE_HEADER)
+      expect(delivery.context).not.toBe("")
+    }
+  })
+  it("marks streamed content without acknowledging it, then delivers its final form", () => {
+    const stream = prepareAsideContext(parent, { inProgressMessageId: parent[1].id })
+    expect(stream.context).toContain("still in progress")
+    expect(stream.cursor?.parentMessageId).toBe(parent[0].id)
+    const final = prepareAsideContext(parent, {
+      cursor: { ...stream.cursor!, sdkSessionId: "sdk" },
+      resumeSdkSessionId: "sdk",
+    })
+    expect(final.context).toBe("Assistant: answer")
+  })
+  it("never acknowledges completed messages displaced by an oversized streaming tail", () => {
+    const long = msg("assistant", "x".repeat(9000))
+    const delivery = prepareAsideContext([parent[0], long], { inProgressMessageId: long.id })
+    expect(delivery.cursor).toBeUndefined()
+  })
+  it("keeps rebuilding-lane snapshots complete regardless of a stored cursor", () => {
+    expect(prepareAsideContext(parent, { cursor }).context).toBe(full.context)
+    expect(prepareAsideContext(parent, { cursor }).context).toBe(full.context)
+  })
+})
+
+it("acknowledges an empty parent once, then sends only subsequent messages", () => {
+  const initial = prepareAsideContext([msg("user", "old")])
+  const cleared = prepareAsideContext([], {
+    cursor: { ...initial.cursor!, sdkSessionId: "sdk" },
+    resumeSdkSessionId: "sdk",
+  })
+  expect(cleared.context).toContain("no visible messages")
+  expect(cleared.cursor?.parentMessageId).toBeNull()
+  const cursor = { ...cleared.cursor!, sdkSessionId: "sdk" }
+  expect(prepareAsideContext([], { cursor, resumeSdkSessionId: "sdk" }).context).toBe("")
+  expect(
+    prepareAsideContext([msg("user", "new")], { cursor, resumeSdkSessionId: "sdk" }).context
+  ).toBe("User: new")
+})
+
+it("does not advance past a streaming assistant when a parent steer follows it", () => {
+  const question = msg("user", "question")
+  const streaming = msg("assistant", "partial")
+  const steer = msg("user", "also check this")
+  const delivery = prepareAsideContext([question, streaming, steer], {
+    inProgressMessageId: streaming.id,
+  })
+  expect(delivery.cursor?.parentMessageId).toBe(question.id)
+  expect(delivery.context).toContain("still in progress")
+  const final = prepareAsideContext(
+    [question, { ...streaming, parts: [{ type: "text", text: "final answer" }] }, steer],
+    {
+      cursor: { ...delivery.cursor!, sdkSessionId: "sdk" },
+      resumeSdkSessionId: "sdk",
+    }
+  )
+  expect(final.context).toContain("final answer")
+  expect(final.cursor?.parentMessageId).toBe(steer.id)
 })

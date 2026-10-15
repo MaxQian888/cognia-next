@@ -551,6 +551,7 @@
       "squads": "小队"
     },
     "shortcut": {
+      "cmdOrCtrlSemicolon": "⌘; / Ctrl+;",
       "cmdOrCtrl0": "Ctrl+0",
       "cmdOrCtrlAltI": "Ctrl+Alt+I",
       "cmdOrCtrlB": "Ctrl+B",
@@ -591,6 +592,7 @@
       "sidecarRestartToastFail": "Sidecar 重启失败：{message}"
     },
     "view": {
+      "toggleSidechat": "切换侧聊与主对话焦点",
       "commandPalette": "命令面板…",
       "guildRailFolded": "已并入侧栏",
       "label": "视图",

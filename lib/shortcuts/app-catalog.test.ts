@@ -158,3 +158,11 @@ describe("navigation rail shortcuts", () => {
     }
   })
 })
+
+it("assigns the modifier-semicolon chord to side chat", () => {
+  expect(getAppShortcutDescriptor("chat.sidechat.toggle")).toMatchObject({
+    scope: "app",
+    defaultChord: "ctrl+;",
+    labelKey: "settings.shortcuts.catalog.chatSidechatToggle",
+  })
+})

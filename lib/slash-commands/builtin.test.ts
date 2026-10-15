@@ -132,3 +132,12 @@ describe("/agents", () => {
     expect(agents.description).toMatch(/subagents/i)
   })
 })
+
+it("registers btw and side as visible aliases of the same local Action", () => {
+  const btw = BUILTIN_SLASH_COMMANDS.find((command) => command.name === "btw")!
+  const side = BUILTIN_SLASH_COMMANDS.find((command) => command.name === "side")!
+  expect(btw.handler).toEqual(expect.any(Function))
+  expect(side.handler).toBe(btw.handler)
+  expect(btw.hiddenFromPicker).not.toBe(true)
+  expect(side.hiddenFromPicker).not.toBe(true)
+})

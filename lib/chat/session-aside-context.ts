@@ -1,4 +1,6 @@
 import type { UIMessage } from "ai"
+import type { ChatSession } from "@cognia/agent-config-types"
+import { contentFingerprint } from "@/lib/chat/mentions/content-fingerprint"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { normalizeToolName, summarizeToolCall, type ToolPartLike } from "@/lib/chat/tool-summary"
 import {
@@ -126,4 +128,75 @@ export function buildAsideContext(
   // A single message over budget is still better truncated than dropped — it is
   // the most recent thing said.
   return rendered.length > maxChars ? rendered.slice(-maxChars) : rendered
+}
+
+export const ASIDE_REFERENCE_HEADER = "Main conversation — reference only"
+export const ASIDE_DELTA_HEADER = "Main conversation — new since your last turn"
+
+export interface AsideContextDelivery {
+  context: string
+  header: string
+  /** Bound to the actual SDK id only after dispatch succeeds. */
+  cursor?: Omit<NonNullable<ChatSession["asideContextCursor"]>, "sdkSessionId">
+}
+
+/** Resolve against a send-time snapshot; never subscribe to parent streaming tokens. */
+export function prepareAsideContext(
+  messages: readonly UIMessage[],
+  options: {
+    cursor?: ChatSession["asideContextCursor"]
+    resumeSdkSessionId?: string
+    inProgressMessageId?: string
+  } = {}
+): AsideContextDelivery {
+  const { cursor, resumeSdkSessionId, inProgressMessageId } = options
+  const cursorIndex = cursor
+    ? messages.findIndex((message) => message.id === cursor.parentMessageId)
+    : -1
+  const incremental = Boolean(
+    cursor &&
+    resumeSdkSessionId === cursor.sdkSessionId &&
+    (cursorIndex >= 0 || cursor.parentMessageId === null) &&
+    contentFingerprint(buildAsideContext(messages.slice(0, cursorIndex + 1))) ===
+      cursor.tailFingerprint
+  )
+  const selected = incremental ? messages.slice(cursorIndex + 1) : messages
+  const rendered = buildAsideContext(selected)
+  const progress = selected.find((message) => message.id === inProgressMessageId)
+  const context = rendered
+    ? `${rendered}${progress ? "\n[Last assistant message is still in progress.]" : ""}`
+    : !incremental && cursor
+      ? "[The main conversation currently has no visible messages.]"
+      : ""
+  // Only completed, quotable content can be acknowledged. If the streaming
+  // tail consumes the entire budget, none of the earlier messages was sent.
+  const progressIndex = selected.findIndex((message) => message.id === inProgressMessageId)
+  // A live steer can append a user row after the assistant still being updated.
+  // Nothing after that assistant is acknowledged until its final form is sent.
+  const completed = progressIndex < 0 ? selected : selected.slice(0, progressIndex)
+  const lastCompleted = [...completed]
+    .reverse()
+    .find(
+      (message) =>
+        message.id !== inProgressMessageId &&
+        renderAsideMessage(message) &&
+        rendered.includes(renderAsideMessage(message).slice(-ASIDE_CONTEXT_MAX_CHARS))
+    )
+  const lastIndex = lastCompleted ? messages.findIndex((m) => m.id === lastCompleted.id) : -1
+  return {
+    context,
+    header: incremental ? ASIDE_DELTA_HEADER : ASIDE_REFERENCE_HEADER,
+    ...(lastCompleted
+      ? {
+          cursor: {
+            parentMessageId: lastCompleted.id,
+            tailFingerprint: contentFingerprint(
+              buildAsideContext(messages.slice(0, lastIndex + 1))
+            ),
+          },
+        }
+      : !incremental && messages.length === 0 && cursor
+        ? { cursor: { parentMessageId: null, tailFingerprint: contentFingerprint("") } }
+        : {}),
+  }
 }

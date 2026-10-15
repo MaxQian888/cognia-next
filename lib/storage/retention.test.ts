@@ -26,6 +26,13 @@ jest.mock("@/lib/ai/media/video-jobs/app-data-sweep", () => ({
   })),
 }))
 
+// The sweep's own behavior is covered by `lib/db/session-aside-orphans.test.ts`;
+// here it only matters that the daily sweep runs it and survives its failure.
+const mockPurgeOrphanedSessionSideChats = jest.fn(async () => 0)
+jest.mock("@/lib/db/session-aside-orphans", () => ({
+  purgeOrphanedSessionSideChats: () => mockPurgeOrphanedSessionSideChats(),
+}))
+
 const MS_PER_DAY = 86_400_000
 
 const dbFixture = createDbTestFixture()
@@ -231,6 +238,21 @@ describe("pruneRetainedTables", () => {
 })
 
 describe("startStorageRetentionSweeper", () => {
+  it("purges orphaned side chats on each sweep and survives that purge failing", async () => {
+    mockPurgeOrphanedSessionSideChats.mockClear()
+    const stop = await startStorageRetentionSweeper()
+    expect(mockPurgeOrphanedSessionSideChats).toHaveBeenCalledTimes(1)
+    stop()
+
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    mockPurgeOrphanedSessionSideChats.mockRejectedValueOnce(new Error("locked"))
+    const stopAgain = await startStorageRetentionSweeper()
+    expect(warn).toHaveBeenCalledWith("orphaned side chat sweep failed", expect.any(Error))
+    expect(warn).not.toHaveBeenCalledWith("storage retention sweep failed", expect.anything())
+    stopAgain()
+    warn.mockRestore()
+  })
+
   it("runs an initial sweep honoring the live retention days", async () => {
     // Real timers: driving Dexie through fake timers deadlocks (IndexedDB
     // schedules its own macrotasks). We assert the initial sweep instead.

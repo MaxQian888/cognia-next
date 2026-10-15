@@ -256,6 +256,7 @@ await writeTextFile(path, content)
 | `/reset`                   | Action   | `/clear` 的别名（CLI 习惯）。                                                                 |
 | `/sessions`                | Action   | 列出全部 session（按 updatedAt 倒序），markdown 表格。                                        |
 | `/resume <id 或 title>`    | Action   | 按 id / 标题子串切换 session。                                                                |
+| `/btw <问题?>`             | Action   | 在当前对话的[侧聊](./side-chat)里提问，不占用主对话轮次；主 agent 执行中也可用。别名 `/side`。桌面端与 Web 端。 |
 | `/status`                  | Action   | 显示当前 session 的有效配置 + sidecar / API key / OAuth / MCP server 健康度。                 |
 | `/cost`                    | Action   | 当前 session 的累计 token + 估价（USD）。                                                     |
 | `/context`                 | Action   | 当前 session 的消息 + token 总览。                                                            |

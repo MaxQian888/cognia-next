@@ -2,6 +2,7 @@ import type { UIMessage } from "ai"
 import type { ChatSession, SessionSurfaceBinding } from "@cognia/agent-config-types"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { renderBranchSeed } from "@/lib/chat/branch-session"
+import { inheritableSessionConfig } from "@/lib/chat/session-config-inheritance"
 import {
   createResourceWorkbenchSession,
   deleteResourceWorkbenchSession,
@@ -81,17 +82,17 @@ export async function dispatchSpawnTask(
     }
 
     const patch: Partial<ChatSession> = {
+      ...inheritableSessionConfig(parent, "aside"),
       spawnedTask: {
         mode: brief.mode,
         pendingPrompt: renderSpawnedTaskPrompt(brief),
       },
     }
-    if (brief.mode === "inherit") {
-      if (parent.sdkSessionId) {
-        patch.forkedFromSdkSessionId = parent.sdkSessionId
-      } else if (inheritedTranscript) {
-        patch.branchSeed = { kind: "transcript", content: inheritedTranscript }
-      }
+    // A clean persisted mirror does not certify the SDK's opaque tool history
+    // or turns removed locally. Only the rendered, gated payload may cross
+    // into this child; never bypass that gate by forking the native session.
+    if (inheritedTranscript) {
+      patch.branchSeed = { kind: "transcript", content: inheritedTranscript }
     }
     await deps.updateSession(task.id, patch)
   } catch (error) {

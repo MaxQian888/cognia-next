@@ -1,6 +1,9 @@
 import type { ChatSession, SessionSurfaceBinding } from "@cognia/agent-config-types"
 import {
   ensureResourceWorkbenchSession,
+  fillResourceSessionConfigGaps,
+  isPrimaryResourceWorkbenchSessionId,
+  promoteEmbeddedSessionPatch,
   migrateResourceSessionBinding,
   resourceWorkbenchSessionId,
   surfaceBindingForContextResource,
@@ -225,7 +228,7 @@ describe("resource workbench sessions", () => {
     )
   })
 
-  it("uses stable encoded ids and repairs an older row with the same id", async () => {
+  it("uses stable encoded ids and preserves promoted primary rows", async () => {
     expect(
       resourceWorkbenchSessionId({
         kind: "project-file",
@@ -251,17 +254,16 @@ describe("resource workbench sessions", () => {
     } as ChatSession
     const update = jest.fn().mockResolvedValue(1)
     const repaired = await ensureResourceWorkbenchSession(binding, "Artifact", {
-      get: async () => stale,
+      get: async (id) => (id === stale.id ? stale : undefined),
       put: async () => undefined,
       update,
       now: () => 20,
     })
 
-    expect(update).toHaveBeenCalledWith(
-      stale.id,
-      expect.objectContaining({ kind: "resource-workbench", visibility: "embedded" })
-    )
+    expect(update).not.toHaveBeenCalled()
+    expect(repaired.id).toBe(`${stale.id}#primary:1`)
     expect(repaired.visibility).toBe("embedded")
+    expect(stale.kind).toBe("direct")
   })
 
   it("repairs a renamed row by its actual id when it is found by binding", async () => {
@@ -291,4 +293,112 @@ describe("resource workbench sessions", () => {
       expect.objectContaining({ kind: "resource-workbench", visibility: "embedded" })
     )
   })
+})
+
+describe("aside configuration and primary replacement", () => {
+  const binding: SessionSurfaceBinding = { kind: "session", sessionId: "main" }
+  function fixture() {
+    const parent: ChatSession = {
+      id: "main",
+      title: "Main",
+      model: "parent-model",
+      accountId: "parent-account",
+      teamId: "team",
+      squadId: "squad",
+      sandboxEnabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const rows = new Map<string, ChatSession>([[parent.id, parent]])
+    const repository = {
+      get: async (id: string) => rows.get(id),
+      put: async (row: ChatSession) => void rows.set(row.id, row),
+      update: jest.fn(async (id: string, patch: Partial<ChatSession>) => {
+        rows.set(id, { ...rows.get(id)!, ...patch })
+      }),
+      resolveProjectId: async () => "project",
+    }
+    return { parent, rows, repository }
+  }
+
+  it("inherits configuration on primary creation and only repairs undefined gaps on open", async () => {
+    const { rows, repository } = fixture()
+    const created = await ensureResourceWorkbenchSession(binding, "Aside", repository)
+    expect(created.model).toBe("parent-model")
+    expect(created.accountId).toBe("parent-account")
+    expect(created.teamId).toBeUndefined()
+    expect(created.squadId).toBeUndefined()
+    rows.set(created.id, {
+      ...created,
+      model: "aside-model",
+      accountId: undefined,
+      sandboxEnabled: false,
+    })
+    const reopened = await ensureResourceWorkbenchSession(binding, "Aside", repository)
+    expect(reopened).toMatchObject({
+      model: "aside-model",
+      accountId: "parent-account",
+      sandboxEnabled: false,
+    })
+    repository.update.mockClear()
+    await ensureResourceWorkbenchSession(binding, "Aside", repository)
+    expect(repository.update).not.toHaveBeenCalled()
+  })
+
+  it("does not inherit configuration for non-session resources", async () => {
+    const { repository } = fixture()
+    const created = await ensureResourceWorkbenchSession(
+      { kind: "artifact", artifactId: "main" },
+      "Artifact",
+      repository
+    )
+    expect(created.model).toBeUndefined()
+    expect(created.accountId).toBeUndefined()
+  })
+
+  it("fills manually selected additional aside gaps without replacing its configuration", async () => {
+    const { rows, repository } = fixture()
+    const aside: ChatSession = {
+      id: "extra",
+      title: "Extra",
+      model: "custom",
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    rows.set(aside.id, aside)
+    expect(await fillResourceSessionConfigGaps(aside, binding, repository)).toMatchObject({
+      model: "custom",
+      accountId: "parent-account",
+    })
+  })
+
+  it("converges across windows after repeated primary promotions without reusing extra asides", async () => {
+    const { rows, repository } = fixture()
+    const first = await ensureResourceWorkbenchSession(binding, "Aside", repository)
+    rows.set(first.id, { ...first, ...promoteEmbeddedSessionPatch() })
+    const [a, b] = await Promise.all([
+      ensureResourceWorkbenchSession(binding, "Aside", repository, "window-a"),
+      ensureResourceWorkbenchSession(binding, "Aside", repository, "window-b"),
+    ])
+    expect(a.id).toBe(b.id)
+    expect(a.id).not.toBe(first.id)
+    expect(rows.get(first.id)?.kind).toBe("direct")
+    rows.set(a.id, { ...a, ...promoteEmbeddedSessionPatch() })
+    const next = await ensureResourceWorkbenchSession(binding, "Aside", repository)
+    expect(next.id).toBe(`${first.id}#primary:2`)
+    expect(rows.get(a.id)?.kind).toBe("direct")
+  })
+})
+
+it("recognizes replacement primary ids without treating additional or other-resource asides as primary", () => {
+  const binding: SessionSurfaceBinding = { kind: "session", sessionId: "main" }
+  const primary = resourceWorkbenchSessionId(binding)
+  expect(isPrimaryResourceWorkbenchSessionId(binding, primary)).toBe(true)
+  expect(isPrimaryResourceWorkbenchSessionId(binding, `${primary}#primary:2`)).toBe(true)
+  expect(isPrimaryResourceWorkbenchSessionId(binding, `${primary}#extra`)).toBe(false)
+  expect(isPrimaryResourceWorkbenchSessionId(binding, `${primary}#primary:0`)).toBe(false)
+  expect(isPrimaryResourceWorkbenchSessionId(binding, `${primary}#primary:1extra`)).toBe(false)
+  expect(
+    isPrimaryResourceWorkbenchSessionId(binding, "resource-workbench:session:other#primary:1")
+  ).toBe(false)
 })

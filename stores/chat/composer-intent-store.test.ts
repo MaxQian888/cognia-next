@@ -68,3 +68,14 @@ it("does not lose restored queue input when an extension replaces the editor in 
     images: [{ data: "YQ==", mimeType: "image/png" }],
   })
 })
+
+it("preserves multiple returned quotes and a pending draft when focus is requested", () => {
+  const store = useComposerIntentStore.getState()
+  store.stage("main", { candidateId: "one", prompt: "> first", mode: "append" })
+  store.stage("main", { candidateId: "two", prompt: "> second", mode: "append" })
+  store.stage("main", { candidateId: "focus", prompt: null })
+  expect(store.consume("main", "two")).toMatchObject({
+    prompt: "> first\n\n> second",
+    mode: "append",
+  })
+})

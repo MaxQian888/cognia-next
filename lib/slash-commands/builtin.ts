@@ -27,6 +27,7 @@ import { handleBalance, handleLogin, handleModels, handleUsage } from "./actions
 import { seedBuiltinSlashCommands } from "./registry"
 import type { SystemMessageBlock, SlashCommandResultBlock } from "./system-blocks"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
+import { dispatchSideChat } from "./actions/side-chat"
 import { dispatchGoalSubcommand } from "./actions/goal"
 import { dispatchPlanSubcommand } from "./actions/plan"
 import { dispatchIssueSubcommand } from "./actions/issue"
@@ -51,6 +52,8 @@ export type SettingsTab = SettingsSectionId
 
 /** What the dispatcher hands an Action command's handler. */
 export interface SlashContext {
+  isMobile?: boolean
+  isAside?: boolean
   /** Cooperative cancellation supplied by the invoking host, when supported. */
   signal?: AbortSignal
   /** Report progress from 0 to 1 with an optional status message. */
@@ -506,6 +509,14 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       ctx.openSettings("data")
     },
   },
+  ...["btw", "side"].map((name): SlashCommand => ({
+    name,
+    description: "Ask a question in the conversation's side chat without interrupting its turn.",
+    scope: "builtin",
+    category: "chat",
+    argumentHint: "[question]",
+    handler: dispatchSideChat,
+  })),
   {
     name: "goal",
     description:

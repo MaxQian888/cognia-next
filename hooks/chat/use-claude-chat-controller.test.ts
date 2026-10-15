@@ -7,15 +7,19 @@ jest.mock("@/lib/db/messages", () => ({
 import { useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import {
   createExternalIdleEventConsumer,
+  asideProviderHistoryMode,
+  asideContextForRegenerate,
   resolveChatTurnAttemptIdentity,
   resolveNativeExternalSessionId,
   useClaudeChat,
   userPromptText,
   rewriteUserPromptText,
   externalTurnPrompt,
+  externalAsideTurnContent,
   redirectSendToBundleAliases,
 } from "./use-claude-chat-controller"
 import type { SendContentBlock, SendOptions } from "@cognia/agent-config-types"
+import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
 
 describe("Claude chat controller seam", () => {
   it("exports the public hook implementation", () => {
@@ -426,4 +430,75 @@ describe("autonomous external turns", () => {
     await consume({ ...base, type: "message_delta", delta: { type: "text", text: "discard late" } })
     expect(persist).toHaveBeenCalledTimes(1)
   })
+})
+
+describe("aside provider-history ownership", () => {
+  it("uses incremental context only for native SDK resumes", () => {
+    expect(asideProviderHistoryMode({}, false)).toBe("sdk-resume")
+    expect(asideProviderHistoryMode({ provider: "anthropic" }, false)).toBe("sdk-resume")
+  })
+  it("rebuilds every standalone turn, including Anthropic API turns", () => {
+    expect(asideProviderHistoryMode({ provider: "anthropic" }, true)).toBe("rebuild")
+    expect(asideProviderHistoryMode({ provider: "openai" }, true)).toBe("rebuild")
+  })
+  it("rebuilds retained AI SDK loops so permission grants and full context stay current", () => {
+    expect(
+      asideProviderHistoryMode({ provider: "openai", expectedRuntimeSessionId: "retained" }, false)
+    ).toBe("rebuild")
+    expect(
+      asideProviderHistoryMode(
+        { provider: "anthropic", execution: { runtimeAdapter: "ai-sdk" } } as SendOptions,
+        false
+      )
+    ).toBe("rebuild")
+  })
+})
+
+it("reuses provider-only context only for the same regenerated user turn", () => {
+  const captured = { messageId: "user-a", context: "original parent", header: "reference" }
+  expect(asideContextForRegenerate(captured, "user-a")).toBe(captured)
+  // Live steering or a send from another window can replace the latest user row.
+  expect(asideContextForRegenerate(captured, "user-b")).toBeUndefined()
+  expect(asideContextForRegenerate(captured, undefined)).toBeUndefined()
+})
+
+it("sends full parent snapshots on external lanes without borrowing the SDK cursor", () => {
+  expect(
+    asideProviderHistoryMode(
+      { execution: { runtimeAdapter: "external" } } as unknown as SendOptions,
+      false
+    )
+  ).toBe("rebuild")
+})
+
+it("fails closed if a non-direct runtime escapes aside routing", () => {
+  expect(asideProviderHistoryMode({ routerFusionRun: {} } as SendOptions, false)).toBe(
+    "unsupported"
+  )
+})
+
+it("delivers side-question framing to external prompts without changing transcript content", () => {
+  const typed = [{ type: "text" as const, text: "Explain this function" }]
+  const content = externalAsideTurnContent(typed, true)
+  const turn = externalTurnPrompt(content, 0, 1)
+  expect(typed).toEqual([{ type: "text", text: "Explain this function" }])
+  expect(turn.request).toBe("Explain this function")
+  expect(turn.prompt).toContain("[Side chat]")
+  expect(turn.prompt).toContain("reference material only")
+  expect(turn.prompt).toContain("enable editing")
+  expect(externalAsideTurnContent("Explain this function", false)).not.toContain("enable editing")
+})
+
+it("gates the full external side-chat prompt while leaving the typed transcript untouched", () => {
+  const typed = [{ type: "text" as const, text: "Explain the report from jane@example.com" }]
+  const gated = gateWorkbenchProviderPayload(
+    { content: externalAsideTurnContent(typed, true), messages: [], sendOptions: {} },
+    "Parent contact jane@example.com",
+    "Main conversation — reference only"
+  )
+  const turn = externalTurnPrompt(gated.content, 0, 2)
+  expect(turn.prompt).toContain("[Main conversation — reference only]")
+  expect(turn.prompt).toContain("[Side chat]")
+  expect(turn.prompt).not.toContain("jane@example.com")
+  expect(typed[0].text).toContain("jane@example.com")
 })

@@ -1835,6 +1835,8 @@ test("Help > Keyboard Shortcuts opens the shortcuts dialog", async () => {
   await user.click(await screen.findByText("desktop.menu.help.label"))
   await user.click(await screen.findByText("desktop.menu.help.keyboardShortcuts"))
   await waitFor(() => expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument())
+  expect(screen.getByText("desktop.menu.view.toggleSidechat")).toBeInTheDocument()
+  expect(screen.getByText("desktop.menu.shortcut.cmdOrCtrlSemicolon")).toBeInTheDocument()
   // Spot-check one shortcut row.
   expect(screen.getByText("desktop.menu.shortcut.cmdOrCtrlShiftP")).toBeInTheDocument()
 })

@@ -59,6 +59,12 @@ import type {
 } from "@/types/agent/external-agent"
 import type { AgentTool } from "@/lib/ai/agent"
 import {
+  enforceExternalPermissionCeiling,
+  appliesPermissionModeAtPrompt,
+  type PermissionBoundExternalExecutionOptions,
+} from "./policy/permission-ceiling"
+export type { PermissionBoundExternalExecutionOptions } from "./policy/permission-ceiling"
+import {
   buildGatewayTaskConfig,
   cogniaGatewaySupport,
   GATEWAY_RUNTIME_TRAITS,
@@ -520,7 +526,7 @@ export class ExternalAgentManager {
 
   private async prepareGatewayExecution(
     agentId: string,
-    options?: ExternalAgentExecutionOptions,
+    options?: PermissionBoundExternalExecutionOptions,
     prompt?: string
   ) {
     const source = this.instances.get(agentId)
@@ -853,7 +859,7 @@ export class ExternalAgentManager {
           onEvent: options?.onEvent
             ? (event: ExternalAgentEvent) => options.onEvent?.(mapEvent(event))
             : undefined,
-        } as ExternalAgentExecutionOptions,
+        } as PermissionBoundExternalExecutionOptions,
         release: async () => {
           options?.signal?.removeEventListener("abort", abort)
           lease.signal?.removeEventListener("abort", abort)
@@ -3980,7 +3986,7 @@ export class ExternalAgentManager {
   async *executeStreaming(
     agentId: string,
     prompt: string,
-    options?: ExternalAgentExecutionOptions
+    options?: PermissionBoundExternalExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
     const gateway = await this.prepareGatewayExecution(agentId, options, prompt)
     if (gateway) {
@@ -4011,7 +4017,7 @@ export class ExternalAgentManager {
   private async *executePreparedStreaming(
     agentId: string,
     prompt: string,
-    options?: ExternalAgentExecutionOptions
+    options?: PermissionBoundExternalExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
@@ -4025,6 +4031,14 @@ export class ExternalAgentManager {
         await this.connectAdapter(agentId)
       else await this.connect(agentId)
     }
+
+    options = enforceExternalPermissionCeiling(
+      options,
+      instance.config.protocol,
+      instance.capabilities,
+      instance.config.defaultPermissionMode,
+      this.getAgentCapabilityProfile(agentId)
+    )
 
     this.updateInstanceState(agentId, instance, { status: "executing" })
     instance.stats.totalExecutions++
@@ -4047,11 +4061,27 @@ export class ExternalAgentManager {
       options?.permissionMode
     )
     if (
+      options?.permissionCeiling &&
+      effectivePermissionMode &&
+      session.permissionMode !== effectivePermissionMode &&
+      !adapter.setSessionMode &&
+      !appliesPermissionModeAtPrompt(instance.config.protocol)
+    ) {
+      const error = new Error("External agent cannot apply the permission ceiling to this session")
+      this.recordExecutionFailure(instance, agentId, error)
+      throw error
+    }
+    if (
       effectivePermissionMode &&
       adapter.setSessionMode &&
       session.permissionMode !== effectivePermissionMode
     ) {
-      await adapter.setSessionMode(session.id, effectivePermissionMode)
+      try {
+        await adapter.setSessionMode(session.id, effectivePermissionMode)
+      } catch (error) {
+        this.recordExecutionFailure(instance, agentId, error)
+        throw error
+      }
     }
 
     const traceBridge = this.createTraceBridge(agentId, instance, session, options)
@@ -4356,7 +4386,7 @@ export class ExternalAgentManager {
   async execute(
     agentId: string,
     prompt: string,
-    options?: ExternalAgentExecutionOptions
+    options?: PermissionBoundExternalExecutionOptions
   ): Promise<ExternalAgentResult> {
     const gateway = await this.prepareGatewayExecution(agentId, options, prompt)
     if (gateway) {
@@ -4382,7 +4412,7 @@ export class ExternalAgentManager {
   private async executePrepared(
     agentId: string,
     prompt: string,
-    options?: ExternalAgentExecutionOptions
+    options?: PermissionBoundExternalExecutionOptions
   ): Promise<ExternalAgentResult> {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
@@ -4396,6 +4426,14 @@ export class ExternalAgentManager {
         await this.connectAdapter(agentId)
       else await this.connect(agentId)
     }
+
+    options = enforceExternalPermissionCeiling(
+      options,
+      instance.config.protocol,
+      instance.capabilities,
+      instance.config.defaultPermissionMode,
+      this.getAgentCapabilityProfile(agentId)
+    )
 
     this.updateInstanceState(agentId, instance, { status: "executing" })
     instance.stats.totalExecutions++
@@ -4416,6 +4454,14 @@ export class ExternalAgentManager {
         instance,
         options?.permissionMode
       )
+      if (
+        options?.permissionCeiling &&
+        effectivePermissionMode &&
+        session.permissionMode !== effectivePermissionMode &&
+        !adapter.setSessionMode &&
+        !appliesPermissionModeAtPrompt(instance.config.protocol)
+      )
+        throw new Error("External agent cannot apply the permission ceiling to this session")
       if (
         effectivePermissionMode &&
         adapter.setSessionMode &&
@@ -5592,7 +5638,7 @@ export function checkExternalAgentDelegation(
  */
 export async function executeOnExternalAgent(
   prompt: string,
-  options?: ExternalAgentExecutionOptions & { agentId?: string }
+  options?: PermissionBoundExternalExecutionOptions & { agentId?: string }
 ): Promise<ExternalAgentResult | null> {
   const manager = getExternalAgentManager()
 

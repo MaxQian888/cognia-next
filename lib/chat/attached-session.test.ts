@@ -1,5 +1,6 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 import {
   closeAttachedSession,
@@ -120,7 +121,7 @@ describe("createAttachedSession", () => {
     expect(updates[0].patch.spawnedTask).toEqual({ mode: "aside", pendingPrompt: "Do it" })
   })
 
-  it("creates a full-context child using an SDK fork and a separate lifecycle link", async () => {
+  it("creates a full-context child using gated text and a separate lifecycle link", async () => {
     const { deps, updates } = setup([message("u1", "user", "Parent context")])
 
     const child = await createAttachedSession(
@@ -140,7 +141,7 @@ describe("createAttachedSession", () => {
         id: "child-1",
         patch: expect.objectContaining({
           parentSessionId: "parent-1",
-          forkedFromSdkSessionId: "sdk-parent",
+          branchSeed: { kind: "transcript", content: "User: Parent context" },
           workingDir: "/repo",
           executionContext: expect.objectContaining({
             taskWorkspace: { taskId: "task-workspace:child-1", workspaceKey: "child-1" },
@@ -156,6 +157,131 @@ describe("createAttachedSession", () => {
         }),
       },
     ])
+    expect(child.forkedFromSdkSessionId).toBeUndefined()
+  })
+
+  it("inherits aside config without starting the parent's team executor", async () => {
+    const { deps, rows } = setup()
+    rows.set(parent.id, {
+      ...parent,
+      model: "parent-model",
+      providerOverride: "anthropic",
+      accountId: "parent-account",
+      teamId: "team-parent",
+      squadId: "squad-parent",
+      permissionMode: "acceptEdits",
+      systemPrompt: "Parent instructions",
+      sandboxEnabled: true,
+      sandboxTier: "microvm",
+      disabledSkillIds: ["skill-1"],
+    })
+
+    const child = await createAttachedSession(
+      {
+        parentSessionId: parent.id,
+        title: "Aside",
+        prompt: "Question",
+        context: { mode: "none" },
+        workspace: "shared",
+      },
+      deps
+    )
+
+    expect(child).toMatchObject({
+      model: "parent-model",
+      providerOverride: "anthropic",
+      accountId: "parent-account",
+      permissionMode: "acceptEdits",
+      systemPrompt: "Parent instructions",
+      sandboxEnabled: true,
+      sandboxTier: "microvm",
+      disabledSkillIds: ["skill-1"],
+    })
+    expect(child.teamId).toBeUndefined()
+    expect(child.squadId).toBeUndefined()
+    expect(child.asideWriteAccess).toBeUndefined()
+  })
+
+  it("preserves a non-aside creator's explicit model and independent workspace", async () => {
+    const { deps, rows, child } = setup()
+    rows.set(parent.id, { ...parent, model: "parent-model", providerOverride: "anthropic" })
+    child.kind = "direct"
+    child.surfaceBinding = undefined
+    child.model = "thread-model"
+    child.providerOverride = "openai"
+    child.workingDir = "/wt/thread"
+
+    const created = await createAttachedSession(
+      {
+        parentSessionId: parent.id,
+        title: "Thread",
+        prompt: "Work",
+        context: { mode: "none" },
+        workspace: "independent",
+      },
+      deps
+    )
+
+    expect(created).toMatchObject({
+      model: "thread-model",
+      providerOverride: "openai",
+      workingDir: "/wt/thread",
+    })
+  })
+
+  it("does not fork opaque SDK history when tool payloads fail the PII gate", async () => {
+    const messages: UIMessage[] = [
+      message("u1", "user", "Safe question"),
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "lookup",
+            toolCallId: "lookup-1",
+            state: "output-available",
+            input: {},
+            output: { email: "alice@example.com" },
+          },
+        ],
+      },
+    ]
+    const { deps } = setup(messages)
+    deps.gateInheritedContent = hasNoLeakingPiiDeep
+    expect(hasNoLeakingPiiDeep(messages)).toBe(false)
+
+    const child = await createAttachedSession(
+      {
+        parentSessionId: parent.id,
+        title: "Safe fallback",
+        prompt: "Question",
+        context: { mode: "full" },
+        workspace: "shared",
+      },
+      deps
+    )
+
+    expect(child.forkedFromSdkSessionId).toBeUndefined()
+    expect(child.branchSeed).toEqual({ kind: "transcript", content: "User: Safe question" })
+    expect(hasNoLeakingPiiDeep(child.branchSeed)).toBe(true)
+  })
+
+  it("never treats an empty local mirror as proof that an SDK session is safe", async () => {
+    const { deps } = setup()
+    const child = await createAttachedSession(
+      {
+        parentSessionId: parent.id,
+        title: "Empty mirror",
+        prompt: "Question",
+        context: { mode: "full" },
+        workspace: "shared",
+      },
+      deps
+    )
+
+    expect(child.forkedFromSdkSessionId).toBeUndefined()
+    expect(child.branchSeed).toBeUndefined()
   })
 
   it("seeds only the requested tail when a partial context fork is requested", async () => {
@@ -225,9 +351,10 @@ describe("createAttachedSession", () => {
     ).rejects.toThrow("blocked by the PII redaction gate")
   })
 
-  it("gates reconstructed full context before creating an SDK-backed fork", async () => {
-    const { deps } = setup([message("u1", "user", "private")])
-    deps.gateInheritedContent = () => false
+  it("blocks an unsafe rendered fallback even when the parent has an SDK session", async () => {
+    const { deps } = setup([message("u1", "user", "alice@example.com")])
+    deps.gateInheritedContent = hasNoLeakingPiiDeep
+    deps.createChild = jest.fn(deps.createChild)
 
     await expect(
       createAttachedSession(
@@ -241,6 +368,7 @@ describe("createAttachedSession", () => {
         deps
       )
     ).rejects.toThrow("blocked by the PII redaction gate")
+    expect(deps.createChild).not.toHaveBeenCalled()
   })
 
   it("removes the embedded child if lifecycle metadata cannot be persisted", async () => {
