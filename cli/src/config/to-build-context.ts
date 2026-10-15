@@ -386,7 +386,9 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     builtinProcessSandbox: resolveBuiltinProcessSandbox(config),
     lspHost: {
       readProjectFile: (rootDir) =>
-        readProjectLspFile(rootDir, (filePath) => nodeFs.readFile(filePath, "utf8")),
+        readProjectLspFile(rootDir, (root, relativePath) =>
+          nodeFs.readFile(path.join(root, relativePath), "utf8")
+        ),
       installDir: path.join(config.cliHome ?? resolveHome(process.env, os.homedir()), "lsp"),
       // Managed installs spawn package managers outside the per-tool network gate.
       // Permit them only when the session explicitly grants unrestricted network.

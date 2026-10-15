@@ -1,3 +1,6 @@
+import { spawnSync } from "node:child_process"
+import fs from "node:fs"
+import path from "node:path"
 import { cloneLibraryJson, validateLibrarySchema, validateLibraryValue } from "./schema"
 
 describe("library JSON boundary", () => {
@@ -52,6 +55,53 @@ describe("library JSON boundary", () => {
 })
 
 describe("library draft-07 validation", () => {
+  it("validates schemas and values through the production Node ESM bundle", () => {
+    const root = path.resolve(__dirname, "../../..")
+    fs.mkdirSync(path.join(root, ".cache"), { recursive: true })
+    const output = fs.mkdtempSync(path.join(root, ".cache/library-schema-esm-"))
+    try {
+      // Jest's CJS transform cannot catch a missing JSON import attribute.
+      // Exercise the actual source through the CLI bundler and native Node ESM.
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `
+        import path from 'node:path';
+        import { pathToFileURL } from 'node:url';
+        import { cliEsbuildOptions, loadEsbuild } from './scripts/build/esbuild-shared.mjs';
+        const root = process.cwd();
+        const outdir = process.argv[1];
+        const esbuild = await loadEsbuild();
+        await esbuild.build(cliEsbuildOptions({ root,
+          entry: path.join(root, 'lib/plugin/library/schema.ts'),
+          outdir, entryNames: 'schema' }));
+        const { validateLibrarySchema, validateLibraryValue } = await import(
+          pathToFileURL(path.join(outdir, 'schema.mjs')).href);
+        const schema = {type: 'object', properties: {count: {type: 'integer'}}, required: ['count']};
+        console.log(JSON.stringify([
+          validateLibrarySchema(schema) === null,
+          validateLibrarySchema({type: 'unknown'}) !== null,
+          validateLibraryValue(schema, {count: 2}) === null,
+          validateLibraryValue(schema, {count: '2'}) !== null,
+        ]));
+      `,
+          output,
+        ],
+        { cwd: root, encoding: "utf8", timeout: 30_000 }
+      )
+      expect({
+        status: result.status,
+        error: result.error?.message,
+        stderr: result.status ? result.stderr : "",
+      }).toEqual({ status: 0, error: undefined, stderr: "" })
+      expect(JSON.parse(result.stdout.trim())).toEqual([true, true, true, true])
+    } finally {
+      fs.rmSync(output, { recursive: true, force: true })
+    }
+  })
+
   it.each([
     true,
     false,

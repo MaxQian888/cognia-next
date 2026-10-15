@@ -1,6 +1,6 @@
 import { Validator, type Schema } from "jsonschema"
 // Data only: the interpreted validator never invokes Ajv's code generator.
-import draft07 from "ajv/dist/refs/json-schema-draft-07.json"
+import draft07 from "ajv/dist/refs/json-schema-draft-07.json" with { type: "json" }
 import type { PluginLibrarySchema } from "@/types/plugin/plugin-library"
 
 const SCHEMA_BYTES = 256 * 1024

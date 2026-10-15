@@ -704,6 +704,10 @@ describe("CLI LSP host", () => {
       expect(await ctx.lspHost?.readProjectFile(dir)).toEqual({
         servers: [{ id: "typescript", enabled: false }],
       })
+      await fs.writeFile(path.join(dir, ".cognia/lsp.json"), "{invalid")
+      expect(await ctx.lspHost?.readProjectFile(dir)).toBeNull()
+      await fs.rm(path.join(dir, ".cognia/lsp.json"))
+      expect(await ctx.lspHost?.readProjectFile(dir)).toBeNull()
     } finally {
       await fs.rm(dir, { recursive: true, force: true })
     }
