@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "files_changed", "verification", "blockers", "follow_ups"],
+  "properties": {
+    "status": { "type": "string", "enum": ["done", "partial", "blocked"] },
+    "summary": { "type": "string" },
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "change", "reason"],
+        "properties": {
+          "path": { "type": "string" },
+          "change": { "type": "string", "enum": ["added", "modified", "deleted"] },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "exit_code", "outcome", "notes"],
+        "properties": {
+          "command": { "type": "string" },
+          "exit_code": { "type": ["integer", "null"] },
+          "outcome": { "type": "string", "enum": ["passed", "failed", "not_run"] },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "blockers": { "type": "array", "items": { "type": "string" } },
+    "follow_ups": { "type": "array", "items": { "type": "string" } }
+  }
+}
