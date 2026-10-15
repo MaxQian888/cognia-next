@@ -388,7 +388,7 @@ for (const variant of variants) {
     { recursive: true }
   )
 
-  const nativeArtifacts = [launcher, worker]
+  const nativeArtifacts = nativeHosts.map((helper) => path.join(layoutRoot, helper.name))
   let packagedClaude
   if (variant === "full") {
     packagedClaude = path.join(layoutRoot, target.claudeBinary)

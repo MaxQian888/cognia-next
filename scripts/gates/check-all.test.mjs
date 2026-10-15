@@ -16,15 +16,20 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { execFileSync, spawnSync } from "node:child_process"
 
 import {
   GATES,
+  buildQualityPlan,
   RUNTIMES,
   defaultJobCount,
   effectiveJobCount,
   gatesInGroup,
   groupManifest,
   hasGate,
+  isReusableLintCacheResult,
   listGroups,
   parseArgs,
   renderSummaryMarkdown,
@@ -34,6 +39,302 @@ import {
 } from "./check-all.mjs"
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
+
+test("lint cache completion accepts validation failures but rejects incomplete or fatal runs", () => {
+  const completed = { exitCode: 1, signal: null, output: "✖ 2 problems (1 error, 1 warning)\n" }
+  assert.equal(isReusableLintCacheResult("lint", completed), true)
+  assert.equal(isReusableLintCacheResult("lint", { ...completed, exitCode: 2 }), false)
+  assert.equal(isReusableLintCacheResult("lint", { ...completed, signal: "SIGTERM" }), false)
+  assert.equal(isReusableLintCacheResult("lint", { ...completed, exitCode: null }), false)
+  assert.equal(
+    isReusableLintCacheResult("lint", { ...completed, output: "could not load config" }),
+    false
+  )
+  assert.equal(isReusableLintCacheResult("lint", { ...completed, exitCode: 0, output: "" }), true)
+  assert.equal(
+    isReusableLintCacheResult("format:check", {
+      ...completed,
+      output:
+        "[warn] Code style issues found in the above file. Run Prettier with --write to fix.\n",
+    }),
+    true
+  )
+  assert.equal(
+    isReusableLintCacheResult("format:check", {
+      ...completed,
+      output: "[error] Invalid printWidth value. Expected an integer, but received false.\n",
+    }),
+    false
+  )
+  assert.equal(
+    isReusableLintCacheResult("format:check", {
+      ...completed,
+      exitCode: 2,
+      output: "[warn] Code style issues found in 1 file. Run Prettier with --write to fix.\n",
+    }),
+    false
+  )
+  assert.equal(isReusableLintCacheResult("typecheck", { ...completed, exitCode: 0 }), false)
+})
+
+test("CLI publishes cache readiness only after completed lint validation without changing its failure", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "quality-cache-completion-"))
+  try {
+    const command = join(REPO_ROOT, "scripts/gates/check-all.mjs")
+    const outputFile = join(cwd, "github-output")
+    for (const scenario of [
+      { status: 1, output: "✖ 1 problem (1 error, 0 warnings)", cache: true, ready: true },
+      { status: 1, output: "✖ 1 problem (1 error, 0 warnings)", cache: false, ready: false },
+      { status: 2, output: "Oops! Something went wrong!", cache: true, ready: false },
+      { status: 1, output: "could not load config", cache: true, ready: false },
+      {
+        status: 1,
+        signal: "SIGTERM",
+        output: "✖ 1 problem (1 error, 0 warnings)",
+        cache: true,
+        ready: false,
+      },
+      { status: 0, output: "", cache: true, ready: true },
+    ]) {
+      rmSync(join(cwd, ".cache"), { recursive: true, force: true })
+      writeFileSync(outputFile, "")
+      writeFileSync(
+        join(cwd, "pnpm"),
+        `#!${process.execPath}\nconst fs=require('node:fs');\n${scenario.cache ? "fs.mkdirSync('.cache',{recursive:true});fs.writeFileSync('.cache/eslint','fixture');" : ""}\nconsole.log(${JSON.stringify(scenario.output)});${scenario.signal ? `process.kill(process.pid, ${JSON.stringify(scenario.signal)})` : `process.exitCode=${scenario.status}`};\n`,
+        { mode: 0o755 }
+      )
+      const run = spawnSync(process.execPath, [command, "--group", "lint"], {
+        cwd,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: outputFile,
+          GITHUB_STEP_SUMMARY: "",
+          PATH: `${cwd}:${process.env.PATH}`,
+        },
+      })
+      assert.equal(run.status, scenario.status === 0 ? 0 : 1, run.stderr)
+      assert.match(
+        readFileSync(outputFile, "utf8"),
+        new RegExp(`lint-cache-ready=${scenario.ready}\\n`)
+      )
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("the real plugin scaffold build requires Rust and the shared Cargo resource", () => {
+  const scaffold = GATES.find((gate) => gate.script === "sdk:scaffold:test")
+  assert.equal(scaffold.runtime, "rust")
+  assert.equal(scaffold.resource, "cargo")
+  assert.equal(groupManifest([scaffold])[0].rust, true)
+})
+
+function changes(changedFiles, overrides = {}) {
+  return {
+    version: 1,
+    mode: "incremental",
+    head: "a".repeat(40),
+    base: "b".repeat(40),
+    diffBase: "b".repeat(40),
+    mergeBase: null,
+    comparison: "endpoints",
+    changedFiles,
+    deletedFiles: [],
+    reason: "test change range",
+    ...overrides,
+  }
+}
+
+test("documentation changes keep global invariants without builds or native toolchains", () => {
+  const plan = buildQualityPlan(changes(["docs/content/docs/en/guides/chat.mdx"]))
+  const scripts = plan.selected.map((gate) => gate.script)
+  assert.ok(scripts.includes("gates:registry"))
+  assert.ok(scripts.includes("audit:docs-links"))
+  assert.ok(scripts.includes("audit:adr-catalog"))
+  for (const script of ["typecheck", "knip", "build:packages", "sdk:ts:build", "rust:clippy"]) {
+    assert.ok(!scripts.includes(script), `${script} should not run for documentation`)
+  }
+  assert.ok(plan.include.every((group) => !group.python && !group.rust))
+  assert.equal(plan.mode, "incremental")
+  assert.equal(plan.head, "a".repeat(40))
+  assert.equal(plan.selected.length + plan.skipped.length, GATES.length)
+  assert.ok([...plan.selected, ...plan.skipped].every((gate) => gate.reason))
+})
+
+test("frontend leaf changes retain frontend checks without unrelated native SDK suites", () => {
+  const plan = buildQualityPlan(changes(["components/chat/message.tsx"]))
+  const scripts = plan.selected.map((gate) => gate.script)
+  for (const script of [
+    "lint",
+    "typecheck",
+    "lint:i18n",
+    "audit:colocated-tests",
+    "gates:registry",
+  ]) {
+    assert.ok(scripts.includes(script), `${script} must run for frontend changes`)
+  }
+  for (const script of ["sdk:python:test", "sdk:rust:test", "rust:clippy", "scripts:test:ci"]) {
+    assert.ok(!scripts.includes(script), `${script} should not run for a frontend leaf`)
+  }
+  const tests = plan.include.find((group) => group.group === "gate-tests")
+  assert.equal(tests.rust, false, "runtime requirements must reflect selected gates only")
+  for (const group of plan.include) {
+    assert.deepEqual(
+      group.scripts,
+      plan.selected.filter((gate) => gate.group === group.group).map((gate) => gate.script)
+    )
+  }
+})
+
+test("native and shared contract inputs retain the native checks", () => {
+  for (const path of [
+    "src-tauri/src/lib.rs",
+    "crates/example/src/lib.rs",
+    "protocol/commands.json",
+    "docs/api/mobile-companion-api.openapi.yaml",
+    "metadata/contracts.json",
+  ]) {
+    const scripts = buildQualityPlan(changes([path])).selected.map((gate) => gate.script)
+    assert.ok(scripts.includes("rust:clippy"), path)
+    assert.ok(scripts.includes("sdk:rust:test"), path)
+    assert.ok(scripts.includes("sdk:ts:build"), path)
+  }
+})
+
+test("ordinary block component filenames do not trigger the dependency-lock fallback", () => {
+  const plan = buildQualityPlan(changes(["components/chat/lifecycle-status-block.tsx"]))
+  assert.equal(plan.mode, "incremental")
+  assert.ok(plan.include.every((group) => !group.rust && !group.python))
+})
+
+test("author declaration checks keep their package build prerequisite in the same lane", () => {
+  for (const path of [
+    "packages/agent/src/index.ts",
+    "docs/api/mobile-companion-api.openapi.yaml",
+  ]) {
+    const artifacts = buildQualityPlan(changes([path])).include.find(
+      (group) => group.group === "artifacts"
+    )
+    assert.ok(artifacts.scripts.includes("author-types:check"))
+    assert.ok(
+      artifacts.scripts.indexOf("build:packages") < artifacts.scripts.indexOf("author-types:check")
+    )
+  }
+})
+
+test("uncertain inputs, deletions, shared configuration and explicit full mode select every gate", () => {
+  for (const manifest of [
+    changes(["new-area/module.ts"]),
+    changes(["pnpm-lock.yaml"]),
+    changes(["plugins/repowiki/uv.lock"]),
+    changes(["packages/agent/package.json"]),
+    changes(["tsconfig.json"]),
+    changes([".github/workflows/quality.yml"]),
+    changes(["scripts/gates/check-all.mjs"]),
+    changes(["components/deleted.tsx"], { deletedFiles: ["components/deleted.tsx"] }),
+    changes([], { mode: "full", reason: "nightly full validation" }),
+  ]) {
+    const plan = buildQualityPlan(manifest)
+    assert.equal(plan.mode, "full")
+    assert.equal(plan.selected.length, GATES.length, JSON.stringify(manifest))
+    assert.deepEqual(plan.skipped, [])
+  }
+})
+
+test("unscoped new gates default to always selected", () => {
+  const gate = { script: "new:gate", group: "gate-tests", runtime: "node", blocking: true }
+  GATES.push(gate)
+  try {
+    assert.ok(buildQualityPlan(changes([])).selected.some((entry) => entry.script === gate.script))
+  } finally {
+    GATES.pop()
+  }
+})
+
+test("invalid change manifests are rejected instead of silently skipping gates", () => {
+  for (const manifest of [
+    null,
+    {},
+    changes([], { version: 2 }),
+    changes([], { changedFiles: "file" }),
+    changes(["../escape"]),
+    changes([], { head: "main" }),
+  ]) {
+    assert.throws(() => buildQualityPlan(manifest))
+  }
+  assert.equal(parseArgs(["--change-plan", "plan.json"]).changePlan, "plan.json")
+  assert.throws(() => parseArgs(["--change-plan"]), /--change-plan requires/)
+})
+
+test("CLI rejects stale manifests and executes exactly the planned group scripts", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "quality-plan-"))
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim()
+  try {
+    git("init", "--quiet")
+    git(
+      "-c",
+      "user.name=CI Test",
+      "-c",
+      "user.email=ci@example.invalid",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "fixture"
+    )
+    const head = git("rev-parse", "HEAD")
+    const file = join(cwd, "change-plan.json")
+    const manifest = changes(["components/chat/message.tsx"], { head, base: head, diffBase: head })
+    writeFileSync(file, JSON.stringify(manifest))
+    const command = join(REPO_ROOT, "scripts/gates/check-all.mjs")
+    const listing = spawnSync(
+      process.execPath,
+      [command, "--change-plan", file, "--list-groups", "--json"],
+      { cwd, encoding: "utf8" }
+    )
+    assert.equal(listing.status, 0, listing.stderr)
+    const groups = JSON.parse(listing.stdout)
+    assert.deepEqual(groups, buildQualityPlan(manifest).include)
+    const log = join(cwd, "invocations.jsonl")
+    writeFileSync(
+      join(cwd, "pnpm"),
+      `#!${process.execPath}\nrequire("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2))+"\\n")\n`,
+      { mode: 0o755 }
+    )
+    const run = spawnSync(process.execPath, [command, "--change-plan", file, "--group", "types"], {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${cwd}:${process.env.PATH}` },
+    })
+    assert.equal(run.status, 0, run.stderr)
+    assert.deepEqual(
+      readFileSync(log, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line)[1]),
+      groups.find((group) => group.group === "types").scripts
+    )
+    writeFileSync(file, JSON.stringify({ ...manifest, head: "a".repeat(40) }))
+    const stale = spawnSync(
+      process.execPath,
+      [command, "--change-plan", file, "--group", "types"],
+      { cwd, encoding: "utf8" }
+    )
+    assert.notEqual(stale.status, 0)
+    assert.match(stale.stderr, /HEAD|head/)
+    writeFileSync(file, "{invalid json")
+    const malformed = spawnSync(
+      process.execPath,
+      [command, "--change-plan", file, "--list-groups", "--json"],
+      { cwd, encoding: "utf8" }
+    )
+    assert.notEqual(malformed.status, 0)
+    assert.equal(malformed.stdout, "")
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
 
 test("registry covers the read-only gates", () => {
   for (const script of [

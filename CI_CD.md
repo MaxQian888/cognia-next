@@ -97,9 +97,24 @@ pnpm check:all -- --bail          # stop at the first failure
 ```
 
 `quality.yml` does not restate the list. Its `prepare` job calls
-`check-all.mjs --list-groups --json` and the `gates` job fans out one runner
-per group with `fail-fast: false`, so a single run reports **every** failure
-rather than stopping at the first.
+`check-all.mjs --change-plan .cache/ci/changes.json --list-groups --json`.
+The `gates` job downloads that same HEAD-bound manifest and executes only its
+selected scripts, with `fail-fast: false`. Runtime flags are derived from those
+scripts, so an omitted Rust/Python check does not install its toolchain.
+
+The first affected-gate rollout declares input scopes for 22 expensive checks
+(type/build/SDK/native). Unscoped checks, including registry and cross-cutting
+invariants, remain always-on. Documentation content skips these expensive checks;
+shared API/metadata inputs retain their contract consumers. Unknown paths,
+deletions/renames, dependency/configuration changes, and workflow/tooling changes
+select the entire registry. Selected checks still inspect their complete input
+domain and remain blocking; this is gate selection, not line-only validation.
+
+The `quality-change-plan` artifact records selected/skipped scripts and reasons.
+Local `pnpm check:all` still runs everything. Manual Quality runs default to `full`;
+`quality-mode: full` forces all checks, and nightly/release retain a full-registry
+safety net. A malformed or stale manifest fails rather than becoming an empty
+successful matrix.
 
 **Adding a gate**: add it to `REGISTRY` in `check-all.mjs`. Nothing in the
 workflow changes — a brand-new group becomes a new matrix entry automatically.
@@ -136,11 +151,23 @@ Six runners, each with one owner:
 | pytest                           | `plugin-sdk/python`     | `quality.yml`, `plugin-sdk` group                                                 |
 | Agent conformance                | real sidecars + server  | `test.yml`, dedicated conformance job                                             |
 
-PRs and trunk pushes default to **incremental tests without coverage**. The
-planner compares the exact PR base SHA (or, for a push, the ref's previous tip
-`github.event.before`) with the checked-out SHA, selects changed, co-located,
-and transitively related suites, then publishes one immutable plan for every
-worker. Deleted modules include their former importers; global Jest configuration
+PRs and validated trunk pushes use **incremental tests without coverage**.
+Before installing dependencies, `scripts/ci/change-plan.mjs` compares the exact
+PR base tree (against the checked-out synthetic merge tree), or the previous push
+tip `github.event.before` against the new tip. These are endpoint tree diffs and
+do not require ancestry between shallow-fetched objects. Local branch/coverage
+comparison still uses merge-base semantics. Both Jest and Quality consume this
+same change-manifest format, with exact base/head/diff-base identities.
+
+A trunk push is incremental only when the GitHub Actions API confirms a successful
+main CI run for its exact predecessor and branch. Missing, failed, cancelled or
+unverifiable predecessor validation triggers a full catch-up run. The planner
+needs only `actions: read`; API failure conservatively widens the plan. First
+pushes, forced pushes, unavailable PR/push bases, and unreadable diffs also select
+full mode. Invalid checkout identity or an unusable full plan fails the job.
+
+Jest then selects changed, co-located, and transitively related suites and
+publishes one immutable test plan for every worker. Deleted modules include their former importers; global Jest configuration
 changes conservatively select the complete suite inventory. Dependency-only
 updates run critical runtime contracts and package-owned tests. Selection never
 truncates the test set to meet a shard limit.
@@ -162,11 +189,11 @@ run when their inputs change. A regular frontend change uses the E2E static
 export and existing smoke/critical/accessibility/visual tests. Production export
 also runs for native changes, because Windows Rust tests require its artifact,
 and for root build configuration/dependency changes. Full mode runs all lanes.
-Quality gate groups remain mandatory.
+Quality executes affected gates with the conservative full-registry fallbacks above.
 
 The iOS
 simulator build runs on manual/nightly executions because it requires a macOS
-runner. Nightly Tauri packaging depends on successful testing.
+runner. Nightly Tauri packaging depends on successful full Quality and testing.
 
 `src-tauri` is excluded from the Linux workspace run because its
 `tauri::generate_context!()` needs the Next.js static export at compile time;
@@ -244,6 +271,14 @@ The report covers: failed Jest tests with messages, slowest suites, Playwright
 failures, **flaky specs** (passed only on retry — otherwise invisible, since
 `retries: 1` reports them green), coverage deltas, and bundle-size deltas.
 
+Report downloads are selected by artifact ID from a complete authenticated
+listing. Current runs select `jest-shard-*`, `playwright-json`, `coverage-report`
+and `bundle-size`; baselines select only the latter three comparison inputs.
+An absent category remains absent data, while listing, download, expiration,
+digest and partial-download errors fail the report job. Singleton downloads keep
+their artifact-name directory so report paths remain stable. The report still
+runs trusted base-repository code and retains the triggering run's conclusion.
+
 Nothing is persisted: no metrics branch, no committed snapshots. The trade-off
 is that trends are always "versus the trunk branch's latest nightly run", and
 cross-run flake history is not available.
@@ -281,6 +316,44 @@ PRs restore the base branch's entries, which GitHub allows, and never evict
 them with branch-local copies. A PR that changes `Cargo.lock` compiles those
 crates cold until it merges.
 
+Completed lint/format validation may save useful caches even when it reports
+violations; the gate continues to fail. Cache publication requires a normal
+completed check, an existing cache file, a non-cancelled trusted trunk push, and
+no exact cache-key hit. Crashes, configuration errors and missing caches do not
+qualify. Trunk only looks up existing keys and still checks cold; PRs restore
+compatible results. Cache identity includes architecture, tool/configuration
+inputs and the typed sidecar's transitive workspace source inputs, so changes
+outside an individual linted file invalidate its cached diagnostics.
+
+Agent host releases restore a dedicated Rust dependency cache warmed by
+`nightly.yml` on the repository's default branch (also available by manual
+Nightly dispatch on that branch). The three native runner/target pairs match
+the release matrix. Both sides use `rust-toolchain.toml` before hashing and
+share a release-profile key separated by OS, architecture and target; rust-cache
+also includes compiler, Cargo manifests/lockfiles and relevant environment
+identity. Tag jobs are read-only consumers because a cache written under one
+tag cannot serve another tag. The first successful default-branch warm job is
+required before cross-release reuse is possible. Cache errors, eviction,
+toolchain changes or runner-image changes fall back to normal compilation;
+Cargo and release smoke checks always run. The warmer does not build or cache
+signed release artifacts and adds no jobs to PRs.
+
+The Linux Agent host producer also publishes a same-run SDK prerequisite tar
+after packaging and native smoke, including on reruns where its npm version is
+already published. Restore verifies repository, run, exact checkout SHA, target,
+package metadata, producer attempt, archive/file digests, file closure and modes.
+A successful earlier attempt in the same run is accepted when only the SDK job
+is rerun. A genuinely missing or expired artifact triggers the canonical full
+host build and native smoke with the same Rust dependency-cache fallback. API,
+download or integrity errors remain blocking and do not select that fallback.
+
+The SDK's Node RPC smoke builds webclone and built-in plugins first and uses all
+three native helpers from the verified host package, avoiding a second Rust
+compilation. Its handshake/crash-recovery/shutdown smoke still runs separately
+from the native host smoke. `pack:test --require-host` then exercises the default
+host resolution path; a missing host can no longer silently skip that release
+check. SDK publication remains after both checks.
+
 Frozen installs always run with `--prefer-offline`; a cache hit never skips
 lockfile validation, workspace linking or required install scripts. The DeepSeek
 runtime is intentionally separate: its complete pinned manifest is copied to
@@ -296,6 +369,24 @@ when the plan contains no Jest suites, they build their own prerequisites normal
 The production and E2E static exports remain different artifacts because their
 build flags differ. Playwright consumers share the E2E export, and Windows Rust
 verification consumes the production export; neither rebuilds that frontend.
+
+When either CLI bundle suite is selected, the Jest planner builds the Node CLI
+once into a clean temporary directory with `build-cli.mjs --js-only --outdir`.
+Before esbuild runs, preparation invokes the existing built-in plugin builder
+so cold checkouts include the coding-tool chunks and their current catalog.
+Plugin build failures stop preparation; consumers reuse those staged assets
+along with the CLI and do not rebuild either. Unselected plans skip both builds.
+The separate run-scoped `jest-cli-bundle-${{ github.sha }}` artifact carries a
+tar archive and a manifest. Only shards containing `entry.bundle.test.ts` or
+`coding-loop.bundle.test.ts` download it; other Jest shards and frontend consumers
+do not transfer the large CLI chunks. Restore checks the frozen plan and actual
+checkout SHA, platform, architecture, Node major version, archive hash, complete
+file inventory, file hashes and executable modes before replacing `cli/dist`.
+Each suite revalidates the payload without writing or rebuilding it. Missing,
+stale or damaged requested artifacts fail the job instead of silently masking a
+broken producer. Local suites without `COGNIA_JEST_CLI_BUNDLE` retain a fresh
+source build, so local edits cannot reuse an artifact merely because HEAD stayed
+the same. These artifacts cache build output only; both suites still execute.
 
 When selected tests exercise the real OS sandbox or bundled coding loop, the
 planner builds `cognia-sandbox-exec` and `cognia-external-agent-launcher` once.

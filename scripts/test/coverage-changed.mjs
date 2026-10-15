@@ -45,6 +45,8 @@ import { execaSync } from "execa"
 import { z } from "zod"
 import { checkGroup, mergeCoverageFiles } from "./merge-coverage.mjs"
 import timingSequencer from "./jest-timing-sequencer.cjs"
+import { listCommittedChanges, readChangePlan } from "../ci/change-plan.mjs"
+export { listCommittedChanges } from "../ci/change-plan.mjs"
 
 /** Directories whose files are coverage-collected (mirrors jest.config.ts). */
 const COLLECTED_ROOTS = [
@@ -88,6 +90,7 @@ const cliSchema = z.object({
   head: z.string().trim().min(1).optional(),
   mode: z.enum(["incremental", "full"]).optional(),
   output: z.string().trim().min(1).optional(),
+  changePlan: z.string().trim().min(1).optional(),
   runPlan: z.string().trim().min(1).optional(),
   shard: z.coerce.number().int().positive().optional(),
   coverage: z.boolean().optional(),
@@ -106,6 +109,7 @@ function createProgram() {
     .option("--head <ref>", "Exact checked-out head for a test plan.")
     .option("--mode <mode>", "Test plan mode: incremental or full.")
     .option("--output <file>", "Also write the machine-readable test plan to this file.")
+    .option("--change-plan <file>", "Use the verified committed-change manifest from CI.")
     .option("--run-plan <file>", "Execute one shard from a persisted test plan.")
     .option("--shard <number>", "One-based test-plan shard to execute.")
     .option("--coverage", "Collect coverage when executing a full-mode test plan.")
@@ -210,7 +214,9 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
   const all =
     mode === "full" ||
     changedFiles.some((file) =>
-      /^(?:\.github\/workflows\/(?:ci|test)\.yml|scripts\/test\/coverage-changed\.mjs)$/.test(file)
+      /^(?:\.github\/workflows\/(?:ci|test)\.yml|scripts\/(?:test\/coverage-changed|ci\/change-plan)\.mjs)$/.test(
+        file
+      )
     )
   const any = (pattern) => all || changedFiles.some((file) => pattern.test(file))
   const globalJS = any(
@@ -259,47 +265,6 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
       any(
         /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^/]+)?\.json|next\.config\.[^/]+|postcss\.config\.[^/]+|\.npmrc$|patches\/|scripts\/build\/)/
       ),
-  }
-}
-
-/** Resolve a committed diff only; local/untracked files never enter a CI plan.
- * --no-renames makes both the removed and new path explicit so deletion-neighbor
- * and colocated suites remain selected after moves. NUL records preserve spaces.
- */
-export function listCommittedChanges(
-  base,
-  head,
-  exec = (command, args) => execaSync(command, args).stdout
-) {
-  const resolve = (ref) =>
-    exec("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]).trim()
-  const resolvedBase = resolve(base)
-  const resolvedHead = resolve(head)
-  const mergeBase = exec("git", ["merge-base", resolvedBase, resolvedHead]).trim()
-  const records = exec("git", [
-    "diff",
-    "--name-status",
-    "-z",
-    "--no-renames",
-    mergeBase,
-    resolvedHead,
-    "--",
-  ]).split("\0")
-  const changedFiles = [],
-    deletedFiles = []
-  for (let index = 0; index < records.length - 1; index += 2) {
-    const status = records[index],
-      file = records[index + 1]
-    if (!file) throw new Error("Malformed Git name-status record")
-    changedFiles.push(file)
-    if (status === "D") deletedFiles.push(file)
-  }
-  return {
-    base: resolvedBase,
-    head: resolvedHead,
-    mergeBase,
-    changedFiles: [...new Set(changedFiles)].sort(),
-    deletedFiles: deletedFiles.sort(),
   }
 }
 
@@ -612,8 +577,11 @@ function listJestTests(inputs) {
 }
 
 function createCommittedPlan(args) {
+  const committedPlan = args.changePlan ? readChangePlan(args.changePlan) : null
+  if (committedPlan)
+    args = { ...args, head: committedPlan.head, base: committedPlan.base, mode: committedPlan.mode }
   if (!args.head) throw new Error("--plan requires --head")
-  const changes = listCommittedChanges(args.base, args.head)
+  const changes = committedPlan ?? listCommittedChanges(args.base, args.head)
   const currentHead = execaSync("git", ["rev-parse", "HEAD"]).stdout.trim()
   if (currentHead !== changes.head)
     throw new Error("Test planning must run at the requested head commit")
@@ -636,7 +604,7 @@ function createCommittedPlan(args) {
     for (const file of changes.deletedFiles) {
       if (!RELATED_INPUT.test(file) || TEST_INPUT.test(file) || DEPENDENCY_INPUT.test(file))
         continue
-      const consumers = findDeletedModuleConsumers([file], changes.mergeBase).filter((consumer) =>
+      const consumers = findDeletedModuleConsumers([file], changes.diffBase).filter((consumer) =>
         existsSync(consumer)
       )
       consumers.forEach((consumer) => deletedConsumerSet.add(consumer))
@@ -676,7 +644,14 @@ function createCommittedPlan(args) {
     sizes,
     timingManifest,
   })
-  return { ...plan, deletedConsumers, unresolvedDeletedFiles }
+  return {
+    ...plan,
+    diffBase: changes.diffBase,
+    comparison: changes.comparison,
+    ...(committedPlan ? { reason: committedPlan.reason } : {}),
+    deletedConsumers,
+    unresolvedDeletedFiles,
+  }
 }
 
 function main() {

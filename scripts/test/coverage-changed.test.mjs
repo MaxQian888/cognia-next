@@ -8,6 +8,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { readFileSync, mkdtempSync, writeFileSync, rmSync, renameSync, symlinkSync } from "node:fs"
 import os from "node:os"
 import { execaSync } from "execa"
@@ -29,6 +30,49 @@ import {
   findDeletedModuleConsumers,
   runPlannedShard,
 } from "./coverage-changed.mjs"
+
+test("a shallow multi-commit push compares endpoint trees without requiring ancestry", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "cognia-planner-shallow-"))
+  const source = path.join(directory, "source")
+  const checkout = path.join(directory, "checkout")
+  const git = (cwd, ...args) => execaSync("git", args, { cwd }).stdout.trim()
+  try {
+    git(directory, "init", "--quiet", source)
+    git(source, "config", "user.email", "fixture@example.invalid")
+    git(source, "config", "user.name", "Planner fixture")
+    let base
+    for (let index = 0; index < 5; index++) {
+      writeFileSync(path.join(source, `change-${index}.js`), `module.exports = ${index}\n`)
+      git(source, "add", ".")
+      git(source, "commit", "--quiet", "-m", `change ${index}`)
+      if (index === 0) base = git(source, "rev-parse", "HEAD")
+    }
+    const head = git(source, "rev-parse", "HEAD")
+    git(directory, "clone", "--quiet", "--depth=2", pathToFileURL(source).href, checkout)
+    git(checkout, "fetch", "--no-tags", "--depth=1", "origin", base)
+    assert.equal(
+      execaSync("git", ["merge-base", base, head], { cwd: checkout, reject: false }).exitCode,
+      1,
+      "the fixture must reproduce the hosted shallow-history failure"
+    )
+    const changes = listCommittedChanges(
+      base,
+      head,
+      (command, args) => execaSync(command, args, { cwd: checkout }).stdout,
+      "endpoints"
+    )
+    assert.deepEqual(changes.changedFiles, [
+      "change-1.js",
+      "change-2.js",
+      "change-3.js",
+      "change-4.js",
+    ])
+    assert.equal(changes.diffBase, base)
+    assert.equal(changes.mergeBase, null)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
 
 test("deleted-module discovery keeps old consumers outside the removed module's directory", () => {
   const calls = []
@@ -98,6 +142,38 @@ test("committed planning follows surviving importers of a moved module in a real
         .find((reason) => reason.kind === "related")
         .testFiles.includes("consumer.test.js")
     )
+    // CI consumes an endpoint manifest. Deleted-import discovery must inspect
+    // its base tree even though no merge-base is needed or recorded.
+    const changes = listCommittedChanges(
+      base,
+      head,
+      (command, args) => execaSync(command, args, { cwd: directory }).stdout,
+      "endpoints"
+    )
+    const manifest = path.join(directory, "changes.json")
+    writeFileSync(
+      manifest,
+      JSON.stringify({ version: 1, mode: "incremental", reason: "event-tree-diff", ...changes })
+    )
+    const fromManifest = JSON.parse(
+      execaSync(process.execPath, [script, "--plan", "--change-plan", manifest], { cwd: directory })
+        .stdout
+    )
+    assert.equal(fromManifest.mergeBase, null)
+    assert.equal(fromManifest.diffBase, base)
+    assert.deepEqual(fromManifest.deletedConsumers, ["consumer.js"])
+    assert.ok(fromManifest.testFiles.includes("consumer.test.js"))
+    writeFileSync(
+      manifest,
+      JSON.stringify({ version: 1, mode: "full", reason: "unverified-push-baseline", ...changes })
+    )
+    const catchUp = JSON.parse(
+      execaSync(process.execPath, [script, "--plan", "--change-plan", manifest], { cwd: directory })
+        .stdout
+    )
+    assert.equal(catchUp.mode, "full")
+    assert.equal(catchUp.reason, "unverified-push-baseline")
+    assert.deepEqual(catchUp.testFiles, ["consumer.test.js", "unrelated.test.js"])
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
@@ -183,6 +259,7 @@ test("shared manifests, Rust graph and workflow changes conservatively fan out t
   assert.equal(rust.diagnostic, false)
   assert.equal(rust.frontend, false)
   assert.ok(Object.values(classifyCiImpact([".github/workflows/test.yml"])).every(Boolean))
+  assert.ok(Object.values(classifyCiImpact(["scripts/ci/change-plan.mjs"])).every(Boolean))
   assert.ok(Object.values(classifyCiImpact([], "full")).every(Boolean))
 })
 
@@ -346,6 +423,8 @@ test("committed diffs use exact resolved refs and include both sides of a rename
     base: "base-sha",
     head: "head-sha",
     mergeBase: "ancestor-sha",
+    diffBase: "ancestor-sha",
+    comparison: "merge-base",
     changedFiles: ["lib/new.ts", "lib/old.ts", "lib/space name.ts"],
     deletedFiles: ["lib/old.ts"],
   })

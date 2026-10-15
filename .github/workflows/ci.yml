@@ -54,6 +54,9 @@ jobs:
   # a lint failure should not hide a broken test.
   quality:
     name: Quality
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/quality.yml
 
   # PRs and trunk pushes select affected tests; nightly.yml, tags and manual
@@ -61,6 +64,9 @@ jobs:
   # Expensive builds and integration lanes follow the reusable workflow plan.
   test:
     name: Test
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/test.yml
 
   # Branch protection consumes this stable name instead of the reusable

@@ -70,13 +70,33 @@ jobs:
       - name: Install report dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
+      - name: Test report artifact selection
+        run: node --test scripts/ci/report/select-artifacts.test.mjs
+
+      - name: Select this run's report artifacts
+        id: current-artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPORT_ARTIFACT_MANIFEST: .cache/ci/report-current-artifacts.json
+          REPORT_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: node scripts/ci/report/select-artifacts.mjs --scope current --run-id "$REPORT_RUN_ID"
+
       - name: Download this run's artifacts
+        if: steps.current-artifacts.outputs.artifact-ids != ''
         uses: actions/download-artifact@v8
         with:
+          artifact-ids: ${{ steps.current-artifacts.outputs.artifact-ids }}
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
-          path: artifacts
-        continue-on-error: true
+          # v8 flattens a singleton ID selection, so retain its named directory.
+          path: artifacts/${{ steps.current-artifacts.outputs.single-name }}
+          merge-multiple: false
+          digest-mismatch: error
+
+      - name: Verify this run's artifact downloads
+        env:
+          REPORT_ARTIFACT_MANIFEST: .cache/ci/report-current-artifacts.json
+        run: node scripts/ci/report/select-artifacts.mjs --scope current --verify --directory artifacts
 
       # Baseline for the trend: the newest successful run of the same
       # workflow on the trunk branch. Nothing is persisted anywhere — no
@@ -104,14 +124,31 @@ jobs:
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "Baseline run: ${run_id:-<none>}"
 
-      - name: Download the baseline artifacts
+      - name: Select baseline report artifacts
         if: steps.baseline.outputs.run_id != ''
+        id: baseline-artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPORT_ARTIFACT_MANIFEST: .cache/ci/report-baseline-artifacts.json
+          REPORT_RUN_ID: ${{ steps.baseline.outputs.run_id }}
+        run: node scripts/ci/report/select-artifacts.mjs --scope baseline --run-id "$REPORT_RUN_ID"
+
+      - name: Download the baseline artifacts
+        if: steps.baseline-artifacts.outputs.artifact-ids != ''
         uses: actions/download-artifact@v8
         with:
+          artifact-ids: ${{ steps.baseline-artifacts.outputs.artifact-ids }}
           run-id: ${{ steps.baseline.outputs.run_id }}
           github-token: ${{ github.token }}
-          path: baseline
-        continue-on-error: true
+          path: baseline/${{ steps.baseline-artifacts.outputs.single-name }}
+          merge-multiple: false
+          digest-mismatch: error
+
+      - name: Verify baseline artifact downloads
+        if: steps.baseline.outputs.run_id != ''
+        env:
+          REPORT_ARTIFACT_MANIFEST: .cache/ci/report-baseline-artifacts.json
+        run: node scripts/ci/report/select-artifacts.mjs --scope baseline --verify --directory baseline
 
       # Incremental PRs intentionally omit coverage; the report preserves JUnit
       # results and labels absent coverage instead of borrowing baseline values.

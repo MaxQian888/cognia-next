@@ -28,7 +28,18 @@ name: Code Quality
 
 on:
   workflow_call:
+    inputs:
+      quality-mode:
+        type: string
+        default: auto
+        description: auto selects affected gates on PRs and validated trunk pushes
   workflow_dispatch:
+    inputs:
+      quality-mode:
+        type: choice
+        options: [full, incremental, auto]
+        default: full
+        description: Quality selection mode
 
 concurrency:
   # PRs cancel superseded runs. Trunk pushes never cancel a run in progress:
@@ -47,6 +58,7 @@ jobs:
 
     permissions:
       contents: read
+      actions: read
 
     outputs:
       groups: ${{ steps.manifest.outputs.groups }}
@@ -63,12 +75,40 @@ jobs:
         with:
           node-version: 26.x
 
+      - name: Test Git change planning
+        run: node --test scripts/ci/change-plan.test.mjs
+
+      - name: Resolve committed changes
+        env:
+          REQUESTED_MODE: ${{ inputs.quality-mode || 'auto' }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_FORCED: ${{ github.event.forced }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci/change-plan.mjs --output .cache/ci/changes.json
+
       - name: Read the gate group manifest
         id: manifest
         run: |
-          groups="$(node scripts/gates/check-all.mjs --list-groups --json)"
-          echo "groups=$groups" >> "$GITHUB_OUTPUT"
-          echo "Gate groups: $groups"
+          node --input-type=module <<'NODE'
+          import { appendFileSync, writeFileSync } from 'node:fs';
+          import { readChangePlan } from './scripts/ci/change-plan.mjs';
+          import { buildQualityPlan } from './scripts/gates/check-all.mjs';
+          const plan = buildQualityPlan(readChangePlan('.cache/ci/changes.json'));
+          appendFileSync(process.env.GITHUB_OUTPUT, `groups=${JSON.stringify(plan.include)}\n`);
+          writeFileSync('.cache/ci/quality-plan.json', JSON.stringify(plan, null, 2));
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Quality plan\nMode: ${plan.mode}\n\n${plan.selected.length} selected gates, ${plan.skipped.length} skipped gates.\n\nBase: ${plan.base}\nHead: ${plan.head}\n\nSee quality-change-plan for selection reasons.\n`);
+          NODE
+
+      - name: Publish immutable Quality change plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: quality-change-plan
+          path: .cache/ci/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   gates:
     name: Gates (${{ matrix.group }})
@@ -87,12 +127,18 @@ jobs:
         include: ${{ fromJSON(needs.prepare.outputs.groups) }}
 
     steps:
-      # Gates inspect tracked files and the current index; they do not diff
-      # against an ancestor. Base-aware test selection owns its separate fetch.
+      # Execution consumes the same HEAD-bound manifest as the matrix planner.
+      # Gate bodies still inspect their complete input domains.
       - name: Checkout code
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+
+      - name: Download Quality change plan
+        uses: actions/download-artifact@v8
+        with:
+          name: quality-change-plan
+          path: .cache/ci/
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -132,13 +178,17 @@ jobs:
         if: matrix.rust
         uses: Swatinem/rust-cache@v2
         with:
+          # Matrix lanes compile different dependency sets. The default job key
+          # is identical for every lane; immutable caches cannot merge writers.
+          key: quality-${{ matrix.group }}
           save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
           workspaces: ". -> target"
+          cache-on-failure: true
 
       # cargo-deny is not a rustup component; without it the `rust:deny` gate
       # reports as advisory-failed and the supply-chain scan never runs.
       - name: Install cargo-deny
-        if: matrix.group == 'supply-chain'
+        if: matrix.group == 'supply-chain' && contains(matrix.scripts, 'rust:deny')
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
@@ -239,24 +289,39 @@ jobs:
       # pass and is the only writer, so cross-file state that a per-file
       # cache cannot see (typed sidecar rules, config drift) is re-proven on
       # every trunk push and never published from an unmerged branch.
+      - name: Resolve lint result cache identity
+        id: lint-cache-key
+        if: matrix.group == 'lint' || matrix.group == 'format'
+        env:
+          # Typed sidecar rules also read workspace sources and imported JSON.
+          # Hash that closure so a PR cannot reuse stale cross-file diagnostics.
+          CACHE_PREFIX: ${{ runner.os }}-${{ runner.arch }}-node26-${{ matrix.group }}-results-v2-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'pnpm-workspace.yaml', 'sidecar/**/package.json', 'sidecar/**/pnpm-lock.yaml', 'sidecar/**/package-lock.json', 'packages/*/package.json', '**/eslint.config.*', '**/.prettier*', '**/tsconfig*.json', '!**/node_modules/**', '!**/dist/**', '!**/.next/**', '!**/.cache/**') }}-${{ matrix.group == 'lint' && hashFiles('sidecar/src/**', 'sidecar/codex-app-control/**', 'sidecar/test-support/**', 'sidecar/*.mjs', 'sidecar/webclone/src/**', 'packages/*/src/**', 'lib/**', 'types/**', '!**/node_modules/**', '!**/dist/**', '!**/.cache/**') || 'format' }}-
+        run: |
+          printf 'prefix=%s\nkey=%s%s\n' "$CACHE_PREFIX" "$CACHE_PREFIX" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Restore lint result cache
-        if: github.event_name == 'pull_request' && (matrix.group == 'lint' || matrix.group == 'format')
+        id: lint-result-cache
+        if: (github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master'))) && (matrix.group == 'lint' || matrix.group == 'format')
         uses: actions/cache/restore@v6
         with:
+          # Trunk checks only whether this immutable key already exists.
+          lookup-only: ${{ github.event_name != 'pull_request' }}
           path: .cache/${{ matrix.group == 'lint' && 'eslint' || 'prettier' }}
-          key: ${{ runner.os }}-node26-${{ matrix.group }}-results-${{ hashFiles('pnpm-lock.yaml', 'eslint.config.mjs', '.prettierrc.json', '.prettierignore', 'tsconfig.json', 'sidecar/tsconfig.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-node26-${{ matrix.group }}-results-${{ hashFiles('pnpm-lock.yaml', 'eslint.config.mjs', '.prettierrc.json', '.prettierignore', 'tsconfig.json', 'sidecar/tsconfig.json') }}-
+          key: ${{ steps.lint-cache-key.outputs.key }}
+          restore-keys: ${{ steps.lint-cache-key.outputs.prefix }}
 
       # check-all.mjs runs every gate in the group, continues past failures,
       # writes a ✓/✗ table to the job summary, and exits non-zero if any
       # blocking gate failed.
       - name: Run gate group
-        run: node scripts/gates/check-all.mjs --group ${{ matrix.group }}
+        id: gates
+        run: node scripts/gates/check-all.mjs --change-plan .cache/ci/changes.json --group ${{ matrix.group }}
 
       - name: Save lint result cache
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master') && (matrix.group == 'lint' || matrix.group == 'format')
+        # A completed lint/format failure still yields reusable per-file results.
+        # Preserve its failing gate while excluding crashes and cancelled runs.
+        if: ${{ !cancelled() && steps.gates.outputs.lint-cache-ready == 'true' && steps.lint-result-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master') && (matrix.group == 'lint' || matrix.group == 'format') }}
         uses: actions/cache/save@v6
         with:
           path: .cache/${{ matrix.group == 'lint' && 'eslint' || 'prettier' }}
-          key: ${{ runner.os }}-node26-${{ matrix.group }}-results-${{ hashFiles('pnpm-lock.yaml', 'eslint.config.mjs', '.prettierrc.json', '.prettierignore', 'tsconfig.json', 'sidecar/tsconfig.json') }}-${{ github.sha }}
+          key: ${{ steps.lint-cache-key.outputs.key }}

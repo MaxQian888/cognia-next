@@ -11,6 +11,63 @@ import { ESLint } from "eslint"
 const readWorkflow = (name) =>
   readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), "utf8")
 
+test("Jest bundle suites consume a verified artifact from the frozen plan", async () => {
+  const { jobs } = parse(await readWorkflow("test.yml"))
+  const producer = jobs["jest-plan"].steps
+  const freeze = producer.findIndex((step) => step.id === "plan")
+  const bundle = producer.findIndex(
+    (step) => step.run === "node scripts/test/cli-bundle.mjs prepare .cache/jest/plan.json"
+  )
+  const upload = producer.findIndex((step) => step.name === "Publish prepared Jest CLI bundle")
+  assert.ok(freeze >= 0 && freeze < bundle && bundle < upload)
+  assert.match(producer[upload].with.path, /cli-bundle\.tar/)
+  assert.match(producer[upload].with.path, /cli-bundle\.json/)
+  assert.equal(producer[upload].if, "steps.cli-bundle.outputs.prepared == 'true'")
+  assert.equal(producer[upload].with.name, "jest-cli-bundle-${{ github.sha }}")
+  assert.ok(
+    !producer
+      .find((step) => step.name === "Publish built Jest prerequisites")
+      .with.path.includes("cli-bundle")
+  )
+  const consumer = jobs.test.steps
+  const restore = consumer.findIndex(
+    (step) => step.run === 'node scripts/test/cli-bundle.mjs restore .cache/jest/plan.json "$SHARD"'
+  )
+  const run = consumer.findIndex((step) => step.name === "Run Jest planned shard")
+  assert.ok(restore > consumer.findIndex((step) => step.name === "Download frozen Jest test plan"))
+  assert.ok(restore < run)
+  const download = consumer.findIndex((step) => step.name === "Download selected Jest CLI bundle")
+  assert.ok(download < restore)
+  assert.equal(consumer[download].if, "steps.cli-bundle.outputs.required == 'true'")
+  assert.equal(consumer[download].with.name, producer[upload].with.name)
+  assert.equal(consumer[download].with.path, ".cache/jest/")
+  const select = consumer.findIndex((step) => step.id === "cli-bundle")
+  assert.ok(select < download)
+  assert.match(consumer[select].run, /cli-bundle\.mjs required/)
+  assert.equal(consumer[run].env.COGNIA_JEST_CLI_BUNDLE, ".cache/jest/cli-bundle.json")
+  for (const suite of ["entry.bundle", "coding-loop.bundle"]) {
+    const source = await readFile(
+      new URL(`../../cli/src/cli/${suite}.test.ts`, import.meta.url),
+      "utf8"
+    )
+    assert.match(source, /scripts\/test\/cli-bundle\.mjs/)
+    assert.ok(!source.includes('"scripts/build/build-cli.mjs"'))
+  }
+})
+
+test("Quality Cargo caches isolate matrix producers and retain failed trunk builds", async () => {
+  const { jobs } = parse(await readWorkflow("quality.yml"))
+  const cache = jobs.gates.steps.find((step) => step.uses?.startsWith("Swatinem/rust-cache@"))
+  assert.equal(cache.if, "matrix.rust")
+  assert.equal(cache.with.key, "quality-${{ matrix.group }}")
+  assert.equal(cache.with["cache-on-failure"], true)
+  assert.equal(
+    cache.with["save-if"],
+    "${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}"
+  )
+  assert.equal(cache.with["shared-key"], undefined)
+})
+
 test("iOS tagged releases verify the IPA before uploading to TestFlight and gate publication", async () => {
   const { jobs } = parse(await readWorkflow("release.yml"))
   const ios = jobs["build-ios"]
@@ -313,8 +370,8 @@ test("all Jest waves execute one immutable plan for the exact checkout", async (
   assert.equal(jobs.test.needs, "jest-plan")
   assert.ok(jobs["jest-plan"].steps.some((step) => step.uses?.startsWith("actions/cache/restore@")))
   assert.ok(!jobs.test.steps.some((step) => step.uses?.startsWith("actions/cache/restore@")))
-  const publish = jobs["jest-plan"].steps.find((step) =>
-    step.uses?.startsWith("actions/upload-artifact@")
+  const publish = jobs["jest-plan"].steps.find(
+    (step) => step.name === "Publish immutable test plan"
   )
   const consume = jobs.test.steps.find((step) => step.name === "Download frozen Jest test plan")
   assert.equal(publish.with.name, consume.with.name)
@@ -326,10 +383,10 @@ test("all Jest waves execute one immutable plan for the exact checkout", async (
       jobs.test.steps.findIndex((step) => step.name === "Run Jest planned shard")
   )
   const planning = jobs["jest-plan"].steps.find((step) => step.id === "plan")
-  assert.equal(planning.env.PR_BASE_SHA, "${{ github.event.pull_request.base.sha }}")
-  assert.match(planning.run, /git fetch --no-tags --depth=1 origin "\$base"/)
-  assert.match(planning.run, /--head "\$GITHUB_SHA"/)
-  assert.match(planning.run, /pull_request.*mode=incremental/)
+  const changes = jobs["jest-plan"].steps.find((step) => step.name === "Resolve committed changes")
+  assert.equal(changes.env.PR_BASE_SHA, "${{ github.event.pull_request.base.sha }}")
+  assert.equal(changes.env.PUSH_BEFORE_SHA, "${{ github.event.before }}")
+  assert.match(planning.run, /--plan --change-plan \.cache\/ci\/changes\.json/)
   assert.equal(jobs.test.strategy.matrix, "${{ fromJSON(needs.jest-plan.outputs.matrix) }}")
   assert.equal(jobs.test.if, "needs.jest-plan.outputs.has-tests == 'true'")
   assert.equal(
@@ -463,9 +520,9 @@ test("CI exposes stable and complete verification seams", async () => {
   assert.match(testWorkflow, /web-build:[\s\S]*pnpm web:build/)
   assert.match(testWorkflow, /mobile-android-build:[\s\S]*assembleDebug/)
   // The nightly Tauri matrix is the most expensive job in the repo and is
-  // gated on `test` for that reason. Asserted, not forbidden: a bundle built
+  // gated on quality and tests for that reason: a bundle built
   // from a red tree proves nothing.
-  assert.match(nightly, /build-tauri:[\s\S]*needs: test/)
+  assert.deepEqual(parse(nightly).jobs["build-tauri"].needs, ["quality", "test"])
 })
 
 test("formatting and lint exclude generated test and extension artifacts", async () => {
@@ -922,15 +979,71 @@ test("lint and format results are restored on PRs and written only by cold trunk
   const save = steps.find((step) => step.name === "Save lint result cache")
   assert.ok(restore.uses.startsWith("actions/cache/restore@"))
   assert.ok(save.uses.startsWith("actions/cache/save@"))
-  assert.match(restore.if, /^github\.event_name == 'pull_request' && /)
-  assert.ok(save.if.startsWith(`github.event_name == 'push' && (${TRUNK})`))
+  assert.match(restore.if, /github\.event_name == 'pull_request'/)
+  assert.equal(restore.with["lookup-only"], "${{ github.event_name != 'pull_request' }}")
+  assert.ok(save.if.includes(`github.event_name == 'push' && (${TRUNK})`))
+  assert.ok(save.if.includes("!cancelled()"))
+  assert.ok(save.if.includes("steps.gates.outputs.lint-cache-ready == 'true'"))
+  assert.ok(save.if.includes("steps.lint-result-cache.outputs.cache-hit != 'true'"))
+  assert.equal(steps[gate].id, "gates")
+  assert.equal(steps[gate]["continue-on-error"], undefined)
   assert.ok(steps.indexOf(restore) < gate && gate < steps.indexOf(save))
   assert.equal(restore.with.path, save.with.path)
   assert.equal(restore.with.key, save.with.key)
-  assert.equal(
-    restore.with["restore-keys"].trim(),
-    restore.with.key.replace(/\$\{\{ github\.sha \}\}$/, "")
-  )
+  assert.equal(restore.with.key, "${{ steps.lint-cache-key.outputs.key }}")
+  assert.equal(restore.with["restore-keys"], "${{ steps.lint-cache-key.outputs.prefix }}")
+  const key = steps.find((step) => step.id === "lint-cache-key")
+  assert.ok(steps.indexOf(key) < steps.indexOf(restore))
+  for (const input of [
+    "runner.arch",
+    "pnpm-lock.yaml",
+    "eslint.config",
+    "tsconfig",
+    "sidecar/src",
+    "sidecar/**/pnpm-lock.yaml",
+    "sidecar/**/package-lock.json",
+    "sidecar/**/package.json",
+    "packages/*/src",
+    "packages/*/package.json",
+    "lib/**",
+    "types/**",
+  ]) {
+    assert.ok(key.env.CACHE_PREFIX.includes(input), `cache identity includes ${input}`)
+  }
+})
+
+test("reports download only frozen input IDs and preserve singleton artifact directories", async () => {
+  const steps = parse(await readWorkflow("report.yml")).jobs.report.steps
+  const build = steps.findIndex((step) => step.name === "Build the report")
+  for (const [scope, name, destination] of [
+    ["current", "Download this run's artifacts", "artifacts"],
+    ["baseline", "Download the baseline artifacts", "baseline"],
+  ]) {
+    const select = steps.find((step) => step.id === `${scope}-artifacts`)
+    const download = steps.find((step) => step.name === name)
+    const verify = steps.find((step) => step.run?.includes(`--scope ${scope} --verify`))
+    assert.ok(select && download && verify)
+    assert.match(select.run, new RegExp(`--scope ${scope} --run-id`))
+    assert.equal(
+      download.with["artifact-ids"],
+      `\${{ steps.${scope}-artifacts.outputs.artifact-ids }}`
+    )
+    assert.equal(
+      download.with.path,
+      `${destination}/\${{ steps.${scope}-artifacts.outputs.single-name }}`
+    )
+    assert.equal(download.with["digest-mismatch"], "error")
+    assert.equal(download.with["merge-multiple"], false)
+    assert.equal(download.if, `steps.${scope}-artifacts.outputs.artifact-ids != ''`)
+    assert.ok(steps.indexOf(select) < steps.indexOf(download))
+    assert.ok(steps.indexOf(download) < steps.indexOf(verify) && steps.indexOf(verify) < build)
+    for (const step of [select, download, verify])
+      assert.equal(step["continue-on-error"], undefined)
+    assert.equal(select.env.REPORT_ARTIFACT_MANIFEST, verify.env.REPORT_ARTIFACT_MANIFEST)
+  }
+  const checkout = steps.find((step) => step.uses?.startsWith("actions/checkout@"))
+  assert.equal(checkout.with?.ref, undefined, "report code remains on trusted base checkout")
+  assert.match(steps[build].run, /github\.event\.workflow_run\.conclusion/)
 })
 
 test("compiled workspace prerequisites reuse only exact-source trunk builds", async () => {
@@ -977,85 +1090,63 @@ test("compiled workspace prerequisites reuse only exact-source trunk builds", as
   )
 })
 
-test("PRs and branch pushes plan incrementally; schedule, tags and new refs run the full suite", async () => {
-  const step = parse(await readWorkflow("test.yml")).jobs["jest-plan"].steps.find(
-    (item) => item.id === "plan"
-  )
-  const dir = await mkdtemp(join(tmpdir(), "cognia-plan-mode-"))
-  const log = join(dir, "calls.log")
-  try {
-    // `git fetch` fails for the sentinel "gone" SHA, like a force-pushed-away tip.
-    await writeFile(
-      join(dir, "git"),
-      '#!/bin/sh\nprintf "git %s\\n" "$*" >> "$CALLS"\ncase "$*" in *gone*) exit 1;; "rev-parse HEAD^") echo parent;; esac\n',
-      { mode: 0o755 }
+test("Quality and Jest resolve changes before install and use the same Git-only planner", async () => {
+  for (const [workflow, jobName] of [
+    ["quality.yml", "prepare"],
+    ["test.yml", "jest-plan"],
+  ]) {
+    const job = parse(await readWorkflow(workflow)).jobs[jobName]
+    const index = job.steps.findIndex((step) => step.name === "Resolve committed changes")
+    assert.ok(index >= 0, `${workflow} resolves a shared change manifest`)
+    assert.equal(
+      job.steps[index].run,
+      "node scripts/ci/change-plan.mjs --output .cache/ci/changes.json"
     )
-    await writeFile(
-      join(dir, "node"),
-      '#!/bin/sh\nprintf "node %s\\n" "$*" >> "$CALLS"\ncat >/dev/null\n',
-      {
-        mode: 0o755,
-      }
-    )
-    const plan = async (env) => {
-      await writeFile(log, "")
-      execFileSync("bash", ["-euo", "pipefail", "-c", step.run], {
-        env: {
-          PATH: `${dir}:${process.env.PATH}`,
-          CALLS: log,
-          GITHUB_SHA: "head",
-          REQUESTED_MODE: "auto",
-          PR_BASE_SHA: "",
-          PUSH_BEFORE_SHA: "",
-          ...env,
-        },
-        stdio: "pipe",
-      })
-      const call = (await readFile(log, "utf8")).split("\n").find((line) => line.includes("--plan"))
-      return {
-        mode: call.match(/--mode (\S+)/)[1],
-        base: call.match(/--base (\S+)/)[1],
-      }
-    }
-    assert.deepEqual(
-      await plan({
-        EVENT_NAME: "pull_request",
-        GITHUB_REF: "refs/pull/1/merge",
-        PR_BASE_SHA: "base",
-      }),
-      { mode: "incremental", base: "base" }
-    )
-    assert.deepEqual(
-      await plan({ EVENT_NAME: "push", GITHUB_REF: "refs/heads/dev", PUSH_BEFORE_SHA: "before" }),
-      { mode: "incremental", base: "before" },
-      "a multi-commit push diffs against the previous tip, not HEAD^"
-    )
-    assert.deepEqual(
-      await plan({
-        EVENT_NAME: "push",
-        GITHUB_REF: "refs/heads/dev",
-        PUSH_BEFORE_SHA: "0".repeat(40),
-      }),
-      { mode: "full", base: "head" }
-    )
-    assert.deepEqual(
-      await plan({ EVENT_NAME: "push", GITHUB_REF: "refs/heads/dev", PUSH_BEFORE_SHA: "gone" }),
-      { mode: "full", base: "head" }
-    )
-    for (const [EVENT_NAME, GITHUB_REF] of [
-      ["push", "refs/tags/v1.0.0"],
-      ["schedule", "refs/heads/dev"],
-      ["workflow_dispatch", "refs/heads/dev"],
-    ]) {
+    const install = job.steps.findIndex((step) => step.name === "Install dependencies")
+    assert.ok(install === -1 || index < install)
+    assert.equal(job.permissions.actions, "read")
+  }
+})
+
+test("every reusable planner caller grants the read-only baseline lookup permission", async () => {
+  for (const workflow of ["ci.yml", "nightly.yml", "release.yml"]) {
+    const { jobs } = parse(await readWorkflow(workflow))
+    for (const name of ["quality", "test"]) {
       assert.deepEqual(
-        await plan({ EVENT_NAME, GITHUB_REF }),
-        { mode: "full", base: "head" },
-        EVENT_NAME
+        jobs[name].permissions,
+        { contents: "read", actions: "read" },
+        `${workflow}:${name}`
       )
     }
-  } finally {
-    await rm(dir, { recursive: true, force: true })
   }
+})
+
+test("Quality executes the frozen affected matrix and nightly retains the full registry", async () => {
+  const quality = parse(await readWorkflow("quality.yml"))
+  const steps = quality.jobs.prepare.steps
+  const manifest = steps.find((step) => step.id === "manifest").run
+  assert.match(manifest, /buildQualityPlan\(readChangePlan\('\.cache\/ci\/changes\.json'\)\)/)
+  assert.match(manifest, /groups=\$\{JSON\.stringify\(plan\.include\)\}/)
+  const publish = steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"))
+  assert.equal(publish.with.name, "quality-change-plan")
+  const execution = quality.jobs.gates.steps
+  assert.equal(
+    execution.find((step) => step.uses?.startsWith("actions/download-artifact@")).with.name,
+    publish.with.name
+  )
+  assert.match(
+    execution.find((step) => step.name === "Run gate group").run,
+    /--change-plan \.cache\/ci\/changes\.json --group/
+  )
+  assert.equal(quality.on.workflow_dispatch.inputs["quality-mode"].default, "full")
+  const nightly = parse(await readWorkflow("nightly.yml"))
+  assert.equal(nightly.jobs.quality.with["quality-mode"], "full")
+  assert.deepEqual(nightly.jobs["build-tauri"].needs, ["quality", "test"])
+  const jestSteps = parse(await readWorkflow("test.yml")).jobs["jest-plan"].steps
+  assert.match(
+    jestSteps.find((step) => step.id === "plan").run,
+    /--plan --change-plan \.cache\/ci\/changes\.json/
+  )
 })
 
 test("the Pro IDE E2E runs on its own impact against the pinned code-server", async () => {

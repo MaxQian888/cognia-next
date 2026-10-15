@@ -51,11 +51,14 @@
  *   pnpm check:all -- --jobs 2           # override local concurrency
  *   pnpm check:all -- --bail             # stop at the first failure
  *   node scripts/gates/check-all.mjs --list-groups --json
+ *   node scripts/gates/check-all.mjs --change-plan changes.json --list-groups --json
+ *   node scripts/gates/check-all.mjs --change-plan changes.json --group audit
  */
 
 import { spawn } from "node:child_process"
-import { appendFileSync } from "node:fs"
+import { appendFileSync, statSync } from "node:fs"
 import { availableParallelism } from "node:os"
+import { readChangePlan, validateChangePlan } from "../ci/change-plan.mjs"
 
 /** Toolchains a gate can require. CI provisions these per group. */
 export const RUNTIMES = ["node", "python", "rust"]
@@ -333,7 +336,7 @@ const REGISTRY = [
   { script: "plugin:packages:verify", group: "plugin-sdk" },
   // ADR-0217: every agent package installs from its tarball and loads its entries.
   { script: "agent:packages:pack-test", group: "plugin-sdk" },
-  { script: "sdk:scaffold:test", group: "plugin-sdk" },
+  { script: "sdk:scaffold:test", group: "plugin-sdk", runtime: "rust", resource: "cargo" },
   { script: "sdk:python:test", group: "plugin-sdk", runtime: "python" },
   { script: "plugin:repowiki:test", group: "plugin-sdk", runtime: "python" },
   // laya's torch stack stays out of CI: the suite stubs the engine and a fake
@@ -362,12 +365,157 @@ const REGISTRY = [
   },
 ]
 
+// This first rollout narrows only gates whose input boundary is explicit.
+// Everything without a reviewed scope remains always-on, including registry,
+// security and cross-language consistency invariants. A prefix ending in `/`
+// denotes a directory; other entries denote exact repository-relative files.
+const FRONTEND_INPUTS = [
+  "app/",
+  "components/",
+  "hooks/",
+  "lib/",
+  "stores/",
+  "types/",
+  "contexts/",
+  "providers/",
+  "utils/",
+  "config/",
+  "i18n/",
+  "public/",
+  "packages/",
+  "sidecar/",
+  "protocol/",
+  "cli/",
+  "plugins/",
+  "plugin-sdk/",
+  "mobile/",
+  "tests/",
+  "e2e/",
+]
+const CONTRACT_INPUTS = [
+  "docs/api/",
+  "metadata/",
+  "src-tauri/",
+  "crates/",
+  "services/",
+  "packages/",
+  "plugins/",
+  "plugin-sdk/",
+  "protocol/",
+  "lib/",
+  "types/",
+  "sidecar/",
+  "cli/",
+  "mobile/",
+]
+const SDK_INPUTS = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS]
+const GATE_INPUTS = {
+  typecheck: FRONTEND_INPUTS,
+  knip: [...FRONTEND_INPUTS, "web/", "browser-extension/", "docs/app/", "docs/lib/"],
+  "web:typecheck": ["web/", "packages/"],
+  "browser-ext:typecheck": ["browser-extension/", "packages/", "lib/", "types/"],
+  "sidecar:typecheck": CONTRACT_INPUTS,
+  "build:packages": CONTRACT_INPUTS,
+  "author-types:check": CONTRACT_INPUTS,
+  "sdk:ts:build": SDK_INPUTS,
+  "sdk:ts:pack:test": SDK_INPUTS,
+  "plugin:packages:verify": SDK_INPUTS,
+  "agent:packages:pack-test": CONTRACT_INPUTS,
+  "sdk:scaffold:test": CONTRACT_INPUTS,
+  "sdk:python:test": CONTRACT_INPUTS,
+  "plugin:repowiki:test": CONTRACT_INPUTS,
+  "plugin:laya-guard:test": CONTRACT_INPUTS,
+  "sdk:rust:test": CONTRACT_INPUTS,
+  "rust:fmt:check": CONTRACT_INPUTS,
+  "rust:clippy": CONTRACT_INPUTS,
+  "audit:rust-architecture": CONTRACT_INPUTS,
+  "audit:rust-architecture:deep": CONTRACT_INPUTS,
+  "rust:deny": CONTRACT_INPUTS,
+  "scripts:test:ci": CONTRACT_INPUTS,
+}
+
 /** The registry with defaults applied, so consumers never handle undefined. */
 export const GATES = REGISTRY.map((g) => ({
   runtime: "node",
   blocking: true,
+  inputs: GATE_INPUTS[g.script],
   ...g,
 }))
+
+function matchesInput(path, input) {
+  return input.endsWith("/") ? path.startsWith(input) : path === input
+}
+
+function fullQualityReason(changePlan) {
+  if (changePlan.mode === "full") return changePlan.reason
+  if (changePlan.deletedFiles.length) return "Deleted or renamed paths require full validation"
+  const knownInputs = [
+    ...FRONTEND_INPUTS,
+    ...CONTRACT_INPUTS,
+    "web/",
+    "browser-extension/",
+    "docs/",
+  ]
+  for (const path of changePlan.changedFiles) {
+    // Configuration and dependency pins can affect every gate, even when they
+    // belong to a single workspace. Tooling changes also invalidate selection.
+    if (
+      path.startsWith("scripts/") ||
+      path.startsWith(".github/") ||
+      /(^|\/)(package\.json|Cargo\.(toml|lock)|pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|uv\.lock|poetry\.lock|Pipfile\.lock|bun\.lockb?|tsconfig[^/]*\.json|[^/]*\.config\.[^/]+|pyproject\.toml|requirements[^/]*\.txt)$/.test(
+        path
+      )
+    )
+      return `Shared configuration or gate tooling changed: ${path}`
+    if (
+      !knownInputs.some((input) => matchesInput(path, input)) &&
+      !/^[^/]+\.(md|mdx)$/.test(path)
+    ) {
+      return `Unclassified input requires full validation: ${path}`
+    }
+  }
+  return null
+}
+
+/** Build the exact gate selection used by both the CI matrix and execution. */
+export function buildQualityPlan(changePlan) {
+  validateChangePlan(changePlan)
+  const fullReason = fullQualityReason(changePlan)
+  const selected = []
+  const skipped = []
+  const selectedGates = []
+  for (const gate of GATES) {
+    const affected = gate.inputs?.some((input) =>
+      changePlan.changedFiles.some((path) => matchesInput(path, input))
+    )
+    const reason =
+      fullReason ??
+      (!gate.inputs
+        ? "Always-on invariant (no narrowed input scope)"
+        : affected
+          ? "Changed file intersects declared inputs"
+          : "No changed file intersects declared inputs")
+    const entry = { script: gate.script, group: gate.group, reason }
+    if (fullReason || !gate.inputs || affected) {
+      selected.push(entry)
+      selectedGates.push(gate)
+    } else skipped.push(entry)
+  }
+  const include = groupManifest(selectedGates).map((entry) => ({
+    ...entry,
+    scripts: selectedGates.filter((gate) => gate.group === entry.group).map((gate) => gate.script),
+  }))
+  return {
+    version: changePlan.version,
+    head: changePlan.head,
+    base: changePlan.base,
+    mode: fullReason ? "full" : "incremental",
+    reason: fullReason ?? changePlan.reason,
+    include,
+    selected,
+    skipped,
+  }
+}
 
 /** @param {string} name @returns {boolean} */
 export function hasGate(name) {
@@ -386,9 +534,11 @@ export function listGroups() {
  *
  * @returns {Array<{ group: string } & Record<string, boolean>>}
  */
-export function groupManifest() {
-  return listGroups().map((group) => {
-    const runtimes = new Set(gatesInGroup(group).map((g) => g.runtime))
+export function groupManifest(gates = GATES) {
+  return [...new Set(gates.map((gate) => gate.group))].map((group) => {
+    const runtimes = new Set(
+      gates.filter((gate) => gate.group === group).map((gate) => gate.runtime)
+    )
     const flags = Object.fromEntries(RUNTIMES.map((r) => [r, runtimes.has(r)]))
     return { group, ...flags }
   })
@@ -553,7 +703,7 @@ export function renderSummaryMarkdown(results, group) {
 /**
  * Parse the CLI surface. Pure.
  * @param {string[]} argv
- * @returns {{ group?: string, runtime?: string, jobs?: number, listGroups: boolean, json: boolean, bail: boolean }}
+ * @returns {{ group?: string, runtime?: string, jobs?: number, changePlan?: string, listGroups: boolean, json: boolean, bail: boolean }}
  */
 export function parseArgs(argv) {
   const args = {
@@ -579,6 +729,10 @@ export function parseArgs(argv) {
         throw new Error("--jobs requires a positive integer")
       }
       args.jobs = jobs
+    } else if (arg === "--change-plan") {
+      const value = argv[++i]
+      if (!value || value.startsWith("--")) throw new Error("--change-plan requires a file path")
+      args.changePlan = value
     } else if (arg === "--list-groups") args.listGroups = true
     else if (arg === "--json") args.json = true
     else if (arg === "--bail") continue
@@ -604,41 +758,82 @@ export function runGate(name) {
       if (settled) return
       settled = true
       chunks.push(Buffer.from(`[check:all] could not start ${name}: ${error.message}\n`))
-      resolve({ ok: false, output: Buffer.concat(chunks).toString("utf8") })
+      resolve({
+        ok: false,
+        exitCode: null,
+        signal: null,
+        output: Buffer.concat(chunks).toString("utf8"),
+      })
     })
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (settled) return
       settled = true
-      resolve({ ok: code === 0, output: Buffer.concat(chunks).toString("utf8") })
+      resolve({
+        ok: code === 0,
+        exitCode: code,
+        signal,
+        output: Buffer.concat(chunks).toString("utf8"),
+      })
     })
   })
 }
 
+/** An exit code alone cannot distinguish Prettier validation from invalid configuration. */
+export function isReusableLintCacheResult(name, { exitCode, signal, output }) {
+  if (!["lint", "format:check"].includes(name) || signal) return false
+  if (exitCode === 0) return true
+  if (exitCode !== 1) return false
+  return name === "lint"
+    ? /✖ \d+ problems? \(\d+ errors?, \d+ warnings?\)/u.test(output)
+    : /Code style issues found in (?:the above file|\d+ files?)\. Run Prettier with --write to fix\./u.test(
+        output
+      )
+}
+
 export async function main(argv) {
   const args = parseArgs(argv)
+  const qualityPlan = args.changePlan ? buildQualityPlan(readChangePlan(args.changePlan)) : null
 
   if (args.listGroups) {
-    const manifest = groupManifest()
+    const manifest = qualityPlan ? qualityPlan.include : groupManifest()
     process.stdout.write(
       args.json ? `${JSON.stringify(manifest)}\n` : `${manifest.map((m) => m.group).join("\n")}\n`
     )
     return 0
   }
 
-  const selected = selectGates({ group: args.group, runtime: args.runtime })
+  const plannedScripts = qualityPlan
+    ? new Set(qualityPlan.selected.map((gate) => gate.script))
+    : null
+  const selected = selectGates({ group: args.group, runtime: args.runtime }).filter(
+    (gate) => !plannedScripts || plannedScripts.has(gate.script)
+  )
+  if (qualityPlan && selected.length === 0) {
+    throw new Error("Requested gate group/runtime is absent from the quality plan")
+  }
   const jobs = effectiveJobCount(selected, args.jobs ?? defaultJobCount(), args.bail)
   process.stdout.write(
     `check:all — ${selected.length} gate(s), ${jobs} concurrent group lane(s)` +
       `${args.bail ? " (--bail: sequential)" : ""}\n`
   )
 
+  let lintCacheReady = false
   const results = await runGatePlan(selected, {
     jobs,
     bail: args.bail,
     executeGate: async (gate) => {
       const startedAt = Date.now()
       process.stdout.write(`\n=== ${gate.script} (${gate.group}) [started] ===\n`)
-      const { ok, output } = await runGate(gate.script)
+      const result = await runGate(gate.script)
+      const { ok, output } = result
+      if (args.group === gate.group && isReusableLintCacheResult(gate.script, result)) {
+        const cachePath = gate.script === "lint" ? ".cache/eslint" : ".cache/prettier"
+        try {
+          lintCacheReady = statSync(cachePath).isFile()
+        } catch {
+          // Missing caches never warrant publication, even after a completed check.
+        }
+      }
       const seconds = ((Date.now() - startedAt) / 1000).toFixed(1)
       process.stdout.write(
         `\n=== ${gate.script} (${gate.group}) [${ok ? "passed" : "FAILED"} in ${seconds}s] ===\n`
@@ -649,6 +844,12 @@ export async function main(argv) {
   })
   const { exitCode, summary } = summarize(results)
   process.stdout.write(`\n${summary}\n`)
+
+  // Written only after the group completed. Failure remains a failing exit;
+  // the workflow can still retain reusable per-file diagnostics for future PRs.
+  if (process.env.GITHUB_OUTPUT && ["lint", "format"].includes(args.group)) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `lint-cache-ready=${lintCacheReady}\n`)
+  }
 
   // Job summary is best-effort: a failure to write it must never mask the
   // gate result the caller actually cares about.

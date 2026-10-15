@@ -42,7 +42,7 @@ describe("packaged built-in coding loop", () => {
     }
     const result = spawnSync(
       process.execPath,
-      [path.join(ROOT, "scripts/build/build-cli.mjs"), "--js-only"],
+      [path.join(ROOT, "scripts/test/cli-bundle.mjs"), "ensure"],
       { cwd: ROOT, encoding: "utf8", timeout: 120_000 }
     )
     if (result.status !== 0) throw new Error(result.stderr)

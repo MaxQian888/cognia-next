@@ -1,12 +1,12 @@
 /** @jest-environment node */
 /**
- * The ONE test that executes the shipped artifact. Everything else in the CLI
- * suite imports TypeScript through Jest's CJS transform, which folds nothing
+ * Executes the shipped artifact. Most tests in the CLI
+ * suite import TypeScript through Jest's CJS transform, which folds nothing
  * and stubs the rest, so an ESM/CJS boundary that crashes
  * `cli/dist/cognia-agent.mjs` at startup ("does not provide an export named
- * …") was invisible until a user ran the binary. This bundles the JavaScript
- * once (module-level cache), with the production esbuild pipeline, and runs
- * the real file.
+ * …") was invisible until a user ran the binary. CI verifies and reuses the
+ * exact-SHA artifact shared with coding-loop.bundle.test.ts; local runs build
+ * current sources through the production esbuild pipeline.
  */
 import { spawnSync } from "node:child_process"
 import fs from "node:fs"
@@ -61,12 +61,12 @@ describe("cognia-agent bundle", () => {
   beforeAll(() => {
     const built = spawnSync(
       process.execPath,
-      [path.join(REPO_ROOT, "scripts/build/build-cli.mjs"), "--js-only"],
+      [path.join(REPO_ROOT, "scripts/test/cli-bundle.mjs"), "ensure"],
       { cwd: REPO_ROOT, encoding: "utf8", timeout: 200_000 }
     )
     if (built.status !== 0) {
       throw new Error(
-        `build-cli --js-only failed (${built.status}):\n${built.stderr}\n${built.stdout}`
+        `CLI bundle preparation failed (${built.status}):\n${built.stderr}\n${built.stdout}`
       )
     }
   })

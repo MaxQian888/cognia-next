@@ -66,6 +66,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      actions: read
     outputs:
       mode: ${{ steps.plan.outputs.mode }}
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -88,6 +89,15 @@ jobs:
           cache-dependency-path: |
             pnpm-lock.yaml
             sidecar/pnpm-lock.yaml
+      - name: Resolve committed changes
+        env:
+          REQUESTED_MODE: ${{ inputs.test-mode || 'auto' }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_FORCED: ${{ github.event.forced }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci/change-plan.mjs --output .cache/ci/changes.json
       - name: Cache standalone npm downloads
         uses: actions/cache@v6
         with:
@@ -141,54 +151,35 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-
       - name: Test incremental planner
-        run: node --test scripts/test/coverage-changed.test.mjs scripts/test/jest-timing-sequencer.test.mjs scripts/ci/workflow-contract.test.mjs
+        run: node --test scripts/ci/change-plan.test.mjs scripts/test/coverage-changed.test.mjs scripts/test/jest-timing-sequencer.test.mjs scripts/test/cli-bundle.test.mjs scripts/test/release-rust-cache.test.mjs scripts/ci/workflow-contract.test.mjs
       - name: Freeze exact test plan
         id: plan
-        env:
-          REQUESTED_MODE: ${{ inputs.test-mode || 'auto' }}
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
-          # PRs and branch pushes test what changed; the complete suite with
-          # coverage belongs to nightly.yml (schedule), manual runs and tagged
-          # releases. A trunk push diffs against the ref's previous tip, so a
-          # multi-commit push is covered as a whole.
-          mode="$REQUESTED_MODE"
-          if [ "$mode" = auto ]; then
-            case "$EVENT_NAME:$GITHUB_REF" in
-              pull_request:* | push:refs/heads/*) mode=incremental ;;
-              *) mode=full ;;
-            esac
-          fi
-          base="$GITHUB_SHA"
-          if [ "$EVENT_NAME" = pull_request ]; then
-            base="$PR_BASE_SHA"
-            git fetch --no-tags --depth=1 origin "$base"
-          elif [ "$mode" = incremental ]; then
-            base="$(git rev-parse HEAD^)"
-            if [ "$EVENT_NAME" = push ]; then
-              # A new ref or a force push whose old tip is gone has no trustworthy
-              # predecessor to diff against; fail safe to the complete plan.
-              if [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != 0000000000000000000000000000000000000000 ] \
-                && git fetch --no-tags --depth=1 origin "$PUSH_BEFORE_SHA"; then
-                base="$PUSH_BEFORE_SHA"
-              else
-                echo "::notice::Push has no fetchable predecessor; running the full test plan"
-                mode=full
-                base="$GITHUB_SHA"
-              fi
-            fi
-          fi
-          node scripts/test/coverage-changed.mjs --plan --base "$base" --head "$GITHUB_SHA" --mode "$mode" --output .cache/jest/plan.json > /tmp/jest-plan.json
+          node scripts/test/coverage-changed.mjs --plan --change-plan .cache/ci/changes.json --output .cache/jest/plan.json > /tmp/jest-plan.json
           node --input-type=module <<'NODE'
           import { readFileSync, appendFileSync } from 'node:fs';
           const plan = JSON.parse(readFileSync('.cache/jest/plan.json', 'utf8'));
           for (const [key, value] of Object.entries({mode: plan.mode, matrix: JSON.stringify(plan.matrix), 'has-tests': plan.suiteCount > 0, 'native-helpers': plan.testFiles.some(file => ['cli/src/cli/coding-loop.bundle.test.ts', 'cli/src/runtime/sandbox/os-sandbox-exec.test.ts'].includes(file)), impacts: JSON.stringify(plan.impacts)})) {
             appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
           }
-          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Test plan\nMode: ${plan.mode}\n\n${plan.changedFiles.length} changed paths → ${plan.suiteCount} suites / ${plan.shardCount} shards.\n\nBase: ${plan.base}\nHead: ${plan.head}\n\nCoverage is collected only in full mode.\n`);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Test plan\nMode: ${plan.mode}\n\n${plan.changedFiles.length} changed paths → ${plan.suiteCount} suites / ${plan.shardCount} shards.\n\nBase: ${plan.base}\nHead: ${plan.head}\nReason: ${plan.reason}\n\nCoverage is collected only in full mode.\n`);
           NODE
+      - name: Prepare selected Jest CLI bundle once
+        id: cli-bundle
+        run: node scripts/test/cli-bundle.mjs prepare .cache/jest/plan.json
+      # Large CLI chunks travel only to shards that execute the bundle suites.
+      # A separate artifact avoids downloading them into every frontend consumer.
+      - name: Publish prepared Jest CLI bundle
+        if: steps.cli-bundle.outputs.prepared == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: jest-cli-bundle-${{ github.sha }}
+          path: |
+            .cache/jest/cli-bundle.tar
+            .cache/jest/cli-bundle.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
       - name: Setup Rust for selected native integration tests
         if: steps.plan.outputs.native-helpers == 'true'
         uses: dtolnay/rust-toolchain@1.99.0
@@ -273,6 +264,22 @@ jobs:
         with:
           name: jest-test-plan
           path: .cache/jest/
+      - name: Select shard CLI prerequisite
+        id: cli-bundle
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: node scripts/test/cli-bundle.mjs required .cache/jest/plan.json "$SHARD"
+      - name: Download selected Jest CLI bundle
+        if: steps.cli-bundle.outputs.required == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: jest-cli-bundle-${{ github.sha }}
+          path: .cache/jest/
+      - name: Restore selected Jest CLI bundle
+        if: steps.cli-bundle.outputs.required == 'true'
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: node scripts/test/cli-bundle.mjs restore .cache/jest/plan.json "$SHARD"
       - name: Install source contract and selected native prerequisites
         env:
           SHARD: ${{ matrix.shard }}
@@ -311,6 +318,7 @@ jobs:
       # --maxWorkers=2 and the existing merged coverage thresholds.
       - name: Run Jest planned shard
         env:
+          COGNIA_JEST_CLI_BUNDLE: .cache/jest/cli-bundle.json
           NODE_OPTIONS: "--max-old-space-size=6144"
           MODE: ${{ needs.jest-plan.outputs.mode }}
           SHARD: ${{ matrix.shard }}

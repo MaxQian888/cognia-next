@@ -33,11 +33,17 @@ jobs:
   # Run quality checks first
   quality:
     name: Quality Check
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/quality.yml
 
   # Run tests
   test:
     name: Test Suite
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/test.yml
 
   build-android:
@@ -236,6 +242,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+      # Use rust-toolchain.toml before rust-cache computes its compiler hash.
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      # Tag caches are isolated from other tags. Nightly warms this shared key
+      # on the default branch; releases only restore that trusted dependency cache.
+      # A new compiler pin or cache miss falls back to the normal Cargo build.
+      - name: Restore release native helper dependencies
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          shared-key: agent-host-release-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}
+          workspaces: ". -> target"
+          cache-bin: false
+          cache-workspace-crates: false
+          cache-on-failure: false
+          save-if: false
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -281,6 +303,8 @@ jobs:
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: Prepare built-in plugins before compiling the host
+        run: node scripts/build/build-browser-builtin-plugins.mjs
       - run: pnpm cli:build:binary -- --target ${{ matrix.target }} --variant all --archive
         env:
           APPLE_SIGNING_IDENTITY: ${{ matrix.target == 'darwin-arm64' && secrets.APPLE_SIGNING_IDENTITY || '' }}
@@ -307,12 +331,24 @@ jobs:
           "cli/dist/bin/${{ matrix.artifact }}-slim.${{ matrix.archive }}"
           "cli/dist/bin/${{ matrix.artifact }}-size-report.json"
           --clobber
-      - if: steps.release.outputs.publish == 'true'
-        run: pnpm agent:host:package -- ${{ matrix.target }}
-      - if: steps.release.outputs.publish == 'true'
-        run: pnpm --dir packages/agent build
-      - if: steps.release.outputs.publish == 'true'
-        run: pnpm agent:host:smoke -- ${{ matrix.target }}
+      # Reruns still produce and certify the local payload, even when this npm
+      # version already exists. The SDK consumer needs these exact release bytes.
+      - run: pnpm agent:host:package -- ${{ matrix.target }}
+      - run: pnpm --dir packages/agent build
+      - run: pnpm agent:host:smoke -- ${{ matrix.target }}
+      - name: Seal SDK host prerequisites
+        if: matrix.target == 'linux-x64'
+        run: node scripts/ci/release-agent-host.mjs prepare
+      - name: Publish SDK host prerequisites
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-agent-host-linux-x64-${{ github.sha }}
+          path: .cache/release-agent-host/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
       - if: steps.release.outputs.publish == 'true'
         run: pnpm --dir packages/${{ matrix.package }} publish --no-git-checks
         env:
@@ -324,6 +360,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
       id-token: write
     steps:
       - uses: actions/checkout@v7
@@ -355,10 +392,60 @@ jobs:
 
       - if: steps.release.outputs.publish == 'true'
         run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Locate SDK host prerequisites
+        id: host-artifact
+        if: steps.release.outputs.publish == 'true'
+        run: node scripts/ci/release-agent-host.mjs select
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Download SDK host prerequisites
+        if: steps.release.outputs.publish == 'true' && steps.host-artifact.outputs.id != ''
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.host-artifact.outputs.id }}
+          path: .cache/release-agent-host/
+          digest-mismatch: error
+      - name: Verify and restore SDK host prerequisites
+        if: steps.release.outputs.publish == 'true' && steps.host-artifact.outputs.id != ''
+        run: node scripts/ci/release-agent-host.mjs restore
+      # Only a successfully enumerated absence takes this path. API, download,
+      # provenance, integrity, and smoke failures remain blocking failures.
+      - name: Install fallback Bun compiler
+        if: steps.release.outputs.publish == 'true' && steps.host-artifact.outputs.id == ''
+        uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.0
+      - name: Install fallback Rust toolchain
+        if: steps.release.outputs.publish == 'true' && steps.host-artifact.outputs.id == ''
+        run: rustup show active-toolchain
+      - name: Restore fallback native helper dependencies
+        if: steps.release.outputs.publish == 'true' && steps.host-artifact.outputs.id == ''
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          shared-key: agent-host-release-v1-${{ runner.os }}-${{ runner.arch }}-linux-x64
+          workspaces: ". -> target"
+          cache-bin: false
+          cache-workspace-crates: false
+          cache-on-failure: false
+          save-if: false
+      - name: Build missing SDK host prerequisites
+        if: steps.release.outputs.publish == 'true' && steps.host-artifact.outputs.id == ''
+        run: |
+          node scripts/build/build-browser-builtin-plugins.mjs
+          pnpm cli:build:binary -- --target linux-x64 --variant full
+          pnpm cli:smoke:bun -- linux-x64 --variant=full
+          pnpm agent:host:package -- linux-x64
+      - name: Prepare Node RPC smoke prerequisites
+        if: steps.release.outputs.publish == 'true'
+        run: |
+          node scripts/ci/release-agent-host.mjs env
+          pnpm sidecar:webclone:build
+          node scripts/build/build-browser-builtin-plugins.mjs
       - if: steps.release.outputs.publish == 'true'
         run: pnpm agent:sdk:smoke
       - if: steps.release.outputs.publish == 'true'
-        run: pnpm --dir packages/agent pack:test
+        run: pnpm --dir packages/agent pack:test --require-host
       - if: steps.release.outputs.publish == 'true'
         run: pnpm --dir packages/agent publish --no-git-checks
         env:

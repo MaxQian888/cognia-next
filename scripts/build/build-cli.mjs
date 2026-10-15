@@ -24,7 +24,12 @@ import { pruneSidecarResidue } from "./lib/prune-sidecar-residue.mjs"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const entry = path.join(root, "cli/src/cli/entry.ts")
-const outdir = path.join(root, "cli/dist")
+// CI prepares the same bundle in a clean temporary layout before archiving it.
+const outdirIndex = process.argv.indexOf("--outdir")
+if (outdirIndex >= 0 && (!process.argv[outdirIndex + 1] || process.argv[outdirIndex + 1].startsWith("--"))) {
+  throw new Error("build-cli: --outdir requires a directory")
+}
+const outdir = outdirIndex < 0 ? path.join(root, "cli/dist") : path.resolve(process.argv[outdirIndex + 1])
 
 // `--js-only`: bundle the JavaScript and stop before the native-host copies and
 // the asset staging. The bundle-spawn test (cli/src/cli/entry.bundle.test.ts)

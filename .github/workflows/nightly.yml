@@ -31,11 +31,68 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Release tags cannot restore one another's caches. Build only the three
+  # native CLI helpers on the trusted default branch, with the same native
+  # runners and release profile as publish-agent-hosts. This does not publish
+  # artifacts or sign binaries and adds no work to PRs.
+  agent-host-rust-cache:
+    name: Warm Agent host Rust dependencies (${{ matrix.target }})
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: darwin-arm64
+          - runner: ubuntu-latest
+            target: linux-x64
+          - runner: windows-latest
+            target: win32-x64
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      # The action also keys by rustc version/host, Cargo manifests/lockfiles
+      # and compiler flags. A toolchain bump starts cold. Save only after the
+      # builds succeed; workspace binaries themselves are rebuilt on release.
+      - name: Cache release native helper dependencies
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          shared-key: agent-host-release-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}
+          workspaces: ". -> target"
+          cache-bin: false
+          cache-workspace-crates: false
+          cache-on-failure: false
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+      - name: Build release native helpers
+        shell: bash
+        run: |
+          cargo build --locked -p cognia-exec-sandbox --bin cognia-external-agent-launcher --release
+          cargo build --locked -p cognia-exec-sandbox --bin cognia-sandbox-exec --release
+          cargo build --locked -p cognia-task-workspace --bin cognia-task-workspace-worker --release
+
+  quality:
+    name: Quality (full registry)
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/quality.yml
+    with:
+      quality-mode: full
+
   # Re-runs the full test workflow; the difference from the ci.yml call is
   # that `github.event_name` is now `schedule`/`workflow_dispatch`, which
   # switches on the Tauri and iOS E2E jobs.
   test:
     name: Test (full matrix)
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/test.yml
 
   # Bundle for all four targets. No `tagName`, so tauri-action builds without
@@ -43,7 +100,7 @@ jobs:
   # write scope (release.yml is the only caller that grants it).
   build-tauri:
     name: Build Tauri
-    # Gated on `test`: a bundle built from a red tree is not a sanity check,
+    # Gated on quality and tests: a bundle built from a red tree is not a sanity check,
     # and the 4-platform matrix is the most expensive job in the repo.
-    needs: test
+    needs: [quality, test]
     uses: ./.github/workflows/build-tauri.yml
