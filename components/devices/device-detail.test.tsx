@@ -42,6 +42,9 @@ jest.mock("./host-secrets/host-secrets-section", () => ({
 jest.mock("./host-system/host-system-section", () => ({
   HostSystemSection: marker("host-system"),
 }))
+jest.mock("./host-runtimes/host-runtimes-section", () => ({
+  HostRuntimesSection: marker("host-runtimes"),
+}))
 jest.mock("./always-on/always-on-section", () => ({ AlwaysOnSection: marker("always-on") }))
 jest.mock("./sections/files-section", () => ({ FilesSection: marker("files") }))
 jest.mock("./ssh-host-controls", () => ({

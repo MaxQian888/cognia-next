@@ -504,6 +504,16 @@ const schemas = {
     autoUpdate: z.boolean().optional(),
   }),
   host_update_install: emptyRequest,
+  // ADR-0059 W2: the brain's headless runtimes, and restarting one by name.
+  host_runtime_status: emptyRequest,
+  host_runtime_restart: z.object({
+    name: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z0-9-]+$/)
+      .describe("A runtime name as host_runtime_status lists it."),
+  }),
   integration_ingress_nack: z.object({
     route_id: z.string().min(1).describe("Also accepted as routeId."),
     delivery_id: z.string().min(1).describe("Also accepted as deliveryId."),

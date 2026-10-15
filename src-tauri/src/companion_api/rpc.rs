@@ -295,6 +295,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "host_update_refresh",
     "host_update_configure",
     "host_update_install",
+    // ADR-0059 W2 — the brain's headless runtimes.
+    "host_runtime_status",
+    "host_runtime_restart",
     // ADR-0153 — the approver side of the lease. Neither is step-up gated: a
     // lease is what they grant, so requiring one to reach them is a loop.
     "host_consent_pending",
@@ -1634,6 +1637,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // ADR-0224 A10: the host's update state, and a fresh look at the catalog.
     "host_update_status",
     "host_update_refresh",
+    // ADR-0059 W2: the brain's runtimes as they are now.
+    "host_runtime_status",
     // Runtime environments — every read is a projection of stored state.
     "environment_catalog_list",
     "environment_catalog_get",

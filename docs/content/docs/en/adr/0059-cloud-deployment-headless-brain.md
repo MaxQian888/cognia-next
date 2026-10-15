@@ -288,6 +288,11 @@ logs or metrics.
 ## Consequences
 
 - The desktop and cloud share one business codebase and one protocol; features land in both by default. The cost is a hard rule: **new runtime side-effects must register through the headless bootstrap registry, not raw provider effects** — enforce via the wiring audit.
+- A runtime that fails to start does not take the brain down, and it is not invisible either:
+  - The brain's pong names the runtimes that failed. `/readyz` reports them as `degraded` without failing readiness, and they also appear in `/healthz` and in `cognia_brain_failed_runtimes`.
+  - The owner restarts one runtime by name with `host_runtime_restart`. The read is `host_runtime_status`. Both are host-admin commands, reachable from the host's device page (**Runtimes**) or `cognia host call`.
+  - A failed runtime starts again directly. A running one is torn down and then started.
+  - A running runtime that returned no teardown is listed as not restartable, because starting it twice would duplicate its side effects. That is a reason to give new runtimes a teardown.
 - Mobile and web clients need zero protocol changes; the web build finally becomes a first-class client.
 - The companion RPC allowlist becomes the de-facto public API contract of Cognia; changes to it now carry compatibility weight (spec-parity tests already exist — extend them).
 - Until v3 of the durability ladder, cloud installs are bounded by brain memory; this is acceptable for single-tenant self-host and must be revisited before T3.

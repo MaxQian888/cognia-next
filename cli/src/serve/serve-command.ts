@@ -29,7 +29,7 @@ import path from "node:path"
 import "../db/install-indexeddb"
 
 import { getExecutionBroker } from "@/lib/execution/broker"
-import { bootstrapHeadlessRuntimes } from "@/lib/headless/bootstrap"
+import { bootstrapHeadlessRuntimes, type HeadlessRuntimeStatus } from "@/lib/headless/bootstrap"
 import {
   installRemoteWorkerRuntime,
   type RemoteWorkerDescriptor,
@@ -53,6 +53,7 @@ import { BridgeClient, type WebSocketLike } from "./bridge-client"
 import { startHeadlessCollabReader } from "./collab-reader"
 import { startDurability } from "./durability"
 import { createNodePluginRuntimeAdapter } from "./plugin-runtime-adapter"
+import { installRuntimeControl } from "./runtime-control"
 
 export interface ServeDeps {
   out: OutputSink
@@ -197,8 +198,9 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
         .catch(() => undefined)
     },
   })
-  // Filled once the runtimes have started (step 6); reported on every pong.
-  let failedRuntimes: string[] = []
+  // Set once the runtimes have started (step 6); every pong reports the ones
+  // that are down, so a restart clears its name on the next heartbeat.
+  let runtimeStatus: (() => HeadlessRuntimeStatus[]) | null = null
   const bridge = new BridgeClient({
     url: bridgeUrl,
     token: currentToken,
@@ -219,7 +221,10 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     rss: () => durability.rss(),
     // Every agent run and chat turn holds an execution-broker lease.
     activeRuns: () => getExecutionBroker().countRunning(),
-    failedRuntimes: () => failedRuntimes,
+    failedRuntimes: () =>
+      (runtimeStatus?.() ?? [])
+        .filter((runtime) => runtime.state === "failed")
+        .map((runtime) => runtime.name),
     log: (level, message) => {
       if (level === "error") out.error(`serve: ${message}\n`)
       else out.write(`serve: ${message}\n`)
@@ -258,7 +263,15 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
       else out.write(`serve: ${message}\n`)
     },
   })
-  failedRuntimes = runtimes.failed.map((failure) => failure.name)
+  runtimeStatus = runtimes.status
+  const uninstallRuntimeControl = await installRuntimeControl(
+    bridge,
+    runtimes,
+    (level, message) => {
+      if (level === "error") out.error(`serve: ${message}\n`)
+      else out.write(`serve: ${message}\n`)
+    }
+  )
   out.write(
     `serve: runtimes up (${runtimes.started.join(", ") || "none"})` +
       (runtimes.failed.length
@@ -278,6 +291,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     }))
 
   out.write("serve: shutting down…\n")
+  uninstallRuntimeControl()
   await runtimes.stop()
   collabReader?.stop()
   uninstallWorkerRuntime()

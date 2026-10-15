@@ -16,7 +16,7 @@
         "media",
         "filespace"
       ],
-      "catalogHash": "62b830bfbff0c55fdafd00b465a5cfd4c86cc27b7615e3fb629a6b91e623e96a",
+      "catalogHash": "244d22683536dbc85b7e4713e7c10fad8e1b0e6c4017b0233fb2ffb75bd1edaa",
       "contractVersion": 3
     },
     "helloAck": {
@@ -25,7 +25,7 @@
       "serverVersion": "0.9.0",
       "protocol": 3,
       "accountId": "local_acct_a",
-      "catalogHash": "62b830bfbff0c55fdafd00b465a5cfd4c86cc27b7615e3fb629a6b91e623e96a",
+      "catalogHash": "244d22683536dbc85b7e4713e7c10fad8e1b0e6c4017b0233fb2ffb75bd1edaa",
       "contractVersion": 3
     },
     "helloRefused": {
@@ -34,7 +34,7 @@
       "reason": "contract_mismatch",
       "serverVersion": "0.9.0",
       "protocol": 3,
-      "catalogHash": "62b830bfbff0c55fdafd00b465a5cfd4c86cc27b7615e3fb629a6b91e623e96a",
+      "catalogHash": "244d22683536dbc85b7e4713e7c10fad8e1b0e6c4017b0233fb2ffb75bd1edaa",
       "contractVersion": 3
     },
     "eventSyncPull": {
@@ -120,6 +120,30 @@
         "error": null
       }
     },
+    "respondRuntimeControl": {
+      "v": 3,
+      "type": "respond",
+      "command": "companion_runtime_control_response",
+      "payload": {
+        "requestId": "44444444-4444-4444-8444-444444444444",
+        "runtime": {
+          "name": "connector-runtime",
+          "state": "running",
+          "restartable": true,
+          "restarts": 1,
+          "startedAt": 1751400000000
+        },
+        "runtimes": [
+          {
+            "name": "connector-runtime",
+            "state": "running",
+            "restartable": true,
+            "restarts": 1,
+            "startedAt": 1751400000000
+          }
+        ]
+      }
+    },
     "ping": {
       "v": 3,
       "type": "ping",
@@ -130,7 +154,8 @@
       "type": "pong",
       "ts": 1751400000000,
       "rssBytes": 123456789,
-      "lastFlushAt": 1751399990000
+      "lastFlushAt": 1751399990000,
+      "activeRuns": 2
     },
     "tokenRefresh": {
       "v": 3,

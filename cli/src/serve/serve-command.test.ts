@@ -54,9 +54,17 @@ jest.mock("@/lib/headless/bootstrap", () => {
       mockBootOrder.push("runtimes-started")
       const result = await actual.bootstrapHeadlessRuntimes(context)
       // One runtime that cannot start, so the boot reports it degraded.
+      const broken = {
+        name: "broken-runtime",
+        state: "failed",
+        error: "no backend",
+        restartable: true,
+        restarts: 0,
+      }
       return {
         ...result,
         failed: [...result.failed, { name: "broken-runtime", error: new Error("no backend") }],
+        status: () => [...result.status(), broken],
       }
     },
   }
@@ -298,6 +306,27 @@ describe("serveCommand", () => {
             .filter((f) => f.type === "pong")
             .at(-1)
           expect(pong?.failedRuntimes).toContain("broken-runtime")
+
+          // And it answers the server's runtime list.
+          server.serverSend({
+            v: BRIDGE_PROTOCOL_VERSION,
+            type: "event",
+            event: "companion://runtime-control-request",
+            payload: { request_id: "rid-runtimes", action: "list" },
+          })
+          for (let i = 0; i < 100; i++) {
+            const answer = server.responds().find((f) => f.payload.requestId === "rid-runtimes")
+            if (answer) {
+              expect(answer.command).toBe("companion_runtime_control_response")
+              const listed = answer.payload.runtimes as Array<{ name: string; state: string }>
+              expect(listed).toContainEqual(
+                expect.objectContaining({ name: "broken-runtime", state: "failed" })
+              )
+              break
+            }
+            if (i === 99) throw new Error("no runtime control answer arrived")
+            await new Promise((r) => setTimeout(r, 20))
+          }
           releaseShutdown()
           return
         }

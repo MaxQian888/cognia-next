@@ -1169,6 +1169,9 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 Err(e) => log::warn!("companion-api ws-bridge: bad message respond payload: {e}"),
             }
         }
+        // ADR-0059 W2: the brain's answer to `host_runtime_list` /
+        // `host_runtime_restart`, asked by `runtime_control::call_brain`.
+        "companion_runtime_control_response" => super::runtime_control::resolve(payload),
         "companion_desktop_write_response" => {
             match serde_json::from_value::<super::desktop_writes_bridge::DesktopWriteResponse>(
                 payload,

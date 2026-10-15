@@ -17,6 +17,7 @@ import {
   serializeBridgeFrame,
   type BridgeFrame,
 } from "./protocol"
+import { RUNTIME_CONTROL_RESPONSE_COMMAND, type RuntimeControlAnswer } from "./runtime-control"
 
 describe("bridge protocol golden fixtures", () => {
   it("matches the protocol version", () => {
@@ -57,6 +58,24 @@ describe("bridge protocol golden fixtures", () => {
 
     const pong = buildPong(1751400000000, 123456789, 1751399990000, 2)
     expect(pong).toEqual(fixtures.frames.pong)
+  })
+
+  it("builds the runtime control answer the server routes", () => {
+    const runtime = {
+      name: "connector-runtime",
+      state: "running" as const,
+      restartable: true,
+      restarts: 1,
+      startedAt: 1751400000000,
+    }
+    const answer: RuntimeControlAnswer = {
+      requestId: "44444444-4444-4444-8444-444444444444",
+      runtime,
+      runtimes: [runtime],
+    }
+    expect(buildRespond(RUNTIME_CONTROL_RESPONSE_COMMAND, { ...answer })).toEqual(
+      fixtures.frames.respondRuntimeControl
+    )
   })
 
   it("names failed runtimes on a pong only when there are some", () => {

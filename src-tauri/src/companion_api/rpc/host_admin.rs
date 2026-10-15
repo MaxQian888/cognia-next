@@ -39,6 +39,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "host_update_refresh",
     "host_update_configure",
     "host_update_install",
+    "host_runtime_status",
+    "host_runtime_restart",
 ];
 
 /// This host's updater (ADR-0224 A10); the desktop app has none.
@@ -47,6 +49,34 @@ fn host_updater(
 ) -> Result<Arc<crate::companion_api::host_update::HostUpdater>, (StatusCode, Json<RpcError>)> {
     crate::companion_api::host_update::installed()
         .ok_or_else(|| RpcError::headless_host_required(name))
+}
+
+/// The brain's headless runtimes (ADR-0059 W2): what it holds, or the error a
+/// caller can act on. A desktop has no brain to ask.
+async fn brain_runtimes(
+    name: &str,
+    action: crate::companion_api::runtime_control::RuntimeControlAction,
+) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    if crate::companion_api::runtime::headless().is_none() {
+        return Err(RpcError::headless_host_required(name));
+    }
+    crate::companion_api::runtime_control::call_brain(action)
+        .await
+        .map_err(runtime_control_error)
+}
+
+fn runtime_control_error(
+    error: crate::companion_api::runtime_control::RuntimeControlError,
+) -> (StatusCode, Json<RpcError>) {
+    let status = match error.code.as_str() {
+        "invalid_argument" => StatusCode::BAD_REQUEST,
+        "runtime_not_found" => StatusCode::NOT_FOUND,
+        "runtime_not_restartable" | "runtimes_stopped" => StatusCode::CONFLICT,
+        "brain_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+        "brain_timeout" => StatusCode::GATEWAY_TIMEOUT,
+        _ => StatusCode::BAD_GATEWAY,
+    };
+    (status, Json(RpcError::new(&error.code, error.message)))
 }
 
 /// An update the host would not start, with the reason it gave.
@@ -369,6 +399,24 @@ pub(super) async fn dispatch(
             .map_err(update_refused)
             .and_then(to_json),
 
+        // ── Headless runtimes (ADR-0059 W2) ────────────────────────────────
+        "host_runtime_status" => {
+            brain_runtimes(
+                name,
+                crate::companion_api::runtime_control::RuntimeControlAction::List,
+            )
+            .await
+        }
+
+        "host_runtime_restart" => {
+            let runtime: String = required(&args, "name")?;
+            let action =
+                crate::companion_api::runtime_control::RuntimeControlAction::restart(&runtime)
+                    .map_err(runtime_control_error)?;
+            log::info!("host_runtime_restart: {runtime} restarted by device {device_id}");
+            brain_runtimes(name, action).await
+        }
+
         _ => Err(RpcError::unknown_command(name)),
     }
 }
@@ -400,6 +448,39 @@ mod tests {
                 "{name} target"
             );
             assert_eq!(descriptor.capability, "host.admin", "{name} capability");
+        }
+    }
+
+    /// A desktop has no brain, so the runtime arms say a headless host is
+    /// needed rather than timing out; every refusal keeps its own code.
+    #[tokio::test]
+    async fn runtime_arms_need_a_headless_host_and_keep_the_brains_codes() {
+        // No test in this binary installs a headless runtime.
+        let err = brain_runtimes(
+            "host_runtime_status",
+            crate::companion_api::runtime_control::RuntimeControlAction::List,
+        )
+        .await
+        .expect_err("no headless runtime in tests");
+        assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.1 .0.code, "headless_host_required");
+
+        for (code, status) in [
+            ("invalid_argument", StatusCode::BAD_REQUEST),
+            ("runtime_not_found", StatusCode::NOT_FOUND),
+            ("runtime_not_restartable", StatusCode::CONFLICT),
+            ("runtimes_stopped", StatusCode::CONFLICT),
+            ("brain_unavailable", StatusCode::SERVICE_UNAVAILABLE),
+            ("brain_timeout", StatusCode::GATEWAY_TIMEOUT),
+            ("runtime_control_failed", StatusCode::BAD_GATEWAY),
+        ] {
+            let (got, body) =
+                runtime_control_error(crate::companion_api::runtime_control::RuntimeControlError {
+                    code: code.to_string(),
+                    message: "m".to_string(),
+                });
+            assert_eq!(got, status, "{code}");
+            assert_eq!(body.0.code, code);
         }
     }
 

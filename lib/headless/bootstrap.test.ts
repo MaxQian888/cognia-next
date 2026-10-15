@@ -134,3 +134,141 @@ describe("bootstrapHeadlessRuntimes", () => {
     await result.stop()
   })
 })
+
+describe("restarting one runtime", () => {
+  beforeEach(() => __resetHeadlessRuntimesForTesting())
+
+  it("starts a failed runtime again and reports it running", async () => {
+    let attempts = 0
+    registerHeadlessRuntime({
+      name: "flaky",
+      hosts: ["brain"],
+      start: () => {
+        attempts += 1
+        if (attempts === 1) throw new Error("backend not ready")
+        return () => undefined
+      },
+    })
+    const result = await bootstrapHeadlessRuntimes(ctx(), () => 1000)
+    expect(result.status()).toEqual([
+      {
+        name: "flaky",
+        state: "failed",
+        error: "backend not ready",
+        restartable: true,
+        restarts: 0,
+      },
+    ])
+
+    const after = await result.restart("flaky")
+    expect(after).toEqual({
+      name: "flaky",
+      state: "running",
+      restartable: true,
+      restarts: 1,
+      startedAt: 1000,
+    })
+    expect(result.status()).toEqual([after])
+    // The boot record stays what happened at boot.
+    expect(result.failed.map((failure) => failure.name)).toEqual(["flaky"])
+  })
+
+  it("tears a running runtime down before starting it again, and stops the new one at shutdown", async () => {
+    const events: string[] = []
+    let generation = 0
+    registerHeadlessRuntime({
+      name: "worker",
+      hosts: ["brain"],
+      start: () => {
+        const mine = ++generation
+        events.push(`start:${mine}`)
+        return () => {
+          events.push(`stop:${mine}`)
+        }
+      },
+    })
+    const result = await bootstrapHeadlessRuntimes(ctx())
+    await result.restart("worker")
+    await result.stop()
+    expect(events).toEqual(["start:1", "stop:1", "start:2", "stop:2"])
+  })
+
+  it("joins a restart already under way instead of starting twice", async () => {
+    let release: () => void = () => undefined
+    const starts: number[] = []
+    registerHeadlessRuntime({
+      name: "slow",
+      hosts: ["brain"],
+      start: async () => {
+        starts.push(starts.length + 1)
+        if (starts.length > 1) await new Promise<void>((resolve) => (release = resolve))
+        return () => undefined
+      },
+    })
+    const result = await bootstrapHeadlessRuntimes(ctx())
+    const first = result.restart("slow")
+    await Promise.resolve()
+    expect(result.status()[0]).toMatchObject({ state: "restarting", restartable: false })
+    const second = result.restart("slow")
+    expect(second).toBe(first)
+    release()
+    await expect(first).resolves.toMatchObject({ state: "running", restarts: 1 })
+    expect(starts).toEqual([1, 2])
+  })
+
+  it("refuses a running runtime without a teardown, an unknown name, and any restart after stop", async () => {
+    registerHeadlessRuntime({ name: "no-teardown", hosts: ["brain"], start: () => undefined })
+    const result = await bootstrapHeadlessRuntimes(ctx())
+    expect(result.status()[0]).toMatchObject({ state: "running", restartable: false })
+    await expect(result.restart("no-teardown")).rejects.toMatchObject({
+      code: "runtime_not_restartable",
+    })
+    await expect(result.restart("missing")).rejects.toMatchObject({ code: "runtime_not_found" })
+    await result.stop()
+    await expect(result.restart("no-teardown")).rejects.toMatchObject({
+      code: "runtimes_stopped",
+    })
+  })
+
+  it("does not start a runtime again when its teardown fails", async () => {
+    let starts = 0
+    let teardowns = 0
+    registerHeadlessRuntime({
+      name: "stuck",
+      hosts: ["brain"],
+      start: () => {
+        starts += 1
+        return () => {
+          teardowns += 1
+          if (teardowns === 1) throw new Error("socket busy")
+        }
+      },
+    })
+    const result = await bootstrapHeadlessRuntimes(ctx())
+    const after = await result.restart("stuck")
+    expect(after).toMatchObject({
+      state: "running",
+      error: "teardown failed: socket busy",
+      restartable: true,
+    })
+    expect(starts).toBe(1)
+    // The kept teardown is tried again on the next restart.
+    await expect(result.restart("stuck")).resolves.toMatchObject({ state: "running" })
+    expect(starts).toBe(2)
+    expect(result.status()[0].error).toBeUndefined()
+  })
+
+  it("lists only the runtimes this host started", async () => {
+    registerHeadlessRuntime({ name: "here", hosts: ["brain"], start: () => () => undefined })
+    registerHeadlessRuntime({
+      name: "elsewhere",
+      hosts: [] as unknown as ["brain"],
+      start: () => () => undefined,
+    })
+    const result = await bootstrapHeadlessRuntimes(ctx())
+    expect(result.status().map((runtime) => runtime.name)).toEqual(["here"])
+    await expect(result.restart("elsewhere")).rejects.toMatchObject({
+      code: "runtime_not_found",
+    })
+  })
+})

@@ -691,6 +691,42 @@
     "title": "System",
     "unreachable": "Could not read the Host's system details: {error}"
   },
+  "hostRuntimes": {
+    "title": "Runtimes",
+    "loading": "Reading the host's runtimes…",
+    "unreachable": "Could not read the host's runtimes: {error}",
+    "staleList": "Showing the last list; reading it again failed: {error}",
+    "refresh": "Read the runtimes again",
+    "unavailable": {
+      "not-headless": "This host is the desktop app, which runs these in its window. Restart the app to restart them.",
+      "outdated": "This host is from before runtime control. Update it to see and restart its runtimes."
+    },
+    "summary": {
+      "none": "This host runs no background runtimes.",
+      "allRunning": "All {total} runtimes are running.",
+      "failed": "{failed} of {total} runtimes failed to start. The host keeps serving everything else."
+    },
+    "state": {
+      "running": "Running",
+      "failed": "Failed",
+      "restarting": "Restarting"
+    },
+    "startedAt": "Started {when}",
+    "restarts": "{count, plural, =1 {Restarted once} other {Restarted # times}}",
+    "notRestartable": "Has no clean stop, so only restarting the host restarts it",
+    "restart": "Restart",
+    "restarting": "Restarting…",
+    "restarted": "{name} restarted",
+    "restartDidNotStart": "{name} did not start again: {error}",
+    "restartFailed": "Could not restart {name}: {error}",
+    "noReason": "the host gave no reason",
+    "confirm": {
+      "title": "Restart {name}?",
+      "body": "It stops what it is doing and starts again. Work it was handling may be interrupted; everything else on the host keeps running.",
+      "cancel": "Cancel",
+      "restart": "Restart"
+    }
+  },
   "hostUpdates": {
     "title": "Host updates",
     "loading": "Reading the host's update state…",

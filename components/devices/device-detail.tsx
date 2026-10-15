@@ -54,6 +54,7 @@ import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-action
 
 import { AlwaysOnSection } from "./always-on/always-on-section"
 import { HostSecretsSection } from "./host-secrets/host-secrets-section"
+import { HostRuntimesSection } from "./host-runtimes/host-runtimes-section"
 import { HostUpdatesSection } from "./host-updates/host-updates-section"
 import { HostSystemSection } from "./host-system/host-system-section"
 import { DeviceHero, DeviceStatSummary } from "./device-hero"
@@ -87,6 +88,7 @@ const SECTION_LABEL_KEY: Record<DeviceSectionId, string> = {
   "always-on": "alwaysOn.title",
   "host-secrets": "hostSecrets.title",
   "host-updates": "hostUpdates.title",
+  "host-runtimes": "hostRuntimes.title",
   "host-system": "hostSystem.title",
   ssh: "ssh.title",
   files: "files.title",
@@ -139,6 +141,8 @@ function PlannedSection({
       return <HostSecretsSection row={row} />
     case "host-updates":
       return <HostUpdatesSection row={row} />
+    case "host-runtimes":
+      return <HostRuntimesSection row={row} />
     case "host-system":
       return <HostSystemSection row={row} />
     case "ssh":

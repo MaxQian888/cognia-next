@@ -125,6 +125,7 @@ describe("planDeviceSections", () => {
       "always-on",
       "host-secrets",
       "host-updates",
+      "host-runtimes",
       "workspaces",
       "routing",
       "identity",
@@ -150,8 +151,9 @@ describe("planDeviceSections", () => {
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-secrets")
     // Nor its updates, for the same reason.
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-updates")
-    // Nor read its system details.
+    // Nor read its system details or its runtimes.
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-system")
+    expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-runtimes")
     const routed = { ...pairHost, runtime: { ...pairHost.runtime, isRoutingTarget: true } }
     expect(ids(planDeviceSections(routed).sections)).toContain("routing")
   })
@@ -164,6 +166,7 @@ describe("planDeviceSections", () => {
     const sections = ids(planDeviceSections(routed).sections)
     expect(sections).toContain("host-secrets")
     expect(sections).toContain("host-updates")
+    expect(sections).toContain("host-runtimes")
     expect(sections).toContain("host-system")
     // Still nothing to move: a client paired to it already runs everything there.
     expect(sections).not.toContain("always-on")

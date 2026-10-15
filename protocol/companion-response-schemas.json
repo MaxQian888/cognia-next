@@ -56,6 +56,53 @@
       },
       "additionalProperties": false
     },
+    "HostRuntimes": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::runtime_control::call_brain",
+      "description": "An always-on host's headless runtimes as its brain holds them (ADR-0059 W2); a restart also names the runtime it restarted.",
+      "required": ["runtimes"],
+      "properties": {
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HostRuntime"
+          }
+        },
+        "runtime": {
+          "$ref": "#/$defs/HostRuntime"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostRuntime": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/headless/bootstrap.ts HeadlessRuntimeStatus",
+      "required": ["name", "state", "restartable", "restarts"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["running", "failed", "restarting"]
+        },
+        "error": {
+          "type": "string"
+        },
+        "restartable": {
+          "type": "boolean"
+        },
+        "restarts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "startedAt": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false
+    },
     "HostUpdateStatus": {
       "type": "object",
       "x-cognia-wire-source": "companion_api::host_update::HostUpdateStatus",
@@ -11875,6 +11922,12 @@
     },
     "host_update_status": {
       "$ref": "#/$defs/HostUpdateStatus"
+    },
+    "host_runtime_status": {
+      "$ref": "#/$defs/HostRuntimes"
+    },
+    "host_runtime_restart": {
+      "$ref": "#/$defs/HostRuntimes"
     },
     "companion_signaling_status": {
       "$ref": "#/$defs/SignalingStatus"

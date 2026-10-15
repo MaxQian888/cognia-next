@@ -697,6 +697,7 @@
         },
         "feature_manifest": {},
         "paired": {},
+        "runtime": {},
         "secret": {
           "children": {
             "git": {},

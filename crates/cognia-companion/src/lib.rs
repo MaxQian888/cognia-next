@@ -110,6 +110,7 @@ pub mod remote_execution;
 pub use cognia_companion_security::replay_cache;
 pub mod rpc_error;
 pub mod runtime;
+pub mod runtime_control;
 pub use cognia_companion_security::secret;
 pub use cognia_companion_security::security_store;
 pub mod server;

@@ -612,6 +612,8 @@ mod tests {
         ("host_update_refresh", OutputShape::Declared(RootType::Object)),
         ("host_update_configure", OutputShape::Declared(RootType::Object)),
         ("host_update_install", OutputShape::Declared(RootType::Object)),
+        ("host_runtime_status", OutputShape::Declared(RootType::Object)),
+        ("host_runtime_restart", OutputShape::Declared(RootType::Object)),
 
         // ── source_control (rpc/source_control.rs) ───────────────────────────
         ("git_is_repo", OutputShape::Scalar(ScalarShape::Bool)),
