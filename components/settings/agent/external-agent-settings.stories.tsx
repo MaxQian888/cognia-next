@@ -5,7 +5,7 @@ import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
 // `ExternalAgentSettings` is the full management surface for external agents:
-// global toggles, rule-based delegation, the quick-start preset gallery, and
+// global toggles, rule-based delegation, preset onboarding, and
 // the configured-agent list. It reads `useExternalAgentStore` and drives the
 // `useExternalAgent` connection hook (which lazily imports the manager and
 // degrades gracefully on the web preview, where no agent process can spawn).
@@ -40,7 +40,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Enabled, no agents configured yet — preset gallery + "add an agent" prompt.
+// Enabled, no agents configured yet — inline preset picker.
 export const Default: Story = {}
 
 // One configured agent (disconnected on the web preview).

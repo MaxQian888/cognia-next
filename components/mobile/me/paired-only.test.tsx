@@ -8,9 +8,7 @@ import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 
 jest.mock("@/hooks/companion/use-companion-config")
 
-const mockUseCompanionConfig = useCompanionConfig as jest.MockedFunction<
-  typeof useCompanionConfig
->
+const mockUseCompanionConfig = useCompanionConfig as jest.MockedFunction<typeof useCompanionConfig>
 
 function mockConfig(partial: Partial<ReturnType<typeof useCompanionConfig>>) {
   mockUseCompanionConfig.mockReturnValue({
@@ -56,6 +54,26 @@ describe("<PairedOnly />", () => {
       </PairedOnly>
     )
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it("renders the optional loading fallback until pairing is known", () => {
+    mockConfig({ paired: false, loading: true })
+    const { rerender } = render(
+      <PairedOnly loadingFallback={<div role="status">Loading screen</div>}>
+        <div data-testid="agent-panel">panel</div>
+      </PairedOnly>
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("Loading screen")
+    expect(screen.queryByTestId("agent-panel")).toBeNull()
+    expect(screen.queryByTestId("paired-only-placeholder")).toBeNull()
+    mockConfig({ paired: true, loading: false })
+    rerender(
+      <PairedOnly loadingFallback={<div role="status">Loading screen</div>}>
+        <div data-testid="agent-panel">panel</div>
+      </PairedOnly>
+    )
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(screen.getByTestId("agent-panel")).toBeInTheDocument()
   })
 
   it("offers a route to pairing instead of naming a section to go find", () => {

@@ -15,6 +15,12 @@ import type {
 import { EXTERNAL_AGENT_VERSION_VERDICTS } from "@/types/agent/external-agent-lifecycle"
 
 import { RuntimeGovernancePanel } from "./runtime-governance-panel"
+import * as runtimeCatalog from "@/lib/ai/agent/external/config/install-catalog"
+
+jest.mock("@/lib/ai/agent/external/config/install-catalog", () => {
+  const catalog = jest.requireActual("@/lib/ai/agent/external/config/install-catalog")
+  return { ...catalog, findRuntimeById: jest.fn(catalog.findRuntimeById) }
+})
 
 // The store is the only thing that decides which runtimes are listed.
 const agents: Record<string, unknown> = {}
@@ -86,6 +92,25 @@ describe("RuntimeGovernancePanel", () => {
     expect(await screen.findByTestId("runtime-row-codex-app-server")).toBeInTheDocument()
   })
 
+  it("uses a flat divided runtime list inside the settings container", async () => {
+    setAgents({ "agent-1": agent("agent-1", "codex-app-server") })
+    const { container } = renderPanel()
+    const row = await screen.findByTestId("runtime-row-codex-app-server")
+    expect(screen.getByRole("list")).toHaveClass("divide-y")
+    expect(row.tagName).toBe("LI")
+    expect(screen.getByRole("heading", { name: externalAgentEn.runtimes.title })).toHaveAttribute(
+      "data-detail-heading",
+      "runtimes"
+    )
+    expect(screen.getByRole("heading", { name: externalAgentEn.runtimes.title })).toHaveAttribute(
+      "tabindex",
+      "-1"
+    )
+    expect(row).not.toHaveClass("border")
+    expect(container.querySelector('[data-slot="card"]')).not.toBeInTheDocument()
+    expect(row.querySelector("dl")).toHaveClass("@md/settings-stack:grid-cols-2")
+  })
+
   it("shows the empty state when nothing is bound", async () => {
     setAgents({ "agent-1": agent("agent-1") })
     const inspectRuntime = jest.fn()
@@ -103,6 +128,8 @@ describe("RuntimeGovernancePanel", () => {
     renderPanel({ hostSupported: false, inspectRuntime })
 
     expect(await screen.findByTestId("runtime-governance-unsupported")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: externalAgentEn.runtimes.refresh })).toBeDisabled()
+    expect(screen.getByTestId("runtime-governance-unsupported")).not.toHaveClass("border")
     // A browser shell has no standing to say a runtime is missing.
     expect(inspectRuntime).not.toHaveBeenCalled()
   })
@@ -154,11 +181,23 @@ describe("RuntimeGovernancePanel", () => {
   it("warns that an unpinned runtime is re-fetched on every start", async () => {
     setAgents({ "agent-1": agent("agent-1", "codex-acp") })
 
-    renderPanel({ inspectRuntime: async () => status({ runtimeId: "codex-acp" }) })
-
-    // `codex-acp` launches through `npx -y`, so the version shown describes the
-    // last run and can change without asking.
-    expect(await screen.findByTestId("runtime-unpinned-codex-acp")).toBeInTheDocument()
+    // Current catalog entries use system executables. Exercise a resolving
+    // launch with the adapter's recorded legacy command, without mutating it.
+    const entry = runtimeCatalog.findRuntimeById("codex-acp")!
+    const legacy = entry.legacyLaunches![0]
+    const lookup = jest.mocked(runtimeCatalog.findRuntimeById).mockReturnValue({
+      ...entry,
+      systemCommand: legacy.command,
+      launchArgs: legacy.args,
+    })
+    try {
+      renderPanel({ inspectRuntime: async () => status({ runtimeId: "codex-acp" }) })
+      expect(await screen.findByTestId("runtime-unpinned-codex-acp")).toBeInTheDocument()
+    } finally {
+      lookup.mockImplementation(
+        jest.requireActual("@/lib/ai/agent/external/config/install-catalog").findRuntimeById
+      )
+    }
   })
 
   it("does not warn about a runtime that launches its own executable", async () => {

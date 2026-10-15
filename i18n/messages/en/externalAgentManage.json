@@ -50,7 +50,20 @@
     "editLabel": "Edit rule {name}",
     "deleteTitle": "Delete rule \"{name}\"?",
     "deleteDescription": "Chat turns will no longer be routed by this rule. This cannot be undone.",
-    "missingTarget": "Unavailable agent"
+    "missingTarget": "Unavailable agent",
+    "noAgentsTitle": "No agents configured",
+    "noEnabledTitle": "All agents are disabled",
+    "noEnabledDescription": "Enable an agent before automatic routing can run.",
+    "addAgent": "Add agent",
+    "openAgent": "Open {name}",
+    "disabledTarget": "Disabled",
+    "disabledTargetOption": "{name} (disabled)",
+    "disabledTargetHint": "This rule will not run until its target agent is enabled.",
+    "enableTarget": "Enable",
+    "nameRequired": "Enter a rule name.",
+    "targetRequired": "Select an agent that still exists.",
+    "matcherRequired": "Enter a matcher for this condition.",
+    "priority": "Priority {priority}"
   },
   "hostConfigs": {
     "deleteTitle": "Delete \"{name}\" from the host?",

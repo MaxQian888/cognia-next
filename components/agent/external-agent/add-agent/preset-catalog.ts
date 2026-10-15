@@ -1,5 +1,5 @@
 /**
- * The presets the phone offers to add, grouped for the picker.
+ * The shared preset catalogue, grouped for phone and desktop pickers.
  *
  * Presets the Host reports as installed come first: they are the ones that
  * will work the moment they are added, and on a phone the first screenful is
@@ -8,7 +8,11 @@
  * "installed" signal survives a query.
  */
 
-import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
+import {
+  getAvailablePresets,
+  getPresetConfig,
+  getRunnablePresets,
+} from "@/lib/ai/agent/external/config/presets"
 import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/config/presets"
 import type { InstalledRuntime } from "@/lib/ai/agent/external/config/installed-runtimes"
 
@@ -24,14 +28,29 @@ export interface PresetEntry {
 export interface GroupedPresets {
   installed: PresetEntry[]
   others: PresetEntry[]
+  experimental: PresetEntry[]
 }
 
 /** Every runnable preset as a picker entry. `describe` supplies the translated copy. */
 export function runnablePresetEntries(
   describe: (id: string, preset: ExternalAgentPresetConfig) => { name: string; description: string }
 ): PresetEntry[] {
+  return presetEntries(getRunnablePresets(), describe)
+}
+
+/** Desktop includes documented-only presets so their limitations remain discoverable. */
+export function availablePresetEntries(
+  describe: (id: string, preset: ExternalAgentPresetConfig) => { name: string; description: string }
+): PresetEntry[] {
+  return presetEntries(getAvailablePresets(), describe)
+}
+
+function presetEntries(
+  ids: readonly string[],
+  describe: (id: string, preset: ExternalAgentPresetConfig) => { name: string; description: string }
+): PresetEntry[] {
   const entries: PresetEntry[] = []
-  for (const id of getRunnablePresets()) {
+  for (const id of ids) {
     const preset = getPresetConfig(id)
     if (!preset) continue
     entries.push({ id, preset, ...describe(id, preset) })
@@ -58,11 +77,13 @@ export function groupPresetEntries(
 ): GroupedPresets {
   const installed: PresetEntry[] = []
   const others: PresetEntry[] = []
+  const experimental: PresetEntry[] = []
   const trimmed = query.trim()
   for (const entry of entries) {
     if (!matches(entry, trimmed)) continue
-    if (forPreset(entry.id)?.resolution === "installed") installed.push(entry)
+    if (entry.preset.supportTier === "documented-only") experimental.push(entry)
+    else if (forPreset(entry.id)?.resolution === "installed") installed.push(entry)
     else others.push(entry)
   }
-  return { installed, others }
+  return { installed, others, experimental }
 }

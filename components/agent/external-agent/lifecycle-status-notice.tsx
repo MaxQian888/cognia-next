@@ -70,7 +70,7 @@ export function LifecycleStatusNotice({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2",
+        "flex flex-wrap items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2",
         className
       )}
       data-testid="lifecycle-status-notice"
@@ -84,9 +84,11 @@ export function LifecycleStatusNotice({
         <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
           {t(`statusLabel.${presentation.labelKey}`)}
         </p>
-        <p className="text-xs text-amber-800/90 dark:text-amber-300/90">{message}</p>
+        <p className="text-xs [overflow-wrap:anywhere] text-amber-800/90 dark:text-amber-300/90">
+          {message}
+        </p>
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="min-w-0 max-w-full">{action}</div> : null}
     </div>
   )
 }

@@ -1,13 +1,29 @@
-/**
- * AgentOverviewBoard — the fleet landing view: collapsible connected/total
- * banner, one readiness row per agent, and the model's next action per row.
- */
+/** Summary filters, attention actions, and first-run preset selection. */
 
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AgentOverviewBoard } from "./agent-overview-board"
 import type { AgentReadiness } from "@/lib/ai/agent/external/agent-readiness"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
+
+jest.mock("@/components/agent/external-agent/add-agent/preset-picker-list", () => ({
+  PresetPickerList: ({
+    onPick,
+    disabled,
+  }: {
+    onPick: (id: string) => void
+    disabled?: boolean
+  }) => (
+    <div data-testid="preset-picker-list">
+      <button onClick={() => onPick("codex")} disabled={disabled}>
+        Codex CLI
+      </button>
+      <button onClick={() => onPick("custom")} disabled={disabled}>
+        Custom configuration
+      </button>
+    </div>
+  ),
+}))
 
 const agent = (id: string, name: string) =>
   ({
@@ -20,33 +36,39 @@ const agent = (id: string, name: string) =>
     updatedAt: new Date(0),
   }) as unknown as LifecycleExternalAgentConfig
 
-const readiness = (over: Partial<AgentReadiness>): AgentReadiness => ({
+const readiness = (over: Partial<AgentReadiness> = {}): AgentReadiness => ({
   state: "connected",
+  ready: (over.state ?? "connected") === "connected",
   blockReason: null,
   blockTransient: false,
   steps: [
     { id: "configured", state: "done" },
     { id: "runnable", state: "done" },
     { id: "connected", state: "done" },
-    { id: "routed", state: "done" },
+    { id: "routed", state: "done", optional: true },
   ],
   nextAction: null,
   ...over,
 })
 
 const entries = [
-  { agent: agent("a1", "Alpha"), readiness: readiness({}) },
+  { agent: agent("ready", "Ready agent"), readiness: readiness() },
   {
-    agent: agent("a2", "Beta"),
+    agent: agent("off", "Off agent"),
     readiness: readiness({ state: "off", nextAction: "connect" }),
   },
   {
-    agent: agent("a3", "Gamma"),
+    agent: agent("blocked", "Blocked agent"),
     readiness: readiness({
       state: "blocked",
       blockReason: "runtime not installed",
       nextAction: "inspect",
     }),
+  },
+  { agent: agent("connecting", "Connecting agent"), readiness: readiness({ state: "connecting" }) },
+  {
+    agent: agent("disabled", "Disabled agent"),
+    readiness: readiness({ state: "disabled", nextAction: "enable" }),
   },
 ]
 
@@ -54,11 +76,12 @@ function renderBoard(over: Partial<Parameters<typeof AgentOverviewBoard>[0]> = {
   const props = {
     entries,
     enabled: true,
-    bannerCollapsed: false,
-    onBannerCollapsedChange: jest.fn(),
+    stateFilter: "all" as const,
+    onStateFilterChange: jest.fn(),
     onOpenAgent: jest.fn(),
     onAction: jest.fn(),
     onNewAgent: jest.fn(),
+    onPickPreset: jest.fn(),
     ...over,
   }
   render(<AgentOverviewBoard {...props} />)
@@ -66,53 +89,78 @@ function renderBoard(over: Partial<Parameters<typeof AgentOverviewBoard>[0]> = {
 }
 
 describe("AgentOverviewBoard", () => {
-  it("summarizes the fleet in the expanded banner", () => {
+  it("counts status groups without rendering a progress bar or the whole fleet", () => {
     renderBoard()
-    expect(screen.getByTestId("fleet-banner-expanded")).toHaveTextContent("1 of 3 agents connected")
+    expect(screen.getByTestId("overview-filter-connected")).toHaveTextContent("1")
+    expect(screen.getByTestId("overview-filter-attention")).toHaveTextContent("2")
+    expect(screen.getByTestId("overview-filter-off")).toHaveTextContent("2")
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-row-ready")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-row-connecting")).not.toBeInTheDocument()
+    expect(screen.getAllByTestId(/^overview-row-/)).toHaveLength(3)
   })
 
-  it("collapses to a one-line summary and reports the store flag", async () => {
+  it.each(["connected", "attention", "off"] as const)(
+    "selects the %s rail filter",
+    async (filter) => {
+      const user = userEvent.setup()
+      const { onStateFilterChange } = renderBoard()
+      const toggle = screen.getByTestId(`overview-filter-${filter}`)
+      expect(toggle).toHaveAttribute("aria-pressed", "false")
+      await user.click(toggle)
+      expect(onStateFilterChange).toHaveBeenCalledWith(filter)
+    }
+  )
+
+  it("reflects and clears the selected filter", async () => {
     const user = userEvent.setup()
-    const { onBannerCollapsedChange } = renderBoard()
-    await user.click(screen.getByTestId("fleet-banner-collapse"))
-    expect(onBannerCollapsedChange).toHaveBeenCalledWith(true)
+    const { onStateFilterChange } = renderBoard({ stateFilter: "attention" })
+    const toggle = screen.getByTestId("overview-filter-attention")
+    expect(toggle).toHaveAttribute("aria-pressed", "true")
+    await user.click(toggle)
+    expect(onStateFilterChange).toHaveBeenCalledWith("all")
   })
 
-  it("renders the compact banner when collapsed and expands on click", async () => {
-    const user = userEvent.setup()
-    const { onBannerCollapsedChange } = renderBoard({ bannerCollapsed: true })
-    expect(screen.getByTestId("fleet-banner-collapsed")).toHaveTextContent("1/3 connected")
-    await user.click(screen.getByTestId("fleet-banner-expand"))
-    expect(onBannerCollapsedChange).toHaveBeenCalledWith(false)
-  })
-
-  it("opens the inspector from a row and runs the row's next action", async () => {
+  it("opens the inspector and runs the next action for an attention row", async () => {
     const user = userEvent.setup()
     const { onOpenAgent, onAction } = renderBoard()
-    await user.click(screen.getByTestId("overview-open-a1"))
-    expect(onOpenAgent).toHaveBeenCalledWith("a1")
-    await user.click(screen.getByTestId("overview-action-a2"))
-    expect(onAction).toHaveBeenCalledWith("a2", "connect")
-    await user.click(screen.getByTestId("overview-action-a3"))
-    expect(onAction).toHaveBeenCalledWith("a3", "inspect")
-  })
-
-  it("shows the block reason on a blocked row", () => {
-    renderBoard()
+    await user.click(screen.getByTestId("overview-open-blocked"))
+    expect(onOpenAgent).toHaveBeenCalledWith("blocked")
+    await user.click(screen.getByTestId("overview-action-off"))
+    expect(onAction).toHaveBeenCalledWith("off", "connect")
+    await user.click(screen.getByTestId("overview-action-blocked"))
+    expect(onAction).toHaveBeenCalledWith("blocked", "inspect")
     expect(
-      within(screen.getByTestId("overview-row-a3")).getByText("runtime not installed")
+      within(screen.getByTestId("overview-row-blocked")).getByText("runtime not installed")
     ).toBeInTheDocument()
   })
 
-  it("spins a connecting row and softens a transient block reason", () => {
+  it("keeps optional routing in a muted suggestions list and shows all-clear", async () => {
+    const user = userEvent.setup()
+    const { onAction } = renderBoard({
+      entries: [
+        { agent: agent("unrouted", "Unrouted"), readiness: readiness({ nextAction: "add-rule" }) },
+        { agent: agent("ready", "Ready"), readiness: readiness() },
+      ],
+    })
+    expect(screen.getByTestId("overview-all-clear")).toBeInTheDocument()
+    expect(screen.queryByTestId("overview-rows")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-row-unrouted")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-suggestion-ready")).not.toBeInTheDocument()
+    await user.click(within(screen.getByTestId("overview-suggestion-unrouted")).getByRole("button"))
+    expect(onAction).toHaveBeenCalledWith("unrouted", "add-rule")
+  })
+
+  it("shows the failure headline and softens transient blockers", () => {
     renderBoard({
       entries: [
         {
-          agent: agent("a4", "Delta"),
-          readiness: readiness({ state: "connecting" }),
+          agent: agent("failed", "Failed"),
+          readiness: readiness({ state: "error", nextAction: "retry" }),
+          failureHeadline: "Process exited unexpectedly",
         },
         {
-          agent: agent("a5", "Epsilon"),
+          agent: agent("checking", "Checking"),
           readiness: readiness({
             state: "blocked",
             blockReason: "runtime update in progress",
@@ -121,43 +169,50 @@ describe("AgentOverviewBoard", () => {
         },
       ],
     })
-    const connectingRow = screen.getByTestId("overview-row-a4")
-    expect(connectingRow.querySelector(".animate-spin")).toBeInTheDocument()
-    // A transient reason is informational, not alarming — muted, not amber.
-    const reason = within(screen.getByTestId("overview-row-a5")).getByText(
-      "runtime update in progress"
-    )
-    expect(reason).toHaveClass("text-muted-foreground")
+    expect(screen.getByText("Process exited unexpectedly")).toBeInTheDocument()
+    expect(screen.getByText("runtime update in progress")).toHaveClass("text-muted-foreground")
   })
 
-  it("renders the empty state with an add action when no agents exist", async () => {
-    const user = userEvent.setup()
-    const { onNewAgent } = renderBoard({ entries: [] })
-    expect(screen.getByTestId("overview-empty")).toBeInTheDocument()
-    await user.click(screen.getByTestId("overview-add-agent"))
-    expect(onNewAgent).toHaveBeenCalled()
-  })
-
-  it("tells configurations of one runtime apart by their traits", () => {
+  it("disables mutations while the master switch is off but keeps inspection available", () => {
     renderBoard({
+      enabled: false,
       entries: [
+        entries[1],
+        entries[2],
+        entries[4],
+        { agent: agent("unrouted", "Unrouted"), readiness: readiness({ nextAction: "add-rule" }) },
         {
-          agent: agent("w", "Codex work"),
-          readiness: readiness({}),
-          traits: [
-            { key: "stateIsolation", value: "isolated" },
-            { key: "permissionMode", value: "plan" },
-          ],
+          agent: agent("failed", "Failed"),
+          readiness: readiness({ state: "error", nextAction: "retry" }),
         },
-        { agent: agent("p", "Codex personal"), readiness: readiness({}), traits: [] },
       ],
     })
-    const work = screen.getByTestId("overview-row-w")
-    expect(within(work).getByTestId("instance-trait-chips")).toHaveTextContent("Own state")
-    expect(within(work).getByTestId("instance-trait-chips")).toHaveTextContent("Plan")
-    // Nothing to tell apart, nothing rendered.
+    expect(screen.getByTestId("overview-action-off")).toBeDisabled()
+    expect(screen.getByTestId("overview-action-failed")).toBeDisabled()
+    expect(screen.getByTestId("overview-action-disabled")).toBeDisabled()
     expect(
-      within(screen.getByTestId("overview-row-p")).queryByTestId("instance-trait-chips")
-    ).not.toBeInTheDocument()
+      within(screen.getByTestId("overview-suggestion-unrouted")).getByRole("button")
+    ).toBeDisabled()
+    expect(screen.getByTestId("overview-action-blocked")).toBeEnabled()
+  })
+
+  it("offers the inline picker and the shared Add entry point on first run", async () => {
+    const user = userEvent.setup()
+    const { onNewAgent, onPickPreset } = renderBoard({ entries: [] })
+    expect(screen.getByTestId("preset-picker-list")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Codex CLI" }))
+    expect(onPickPreset).toHaveBeenCalledWith("codex")
+    await user.click(screen.getByRole("button", { name: "Custom configuration" }))
+    expect(onPickPreset).toHaveBeenCalledWith("custom")
+    await user.click(screen.getByTestId("overview-add-agent"))
+    expect(onNewAgent).toHaveBeenCalled()
+    const heading = screen.getByRole("heading", { level: 2 })
+    expect(heading).toHaveAttribute("data-detail-heading", "overview")
+    expect(heading).toHaveAttribute("tabindex", "-1")
+  })
+
+  it("disables the first-run picker and Add action while the master switch is off", () => {
+    renderBoard({ entries: [], enabled: false })
+    for (const button of screen.getAllByRole("button")) expect(button).toBeDisabled()
   })
 })

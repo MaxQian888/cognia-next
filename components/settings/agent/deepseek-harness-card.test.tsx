@@ -2,8 +2,27 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
-import messages from "@/i18n/messages/en.json"
+import externalAgent from "@/i18n/messages/en/externalAgent.json"
+import type { DshProfileId } from "@cognia/agent-dsh/channel"
+
 import type { DshDoctorReport } from "@cognia/agent-dsh/install"
+
+const messages = { externalAgent }
+
+jest.mock("next-intl", () => ({
+  NextIntlClientProvider: ({ children }: { children: React.ReactNode }) => children,
+  useTranslations: (namespace: string) => (key: string) => {
+    const source = jest.requireActual("@/i18n/messages/en/externalAgent.json")
+    const message = [...namespace.split(".").slice(1), ...key.split(".")].reduce(
+      (value, part) => value?.[part],
+      source
+    )
+    if (typeof message !== "string") {
+      throw new Error(`Missing split-source message: ${namespace}.${key}`)
+    }
+    return message
+  },
+}))
 
 const useDshRuntime = jest.fn()
 jest.mock("@/hooks/agent/use-dsh-runtime", () => ({
@@ -28,9 +47,7 @@ function state(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function renderCard(
-  props: { profileId?: "cognia-sdk-readonly" | "cognia-sdk-workspace" | "cognia-acp" } = {}
-) {
+function renderCard(props: { profile?: DshProfileId; profileId?: DshProfileId } = {}) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
       <DeepSeekHarnessCard {...props} />
@@ -52,7 +69,7 @@ describe("DeepSeekHarnessCard", () => {
     expect(screen.queryByText(dsh.cancelNotice)).not.toBeInTheDocument()
   })
 
-  it("renders a dashed placeholder in hosts that cannot manage a runtime", () => {
+  it("renders a muted explanation in hosts that cannot manage a runtime", () => {
     useDshRuntime.mockReturnValue(state({ supported: false }))
     renderCard()
     expect(screen.queryByTestId("deepseek-harness-card")).not.toBeInTheDocument()
@@ -74,12 +91,56 @@ describe("DeepSeekHarnessCard", () => {
   })
 
   it("offers Install when nothing is installed", () => {
-    useDshRuntime.mockReturnValue(state({ installed: false, report: undefined }))
+    useDshRuntime.mockReturnValue(
+      state({
+        installed: false,
+        report: { healthy: false, findings: [{ code: "channel-malformed" }] },
+      })
+    )
     renderCard()
     expect(screen.getByTestId("dsh-install")).toHaveTextContent(
       messages.externalAgent.settings.deepseekHarness.install
     )
     expect(screen.queryByTestId("dsh-remove")).not.toBeInTheDocument()
+  })
+
+  it("shows Checking until a doctor report arrives", () => {
+    useDshRuntime.mockReturnValue(state({ installed: undefined, report: undefined, busy: true }))
+    renderCard()
+    expect(screen.getByTestId("dsh-status")).toHaveTextContent(
+      externalAgent.settings.deepseekHarness.checking
+    )
+    expect(
+      screen.queryByText(externalAgent.settings.deepseekHarness.notInstalled)
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("dsh-install")).toBeDisabled()
+    expect(screen.getByTestId("dsh-refresh")).toBeDisabled()
+  })
+
+  it("offers Retry after an initial doctor failure without claiming nothing is installed", () => {
+    const refresh = jest.fn()
+    useDshRuntime.mockReturnValue(
+      state({ installed: undefined, report: undefined, error: "doctor failed", refresh })
+    )
+    renderCard()
+    expect(screen.getByRole("alert")).toHaveTextContent("doctor failed")
+    expect(screen.queryByTestId("dsh-status")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(externalAgent.settings.deepseekHarness.notInstalled)
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("dsh-install")).toBeDisabled()
+    fireEvent.click(
+      screen.getByRole("button", { name: externalAgent.settings.deepseekHarness.retry })
+    )
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("accepts a profile for the doctor and capability details", () => {
+    renderCard({ profile: "cognia-acp" })
+    expect(useDshRuntime).toHaveBeenCalledWith("cognia-acp")
+    expect(
+      screen.queryByText(externalAgent.settings.deepseekHarness.approvalNotice)
+    ).not.toBeInTheDocument()
   })
 
   it("offers Reinstall and Remove once installed", () => {

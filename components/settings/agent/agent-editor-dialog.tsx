@@ -42,6 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ResponsiveFormDialog } from "@/components/shared/responsive-form-dialog"
+import { BrandIcon } from "@/components/icons/brand-icon"
 import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
 import {
   StateIsolationField,
@@ -62,6 +63,7 @@ import { isTauri } from "@/lib/platform/detect"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
 import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
+import { uniqueDuplicateName } from "@/lib/ai/agent/external/config/duplicate-config"
 import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
 import { CODEX_PRESET_FAMILY } from "@/lib/ai/agent/external/config/agent-binding"
 import { getExternalAgentLifecycleService } from "@/lib/ai/agent/external/lifecycle/service"
@@ -541,9 +543,11 @@ interface AgentEditorDialogProps {
   editingAgentId?: string | null
   /**
    * Optional preset id to seed the dialog with when opened from the
-   * quick-start gallery. Empty string means "manual configuration".
+   * preset picker. Empty string means "manual configuration".
    */
   initialPreset?: string
+  /** Return to the shared preset picker instead of showing an inline Select. */
+  onChangePreset?: () => void
   /**
    * Persist the configuration. AWAITED: the dialog shows a saving state and
    * keeps every control disabled until it settles.
@@ -566,6 +570,7 @@ export function AgentEditorDialog({
   onOpenChange,
   editingAgentId,
   initialPreset,
+  onChangePreset,
   onSave,
 }: AgentEditorDialogProps) {
   const t = useTranslations("externalAgent.settings")
@@ -573,7 +578,16 @@ export function AgentEditorDialog({
   const tManage = useTranslations("externalAgentManage.editor")
   const tCommon = useTranslations("common")
   const tGateway = useTranslations("externalAgent.cogniaModel")
-  const { getAgent } = useExternalAgentStore()
+  const { getAgent, getAllAgents } = useExternalAgentStore()
+  const [customName, setCustomName] = useState(false)
+  const uniquePresetName = useCallback(
+    (name: string) =>
+      uniqueDuplicateName(
+        getAllAgents().map((agent) => agent.name),
+        (index) => (index === 1 ? name : t("numberedAgentName", { name, index }))
+      ),
+    [getAllAgents, t]
+  )
   const editingAgent = editingAgentId ? getAgent(editingAgentId) : undefined
 
   // Control ids are scoped to this dialog instance. Global ids ("name",
@@ -598,14 +612,14 @@ export function AgentEditorDialog({
   const localPaths = !useRemoteHostActive()
 
   const [formData, setFormData] = useState<AgentFormData>(() => {
-    // Quick-start gallery: open with the preset's defaults so the user only
+    // Preset picker: open with the preset's defaults so the user only
     // has to tweak env vars / cwd before saving.
     if (!editingAgentId && initialPreset && initialPreset !== "custom") {
       const preset = getPresetConfig(initialPreset)
       if (preset) {
         return {
           ...DEFAULT_FORM_DATA,
-          name: presetName(t, initialPreset, preset),
+          name: uniquePresetName(presetName(t, initialPreset, preset)),
           protocol: preset.protocol,
           transport: preset.transport,
           processCommand: preset.process?.command ?? "",
@@ -1061,7 +1075,10 @@ export function AgentEditorDialog({
         const processArgs = preset.process?.args?.map(shellQuote).join(" ") || current.processArgs
         return {
           ...current,
-          name: presetName(t, presetId, preset),
+          name:
+            customName || editingAgentId
+              ? current.name
+              : uniquePresetName(presetName(t, presetId, preset)),
           protocol: preset.protocol,
           transport: preset.transport,
           processCommand,
@@ -1079,7 +1096,7 @@ export function AgentEditorDialog({
         }
       })
     },
-    [setFormData, t]
+    [setFormData, t, customName, editingAgentId, uniquePresetName]
   )
 
   const maxSessionsValue = parseOptionalPositiveInteger(formData.maxConcurrentSessions)
@@ -1137,7 +1154,24 @@ export function AgentEditorDialog({
         )}
         {/* Quick start preset — only shown when creating, not when editing,
             to avoid silently overwriting hand-tuned fields. */}
-        {!editingAgentId && (
+        {!editingAgentId && onChangePreset ? (
+          <div className="flex min-w-0 items-center gap-2 text-sm" data-testid="preset-summary">
+            <span className="shrink-0 text-muted-foreground">{t("presetSummaryLabel")}</span>
+            {presetConfig ? (
+              <>
+                <BrandIcon id={selectedPreset} size={20} className="shrink-0" />
+                <span className="min-w-0 flex-1 truncate">
+                  {presetName(t, selectedPreset, presetConfig)}
+                </span>
+              </>
+            ) : (
+              <span className="min-w-0 flex-1 truncate">{t("customConfiguration")}</span>
+            )}
+            <Button type="button" variant="ghost" size="sm" onClick={onChangePreset}>
+              {t("changePreset")}
+            </Button>
+          </div>
+        ) : !editingAgentId ? (
           <div className="grid gap-2" data-testid="preset-picker">
             <Label htmlFor={fid("preset")}>{t("quickStartPreset")}</Label>
             <Select value={selectedPreset || "custom"} onValueChange={handlePresetChange}>
@@ -1165,7 +1199,7 @@ export function AgentEditorDialog({
               </SelectContent>
             </Select>
           </div>
-        )}
+        ) : null}
 
         {/* Name */}
         <div className="grid gap-2">
@@ -1173,7 +1207,10 @@ export function AgentEditorDialog({
           <Input
             id={fid("name")}
             value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            onChange={(e) => {
+              setCustomName(true)
+              setFormData({ ...formData, name: e.target.value })
+            }}
             placeholder={t("agentNamePlaceholder")}
           />
         </div>

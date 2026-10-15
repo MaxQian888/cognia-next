@@ -236,3 +236,10 @@ describe("CodexAppServerStatusCard", () => {
     })
   })
 })
+
+it("renders a flat section with a semantic heading", () => {
+  renderCard()
+  expect(screen.getByTestId("codex-app-server-status").tagName).toBe("SECTION")
+  expect(screen.getByTestId("codex-app-server-status")).not.toHaveClass("border")
+  expect(screen.getByRole("heading", { level: 4 })).toBeInTheDocument()
+})

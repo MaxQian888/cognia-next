@@ -1,41 +1,27 @@
 "use client"
 
-/**
- * AgentOverviewBoard — the "All agents" landing view.
- *
- * A collapsible fleet banner (connected / total) over one row per agent:
- * brand icon, name, state pill, the compact readiness pipeline, the block
- * reason when there is one, what sets it apart from the other configurations
- * of its runtime (ADR-0216), and a single next-action button — the thing the
- * model says would most move this agent toward ready. Clicking the row opens
- * the agent's inspector. Rows wrap instead of squeezing on a narrow pane.
- */
+/** Summary and actionable attention for the fleet, with optional routing kept separate. */
 
-import { Surface } from "@/components/surface/surface"
-import { Spinner } from "@/components/ui/spinner"
-import { ChevronDown, ChevronUp, Plus } from "lucide-react"
+import { Plus } from "lucide-react"
 import { useTranslations } from "next-intl"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { BrandIcon } from "@/components/icons/brand-icon"
+import { PresetPickerList } from "@/components/agent/external-agent/add-agent/preset-picker-list"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { cn } from "@/lib/utils"
 import { isFromPreset } from "@/lib/ai/agent/external/config/presets"
 import type { AgentReadiness, AgentReadinessAction } from "@/lib/ai/agent/external/agent-readiness"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
-import {
-  InstanceTraitChips,
-  type InstanceTrait,
-} from "@/components/agent/external-agent/instance-traits"
-import { AgentReadinessPipeline, AgentStatePill } from "./agent-readiness-pipeline"
+import type { InstanceTrait } from "@/components/agent/external-agent/instance-traits"
+import { AgentStatePill } from "./agent-readiness-pipeline"
+import { groupForState, type AgentStateFilter } from "./external-agent-rail"
 
 export interface OverviewAgentEntry {
   agent: LifecycleExternalAgentConfig
   readiness: AgentReadiness
-  /** What sets it apart from the other configurations of its runtime. */
   traits?: readonly InstanceTrait[]
+  failureHeadline?: string
 }
 
 const ACTION_LABEL_KEY: Record<AgentReadinessAction, string> = {
@@ -49,174 +35,188 @@ const ACTION_LABEL_KEY: Record<AgentReadinessAction, string> = {
 export function AgentOverviewBoard({
   entries,
   enabled,
-  bannerCollapsed,
-  onBannerCollapsedChange,
+  stateFilter,
+  onStateFilterChange,
   onOpenAgent,
   onAction,
   onNewAgent,
+  onPickPreset,
 }: {
   entries: OverviewAgentEntry[]
-  /** Master switch — connect/retry row actions are inert while it is off. */
   enabled: boolean
-  bannerCollapsed: boolean
-  onBannerCollapsedChange: (collapsed: boolean) => void
+  stateFilter: AgentStateFilter
+  onStateFilterChange: (filter: AgentStateFilter) => void
   onOpenAgent: (agentId: string) => void
-  /** Runs the model's suggested next step for the agent. */
   onAction: (agentId: string, action: AgentReadinessAction) => void
   onNewAgent: () => void
+  onPickPreset: (presetId: string) => void
 }) {
-  const t = useTranslations("externalAgent.settings")
+  const t = useTranslations("externalAgent.overview")
+  const tSettings = useTranslations("externalAgent.settings")
   const tReadiness = useTranslations("externalAgent.readiness")
-
-  const connectedCount = entries.filter((e) => e.readiness.state === "connected").length
-  const total = entries.length
-  const percent = total > 0 ? Math.round((connectedCount / total) * 100) : 0
+  const counts = { connected: 0, attention: 0, off: 0 }
+  for (const { readiness } of entries) counts[groupForState(readiness.state)] += 1
+  const attention = entries.filter(
+    ({ readiness }) =>
+      readiness.blockReason || (readiness.nextAction && readiness.nextAction !== "add-rule")
+  )
+  const suggestions = entries.filter(
+    ({ readiness }) =>
+      readiness.state === "connected" &&
+      !readiness.blockReason &&
+      readiness.nextAction === "add-rule"
+  )
 
   return (
-    <div className="flex min-h-full flex-col gap-4" data-testid="agent-overview-board">
-      {/* Fleet banner — collapsible. The collapsed one-liner keeps the
-          connected/total count on screen without the card chrome, and the
-          state persists in the store so a reload does not reopen it. */}
-      {total > 0 ? (
-        bannerCollapsed ? (
-          <div
-            className="flex items-center gap-3 rounded-lg border px-3 py-2"
-            data-testid="fleet-banner-collapsed"
-          >
-            <span className="text-sm font-medium">
-              {t("fleetBannerCollapsed", { connected: connectedCount, total })}
-            </span>
-            <Progress value={percent} className="h-1.5 flex-1" aria-hidden />
-            <span className="text-xs text-muted-foreground">{percent}%</span>
+    <div className="flex min-h-full min-w-0 flex-col gap-4" data-testid="agent-overview-board">
+      <h2 className="text-base font-semibold" tabIndex={-1} data-detail-heading="overview">
+        {entries.length ? tSettings("allAgents") : t("firstAgentTitle")}
+      </h2>
+      {entries.length === 0 ? (
+        <div className="min-w-0 space-y-4" data-testid="overview-empty">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="text-sm text-muted-foreground">{t("firstAgentDescription")}</p>
             <Button
-              variant="ghost"
-              size="icon"
-              className="touch-hit h-7 w-7"
-              aria-label={t("fleetShowSummary")}
-              data-testid="fleet-banner-expand"
-              onClick={() => onBannerCollapsedChange(false)}
+              size="sm"
+              variant="outline"
+              onClick={onNewAgent}
+              disabled={!enabled}
+              data-testid="overview-add-agent"
             >
-              <ChevronDown className="h-3.5 w-3.5" />
+              <Plus className="size-4" aria-hidden />
+              {tSettings("addAgent")}
             </Button>
           </div>
-        ) : (
-          <Surface
-            className="rounded-lg border bg-muted/20 px-4 py-3"
-            data-testid="fleet-banner-expanded"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">
-                  {t("fleetBannerConnected", { connected: connectedCount, total })}
-                </p>
-                <div className="mt-2 flex items-center gap-3">
-                  <Progress value={percent} className="h-1.5 w-40" aria-hidden />
-                  <span className="text-xs text-muted-foreground">{percent}%</span>
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="touch-hit h-7 w-7 shrink-0"
-                aria-label={t("fleetHideSummary")}
-                data-testid="fleet-banner-collapse"
-                onClick={() => onBannerCollapsedChange(true)}
-              >
-                <ChevronUp className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </Surface>
-        )
-      ) : (
-        <Empty className="flex-1 border" data-testid="overview-empty">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Plus className="h-4 w-4" />
-            </EmptyMedia>
-            <EmptyTitle>{t("noAgentsConfigured")}</EmptyTitle>
-            <EmptyDescription>{t("addAgentToStart")}</EmptyDescription>
-          </EmptyHeader>
-          <Button
-            size="sm"
-            onClick={onNewAgent}
-            disabled={!enabled}
-            data-testid="overview-add-agent"
-          >
-            {t("addAgent")}
-          </Button>
-        </Empty>
-      )}
-
-      {/* One row per agent: name, pill, pipeline, block reason, next action. */}
-      {entries.length > 0 ? (
-        <div className="divide-y rounded-lg border" data-testid="overview-rows">
-          {entries.map(({ agent, readiness, traits = [] }) => {
-            const presetId = isFromPreset(agent)
-            const action = readiness.nextAction
-            return (
-              <div
-                key={agent.id}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5"
-                data-testid={`overview-row-${agent.id}`}
-              >
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-auto min-w-0 flex-1 basis-56 justify-start gap-3 whitespace-normal rounded-md px-1 py-1 text-left font-normal hover:bg-transparent"
-                  onClick={() => onOpenAgent(agent.id)}
-                  data-testid={`overview-open-${agent.id}`}
-                >
-                  <BrandIcon id={presetId ?? agent.name} label={agent.name} size={20} />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-medium">{agent.name}</span>
-                      <AgentStatePill readiness={readiness} />
-                    </span>
-                    <InstanceTraitChips traits={traits} className="mt-1" />
-                    <span className="mt-1 flex items-center gap-2">
-                      <AgentReadinessPipeline readiness={readiness} compact />
-                      {readiness.blockReason ? (
-                        <span
-                          className={cn(
-                            "truncate text-[11px]",
-                            readiness.blockTransient
-                              ? "text-muted-foreground"
-                              : "text-amber-600 dark:text-amber-400"
-                          )}
-                        >
-                          {readiness.blockReason}
-                        </span>
-                      ) : (
-                        <span className="truncate text-[11px] text-muted-foreground">
-                          {agent.protocol} · {agent.transport}
-                        </span>
-                      )}
-                    </span>
-                  </span>
-                </Button>
-                {action ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="ml-auto shrink-0"
-                    data-testid={`overview-action-${agent.id}`}
-                    disabled={!enabled && (action === "connect" || action === "retry")}
-                    onClick={() => onAction(agent.id, action)}
-                  >
-                    {tReadiness(ACTION_LABEL_KEY[action])}
-                  </Button>
-                ) : readiness.state === "connecting" ? (
-                  <Spinner className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                ) : (
-                  <Badge variant="outline" className="shrink-0 font-normal">
-                    {tReadiness("states.ready")}
-                  </Badge>
-                )}
-              </div>
-            )
-          })}
+          <PresetPickerList onPick={onPickPreset} disabled={!enabled} />
         </div>
-      ) : null}
+      ) : (
+        <>
+          <div
+            className="flex flex-wrap items-center gap-x-1 gap-y-2"
+            data-testid="overview-state-filters"
+          >
+            {(["connected", "attention", "off"] as const).map((filter, index) => (
+              <span key={filter} className="inline-flex min-w-0 items-center gap-1">
+                {index > 0 ? (
+                  <span aria-hidden className="text-muted-foreground">
+                    ·
+                  </span>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant={stateFilter === filter ? "secondary" : "ghost"}
+                  className="h-auto whitespace-normal px-2 py-1 text-left"
+                  aria-pressed={stateFilter === filter}
+                  data-testid={`overview-filter-${filter}`}
+                  onClick={() => onStateFilterChange(stateFilter === filter ? "all" : filter)}
+                >
+                  {t(filter)} <span className="tabular-nums">{counts[filter]}</span>
+                </Button>
+              </span>
+            ))}
+          </div>
+          <SettingsStack>
+            <SettingsBlock title={t("attention")} headingLevel={3}>
+              {attention.length ? (
+                <div className="divide-y" data-testid="overview-rows">
+                  {attention.map(({ agent, readiness, failureHeadline }) => {
+                    const action = readiness.nextAction
+                    const reason = readiness.blockReason ?? failureHeadline
+                    return (
+                      <div
+                        key={agent.id}
+                        className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0"
+                        data-testid={`overview-row-${agent.id}`}
+                      >
+                        <Button
+                          variant="ghost"
+                          className="h-auto min-w-0 flex-1 basis-48 justify-start gap-3 whitespace-normal px-0 py-1 text-left font-normal hover:bg-transparent"
+                          onClick={() => onOpenAgent(agent.id)}
+                          data-testid={`overview-open-${agent.id}`}
+                        >
+                          <BrandIcon
+                            id={isFromPreset(agent) ?? agent.name}
+                            label={agent.name}
+                            size={20}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className="min-w-0 break-words text-sm font-medium">
+                                {agent.name}
+                              </span>
+                              <AgentStatePill readiness={readiness} />
+                            </span>
+                            {reason ? (
+                              <span
+                                className={cn(
+                                  "mt-1 block break-words text-xs",
+                                  readiness.blockTransient
+                                    ? "text-muted-foreground"
+                                    : "text-amber-600 dark:text-amber-400"
+                                )}
+                              >
+                                {reason}
+                              </span>
+                            ) : null}
+                          </span>
+                        </Button>
+                        {action && action !== "add-rule" ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="ml-auto shrink-0"
+                            data-testid={`overview-action-${agent.id}`}
+                            disabled={!enabled && action !== "inspect"}
+                            onClick={() => onAction(agent.id, action)}
+                          >
+                            {tReadiness(ACTION_LABEL_KEY[action])}
+                          </Button>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p
+                  className="text-sm text-muted-foreground"
+                  role="status"
+                  data-testid="overview-all-clear"
+                >
+                  {t("allClear", { count: counts.connected })}
+                </p>
+              )}
+            </SettingsBlock>
+            {suggestions.length ? (
+              <SettingsBlock
+                title={t("suggestions")}
+                headingLevel={3}
+                className="text-muted-foreground"
+              >
+                <ul className="divide-y" data-testid="overview-suggestions">
+                  {suggestions.map(({ agent }) => (
+                    <li
+                      key={agent.id}
+                      className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                      data-testid={`overview-suggestion-${agent.id}`}
+                    >
+                      <span className="min-w-0 break-words text-xs">{agent.name}</span>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="h-auto whitespace-normal px-0 py-1 text-xs text-muted-foreground"
+                        disabled={!enabled}
+                        onClick={() => onAction(agent.id, "add-rule")}
+                      >
+                        {tReadiness("actions.addRule")}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </SettingsBlock>
+            ) : null}
+          </SettingsStack>
+        </>
+      )}
     </div>
   )
 }

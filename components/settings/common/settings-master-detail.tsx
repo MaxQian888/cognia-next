@@ -307,9 +307,12 @@ export type SettingsListDensity = "stacked" | "split"
  * flash one open on every desktop mount, and every jsdom test (where layout is
  * always 0) would render the narrow shape.
  */
-export function listDensityForWidth(width: number): SettingsListDensity {
+export function listDensityForWidth(
+  width: number,
+  splitAt: 560 | 720 = SETTINGS_LIST_DETAIL_COLLAPSE
+): SettingsListDensity {
   if (width <= 0) return "split"
-  return width >= SETTINGS_LIST_DETAIL_COLLAPSE ? "split" : "stacked"
+  return width >= splitAt ? "split" : "stacked"
 }
 
 const ListDensityContext = createContext<SettingsListDensity>("split")
@@ -319,7 +322,7 @@ const ListDensityContext = createContext<SettingsListDensity>("split")
  * `"split"` outside one, so a panel rendered on its own route behaves as it
  * did before rather than degrading.
  *
- * Layout stays CSS: the `@[560px]/settings-pane` variants decide *where*
+ * Layout stays CSS: the selected `splitAt` container variants decide *where*
  * things sit. This hook is only for what CSS genuinely cannot express, which
  * in practice is one question. Is the detail a modal right now? CSS cannot
  * unmount a portal.
@@ -343,18 +346,21 @@ export function useSettingsListDensity(): SettingsListDensity {
  */
 export function SettingsListDetail({
   listWidth = 300,
+  splitAt = SETTINGS_LIST_DETAIL_COLLAPSE,
   className,
   "data-testid": testId,
   children,
 }: {
   /** Upper bound for the master column. The clamp never exceeds it. */
   listWidth?: number
+  /** Pane width at which both columns have enough room to stay visible. */
+  splitAt?: 560 | 720
   className?: string
   "data-testid"?: string
   children: ReactNode
 }) {
   const paneRef = useRef<HTMLDivElement>(null)
-  const density = listDensityForWidth(useElementWidth(paneRef))
+  const density = listDensityForWidth(useElementWidth(paneRef), splitAt)
 
   return (
     <ListDensityContext.Provider value={density}>
@@ -367,11 +373,12 @@ export function SettingsListDetail({
         <div
           className={cn(
             "grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-4",
-            "@[560px]/settings-pane:grid-rows-1",
             // `cqi` is a share of *this* pane, so the master grows with the pane
             // instead of stepping once at a viewport breakpoint and then staying
             // put while the detail column absorbs every pixel of the difference.
-            "@[560px]/settings-pane:grid-cols-[clamp(200px,30cqi,var(--settings-rail-w))_minmax(0,1fr)]"
+            splitAt === 720
+              ? "@[720px]/settings-pane:grid-rows-1 @[720px]/settings-pane:grid-cols-[clamp(200px,30cqi,var(--settings-rail-w))_minmax(0,1fr)]"
+              : "@[560px]/settings-pane:grid-rows-1 @[560px]/settings-pane:grid-cols-[clamp(200px,30cqi,var(--settings-rail-w))_minmax(0,1fr)]"
           )}
           style={{ "--settings-rail-w": `${listWidth}px` } as React.CSSProperties}
         >

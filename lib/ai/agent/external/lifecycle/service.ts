@@ -174,6 +174,8 @@ const READY: ReadinessVerdict = { status: "ready" }
  * is what left the manager running the previous config after a Settings edit.
  */
 const RUNTIME_AFFECTING_KEYS = [
+  "protocol",
+  "transport",
   "process",
   "network",
   "codexOptions",

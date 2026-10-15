@@ -2,6 +2,7 @@
 
 import { useTranslations, useFormatter } from "next-intl"
 import { Gauge, RefreshCw, Server, ShieldCheck, Sparkles, UserRound } from "lucide-react"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -43,16 +44,19 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
 
   if (!connected || !available) {
     return (
-      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-        {t("notConnected")}
-      </div>
+      <SettingsBlock title={t("title")} headingLevel={4}>
+        <p className="text-xs text-muted-foreground">{t("notConnected")}</p>
+      </SettingsBlock>
     )
   }
 
   return (
-    <div className="space-y-3 rounded-md border p-3" data-testid="codex-app-server-status">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium">{t("title")}</p>
+    <SettingsBlock
+      title={t("title")}
+      headingLevel={4}
+      testid="codex-app-server-status"
+      contentClassName="space-y-0 divide-y divide-border/60 [&>*]:py-3 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0"
+      action={
         <Button
           variant="ghost"
           size="sm"
@@ -64,8 +68,8 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
         </Button>
-      </div>
-
+      }
+    >
       {/* Account (from account/read + account/updated) */}
       {(status.account !== undefined || status.requiresOpenaiAuth) && (
         <div className="space-y-1" data-testid="codex-account-section">
@@ -75,11 +79,15 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
           </div>
           {status.account ? (
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span data-testid="codex-account-email">
+              <span className="break-all" data-testid="codex-account-email">
                 {status.account.email ?? status.account.type ?? "—"}
               </span>
               {status.account.planType && (
-                <Badge variant="outline" className="text-[10px]" data-testid="codex-account-plan">
+                <Badge
+                  variant="outline"
+                  className="max-w-full whitespace-normal break-all text-[10px]"
+                  data-testid="codex-account-plan"
+                >
                   {status.account.planType}
                 </Badge>
               )}
@@ -119,7 +127,11 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
             </p>
           )}
           {status.rateLimits.rateLimitReachedType && (
-            <Badge variant="destructive" className="text-[10px]" data-testid="codex-rate-limited">
+            <Badge
+              variant="destructive"
+              className="max-w-full whitespace-normal break-all text-[10px]"
+              data-testid="codex-rate-limited"
+            >
               {t("rateLimitReached")}
             </Badge>
           )}
@@ -162,7 +174,11 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
         ) : (
           <div className="flex flex-wrap gap-1" data-testid="codex-managed-policy">
             {managedPolicyBadges.map(({ key, label }) => (
-              <Badge key={key} variant="outline" className="text-[10px]">
+              <Badge
+                key={key}
+                variant="outline"
+                className="max-w-full whitespace-normal break-all text-[10px]"
+              >
                 {label}
               </Badge>
             ))}
@@ -183,7 +199,7 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
               <Badge
                 key={server.name ?? i}
                 variant="outline"
-                className="text-[10px]"
+                className="max-w-full whitespace-normal break-all text-[10px]"
                 data-testid="codex-mcp-server"
               >
                 {server.name ?? "—"}
@@ -207,7 +223,7 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
               <Badge
                 key={skill.path ?? skill.name ?? i}
                 variant={skill.enabled === false ? "secondary" : "outline"}
-                className="text-[10px]"
+                className="max-w-full whitespace-normal break-all text-[10px]"
                 data-testid="codex-skill"
               >
                 {skill.name ?? skill.path ?? "—"}
@@ -216,6 +232,6 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
           </div>
         )}
       </div>
-    </div>
+    </SettingsBlock>
   )
 }

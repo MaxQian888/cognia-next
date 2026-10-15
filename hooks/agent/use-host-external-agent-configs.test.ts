@@ -10,6 +10,20 @@ import {
 } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 
+let mockHostScope = "host:first"
+const mockHostListeners = new Set<() => void>()
+jest.mock("@/lib/ai/agent/external/capability/process-plane", () => ({
+  externalAgentProcessPlaneScope: () => mockHostScope,
+  subscribeExternalAgentProcessPlane: (listener: () => void) => {
+    mockHostListeners.add(listener)
+    return () => mockHostListeners.delete(listener)
+  },
+}))
+
+beforeEach(() => {
+  mockHostScope = "host:first"
+})
+
 const ALL_OPS = Object.values(HOST_CONFIG_COMMANDS)
 
 function record(over: Partial<ExternalAgentConfigRecord> = {}): ExternalAgentConfigRecord {
@@ -56,6 +70,7 @@ describe("useHostExternalAgentConfigs", () => {
     setup({}, () => ({ configs: [record()] }))
     const { result } = renderHook(() => useHostExternalAgentConfigs())
     await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.loaded).toBe(true)
     expect(result.current.configs).toHaveLength(1)
     expect(result.current.unavailable).toBeNull()
   })
@@ -76,6 +91,100 @@ describe("useHostExternalAgentConfigs", () => {
     const { result } = renderHook(() => useHostExternalAgentConfigs())
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.error).toBe("host exploded")
+    expect(result.current.loaded).toBe(false)
+    expect(result.current.configs).toEqual([])
+  })
+
+  it("does not claim an empty host until the first successful report", async () => {
+    let resolve!: (value: unknown) => void
+    setup(
+      {},
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    expect(result.current.loaded).toBe(false)
+    expect(result.current.loading).toBe(true)
+    expect(result.current.configs).toEqual([])
+    await act(async () => {
+      resolve({ configs: [] })
+    })
+    expect(result.current.loaded).toBe(true)
+    expect(result.current.loading).toBe(false)
+  })
+
+  it("retains the last successful report when a refresh fails", async () => {
+    let fail = false
+    setup({}, () => {
+      if (fail) throw new Error("relay timeout")
+      return { configs: [record()] }
+    })
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loaded).toBe(true))
+    fail = true
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.loaded).toBe(true)
+    expect(result.current.configs).toEqual([record()])
+    expect(result.current.error).toBe("relay timeout")
+  })
+
+  it("resets loaded on a host change and ignores the previous host's pending report", async () => {
+    const replies: Array<(value: unknown) => void> = []
+    setup(
+      {},
+      () =>
+        new Promise((resolve) => {
+          replies.push(resolve)
+        })
+    )
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await act(async () => {
+      replies[0]({ configs: [record()] })
+    })
+    expect(result.current.loaded).toBe(true)
+    let pending!: Promise<void>
+    act(() => {
+      pending = result.current.refresh()
+    })
+    act(() => {
+      mockHostScope = "host:second"
+      for (const listener of mockHostListeners) listener()
+    })
+    expect(result.current.loaded).toBe(false)
+    expect(result.current.loading).toBe(true)
+    expect(result.current.configs).toEqual([])
+    await act(async () => {
+      replies[1]({ configs: [record({ configId: "stale" })] })
+      await pending
+    })
+    expect(result.current.loaded).toBe(false)
+    expect(result.current.configs).toEqual([])
+    await act(async () => {
+      replies[2]({ configs: [] })
+    })
+    expect(result.current.loaded).toBe(true)
+    expect(result.current.configs).toEqual([])
+  })
+
+  it("keeps a failed new host unknown even after the previous host loaded", async () => {
+    setup({}, () => {
+      if (mockHostScope === "host:second") throw new Error("host unavailable")
+      return { configs: [record()] }
+    })
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loaded).toBe(true))
+    act(() => {
+      mockHostScope = "host:second"
+      for (const listener of mockHostListeners) listener()
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.loaded).toBe(false)
+    expect(result.current.configs).toEqual([])
+    expect(result.current.error).toBe("host unavailable")
   })
 
   it("re-reads after a write rather than patching the row locally", async () => {

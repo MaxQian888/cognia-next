@@ -127,20 +127,30 @@ export function AgentReadinessPipeline({
   const t = useTranslations("externalAgent.readiness")
   return (
     <ol
-      className={cn("flex items-center", compact ? "gap-1" : "gap-2", className)}
+      className={cn(
+        "flex flex-wrap items-center gap-y-2",
+        compact ? "gap-x-1" : "gap-x-2",
+        className
+      )}
       aria-label={t("pipelineLabel")}
     >
       {readiness.steps.map((step, i) => (
         <li key={step.id} className="flex items-center gap-1.5">
           {i > 0 ? (
             <span
-              className={cn("h-px", compact ? "w-2" : "w-4", CONNECTOR_CLASS[step.state])}
+              className={cn(
+                "h-px shrink-0",
+                compact ? "w-2" : "w-4",
+                step.optional
+                  ? "border-t border-dashed border-muted-foreground/40"
+                  : CONNECTOR_CLASS[step.state]
+              )}
               aria-hidden
             />
           ) : null}
           <span
             className={cn(
-              "flex items-center justify-center rounded-full border",
+              "flex shrink-0 items-center justify-center rounded-full border",
               compact ? "size-4" : "size-5",
               STEP_DOT_CLASS[step.state]
             )}
@@ -151,12 +161,15 @@ export function AgentReadinessPipeline({
           {!compact ? (
             <span className={cn("text-xs whitespace-nowrap", STEP_TEXT_CLASS[step.state])}>
               {t(STEP_LABEL_KEY[step.id])}
+              {step.optional ? ` (${t("optional")})` : null}
+              <span className="sr-only">: {t(`stepStates.${step.state}`)}</span>
             </span>
           ) : (
             // The compact form draws only icons; without this every step was
             // an empty list item to a screen reader.
             <span className="sr-only">
-              {t(STEP_LABEL_KEY[step.id])}: {t(`stepStates.${step.state}`)}
+              {t(STEP_LABEL_KEY[step.id])}
+              {step.optional ? ` (${t("optional")})` : null}: {t(`stepStates.${step.state}`)}
             </span>
           )}
         </li>

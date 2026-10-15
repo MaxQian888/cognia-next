@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Copy, ExternalLink, Terminal } from "lucide-react"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -20,6 +21,10 @@ import { toast } from "@/components/ui/sonner"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { detectPlatform } from "@/lib/terminal/shell-detect"
 import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
+import {
+  resolveIsolatedTerminalEnv,
+  type IsolatedTerminalEnv,
+} from "@/lib/ai/agent/external/lifecycle/isolated-terminal-env"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
 import { shellQuote } from "@/lib/mcp/config-transfer"
 import {
@@ -53,6 +58,49 @@ export function KimiManagementCard({ agent }: { agent: ExternalAgentConfig }) {
 
 function KimiManagementSession({ agent }: { agent: ExternalAgentConfig }) {
   const t = useTranslations("kimiManagement")
+  const tTerminal = useTranslations("externalAgent.settings.isolatedTerminal")
+  const [terminalState, setTerminalState] = useState<{
+    config: ExternalAgentConfig
+    result: IsolatedTerminalEnv
+  } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    if (agent.stateIsolation !== "isolated") return
+    void resolveIsolatedTerminalEnv(agent).then(
+      (result) => {
+        if (!cancelled) setTerminalState({ config: agent, result })
+      },
+      () => {
+        if (!cancelled)
+          setTerminalState({
+            config: agent,
+            result: { kind: "unavailable", reason: "no-state-root" },
+          })
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [agent])
+  const terminalEnv: IsolatedTerminalEnv | undefined =
+    agent.stateIsolation !== "isolated"
+      ? { kind: "shared" }
+      : terminalState?.config === agent
+        ? terminalState.result
+        : undefined
+  const terminalReason = !terminalEnv
+    ? tTerminal("loading")
+    : terminalEnv.kind === "unavailable"
+      ? tTerminal(terminalEnv.reason)
+      : undefined
+  // The recipe embeds the home too, so a stale process.env cannot override the resolved root.
+  const terminalAgent =
+    terminalEnv?.kind === "isolated"
+      ? {
+          ...agent,
+          process: { ...agent.process!, env: { ...agent.process?.env, ...terminalEnv.env } },
+        }
+      : agent
   const [busy, setBusy] = useState(false)
   const [sessionId, setSessionId] = useState("")
   const [confirmation, setConfirmation] = useState<{
@@ -87,7 +135,8 @@ function KimiManagementSession({ agent }: { agent: ExternalAgentConfig }) {
   ) => {
     setBusy(true)
     try {
-      const command = kimiManagementCommand(agent, action, sessionId)
+      if (!terminalEnv || terminalEnv.kind === "unavailable") return
+      const command = kimiManagementCommand(terminalAgent, action, sessionId)
       if (launch) {
         if (selectTerminalTransport() !== "tauri-channel" || detectPlatform() === "windows") {
           throw new Error("local POSIX terminal required")
@@ -101,7 +150,12 @@ function KimiManagementSession({ agent }: { agent: ExternalAgentConfig }) {
         // The wrapper makes command quoting independent of the user's selected
         // terminal shell. Local POSIX hosts only; never send state paths to a
         // remote terminal or weaken the external-agent sandbox policy.
-        await runInTerminalDock(`/bin/sh -c ${shellQuote(command)}`, agent.process?.cwd ?? "", "")
+        await runInTerminalDock(
+          `/bin/sh -c ${shellQuote(command)}`,
+          agent.process?.cwd ?? "",
+          "",
+          terminalEnv.kind === "isolated" ? { env: terminalEnv.env } : {}
+        )
         if (mounted.current) toast.success(t("opened"))
       } else {
         await writeClipboardText(command)
@@ -118,29 +172,26 @@ function KimiManagementSession({ agent }: { agent: ExternalAgentConfig }) {
   }
 
   return (
-    <section className="space-y-3 rounded-md border p-3" aria-label={t("title")}>
-      <div>
-        <h4 className="text-sm font-medium">{t("title")}</h4>
-        <p className="text-xs text-muted-foreground">{t("ownership")}</p>
-      </div>
+    <SettingsBlock title={t("title")} description={t("ownership")} headingLevel={4}>
       <p className="text-xs text-muted-foreground">{t("terminalPolicy")}</p>
-      <div className="space-y-2">
+      {terminalReason && <p className="text-xs text-muted-foreground">{terminalReason}</p>}
+      <div className="divide-y divide-border/60">
         {ACTIONS.map((action) => {
           let command = ""
           try {
-            command = kimiManagementCommand(agent, action)
+            command = kimiManagementCommand(terminalAgent, action)
           } catch {
             /* Invalid config is surfaced by the disabled action. */
           }
           return (
-            <div key={action} className="space-y-1 rounded border p-2">
+            <div key={action} className="space-y-1 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-medium">{t(`actions.${action}`)}</span>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1">
                   <Button
                     size="sm"
                     variant="ghost"
-                    disabled={busy || !command}
+                    disabled={busy || !!terminalReason || !command}
                     onClick={() => void perform(action, false)}
                     aria-label={t("copyAction", { action: t(`actions.${action}`) })}
                   >
@@ -158,6 +209,7 @@ function KimiManagementSession({ agent }: { agent: ExternalAgentConfig }) {
                         busy ||
                         !command ||
                         !canLaunch ||
+                        !!terminalReason ||
                         (PACKAGE_ACTIONS.has(action) && isPackageBlocked)
                       }
                       onClick={() => {
@@ -182,7 +234,7 @@ function KimiManagementSession({ agent }: { agent: ExternalAgentConfig }) {
       </div>
       <div className="space-y-2">
         <Label htmlFor={`kimi-export-${agent.id}`}>{t("exportSession")}</Label>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Input
             id={`kimi-export-${agent.id}`}
             value={sessionId}
@@ -191,7 +243,7 @@ function KimiManagementSession({ agent }: { agent: ExternalAgentConfig }) {
           />
           <Button
             variant="outline"
-            disabled={busy || !sessionId.trim() || sessionId.startsWith("-")}
+            disabled={busy || !!terminalReason || !sessionId.trim() || sessionId.startsWith("-")}
             onClick={() => void perform("export", false)}
           >
             {t("copyExport")}
@@ -239,7 +291,7 @@ function KimiManagementSession({ agent }: { agent: ExternalAgentConfig }) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              disabled={busy || isPackageBlocked || !canLaunch}
+              disabled={busy || isPackageBlocked || !canLaunch || !!terminalReason}
               onClick={(event) => {
                 event.preventDefault()
                 if (confirmation) void perform(confirmation.action, true, confirmation.command)
@@ -250,6 +302,6 @@ function KimiManagementSession({ agent }: { agent: ExternalAgentConfig }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </section>
+    </SettingsBlock>
   )
 }

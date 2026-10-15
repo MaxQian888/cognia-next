@@ -3,6 +3,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+// Resolve complete namespaces from split sources; aggregates are rebuilt by the orchestrator.
 import { HostExternalAgentConfigs } from "./host-external-agent-configs"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
@@ -23,6 +24,54 @@ const state: { current: HostExternalAgentConfigsState } = {
 
 jest.mock("@/hooks/agent/use-host-external-agent-configs", () => ({
   useHostExternalAgentConfigs: () => state.current,
+}))
+
+jest.mock("@/components/agent/external-agent/add-agent/preset-picker-list", () => ({
+  PresetPickerList: ({ onPick }: { onPick: (presetId: string) => void }) => (
+    <button onClick={() => onPick("codex")}>Pick Codex runtime</button>
+  ),
+}))
+
+jest.mock("@/components/agent/external-agent/host/host-agent-editor", () => ({
+  HostAgentEditor: ({
+    configId,
+    onRemoved,
+    onDuplicated,
+    onSaved,
+    onOpenConfig,
+  }: {
+    configId: string
+    onRemoved: () => void
+    onDuplicated: (id: string) => void
+    onSaved: () => void
+    onOpenConfig: (id: string) => void
+  }) => (
+    <div data-testid="shared-host-editor">
+      <span>{configId}</span>
+      <button onClick={onRemoved}>Remove edited configuration</button>
+      <button onClick={() => onDuplicated("eac_copy")}>Duplicate edited configuration</button>
+      <button onClick={onSaved}>Save edited configuration</button>
+      <button onClick={() => onOpenConfig("eac_sibling")}>Open sibling configuration</button>
+    </div>
+  ),
+}))
+
+jest.mock("@/components/agent/external-agent/host/host-agent-create-form", () => ({
+  HostAgentCreateForm: ({
+    presetId,
+    onCreated,
+    onCancel,
+  }: {
+    presetId: string
+    onCreated: (id: string) => void
+    onCancel: () => void
+  }) => (
+    <div data-testid="shared-host-create-form">
+      <span>{presetId}</span>
+      <button onClick={() => onCreated("eac_created")}>Create host configuration</button>
+      <button onClick={onCancel}>Choose another runtime</button>
+    </div>
+  ),
 }))
 
 const localAgents: {
@@ -61,6 +110,7 @@ function setState(over: Partial<HostExternalAgentConfigsState> = {}) {
   state.current = {
     configs: [],
     loading: false,
+    loaded: true,
     unavailable: null,
     error: null,
     busy: false,
@@ -97,7 +147,7 @@ describe("HostExternalAgentConfigs", () => {
   // The three unreachable reasons are different screens on purpose: "pair a
   // host", "wait", and "upgrade the host" are three different actions.
   it.each([
-    ["no-host", /Pair a host/i],
+    ["no-host", /Pair a host to configure/i],
     ["unsupported", /does not support/i],
     ["manifest-missing", /Waiting for/i],
   ] as const)("explains %s rather than showing an empty list", (reason, copy) => {
@@ -117,6 +167,49 @@ describe("HostExternalAgentConfigs", () => {
     setState({ loading: true })
     render(<HostExternalAgentConfigs />)
     expect(screen.getByText(/Loading host configurations/i)).toBeInTheDocument()
+  })
+
+  it("links an unpaired device to Connectivity settings", () => {
+    setState({ unavailable: "no-host", loaded: false })
+    render(<HostExternalAgentConfigs />)
+    expect(screen.getByRole("link", { name: "Pair a host" })).toHaveAttribute(
+      "href",
+      "/settings?section=connectivity"
+    )
+  })
+
+  it("shows a first-load failure with retry without claiming the Host is empty", async () => {
+    const refresh = jest.fn(async () => {})
+    setState({ loaded: false, error: "relay timeout", refresh })
+    render(<HostExternalAgentConfigs />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not load host configurations")
+    expect(screen.getByRole("alert")).toHaveTextContent("relay timeout")
+    expect(screen.queryByText(/No agents configured on this host/i)).not.toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Retry" }))
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps retry loading distinct from its previous failure", () => {
+    setState({ loaded: false, loading: true, error: "relay timeout" })
+    render(<HostExternalAgentConfigs />)
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true")
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(screen.queryByText(/No agents configured on this host/i)).not.toBeInTheDocument()
+  })
+
+  it("keeps its focus heading and renders flat divided rows", () => {
+    setState({ configs: [record()] })
+    const { container } = render(<HostExternalAgentConfigs />)
+    expect(screen.getByRole("heading", { name: "Host-owned agents" })).toHaveAttribute(
+      "tabindex",
+      "-1"
+    )
+    expect(screen.getByRole("heading", { name: "Host-owned agents" })).toHaveAttribute(
+      "data-detail-heading"
+    )
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    expect(screen.getByTestId("host-config-eac_1")).toHaveClass("border-0")
+    expect(screen.getByTestId("host-config-eac_1").parentElement).toHaveClass("divide-y")
   })
 
   it("surfaces a write failure in the panel, not only as a toast", () => {
@@ -166,7 +259,8 @@ describe("HostExternalAgentConfigs", () => {
     const remove = jest.fn(async () => true)
     setState({ configs: [record()], remove })
     render(<HostExternalAgentConfigs />)
-    await userEvent.click(screen.getByRole("button", { name: /Delete Pi/i }))
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Pi" }))
+    await userEvent.click(screen.getByRole("menuitem", { name: /Delete Pi/i }))
     expect(remove).not.toHaveBeenCalled()
     const confirm = screen.getByRole("alertdialog")
     expect(confirm).toHaveTextContent('Delete "Pi" from the host?')
@@ -180,7 +274,8 @@ describe("HostExternalAgentConfigs", () => {
     const remove = jest.fn(async () => true)
     setState({ configs: [record()], remove })
     render(<HostExternalAgentConfigs />)
-    await userEvent.click(screen.getByRole("button", { name: /Delete Pi/i }))
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Pi" }))
+    await userEvent.click(screen.getByRole("menuitem", { name: /Delete Pi/i }))
     await userEvent.click(screen.getByRole("button", { name: /^Cancel$/ }))
     expect(remove).not.toHaveBeenCalled()
   })
@@ -197,6 +292,7 @@ describe("HostExternalAgentConfigs", () => {
     setState({ configs: [record()], busy: true })
     render(<HostExternalAgentConfigs />)
     expect(screen.getByRole("switch")).toBeDisabled()
+    expect(screen.getByRole("combobox")).toBeDisabled()
     for (const button of screen.getAllByRole("button")) expect(button).toBeDisabled()
   })
 
@@ -204,6 +300,88 @@ describe("HostExternalAgentConfigs", () => {
     setState({ configs: [record({ config: {} as never })] })
     render(<HostExternalAgentConfigs />)
     expect(screen.getByText("eac_1")).toBeInTheDocument()
+  })
+
+  it("updates permission against the row's current revision", async () => {
+    const source = record()
+    const update = jest.fn(async () => true)
+    setState({ configs: [source], update })
+    render(<HostExternalAgentConfigs />)
+    await userEvent.click(screen.getByRole("combobox", { name: "Permission mode for Pi" }))
+    await userEvent.click(screen.getByRole("option", { name: "Plan" }))
+    expect(update).toHaveBeenCalledWith(source, { defaultPermissionMode: "plan" })
+  })
+
+  it("offers only permission modes the host runtime supports", async () => {
+    setState({ configs: [record({ config: { name: "Remote", protocol: "a2a" } as never })] })
+    render(<HostExternalAgentConfigs />)
+    await userEvent.click(screen.getByRole("combobox", { name: "Permission mode for Remote" }))
+    expect(screen.getAllByRole("option")).toHaveLength(1)
+    expect(screen.getByRole("option")).toHaveTextContent("Default")
+  })
+
+  it("opens the route-free editor and refreshes the list after saving", async () => {
+    setState({ configs: [record()] })
+    render(<HostExternalAgentConfigs />)
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pi" }))
+    const sheet = screen.getByRole("dialog", { name: "Edit host configuration" })
+    expect(sheet).toHaveClass("w-full", "sm:max-w-lg")
+    expect(within(sheet).getByTestId("shared-host-editor")).toHaveTextContent("eac_1")
+    await userEvent.click(within(sheet).getByRole("button", { name: "Save edited configuration" }))
+    expect(state.current.refresh).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Remove edited configuration" })
+    )
+    expect(state.current.refresh).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("keeps duplicates and siblings inside the desktop editor sheet", async () => {
+    setState({ configs: [record()] })
+    render(<HostExternalAgentConfigs />)
+    await userEvent.click(screen.getByRole("button", { name: "Edit Pi" }))
+    await userEvent.click(screen.getByRole("button", { name: "Duplicate edited configuration" }))
+    expect(screen.getByTestId("shared-host-editor")).toHaveTextContent("eac_copy")
+    expect(state.current.refresh).toHaveBeenCalledTimes(1)
+    await userEvent.click(screen.getByRole("button", { name: "Open sibling configuration" }))
+    expect(screen.getByTestId("shared-host-editor")).toHaveTextContent("eac_sibling")
+  })
+
+  it("creates from the shared picker and highlights the created row after closing", async () => {
+    const created = record({
+      configId: "eac_created",
+      config: { name: "Codex", protocol: "acp" } as never,
+    })
+    setState({ configs: [] })
+    const { rerender } = render(<HostExternalAgentConfigs />)
+    await userEvent.click(screen.getByRole("button", { name: "New on host" }))
+    expect(screen.getByRole("dialog", { name: "New on host" })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Pick Codex runtime" }))
+    expect(screen.getByTestId("shared-host-create-form")).toHaveTextContent("codex")
+    await userEvent.click(screen.getByRole("button", { name: "Create host configuration" }))
+    expect(state.current.refresh).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    state.current.configs = [created]
+    rerender(<HostExternalAgentConfigs />)
+    expect(screen.getByTestId("host-config-eac_created")).toHaveAttribute(
+      "data-highlighted",
+      "true"
+    )
+  })
+
+  it("returns to the picker on cancel and starts each new sheet at the picker", async () => {
+    setState({ configs: [] })
+    render(<HostExternalAgentConfigs />)
+    await userEvent.click(screen.getByRole("button", { name: "New on host" }))
+    await userEvent.click(screen.getByRole("button", { name: "Pick Codex runtime" }))
+    await userEvent.click(screen.getByRole("button", { name: "Choose another runtime" }))
+    expect(screen.getByRole("button", { name: "Pick Codex runtime" })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Pick Codex runtime" }))
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await userEvent.click(screen.getByRole("button", { name: "New on host" }))
+    expect(screen.getByRole("button", { name: "Pick Codex runtime" })).toBeInTheDocument()
+    expect(screen.queryByTestId("shared-host-create-form")).not.toBeInTheDocument()
   })
 })
 
@@ -294,7 +472,8 @@ describe("instances on the host (ADR-0216)", () => {
     }))
     setState({ configs: [record({ config: codex({}) })], duplicate })
     renderInShell()
-    await userEvent.click(screen.getByRole("button", { name: "Duplicate Codex" }))
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Codex" }))
+    await userEvent.click(screen.getByRole("menuitem", { name: "Duplicate Codex" }))
     const name = screen.getByTestId("duplicate-agent-name")
     expect(name).toHaveValue("Codex (copy)")
     await userEvent.clear(name)
@@ -321,7 +500,8 @@ describe("instances on the host (ADR-0216)", () => {
     const duplicate = jest.fn(async () => ({ ok: false as const, error: "keyring locked" }))
     setState({ configs: [record({ config: codex({}) })], duplicate })
     renderInShell()
-    await userEvent.click(screen.getByRole("button", { name: "Duplicate Codex" }))
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Codex" }))
+    await userEvent.click(screen.getByRole("menuitem", { name: "Duplicate Codex" }))
     await userEvent.click(screen.getByTestId("duplicate-agent-submit"))
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("keyring locked"))
@@ -337,7 +517,8 @@ describe("instances on the host (ADR-0216)", () => {
       ],
     })
     renderInShell()
-    await userEvent.click(screen.getByRole("button", { name: "Duplicate Codex" }))
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Codex" }))
+    await userEvent.click(screen.getByRole("menuitem", { name: "Duplicate Codex" }))
     expect(screen.getByTestId("duplicate-agent-name")).not.toHaveValue("Codex (copy)")
   })
 

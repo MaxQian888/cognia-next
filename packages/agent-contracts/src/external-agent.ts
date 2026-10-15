@@ -1692,6 +1692,9 @@ export interface CreateExternalAgentInput {
  */
 export interface UpdateExternalAgentInput {
   name?: string
+  /** A protocol change rebuilds the live adapter, like a process change. */
+  protocol?: ExternalAgentProtocol
+  transport?: ExternalAgentTransport
   /** Null clears the configured binding; omission preserves it. */
   cogniaModel?: ExternalAgentCogniaModelBinding | null
   stateIsolation?: ExternalAgentStateIsolation

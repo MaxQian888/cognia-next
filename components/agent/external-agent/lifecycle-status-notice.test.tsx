@@ -34,6 +34,7 @@ describe("LifecycleStatusNotice", () => {
     renderNotice({ status: "blocked", reasonCode: "adapter_unavailable" })
 
     expect(screen.getByTestId("lifecycle-status-notice")).toHaveAttribute("data-status", "blocked")
+    expect(screen.getByTestId("lifecycle-status-notice")).not.toHaveClass("border")
     expect(screen.getByText("Cannot start")).toBeInTheDocument()
     expect(
       screen.getByText("The plugin that provides this agent's protocol is not enabled.")

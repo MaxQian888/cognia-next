@@ -59,9 +59,13 @@ describe("MobileExternalAgentsPage", () => {
     expect(screen.queryByTestId("desktop-local-agents-stub")).toBeNull()
   })
 
-  it("renders neither the lists nor the placeholder while pairing state loads", () => {
+  it("shows the screen skeleton while pairing state loads", () => {
     mockPaired(false, true)
     render(<MobileExternalAgentsPage />)
+    expect(screen.getByTestId("external-agent-screen-skeleton")).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
     expect(screen.queryByTestId("paired-only-placeholder")).toBeNull()
     expect(screen.queryByTestId("host-agent-list-stub")).toBeNull()
   })

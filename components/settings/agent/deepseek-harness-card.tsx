@@ -25,6 +25,7 @@ import {
  */
 
 interface DeepSeekHarnessCardProps {
+  profile?: DshProfileId
   profileId?: DshProfileId
 }
 
@@ -40,7 +41,8 @@ const FINDING_KEYS: Record<DshDoctorFinding["code"], string> = {
 }
 
 export function DeepSeekHarnessCard({
-  profileId = "cognia-sdk-readonly",
+  profile,
+  profileId = profile ?? "cognia-sdk-readonly",
 }: DeepSeekHarnessCardProps) {
   const t = useTranslations("externalAgent.settings.deepseekHarness")
   const { supported, report, busy, error, installed, refresh, install, remove } =
@@ -60,18 +62,17 @@ export function DeepSeekHarnessCard({
   ] as const
 
   if (!supported) {
-    return (
-      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-        {t("description")}
-      </div>
-    )
+    return <p className="text-xs text-muted-foreground">{t("description")}</p>
   }
 
   return (
-    <div className="space-y-3 rounded-md border p-3" data-testid="deepseek-harness-card">
+    <div
+      className="@container/settings-stack space-y-3 rounded-md border p-3"
+      data-testid="deepseek-harness-card"
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium">{t("title")}</p>
             <Badge variant="outline">{t("experimentalBadge")}</Badge>
           </div>
@@ -94,27 +95,37 @@ export function DeepSeekHarnessCard({
         {t("experimentalNotice")}
       </p>
 
-      <div className="flex items-center gap-2 text-xs" data-testid="dsh-status">
-        {installed ? (
-          report?.healthy ? (
-            <CheckCircle2 className="size-3.5 text-emerald-600" />
+      {report || !error ? (
+        <div className="flex items-center gap-2 text-xs" role="status" data-testid="dsh-status">
+          {!report ? (
+            <RefreshCw className="size-3.5 animate-spin text-muted-foreground" />
+          ) : installed ? (
+            report?.healthy ? (
+              <CheckCircle2 className="size-3.5 text-emerald-600" />
+            ) : (
+              <AlertTriangle className="size-3.5 text-amber-600" />
+            )
           ) : (
-            <AlertTriangle className="size-3.5 text-amber-600" />
-          )
-        ) : (
-          <XCircle className="size-3.5 text-muted-foreground" />
-        )}
-        <span>
-          {!installed ? t("notInstalled") : report?.healthy ? t("healthy") : t("unhealthy")}
-        </span>
-      </div>
+            <XCircle className="size-3.5 text-muted-foreground" />
+          )}
+          <span>
+            {!report
+              ? t("checking")
+              : !installed
+                ? t("notInstalled")
+                : report.healthy
+                  ? t("healthy")
+                  : t("unhealthy")}
+          </span>
+        </div>
+      ) : null}
 
       {installed && report && !report.healthy ? (
-        <ul className="space-y-1" data-testid="dsh-findings">
+        <ul className="divide-y divide-amber-500/20" data-testid="dsh-findings">
           {report.findings.map((finding, index) => (
             <li
               key={`${finding.code}-${index}`}
-              className="rounded border border-amber-500/40 bg-amber-500/5 p-2 text-xs"
+              className="py-2 text-xs text-amber-800 dark:text-amber-300"
             >
               {t(`findings.${FINDING_KEYS[finding.code]}`)}
             </li>
@@ -125,7 +136,7 @@ export function DeepSeekHarnessCard({
       <div className="space-y-1" data-testid="dsh-capabilities">
         <p className="text-xs font-medium">{t("capabilities")}</p>
         {capabilityRows.map(([key, enabled]) => (
-          <div key={key} className="flex items-center justify-between text-xs">
+          <div key={key} className="flex items-start justify-between gap-4 text-xs">
             <span className="text-muted-foreground">{t(key)}</span>
             <span>{enabled ? t("capabilitySupported") : t("capabilityUnsupported")}</span>
           </div>
@@ -143,21 +154,44 @@ export function DeepSeekHarnessCard({
       )}
 
       {error ? (
-        <p className="text-xs text-destructive" role="alert" data-testid="dsh-error">
-          {error}
-        </p>
+        <div className="space-y-2">
+          <p className="break-words text-xs text-destructive" role="alert" data-testid="dsh-error">
+            {error}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full @md/settings-stack:w-auto [[data-detail-density=stacked]_&]:w-full"
+            onClick={() => void refresh()}
+            disabled={busy}
+          >
+            {t("retry")}
+          </Button>
+        </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={() => void install()} disabled={busy} data-testid="dsh-install">
+      <div className="flex flex-col gap-2 @md/settings-stack:flex-row [[data-detail-density=stacked]_&]:flex-col [[data-detail-density=stacked]_&]:items-stretch @md/settings-stack:flex-wrap @md/settings-stack:items-center">
+        <Button
+          size="sm"
+          onClick={() => void install()}
+          disabled={busy || !report}
+          data-testid="dsh-install"
+        >
           <Download className="mr-1 size-3.5" />
-          {busy ? t("installing") : installed ? t("reinstall") : t("install")}
+          {busy && !report
+            ? t("checking")
+            : busy
+              ? t("installing")
+              : installed
+                ? t("reinstall")
+                : t("install")}
         </Button>
         {installed ? (
           confirmingRemove ? (
             <Button
               size="sm"
               variant="destructive"
+              className="h-auto whitespace-normal"
               onClick={() => {
                 setConfirmingRemove(false)
                 void remove()

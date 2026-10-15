@@ -50,7 +50,20 @@
     "editLabel": "编辑规则 {name}",
     "deleteTitle": "删除规则“{name}”？",
     "deleteDescription": "聊天回合将不再按此规则路由。此操作无法撤销。",
-    "missingTarget": "不可用的智能体"
+    "missingTarget": "不可用的智能体",
+    "noAgentsTitle": "尚未配置智能体",
+    "noEnabledTitle": "所有智能体均已禁用",
+    "noEnabledDescription": "启用智能体后，自动路由才能运行。",
+    "addAgent": "添加智能体",
+    "openAgent": "打开 {name}",
+    "disabledTarget": "已禁用",
+    "disabledTargetOption": "{name}（已禁用）",
+    "disabledTargetHint": "启用目标智能体后，此规则才会运行。",
+    "enableTarget": "启用",
+    "nameRequired": "请输入规则名称。",
+    "targetRequired": "请选择仍存在的智能体。",
+    "matcherRequired": "请输入此条件的匹配内容。",
+    "priority": "优先级 {priority}"
   },
   "hostConfigs": {
     "deleteTitle": "从主机删除“{name}”？",

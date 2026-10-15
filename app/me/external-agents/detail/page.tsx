@@ -25,12 +25,12 @@ function DetailScreen() {
   const configId = useSearchParams().get("id") ?? ""
   return (
     <SubPageShell
-      title={t("detailTitle")}
+      title={t("title")}
       backAria={t("backToListAria")}
       backHref={EXTERNAL_AGENTS_ROUTE}
       testid="mobile-external-agent-detail-page"
     >
-      <PairedOnly>
+      <PairedOnly loadingFallback={<ExternalAgentScreenSkeleton />}>
         {/* Keyed so moving to a sibling (or a fresh copy) starts a fresh screen. */}
         <HostAgentDetail key={configId} configId={configId} />
       </PairedOnly>

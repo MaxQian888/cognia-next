@@ -16,7 +16,7 @@
  * the other configurations of its runtime, and a quick-connect button. The add
  * row and the CONFIGURE group of non-agent destinations close the list.
  *
- * At the stacked pane tier (<560px, see `SettingsListDetail`) the list and the
+ * At the stacked pane tier (<720px, see `SettingsListDetail`) the list and the
  * detail take turns owning the pane — the same list→detail push the provider
  * settings use: the full list (search, groups, quick connect) fills the pane,
  * choosing a destination shows its detail under a back bar, and the back bar
@@ -35,7 +35,8 @@ import {
   Search,
   ServerCog,
   Settings2,
-  Sparkles,
+  ListFilter,
+  X,
 } from "lucide-react"
 import { useId, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -43,7 +44,14 @@ import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { BrandIcon } from "@/components/icons/brand-icon"
 import { cn } from "@/lib/utils"
 import { getPresetDisplayInfo, isFromPreset } from "@/lib/ai/agent/external/config/presets"
@@ -60,7 +68,6 @@ import { AgentReadinessDots } from "./agent-readiness-pipeline"
 /** What the right-hand detail pane is currently showing. */
 export type AgentSettingsView =
   | { kind: "overview" }
-  | { kind: "gallery" }
   | { kind: "global" }
   | { kind: "delegation" }
   | { kind: "runtimes" }
@@ -72,19 +79,21 @@ export type AgentRailStackedView = "list" | "detail"
 
 export type AgentRailGroupBy = "readiness" | "runtime"
 
-type ReadinessGroupId = "attention" | "connected" | "inactive"
+export type AgentStateFilter = "all" | "attention" | "connected" | "off"
 
-const READINESS_GROUP_ORDER: ReadinessGroupId[] = ["attention", "connected", "inactive"]
+type ReadinessGroupId = Exclude<AgentStateFilter, "all">
+
+const READINESS_GROUP_ORDER: ReadinessGroupId[] = ["attention", "connected", "off"]
 
 /**
  * Readiness state → rail group. "connecting" sits with attention rather than
  * inactive: it is a transitional state worth watching, and a connect that
  * stalls is indistinguishable from a failure until it resolves.
  */
-function groupForState(state: AgentReadinessState | undefined): ReadinessGroupId {
+export function groupForState(state: AgentReadinessState | undefined): ReadinessGroupId {
   if (state === "connected") return "connected"
   if (state === "blocked" || state === "error" || state === "connecting") return "attention"
-  return "inactive"
+  return "off"
 }
 
 function viewKey(view: AgentSettingsView): string {
@@ -181,9 +190,20 @@ function AgentRow({
   onPower: () => void
 }) {
   const t = useTranslations("externalAgent.settings")
+  const tReadiness = useTranslations("externalAgent.readiness")
   const reasonId = useId()
   const presetId = isFromPreset(agent)
   const fromPresetName = presetId ? getPresetDisplayInfo(presetId)?.name : undefined
+  const repeatsPresetName = fromPresetName?.trim().toLowerCase() === agent.name.trim().toLowerCase()
+  const dotsLabel = readiness
+    ? tReadiness("dotsLabel", {
+        summary: readiness.steps
+          .map(
+            (step) => `${tReadiness(`steps.${step.id}`)}: ${tReadiness(`stepStates.${step.state}`)}`
+          )
+          .join(", "),
+      })
+    : undefined
   const connected = readiness?.state === "connected"
   // Blocked and deliberately-disabled agents cannot accept a connection —
   // the power button would only produce an error toast.
@@ -192,44 +212,60 @@ function AgentRow({
 
   return (
     <div className={cn("group flex items-center gap-0.5 rounded-md", active && "bg-accent")}>
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={onSelect}
-        aria-current={active ? "page" : undefined}
-        aria-describedby={blockReason ? reasonId : undefined}
-        data-testid={`agent-row-${agent.id}`}
-        // The hover title stays for a mouse; keyboard and screen-reader users
-        // get the same reason through `aria-describedby`.
-        title={blockReason ?? `${agent.protocol} · ${agent.transport}`}
-        className={cn(
-          "touch-hit h-auto min-w-0 flex-1 justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left text-sm font-normal hover:bg-accent/50",
-          active && "font-medium text-accent-foreground"
-        )}
-      >
-        <BrandIcon id={presetId ?? agent.name} label={agent.name} size={20} />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="truncate">{agent.name}</span>
-            {showPresetBadge && fromPresetName && (
-              <Badge
-                variant="outline"
-                className="h-4 shrink-0 px-1 text-[9px] font-normal"
-                data-testid={`agent-from-preset-${agent.id}`}
-              >
-                {fromPresetName}
-              </Badge>
-            )}
-          </span>
-          <InstanceTraitChips traits={traits} max={2} className="mt-0.5" />
-          {readiness ? <AgentReadinessDots readiness={readiness} className="mt-1" /> : null}
-          {blockReason ? (
-            <span id={reasonId} className="sr-only">
-              {blockReason}
+      <div className="min-w-0 flex-1">
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={onSelect}
+          aria-current={active ? "page" : undefined}
+          aria-describedby={blockReason ? reasonId : undefined}
+          data-testid={`agent-row-${agent.id}`}
+          // The hover title stays for a mouse; keyboard and screen-reader users
+          // get the same reason through `aria-describedby`.
+          title={blockReason ?? `${agent.protocol} · ${agent.transport}`}
+          className={cn(
+            "touch-hit h-auto w-full min-w-0 justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left text-sm font-normal hover:bg-accent/50",
+            active && "font-medium text-accent-foreground"
+          )}
+        >
+          <BrandIcon id={presetId ?? agent.name} label={agent.name} size={20} />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5 overflow-hidden">
+              <span className="min-w-0 max-w-full shrink-0 basis-auto truncate">{agent.name}</span>
+              {showPresetBadge && fromPresetName && !repeatsPresetName && (
+                <Badge
+                  variant="outline"
+                  className="h-4 min-w-0 shrink overflow-hidden px-1 text-[9px] font-normal [&>span]:truncate"
+                  data-testid={`agent-from-preset-${agent.id}`}
+                >
+                  <span>{fromPresetName}</span>
+                </Badge>
+              )}
             </span>
-          ) : null}
-        </span>
-      </Button>
+            <InstanceTraitChips traits={traits} max={2} className="mt-0.5" />
+            {blockReason ? (
+              <span id={reasonId} className="sr-only">
+                {blockReason}
+              </span>
+            ) : null}
+          </span>
+        </Button>
+        {readiness ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                tabIndex={0}
+                aria-label={dotsLabel}
+                className="ml-10 mb-1 inline-flex rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                data-testid={`agent-readiness-dots-${agent.id}`}
+              >
+                <AgentReadinessDots readiness={readiness} />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-64">{dotsLabel}</TooltipContent>
+          </Tooltip>
+        ) : null}
+      </div>
       {/* Connect without leaving the list — the most frequent action should
           not be two clicks deep. */}
       <Button
@@ -265,6 +301,8 @@ export function ExternalAgentRail({
   enabled,
   groupBy,
   onGroupByChange,
+  stateFilter,
+  onStateFilterChange,
   stackedView,
   onStackedViewChange,
   onViewChange,
@@ -281,6 +319,8 @@ export function ExternalAgentRail({
   enabled: boolean
   groupBy: AgentRailGroupBy
   onGroupByChange: (groupBy: AgentRailGroupBy) => void
+  stateFilter: AgentStateFilter
+  onStateFilterChange: (filter: AgentStateFilter) => void
   stackedView: AgentRailStackedView
   onStackedViewChange: (view: AgentRailStackedView) => void
   onViewChange: (view: AgentSettingsView) => void
@@ -291,8 +331,7 @@ export function ExternalAgentRail({
 }) {
   const t = useTranslations("externalAgent.settings")
   const tReadiness = useTranslations("externalAgent.readiness")
-  const tRuntimes = useTranslations("externalAgent.runtimes")
-  const tHostConfigs = useTranslations("externalAgent.hostConfigs")
+  const tRail = useTranslations("externalAgent.rail")
   const density = useSettingsListDensity()
   const [query, setQuery] = useState("")
 
@@ -311,33 +350,41 @@ export function ExternalAgentRail({
     {
       view: { kind: "delegation" },
       icon: Route,
-      label: t("delegation.title"),
+      label: tRail("automaticRouting"),
       testId: "nav-delegation",
     },
     {
-      view: { kind: "gallery" },
-      icon: Sparkles,
-      label: t("quickStartTitle"),
-      testId: "nav-quick-start",
+      view: { kind: "runtimes" },
+      icon: Boxes,
+      label: tRail("runtimesAndInstalls"),
+      testId: "nav-runtimes",
     },
-    { view: { kind: "runtimes" }, icon: Boxes, label: tRuntimes("title"), testId: "nav-runtimes" },
     {
       view: { kind: "host" },
       icon: ServerCog,
-      label: tHostConfigs("title"),
+      label: tRail("hostOwnedAgents"),
       testId: "nav-host-configs",
     },
   ]
 
   const stacked = density === "stacked"
-  // Choosing anything at the stacked tier hands the pane to its detail.
+  // The owner guards navigation before handing the stacked pane to its detail.
   const choose = (next: AgentSettingsView) => {
     onViewChange(next)
-    if (stacked) onStackedViewChange("detail")
   }
 
   const q = query.trim().toLowerCase()
-  const filtered = agents.filter((agent) => matchesQuery(agent, q))
+  const filtered = agents.filter(
+    (agent) =>
+      matchesQuery(agent, q) &&
+      (stateFilter === "all" || groupForState(readinessById.get(agent.id)?.state) === stateFilter)
+  )
+  const filterLabel =
+    stateFilter === "connected"
+      ? tReadiness("states.connected")
+      : stateFilter === "attention"
+        ? t("railGroupAttention")
+        : tRail("off")
   const groups: { id: string; label: string; agents: LifecycleExternalAgentConfig[] }[] =
     groupBy === "runtime"
       ? Array.from(
@@ -365,12 +412,8 @@ export function ExternalAgentRail({
         })).filter((group) => group.agents.length > 0)
 
   if (stacked && stackedView === "detail") {
-    const current =
-      view.kind === "agent"
-        ? (agents.find((agent) => agent.id === view.id)?.name ?? t("allAgents"))
-        : view.kind === "overview"
-          ? t("allAgents")
-          : (configureItems.find((item) => item.view.kind === view.kind)?.label ?? t("allAgents"))
+    // Only the way back. Every destination opens on its own heading, so
+    // naming it here as well put the same title on screen twice.
     return (
       <div className="flex min-w-0 items-center gap-2" data-testid="external-agent-rail-bar">
         <Button
@@ -383,9 +426,6 @@ export function ExternalAgentRail({
           <ArrowLeft className="h-4 w-4" />
           {t("railBackToList")}
         </Button>
-        <span className="min-w-0 truncate text-sm font-medium" aria-current="page">
-          {current}
-        </span>
       </div>
     )
   }
@@ -404,41 +444,63 @@ export function ExternalAgentRail({
     >
       {/* Fleet filter and grouping — pinned outside the scroll region. */}
       <div className="shrink-0 space-y-2 border-b p-2">
-        <div className="relative">
-          <Search
-            aria-hidden
-            className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("railSearchPlaceholder")}
-            aria-label={t("railSearchPlaceholder")}
-            className="h-8 pl-8 text-xs"
-            data-testid="agent-search"
-          />
+        <div className="flex min-w-0 items-center gap-1">
+          <div className="relative min-w-0 flex-1">
+            <Search
+              aria-hidden
+              className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("railSearchPlaceholder")}
+              aria-label={t("railSearchPlaceholder")}
+              className="h-8 pl-8 text-xs"
+              data-testid="agent-search"
+            />
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0"
+                aria-label={t("railGroupByLabel")}
+                data-testid="agent-rail-group-by"
+              >
+                <ListFilter className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup
+                value={groupBy}
+                onValueChange={(value) => {
+                  if (value === "readiness" || value === "runtime") onGroupByChange(value)
+                }}
+              >
+                <DropdownMenuRadioItem value="readiness">
+                  {t("railGroupByReadiness")}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="runtime">
+                  {t("railGroupByRuntime")}
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        <ToggleGroup
-          type="single"
-          size="sm"
-          variant="outline"
-          value={groupBy}
-          onValueChange={(value) => {
-            // A single toggle group reports "" when the active item is clicked
-            // again; grouping always has one answer.
-            if (value === "readiness" || value === "runtime") onGroupByChange(value)
-          }}
-          aria-label={t("railGroupByLabel")}
-          className="w-full"
-          data-testid="agent-rail-group-by"
-        >
-          <ToggleGroupItem value="readiness" className="flex-1 text-xs">
-            {t("railGroupByReadiness")}
-          </ToggleGroupItem>
-          <ToggleGroupItem value="runtime" className="flex-1 text-xs">
-            {t("railGroupByRuntime")}
-          </ToggleGroupItem>
-        </ToggleGroup>
+        {stateFilter !== "all" ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-auto max-w-full gap-1 whitespace-normal px-2 py-1 text-xs"
+            aria-label={tRail("clearFilter", { filter: filterLabel })}
+            onClick={() => onStateFilterChange("all")}
+            data-testid="agent-rail-state-filter"
+          >
+            <span className="min-w-0 break-words">{tRail("showing", { filter: filterLabel })}</span>
+            <X className="size-3 shrink-0" aria-hidden />
+          </Button>
+        ) : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
@@ -484,7 +546,7 @@ export function ExternalAgentRail({
               </div>
             </div>
           ))}
-          {filtered.length === 0 && q ? (
+          {filtered.length === 0 && (q || stateFilter !== "all") ? (
             <p className="px-2 py-3 text-xs text-muted-foreground" role="status">
               {t("railSearchEmpty")}
             </p>

@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+// Resolve complete namespaces from split sources; aggregates are rebuilt by the orchestrator.
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
@@ -39,7 +40,7 @@ beforeAll(() => {
   Element.prototype.releasePointerCapture = jest.fn()
 })
 
-// Rows in these tests only carry the config fields the card reads.
+// Rows in these tests only carry the config fields the list reads.
 type RecordOverrides = Omit<Partial<ExternalAgentConfigRecord>, "config"> & {
   config?: Partial<ExternalAgentConfigRecord["config"]>
 }
@@ -69,6 +70,7 @@ function setHost(over: Partial<HostExternalAgentConfigsState> = {}) {
   hostState.current = {
     configs: [],
     loading: false,
+    loaded: true,
     unavailable: null,
     error: null,
     busy: false,
@@ -123,7 +125,7 @@ describe("HostAgentList", () => {
     )
   })
 
-  it("renders one card per Host agent with its mark, name and connection", () => {
+  it("renders divided Host rows with their mark, name and connection", () => {
     setHost({
       configs: [
         record(),
@@ -152,7 +154,7 @@ describe("HostAgentList", () => {
   it("falls back to the config id when a row has no name", () => {
     setHost({ configs: [record({ config: { protocol: "acp", transport: "stdio" } })] })
     render(<HostAgentList />)
-    expect(screen.getByText("eac_1")).toBeInTheDocument()
+    expect(within(screen.getByTestId("host-agent-eac_1")).getByText("eac_1")).toBeInTheDocument()
   })
 
   it("will not offer the switch for a config the Host says cannot run", () => {
@@ -165,8 +167,8 @@ describe("HostAgentList", () => {
     render(<HostAgentList />)
     expect(screen.getByTestId("host-agent-switch-eac_1")).toBeDisabled()
     expect(
-      within(screen.getByTestId("host-agent-eac_1")).getByTestId("lifecycle-status-notice")
-    ).toHaveAttribute("data-status", "needs-runtime")
+      within(screen.getByTestId("host-agent-eac_1")).getByText("Needs attention")
+    ).toBeInTheDocument()
     expect(screen.getByTestId("host-agent-switch-eac_2")).not.toBeDisabled()
   })
 
@@ -174,7 +176,6 @@ describe("HostAgentList", () => {
     setHost({ busy: true, configs: [record()] })
     render(<HostAgentList />)
     expect(screen.getByTestId("host-agent-switch-eac_1")).toBeDisabled()
-    expect(screen.getByTestId("host-agent-mode-eac_1")).toBeDisabled()
     expect(screen.getByTestId("host-agent-menu-eac_1")).toBeDisabled()
   })
 
@@ -185,7 +186,9 @@ describe("HostAgentList", () => {
     setHost({ configs: [row], update })
     render(<HostAgentList />)
 
-    await user.click(screen.getByTestId("host-agent-switch-eac_1"))
+    const target = screen.getByTestId("host-agent-switch-eac_1").closest("label")!
+    expect(target).toHaveClass("size-11")
+    await user.click(target)
     await waitFor(() => expect(update).toHaveBeenCalledWith(row, { enabled: false }))
     expect(toastSuccess).toHaveBeenCalledWith("Change saved on the Host.")
   })
@@ -201,36 +204,14 @@ describe("HostAgentList", () => {
     expect(toastSuccess).not.toHaveBeenCalled()
   })
 
-  it("changes the permission mode through the Host", async () => {
-    const user = userEvent.setup()
-    const row = record()
-    const update = jest.fn(async () => true)
-    setHost({ configs: [row], update })
+  it("leaves permission editing in the detail instead of on every row", () => {
+    setHost({ configs: [record()] })
     render(<HostAgentList />)
-
-    await user.click(screen.getByTestId("host-agent-mode-eac_1"))
-    await user.click(await screen.findByRole("option", { name: "Plan" }))
-    await waitFor(() => expect(update).toHaveBeenCalledWith(row, { defaultPermissionMode: "plan" }))
-    expect(toastSuccess).toHaveBeenCalledWith("Change saved on the Host.")
-  })
-
-  it("shows the mode clamped to what the protocol can run", () => {
-    setHost({
-      configs: [
-        record({
-          config: {
-            name: "Remote",
-            protocol: "a2a",
-            transport: "http",
-            defaultPermissionMode: "plan",
-          },
-        }),
-      ],
-    })
-    render(<HostAgentList />)
-    // a2a only runs as `default`; a stored `plan` must not be shown as if it applied.
-    expect(screen.getByTestId("host-agent-mode-eac_1")).toHaveTextContent("Default")
-    expect(screen.getByTestId("host-agent-mode-eac_1")).not.toHaveTextContent("Plan")
+    expect(within(screen.getByTestId("host-agent-eac_1")).queryByRole("combobox")).toBeNull()
+    expect(screen.getByRole("link", { name: "Open Claude Code" })).toHaveAttribute(
+      "href",
+      "/me/external-agents/detail?id=eac_1"
+    )
   })
 
   it("removes an agent only after confirmation and toasts on success", async () => {
@@ -288,7 +269,7 @@ describe("HostAgentList", () => {
   it("shows a failed load as a load failure with a retry, not as an empty Host", async () => {
     const user = userEvent.setup()
     const refresh = jest.fn(async () => {})
-    setHost({ error: "relay timeout", refresh })
+    setHost({ loaded: false, error: "relay timeout", refresh })
     render(<HostAgentList />)
 
     expect(screen.getByTestId("host-agents-load-failed")).toHaveTextContent(
@@ -301,14 +282,14 @@ describe("HostAgentList", () => {
   })
 
   it("keeps showing the skeleton while a reload after a failure is in flight", () => {
-    setHost({ error: "relay timeout", loading: true })
+    setHost({ loaded: false, error: "relay timeout", loading: true })
     render(<HostAgentList />)
     expect(screen.getByTestId("host-agents-loading")).toBeInTheDocument()
     expect(screen.queryByTestId("host-agents-load-failed")).toBeNull()
     expect(screen.queryByTestId("host-agents-error")).toBeNull()
   })
 
-  it("opens the detail screen from the card body, with the controls outside the link", () => {
+  it("opens the detail screen from the row identity, with the controls outside the link", () => {
     setHost({ configs: [record()] })
     render(<HostAgentList />)
     const link = screen.getByRole("link", { name: "Open Claude Code" })
@@ -373,9 +354,131 @@ describe("HostAgentList", () => {
     expect(group).toHaveTextContent("2 configurations")
     expect(within(group).getByTestId("host-agent-eac_1")).toBeInTheDocument()
     expect(within(group).getByTestId("host-agent-eac_3")).toBeInTheDocument()
-    // A runtime with one configuration gets no header of its own.
     expect(within(group).queryByTestId("host-agent-eac_2")).toBeNull()
-    expect(screen.getAllByRole("group")).toHaveLength(1)
+    expect(screen.getAllByRole("group")).toHaveLength(2)
+    const row = within(group).getByTestId("host-agent-eac_1")
+    expect(row.parentElement).toHaveClass("divide-y", "border")
+    expect(row).not.toHaveClass("border")
+  })
+
+  it("searches configurations while preserving runtime grouping and lineage", async () => {
+    const user = userEvent.setup()
+    setHost({
+      configs: [
+        record(),
+        record({
+          configId: "eac_2",
+          config: {
+            name: "Claude work",
+            protocol: "acp",
+            transport: "stdio",
+            duplicatedFromAgentId: "eac_1",
+            metadata: { preset: "claude-code" },
+          },
+        }),
+        record({
+          configId: "eac_3",
+          config: {
+            name: "Remote",
+            protocol: "a2a",
+            transport: "http",
+          },
+        }),
+      ],
+    })
+    render(<HostAgentList />)
+    await user.type(screen.getByRole("textbox", { name: "Search agents" }), " work ")
+    expect(screen.queryByTestId("host-agent-eac_1")).toBeNull()
+    expect(screen.queryByTestId("host-agent-eac_3")).toBeNull()
+    const group = screen.getByRole("group", { name: /Claude Code/ })
+    expect(within(group).getByTestId("host-agent-eac_2")).toBeInTheDocument()
+    expect(within(group).getByText("Copy of Claude Code")).toBeInTheDocument()
+  })
+
+  it("keeps same-name configurations distinguishable after search and state filters", async () => {
+    const user = userEvent.setup()
+    setHost({
+      configs: [
+        record({
+          config: {
+            name: "Codex",
+            description: "Work",
+            protocol: "acp",
+            transport: "stdio",
+            defaultPermissionMode: "default",
+            stateIsolation: "shared",
+            metadata: { preset: "codex" },
+          },
+        }),
+        record({
+          configId: "eac_2",
+          enabled: false,
+          config: {
+            name: "Codex",
+            description: "Review",
+            protocol: "acp",
+            transport: "stdio",
+            defaultPermissionMode: "plan",
+            stateIsolation: "isolated",
+            metadata: { preset: "codex" },
+          },
+        }),
+      ],
+    })
+    render(<HostAgentList />)
+    const first = screen.getByTestId("host-agent-eac_1")
+    const second = screen.getByTestId("host-agent-eac_2")
+    expect(within(first).getByText("Ask")).toBeInTheDocument()
+    expect(within(second).getByText("Plan")).toBeInTheDocument()
+    expect(within(first).getAllByText("Shared state")).toHaveLength(1)
+    expect(within(second).getAllByText("Own state")).toHaveLength(1)
+
+    const search = screen.getByRole("textbox", { name: "Search agents" })
+    await user.type(search, "Review")
+    expect(screen.queryByTestId("host-agent-eac_1")).toBeNull()
+    expect(within(screen.getByTestId("host-agent-eac_2")).getByText("Plan")).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.click(screen.getByRole("combobox", { name: "Filter agents by state" }))
+    await user.click(await screen.findByRole("option", { name: "On" }))
+    expect(screen.queryByTestId("host-agent-eac_2")).toBeNull()
+    expect(within(screen.getByTestId("host-agent-eac_1")).getByText("Ask")).toBeInTheDocument()
+  })
+
+  it("filters attention, on and off independently and reports an empty filter result", async () => {
+    const user = userEvent.setup()
+    setHost({
+      configs: [
+        record(),
+        record({ configId: "eac_2", enabled: false }),
+        record({ configId: "eac_3", enabled: false, lifecycleStatus: "needs-runtime" }),
+      ],
+    })
+    render(<HostAgentList />)
+    const filter = screen.getByRole("combobox", { name: "Filter agents by state" })
+    await user.click(filter)
+    await user.click(await screen.findByRole("option", { name: "Needs attention" }))
+    expect(screen.getByTestId("host-agent-eac_3")).toBeInTheDocument()
+    expect(screen.queryByTestId("host-agent-eac_1")).toBeNull()
+    expect(screen.queryByTestId("host-agent-eac_2")).toBeNull()
+    await user.click(filter)
+    await user.click(await screen.findByRole("option", { name: "On" }))
+    expect(screen.getByTestId("host-agent-eac_1")).toBeInTheDocument()
+    expect(screen.queryByTestId("host-agent-eac_3")).toBeNull()
+    await user.click(filter)
+    await user.click(await screen.findByRole("option", { name: "Off" }))
+    expect(screen.getByTestId("host-agent-eac_2")).toBeInTheDocument()
+    expect(screen.getByTestId("host-agent-eac_3")).toBeInTheDocument()
+    await user.type(screen.getByRole("textbox", { name: "Search agents" }), "unknown")
+    expect(screen.getByRole("status")).toHaveTextContent("No agents match these filters.")
+    expect(screen.queryByTestId("host-agents-empty")).toBeNull()
+    expect(screen.getByRole("textbox", { name: "Search agents" })).toHaveValue("unknown")
+    await user.clear(screen.getByRole("textbox", { name: "Search agents" }))
+    await user.click(filter)
+    await user.click(await screen.findByRole("option", { name: "All" }))
+    expect(screen.getByTestId("host-agent-eac_1")).toBeInTheDocument()
+    expect(screen.getByTestId("host-agent-eac_2")).toBeInTheDocument()
+    expect(screen.getByTestId("host-agent-eac_3")).toBeInTheDocument()
   })
 
   it("offers edit, duplicate and remove in the overflow menu", async () => {
@@ -405,7 +508,10 @@ describe("HostAgentList", () => {
     await user.click(screen.getByTestId("duplicate-submit"))
 
     await waitFor(() =>
-      expect(duplicate).toHaveBeenCalledWith(row, expect.objectContaining({ name: "Claude Code (copy)" }))
+      expect(duplicate).toHaveBeenCalledWith(
+        row,
+        expect.objectContaining({ name: "Claude Code (copy)" })
+      )
     )
     expect(mockPush).toHaveBeenCalledWith("/me/external-agents/detail?id=eac_copy")
   })

@@ -26,7 +26,7 @@ import { useInstalledAgentRuntimes } from "@/hooks/agent/use-installed-agent-run
 import type { InstalledRuntime } from "@/lib/ai/agent/external/config/installed-runtimes"
 import { cn } from "@/lib/utils"
 
-import { groupPresetEntries, runnablePresetEntries, type PresetEntry } from "./preset-catalog"
+import { groupPresetEntries, runnablePresetEntries, type PresetEntry } from "@/components/agent/external-agent/add-agent/preset-catalog"
 import { configureExternalAgentHref } from "./routes"
 
 const CARD_CLASS =

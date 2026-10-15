@@ -5,14 +5,17 @@
  * tier pushes list → detail with a back bar instead of squeezing both.
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import {
   ExternalAgentRail,
   type AgentRailGroupBy,
+  type AgentStateFilter,
   type AgentRailStackedView,
   type AgentSettingsView,
 } from "./external-agent-rail"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import externalAgentMessages from "@/i18n/messages/en/externalAgent.json"
 import type { AgentReadiness } from "@/lib/ai/agent/external/agent-readiness"
 import type { InstanceTrait } from "@/components/agent/external-agent/instance-traits"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
@@ -42,6 +45,7 @@ const agent = (id: string, name: string, command = "npx", args = ["agent"]) =>
 
 const ready: AgentReadiness = {
   state: "connected",
+  ready: true,
   blockReason: null,
   blockTransient: false,
   steps: [
@@ -52,10 +56,11 @@ const ready: AgentReadiness = {
   ],
   nextAction: null,
 }
-const off: AgentReadiness = { ...ready, state: "off", nextAction: "connect" }
+const off: AgentReadiness = { ...ready, state: "off", ready: false, nextAction: "connect" }
 const blocked: AgentReadiness = {
   ...ready,
   state: "blocked",
+  ready: false,
   blockReason: "command not found",
   steps: [
     { id: "configured", state: "done" },
@@ -85,6 +90,7 @@ function renderRail(
     groupBy?: AgentRailGroupBy
     stackedView?: AgentRailStackedView
     enabled?: boolean
+    stateFilter?: AgentStateFilter
   } = {}
 ) {
   const onViewChange = jest.fn()
@@ -92,31 +98,40 @@ function renderRail(
   const onConnect = jest.fn()
   const onDisconnect = jest.fn()
   const onGroupByChange = jest.fn()
+  const onStateFilterChange = jest.fn()
   const onStackedViewChange = jest.fn()
-  render(
-    <ExternalAgentRail
-      agents={fixture.agents}
-      readinessById={fixture.readinessById}
-      traitsById={fixture.traitsById ?? new Map()}
-      view={view}
-      enabled={options.enabled ?? true}
-      groupBy={options.groupBy ?? "readiness"}
-      onGroupByChange={onGroupByChange}
-      stackedView={options.stackedView ?? "list"}
-      onStackedViewChange={onStackedViewChange}
-      onViewChange={onViewChange}
-      onNewAgent={onNewAgent}
-      onConnect={onConnect}
-      onDisconnect={onDisconnect}
-      isConnecting={() => false}
-    />
+  const rail = (nextView = view, nextStackedView = options.stackedView ?? "list") => (
+    <TooltipProvider>
+      <ExternalAgentRail
+        agents={fixture.agents}
+        readinessById={fixture.readinessById}
+        traitsById={fixture.traitsById ?? new Map()}
+        view={nextView}
+        enabled={options.enabled ?? true}
+        groupBy={options.groupBy ?? "readiness"}
+        onGroupByChange={onGroupByChange}
+        stateFilter={options.stateFilter ?? "all"}
+        onStateFilterChange={onStateFilterChange}
+        stackedView={nextStackedView}
+        onStackedViewChange={onStackedViewChange}
+        onViewChange={onViewChange}
+        onNewAgent={onNewAgent}
+        onConnect={onConnect}
+        onDisconnect={onDisconnect}
+        isConnecting={() => false}
+      />
+    </TooltipProvider>
   )
+  const rendered = render(rail())
   return {
+    rerenderView: (nextView: AgentSettingsView, nextStackedView: AgentRailStackedView) =>
+      rendered.rerender(rail(nextView, nextStackedView)),
     onViewChange,
     onNewAgent,
     onConnect,
     onDisconnect,
     onGroupByChange,
+    onStateFilterChange,
     onStackedViewChange,
   }
 }
@@ -132,10 +147,10 @@ describe("ExternalAgentRail", () => {
     expect(screen.getByTestId("agent-row-a1")).toBeInTheDocument()
     expect(screen.getByTestId("agent-row-a2")).toBeInTheDocument()
     expect(screen.getByTestId("nav-new-agent")).toBeInTheDocument()
+    expect(screen.queryByTestId("nav-quick-start")).not.toBeInTheDocument()
     for (const id of [
       "nav-global-settings",
       "nav-delegation",
-      "nav-quick-start",
       "nav-runtimes",
       "nav-host-configs",
     ]) {
@@ -220,7 +235,12 @@ describe("ExternalAgentRail", () => {
     const codex = groups.find((group) => group.contains(screen.getByTestId("agent-row-c1")))!
     expect(codex).toContainElement(screen.getByTestId("agent-row-c2"))
     expect(codex).not.toContainElement(screen.getByTestId("agent-row-q1"))
-    await user.click(screen.getByRole("radio", { name: "By status" }))
+    await user.click(screen.getByTestId("agent-rail-group-by"))
+    expect(screen.getByRole("menuitemradio", { name: "By runtime" })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    )
+    await user.click(screen.getByRole("menuitemradio", { name: "By status" }))
     expect(onGroupByChange).toHaveBeenCalledWith("readiness")
   })
 
@@ -278,7 +298,7 @@ describe("ExternalAgentRail", () => {
     expect(screen.getByTestId("nav-new-agent")).toBeInTheDocument()
   })
 
-  it("pushes from the list to the detail at the stacked tier", async () => {
+  it("delegates stacked navigation to the guarded view handler", async () => {
     mockDensity.mockReturnValue("stacked")
     const user = userEvent.setup()
     const { onViewChange, onStackedViewChange } = renderRail(
@@ -290,27 +310,31 @@ describe("ExternalAgentRail", () => {
     expect(screen.getByTestId("external-agent-rail")).toHaveAttribute("data-stacked-view", "list")
     await user.click(screen.getByTestId("agent-row-a2"))
     expect(onViewChange).toHaveBeenCalledWith({ kind: "agent", id: "a2" })
-    expect(onStackedViewChange).toHaveBeenCalledWith("detail")
+    expect(onStackedViewChange).not.toHaveBeenCalled()
     await user.click(screen.getByTestId("nav-delegation"))
     expect(onViewChange).toHaveBeenCalledWith({ kind: "delegation" })
   })
 
-  it("shows a back bar naming the open destination while the detail is up", async () => {
+  it("shows only a back bar while the detail is up; the detail carries its own heading", async () => {
     mockDensity.mockReturnValue("stacked")
     const user = userEvent.setup()
     const { onStackedViewChange } = renderRail({ kind: "agent", id: "a1" }, defaultFixture(), {
       stackedView: "detail",
     })
     expect(screen.queryByTestId("agent-row-a1")).not.toBeInTheDocument()
-    expect(screen.getByTestId("external-agent-rail-bar")).toHaveTextContent("Alpha")
+    expect(screen.getByTestId("external-agent-rail-bar")).not.toHaveTextContent("Alpha")
     await user.click(screen.getByTestId("external-agent-rail-back"))
     expect(onStackedViewChange).toHaveBeenCalledWith("list")
   })
 
-  it("names a configure destination in the back bar", () => {
+  it("does not repeat a configure destination's title in the back bar", () => {
     mockDensity.mockReturnValue("stacked")
-    renderRail({ kind: "delegation" }, defaultFixture(), { stackedView: "detail" })
-    expect(screen.getByTestId("external-agent-rail-bar")).toHaveTextContent("Delegation Rules")
+    const { rerenderView } = renderRail()
+    const destinationLabel = screen.getByTestId("nav-delegation").textContent!
+    expect(destinationLabel).not.toBe("")
+    rerenderView({ kind: "delegation" }, "detail")
+    expect(screen.getByTestId("external-agent-rail-bar")).not.toHaveTextContent(destinationLabel)
+    expect(screen.getByTestId("external-agent-rail-back")).toBeInTheDocument()
   })
 
   it("never pushes at the split tier", async () => {
@@ -319,5 +343,75 @@ describe("ExternalAgentRail", () => {
     await user.click(screen.getByTestId("agent-row-a1"))
     expect(onStackedViewChange).not.toHaveBeenCalled()
     expect(screen.getByTestId("external-agent-rail")).not.toHaveAttribute("data-stacked-view")
+  })
+  it.each([
+    ["attention", "a3"],
+    ["connected", "a1"],
+    ["off", "a2"],
+  ] as const)("filters rows by %s and clears the chip", async (stateFilter, visibleId) => {
+    const user = userEvent.setup()
+    const { onStateFilterChange } = renderRail(
+      undefined,
+      {
+        agents: [agent("a1", "Alpha"), agent("a2", "Beta"), agent("a3", "Gamma")],
+        readinessById: new Map([
+          ["a1", ready],
+          ["a2", off],
+          ["a3", blocked],
+        ]),
+      },
+      { stateFilter }
+    )
+    expect(screen.getByTestId(`agent-row-${visibleId}`)).toBeInTheDocument()
+    expect(screen.getAllByTestId(/^agent-row-/)).toHaveLength(1)
+    expect(screen.getByTestId("nav-global-settings")).toBeInTheDocument()
+    await user.click(screen.getByTestId("agent-rail-state-filter"))
+    expect(onStateFilterChange).toHaveBeenCalledWith("all")
+  })
+
+  it("includes disabled agents in Off and connecting agents in attention", () => {
+    renderRail(
+      undefined,
+      {
+        agents: [agent("disabled", "Disabled"), agent("connecting", "Connecting")],
+        readinessById: new Map([
+          ["disabled", { ...off, state: "disabled" }],
+          ["connecting", { ...off, state: "connecting" }],
+        ]),
+      },
+      { stateFilter: "off" }
+    )
+    expect(screen.getByTestId("agent-row-disabled")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-row-connecting")).not.toBeInTheDocument()
+  })
+
+  it("hides redundant preset names while preserving a custom instance's badge", () => {
+    const fromPreset = (id: string, name: string) => ({
+      ...agent(id, name),
+      metadata: { preset: "codex" },
+    })
+    renderRail(undefined, {
+      agents: [fromPreset("same", "  CODEX CLI  "), fromPreset("named", "Work")],
+      readinessById: new Map([
+        ["same", ready],
+        ["named", ready],
+      ]),
+    })
+    expect(screen.queryByTestId("agent-from-preset-same")).not.toBeInTheDocument()
+    expect(screen.getByTestId("agent-from-preset-named")).toHaveTextContent("Codex CLI")
+  })
+
+  it("shows the readiness steps and states in a visible focus tooltip", async () => {
+    renderRail(undefined, {
+      agents: [agent("blocked", "Blocked")],
+      readinessById: new Map([["blocked", blocked]]),
+    })
+    const dots = screen.getByTestId("agent-readiness-dots-blocked")
+    expect(dots).toHaveAttribute("tabindex", "0")
+    fireEvent.focus(dots)
+    const tooltip = await screen.findByRole("tooltip")
+    expect(tooltip).toHaveTextContent(dots.getAttribute("aria-label")!)
+    expect(tooltip).toHaveTextContent("Configured")
+    expect(tooltip).toHaveTextContent(externalAgentMessages.readiness.stepStates.failed)
   })
 })

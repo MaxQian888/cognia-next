@@ -14,7 +14,7 @@
  * machine has to move this list, not leave a stale one on screen.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 
 import {
   HOST_CONFIG_COMMANDS,
@@ -29,12 +29,18 @@ import {
   type HostConfigsUnavailableReason,
   type RemoteHostConfigDuplicateOptions,
 } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
+import {
+  externalAgentProcessPlaneScope,
+  subscribeExternalAgentProcessPlane,
+} from "@/lib/ai/agent/external/capability/process-plane"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 
 export interface HostExternalAgentConfigsState {
   configs: ExternalAgentConfigRecord[]
   loading: boolean
+  /** True after a successful list read for the current host. */
+  loaded: boolean
   /** Present when the host cannot serve this surface at all. */
   unavailable: HostConfigsUnavailableReason | null
   /** A failed call, kept so the panel can show it without a toast being the only trace. */
@@ -87,7 +93,27 @@ export interface HostExternalAgentConfigsState {
   busy: boolean
 }
 
+function hostLoadKey(): string {
+  const availability = hostConfigsAvailability(HOST_CONFIG_COMMANDS.list)
+  return JSON.stringify([
+    externalAgentProcessPlaneScope(),
+    availability.ok ? "available" : availability.reason,
+  ])
+}
+
+const EMPTY_CONFIGS: ExternalAgentConfigRecord[] = []
+
 export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
+  const hostKey = useSyncExternalStore(
+    subscribeExternalAgentProcessPlane,
+    hostLoadKey,
+    () => '["server","no-host"]'
+  )
+  const scope = JSON.parse(hostKey)[0] as string
+  const [loadedScope, setLoadedScope] = useState(scope)
+  const [loaded, setLoaded] = useState(false)
+  const request = useRef(0)
+  const requestScope = useRef(scope)
   const [configs, setConfigs] = useState<ExternalAgentConfigRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -95,33 +121,43 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
+    const currentRequest = ++request.current
+    const currentScope = externalAgentProcessPlaneScope()
+    if (currentScope !== requestScope.current) {
+      requestScope.current = currentScope
+      setLoadedScope(currentScope)
+      setLoaded(false)
+      setConfigs([])
+      setError(null)
+    }
+    const isCurrent = () => request.current === currentRequest && hostLoadKey() === hostKey
     const availability = hostConfigsAvailability(HOST_CONFIG_COMMANDS.list)
     if (!availability.ok) {
       setUnavailable(availability.reason)
       setConfigs([])
+      setError(null)
       setLoading(false)
       return
     }
     setUnavailable(null)
     setLoading(true)
     try {
-      setConfigs(await listRemoteHostConfigs())
+      const nextConfigs = await listRemoteHostConfigs()
+      if (!isCurrent()) return
+      setConfigs(nextConfigs)
+      setLoaded(true)
       setError(null)
     } catch (cause) {
+      if (!isCurrent()) return
       if (cause instanceof HostConfigsUnsupportedError) setUnavailable(cause.reason)
       else setError(cause instanceof Error ? cause.message : String(cause))
-      setConfigs([])
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
-  }, [])
+  }, [hostKey])
 
-  // The load is wrapped rather than called directly because every state write
-  // in `refresh` happens after an await, and an effect that calls a setState-ing
-  // callback synchronously is what `react-hooks/set-state-in-effect` forbids for
-  // `hooks/**`. The wrapper is also the only place an initial-load failure can
-  // be swallowed: `refresh` already records it in `error`, so a rejected promise
-  // here would only be an unhandled rejection.
+  // Reload when the host or its advertised availability changes. Refresh
+  // records failures in state so an initial read never rejects unhandled.
   useEffect(() => {
     const load = async () => {
       await refresh()
@@ -140,6 +176,7 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
     async <T>(
       run: () => Promise<T>
     ): Promise<{ ok: true; value: T } | { ok: false; error: string }> => {
+      const mutationScope = externalAgentProcessPlaneScope()
       setBusy(true)
       let failure: string | null = null
       let outcome: { ok: true; value: T } | { ok: false; error: string }
@@ -153,8 +190,10 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
       // that succeeds clears `error` — so setting the write's failure first
       // would have it wiped a moment later, and a rejected compare-and-swap
       // would look like it had silently worked.
-      await refresh()
-      setError(failure)
+      if (externalAgentProcessPlaneScope() === mutationScope) {
+        await refresh()
+        if (failure && externalAgentProcessPlaneScope() === mutationScope) setError(failure)
+      }
       setBusy(false)
       return outcome
     },
@@ -221,10 +260,11 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
 
   return useMemo(
     () => ({
-      configs,
-      loading,
-      unavailable,
-      error,
+      configs: loadedScope === scope ? configs : EMPTY_CONFIGS,
+      loading: loadedScope !== scope || loading,
+      loaded: loadedScope === scope && loaded,
+      unavailable: loadedScope === scope ? unavailable : null,
+      error: loadedScope === scope ? error : null,
       refresh,
       reconcile,
       setEnabled,
@@ -236,6 +276,9 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
       busy,
     }),
     [
+      loadedScope,
+      scope,
+      loaded,
       configs,
       loading,
       unavailable,

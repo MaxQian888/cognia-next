@@ -402,6 +402,20 @@ describe("clearCredentialSlot", () => {
 })
 
 describe("updateConfig", () => {
+  it.each<UpdateExternalAgentInput>([
+    { protocol: "a2a" },
+    { transport: "http" },
+    { protocol: "a2a", transport: "http" },
+  ])("persists and rebuilds the adapter for %j", async (updates) => {
+    const { service, manager, store } = build({}, [stdioConfig()])
+    await service.connect("agent-1")
+    manager.calls.length = 0
+    await service.updateConfig("agent-1", updates)
+    expect(store.getAgent("agent-1")).toMatchObject(updates)
+    expect(manager.calls).toEqual(["removeAgent:agent-1", "addAgent:agent-1"])
+    expect(manager.addAgent).toHaveBeenLastCalledWith(expect.objectContaining(updates), {})
+  })
+
   it("rebuilds the runtime for a launch-shaping edit, tearing down before persisting", async () => {
     const { service, manager, store } = build({}, [stdioConfig()])
     await service.connect("agent-1")

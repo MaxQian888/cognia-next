@@ -4,6 +4,7 @@
 
 import { useTranslations } from "next-intl"
 
+import { ExternalAgentScreenSkeleton } from "@/components/mobile/external-agents/external-agent-screen-skeleton"
 import { PairedOnly } from "@/components/mobile/me/paired-only"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { AgentPresetPicker } from "@/components/mobile/external-agents/agent-preset-picker"
@@ -18,7 +19,7 @@ export default function MobileAddExternalAgentPage() {
       backHref={EXTERNAL_AGENTS_ROUTE}
       testid="mobile-add-external-agent-page"
     >
-      <PairedOnly>
+      <PairedOnly loadingFallback={<ExternalAgentScreenSkeleton />}>
         <AgentPresetPicker />
       </PairedOnly>
     </SubPageShell>

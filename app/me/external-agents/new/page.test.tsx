@@ -41,4 +41,15 @@ describe("MobileAddExternalAgentPage", () => {
     expect(screen.getByTestId("paired-only-placeholder")).toBeInTheDocument()
     expect(screen.queryByTestId("agent-preset-picker-stub")).toBeNull()
   })
+
+  it("shows the screen skeleton while pairing state loads", () => {
+    ;(useCompanionConfig as jest.Mock).mockReturnValue({ paired: false, loading: true })
+    render(<MobileAddExternalAgentPage />)
+    expect(screen.getByTestId("external-agent-screen-skeleton")).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
+    expect(screen.queryByTestId("paired-only-placeholder")).toBeNull()
+    expect(screen.queryByTestId("agent-preset-picker-stub")).toBeNull()
+  })
 })

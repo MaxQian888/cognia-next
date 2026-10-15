@@ -67,6 +67,7 @@ describe("computeAgentReadiness", () => {
   it("is fully ready for a connected, routed agent", () => {
     const r = readiness({ connectionStatus: "connected", delegatedRuleCount: 2 })
     expect(r.state).toBe("connected")
+    expect(r.ready).toBe(true)
     expect(r.nextAction).toBeNull()
     expect(stepStates(r)).toEqual({
       configured: "done",
@@ -163,8 +164,23 @@ describe("computeAgentReadiness", () => {
   it("nudges a connected agent with no routing toward a delegation rule", () => {
     const r = readiness({ connectionStatus: "connected" })
     expect(r.state).toBe("connected")
+    expect(r.ready).toBe(true)
     expect(r.nextAction).toBe("add-rule")
     expect(stepStates(r).routed).toBe("todo")
+    expect(r.steps.filter((step) => step.optional).map((step) => step.id)).toEqual(["routed"])
+  })
+
+  it.each<ExternalAgentConnectionStatus>(["disconnected", "connecting", "reconnecting", "error"])(
+    "does not consider %s ready even with routing configured",
+    (connectionStatus) => {
+      expect(readiness({ connectionStatus, delegatedRuleCount: 1 }).ready).toBe(false)
+    }
+  )
+
+  it("does not consider a disabled or blocked agent ready despite a stale connection", () => {
+    expect(readiness({ connectionStatus: "connected" }, { enabled: false }).ready).toBe(false)
+    mockExecutionBlock.mockReturnValue({ code: "transport_blocked", reason: "needs a Host" })
+    expect(readiness({ connectionStatus: "connected" }).ready).toBe(false)
   })
 
   it("counts routing as configured even while disconnected", () => {

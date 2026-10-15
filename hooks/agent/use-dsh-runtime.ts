@@ -53,7 +53,8 @@ export interface UseDshRuntimeResult {
   report?: DshDoctorReport
   busy: boolean
   error?: string
-  installed: boolean
+  /** Unknown until a doctor report confirms whether a manifest exists. */
+  installed: boolean | undefined
   refresh: () => Promise<void>
   install: () => Promise<void>
   remove: () => Promise<void>
@@ -66,8 +67,8 @@ export interface UseDshRuntimeResult {
  * so its absence means a runtime exists even if otherwise unhealthy — which is
  * what decides whether the UI offers Install or Reinstall.
  */
-function isInstalled(report: DshDoctorReport | undefined): boolean {
-  if (!report) return false
+function isInstalled(report: DshDoctorReport | undefined): boolean | undefined {
+  if (!report) return undefined
   return !report.findings.some((finding) => finding.code === "channel-malformed")
 }
 
@@ -91,25 +92,48 @@ export function useDshRuntime(profileId: DshProfileId): UseDshRuntimeResult {
   // is. Gating on the wider predicate offered this card's Install button to a
   // tab that could only ever get a transport-forbidden error back.
   const supported = runsExternalAgentProcessesLocally()
-  const [report, setReport] = useState<DshDoctorReport | undefined>(undefined)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | undefined>(undefined)
+  const [result, setResult] = useState<{
+    profileId: DshProfileId
+    report?: DshDoctorReport
+    error?: string
+  }>()
+  const [actionBusy, setActionBusy] = useState(false)
+  const current = result?.profileId === profileId ? result : undefined
+  const report = current?.report
+  const error = current?.error
+  const busy = supported && (actionBusy || !current)
 
-  const run = useCallback(async (action: () => Promise<void>) => {
-    setBusy(true)
-    setError(undefined)
-    try {
-      await action()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setBusy(false)
-    }
-  }, [])
+  const run = useCallback(
+    async (action: () => Promise<void>) => {
+      setActionBusy(true)
+      setResult((previous) =>
+        previous?.profileId === profileId ? { ...previous, error: undefined } : previous
+      )
+      try {
+        await action()
+      } catch (cause) {
+        setResult((previous) =>
+          previous && previous.profileId !== profileId
+            ? previous
+            : {
+                profileId,
+                report: previous?.report,
+                error: cause instanceof Error ? cause.message : String(cause),
+              }
+        )
+      } finally {
+        setActionBusy(false)
+      }
+    },
+    [profileId]
+  )
 
   const check = useCallback(async () => {
     const facts = await agentInvoke<DshHostFacts>("dsh_runtime_facts", {})
-    setReport(verdictFrom(facts, profileId))
+    const report = verdictFrom(facts, profileId)
+    setResult((previous) =>
+      previous && previous.profileId !== profileId ? previous : { profileId, report }
+    )
   }, [profileId])
 
   const refresh = useCallback(async () => {
@@ -163,8 +187,7 @@ export function useDshRuntime(profileId: DshProfileId): UseDshRuntimeResult {
         failure = cause instanceof Error ? cause.message : String(cause)
       }
       if (!active) return
-      if (failure) setError(failure)
-      else setReport(next)
+      setResult({ profileId, report: next, error: failure })
     })()
     return () => {
       active = false

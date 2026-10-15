@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+// Resolve complete namespaces from split sources; aggregates are rebuilt by the orchestrator.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
@@ -70,6 +71,18 @@ describe("DesktopLocalAgents", () => {
     expect(screen.getByTestId("external-agent-switch-a2")).not.toBeChecked()
   })
 
+  it("uses divided rows and explains the limits of phone editing", async () => {
+    render(<DesktopLocalAgents />)
+    const first = await screen.findByTestId("external-agent-row-a1")
+    const second = screen.getByTestId("external-agent-row-a2")
+    expect(first.parentElement).toBe(second.parentElement)
+    expect(first.parentElement).toHaveClass("divide-y")
+    expect(first).not.toHaveClass("border")
+    expect(screen.getByTestId("desktop-local-agents")).toHaveTextContent(
+      "Only enablement and permission mode can be changed here. Manage all other settings in Settings → Agents on your desktop."
+    )
+  })
+
   it("renders nothing when the desktop has no agents of its own", async () => {
     routeCalls({ agents: [] })
     const { container } = render(<DesktopLocalAgents />)
@@ -120,12 +133,16 @@ describe("DesktopLocalAgents", () => {
     await user.click(await screen.findByTestId("desktop-local-agents-retry"))
     expect(await screen.findByTestId("external-agent-row-a1")).toBeInTheDocument()
     expect(screen.queryByTestId("desktop-local-agents-error")).toBeNull()
-    expect(callMock.mock.calls.filter(([command]) => command === "external_agent_list")).toHaveLength(2)
+    expect(
+      callMock.mock.calls.filter(([command]) => command === "external_agent_list")
+    ).toHaveLength(2)
   })
 
   it("sends an enable/disable toggle with a fresh approval lease", async () => {
     render(<DesktopLocalAgents />)
-    fireEvent.click(await screen.findByTestId("external-agent-switch-a1"))
+    const target = (await screen.findByTestId("external-agent-switch-a1")).closest("label")!
+    expect(target).toHaveClass("size-11")
+    fireEvent.click(target)
     // Optimistic: the switch flips before the write resolves.
     expect(screen.getByTestId("external-agent-switch-a1")).not.toBeChecked()
     await waitFor(() => expect(issueLeaseMock).toHaveBeenCalledWith(["external_agent_update"]))

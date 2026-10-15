@@ -90,7 +90,7 @@ describe("densityForWidth", () => {
     const settingsRoot = path.join(__dirname, "..")
 
     const declared = new Set(
-      [...Object.values(SETTINGS_PANE_TIERS), SETTINGS_LIST_DETAIL_COLLAPSE].map(String)
+      [...Object.values(SETTINGS_PANE_TIERS), SETTINGS_LIST_DETAIL_COLLAPSE, 720].map(String)
     )
 
     const files: string[] = []
@@ -198,6 +198,14 @@ describe("listDensityForWidth", () => {
     expect(listDensityForWidth(SETTINGS_LIST_DETAIL_COLLAPSE - 1)).toBe("stacked")
   })
 
+  it("supports a later split without changing the default tier", () => {
+    expect(listDensityForWidth(0, 720)).toBe("split")
+    expect(listDensityForWidth(560, 720)).toBe("stacked")
+    expect(listDensityForWidth(719, 720)).toBe("stacked")
+    expect(listDensityForWidth(720, 720)).toBe("split")
+    expect(listDensityForWidth(719)).toBe("split")
+  })
+
   it("agrees with the CSS variant the frame actually ships", () => {
     // The class string below spells the threshold as a literal
     // `@[560px]/settings-pane`. If these two ever disagree, a caller opens its
@@ -233,6 +241,30 @@ describe("SettingsListDetail", () => {
     )
   })
 
+  it("uses only the selected split threshold for both grid tracks", () => {
+    const { container, rerender } = render(
+      <SettingsListDetail splitAt={720}>
+        <div />
+        <div />
+      </SettingsListDetail>
+    )
+    const grid = container.querySelector<HTMLElement>("[style*='--settings-rail-w']")
+    expect(grid?.className).toContain("@[720px]/settings-pane:grid-rows-1")
+    expect(grid?.className).toContain(
+      "@[720px]/settings-pane:grid-cols-[clamp(200px,30cqi,var(--settings-rail-w))"
+    )
+    expect(grid?.className).not.toContain("@[560px]/settings-pane:")
+
+    rerender(
+      <SettingsListDetail splitAt={560}>
+        <div />
+        <div />
+      </SettingsListDetail>
+    )
+    expect(grid?.className).toContain("@[560px]/settings-pane:grid-rows-1")
+    expect(grid?.className).not.toContain("@[720px]/settings-pane:")
+  })
+
   it("scopes the split to the pane, not the viewport", () => {
     // The defect this frame exists to fix. A `md:` variant here reads the
     // window, which this pane never gets.
@@ -258,6 +290,44 @@ describe("SettingsListDetail", () => {
     // attribute and the hook report the widest tier.
     expect(screen.getByTestId("list-pane")).toHaveAttribute("data-settings-list-density", "split")
     expect(screen.getByTestId("probe")).toHaveTextContent("split")
+  })
+
+  it("publishes the opted-in stacked tier at widths that default panes split", () => {
+    const measure = jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 650,
+      height: 500,
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 500,
+      right: 650,
+      toJSON: () => ({}),
+    })
+    const Probe = () => <span data-testid="probe">{useSettingsListDensity()}</span>
+    try {
+      const { rerender } = render(
+        <SettingsListDetail splitAt={720} data-testid="list-pane">
+          <Probe />
+          <div />
+        </SettingsListDetail>
+      )
+      expect(screen.getByTestId("list-pane")).toHaveAttribute(
+        "data-settings-list-density",
+        "stacked"
+      )
+      expect(screen.getByTestId("probe")).toHaveTextContent("stacked")
+      rerender(
+        <SettingsListDetail data-testid="list-pane">
+          <Probe />
+          <div />
+        </SettingsListDetail>
+      )
+      expect(screen.getByTestId("list-pane")).toHaveAttribute("data-settings-list-density", "split")
+      expect(screen.getByTestId("probe")).toHaveTextContent("split")
+    } finally {
+      measure.mockRestore()
+    }
   })
 })
 

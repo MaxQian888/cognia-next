@@ -1,24 +1,10 @@
 "use client"
 
 /**
- * The external agents on the paired Host, as the phone manages them.
- *
- * These are the Host's own configurations — the same rows the chat composer's
- * runtime menu offers on this phone — so adding, switching, retuning and
- * removing here changes what the phone can actually run. One card per agent:
- * its mark, name, connection and the facts that tell it from a sibling
- * configuration (own or shared state, "copy of …") on the first line, which
- * opens the agent's detail screen; the on/off switch beside it; and the
- * permission mode and the overflow menu (edit, duplicate, remove) on the
- * second, so no control has to squeeze into the width the name needs.
- *
- * Several configurations of one runtime (ADR-0216) are drawn under one header
- * naming the runtime, so two cards with the same mark read as two setups of
- * one thing rather than as a duplicate row.
- *
- * The card's link covers only the identity block, and the switch, select and
- * menu sit outside it: an interactive control nested in a link is announced
- * twice and its taps also navigate.
+ * The paired Host's configurations, grouped by runtime (ADR-0216). Identity
+ * links open details; switches and overflow actions stay outside the links.
+ * Search and state filters keep the runtime grouping and the source records
+ * used by duplicate, lineage and compare-and-swap updates.
  */
 
 import { useState } from "react"
@@ -55,16 +41,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { BrandIcon } from "@/components/icons/brand-icon"
-import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
+import { InstanceTraitChips } from "@/components/agent/external-agent/instance-traits"
+import {
+  distinguishingTraits,
+  runtimeSiblings,
+  type InstanceFamilyConfig,
+} from "@/lib/ai/agent/external/config/instance-family"
 import {
   useHostExternalAgentConfigs,
   type HostExternalAgentConfigsState,
 } from "@/hooks/agent/use-host-external-agent-configs"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
-import type { AcpPermissionMode } from "@/types/agent/external-agent"
 
 import { HOST_UNAVAILABLE_KEY } from "./add-external-agent-form"
 import { DuplicateHostAgentSheet } from "./duplicate-host-agent-sheet"
@@ -75,15 +66,10 @@ import {
   lineageSourceOf,
   presetOf,
 } from "./host-agent-family"
-import {
-  PERMISSION_MODE_LABEL_KEY,
-  effectivePermissionMode,
-  permissionModesFor,
-} from "./permission-modes"
 import { RemoveHostAgentDialog } from "./remove-host-agent-dialog"
 import { ADD_EXTERNAL_AGENT_ROUTE, externalAgentDetailHref } from "./routes"
 
-function HostAgentCard({
+function HostAgentRow({
   record,
   host,
   onDuplicate,
@@ -99,57 +85,75 @@ function HostAgentCard({
   const name = hostAgentName(record)
   const preset = presetOf(record)
   const protocol = config.protocol
-  const mode = effectivePermissionMode(config.defaultPermissionMode, protocol)
   // A config the Host says cannot run must not be switchable on: the Host
   // would refuse the write, and offering the control implies a choice the
-  // user does not have. The notice below says why.
+  // user does not have. The detail explains the lifecycle verdict.
   const notReady = record.lifecycleStatus !== "ready"
   const source = lineageSourceOf(record, host.configs)
   const href = externalAgentDetailHref(record.configId)
+  const member = { ...config, id: record.configId } as InstanceFamilyConfig
+  const members = host.configs.map((row) => ({
+    ...row.config,
+    id: row.configId,
+  })) as InstanceFamilyConfig[]
+  const traits = distinguishingTraits(member, runtimeSiblings(member, members)).filter(
+    ({ key }) => key !== "stateIsolation"
+  )
 
-  const write = async (patch: { enabled?: boolean; defaultPermissionMode?: AcpPermissionMode }) => {
+  const write = async (patch: { enabled: boolean }) => {
     const ok = await host.update(record, patch)
     if (ok) toast.success(t("updateQueued"))
   }
 
   return (
     <div
-      className="flex flex-col gap-3 rounded-xl border bg-card p-3"
+      className="flex min-w-0 items-center gap-1 px-3 py-3 @min-[380px]:gap-2"
       data-testid={`host-agent-${record.configId}`}
     >
-      <div className="flex items-center gap-3">
-        <Link
-          href={href}
-          className="-m-1 flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg p-1 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 active:bg-muted/60"
-          aria-label={t("openDetailsAria", { name })}
-          data-testid={`host-agent-open-${record.configId}`}
-        >
-          {preset ? (
-            <BrandIcon id={preset} size={32} label={name} />
-          ) : (
-            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
-              <BotIcon className="size-4 text-muted-foreground" aria-hidden />
-            </span>
-          )}
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{name}</span>
-            <span className="block truncate font-mono text-[11px] text-muted-foreground">
-              {protocol} · {config.transport}
-            </span>
-            <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-              <HostAgentIsolationChip record={record} />
-              {source && source !== "removed" ? (
-                <span
-                  className="truncate text-[11px] text-muted-foreground"
-                  data-testid={`host-agent-lineage-${record.configId}`}
-                >
-                  {t("copyOf", { name: hostAgentName(source) })}
-                </span>
-              ) : null}
-            </span>
+      <Link
+        href={href}
+        className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 active:bg-muted/60"
+        aria-label={t("openDetailsAria", { name })}
+        data-testid={`host-agent-open-${record.configId}`}
+      >
+        {preset ? (
+          <BrandIcon id={preset} size={32} label={name} />
+        ) : (
+          <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
+            <BotIcon className="size-4 text-muted-foreground" aria-hidden />
           </span>
-          <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        </Link>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{name}</span>
+          <span className="block truncate font-mono text-[11px] text-muted-foreground">
+            {protocol} · {config.transport}
+          </span>
+          <span className="block text-[11px] text-muted-foreground">
+            {t(notReady ? "stateAttention" : record.enabled ? "stateOn" : "stateOff")}
+          </span>
+          <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+            <HostAgentIsolationChip record={record} />
+            {source && source !== "removed" ? (
+              <span
+                className="truncate text-[11px] text-muted-foreground"
+                data-testid={`host-agent-lineage-${record.configId}`}
+              >
+                {t("copyOf", { name: hostAgentName(source) })}
+              </span>
+            ) : null}
+          </span>
+          <InstanceTraitChips
+            traits={traits}
+            max={traits.length}
+            className="mt-1 [&_[data-slot=badge]]:max-w-full"
+          />
+        </span>
+        <ChevronRightIcon
+          className="hidden size-4 shrink-0 text-muted-foreground @min-[380px]:block"
+          aria-hidden
+        />
+      </Link>
+      <label className="flex size-11 shrink-0 items-center justify-center">
         <Switch
           checked={record.enabled}
           disabled={host.busy || notReady}
@@ -158,97 +162,63 @@ function HostAgentCard({
           className="touch-hit"
           data-testid={`host-agent-switch-${record.configId}`}
         />
-      </div>
-
-      {notReady ? (
-        <LifecycleStatusNotice
-          status={record.lifecycleStatus}
-          reasonCode={config.lifecycleReasonCode}
-        />
-      ) : null}
-
-      <div className="flex items-center gap-2">
-        <Select
-          value={mode}
-          disabled={host.busy}
-          onValueChange={(value) => void write({ defaultPermissionMode: value as AcpPermissionMode })}
-        >
-          <SelectTrigger
-            className="h-11 min-w-0 flex-1 text-xs"
-            aria-label={t("permissionModeAria", { name })}
-            data-testid={`host-agent-mode-${record.configId}`}
+      </label>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-11"
+            disabled={host.busy}
+            aria-label={t("moreActionsAria", { name })}
+            data-testid={`host-agent-menu-${record.configId}`}
           >
-            <span className="text-muted-foreground">{t("permissionLabel")}</span>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {permissionModesFor(protocol).map((option) => (
-              <SelectItem key={option} value={option}>
-                {t(PERMISSION_MODE_LABEL_KEY[option])}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-11"
-              disabled={host.busy}
-              aria-label={t("moreActionsAria", { name })}
-              data-testid={`host-agent-menu-${record.configId}`}
+            <MoreHorizontalIcon className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem asChild className="min-h-11">
+            <Link
+              href={href}
+              aria-label={t("editAria", { name })}
+              data-testid={`host-agent-edit-${record.configId}`}
             >
-              <MoreHorizontalIcon className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem asChild className="min-h-11">
-              <Link
-                href={href}
-                aria-label={t("editAria", { name })}
-                data-testid={`host-agent-edit-${record.configId}`}
-              >
-                <PencilIcon className="size-4" />
-                {t("edit")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="min-h-11"
-              onSelect={() => onDuplicate(record)}
-              aria-label={t("duplicateAria", { name })}
-              data-testid={`host-agent-duplicate-${record.configId}`}
-            >
-              <CopyIcon className="size-4" />
-              {t("duplicate")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              variant="destructive"
-              className="min-h-11"
-              onSelect={() => onRemove(record)}
-              aria-label={t("removeAria", { name })}
-              data-testid={`host-agent-remove-${record.configId}`}
-            >
-              <Trash2Icon className="size-4" />
-              {t("deleteConfirm")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+              <PencilIcon className="size-4" />
+              {t("edit")}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="min-h-11"
+            onSelect={() => onDuplicate(record)}
+            aria-label={t("duplicateAria", { name })}
+            data-testid={`host-agent-duplicate-${record.configId}`}
+          >
+            <CopyIcon className="size-4" />
+            {t("duplicate")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            variant="destructive"
+            className="min-h-11"
+            onSelect={() => onRemove(record)}
+            aria-label={t("removeAria", { name })}
+            data-testid={`host-agent-remove-${record.configId}`}
+          >
+            <Trash2Icon className="size-4" />
+            {t("deleteConfirm")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }
 
-/**
- * The cards, under a runtime header wherever a runtime has two or more
- * configurations. A lone configuration needs no header: its card already
- * carries the runtime's mark.
- */
-function HostAgentCards({
+function HostAgentRows({
+  records,
   host,
   onDuplicate,
   onRemove,
 }: {
+  records: ExternalAgentConfigRecord[]
   host: HostExternalAgentConfigsState
   onDuplicate: (record: ExternalAgentConfigRecord) => void
   onRemove: (record: ExternalAgentConfigRecord) => void
@@ -257,17 +227,7 @@ function HostAgentCards({
   const runtimeName = useRuntimeName()
   return (
     <>
-      {groupHostConfigsByRuntime(host.configs).map((group) => {
-        const cards = group.records.map((record) => (
-          <HostAgentCard
-            key={record.configId}
-            record={record}
-            host={host}
-            onDuplicate={onDuplicate}
-            onRemove={onRemove}
-          />
-        ))
-        if (group.records.length < 2) return cards
+      {groupHostConfigsByRuntime(records).map((group) => {
         const label = runtimeName(group.runtime, hostAgentName(group.records[0]))
         const headingId = `host-agent-group-${group.runtime.key}`
         return (
@@ -275,7 +235,7 @@ function HostAgentCards({
             key={group.runtime.key}
             role="group"
             aria-labelledby={headingId}
-            className="flex flex-col gap-2"
+            className="flex min-w-0 flex-col gap-2"
             data-testid={`host-agent-group-${group.runtime.key}`}
           >
             <p
@@ -287,7 +247,17 @@ function HostAgentCards({
                 {t("groupCount", { count: group.records.length })}
               </span>
             </p>
-            {cards}
+            <div className="divide-y overflow-hidden rounded-xl border bg-card">
+              {group.records.map((record) => (
+                <HostAgentRow
+                  key={record.configId}
+                  record={record}
+                  host={host}
+                  onDuplicate={onDuplicate}
+                  onRemove={onRemove}
+                />
+              ))}
+            </div>
           </div>
         )
       })}
@@ -295,7 +265,7 @@ function HostAgentCards({
   )
 }
 
-function LoadingCards() {
+function LoadingRows() {
   return (
     <div className="flex flex-col gap-2" aria-busy="true" data-testid="host-agents-loading">
       <Skeleton className="h-28 w-full rounded-xl" />
@@ -311,6 +281,24 @@ export function HostAgentList() {
   const host = useHostExternalAgentConfigs()
   const [pendingRemoval, setPendingRemoval] = useState<ExternalAgentConfigRecord | null>(null)
   const [duplicating, setDuplicating] = useState<ExternalAgentConfigRecord | null>(null)
+  const [query, setQuery] = useState("")
+  const [stateFilter, setStateFilter] = useState("all")
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visibleConfigs = host.configs.filter((record) => {
+    const matchesQuery = [
+      hostAgentName(record),
+      record.config.description,
+      record.config.protocol,
+      record.config.transport,
+      presetOf(record),
+    ].some((value) => value?.toLocaleLowerCase().includes(normalizedQuery))
+    const matchesState =
+      stateFilter === "all" ||
+      (stateFilter === "attention" && record.lifecycleStatus !== "ready") ||
+      (stateFilter === "on" && record.enabled) ||
+      (stateFilter === "off" && !record.enabled)
+    return matchesQuery && matchesState
+  })
 
   const confirmRemoval = async (record: ExternalAgentConfigRecord) => {
     setPendingRemoval(null)
@@ -334,20 +322,16 @@ export function HostAgentList() {
     )
   }
 
-  // A failed read leaves no rows and no load in flight; a failed write re-reads
-  // first, so it normally keeps them. Telling the two apart here keeps a load
-  // failure from reading "could not save" above an "add your first agent" box
-  // that says the Host has none, which it was never able to say.
-  const loadFailed = host.error !== null && !host.loading && host.configs.length === 0
+  // An empty Host is known only after a successful read; a first-load failure
+  // cannot make that claim. Refresh failures retain the last successful list.
+  const loadFailed = host.error !== null && !host.loading && !host.loaded
 
   return (
-    // Not `MeSection`: that wraps its rows in a bordered surface, and these
-    // are cards of their own — a card inside a card read as a double border.
-    <section className="flex flex-col gap-2" data-testid="host-agents-section">
+    <section className="@container flex min-w-0 flex-col gap-2" data-testid="host-agents-section">
       <h2 className="px-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
         {t("hostSectionTitle")}
       </h2>
-      {host.error && host.configs.length > 0 ? (
+      {host.error && host.loaded ? (
         <Alert variant="destructive" data-testid="host-agents-error">
           <AlertDescription>{t("toggleFailed", { message: host.error })}</AlertDescription>
         </Alert>
@@ -373,8 +357,8 @@ export function HostAgentList() {
             {t("retry")}
           </Button>
         </Empty>
-      ) : host.loading && host.configs.length === 0 ? (
-        <LoadingCards />
+      ) : !host.loaded || (host.loading && host.configs.length === 0) ? (
+        <LoadingRows />
       ) : host.configs.length === 0 ? (
         <Empty className="rounded-xl border" data-testid="host-agents-empty">
           <EmptyHeader>
@@ -393,7 +377,49 @@ export function HostAgentList() {
         </Empty>
       ) : (
         <div className="flex flex-col gap-2">
-          <HostAgentCards host={host} onDuplicate={setDuplicating} onRemove={setPendingRemoval} />
+          <div className="grid min-w-0 gap-2 @min-[380px]:grid-cols-[minmax(0,1fr)_auto]">
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("searchPlaceholder")}
+              aria-label={t("searchAria")}
+              className="h-11 min-w-0"
+            />
+            <Select value={stateFilter} onValueChange={setStateFilter}>
+              <SelectTrigger
+                className="min-h-11 w-full @min-[380px]:w-40"
+                aria-label={t("stateFilterAria")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="min-h-11">
+                  {t("stateAll")}
+                </SelectItem>
+                <SelectItem value="attention" className="min-h-11">
+                  {t("stateAttention")}
+                </SelectItem>
+                <SelectItem value="on" className="min-h-11">
+                  {t("stateOn")}
+                </SelectItem>
+                <SelectItem value="off" className="min-h-11">
+                  {t("stateOff")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {visibleConfigs.length === 0 ? (
+            <p role="status" className="px-3 py-6 text-center text-sm text-muted-foreground">
+              {t("noFilterMatches")}
+            </p>
+          ) : (
+            <HostAgentRows
+              records={visibleConfigs}
+              host={host}
+              onDuplicate={setDuplicating}
+              onRemove={setPendingRemoval}
+            />
+          )}
           <Button
             asChild
             variant="outline"

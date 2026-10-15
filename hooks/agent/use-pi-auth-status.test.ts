@@ -216,3 +216,21 @@ describe("usePiAuthStatus", () => {
     expect(result.current.status.models).toHaveLength(3)
   })
 })
+
+it("keeps a pending first listing idle until Pi answers", async () => {
+  let finish!: (value: { status: "ok"; models: typeof LISTED }) => void
+  fakeAdapter.listAgentModels.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve
+    })
+  )
+  const { result } = renderHook(() => usePiAuthStatus("pending-pi", true))
+  await waitFor(() => expect(result.current.loading).toBe(true))
+  expect(result.current.status.listing).toBe("idle")
+  expect(result.current.status.verdicts).toEqual([])
+  await act(async () => {
+    finish({ status: "ok", models: [] })
+  })
+  expect(result.current.status.listing).toBe("ok")
+  expect(result.current.loading).toBe(false)
+})

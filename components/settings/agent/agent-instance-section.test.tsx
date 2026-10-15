@@ -127,6 +127,7 @@ describe("AgentInstanceSection", () => {
   it("does not look for a folder for a configuration on the shared state", () => {
     const personal = codex("personal", { stateIsolation: "shared" })
     renderSection(personal, [personal])
+    expect(screen.getByTestId("agent-instance-section")).not.toHaveClass("border")
     expect(mockStateRootInfo).not.toHaveBeenCalled()
     expect(screen.queryByTestId("state-folder-loading")).not.toBeInTheDocument()
   })
@@ -173,6 +174,8 @@ describe("AgentInstanceSection", () => {
     })
     const { onOpenAgent } = renderSection(a, [a, b, c, other])
     const siblings = screen.getByTestId("instance-siblings")
+    expect(siblings.querySelector("ul")).toHaveClass("divide-y")
+    expect(screen.getByTestId("instance-sibling-Planner")).not.toHaveClass("border")
     expect(siblings).toHaveTextContent("Other configurations of this runtime (2)")
     expect(screen.getByTestId("instance-sibling-Planner")).toHaveTextContent("Plan")
     expect(screen.getByTestId("instance-sibling-Twin")).toHaveTextContent("Same settings")

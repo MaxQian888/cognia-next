@@ -49,13 +49,13 @@ const meta = {
   title: "Settings/Agent/DelegationRulesSection",
   component: DelegationRulesSection,
   parameters: { layout: "padded" },
-  args: { disabled: false },
+  args: { disabled: false, onAddAgent: () => undefined, onOpenAgent: () => undefined },
   beforeEach: () => {
     resetStore(useExternalAgentStore)
   },
   decorators: [
     (Story) => (
-      <div className="max-w-2xl">
+      <div className="@container/agent-detail max-w-2xl">
         <Story />
       </div>
     ),
@@ -88,6 +88,33 @@ export const Disabled: Story = {
     seedStore(useExternalAgentStore, {
       agents: sampleAgents,
       delegationRules: sampleRules,
+    } as never)
+  },
+}
+
+export const DisabledTargets: Story = {
+  beforeEach: () => {
+    resetStore(useExternalAgentStore)
+    seedStore(useExternalAgentStore, {
+      enabled: true,
+      agents: Object.fromEntries(
+        Object.entries(sampleAgents).map(([id, agent]) => [id, { ...agent, enabled: false }])
+      ),
+      delegationRules: sampleRules,
+    } as never)
+  },
+}
+
+export const AllAgentsDisabled: Story = {
+  ...DisabledTargets,
+  beforeEach: () => {
+    resetStore(useExternalAgentStore)
+    seedStore(useExternalAgentStore, {
+      enabled: true,
+      agents: Object.fromEntries(
+        Object.entries(sampleAgents).map(([id, agent]) => [id, { ...agent, enabled: false }])
+      ),
+      delegationRules: [],
     } as never)
   },
 }

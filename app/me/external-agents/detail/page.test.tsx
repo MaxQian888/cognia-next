@@ -54,7 +54,7 @@ describe("MobileExternalAgentDetailPage", () => {
       "data-config-id",
       "eac_1"
     )
-    expect(screen.getByText("Agent details")).toBeInTheDocument()
+    expect(screen.getByText("External agents")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Back to external agents" })).toBeInTheDocument()
   })
 
@@ -80,6 +80,17 @@ describe("MobileExternalAgentDetailPage", () => {
     mockPaired(false)
     searchParams.current = new URLSearchParams("id=eac_1")
     render(<MobileExternalAgentDetailPage />)
+    expect(screen.queryByTestId("host-agent-detail-stub")).toBeNull()
+  })
+
+  it("shows the screen skeleton while pairing state loads", () => {
+    ;(useCompanionConfig as jest.Mock).mockReturnValue({ paired: false, loading: true })
+    render(<MobileExternalAgentDetailPage />)
+    expect(screen.getByTestId("external-agent-screen-skeleton")).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
+    expect(screen.queryByTestId("paired-only-placeholder")).toBeNull()
     expect(screen.queryByTestId("host-agent-detail-stub")).toBeNull()
   })
 })

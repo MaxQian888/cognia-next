@@ -17,15 +17,41 @@
  */
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
-import { CopyPlus, RefreshCw, ServerCog, Trash2, Upload } from "lucide-react"
+import {
+  CopyPlus,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  ServerCog,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,6 +71,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
+import { PresetPickerList } from "@/components/agent/external-agent/add-agent/preset-picker-list"
+import { HostAgentCreateForm } from "@/components/agent/external-agent/host/host-agent-create-form"
+import { HostAgentEditor } from "@/components/agent/external-agent/host/host-agent-editor"
+import {
+  PERMISSION_MODE_LABEL_KEY,
+  effectivePermissionMode,
+  permissionModesFor,
+} from "@/components/mobile/external-agents/permission-modes"
 import {
   DuplicatedFromHint,
   InstanceTraitChips,
@@ -63,7 +97,7 @@ import {
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { hydrateAgentConfig, selectAgents } from "@/stores/agent/external-agent-store/selectors"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
-import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { AcpPermissionMode, ExternalAgentConfig } from "@/types/agent/external-agent"
 import type { HostConfigsUnavailableReason } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 
 const UNAVAILABLE_KEY: Record<HostConfigsUnavailableReason, string> = {
@@ -100,7 +134,10 @@ function HostConfigRow({
   busy,
   sourceName,
   traits,
+  highlighted,
   onToggle,
+  onPermissionChange,
+  onEdit,
   onRemove,
   onDuplicate,
 }: {
@@ -110,12 +147,17 @@ function HostConfigRow({
   sourceName: string | null
   /** What sets it apart from the host's other configurations of its runtime. */
   traits: readonly InstanceTrait[]
+  highlighted: boolean
   onToggle: (next: boolean) => void
+  onPermissionChange: (mode: AcpPermissionMode) => void
+  onEdit: () => void
   onRemove: () => void
   onDuplicate: () => void
 }) {
   const t = useTranslations("externalAgent.hostConfigs")
   const tManage = useTranslations("externalAgentManage.hostConfigs")
+  const tMobile = useTranslations("mobile.externalAgents")
+  const tCommon = useTranslations("common")
   // No cast: `record.config` is a `StoredExternalAgentConfig`, which already
   // types `name`, `protocol` and the lifecycle fields read below.
   const config = record.config
@@ -123,7 +165,11 @@ function HostConfigRow({
   const notReady = record.lifecycleStatus !== "ready"
 
   return (
-    <Item variant="outline" data-testid={`host-config-${record.configId}`}>
+    <Item
+      className="rounded-none border-0 px-0 data-[highlighted=true]:bg-accent/60 @max-md/settings-stack:flex-col @max-md/settings-stack:items-stretch"
+      data-testid={`host-config-${record.configId}`}
+      data-highlighted={highlighted}
+    >
       <ItemContent className="min-w-0">
         {/* `min-w-0` on the content, not on the title: the title's own
             intrinsic width is what defeats truncation inside an Item. */}
@@ -144,7 +190,26 @@ function HostConfigRow({
           className="mt-2"
         />
       </ItemContent>
-      <ItemActions className="gap-1">
+      <ItemActions className="min-w-0 flex-wrap gap-2 @max-md/settings-stack:justify-end">
+        <Select
+          value={effectivePermissionMode(config.defaultPermissionMode, config.protocol)}
+          disabled={busy}
+          onValueChange={(value) => onPermissionChange(value as AcpPermissionMode)}
+        >
+          <SelectTrigger
+            className="min-w-0 max-w-full text-xs @max-md/settings-stack:flex-1"
+            aria-label={tMobile("permissionModeAria", { name })}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {permissionModesFor(config.protocol).map((mode) => (
+              <SelectItem key={mode} value={mode}>
+                {tMobile(PERMISSION_MODE_LABEL_KEY[mode])}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Switch
           checked={record.enabled}
           // A config the host says cannot run must not be switchable on: the
@@ -156,30 +221,51 @@ function HostConfigRow({
         />
         <Button
           variant="ghost"
-          size="icon"
+          size="sm"
           className="touch-hit"
           disabled={busy}
-          onClick={onDuplicate}
-          aria-label={tManage("duplicateLabel", { name })}
+          onClick={onEdit}
+          aria-label={t("editLabel", { name })}
         >
-          <CopyPlus className="size-4" />
+          <Pencil className="size-4" />
+          {tCommon("edit")}
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="touch-hit"
-          disabled={busy}
-          onClick={onRemove}
-          aria-label={t("deleteLabel", { name })}
-        >
-          <Trash2 className="size-4" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="touch-hit"
+              disabled={busy}
+              aria-label={t("actionsLabel", { name })}
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onSelect={onDuplicate}
+              aria-label={tManage("duplicateLabel", { name })}
+            >
+              <CopyPlus className="size-4" />
+              {tMobile("duplicate")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={onRemove}
+              aria-label={t("deleteLabel", { name })}
+            >
+              <Trash2 className="size-4" />
+              {tCommon("delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </ItemActions>
     </Item>
   )
 }
 
-export function HostExternalAgentConfigs() {
+export function HostExternalAgentConfigs({ title }: { title?: string } = {}) {
   const t = useTranslations("externalAgent.hostConfigs")
   const tManage = useTranslations("externalAgentManage.hostConfigs")
   const tCommon = useTranslations("common")
@@ -187,10 +273,13 @@ export function HostExternalAgentConfigs() {
   const {
     configs,
     loading,
+    loaded,
     unavailable,
     error,
+    refresh,
     reconcile,
     setEnabled,
+    update,
     remove,
     copyLocal,
     duplicate,
@@ -199,6 +288,10 @@ export function HostExternalAgentConfigs() {
   const localAgents = useExternalAgentStore(selectAgents)
   const [pendingDelete, setPendingDelete] = useState<ExternalAgentConfigRecord | null>(null)
   const [duplicating, setDuplicating] = useState<ExternalAgentConfigRecord | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [presetId, setPresetId] = useState<string | null>(null)
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
 
   // Lineage and family, read across the host's own records (ADR-0216).
   const members = useMemo(() => configs.map(familyMember), [configs])
@@ -241,15 +334,79 @@ export function HostExternalAgentConfigs() {
   }, [copyable, localAgents, traitLine])
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <ServerCog className="size-4" />
-          {t("title")}
-        </CardTitle>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 @md/agent-detail:flex-row [[data-detail-density=stacked]_&]:flex-col @md/agent-detail:items-start @md/agent-detail:justify-between">
+        <div className="min-w-0">
+          <h3
+            tabIndex={-1}
+            data-detail-heading="host"
+            className="text-base font-semibold outline-none"
+          >
+            {title ?? t("title")}
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
+        </div>
+        {!unavailable ? (
+          <div className="flex w-full flex-col gap-2 @md/agent-detail:w-auto @md/agent-detail:shrink-0">
+            <Button
+              size="sm"
+              disabled={busy || loading || !loaded}
+              onClick={() => {
+                setPresetId(null)
+                setCreating(true)
+              }}
+            >
+              <Plus className="size-4" />
+              {t("newOnHost")}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  className="w-full @md/agent-detail:w-auto [[data-detail-density=stacked]_&]:w-full"
+                  variant="outline"
+                  size="sm"
+                  disabled={busy || loading || copyable.length === 0}
+                >
+                  <Upload className="size-4" />
+                  {t("copyLocal")}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {copyable.map((agent) => {
+                  const traits = copyableTraits.get(agent.id)
+                  return (
+                    <DropdownMenuItem
+                      key={agent.id}
+                      onSelect={() => void copyLocal(agent)}
+                      className="flex-col items-start gap-0"
+                    >
+                      <span>{agent.name}</span>
+                      {traits ? (
+                        <span
+                          className="text-xs text-muted-foreground"
+                          data-testid={`copy-local-traits-${agent.id}`}
+                        >
+                          {traits}
+                        </span>
+                      ) : null}
+                    </DropdownMenuItem>
+                  )
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy || loading || !loaded}
+              onClick={() => void reconcile()}
+            >
+              <RefreshCw className={busy ? "size-4 animate-spin" : "size-4"} />
+              {t("recheck")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <SettingsStack>
         {unavailable ? (
           <Empty>
             <EmptyHeader>
@@ -259,64 +416,48 @@ export function HostExternalAgentConfigs() {
               <EmptyTitle>{t("unavailableTitle")}</EmptyTitle>
               <EmptyDescription>{t(UNAVAILABLE_KEY[unavailable])}</EmptyDescription>
             </EmptyHeader>
+            {unavailable === "no-host" ? (
+              <Button
+                asChild
+                className="w-full @md/settings-stack:w-auto [[data-detail-density=stacked]_&]:w-full"
+              >
+                <Link href="/settings?section=connectivity">{t("pairHost")}</Link>
+              </Button>
+            ) : null}
           </Empty>
-        ) : loading ? (
-          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+        ) : !loaded && error && !loading ? (
+          <div role="alert" className="space-y-3">
+            <p className="text-sm font-medium">{t("loadFailed")}</p>
+            <p className="break-words text-sm text-destructive">{error}</p>
+            <Button
+              variant="outline"
+              className="w-full @md/settings-stack:w-auto [[data-detail-density=stacked]_&]:w-full"
+              onClick={() => void refresh()}
+            >
+              <RefreshCw className="size-4" />
+              {t("retry")}
+            </Button>
+          </div>
+        ) : !loaded || (loading && configs.length === 0) ? (
+          <div
+            role="status"
+            aria-busy="true"
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+          >
             <Spinner className="size-4" />
             {t("loading")}
           </div>
         ) : (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-muted-foreground text-sm">
-                {t("count", { count: configs.length })}
-              </span>
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Disabled rather than hidden when there is nothing to copy:
-                    the empty state names this action, and a control that
-                    vanishes makes the sentence look like a lie. */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" disabled={busy || copyable.length === 0}>
-                      <Upload className="size-4" />
-                      {t("copyLocal")}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {copyable.map((agent) => {
-                      const traits = copyableTraits.get(agent.id)
-                      return (
-                        <DropdownMenuItem
-                          key={agent.id}
-                          onSelect={() => void copyLocal(agent)}
-                          className="flex-col items-start gap-0"
-                        >
-                          <span>{agent.name}</span>
-                          {traits ? (
-                            <span
-                              className="text-xs text-muted-foreground"
-                              data-testid={`copy-local-traits-${agent.id}`}
-                            >
-                              {traits}
-                            </span>
-                          ) : null}
-                        </DropdownMenuItem>
-                      )
-                    })}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => void reconcile()}
-                >
-                  <RefreshCw className={busy ? "size-4 animate-spin" : "size-4"} />
-                  {t("recheck")}
-                </Button>
-              </div>
-            </div>
-            {error ? <p className="text-destructive text-sm">{error}</p> : null}
+          <SettingsBlock
+            title={t("count", { count: configs.length })}
+            className="[&_h3]:text-[11px] [&_h3]:font-medium [&_h3]:uppercase [&_h3]:tracking-wide [&_h3]:text-muted-foreground"
+            headingLevel={3}
+          >
+            {error ? (
+              <p role="alert" className="break-words text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
             {configs.length === 0 ? (
               <Empty>
                 <EmptyHeader>
@@ -325,7 +466,7 @@ export function HostExternalAgentConfigs() {
                 </EmptyHeader>
               </Empty>
             ) : (
-              <div className="space-y-2">
+              <div className="divide-y divide-border/60">
                 {configs.map((record) => (
                   <HostConfigRow
                     key={record.configId}
@@ -333,16 +474,101 @@ export function HostExternalAgentConfigs() {
                     busy={busy}
                     sourceName={rowFacts.get(record.configId)?.sourceName ?? null}
                     traits={rowFacts.get(record.configId)?.traits ?? []}
+                    highlighted={record.configId === highlightedId}
                     onToggle={(next) => void setEnabled(record, next)}
+                    onPermissionChange={(mode) =>
+                      void update(record, { defaultPermissionMode: mode })
+                    }
+                    onEdit={() => setEditingId(record.configId)}
                     onRemove={() => setPendingDelete(record)}
                     onDuplicate={() => setDuplicating(record)}
                   />
                 ))}
               </div>
             )}
-          </>
+          </SettingsBlock>
         )}
-      </CardContent>
+      </SettingsStack>
+
+      <Sheet
+        open={editingId !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingId(null)
+        }}
+      >
+        <SheetContent side="right" className="w-full gap-0 sm:max-w-lg" showCloseButton={false}>
+          <SheetHeader className="flex-row items-center justify-between border-b">
+            <SheetTitle>{t("editTitle")}</SheetTitle>
+            <SheetDescription className="sr-only">{t("description")}</SheetDescription>
+            <SheetClose asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-11 shrink-0"
+                aria-label={tCommon("close")}
+              >
+                <X className="size-4" />
+              </Button>
+            </SheetClose>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {editingId ? (
+              <HostAgentEditor
+                key={editingId}
+                configId={editingId}
+                onRemoved={() => {
+                  setEditingId(null)
+                  void refresh()
+                }}
+                onDuplicated={(configId) => {
+                  setEditingId(configId)
+                  setHighlightedId(configId)
+                  void refresh()
+                }}
+                onSaved={() => void refresh()}
+                onOpenConfig={setEditingId}
+              />
+            ) : null}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={creating} onOpenChange={setCreating}>
+        <SheetContent side="right" className="w-full gap-0 sm:max-w-lg" showCloseButton={false}>
+          <SheetHeader className="border-b">
+            <div className="flex items-center justify-between gap-2">
+              <SheetTitle>{t("newOnHost")}</SheetTitle>
+              <SheetClose asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 shrink-0"
+                  aria-label={tCommon("close")}
+                >
+                  <X className="size-4" />
+                </Button>
+              </SheetClose>
+            </div>
+            <SheetDescription>{t("createDescription")}</SheetDescription>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {presetId ? (
+              <HostAgentCreateForm
+                key={presetId}
+                presetId={presetId}
+                onCancel={() => setPresetId(null)}
+                onCreated={(configId) => {
+                  setCreating(false)
+                  setHighlightedId(configId)
+                  void refresh()
+                }}
+              />
+            ) : (
+              <PresetPickerList onPick={setPresetId} disabled={busy} autoFocusSearch />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {duplicating ? (
         <DuplicateAgentDialog
@@ -394,6 +620,6 @@ export function HostExternalAgentConfigs() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </div>
   )
 }

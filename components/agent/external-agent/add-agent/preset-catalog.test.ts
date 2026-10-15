@@ -1,7 +1,16 @@
-import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
+import {
+  getAvailablePresets,
+  getPresetConfig,
+  getRunnablePresets,
+} from "@/lib/ai/agent/external/config/presets"
 import type { InstalledRuntime } from "@/lib/ai/agent/external/config/installed-runtimes"
 
-import { groupPresetEntries, runnablePresetEntries, type PresetEntry } from "./preset-catalog"
+import {
+  availablePresetEntries,
+  groupPresetEntries,
+  runnablePresetEntries,
+  type PresetEntry,
+} from "./preset-catalog"
 
 function runtime(resolution: InstalledRuntime["resolution"]): InstalledRuntime {
   return {
@@ -55,14 +64,17 @@ describe("groupPresetEntries", () => {
     expect(groupPresetEntries(named, installedB, "  CODING   agent ")).toEqual({
       installed: [named[1]],
       others: [named[0]],
+      experimental: [],
     })
     expect(groupPresetEntries(named, installedB, "anthropic")).toEqual({
       installed: [],
       others: [named[0]],
+      experimental: [],
     })
     expect(groupPresetEntries(named, installedB, "nothing-matches")).toEqual({
       installed: [],
       others: [],
+      experimental: [],
     })
   })
 
@@ -76,5 +88,33 @@ describe("groupPresetEntries", () => {
     }
     expect(groupPresetEntries([tagged], () => undefined, "zz-agent").others).toEqual([tagged])
     expect(groupPresetEntries([tagged], () => undefined, "terminal").others).toEqual([tagged])
+  })
+})
+
+describe("availablePresetEntries", () => {
+  it("includes the experimental desktop presets without offering them on the phone", () => {
+    const available = availablePresetEntries((id, preset) => ({
+      name: id,
+      description: preset.description,
+    }))
+    expect(available.map((entry) => entry.id)).toEqual(
+      getAvailablePresets().filter((id) => getPresetConfig(id))
+    )
+    const experimental = available.filter((entry) => entry.preset.supportTier === "documented-only")
+    expect(experimental.length).toBeGreaterThan(0)
+    expect(entries.every((entry) => entry.preset.supportTier !== "documented-only")).toBe(true)
+    const grouped = groupPresetEntries(available, () => runtime("installed"), "")
+    expect(grouped.experimental).toEqual(experimental)
+    expect(grouped.installed.every((entry) => entry.preset.supportTier !== "documented-only")).toBe(
+      true
+    )
+  })
+
+  it("searches entries with absent plugin tags safely", () => {
+    const entry = {
+      ...entries[0],
+      preset: { ...entries[0].preset, tags: undefined },
+    } as unknown as PresetEntry
+    expect(groupPresetEntries([entry], () => undefined, entry.name).others).toEqual([entry])
   })
 })

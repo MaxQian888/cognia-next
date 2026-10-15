@@ -24,7 +24,6 @@ import { CloudOffIcon, MonitorIcon, RotateCwIcon } from "lucide-react"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -164,60 +163,68 @@ export function DesktopLocalAgents() {
     <MeSection
       title={t("desktopLocalTitle")}
       description={t("desktopLocalDescription")}
+      className="@container min-w-0"
       testid="desktop-local-agents"
     >
-      {agents.map((agent) => {
-        const currentMode = effectivePermissionMode(agent.defaultPermissionMode, agent.protocol)
-        return (
-          <Item
-            key={agent.id}
-            size="sm"
-            className="px-0"
-            data-testid={`external-agent-row-${agent.id}`}
-          >
-            <ItemMedia>
-              <MonitorIcon className="size-4 text-muted-foreground" aria-hidden />
-            </ItemMedia>
-            <ItemContent className="min-w-0">
-              <ItemTitle className="text-xs">{agent.name}</ItemTitle>
-              <ItemDescription className="text-[11px]">
-                <span className="font-mono">{agent.protocol}</span> ·{" "}
-                <span className="font-mono">{agent.transport}</span>
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions className="gap-2">
-              <Select
-                value={currentMode}
-                onValueChange={(v) =>
-                  void writeUpdate(agent, { defaultPermissionMode: v as AcpPermissionMode })
-                }
-              >
-                <SelectTrigger
-                  className="h-11 w-28 text-xs"
-                  aria-label={t("permissionModeAria", { name: agent.name })}
-                  data-testid={`external-agent-mode-${agent.id}`}
+      <div className="divide-y">
+        {agents.map((agent) => {
+          const currentMode = effectivePermissionMode(agent.defaultPermissionMode, agent.protocol)
+          return (
+            <div
+              key={agent.id}
+              className="grid min-w-0 grid-cols-[minmax(0,1fr)_44px] items-center gap-x-2 gap-y-2 p-3"
+              data-testid={`external-agent-row-${agent.id}`}
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <MonitorIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{agent.name}</p>
+                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                    {agent.protocol} · {agent.transport}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {t(agent.enabled ? "stateOn" : "stateOff")}
+                  </p>
+                </div>
+              </div>
+              <label className="flex size-11 items-center justify-center">
+                <Switch
+                  checked={agent.enabled}
+                  onCheckedChange={(next) => void writeUpdate(agent, { enabled: next })}
+                  aria-label={t("enabledAria", { name: agent.name })}
+                  className="touch-hit"
+                  data-testid={`external-agent-switch-${agent.id}`}
+                />
+              </label>
+              <div className="col-span-2 min-w-0">
+                <Select
+                  value={currentMode}
+                  onValueChange={(v) =>
+                    void writeUpdate(agent, { defaultPermissionMode: v as AcpPermissionMode })
+                  }
                 >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {permissionModesFor(agent.protocol).map((mode) => (
-                    <SelectItem key={mode} value={mode}>
-                      {t(PERMISSION_MODE_LABEL_KEY[mode])}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Switch
-                checked={agent.enabled}
-                onCheckedChange={(next) => void writeUpdate(agent, { enabled: next })}
-                aria-label={t("enabledAria", { name: agent.name })}
-                className="touch-hit"
-                data-testid={`external-agent-switch-${agent.id}`}
-              />
-            </ItemActions>
-          </Item>
-        )
-      })}
+                  <SelectTrigger
+                    className="min-h-11 w-full text-xs"
+                    aria-label={t("permissionModeAria", { name: agent.name })}
+                    data-testid={`external-agent-mode-${agent.id}`}
+                  >
+                    <span className="text-muted-foreground">{t("permissionLabel")}</span>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {permissionModesFor(agent.protocol).map((mode) => (
+                      <SelectItem key={mode} value={mode} className="min-h-11">
+                        {t(PERMISSION_MODE_LABEL_KEY[mode])}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <p className="px-3 py-3 text-xs text-muted-foreground">{t("desktopLocalEditHint")}</p>
     </MeSection>
   )
 }

@@ -137,7 +137,15 @@
     "unavailableTitle": "没有宿主配置",
     "unavailableNoHost": "先配对一个宿主，才能配置真正可运行的外部智能体。",
     "unavailableUnsupported": "已配对的宿主不支持宿主端外部智能体。升级后即可在这里管理。",
-    "unavailableManifestMissing": "正在等待已配对的宿主上报其支持的能力。"
+    "unavailableManifestMissing": "正在等待已配对的宿主上报其支持的能力。",
+    "pairHost": "配对主机",
+    "loadFailed": "无法加载主机配置",
+    "retry": "重试",
+    "newOnHost": "在主机上新建",
+    "editLabel": "编辑 {name}",
+    "actionsLabel": "{name} 的操作",
+    "editTitle": "编辑主机配置",
+    "createDescription": "选择运行时，然后在配对主机上配置。"
   },
   "lifecycle": {
     "statusLabel": {
@@ -423,6 +431,16 @@
   "selectorPluginUnavailable": "插件未启用",
   "setConfigOptionFailed": "更新配置项失败",
   "settings": {
+    "discardDraftTitle": "放弃未保存的更改？",
+    "discardDraftDescription": "对此智能体的更改尚未保存。放弃更改以继续，或留在此处编辑。",
+    "keepEditing": "继续编辑",
+    "discardDraft": "放弃更改",
+    "numberedAgentName": "{name} {index}",
+    "isolatedTerminal": {
+      "loading": "正在查找此配置的状态目录…",
+      "no-state-root": "此配置的状态目录不可用。请在本地主机上打开后继续。",
+      "isolation-unsupported": "此配置无法使用隔离状态。请检查其状态隔离设置。"
+    },
     "clinePresetDescription": "官方 Cline CLI，支持流式回复、Plan/Act、工具审批和会话恢复。",
     "clineSetupHint": "安装 npm install -g cline@3.0.67，运行 cline auth 登录 Cline/ClinePass/ChatGPT，或在本地设置 CLINE_PROVIDER、CLINE_MODEL 和 CLINE_API_KEY。独立 ACP 状态请用 --config 或 CLINE_DIR；ACP 不支持 --data-dir。托管运行关闭自动更新。删除配置会保留系统安装与 Cline 数据。Cline 3.0.67 ACP 未转发图片和会话 MCP；原生 MCP 使用 cline mcp 配置。",
     "clineEnvironment": "Cline 认证与配置",
@@ -552,7 +570,8 @@
       "managedLaunchNotice": "先安装托管运行时，再保存此配置。Cognia 会在启动时解析可执行文件和运行配置。",
       "credentialNotice": "API Key 将保存到本地密钥库。编辑时留空可保留已有密钥。",
       "committedEventsNotice": "两种传输均提供已提交的文本、推理和工具事件，并可通过 MCP 使用 Cognia 工具。不支持实时 token 增量；SDK 额外提供用量和子代理关系，ACP 支持逐工具审批和会话恢复。",
-      "capabilityMcp": "Cognia 与 MCP 工具"
+      "capabilityMcp": "Cognia 与 MCP 工具",
+      "retry": "重试"
     },
     "defaultPermissionMode": "默认权限模式",
     "defaultPermissionModeDesc": "新代理会话使用的默认权限模式",
@@ -637,7 +656,12 @@
       "project": "项目",
       "providers": "提供商",
       "refresh": "刷新状态",
-      "title": "OpenCode 服务器"
+      "title": "OpenCode 服务器",
+      "checking": "正在检查…",
+      "loadFailed": "无法加载此状态。",
+      "retry": "重试",
+      "unavailableForVersion": "此版本暂不支持。",
+      "providerAuthUnknown": "无法检查提供商登录状态。"
     },
     "opencodeV2PresetDescription": "通过 HTTP 和 SSE 连接当前版本的 OpenCode 服务。",
     "opencodeV2PresetName": "OpenCode V2",
@@ -735,7 +759,8 @@
       "signInFailed": "无法在终端中打开 Pi：{reason}",
       "modelsSummary": "{providers} 个提供方，共 {count} 个模型",
       "evidenceListing": "已列出",
-      "evidenceListingTitle": "Pi 的 auth check 不认识这个提供方（由扩展注册），但 Pi 列出了它的模型，而这只会在凭证可用时发生。"
+      "evidenceListingTitle": "Pi 的 auth check 不认识这个提供方（由扩展注册），但 Pi 列出了它的模型，而这只会在凭证可用时发生。",
+      "checking": "正在检查提供商…"
     },
     "devinPresetDescription": "通过原生 ACP 服务运行 Devin，复用已有的 CLI 登录。连接后可选择 SWE-2 等模型。 如需修改文件，请选择“接受编辑（Code）”模式。 每个会话均可使用 Cognia 工具和 Devin 原生工具。",
     "opencodeV2EndpointPlaceholder": "留空以发现本地服务",
@@ -746,7 +771,7 @@
     "railSearchEmpty": "没有匹配的 Agent",
     "railGroupAttention": "需要处理",
     "railGroupInactive": "未激活",
-    "railBackToList": "全部 Agent 与设置",
+    "railBackToList": "Agent 列表",
     "railLabel": "外部 Agent",
     "railGroupByLabel": "Agent 分组方式",
     "railGroupByReadiness": "按状态",
@@ -788,7 +813,39 @@
     "inspectorDeleteAria": "删除 {name}",
     "sessionLimitInvalid": "会话上限必须是大于零的整数，留空表示不限制。",
     "milliseconds": "{value} 毫秒",
-    "retrySummary": "{count} 次 × {delay} 毫秒"
+    "retrySummary": "{count} 次 × {delay} 毫秒",
+    "inspectorStatus": "状态",
+    "inspectorMasterDisabled": "请先启用外部代理，再连接。",
+    "inspectorActionsAria": "{name} 的操作",
+    "inspectorEditAll": "编辑所有设置",
+    "inspectorKeySaved": "已保存 — 留空以保留",
+    "remedies": {
+      "open-runtimes": "打开运行时",
+      "open-plugins": "打开插件",
+      "edit-credentials": "编辑凭据",
+      "use-shared-state": "使用共享状态",
+      "edit-session-limit": "编辑会话上限"
+    },
+    "presetSummaryLabel": "预设：",
+    "changePreset": "更改",
+    "mobileDetailShowDetails": "显示详情",
+    "mobileDetailReadinessSteps": "就绪步骤",
+    "mobileDetailGeneral": "常规",
+    "mobileDetailBehaviour": "行为",
+    "mobileDetailDiagnostics": "诊断",
+    "mobileDetailManage": "管理",
+    "mobileDetailMoreOptions": "更多选项",
+    "mobileDetailNameDescription": "名称与描述",
+    "mobileDetailSessionLimit": "会话限制",
+    "mobileDetailPermissionMode": "权限模式",
+    "mobileDetailWebSearch": "网页搜索",
+    "mobileDetailPiSignIn": "Pi 登录",
+    "mobileDetailOpenCode": "OpenCode",
+    "mobileDetailKimi": "Kimi",
+    "mobileDetailNotSet": "未设置",
+    "mobileDetailSaved": "已保存",
+    "mobileDetailNonNegativeIntegerInvalid": "请输入大于或等于零的整数。",
+    "sectionDefaults": "默认设置"
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",
@@ -896,7 +953,8 @@
       "retry": "重试",
       "connect": "连接",
       "addRule": "添加路由规则"
-    }
+    },
+    "optional": "可选"
   },
   "configPin": {
     "label": "智能体配置",
@@ -1062,6 +1120,37 @@
     "statusRegion": "Agent 扩展状态",
     "widget": "{name} 扩展的输出",
     "dismissNotice": "关闭提示"
+  },
+  "picker": {
+    "searchPlaceholder": "搜索预设…",
+    "searchAria": "搜索智能体预设",
+    "detectedSection": "此设备上已检测到",
+    "availableSection": "可用",
+    "experimentalSection": "实验性",
+    "experimentalReason": "此预设仅有文档说明，暂时无法添加。",
+    "customTitle": "自定义配置",
+    "customDescription": "使用自定义连接设置配置智能体。",
+    "noMatches": "没有与“{query}”匹配的预设。",
+    "description": "选择预设或创建自定义配置。",
+    "detectionChecking": "正在检查本设备已安装的 Agent…",
+    "detectionUnavailable": "本设备无法检查已安装的 Agent，所有预设仍可添加。"
+  },
+  "overview": {
+    "connected": "已连接",
+    "attention": "待处理",
+    "off": "已关闭",
+    "allClear": "一切正常 · {count} 个已连接",
+    "firstAgentTitle": "添加你的第一个智能体",
+    "firstAgentDescription": "选择预设来配置你的第一个外部智能体。",
+    "suggestions": "建议"
+  },
+  "rail": {
+    "automaticRouting": "自动路由",
+    "runtimesAndInstalls": "运行时与安装",
+    "showing": "正在显示：{filter}",
+    "clearFilter": "清除状态筛选",
+    "off": "已关闭",
+    "hostOwnedAgents": "宿主智能体"
   },
   "delivery": {
     "title": "远程沙箱交付历史",

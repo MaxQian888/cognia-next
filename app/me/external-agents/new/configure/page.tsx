@@ -34,7 +34,7 @@ function ConfigureScreen() {
       backHref={ADD_EXTERNAL_AGENT_ROUTE}
       testid="mobile-configure-external-agent-page"
     >
-      <PairedOnly>
+      <PairedOnly loadingFallback={<ExternalAgentScreenSkeleton />}>
         <AddExternalAgentForm presetId={presetId} />
       </PairedOnly>
     </SubPageShell>

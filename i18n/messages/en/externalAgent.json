@@ -137,7 +137,15 @@
     "unavailableTitle": "No host configurations",
     "unavailableNoHost": "Pair a host to configure external agents that can actually run.",
     "unavailableUnsupported": "The paired host does not support host-owned external agents. Update it to manage them from here.",
-    "unavailableManifestMissing": "Waiting for the paired host to report what it supports."
+    "unavailableManifestMissing": "Waiting for the paired host to report what it supports.",
+    "pairHost": "Pair a host",
+    "loadFailed": "Could not load host configurations",
+    "retry": "Retry",
+    "newOnHost": "New on host",
+    "editLabel": "Edit {name}",
+    "actionsLabel": "Actions for {name}",
+    "editTitle": "Edit host configuration",
+    "createDescription": "Choose a runtime, then configure it on the paired host."
   },
   "lifecycle": {
     "statusLabel": {
@@ -423,6 +431,16 @@
   "selectorPluginUnavailable": "Plugin off",
   "setConfigOptionFailed": "Failed to update config option",
   "settings": {
+    "discardDraftTitle": "Discard unsaved changes?",
+    "discardDraftDescription": "Your changes to this agent have not been saved. Discard them to continue, or keep editing.",
+    "keepEditing": "Keep editing",
+    "discardDraft": "Discard changes",
+    "numberedAgentName": "{name} {index}",
+    "isolatedTerminal": {
+      "loading": "Locating this configuration’s state folder…",
+      "no-state-root": "This configuration’s state folder is unavailable. Open it on the local host to continue.",
+      "isolation-unsupported": "This configuration cannot use isolated state. Review its state isolation settings."
+    },
     "clinePresetDescription": "Official Cline CLI with streaming, Plan/Act, tool approvals and session resume.",
     "clineSetupHint": "Install npm install -g cline@3.0.67, then run cline auth for Cline/ClinePass/ChatGPT login, or supply CLINE_PROVIDER, CLINE_MODEL and CLINE_API_KEY locally. Use --config or CLINE_DIR for separate ACP state; --data-dir is unsupported in ACP. Hosted auto-update is disabled. Removing this configuration preserves your system installation and Cline data. Cline 3.0.67 ACP does not forward images or session MCP servers; native MCP uses cline mcp.",
     "clineEnvironment": "Cline authentication and configuration",
@@ -552,7 +570,8 @@
       "managedLaunchNotice": "Install the managed runtime, then save this profile. Cognia resolves its executable and composition at launch.",
       "credentialNotice": "The API key is stored in the local keyring. Leave this field blank when editing to keep the existing key.",
       "committedEventsNotice": "Both transports provide committed text, reasoning and tool events, and can use Cognia tools through MCP. Live token deltas are unavailable; SDK also reports usage and subagent lineage, while ACP supports per-tool approval and session resume.",
-      "capabilityMcp": "Cognia and MCP tools"
+      "capabilityMcp": "Cognia and MCP tools",
+      "retry": "Retry"
     },
     "defaultPermissionMode": "Default Permission Mode",
     "defaultPermissionModeDesc": "Default permission mode for new agent sessions",
@@ -637,7 +656,12 @@
       "project": "Project",
       "providers": "Providers",
       "refresh": "Refresh status",
-      "title": "OpenCode server"
+      "title": "OpenCode server",
+      "checking": "Checking…",
+      "loadFailed": "Could not load this status.",
+      "retry": "Retry",
+      "unavailableForVersion": "Not available for this version.",
+      "providerAuthUnknown": "Provider sign-in status could not be checked."
     },
     "opencodeV2PresetDescription": "Connect to the current OpenCode service over HTTP and SSE.",
     "opencodeV2PresetName": "OpenCode V2",
@@ -735,7 +759,8 @@
       "signInFailed": "Could not open Pi in the terminal: {reason}",
       "modelsSummary": "{count} models across {providers} providers",
       "evidenceListing": "Listed",
-      "evidenceListingTitle": "Pi's auth check does not know this provider (it is registered by an extension), but Pi lists its models, which it only does once credentials resolve."
+      "evidenceListingTitle": "Pi's auth check does not know this provider (it is registered by an extension), but Pi lists its models, which it only does once credentials resolve.",
+      "checking": "Checking providers…"
     },
     "devinPresetDescription": "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools.",
     "opencodeV2EndpointPlaceholder": "Leave blank to discover the local service",
@@ -746,7 +771,7 @@
     "railSearchEmpty": "No agents match your search",
     "railGroupAttention": "Needs attention",
     "railGroupInactive": "Inactive",
-    "railBackToList": "All agents and settings",
+    "railBackToList": "Agents",
     "railLabel": "External agents",
     "railGroupByLabel": "Group agents",
     "railGroupByReadiness": "By status",
@@ -788,7 +813,39 @@
     "inspectorDeleteAria": "Delete {name}",
     "sessionLimitInvalid": "The session limit must be a whole number above zero, or empty for no limit.",
     "milliseconds": "{value} ms",
-    "retrySummary": "{count} × {delay} ms"
+    "retrySummary": "{count} × {delay} ms",
+    "inspectorStatus": "Status",
+    "inspectorMasterDisabled": "Enable external agents to connect.",
+    "inspectorActionsAria": "Actions for {name}",
+    "inspectorEditAll": "Edit all settings",
+    "inspectorKeySaved": "Saved — leave empty to keep",
+    "remedies": {
+      "open-runtimes": "Open runtimes",
+      "open-plugins": "Open plugins",
+      "edit-credentials": "Edit credentials",
+      "use-shared-state": "Use shared state",
+      "edit-session-limit": "Edit session limit"
+    },
+    "presetSummaryLabel": "Preset:",
+    "changePreset": "Change",
+    "mobileDetailShowDetails": "Show details",
+    "mobileDetailReadinessSteps": "Readiness steps",
+    "mobileDetailGeneral": "General",
+    "mobileDetailBehaviour": "Behaviour",
+    "mobileDetailDiagnostics": "Diagnostics",
+    "mobileDetailManage": "Manage",
+    "mobileDetailMoreOptions": "More options",
+    "mobileDetailNameDescription": "Name & description",
+    "mobileDetailSessionLimit": "Session limit",
+    "mobileDetailPermissionMode": "Permission mode",
+    "mobileDetailWebSearch": "Web search",
+    "mobileDetailPiSignIn": "Pi sign-in",
+    "mobileDetailOpenCode": "OpenCode",
+    "mobileDetailKimi": "Kimi",
+    "mobileDetailNotSet": "Not set",
+    "mobileDetailSaved": "Saved",
+    "mobileDetailNonNegativeIntegerInvalid": "Enter a whole number of zero or greater.",
+    "sectionDefaults": "Defaults"
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",
@@ -896,7 +953,8 @@
       "retry": "Retry",
       "connect": "Connect",
       "addRule": "Add routing rule"
-    }
+    },
+    "optional": "optional"
   },
   "configPin": {
     "label": "Agent config",
@@ -1062,6 +1120,37 @@
     "statusRegion": "Agent extension status",
     "widget": "Output from the {name} extension",
     "dismissNotice": "Dismiss notice"
+  },
+  "picker": {
+    "searchPlaceholder": "Search presets…",
+    "searchAria": "Search agent presets",
+    "detectedSection": "Detected on this device",
+    "availableSection": "Available",
+    "experimentalSection": "Experimental",
+    "experimentalReason": "This preset is documented only and cannot be added yet.",
+    "customTitle": "Custom configuration",
+    "customDescription": "Configure an agent with your own connection settings.",
+    "noMatches": "No presets match “{query}”.",
+    "description": "Choose a preset or create a custom configuration.",
+    "detectionChecking": "Checking what's installed on this device…",
+    "detectionUnavailable": "This device can't check which agents are installed. Every preset can still be added."
+  },
+  "overview": {
+    "connected": "Connected",
+    "attention": "Next steps",
+    "off": "Off",
+    "allClear": "All clear · {count} connected",
+    "firstAgentTitle": "Add your first agent",
+    "firstAgentDescription": "Choose a preset to configure your first external agent.",
+    "suggestions": "Suggestions"
+  },
+  "rail": {
+    "automaticRouting": "Automatic routing",
+    "runtimesAndInstalls": "Runtimes & installs",
+    "showing": "Showing: {filter}",
+    "clearFilter": "Clear state filter",
+    "off": "Off",
+    "hostOwnedAgents": "Host-owned agents"
   },
   "delivery": {
     "title": "Remote sandbox delivery history",

@@ -226,6 +226,8 @@ export const createExternalAgentActionsSlice = (
       const updated: StoredExternalAgentConfig = {
         ...agent,
         name: updates.name ?? agent.name,
+        protocol: updates.protocol ?? agent.protocol,
+        transport: updates.transport ?? agent.transport,
         description: updates.description ?? agent.description,
         enabled: updates.enabled ?? agent.enabled,
         process: updates.process

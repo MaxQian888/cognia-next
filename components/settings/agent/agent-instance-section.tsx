@@ -16,10 +16,11 @@
  * draft and its one save bar, so every inline edit is saved the same way.
  */
 
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useState, type Ref } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, FolderOpenIcon } from "lucide-react"
 
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -104,7 +105,7 @@ function StateFolderRow({ agentId }: { agentId: string }) {
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="state-folder">
       <code
-        className="min-w-0 flex-1 basis-48 truncate rounded bg-muted px-1.5 py-0.5 text-xs"
+        className="min-w-0 flex-1 basis-48 break-all rounded bg-muted px-1.5 py-0.5 text-xs"
         title={info.path}
       >
         {info.path}
@@ -136,6 +137,7 @@ export function AgentInstanceSection({
   draftSessionLimit,
   onDraftSessionLimitChange,
   onOpenAgent,
+  sessionLimitRef,
 }: {
   agent: LifecycleExternalAgentConfig
   allAgents: readonly LifecycleExternalAgentConfig[]
@@ -145,6 +147,7 @@ export function AgentInstanceSection({
   draftSessionLimit: string
   onDraftSessionLimitChange: (value: string) => void
   onOpenAgent: (agentId: string) => void
+  sessionLimitRef?: Ref<HTMLInputElement>
 }) {
   const t = useTranslations("externalAgent.instanceSection")
   const limitId = useId()
@@ -153,18 +156,12 @@ export function AgentInstanceSection({
   const sharing = sharedStateSiblings(agent, allAgents)
 
   return (
-    <section
-      className="space-y-4 rounded-lg border p-3"
-      aria-labelledby={`${limitId}-title`}
-      data-testid="agent-instance-section"
+    <SettingsBlock
+      title={t("title")}
+      description={t("description")}
+      headingLevel={4}
+      testid="agent-instance-section"
     >
-      <div>
-        <h4 id={`${limitId}-title`} className="text-sm font-medium">
-          {t("title")}
-        </h4>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
-      </div>
-
       {local ? (
         <div className="space-y-2">
           <StateIsolationField
@@ -184,7 +181,7 @@ export function AgentInstanceSection({
 
       {sharing.length > 0 ? (
         <p
-          className="flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300"
+          className="flex items-start gap-1.5 rounded-md bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300"
           data-testid="instance-shared-state-warning"
         >
           <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -198,6 +195,7 @@ export function AgentInstanceSection({
       <div className="grid gap-1.5">
         <Label htmlFor={limitId}>{t("sessionLimit")}</Label>
         <Input
+          ref={sessionLimitRef}
           id={limitId}
           type="number"
           inputMode="numeric"
@@ -220,7 +218,7 @@ export function AgentInstanceSection({
           <p className="text-xs font-medium text-muted-foreground">
             {t("siblings", { count: siblings.length })}
           </p>
-          <ul className="space-y-1">
+          <ul className="divide-y divide-border/60">
             {siblings.map((sibling) => {
               const differences = instanceDifferences(sibling, agent).map((difference) => ({
                 key: difference.key,
@@ -231,7 +229,7 @@ export function AgentInstanceSection({
                   <button
                     type="button"
                     onClick={() => onOpenAgent(sibling.id)}
-                    className="touch-hit flex w-full min-w-0 items-start gap-2 rounded-md border px-2 py-1.5 text-left hover:bg-accent/50"
+                    className="touch-hit flex w-full min-w-0 items-start gap-2 px-0 py-2 text-left hover:bg-accent/50"
                     data-testid={`instance-sibling-${sibling.id}`}
                   >
                     <BrandIcon
@@ -241,7 +239,7 @@ export function AgentInstanceSection({
                     />
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="truncate text-sm">{sibling.name}</span>
+                        <span className="break-all text-sm">{sibling.name}</span>
                         <StateIsolationBadge config={sibling} className="h-4 px-1 text-[10px]" />
                       </span>
                       {differences.length > 0 ? (
@@ -257,6 +255,6 @@ export function AgentInstanceSection({
           </ul>
         </div>
       ) : null}
-    </section>
+    </SettingsBlock>
   )
 }

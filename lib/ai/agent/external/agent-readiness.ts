@@ -11,7 +11,7 @@
  *
  * `nextAction` is the single most useful thing a row can offer: enabling a
  * deliberately-disabled agent, inspecting a block, retrying an error,
- * connecting, or finishing setup with a routing rule. It is deliberately
+ * connecting, or suggesting an optional routing rule. It is deliberately
  * `null` while connecting — there is nothing to do but wait.
  */
 
@@ -37,6 +37,7 @@ export type AgentReadinessStepState = "done" | "current" | "failed" | "todo" | "
 export interface AgentReadinessStep {
   id: AgentReadinessStepId
   state: AgentReadinessStepState
+  optional?: boolean
 }
 
 /**
@@ -47,6 +48,8 @@ export type AgentReadinessAction = "enable" | "inspect" | "retry" | "connect" | 
 
 export interface AgentReadiness {
   state: AgentReadinessState
+  /** A live connection is ready; routing is an optional way to reach it. */
+  ready: boolean
   /**
    * Why the agent cannot run, when `state === "blocked"`. Prefers the runtime
    * verdict (`agentValidity`) over the static gate, matching the precedence
@@ -123,7 +126,7 @@ export function computeAgentReadiness(input: {
     { id: "connected", state: connectedState },
     // Routing is configured state, not runtime state: a disconnected agent
     // with rules still counts as routed.
-    { id: "routed", state: delegatedRuleCount > 0 ? "done" : "todo" },
+    { id: "routed", state: delegatedRuleCount > 0 ? "done" : "todo", optional: true },
   ]
 
   const nextAction: AgentReadinessAction | null =
@@ -141,5 +144,5 @@ export function computeAgentReadiness(input: {
                 ? "add-rule"
                 : null
 
-  return { state, blockReason, blockTransient, steps, nextAction }
+  return { state, ready: state === "connected", blockReason, blockTransient, steps, nextAction }
 }

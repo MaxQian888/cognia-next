@@ -1,15 +1,21 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { KeyRound, LogIn, RefreshCw, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react"
 import { toast } from "sonner"
 
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { usePiAuthStatus } from "@/hooks/agent/use-pi-auth-status"
 import type { PiAuthProbeStatus, PiListedModel } from "@cognia/agent-pi/auth"
 import { terminalAvailable } from "@/lib/terminal/pick-transport"
+import { shellQuote } from "@/lib/mcp/config-transfer"
+import {
+  resolveIsolatedTerminalEnv,
+  type IsolatedTerminalEnv,
+} from "@/lib/ai/agent/external/lifecycle/isolated-terminal-env"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
@@ -66,7 +72,45 @@ function groupModels(models: readonly PiListedModel[]): Array<[string, PiListedM
 export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) {
   const t = useTranslations("externalAgent.settings.piAuth")
   const { status, loading, available, refresh } = usePiAuthStatus(agentId, connected)
-  const cwd = useExternalAgentStore((s) => s.agents[agentId]?.process?.cwd ?? "")
+  const agent = useExternalAgentStore((s) => s.agents[agentId])
+  const tTerminal = useTranslations("externalAgent.settings.isolatedTerminal")
+  const [terminalState, setTerminalState] = useState<{
+    config: typeof agent
+    result: IsolatedTerminalEnv
+  } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    if (agent?.stateIsolation === "isolated") {
+      void resolveIsolatedTerminalEnv(agent).then(
+        (result) => {
+          if (!cancelled) setTerminalState({ config: agent, result })
+        },
+        () => {
+          if (!cancelled)
+            setTerminalState({
+              config: agent,
+              result: { kind: "unavailable", reason: "no-state-root" },
+            })
+        }
+      )
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [agent])
+  const terminalEnv: IsolatedTerminalEnv | undefined =
+    agent?.stateIsolation !== "isolated"
+      ? { kind: "shared" }
+      : terminalState?.config === agent
+        ? terminalState?.result
+        : undefined
+  const terminalReason = !agent
+    ? tTerminal("no-state-root")
+    : !terminalEnv
+      ? tTerminal("loading")
+      : terminalEnv.kind === "unavailable"
+        ? tTerminal(terminalEnv.reason)
+        : undefined
   const [signingIn, setSigningIn] = useState(false)
   const [modelsOpen, setModelsOpen] = useState(false)
   const groups = useMemo(() => groupModels(status.models), [status.models])
@@ -81,9 +125,15 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
    * Cognia never types, reads or stores the credential (ADR-0119).
    */
   const openSignIn = async () => {
+    if (!agent || !terminalEnv || terminalEnv.kind === "unavailable") return
     setSigningIn(true)
     try {
-      await runInTerminalDock("pi", cwd, "")
+      await runInTerminalDock(
+        shellQuote(agent.process?.command || "pi"),
+        agent.process?.cwd ?? "",
+        "",
+        terminalEnv.kind === "isolated" ? { env: terminalEnv.env } : {}
+      )
       toast.message(t("signInOpened"))
     } catch (error) {
       toast.error(
@@ -94,21 +144,21 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
     }
   }
 
-  if (!connected || !available) {
+  if (!connected) {
     return (
-      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-        {t("notConnected")}
-      </div>
+      <SettingsBlock title={t("title")} headingLevel={4}>
+        <p className="text-xs text-muted-foreground">{t("notConnected")}</p>
+      </SettingsBlock>
     )
   }
 
   return (
-    <div className="space-y-3 rounded-md border p-3" data-testid="pi-auth-status">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 shrink items-center gap-1.5">
-          <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <p className="truncate text-sm font-medium">{t("title")}</p>
-        </div>
+    <SettingsBlock
+      title={t("title")}
+      icon={<KeyRound />}
+      headingLevel={4}
+      testid="pi-auth-status"
+      action={
         <Button
           variant="ghost"
           size="sm"
@@ -120,11 +170,15 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
         </Button>
-      </div>
-
+      }
+    >
       <p className="text-xs text-muted-foreground">{t("readOnlyNote")}</p>
 
-      {status.listing === "unreadable" ? (
+      {status.listing === "idle" || !available ? (
+        <p className="text-xs text-muted-foreground" role="status" data-testid="pi-auth-checking">
+          {t("checking")}
+        </p>
+      ) : status.listing === "unreadable" ? (
         <p className="text-xs text-muted-foreground" data-testid="pi-auth-listing-unreadable">
           {t("listingUnreadable")}
         </p>
@@ -133,22 +187,22 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
           {t("noProviders")}
         </p>
       ) : (
-        <div className="space-y-1.5">
+        <div className="divide-y divide-border/60">
           {status.verdicts.map((verdict, index) => {
             const Icon = ICONS[verdict.status]
             return (
               <div
                 key={`${verdict.provider ?? "unknown"}:${index}`}
-                className="flex items-center justify-between gap-2"
+                className="flex flex-wrap items-center justify-between gap-2 py-2"
                 data-testid="pi-auth-provider"
               >
                 <div className="flex min-w-0 shrink items-center gap-1.5">
                   <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate text-xs">
+                  <span className="break-all text-xs">
                     {verdict.provider ?? t("unknownProvider")}
                   </span>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   {verdict.authType && (
                     <Badge variant="outline" className="text-[10px]">
                       {t(`authType.${verdict.authType}`)}
@@ -187,15 +241,15 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
           size="sm"
           className="h-7 gap-1.5 px-2 text-xs"
           onClick={() => void openSignIn()}
-          disabled={!canOpenTerminal || signingIn}
+          disabled={!canOpenTerminal || !!terminalReason || signingIn}
           data-testid="pi-auth-sign-in"
-          title={canOpenTerminal ? undefined : t("signInNeedsTerminal")}
+          title={terminalReason ?? (canOpenTerminal ? undefined : t("signInNeedsTerminal"))}
         >
           <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
           {t("signIn")}
         </Button>
         <span className="text-[11px] text-muted-foreground">
-          {canOpenTerminal ? t("signInHint") : t("signInNeedsTerminal")}
+          {terminalReason ?? (canOpenTerminal ? t("signInHint") : t("signInNeedsTerminal"))}
         </span>
       </div>
 
@@ -205,7 +259,7 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
             type="button"
             variant="ghost"
             size="sm"
-            className="h-auto px-0 text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
+            className="h-auto whitespace-normal px-0 text-left text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
             onClick={() => setModelsOpen((open) => !open)}
             aria-expanded={modelsOpen}
             data-testid="pi-auth-models-toggle"
@@ -213,9 +267,9 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
             {t("modelsSummary", { count: status.models.length, providers: groups.length })}
           </Button>
           {modelsOpen && (
-            <ul className="space-y-1">
+            <ul className="divide-y divide-border/60">
               {groups.map(([provider, models]) => (
-                <li key={provider} className="text-xs">
+                <li key={provider} className="break-all py-2 text-xs">
                   <span className="font-medium">{provider}</span>
                   <span className="text-muted-foreground">
                     {" "}
@@ -227,6 +281,6 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
           )}
         </div>
       )}
-    </div>
+    </SettingsBlock>
   )
 }

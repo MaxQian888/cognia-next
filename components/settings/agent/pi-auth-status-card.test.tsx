@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
@@ -8,6 +8,43 @@ import type { PiAuthStatus } from "@/hooks/agent/use-pi-auth-status"
 import type { PiAuthType, PiAuthProbeStatus } from "@cognia/agent-pi/auth"
 
 import { PiAuthStatusCard } from "./pi-auth-status-card"
+
+jest.mock("next-intl", () => ({
+  NextIntlClientProvider: ({ children }: { children: React.ReactNode }) => children,
+  useLocale: () => "en",
+  useTranslations: (namespace: string) => {
+    const [root, ...path] = namespace.split(".")
+    const source = jest.requireActual(`@/i18n/messages/en/${root}.json`)
+    const lookup = (key: string): unknown =>
+      [...path, ...key.split(".")].reduce((value, part) => value?.[part], source)
+    const translate = (key: string, values: Record<string, unknown> = {}) => {
+      const message = lookup(key)
+      if (typeof message !== "string")
+        throw new Error(`Missing split-source message: ${namespace}.${key}`)
+      return message
+        .replace(
+          /\{(\w+),\s*plural,\s*((?:(?:=\d+|\w+)\s*\{(?:[^{}]|\{\w+\})*\}\s*)+)\}/g,
+          (_, name, body) => {
+            const branches = Object.fromEntries(
+              [...body.matchAll(/(=\d+|\w+)\s*\{((?:[^{}]|\{\w+\})*)\}/g)].map(
+                (match: RegExpMatchArray) => [match[1], match[2]]
+              )
+            )
+            return (
+              branches[`=${values[name]}`] ??
+              branches[new Intl.PluralRules("en").select(Number(values[name]))] ??
+              branches.other
+            ).replace(/#/g, String(values[name]))
+          }
+        )
+        .replace(/\{(\w+)(?:,\s*number)?\}/g, (_, name) => String(values[name] ?? `{${name}}`))
+    }
+    translate.has = (key: string) => typeof lookup(key) === "string"
+    translate.raw = lookup
+    translate.rich = translate
+    return translate
+  },
+}))
 
 let hookValue: {
   status: PiAuthStatus
@@ -20,17 +57,24 @@ jest.mock("@/hooks/agent/use-pi-auth-status", () => ({
   usePiAuthStatus: () => hookValue,
 }))
 
-const runInTerminalDock = jest.fn<Promise<void>, [string, string, string]>()
+type RunInTerminalDock = typeof import("@/lib/terminal/run-in-dock").runInTerminalDock
+const runInTerminalDock = jest.fn<ReturnType<RunInTerminalDock>, Parameters<RunInTerminalDock>>()
+const resolveEnv = jest.fn()
+jest.mock("@/lib/ai/agent/external/lifecycle/isolated-terminal-env", () => ({
+  resolveIsolatedTerminalEnv: (...args: unknown[]) => resolveEnv(...args),
+}))
+let mockPiAgent: import("@/types/agent/external-agent").ExternalAgentConfig
+
 let terminalReachable = true
 jest.mock("@/lib/terminal/run-in-dock", () => ({
-  runInTerminalDock: (...args: [string, string, string]) => runInTerminalDock(...args),
+  runInTerminalDock: (...args: Parameters<RunInTerminalDock>) => runInTerminalDock(...args),
 }))
 jest.mock("@/lib/terminal/pick-transport", () => ({
   terminalAvailable: () => terminalReachable,
 }))
 jest.mock("@/stores/agent/external-agent-store", () => ({
   useExternalAgentStore: (selector: (state: unknown) => unknown) =>
-    selector({ agents: { "pi-1": { process: { command: "pi", cwd: "/work" } } } }),
+    selector({ agents: { "pi-1": mockPiAgent } }),
 }))
 const toast = { message: jest.fn(), error: jest.fn() }
 jest.mock("sonner", () => ({
@@ -54,6 +98,15 @@ function renderCard(props?: { connected?: boolean }) {
 }
 
 beforeEach(() => {
+  mockPiAgent = {
+    id: "pi-1",
+    name: "Pi",
+    protocol: "pi-rpc",
+    transport: "stdio",
+    enabled: true,
+    process: { command: "pi", cwd: "/work" },
+  }
+  resolveEnv.mockReset().mockResolvedValue({ kind: "shared" })
   runInTerminalDock.mockReset().mockResolvedValue(undefined)
   terminalReachable = true
   toast.message.mockReset()
@@ -191,7 +244,7 @@ describe("piAuth catalogue coverage", () => {
     hookValue.status = { listing: "ok", verdicts: [], models: [] }
     const { unmount } = renderCard()
     await userEvent.click(screen.getByTestId("pi-auth-sign-in"))
-    expect(runInTerminalDock).toHaveBeenCalledWith("pi", "/work", "")
+    expect(runInTerminalDock).toHaveBeenCalledWith("pi", "/work", "", {})
     expect(toast.message).toHaveBeenCalledWith(enMessages.settings.piAuth.signInOpened)
     unmount()
 
@@ -227,4 +280,93 @@ describe("piAuth catalogue coverage", () => {
     await userEvent.click(toggle)
     expect(screen.getByText("claude-opus-5, claude-sonnet-5")).toBeInTheDocument()
   })
+})
+
+describe("isolated Pi sign-in", () => {
+  it("opens the configured executable with its own state root", async () => {
+    mockPiAgent = {
+      ...mockPiAgent,
+      stateIsolation: "isolated",
+      process: { command: "/my tools/pi", cwd: "/work" },
+    }
+    resolveEnv.mockResolvedValue({
+      kind: "isolated",
+      env: { PI_CODING_AGENT_DIR: "/state/pi-1/pi" },
+    })
+    renderCard()
+    await waitFor(() => expect(screen.getByTestId("pi-auth-sign-in")).toBeEnabled())
+    await userEvent.click(screen.getByTestId("pi-auth-sign-in"))
+    expect(resolveEnv).toHaveBeenCalledWith(mockPiAgent)
+    expect(runInTerminalDock).toHaveBeenCalledWith("'/my tools/pi'", "/work", "", {
+      env: { PI_CODING_AGENT_DIR: "/state/pi-1/pi" },
+    })
+  })
+
+  it.each(["no-state-root", "isolation-unsupported"] as const)(
+    "explains %s and never opens shared Pi",
+    async (reason) => {
+      mockPiAgent = { ...mockPiAgent, stateIsolation: "isolated" }
+      resolveEnv.mockResolvedValue({ kind: "unavailable", reason })
+      renderCard()
+      expect(
+        await screen.findByText(enMessages.settings.isolatedTerminal[reason])
+      ).toBeInTheDocument()
+      expect(screen.getByTestId("pi-auth-sign-in")).toBeDisabled()
+      expect(runInTerminalDock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("disables sign-in on a failed state-root lookup", async () => {
+    mockPiAgent = { ...mockPiAgent, stateIsolation: "isolated" }
+    resolveEnv.mockRejectedValue(new Error("host failed"))
+    renderCard()
+    expect(
+      await screen.findByText(enMessages.settings.isolatedTerminal["no-state-root"])
+    ).toBeInTheDocument()
+    expect(screen.getByTestId("pi-auth-sign-in")).toBeDisabled()
+  })
+
+  it("falls back to pi when the configured command is absent", async () => {
+    mockPiAgent = { ...mockPiAgent, process: undefined }
+    renderCard()
+    await userEvent.click(screen.getByTestId("pi-auth-sign-in"))
+    expect(runInTerminalDock).toHaveBeenCalledWith("pi", "", "", {})
+  })
+
+  it("ignores a late lookup for an obsolete config", async () => {
+    let finish!: (value: unknown) => void
+    resolveEnv.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
+    mockPiAgent = { ...mockPiAgent, stateIsolation: "isolated" }
+    const view = renderCard()
+    mockPiAgent = { ...mockPiAgent, id: "pi-new" }
+    resolveEnv.mockResolvedValue({ kind: "isolated", env: { PI_CODING_AGENT_DIR: "/new/pi" } })
+    view.rerender(<PiAuthStatusCard agentId="pi-1" connected />)
+    await waitFor(() => expect(screen.getByTestId("pi-auth-sign-in")).toBeEnabled())
+    await act(async () => finish({ kind: "isolated", env: { PI_CODING_AGENT_DIR: "/old/pi" } }))
+    await userEvent.click(screen.getByTestId("pi-auth-sign-in"))
+    expect(runInTerminalDock).toHaveBeenLastCalledWith("pi", "/work", "", {
+      env: { PI_CODING_AGENT_DIR: "/new/pi" },
+    })
+  })
+})
+
+it("shows a pending first check without claiming there are no providers", () => {
+  renderCard()
+  expect(screen.getByTestId("pi-auth-checking")).toHaveTextContent(
+    enMessages.settings.piAuth.checking
+  )
+  expect(screen.queryByTestId("pi-auth-no-providers")).not.toBeInTheDocument()
+  expect(screen.getByTestId("pi-auth-status").tagName).toBe("SECTION")
+  expect(screen.getByTestId("pi-auth-status")).not.toHaveClass("border")
+})
+
+it("keeps connected adapter discovery in the checking state", () => {
+  hookValue.available = false
+  renderCard()
+  expect(screen.getByTestId("pi-auth-checking")).toBeInTheDocument()
+  expect(screen.queryByText(enMessages.settings.piAuth.notConnected)).not.toBeInTheDocument()
 })

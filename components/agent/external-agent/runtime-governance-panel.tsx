@@ -33,7 +33,7 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsStack } from "@/components/settings/common/settings-block"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { runsExternalAgentProcessesLocally } from "@/lib/ai/agent/external/agent-transport"
@@ -54,6 +54,7 @@ export interface RuntimeGovernanceRow {
 }
 
 export interface RuntimeGovernancePanelProps {
+  title?: string
   /**
    * Loads one runtime's status. Defaults to the lifecycle service; injectable
    * so a test can drive every verdict without a host that has processes.
@@ -93,6 +94,7 @@ async function defaultInspectRuntime(runtimeId: string): Promise<ExternalAgentRu
 }
 
 export function RuntimeGovernancePanel({
+  title,
   inspectRuntime = defaultInspectRuntime,
   hostSupported = runsExternalAgentProcessesLocally(),
 }: RuntimeGovernancePanelProps = {}) {
@@ -147,17 +149,20 @@ export function RuntimeGovernancePanel({
   }, [inspectable, inspectRuntime, request, runtimeIds])
 
   return (
-    <Card data-testid="runtime-governance-card">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-2">
+    <SettingsStack>
+      <section data-testid="runtime-governance-panel">
+        <div className="flex flex-col gap-3 @md/settings-stack:flex-row [[data-detail-density=stacked]_&]:flex-col @md/settings-stack:items-start @md/settings-stack:justify-between">
           <div className="min-w-0">
-            <CardTitle>{t("title")}</CardTitle>
-            <CardDescription>{t("description")}</CardDescription>
+            <h3 tabIndex={-1} data-detail-heading="runtimes" className="text-base font-semibold">
+              {title ?? t("title")}
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">{t("description")}</p>
           </div>
           <Button
             type="button"
             variant="outline"
             size="sm"
+            className="w-full @md/settings-stack:w-auto [[data-detail-density=stacked]_&]:w-full"
             onClick={() => setRequest((previous) => previous + 1)}
             disabled={loading || !inspectable}
             data-testid="runtime-governance-refresh"
@@ -169,37 +174,41 @@ export function RuntimeGovernancePanel({
             {t("refresh")}
           </Button>
         </div>
-      </CardHeader>
 
-      <CardContent className="space-y-3">
-        {!hostSupported ? (
-          <p
-            className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
-            data-testid="runtime-governance-unsupported"
-          >
-            {t("hostCannotInspect")}
-          </p>
-        ) : runtimeIds.length === 0 ? (
-          <Empty className="border-0 py-6">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <PackageX className="size-6" />
-              </EmptyMedia>
-              <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
-              <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : loading && rows.length === 0 ? (
-          <div className="space-y-2" data-testid="runtime-governance-loading">
-            {runtimeIds.map((runtimeId) => (
-              <Skeleton key={runtimeId} className="h-20 w-full" />
-            ))}
-          </div>
-        ) : (
-          rows.map((row) => <RuntimeRow key={row.runtimeId} row={row} t={t} tErrors={tErrors} />)
-        )}
-      </CardContent>
-    </Card>
+        <div className="mt-4">
+          {!hostSupported ? (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="runtime-governance-unsupported"
+            >
+              {t("hostCannotInspect")}
+            </p>
+          ) : runtimeIds.length === 0 ? (
+            <Empty className="border-0 py-6">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <PackageX className="size-6" />
+                </EmptyMedia>
+                <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
+                <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : loading && rows.length === 0 ? (
+            <div className="space-y-2" data-testid="runtime-governance-loading">
+              {runtimeIds.map((runtimeId) => (
+                <Skeleton key={runtimeId} className="h-20 w-full" />
+              ))}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border/60">
+              {rows.map((row) => (
+                <RuntimeRow key={row.runtimeId} row={row} t={t} tErrors={tErrors} />
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+    </SettingsStack>
   )
 }
 
@@ -219,15 +228,12 @@ function RuntimeRow({
 
   if (row.error || !row.status) {
     return (
-      <div
-        className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2"
-        data-testid={`runtime-row-${row.runtimeId}`}
-      >
+      <li className="py-4 first:pt-0 last:pb-0" data-testid={`runtime-row-${row.runtimeId}`}>
         <p className="text-sm font-medium">{name}</p>
         <p className="mt-1 text-xs text-destructive">
           {lifecycleErrorMessage(row.error, (key) => tErrors(key))}
         </p>
-      </div>
+      </li>
     )
   }
 
@@ -236,8 +242,8 @@ function RuntimeRow({
   const VerdictIcon = verdict.icon
 
   return (
-    <div
-      className="space-y-2 rounded-md border px-3 py-2"
+    <li
+      className="space-y-2 py-4 first:pt-0 last:pb-0"
       data-testid={`runtime-row-${row.runtimeId}`}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -259,7 +265,7 @@ function RuntimeRow({
         {t(`verdictHelp.${VERDICT_KEY[assessment.verdict]}`)}
       </p>
 
-      <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs @md/settings-stack:grid-cols-2">
         <Field
           label={t("detectedVersion")}
           value={assessment.detectedVersion ?? t("versionUnknown")}
@@ -297,7 +303,7 @@ function RuntimeRow({
           {t("openDocs")}
         </a>
       ) : null}
-    </div>
+    </li>
   )
 }
 

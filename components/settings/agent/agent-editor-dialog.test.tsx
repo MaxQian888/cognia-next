@@ -38,9 +38,14 @@ const existingAgent: ExternalAgentConfig = {
   updatedAt: new Date(0),
 }
 
+let mockExtraAgents: ExternalAgentConfig[] = []
+
 jest.mock("@/stores/agent/external-agent-store", () => ({
   useExternalAgentStore: (sel?: (s: Record<string, unknown>) => unknown) => {
-    const s = { getAgent: (id: string) => (id === "agent-1" ? existingAgent : undefined) }
+    const s = {
+      getAgent: (id: string) => (id === "agent-1" ? existingAgent : undefined),
+      getAllAgents: () => [existingAgent, ...mockExtraAgents],
+    }
     return sel ? sel(s) : s
   },
 }))
@@ -95,6 +100,7 @@ const useAccountsMock = useAccounts as jest.Mock
 const toastErrorMock = toast.error as jest.Mock
 
 beforeEach(() => {
+  mockExtraAgents = []
   clearCredentialSlotMock.mockClear()
   toastErrorMock.mockClear()
   useIsMobileMock.mockReturnValue(false)
@@ -122,6 +128,58 @@ async function withAgent(patch: Record<string, unknown>, body: () => Promise<voi
 }
 
 describe("AgentEditorDialog", () => {
+  it("summarizes the picked preset and delegates Change to the add flow", async () => {
+    const onChangePreset = jest.fn()
+    render(
+      <AgentEditorDialog
+        open
+        initialPreset="codex"
+        onChangePreset={onChangePreset}
+        onOpenChange={jest.fn()}
+        onSave={jest.fn()}
+      />
+    )
+    const summary = screen.getByTestId("preset-summary")
+    expect(summary).toHaveTextContent("Codex CLI")
+    expect(screen.queryByTestId("preset-picker")).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/agent name/i)).toHaveValue("Codex CLI")
+    await userEvent.click(within(summary).getByRole("button"))
+    expect(onChangePreset).toHaveBeenCalledTimes(1)
+  })
+
+  it("summarizes a custom configuration when no preset was picked", () => {
+    render(
+      <AgentEditorDialog
+        open
+        onChangePreset={jest.fn()}
+        onOpenChange={jest.fn()}
+        onSave={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("preset-summary")).toHaveTextContent("Custom configuration")
+    expect(screen.getByLabelText(/agent name/i)).toHaveValue("")
+    expect(screen.queryByTestId("preset-picker")).not.toBeInTheDocument()
+  })
+
+  it("retains the selector for callers without Change and hides both while editing", () => {
+    const { rerender } = render(
+      <AgentEditorDialog open onOpenChange={jest.fn()} onSave={jest.fn()} />
+    )
+    expect(within(screen.getByTestId("preset-picker")).getByRole("combobox")).toBeInTheDocument()
+    expect(screen.queryByTestId("preset-summary")).not.toBeInTheDocument()
+    rerender(
+      <AgentEditorDialog
+        open
+        editingAgentId="agent-1"
+        onChangePreset={jest.fn()}
+        onOpenChange={jest.fn()}
+        onSave={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("preset-picker")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("preset-summary")).not.toBeInTheDocument()
+  })
+
   it("seeds Kimi subscription ACP and saves isolated state through the masked env editor", async () => {
     const onSave = jest.fn().mockResolvedValue(true)
     render(<AgentEditorDialog open onOpenChange={jest.fn()} initialPreset="kimi" onSave={onSave} />)
@@ -1005,5 +1063,49 @@ describe("AgentEditorDialog", () => {
     )
     // Devin's hint was missing from this dialog's private ladder.
     expect(screen.getByTestId("preset-setup-hint")).toBeInTheDocument()
+  })
+})
+
+describe("new preset names", () => {
+  it("uses the bare name when free and skips case-insensitive existing numbered names", () => {
+    mockExtraAgents = [" codex cli ", "CODEX CLI 2"].map((name, index) => ({
+      ...existingAgent,
+      id: `extra-${index}`,
+      name,
+    }))
+    render(
+      <AgentEditorDialog open initialPreset="codex" onOpenChange={jest.fn()} onSave={jest.fn()} />
+    )
+    expect(screen.getByLabelText(/agent name/i)).toHaveValue("Codex CLI 3")
+  })
+
+  it("refreshes the default name on preset changes but preserves a custom name", async () => {
+    const user = userEvent.setup()
+    render(
+      <AgentEditorDialog open initialPreset="codex" onOpenChange={jest.fn()} onSave={jest.fn()} />
+    )
+    expect(screen.getByLabelText(/agent name/i)).toHaveValue("Codex CLI")
+    mockExtraAgents = [{ ...existingAgent, name: "Pi (native RPC)" }]
+    await user.click(within(screen.getByTestId("preset-picker")).getByRole("combobox"))
+    await user.click(screen.getByRole("option", { name: /^Pi(?:\s|$)/ }))
+    expect(screen.getByLabelText(/agent name/i)).toHaveValue("Pi (native RPC) 2")
+    await user.clear(screen.getByLabelText(/agent name/i))
+    await user.type(screen.getByLabelText(/agent name/i), "My reviewer")
+    await user.click(within(screen.getByTestId("preset-picker")).getByRole("combobox"))
+    await user.click(screen.getByRole("option", { name: /^Codex CLI/ }))
+    expect(screen.getByLabelText(/agent name/i)).toHaveValue("My reviewer")
+  })
+
+  it("never renumbers the saved name when editing", () => {
+    mockExtraAgents = [{ ...existingAgent, id: "other" }]
+    render(
+      <AgentEditorDialog
+        open
+        editingAgentId="agent-1"
+        onOpenChange={jest.fn()}
+        onSave={jest.fn()}
+      />
+    )
+    expect(screen.getByLabelText(/agent name/i)).toHaveValue("My Codex")
   })
 })

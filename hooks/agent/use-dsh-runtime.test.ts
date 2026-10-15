@@ -56,6 +56,125 @@ describe("useDshRuntime", () => {
     expect(agentInvoke).toHaveBeenCalledWith("dsh_runtime_facts", {})
   })
 
+  it("keeps installation unknown and marks the first doctor request busy", async () => {
+    let resolveFacts!: (value: ReturnType<typeof facts>) => void
+    agentInvoke.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFacts = resolve
+      })
+    )
+    const { result } = renderHook(() => useDshRuntime("cognia-sdk-readonly"))
+    expect(result.current.busy).toBe(true)
+    expect(result.current.report).toBeUndefined()
+    expect(result.current.installed).toBeUndefined()
+
+    await act(async () => {
+      resolveFacts(HEALTHY)
+    })
+    expect(result.current.busy).toBe(false)
+    expect(result.current.installed).toBe(true)
+  })
+
+  it("keeps a failed first check unknown and retries the doctor", async () => {
+    agentInvoke.mockRejectedValueOnce(new Error("doctor failed"))
+    const { result } = renderHook(() => useDshRuntime("cognia-sdk-readonly"))
+    await waitFor(() => expect(result.current.error).toBe("doctor failed"))
+    expect(result.current.busy).toBe(false)
+    expect(result.current.report).toBeUndefined()
+    expect(result.current.installed).toBeUndefined()
+
+    agentInvoke.mockResolvedValueOnce(NOT_INSTALLED)
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.error).toBeUndefined()
+    expect(result.current.installed).toBe(false)
+    expect(result.current.busy).toBe(false)
+  })
+
+  it("does not show a previous profile's verdict while checking a new profile", async () => {
+    agentInvoke.mockResolvedValueOnce(HEALTHY)
+    const { result, rerender } = renderHook(
+      ({ profile }: { profile: "cognia-sdk-readonly" | "cognia-sdk-workspace" }) =>
+        useDshRuntime(profile),
+      { initialProps: { profile: "cognia-sdk-readonly" } }
+    )
+    await waitFor(() => expect(result.current.installed).toBe(true))
+    let resolveFacts!: (value: ReturnType<typeof facts>) => void
+    agentInvoke.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFacts = resolve
+      })
+    )
+    rerender({ profile: "cognia-sdk-workspace" })
+    expect(result.current.busy).toBe(true)
+    expect(result.current.report).toBeUndefined()
+    expect(result.current.installed).toBeUndefined()
+    await act(async () => {
+      resolveFacts(HEALTHY)
+    })
+    expect(result.current.busy).toBe(false)
+    expect(result.current.installed).toBe(true)
+  })
+
+  it("ignores an old profile's doctor response after the profile changes", async () => {
+    let resolvePrevious!: (value: ReturnType<typeof facts>) => void
+    agentInvoke.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePrevious = resolve
+      })
+    )
+    const { result, rerender } = renderHook(
+      ({ profile }: { profile: "cognia-sdk-readonly" | "cognia-sdk-workspace" }) =>
+        useDshRuntime(profile),
+      { initialProps: { profile: "cognia-sdk-readonly" } }
+    )
+    agentInvoke.mockResolvedValueOnce(HEALTHY)
+    rerender({ profile: "cognia-sdk-workspace" })
+    await waitFor(() => expect(result.current.installed).toBe(true))
+    await act(async () => {
+      resolvePrevious(NOT_INSTALLED)
+    })
+    expect(result.current.installed).toBe(true)
+  })
+
+  it.each(["resolve", "reject"])(
+    "ignores a previous profile's manual refresh %s",
+    async (outcome) => {
+      agentInvoke.mockResolvedValueOnce(HEALTHY)
+      const { result, rerender } = renderHook(
+        ({ profile }: { profile: "cognia-sdk-readonly" | "cognia-sdk-workspace" }) =>
+          useDshRuntime(profile),
+        { initialProps: { profile: "cognia-sdk-readonly" } }
+      )
+      await waitFor(() => expect(result.current.installed).toBe(true))
+      let resolvePrevious!: (value: ReturnType<typeof facts>) => void
+      let rejectPrevious!: (reason: Error) => void
+      agentInvoke.mockReturnValueOnce(
+        new Promise((resolve, reject) => {
+          resolvePrevious = resolve
+          rejectPrevious = reject
+        })
+      )
+      let pendingRefresh!: Promise<void>
+      act(() => {
+        pendingRefresh = result.current.refresh()
+      })
+      agentInvoke.mockResolvedValueOnce(HEALTHY)
+      rerender({ profile: "cognia-sdk-workspace" })
+      await waitFor(() => expect(result.current.report?.healthy).toBe(true))
+      await act(async () => {
+        if (outcome === "resolve") resolvePrevious(NOT_INSTALLED)
+        else rejectPrevious(new Error("old profile failed"))
+        await pendingRefresh
+      })
+      expect(result.current.installed).toBe(true)
+      expect(result.current.report?.healthy).toBe(true)
+      expect(result.current.error).toBeUndefined()
+      expect(result.current.busy).toBe(false)
+    }
+  )
+
   it("reports unsupported hosts without calling the transport", async () => {
     // Web and Capacitor have no runtime home to manage; offering Install there
     // would be a button that cannot work.
@@ -63,6 +182,7 @@ describe("useDshRuntime", () => {
     const { result } = renderHook(() => useDshRuntime("cognia-sdk-readonly"))
     await waitFor(() => expect(result.current.supported).toBe(false))
     expect(agentInvoke).not.toHaveBeenCalled()
+    expect(result.current.busy).toBe(false)
   })
 
   it("treats a channel-malformed finding as not installed", async () => {

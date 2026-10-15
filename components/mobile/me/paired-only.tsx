@@ -38,14 +38,16 @@ export interface PairedOnlyProps {
   children: ReactNode
   /** Test id for the unpaired placeholder. */
   testid?: string
+  /** Optional screen-shaped placeholder while pairing state hydrates. */
+  loadingFallback?: ReactNode
 }
 
-export function PairedOnly({ children, testid }: PairedOnlyProps) {
+export function PairedOnly({ children, testid, loadingFallback = null }: PairedOnlyProps) {
   const t = useTranslations("mobile.pairedOnly")
   const { paired, loading } = useCompanionConfig()
 
   // Avoid flashing the placeholder before the JWT has hydrated.
-  if (loading) return null
+  if (loading) return <>{loadingFallback}</>
 
   if (!paired) {
     return (

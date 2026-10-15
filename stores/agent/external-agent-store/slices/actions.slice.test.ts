@@ -41,6 +41,17 @@ describe("useExternalAgentStore CRUD", () => {
     expect(stored!.name).toBe("Claude Code")
   })
 
+  it("persists protocol and transport edits and preserves omitted fields", () => {
+    const { addAgent, updateAgent, getAgent } = useExternalAgentStore.getState()
+    const id = addAgent({ name: "Agent", protocol: "acp", transport: "stdio" })
+    updateAgent(id, { protocol: "a2a" })
+    expect(getAgent(id)).toMatchObject({ protocol: "a2a", transport: "stdio" })
+    updateAgent(id, { transport: "http" })
+    expect(getAgent(id)).toMatchObject({ protocol: "a2a", transport: "http" })
+    updateAgent(id, { name: "Renamed", protocol: undefined, transport: undefined })
+    expect(getAgent(id)).toMatchObject({ name: "Renamed", protocol: "a2a", transport: "http" })
+  })
+
   it("updateAgent merges patches", () => {
     const id = useExternalAgentStore.getState().addAgent({
       name: "Original",

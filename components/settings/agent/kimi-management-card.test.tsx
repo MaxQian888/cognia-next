@@ -2,6 +2,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { KimiManagementCard } from "./kimi-management-card"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import en from "@/i18n/messages/en/kimiManagement.json"
+import externalMessages from "@/i18n/messages/en/externalAgent.json"
+
+const resolveEnv = jest.fn()
+jest.mock("@/lib/ai/agent/external/lifecycle/isolated-terminal-env", () => ({
+  resolveIsolatedTerminalEnv: (...args: unknown[]) => resolveEnv(...args),
+}))
 
 type WriteClipboardText = typeof import("@/lib/tauri/clipboard").writeClipboardText
 type RunInTerminalDock = typeof import("@/lib/terminal/run-in-dock").runInTerminalDock
@@ -36,10 +42,15 @@ jest.mock("@/lib/terminal/run-in-dock", () => ({
 jest.mock("@/lib/terminal/pick-transport", () => ({ selectTerminalTransport: () => transport() }))
 jest.mock("@/lib/terminal/shell-detect", () => ({ detectPlatform: () => "macos" }))
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, params?: Record<string, string>) => {
+  useTranslations: (namespace: string) => (key: string, params?: Record<string, string>) => {
     const value = key
       .split(".")
-      .reduce((obj, part) => (obj as Record<string, unknown>)[part], en as unknown)
+      .reduce(
+        (obj, part) => (obj as Record<string, unknown>)[part],
+        (namespace === "kimiManagement"
+          ? en
+          : externalMessages.settings.isolatedTerminal) as unknown
+      )
     return typeof value === "string"
       ? value.replace(/\{(\w+)\}/g, (_, name: string) => params?.[name] ?? name)
       : key
@@ -63,6 +74,7 @@ const agent: ExternalAgentConfig = {
 describe("KimiManagementCard", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    resolveEnv.mockReset().mockResolvedValue({ kind: "shared" })
     transport.mockReturnValue("tauri-channel")
     mockConnection = "disconnected"
     mockOtherAgent = null
@@ -90,7 +102,8 @@ describe("KimiManagementCard", () => {
       expect(launch).toHaveBeenCalledWith(
         "/bin/sh -c 'cd -- /workspace && env KIMI_CODE_HOME=/owned/state kimi web'",
         "/workspace",
-        ""
+        "",
+        {}
       )
     )
     expect(launch.mock.calls.flat().join(" ")).not.toMatch(/secret-key|dangerous-bypass|--host|acp/)
@@ -158,7 +171,8 @@ describe("KimiManagementCard", () => {
       expect(launch).toHaveBeenCalledWith(
         "/bin/sh -c 'npm install --global @moonshot-ai/kimi-code@2.1.1'",
         "/workspace",
-        ""
+        "",
+        {}
       )
     )
   })
@@ -225,7 +239,7 @@ describe("KimiManagementCard", () => {
     fireEvent.click(screen.getByRole("button", { name: `Open terminal for ${action}` }))
     expect(launch).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Run reviewed command" }))
-    await waitFor(() => expect(launch).toHaveBeenCalledWith(command, "/workspace", ""))
+    await waitFor(() => expect(launch).toHaveBeenCalledWith(command, "/workspace", "", {}))
   })
 
   it("refuses changed configuration instead of executing an unreviewed upgrade command", async () => {
@@ -240,4 +254,72 @@ describe("KimiManagementCard", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
     expect(launch).not.toHaveBeenCalled()
   })
+})
+
+describe("isolated Kimi management", () => {
+  beforeEach(() => {
+    launch.mockClear()
+    mockConnection = "disconnected"
+    mockOtherAgent = null
+  })
+
+  it("uses the resolved home in both the recipe and terminal env, overriding a stale home", async () => {
+    resolveEnv.mockResolvedValue({
+      kind: "isolated",
+      env: { KIMI_CODE_HOME: "/state/kimi-agent/kimi" },
+    })
+    render(<KimiManagementCard agent={{ ...agent, stateIsolation: "isolated" }} />)
+    const open = screen.getByRole("button", {
+      name: "Open terminal for Open native web management",
+    })
+    await waitFor(() => expect(open).toBeEnabled())
+    fireEvent.click(open)
+    await waitFor(() =>
+      expect(launch).toHaveBeenCalledWith(
+        "/bin/sh -c 'cd -- /workspace && env KIMI_CODE_HOME=/state/kimi-agent/kimi kimi web'",
+        "/workspace",
+        "",
+        { env: { KIMI_CODE_HOME: "/state/kimi-agent/kimi" } }
+      )
+    )
+    expect(launch.mock.calls.flat().join(" ")).not.toContain("/owned/state")
+    expect(launch.mock.calls.flat().join(" ")).not.toContain("secret-key")
+  })
+
+  it.each(["no-state-root", "isolation-unsupported"] as const)(
+    "explains %s and disables terminal actions",
+    async (reason) => {
+      resolveEnv.mockResolvedValue({ kind: "unavailable", reason })
+      render(<KimiManagementCard agent={{ ...agent, stateIsolation: "isolated" }} />)
+      expect(
+        await screen.findByText(externalMessages.settings.isolatedTerminal[reason])
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Open terminal for Open native web management" })
+      ).toBeDisabled()
+      expect(
+        screen.getByRole("button", { name: "Open terminal for Install reviewed version" })
+      ).toBeDisabled()
+      expect(launch).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not enable a shared-state launch after a lookup failure", async () => {
+    resolveEnv.mockRejectedValue(new Error("offline"))
+    render(<KimiManagementCard agent={{ ...agent, stateIsolation: "isolated" }} />)
+    expect(
+      await screen.findByText(externalMessages.settings.isolatedTerminal["no-state-root"])
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Open terminal for Open native web management" })
+    ).toBeDisabled()
+  })
+})
+
+it("groups commands in one flat section with divided rows", () => {
+  const { container } = render(<KimiManagementCard agent={agent} />)
+  expect(screen.getByRole("heading", { name: en.title, level: 4 })).toBeInTheDocument()
+  expect(container.querySelector("section")).not.toHaveClass("border")
+  expect(container.querySelector(".divide-y")).toBeInTheDocument()
+  expect(container.querySelector(".rounded.border")).not.toBeInTheDocument()
 })
