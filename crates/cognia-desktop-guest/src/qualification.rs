@@ -88,13 +88,20 @@ impl BrowserRun {
         if self.local_preview != "cognia-qualified-loopback" {
             return Err("validation_browser_preview");
         }
-        if !self.metadata_navigation_net_errors.contains(&-109) {
+        // Chromium normalizes failed TCP connects and system DNS lookups to
+        // ERR_INTERNET_DISCONNECTED (-106) when only loopback is online. These
+        // navigation outcomes do not replace the mandatory raw socket, DNS and
+        // namespace observations validated by the complete report.
+        let denied = |errors: &[i32], expected: i32| {
+            !errors.is_empty() && errors.iter().all(|code| *code == expected || *code == -106)
+        };
+        if !denied(&self.metadata_navigation_net_errors, -109) {
             return Err("validation_browser_metadata");
         }
-        if !self.redirect_net_errors.contains(&-109) {
+        if !denied(&self.redirect_net_errors, -109) {
             return Err("validation_browser_redirect");
         }
-        if !self.hostname_net_errors.contains(&-105) {
+        if !denied(&self.hostname_net_errors, -105) {
             return Err("validation_browser_hostname");
         }
         Ok(())
@@ -653,6 +660,53 @@ mod tests {
         assert_eq!(bad.validate_outcome(), Err("validation_browser_redirect"));
         let mut bad = good.clone();
         bad.hostname_net_errors = vec![-3];
+        assert_eq!(bad.validate_outcome(), Err("validation_browser_hostname"));
+    }
+    #[test]
+    fn browser_denials_require_nonempty_exact_target_specific_errors() {
+        let mut process = valid_probe().process;
+        process.executable = "/usr/lib/chromium/chromium".into();
+        let good = BrowserRun {
+            process,
+            exit_code: 0,
+            local_preview: "cognia-qualified-loopback".into(),
+            metadata_navigation_net_errors: vec![-106],
+            redirect_net_errors: vec![-106],
+            hostname_net_errors: vec![-106],
+        };
+        assert!(good.validate_outcome().is_ok());
+        let mut mixed_allowed = good.clone();
+        mixed_allowed.metadata_navigation_net_errors.push(-109);
+        mixed_allowed.redirect_net_errors.push(-109);
+        mixed_allowed.hostname_net_errors.push(-105);
+        assert!(mixed_allowed.validate_outcome().is_ok());
+
+        for errors in [
+            vec![],
+            vec![0],
+            vec![-106, 0],
+            vec![-106, -3],
+            vec![-106, -7],
+            vec![-106, -102],
+        ] {
+            let mut bad = good.clone();
+            bad.metadata_navigation_net_errors = errors.clone();
+            assert_eq!(bad.validate_outcome(), Err("validation_browser_metadata"));
+            let mut bad = good.clone();
+            bad.redirect_net_errors = errors.clone();
+            assert_eq!(bad.validate_outcome(), Err("validation_browser_redirect"));
+            let mut bad = good.clone();
+            bad.hostname_net_errors = errors;
+            assert_eq!(bad.validate_outcome(), Err("validation_browser_hostname"));
+        }
+        let mut bad = good.clone();
+        bad.metadata_navigation_net_errors.push(-105);
+        assert_eq!(bad.validate_outcome(), Err("validation_browser_metadata"));
+        let mut bad = good.clone();
+        bad.redirect_net_errors.push(-105);
+        assert_eq!(bad.validate_outcome(), Err("validation_browser_redirect"));
+        let mut bad = good;
+        bad.hostname_net_errors.push(-109);
         assert_eq!(bad.validate_outcome(), Err("validation_browser_hostname"));
     }
     #[test]
