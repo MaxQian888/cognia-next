@@ -133,6 +133,34 @@ Host 重新检查 owner、release、region、shape、剩余 quota、capabilities
 
 限制公网入站，阻止私网／链路本地／metadata 出站。域名策略必须说明 E2B 文档中的限制：80 端口 HTTP Host 和 443 端口 TLS SNI；其他端口需 CIDR，QUIC 不受域名过滤。拒绝无法实现的必需策略；绝不为了安装脚本、Git 或预览而静默放宽出站。Host 中转的 Git／文件传输只限获授权来源，不是通用 Host 网络隧道。[S5, S6]
 
+### MMDS 工作负载隔离修订（2026-10-16 已接受）
+
+E2B 托管桌面的隔离对象包括所有处理交付源码、运行桌面或应用的工作负载进程。
+这些进程必须由内核强制阻断私网、链路本地和元数据地址，包括沙盒本地 MMDS。
+首版 egress-Off 使用仅有 loopback 的独立网络命名空间，并限制进程、挂载和 IPC
+可见性，使用非特权身份、no-new-privileges 并移除 capabilities。桌面、导入/Git、
+验收启动的全部路径都必须在处理不可信内容之前进入隔离边界。无法建立边界或缺少
+必需内核能力时，必须拒绝并清理，不能退回普通启动。
+
+Provider envd 初始化属于独立的可信控制面，可保留其必需的沙盒本地 MMDS 访问。
+此例外不能向工作负载暴露网络通道、特权 socket、继承描述符或特权执行服务；也
+不代表“整个 VM 内的所有进程均无法访问元数据”。Provider egress-Off 策略与 guest
+内核隔离必须同时成立。GUI 入站仅经过固定目标的本地桥接，不增加通用出站代理。
+
+Provider 侧观察和工作负载隔离证据分别记录。保留历史失败记录；新的资格版本必须
+绑定准确镜像、隔离策略、模板、owner/config 和会话 generation。工作负载探测必须
+包括元数据地址及所有实际启动路径；任一元数据响应或越界均判失败。不能用配置值、
+guest 自报成功或缺失测试代替实测。镜像或隔离策略变化使旧资格失效，后端、API、UI
+三个层面均保持 dormant，直到所需真实 smoke 通过。
+
+监督进程和固定 relay 也属于工作负载网络命名空间之外的可信控制面；它们不能解析项目内容、接受任意目标地址或向工作负载暴露隔离外执行能力。源码导入采用非特权隔离身份；所有导入子进程退出后，文件晋升使用基于目录描述符的 no-follow 操作，并拒绝符号链接、硬链接和特殊文件。后续应用启动继承完整桌面隔离策略，而不只是网络命名空间。独立生命周期守卫必须在监督进程死亡后终止所有子进程并关闭入站，包括 Host 断连时。
+
+Host 重启必须重新验证边界；缺少能力、generation 不明确或探测失败时拒绝并进入销毁／重试。全端口阻断通过无外部接口／路由／继承外部 socket 的不变量和代表性直接传输探测证明，而不是穷举端口扫描。现有生命周期和控制验收断言全部保留。
+
+用户于 2026-10-16 批准本修订及实施。先在 E2B 内验证必需的内核隔离和固定 GUI 传输；失败时 provider 继续阻断。生产保持 dormant，dev 合并暂停，按用户要求跳过 Rust 测试。已接受的实施计划及证据门禁见 `docs/plans/2026-10-16-managed-desktop-mmds-isolation.md`。
+
+依据：[固定版本 E2B MMDS 初始化](https://github.com/e2b-dev/runtime/blob/a1899fb840e1eb1ef2c0ffc751c639959ed6a144/packages/envd/internal/host/mmds.go)、[固定版本 MMDS 路由](https://github.com/e2b-dev/runtime/blob/a1899fb840e1eb1ef2c0ffc751c639959ed6a144/packages/envd/internal/host/mmds_route_linux.go)、[Linux 网络命名空间语义](https://man7.org/linux/man-pages/man7/network_namespaces.7.html)，核查日期 2026-10-16。源码行为不代表托管运行环境已通过资格验证。
+
 ## 整体审查边界（2026-10-16）
 
 生命周期请求在排队操作完成后、以及实际付费请求之前，重新核验当前账户、admin lease、provider 配置和凭据 generation。资源已创建或删除请求已接受后，持久化清理权限不因调用方退出账户而失效。生命周期、交接和结果客户端要求 registered 或 paired Host 配置明确绑定当前解锁账户，缺少归属的旧配置会被拒绝。浏览器客户端在账户、锁定状态或 Host 配置变化时使进行中的操作失效，即使状态随后恢复原值。原始交付 Host 绑定在账户同步中保持设备本地属性。

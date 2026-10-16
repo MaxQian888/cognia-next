@@ -131,6 +131,41 @@ Re-admit owner, release, region, shape, remaining quota, capabilities, isolation
 
 Restrict public ingress and block private/link-local/metadata egress. Domain policies must state E2B's documented limits: HTTP Host on port 80 and TLS SNI on port 443; other ports need CIDRs and QUIC is not domain-filtered. Refuse unimplementable required policies; never silently widen egress for install scripts, Git or a preview. Host-brokered Git/file transfer is scoped to the authorized source, not a general Host network tunnel. [S5, S6]
 
+### MMDS workload isolation amendment (accepted 2026-10-16)
+
+For E2B managed desktops, the security subject is every process handling
+delivered source or running the desktop/application workload. These processes
+must be kernel-confined from private, link-local and metadata destinations,
+including sandbox-local MMDS. For the first egress-Off release, use a mandatory
+loopback-only network namespace with restricted process/mount/IPC visibility,
+unprivileged execution, no-new-privileges and capability removal. All desktop,
+import/Git and acceptance launch paths must enter the boundary before handling
+untrusted content. No namespace/profile capability means refusal and cleanup.
+
+Provider envd initialization is a distinct trusted control-plane activity and
+may retain its required sandbox-local MMDS access. This exception grants no
+network path, privileged socket, inherited descriptor or execution service to
+workloads. It is not a whole-VM metadata-denial claim. The published provider
+egress-Off policy remains required alongside guest-kernel enforcement. GUI
+ingress uses a fixed local bridge; no general-purpose egress proxy is added.
+
+Record provider observations and workload enforcement separately. Preserve old
+failed evidence; require a new versioned qualification bound to the exact
+image, profile, template, owner/config and session generation. Workload probes
+must include metadata and all actual launch paths; any metadata response or
+boundary bypass fails qualification. Never substitute a provider setting,
+guest-reported success or missing test for observed isolation. A recipe/profile
+change invalidates old qualifications and keeps all three product axes dormant
+until the required smoke passes.
+
+The supervisor and fixed relay are also trusted control-plane processes outside the workload network namespace; they must not parse project content, offer arbitrary destinations or expose unconfined execution to workloads. Source import uses an unprivileged confined identity, and promotion rejects symlinks, hardlinks and special files through descriptor-relative no-follow operations after all importer descendants exit. Later application launches inherit the entire desktop profile, not only its network namespace. An independent lifetime guard must terminate descendants and close ingress after supervisor death, including while the Host is disconnected.
+
+Host restart revalidates the boundary; missing support, ambiguous generation or failed probes cause refusal and destroy/retry. All-port denial is established by the no-interface/no-route/no-inherited-outside-socket invariant and representative direct transport probes, not an exhaustive port scan. The existing lifecycle and control assertions remain mandatory.
+
+The user approved this amendment and implementation on 2026-10-16. First verify the required kernel isolation and fixed GUI transport inside E2B; failure keeps the provider blocked. Production remains dormant and the dev merge is paused. Rust tests are skipped at the user’s instruction. See `docs/plans/2026-10-16-managed-desktop-mmds-isolation.md` for the accepted implementation plan and evidence gates.
+
+Evidence: [pinned E2B MMDS initialization](https://github.com/e2b-dev/runtime/blob/a1899fb840e1eb1ef2c0ffc751c639959ed6a144/packages/envd/internal/host/mmds.go), [pinned MMDS route](https://github.com/e2b-dev/runtime/blob/a1899fb840e1eb1ef2c0ffc751c639959ed6a144/packages/envd/internal/host/mmds_route_linux.go), and [Linux network namespace semantics](https://man7.org/linux/man-pages/man7/network_namespaces.7.html), checked 2026-10-16. Source behavior is not hosted-runtime qualification.
+
 ## 7. A handoff is a new acceptance execution of immutable source
 
 **Dependency D1:** delivery commit `ff3c51c617deb351caf07415d25d4b59467e6fe0` is merged. The user subsequently authorized completing its missing source authority, then Phase 3. Original authenticated admission now persists owner/Host/device, conversation/task, a Host-minted coding-run ID, normalized repository and a Host-only credential reference; each delivery binds that source ID. The conversation's original run reference is captured once as `originRunRef`, separate from the Host-minted authority, and never authorizes a later browser assertion. Legacy source-less records refuse. Source tombstones survive restart; canonical deletion revokes on the recorded source Host before losing its durable link. The implementation is uncommitted in the isolated Phase 3 checkout; native tests are written but skipped by user instruction. See `docs/plans/2026-10-15-managed-cloud-desktop-phase3-verification.md` for evidence. Phase 4 implements the final history projection and result deletion under the same dormant release boundary.

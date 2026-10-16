@@ -11,14 +11,14 @@ const IMAGE_CONTEXT = "crates/cognia-automation/src/cua_sandbox/image"
 
 export const RELEASE_IDENTITY = Object.freeze({
   architecture: "linux/amd64",
-  recipeRevision: "3",
+  recipeRevision: "4",
   protocol: "computer-server-0.3.46",
   serverVersion: "0.3.46",
   // Template snapshots must never contain a runtime guest token. The Host
   // starts the authenticated desktop over protected envd after create.
   startCommand: "sleep infinity",
   readyCommand:
-    "test -x /usr/local/bin/cognia-desktop && test -f /opt/cognia-desktop/server.py && test -f /opt/cognia-desktop/startup.py && test -x /usr/bin/git && test -x /usr/bin/node && test -x /usr/bin/npm",
+    "test -x /usr/local/bin/cognia-desktop && test -f /opt/cognia-desktop/server.py && test -f /opt/cognia-desktop/startup.py && test -x /usr/bin/git && test -x /usr/bin/node && test -x /usr/bin/npm && test -x /usr/bin/bwrap && test -x /usr/local/bin/cognia-desktop-guest",
 })
 
 export function createManagedDesktopRelease({ imageRepository, digest }) {

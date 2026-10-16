@@ -17,6 +17,14 @@ def main():
     token = os.environ.pop("COGNIA_CUA_AUTH_TOKEN", "")
     if len(token) != 64:
         raise RuntimeError("Missing private desktop server credential")
+    if sys.argv[1:] not in ([], ["--managed"]):
+        raise RuntimeError("Invalid desktop startup mode")
+    spec = importlib.util.spec_from_file_location("cognia_desktop_server", "/opt/cognia-desktop/server.py")
+    server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server)
+    # Validate and close-on-exec the sole guard descriptor before any desktop
+    # child exists. Missing isolation ingress never falls back to TCP.
+    listener_fd = server.prepare_managed_listener() if sys.argv[1:] else None
     menu = os.path.join(os.environ["HOME"], ".config", "openbox", "menu.xml")
     os.makedirs(os.path.dirname(menu), exist_ok=True)
     if not os.path.exists(menu):
@@ -32,7 +40,7 @@ def main():
     signal.signal(signal.SIGINT, stop)
 
     def start(argv, **options):
-        child = subprocess.Popen(argv, start_new_session=True, **options)
+        child = subprocess.Popen(argv, start_new_session=True, close_fds=True, **options)
         children.append(child)
         return child
 
@@ -61,10 +69,6 @@ def main():
         start(["chromium", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
                "--no-first-run", "--no-default-browser-check", "--window-position=20,20",
                "--window-size=1000,580", "about:blank"])
-        spec = importlib.util.spec_from_file_location("cognia_desktop_server", "/opt/cognia-desktop/server.py")
-        server = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(server)
-
         def should_stop():
             for child in children:
                 child.poll()
@@ -72,7 +76,7 @@ def main():
 
         # Serve in this original nondumpable process. exec() would reset
         # dumpability and briefly expose a token passed in a child's env.
-        server.serve(token, should_stop)
+        server.serve(token, should_stop, listener_fd=listener_fd)
         if not stopped and any(child.poll() is not None for child in [bus, display, manager]):
             raise RuntimeError("A required desktop service exited; restart the sandbox")
     finally:

@@ -119,6 +119,7 @@ members = [
   # ADR-0196 P2 — the per-tool OS execution sandbox (ADR-0028), out of
   # cognia-automation so the terminal and plugin host stop linking UI automation.
   "crates/cognia-exec-sandbox",
+  "crates/cognia-desktop-guest",
   "crates/cognia-automation",
   "crates/cognia-e2b",
   "crates/cognia-scheduling",

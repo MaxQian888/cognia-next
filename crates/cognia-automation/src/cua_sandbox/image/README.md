@@ -24,9 +24,29 @@ host. The original nondumpable startup process runs the server after removing
 the credential from its environment. Desktop applications, DBus and supervised
 shell/file commands never receive it. Upstream telemetry is disabled.
 
+The managed E2B entrypoint is explicitly `cognia-desktop --managed`. It requires
+the release-packaged `cognia-desktop-guest` guard and invokes its `supervise`
+operation; a missing guard is a startup failure, never a Docker-mode fallback.
+The guard must establish the strict workload boundary before launching Python
+as `cua`, and pass exactly the AF_UNIX stream listener at descriptor 3. Python
+validates that descriptor and marks it close-on-exec before starting any GUI
+child. All child launches close inherited descriptors; only the original server
+process keeps the listener. Managed Uvicorn uses the pre-opened descriptor,
+preserving the same HTTP/WebSocket authentication without a TCP listener inside
+the workload. The no-argument Docker entrypoint retains its port 8000 listener.
+
+Recipe 4 includes Bubblewrap for the guard's mandatory confinement profile.
+Installing Bubblewrap or passing a listener is not isolation attestation: the
+native guard and Host qualification must verify namespaces, privilege dropping,
+and the actual desktop/import/acceptance paths. The base Docker build alone
+does not package that guard and cannot start managed mode. Production managed
+desktops remain dormant until the exact release passes native qualification.
+
 Build: `docker build -t cognia-cua-desktop:0.3.46-2 .`
 
 Sources verified 2026-10-03:
 
 - https://pypi.org/project/cua-computer-server/0.3.46/
 - https://github.com/docker-library/python
+
+Managed publication compiles `cognia-desktop-guest` for `x86_64-unknown-linux-musl` with the repository toolchain and lockfile. `scripts/build/managed-desktop-context.mjs` verifies a static amd64 ELF and stages a fresh context containing the guard; the Images workflow builds that context. The embedded Docker context stays independently buildable. Recipe 4 readiness checks require both Bubblewrap and the guard before E2B template admission.

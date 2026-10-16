@@ -2183,8 +2183,8 @@ name = "cognia-companion-rpc"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "base64 0.23.1",
  "axum",
+ "base64 0.23.1",
  "chrono",
  "cognia-agent-state",
  "cognia-automation",
@@ -2356,6 +2356,17 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.21",
  "url",
+]
+
+[[package]]
+name = "cognia-desktop-guest"
+version = "0.1.0"
+dependencies = [
+ "cognia-exec-sandbox",
+ "libc",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

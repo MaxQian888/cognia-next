@@ -634,11 +634,12 @@ async fn start_desktop_at(
 ) -> Result<u32, EnvdError> {
     let spec = StartSpec {
         cmd: "/usr/local/bin/cognia-desktop".into(),
-        args: Vec::new(),
+        args: vec!["--managed".into()],
         envs: BTreeMap::from([(
             "COGNIA_CUA_AUTH_TOKEN".into(),
             bootstrap.guest_token.clone(),
         )]),
+        // Managed execution must enter the mandatory guest guard; no Docker fallback.
         // envd does not inherit the image WORKDIR. The entrypoint drops to
         // cua; dependency startup must not inspect dotenv from root's cwd.
         cwd: Some("/home/cua".into()),
@@ -1021,7 +1022,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(
             value,
-            json!({"process":{"cmd":"/usr/local/bin/cognia-desktop","args":[],"envs":{"COGNIA_CUA_AUTH_TOKEN":"guest-secret"},"cwd":"/home/cua"},"stdin":false})
+            json!({"process":{"cmd":"/usr/local/bin/cognia-desktop","args":["--managed"],"envs":{"COGNIA_CUA_AUTH_TOKEN":"guest-secret"},"cwd":"/home/cua"},"stdin":false})
         );
     }
 

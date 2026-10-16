@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 import secrets
+import socket
 import threading
 
 
@@ -23,7 +24,7 @@ class TokenAuth:
         valid = valid and not any(key.lower() == b"origin" for key, _ in headers)
         if valid:
             if scope["type"] == "http" and scope.get("path") == "/cognia/health" and scope.get("method") == "GET":
-                body = json.dumps({"protocol": "computer-server-0.3.46", "recipeRevision": "3",
+                body = json.dumps({"protocol": "computer-server-0.3.46", "recipeRevision": "4",
                                    "serverVersion": "0.3.46"}).encode("utf-8")
                 await send({"type": "http.response.start", "status": 200,
                             "headers": [(b"content-type", b"application/json"), (b"cache-control", b"no-store")]})
@@ -42,7 +43,29 @@ class TokenAuth:
             await send({"type": "websocket.close", "code": 1008})
 
 
-def serve(token, should_stop):
+def prepare_managed_listener(fd=3):
+    """Accept only the guard's pre-opened Unix stream listener, never TCP."""
+    try:
+        duplicate = os.dup(fd)
+        try:
+            listener = socket.socket(fileno=duplicate)
+        except OSError:
+            os.close(duplicate)
+            raise
+        with listener:
+            if (listener.family != socket.AF_UNIX
+                    or listener.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM
+                    or listener.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) != 1):
+                raise RuntimeError("Invalid managed desktop listener")
+        # The original process keeps this descriptor; every exec'd desktop
+        # child must lose it, including before the server imports upstream code.
+        os.set_inheritable(fd, False)
+    except OSError:
+        raise RuntimeError("Managed desktop listener is unavailable") from None
+    return fd
+
+
+def serve(token, should_stop, listener_fd=None):
     # Neither guest applications nor same-uid children may inspect the server
     # credential in /proc/<pid>/environ or memory.
     if ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0) != 0:
@@ -52,7 +75,11 @@ def serve(token, should_stop):
     from computer_server.main import app
     import uvicorn
 
-    server = uvicorn.Server(uvicorn.Config(TokenAuth(app, token), host="0.0.0.0", port=8000, log_level="info"))
+    if listener_fd is None:
+        transport = {"host": "0.0.0.0", "port": 8000}
+    else:
+        transport = {"fd": prepare_managed_listener(listener_fd)}
+    server = uvicorn.Server(uvicorn.Config(TokenAuth(app, token), log_level="info", **transport))
     finished = threading.Event()
 
     def monitor():

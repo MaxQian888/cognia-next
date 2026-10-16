@@ -23,7 +23,7 @@ test("release uses the published immutable digest and contains no runtime token"
   assert.equal(release.image, `${imageRepository}@${digest}`)
   assert.equal(release.imageDigest, digest)
   assert.equal(release.architecture, "linux/amd64")
-  assert.equal(release.recipeRevision, "3")
+  assert.equal(release.recipeRevision, "4")
   assert.equal(release.protocol, "computer-server-0.3.46")
   assert.equal(release.serverVersion, "0.3.46")
   assert.equal(release.startCommand, "sleep infinity")
@@ -70,7 +70,7 @@ test("recipe drift and mutable base prevent publication of a stale manifest", ()
     writeFileSync(join(context, "server.py"), server)
     writeFileSync(
       join(context, "Dockerfile"),
-      dockerfile.replace('cognia.cua.recipe="3"', 'cognia.cua.recipe="4"')
+      dockerfile.replace('cognia.cua.recipe="4"', 'cognia.cua.recipe="5"')
     )
     assert.throws(() => verifyImageSources(root), /identity/)
     writeFileSync(join(context, "Dockerfile"), dockerfile.replace(/@sha256:[0-9a-f]{64}/, ""))
@@ -78,7 +78,7 @@ test("recipe drift and mutable base prevent publication of a stale manifest", ()
     writeFileSync(join(context, "Dockerfile"), dockerfile)
     writeFileSync(
       join(context, "server.py"),
-      server.replace('"recipeRevision": "3"', '"recipeRevision": "4"')
+      server.replace('"recipeRevision": "4"', '"recipeRevision": "5"')
     )
     assert.throws(() => verifyImageSources(root), /health identity/)
   } finally {
@@ -126,7 +126,9 @@ test("existing Images publication gate owns the release artifact and amd64 build
   const job = workflow.split("  managed-desktop-image:\n")[1]?.split("\n  # ADR-0183:")[0]
   assert.ok(job, "managed desktop must be wired into Images")
   assert.match(job, /platforms: linux\/amd64/)
-  assert.match(job, /context: crates\/cognia-automation\/src\/cua_sandbox\/image/)
+  assert.match(job, /context: \$\{\{ runner.temp \}\}\/managed-desktop-image/)
+  assert.match(job, /cargo build --locked --release -p cognia-desktop-guest/)
+  assert.match(job, /managed-desktop-context\.mjs/)
   assert.match(job, /push: \$\{\{ needs.vars.outputs.should_push == 'true' \}\}/)
   assert.match(job, /DIGEST: \$\{\{ steps.build.outputs.digest \}\}/)
   assert.match(job, /name: managed-desktop-release\n/)
