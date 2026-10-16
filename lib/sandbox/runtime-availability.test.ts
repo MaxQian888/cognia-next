@@ -78,3 +78,24 @@ it("projects connection actions from the live implemented adapter", () => {
     Object.values(projectSandboxConnectionCapabilities(cloud, true)).every((value) => !value)
   ).toBe(true)
 })
+
+it("withholds unqualified E2B creation but retains cleanup and health", () => {
+  const row = connection({
+    provider: "e2b",
+    config: {
+      provider: "e2b",
+      target: { kind: "remote", hostId: "host" },
+      providerConfigId: "byo",
+      qualification: "unqualified",
+    },
+    capabilities: defaultSandboxCapabilities("e2b", "computer-server"),
+  })
+  expect(projectSandboxConnectionCapabilities(row, true)).toMatchObject({
+    create: false,
+    connect: true,
+    health: true,
+    delete: true,
+    gui: false,
+    workspaceExec: false,
+  })
+})

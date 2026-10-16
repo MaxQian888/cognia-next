@@ -37,7 +37,7 @@ import type {
  * current revision is recomputed from defaults. Handshake narrowing is
  * per-connection and still only ever removes, within a revision.
  */
-export const SANDBOX_CAPABILITY_REVISION = 3
+export const SANDBOX_CAPABILITY_REVISION = 4
 
 /** Every operation, in a stable order for iteration and display. */
 export const SANDBOX_LIFECYCLE_OPERATIONS: readonly SandboxLifecycleOperation[] = [
@@ -63,7 +63,8 @@ function caps(overrides: Partial<Record<SandboxLifecycleOperation, boolean>>): S
 /**
  * Capabilities backed by a production adapter in this repository. Provider
  * documentation is not an implementation: compatibility rows stay readable,
- * but only Docker/computer-server currently has lifecycle and GUI wiring.
+ * Docker/computer-server has lifecycle and GUI wiring; E2B/computer-server
+ * has Host lifecycle only and requires qualification before creating resources.
  *
  * Docker claims `suspend` and `resume` because the adapter implements them
  * with `docker pause` / `docker unpause`, which SIGSTOP the container's
@@ -84,6 +85,11 @@ const PROVIDER_CAPABILITIES: Record<SandboxConnectionProvider, SandboxCapabiliti
     workspaceRead: true,
     workspaceExec: true,
   }),
+  // Lifecycle exists; creation additionally requires a Host qualification receipt.
+  // Automated GUI, source transfer and persistence remain dormant (ADR-0228).
+  // Phase 2 manual viewing uses a bound control session and Host GUI qualification;
+  // this agent-operation matrix must not advertise delegation before Phase 3.
+  e2b: caps({ create: true, connect: true, delete: true, health: true }),
   "cua-cloud": caps({}),
   lume: caps({}),
 }

@@ -54,6 +54,7 @@ fn authorize(
     let gateway = gateway.clone();
     let task_id = task.clone();
     Ok(Some(GatewayAuthority {
+        delivery_source: None,
         port,
         device_id: None,
         task_id,
@@ -73,7 +74,7 @@ pub async fn spawn_external_agent(
     state: State<'_, external_agent::commands::ExternalAgentState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let authority = if config
+    let mut authority = if config
         .env
         .contains_key(external_agent::gateway_task::PAYLOAD_ENV)
     {
@@ -84,11 +85,72 @@ pub async fn spawn_external_agent(
     } else {
         None
     };
+    if config.env.contains_key(external_agent::spawn_authority::DELIVERY_SOURCE_ENV) {
+        let source_authority = authority.as_mut().ok_or("delivery_source_gateway_required")?;
+        let binding = crate::companion_api::host_identity::current()?;
+        let owner = crate::companion_api::host_identity::namespace_for_tenant(&binding.remote_tenant_id)
+            .ok_or("delivery_source_account_required")?;
+        let directory = app.path().app_data_dir().map_err(|e| e.to_string())?.join("cognia");
+        let task = source_authority.task_id.clone();
+        let (next_config, source) = tokio::task::spawn_blocking(move || {
+            let host_id = crate::headless::deployment_id::resolve(&directory)?;
+            let source = cognia_companion_rpc::delivery_admission::consume(
+                &directory, &owner, &host_id, "local-desktop", &task, &mut config)?;
+            Ok::<_, String>((config, source))
+        }).await.map_err(|_| "delivery_source_admission_failed".to_string())??;
+        config = next_config;
+        source_authority.delivery_source = source;
+        if !(source_authority.authorized)() { return Err("delivery_source_authority_revoked".into()); }
+    }
     with_gateway(
         authority,
         external_agent::commands::spawn_external_agent(config, state, app),
     )
     .await
+}
+
+/// Native task deletion permanently fences any delivery produced by that task.
+#[tauri::command]
+pub async fn external_agent_delete_gateway_task(
+    task_id: String,
+    state: State<'_, external_agent::commands::ExternalAgentState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let backend = state.exec();
+    cognia_companion_rpc::delivery_admission::delete_with_source_fence(
+        external_agent::commands::authorize_gateway_task_deletion(&task_id, backend.as_ref(), None),
+        async {
+            let directory = app.path().app_data_dir().map_err(|e| e.to_string())?.join("cognia");
+            let source_store = cognia_sandbox_pool::provenance::SourceStore::new(&directory);
+            let reader = source_store.clone();
+            let task = task_id.clone();
+            let has_source = tokio::task::spawn_blocking(move || reader.has_task(&task))
+                .await.map_err(|_| "delivery_source_unavailable".to_string())??;
+            if !has_source { return Ok(()); }
+            let binding = crate::companion_api::host_identity::current()?;
+            let owner = crate::companion_api::host_identity::namespace_for_tenant(&binding.remote_tenant_id)
+                .ok_or("delivery_source_account_required")?;
+            let task = task_id.clone();
+            tokio::task::spawn_blocking(move || {
+                let host_id = crate::headless::deployment_id::resolve(&directory)?;
+                source_store.revoke_owned_task(&owner, &host_id, &task, Some("local-desktop"))
+            }).await.map_err(|_| "delivery_source_revocation_failed".to_string())?
+        },
+        async {
+            let directory = app.path().app_data_dir().map_err(|e| e.to_string())?.join("cognia");
+            let owner = crate::companion_api::host_identity::current().ok()
+                .and_then(|binding| crate::companion_api::host_identity::namespace_for_tenant(&binding.remote_tenant_id));
+            let root = directory.clone();
+            let host_id = tokio::task::spawn_blocking(move || crate::headless::deployment_id::resolve(&root))
+                .await.map_err(|_| "delivery_source_unavailable".to_string())??;
+            let admission = cognia_companion_rpc::managed_desktops::task_deletion_admission(
+                cognia_companion_rpc::managed_desktops::Caller { device_id:"local-desktop",tenant_id:None,scope:None,local:true },
+                host_id.clone(),owner.clone());
+            cognia_companion_rpc::managed_desktop_results::delete_task_history(&directory, owner, host_id, task_id.clone(), None, admission,
+                external_agent::commands::delete_gateway_task_for_backend(&task_id, backend.as_ref())).await
+        },
+    ).await
+
 }
 
 #[cfg(test)]

@@ -120,6 +120,7 @@ members = [
   # cognia-automation so the terminal and plugin host stop linking UI automation.
   "crates/cognia-exec-sandbox",
   "crates/cognia-automation",
+  "crates/cognia-e2b",
   "crates/cognia-scheduling",
   # ADR-0067 Tier-B — foundation crates unblocking the subscription/
   # connectors/terminal/plugin_api extractions.

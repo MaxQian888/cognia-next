@@ -244,9 +244,10 @@ pub(crate) fn remote_sandboxes(app: &App) {
                 if let Some(services) = pool.services {
                     crate::companion_api::environment_pool::install(services);
                 }
+                cognia_companion_rpc::managed_desktop_results::install_task_cleanup_backend(state.exec());
                 log::info!("remote sandboxes: on");
             }
-            Ok(None) => {}
+            Ok(None) => { cognia_companion_rpc::managed_desktop_results::install_task_cleanup_backend(state.exec()); }
             Err(error) => log::warn!("remote sandboxes: not installed: {error}"),
         }
     });
@@ -332,4 +333,17 @@ mod tests {
             PathBuf::from("/data/com.cognia.app/cognia/gateway-config.json")
         );
     }
+}
+
+/// Assemble the crate-owned managed desktop lifecycle, including cleanup when dormant.
+pub(crate) fn managed_desktops(app: &App) {
+    let Ok(app_data_dir) = app.path().app_data_dir() else { return; };
+    let dir = cognia_data_dir(&app_data_dir);
+    tauri::async_runtime::spawn(async move {
+        let result = match crate::headless::deployment_id::resolve(&dir) {
+            Ok(id) => cognia_companion_rpc::managed_desktops::install(&dir, &id).await.map_err(|e| e.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        if let Err(error) = result { log::warn!("managed desktops unavailable: {error}"); }
+    });
 }

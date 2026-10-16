@@ -3389,6 +3389,7 @@ mod tests {
             "device-a",
             cognia_external_agent::spawn_authority::with_gateway(
                 Some(cognia_external_agent::spawn_authority::GatewayAuthority {
+                    delivery_source: None,
                     port: 32123,
                     device_id: Some("device-a".into()),
                     task_id: "task".into(),

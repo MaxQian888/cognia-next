@@ -254,3 +254,15 @@ describe("SandboxCapabilityError", () => {
     expect(err.message).toContain("not-connected")
   })
 })
+
+// Imported rows cannot turn the dormant cloud GUI into the legacy local driver.
+it("refuses E2B GUI and workspace even when stored capabilities falsely advertise them", () => {
+  for (const operation of ["gui", "workspaceRead", "workspaceExec", "suspend", "resume"] as const) {
+    expect(() =>
+      assertSandboxOperationAllowed(
+        ctx({ provider: "e2b", driver: "computer-server", capabilities: caps() }),
+        operation
+      )
+    ).toThrow(SandboxCapabilityError)
+  }
+})

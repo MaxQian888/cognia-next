@@ -45,7 +45,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 use url::Url;
 
-use self::api::{ApiClient, ApiError, CreatedSandbox, PauseOutcome, SandboxInfo};
+use self::api::{ApiClient, ApiError, CreatedSandbox, PauseOutcome, SandboxInfo, SpawnErrorExt};
 use self::bundle::BundleSource;
 use self::envd::{
     EndStatus, EnvdEndpoint, EnvdError, ProcessEvent, ProcessInput, ProcessStream, StartSpec,

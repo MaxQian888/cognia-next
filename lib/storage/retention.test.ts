@@ -1,3 +1,7 @@
+const mockRetryDesktopDeletion = jest.fn(async () => 0)
+jest.mock("@/lib/automation/managed-desktop-result-deletion", () => ({
+  retryManagedDesktopResultDeletions: () => mockRetryDesktopDeletion(),
+}))
 import {
   pruneRetainedTables,
   startStorageRetentionSweeper,
@@ -137,6 +141,7 @@ describe("pruneRetainedTables", () => {
       { id: "evalArtifacts", removed: 0 },
       { id: "evalOnline", removed: 0 },
       { id: "workSubmissions", removed: 0 },
+      { id: "managedDesktopDeletion", removed: 0 },
       { id: "mediaGenerationJobs", removed: 0 },
       { id: "memoryGovernance", removed: 0 },
       { id: "notificationDelivery", removed: 0 },
@@ -445,4 +450,12 @@ describe("notification delivery retention", () => {
     await seedSettledIntent(Date.now() - 10 * MS_PER_DAY)
     expect(await target().prune(Date.now())).toBe(0)
   })
+})
+
+it("replays desktop deletion even when configured retention keeps everything", async () => {
+  mockRetryDesktopDeletion.mockResolvedValueOnce(2)
+  const target = RETENTION_TARGETS.find((row) => row.id === "managedDesktopDeletion")!
+  expect(await pruneRetainedTables(0, [target])).toEqual([
+    { id: "managedDesktopDeletion", removed: 2 },
+  ])
 })

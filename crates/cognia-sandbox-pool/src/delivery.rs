@@ -46,6 +46,9 @@ pub struct TaskDeliveryRecord {
     pub agent_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
+    /// Missing on legacy records: those records cannot authorize handoff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
     pub provider_id: String,
     pub instance_id: String,
     pub branch: String,
@@ -117,6 +120,7 @@ impl TaskDeliveryRecord {
             id,
             agent_id,
             task_id,
+            source_id: None,
             provider_id,
             instance_id,
             branch,
@@ -140,6 +144,7 @@ fn now_ms() -> u64 {
 
 pub struct DeliveryStore {
     directory: PathBuf,
+    sources: crate::provenance::SourceStore,
     writer: Mutex<()>,
 }
 
@@ -148,6 +153,7 @@ impl DeliveryStore {
     pub fn new(data_dir: &Path) -> Self {
         Self {
             directory: data_dir.join(DELIVERY_DIR),
+            sources: crate::provenance::SourceStore::new(data_dir),
             writer: Mutex::new(()),
         }
     }
@@ -170,6 +176,34 @@ impl DeliveryStore {
             });
             records
         })
+    }
+
+    /// Reauthorize immutable delivery and source after restart. Caller identity
+    /// must come from the current Host principal, never handoff arguments.
+    pub fn authorize(
+        &self, id: &str, revision: u64, owner: &str, host: &str,
+    ) -> Result<(TaskDeliveryRecord, cognia_external_agent::spawn_authority::DeliverySource), String> {
+        let _guard = self.writer.lock();
+        let record = self.read(id)?;
+        if record.revision != revision { return Err("delivery_revision_changed".into()); }
+        let source = self.sources.authorize(record.source_id.as_deref().ok_or("delivery_source_missing")?, owner, host)?;
+        if record.task_id.as_deref() != Some(source.task_id.as_str()) || record.branch != source.branch {
+            return Err("delivery_source_binding_mismatch".into());
+        }
+        Ok((record, source))
+    }
+
+    pub fn list_authorized(&self, owner: &str, host: &str) -> Result<Vec<TaskDeliveryRecord>, String> {
+        let records = self.list(None, None)?;
+        let mut visible = Vec::new();
+        for record in records {
+            match self.authorize(&record.id, record.revision, owner, host) {
+                Ok((record, _)) => visible.push(record),
+                Err(error) if matches!(error.as_str(), "delivery_source_missing" | "delivery_source_forbidden" | "delivery_source_revoked") => {},
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(visible)
     }
 
     pub(crate) fn create(&self, record: TaskDeliveryRecord) -> Result<(), String> {
@@ -461,4 +495,28 @@ mod tests {
             .unwrap_err()
             .contains("decode delivery record"));
     }
+    #[test]
+    fn exact_source_survives_restart_and_legacy_or_revoked_records_cannot_authorize() {
+        use cognia_external_agent::spawn_authority::DeliverySourceDeclaration;
+        let directory = tempfile::tempdir().unwrap();
+        let sources = crate::provenance::SourceStore::new(directory.path());
+        let source = sources.admit("owner", "host", "task", "device",
+            DeliverySourceDeclaration { conversation_id: "conversation".into(), origin_run_ref: "origin".into() },
+            "https://example.com/repo.git", "main", "task/branch", None).unwrap();
+        let store = DeliveryStore::new(directory.path());
+        store.create(record("legacy")).unwrap();
+        let mut bound = record("bound");
+        bound.source_id = Some(source.id.clone());
+        store.create(bound).unwrap();
+        let reopened = DeliveryStore::new(directory.path());
+        assert_eq!(reopened.authorize("bound", 0, "owner", "host").unwrap().1, source);
+        assert!(reopened.authorize("legacy", 0, "owner", "host").is_err());
+        assert!(reopened.authorize("bound", 1, "owner", "host").is_err());
+        assert!(reopened.authorize("bound", 0, "another", "host").is_err());
+        assert_eq!(reopened.list_authorized("owner", "host").unwrap().len(), 1);
+        sources.revoke_conversation("owner", "host", "conversation").unwrap();
+        assert!(reopened.authorize("bound", 0, "owner", "host").is_err());
+        assert!(reopened.list_authorized("owner", "host").unwrap().is_empty());
+    }
+
 }

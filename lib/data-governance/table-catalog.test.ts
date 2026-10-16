@@ -56,7 +56,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(384)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(385)
     db.close()
   })
 
@@ -75,7 +75,10 @@ describe("DataTableCatalog", () => {
       if (entry.retentionPolicy.enforcement === "central") {
         expect(entry.retentionPolicy.executorId).not.toBe("")
       }
-      if (entry.retentionPolicy.mode === "permanent") {
+      if (
+        entry.retentionPolicy.mode === "permanent" &&
+        entry.name !== "managedDesktopDeletionOutbox"
+      ) {
         expect(entry.retentionPolicy.enforcement).toBe("explicit-delete")
       }
     }
@@ -162,6 +165,7 @@ describe("DataTableCatalog", () => {
       "evalArtifacts",
       "evalOnline",
       "workSubmissions",
+      "managedDesktopDeletion",
       "mediaGenerationJobs",
       "memoryGovernance",
       "notificationDelivery",
@@ -622,4 +626,17 @@ it("keeps the encrypted session list derived and outside both sync protocols", (
     accountSync: { mode: "none" },
     cleanupPolicy: "protected",
   })
+})
+
+it("retains desktop cleanup intents until Host acknowledgment without sync or portable backup", () => {
+  const policy = policyForTable("managedDesktopDeletionOutbox")!
+  expect(policy.retentionPolicy).toMatchObject({
+    mode: "permanent",
+    enforcement: "central",
+    executorId: "managedDesktopDeletion",
+  })
+  expect(policy.cleanupPolicy).toBe("protected")
+  expect(policy.backupPolicy.mode).toBe("device-local")
+  expect(policy.syncPolicy.mode).toBe("none")
+  expect(policy.accountSync.mode).toBe("none")
 })

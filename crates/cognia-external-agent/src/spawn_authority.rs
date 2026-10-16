@@ -8,8 +8,39 @@ pub struct GatewayAuthority {
     pub port: u16,
     pub device_id: Option<String>,
     pub task_id: String,
+    /// Host-admitted immutable source; never decoded from the spawn payload.
+    pub delivery_source: Option<DeliverySource>,
     pub authorized: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
 }
+/// Durable source authority issued by the Host before remote execution.
+/// Origin references are owner-admitted labels, not credentials or authority.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeliverySource {
+    pub version: u32,
+    pub id: String,
+    pub owner_account_id: String,
+    pub host_id: String,
+    pub task_id: String,
+    pub device_id: String,
+    pub conversation_id: String,
+    pub coding_run_id: String,
+    pub origin_run_ref: String,
+    pub repository_url: String,
+    pub base_ref: String,
+    pub branch: String,
+    pub credential_ref: Option<String>,
+}
+
+/// Declared during the original authenticated operation, never at handoff.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeliverySourceDeclaration {
+    pub conversation_id: String,
+    pub origin_run_ref: String,
+}
+pub const DELIVERY_SOURCE_ENV: &str = "COGNIA_DELIVERY_SOURCE";
+
 tokio::task_local! { static GATEWAY: Option<GatewayAuthority>; }
 pub async fn with_gateway<T>(
     authority: Option<GatewayAuthority>,

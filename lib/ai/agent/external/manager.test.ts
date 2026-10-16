@@ -1,3 +1,6 @@
+jest.mock("@/lib/sandbox/delivery-source-hosts", () => ({
+  recordDeliverySourceHost: jest.fn(async () => () => undefined),
+}))
 jest.mock("./agent-hooks", () => {
   const actual = jest.requireActual("./agent-hooks")
   return { ...actual, gateExternalAgentPermission: jest.fn(actual.gateExternalAgentPermission) }
@@ -3749,6 +3752,52 @@ describe("Cognia gateway task lifecycle", () => {
       expect(revoke).toHaveBeenCalledTimes(1)
       expect(mockGatewayRevoke).not.toHaveBeenCalled()
     } finally {
+      restorePlane()
+    }
+  })
+
+  it("captures a cleanup Host before carrying immutable origin references into remote spawn", async () => {
+    const sourceHosts = await import("@/lib/sandbox/delivery-source-hosts")
+    const capture = jest
+      .mocked(sourceHosts.recordDeliverySourceHost)
+      .mockResolvedValue(() => undefined)
+    const { manager, restorePlane } = prepare()
+    const launched: ExternalAgentConfig[] = []
+    protocolAdapterRegistry.register("acp", () => {
+      const adapter = new MockAdapter()
+      const connect = adapter.connect.bind(adapter)
+      adapter.connect = async (config) => {
+        launched.push(config)
+        await connect(config)
+      }
+      return adapter as never
+    })
+    try {
+      await manager.addAgent(managedConfig())
+      registerSpawnPlacement("managed", {
+        ...placement(),
+        provider: "cloud",
+        workspace: {
+          remoteUrl: "https://example.com/repo.git",
+          baseRef: "main",
+          branch: "task/branch",
+        },
+      })
+      await expect(
+        manager.execute("managed", "task", {
+          context: {
+            custom: { chatSessionId: "conversation", deliveryOriginRunRef: "origin-run" },
+          },
+        })
+      ).resolves.toMatchObject({ success: true })
+      expect(capture).toHaveBeenCalledWith("conversation")
+      const prepared = launched.find((config) => config.id.startsWith("gateway-task-"))
+      expect(JSON.parse(prepared!.process!.env!.COGNIA_DELIVERY_SOURCE)).toEqual({
+        conversationId: "conversation",
+        originRunRef: "origin-run",
+      })
+    } finally {
+      capture.mockClear()
       restorePlane()
     }
   })

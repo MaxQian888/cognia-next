@@ -1,0 +1,27 @@
+[package]
+name = "cognia-e2b"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Host-only E2B control-plane transport and immutable template requests"
+
+[dependencies]
+base64.workspace = true
+cognia-net = { path = "../cognia-net" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+url.workspace = true
+reqwest = { workspace = true, features = ["stream", "json", "rustls-no-provider"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+tokio = { workspace = true, features = ["fs", "time"] }
+uuid.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "sync"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

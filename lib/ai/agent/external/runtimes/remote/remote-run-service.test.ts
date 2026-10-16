@@ -198,7 +198,7 @@ describe("starting a run", () => {
       reasoningEffort: "high",
       systemPrompt: "Selected skill: verify results",
       allowedTools: ["read"],
-      context: { custom: { chatSessionId: "chat-1" } },
+      context: { custom: { chatSessionId: "chat-1", deliveryOriginRunRef: "run-1" } },
     })
   })
 
@@ -265,7 +265,13 @@ describe("starting a run", () => {
         callerDeviceId: "device-phone",
       })
       expect(h.manager.executed[0]).toMatchObject({
-        context: { custom: { chatSessionId: "chat-1", callerDeviceId: "device-phone" } },
+        context: {
+          custom: {
+            chatSessionId: "chat-1",
+            deliveryOriginRunRef: "run-1",
+            callerDeviceId: "device-phone",
+          },
+        },
       })
     })
 

@@ -5,6 +5,77 @@ import Ajv2020 from "ajv/dist/2020.js"
 import { parse as parseYaml } from "yaml"
 import { buildCompanionRequestSchemaContracts } from "./companion-request-schema-contracts.mjs"
 
+test("managed desktops keep human leases and closed payloads on the device plane", () => {
+  const request = JSON.parse(readFileSync(new URL("../../protocol/companion-request-schemas.json", import.meta.url), "utf8"))
+  const commands = JSON.parse(readFileSync(new URL("../../protocol/companion-commands.json", import.meta.url), "utf8")).commands
+  const validate = new Ajv2020({ strict: false }).compile(request.commands.managed_desktop_authorize)
+  const body = { providerConfigId: "e2b", quoteId: "quote", action: "create", adminLease: "lease" }
+  assert.equal(validate(body), true)
+  for (const extra of [{ ownerPrincipalId: "other" }, { confirmed: true }, { action: "smoke" }]) {
+    assert.equal(validate({ ...body, ...extra }), false)
+  }
+  for (const suffix of ["authorize", "prepare_template", "create", "connect", "delete"]) {
+    const command = commands.find((c) => c.name === `managed_desktop_${suffix}`)
+    assert.equal(command.approval, "interactive")
+    assert.equal(command.capability, "host.admin")
+    assert.equal(classifyHostCommand(command.name), "automation")
+  }
+  assert.equal(commands.some((c) => c.name.includes("managed_desktop_smoke")), false)
+})
+
+test("managed desktop responses declare isolation and egress attestations", () => {
+  const catalog = JSON.parse(readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"))
+  const summary = catalog.$defs.ManagedDesktopConfigSummary
+  for (const key of ["isolationTier", "egressTier", "egressEnforcement"]) {
+    assert.ok(summary.required.includes(key))
+    assert.equal(summary.properties[key].type, "string")
+  }
+  assert.deepEqual(summary.properties.egressTier.enum, ["off", "on", "allowlist"])
+})
+
+test("managed desktop control uses fenced closed requests and private frame responses", () => {
+  const request = JSON.parse(readFileSync(new URL("../../protocol/companion-request-schemas.json", import.meta.url), "utf8"))
+  const response = JSON.parse(readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"))
+  const commands = JSON.parse(readFileSync(new URL("../../protocol/companion-commands.json", import.meta.url), "utf8")).commands
+  const ajv = new Ajv2020({ strict: false })
+  const base = { desktopId: "desktop-1", generation: 1 }
+  for (const suffix of ["status", "frame", "acquire", "renew", "release", "input"]) {
+    const name = `managed_desktop_control_${suffix}`
+    const command = commands.find((c) => c.name === name)
+    assert.ok(command, name)
+    assert.equal(command.capability, ["status", "frame"].includes(suffix) ? "host.observe" : "host.admin")
+    assert.equal(classifyHostCommand(name), "automation")
+    assert.equal(request.commands[name].additionalProperties, false)
+  }
+  const acquire = ajv.compile(request.commands.managed_desktop_control_acquire)
+  assert.equal(acquire({ ...base, takeover: true }), true)
+  assert.equal(acquire({ ...base, takeover: true, principal: "other" }), false)
+  const input = ajv.compile(request.commands.managed_desktop_control_input)
+  const action = { ...base, token: "lease", fence: 2, frameId: "frame", point: { x: 2, y: 3 }, action: { kind: "click" } }
+  assert.equal(input(action), true)
+  assert.equal(input({ ...action, action: { kind: "drag", to: { x: 3, y: 4 }, opts: { durationMs: 2000, steps: 60 } } }), true)
+  for (const invalidAction of [
+    { kind: "drag", to: { x: 3, y: 4 }, opts: { durationMs: 2001 } },
+    { kind: "drag", to: { x: 3, y: 4 }, opts: { steps: 61 } },
+    { kind: "pressKey", chord: "x".repeat(257) },
+    { kind: "setValue", value: "unsupported" },
+  ]) assert.equal(input({ ...action, action: invalidAction }), false)
+  for (const extra of [{ fence: 0 }, { frameId: "" }, { ownerPrincipalId: "other" }, { action: { kind: "click", confirmed: true } }, { action: { kind: "typeText", text: "x".repeat(4097) } }]) {
+    assert.equal(input({ ...action, ...extra }), false)
+  }
+  const frame = response.$defs.ManagedDesktopControlFrame
+  assert.equal(frame.additionalProperties, false)
+  assert.deepEqual(frame.required, ["frameId", "fence", "expiresAt", "screenshot"])
+  assert.ok(!JSON.stringify(frame).includes("endpoint"))
+  const validateFrame = ajv.compile(frame)
+  const shot = { bytes: "png", width: 1, height: 1, capturedAt: 1, format: "png" }
+  const observed = { frameId: "frame", fence: 0, expiresAt: 10, screenshot: shot }
+  assert.equal(validateFrame(observed), true)
+  assert.equal(validateFrame({ ...observed, endpoint: "https://provider" }), false)
+  assert.equal(validateFrame({ ...observed, screenshot: { ...shot, trafficToken: "secret" } }), false)
+  assert.ok(response.$defs.ManagedDesktopConfigSummary.required.includes("guiQualified"))
+})
+
 test("HostState submit admits the current closed action envelope on both API planes", () => {
   const inspected = inspectCommittedContract()
   const action = {
@@ -532,6 +603,13 @@ test("runtime health schemas admit legacy and bootstrap-aware brains", () => {
     assert.equal(validatePong(pong), true, JSON.stringify(validatePong.errors))
   }
   assert.equal(validatePong({ ...fixtures.pong, bootstrapped: "yes" }), false)
+  const validateHello = new Ajv2020({ strict: false }).compile(
+    asyncApi.components.messages.BridgeHelloFrame.payload,
+  )
+  for (const hello of [fixtures.hello, fixtures.helloRuntimeHealth]) {
+    assert.equal(validateHello(hello), true, JSON.stringify(validateHello.errors))
+    assert.equal(hello.catalogHash, inspected.desiredHostCommandCatalog.catalogHash)
+  }
   const responses = JSON.parse(readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"))
   const runtimeSchema = responses.$defs.HostRuntime
   const validateRuntime = new Ajv2020({ strict: false }).compile(runtimeSchema)
@@ -579,9 +657,11 @@ test("generates one drift-free identity for HTTP, WebSocket, CLI, and bridge con
   )
   assert.ok(fixtureFrameTypes.size >= 10, `expected all ten frame types, saw ${fixtureFrameTypes.size}`)
 
-  for (const name of ["hello", "helloAck"]) {
-    assert.equal(bridgeFixture.frames[name].catalogHash, catalog.catalogHash)
-    assert.equal(bridgeFixture.frames[name].contractVersion, catalog.schemaVersion)
+  for (const frame of Object.values(bridgeFixture.frames).filter((frame) =>
+    ["hello", "hello_ack", "hello_refused"].includes(frame.type),
+  )) {
+    assert.equal(frame.catalogHash, catalog.catalogHash)
+    assert.equal(frame.contractVersion, catalog.schemaVersion)
   }
   assert.equal(inspected.headlessAsyncApiDrift, false)
   assert.equal(inspected.hostCommandCatalogDrift, false)
@@ -1442,4 +1522,25 @@ test("Git fetch admits credentialed branch and PR-head targets only on the servi
   for (const refspec of ["HEAD:refs/heads/main", "--upload-pack=evil", "", null]) {
     assert.equal(service({ ...serviceBase, refspec }), false, String(refspec))
   }
+})
+
+test("managed desktop handoff accepts only immutable source selectors and stays dormant", () => {
+  const requests = JSON.parse(readFileSync(new URL("../../protocol/companion-request-schemas.json", import.meta.url), "utf8"))
+  const responses = JSON.parse(readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"))
+  const commands = JSON.parse(readFileSync(new URL("../../protocol/companion-commands.json", import.meta.url), "utf8")).commands
+  const ajv = new Ajv2020({ strict: false })
+  const validate = ajv.compile(requests.commands.managed_desktop_handoff_prepare)
+  const body = { deliveryId: "delivery", deliveryRevision: 1, mode: "commit", providerConfigId: "e2b", lifetimeSeconds: 60, criteria: ["Page loads"], acceptanceFiles: [], argv: [] }
+  assert.equal(validate(body), true)
+  assert.equal(validate({ ...body, mode: "bundle" }), true)
+  for (const extra of [{ ownerAccountId: "foreign" }, { sourceId: "forged" }, { mode: "livePreview" }, { lifetimeSeconds: 3601 }, { criteria: [] }, { argv: ["npm", "run", "test", "extra"] }]) {
+    assert.equal(validate({ ...body, ...extra }), false)
+  }
+  const proposal = responses.commands.managed_desktop_handoff_prepare
+  assert.equal(proposal.properties.executionEnabled.const, false)
+  assert.equal(proposal.properties.dormantReason.const, "managed_desktop_handoff_requires_results_qualification")
+  assert.equal(commands.some((command) => /managed_desktop_handoff_(execute|create|smoke)$/.test(command.name)), false)
+  assert.equal(commands.find((c) => c.name === "managed_desktop_handoff_revoke_source").idempotency, "required")
+  assert.equal(responses.$defs.TaskDeliveryRecord.properties.sourceId.type, "string")
+  assert.equal(responses.$defs.TaskDeliveryRecord.required.includes("sourceId"), false, "legacy records remain readable but ineligible")
 })

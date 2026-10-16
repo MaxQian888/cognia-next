@@ -6,7 +6,7 @@ import {
   supportsSandboxOperation,
 } from "./connection-capabilities"
 
-const PROVIDERS: SandboxConnectionProvider[] = ["docker", "cua-cloud", "lume"]
+const PROVIDERS: SandboxConnectionProvider[] = ["docker", "e2b", "cua-cloud", "lume"]
 const DRIVERS: SandboxConnectionDriver[] = ["computer-server", "cua-driver"]
 
 describe("defaultSandboxCapabilities", () => {

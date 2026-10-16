@@ -127,6 +127,28 @@ pub struct CommandDescriptor {
     pub output_schema: String,
 }
 
+/// Storage policy is independent of the wire requirement for a UUID key.
+/// Host-semantic commands bind that key to the request hash, but must re-enter
+/// current Host authorization and durable domain fences on every retry. Their
+/// private results must never become generic operation receipts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandReceiptPolicy {
+    Replay,
+    HostSemantic,
+}
+
+impl CommandDescriptor {
+    pub fn receipt_policy(&self) -> CommandReceiptPolicy {
+        if self.resource == "sandbox.managed_desktop.result"
+            && self.idempotency == CommandIdempotency::Required
+        {
+            CommandReceiptPolicy::HostSemantic
+        } else {
+            CommandReceiptPolicy::Replay
+        }
+    }
+}
+
 impl From<&WireCommand> for CommandDescriptor {
     fn from(command: &WireCommand) -> Self {
         Self {
@@ -368,6 +390,20 @@ mod tests {
         assert!(remote_command_names()
             .iter()
             .all(|name| descriptor(name).is_some()));
+    }
+
+    #[test]
+    fn private_result_mutations_require_keys_but_never_replay_generic_receipts() {
+        let semantic: Vec<_> = commands().iter().filter(|c|
+            c.receipt_policy() == CommandReceiptPolicy::HostSemantic).collect();
+        assert_eq!(semantic.len(), 6);
+        for descriptor in semantic {
+            assert!(descriptor.name.starts_with("managed_desktop_results_"));
+            assert_eq!(descriptor.idempotency, CommandIdempotency::Required);
+            assert_ne!(descriptor.operation, CommandOperation::Read);
+        }
+        assert_eq!(descriptor("managed_desktop_results_get_result").unwrap().receipt_policy(), CommandReceiptPolicy::Replay);
+        assert_eq!(descriptor("claude_send").unwrap().receipt_policy(), CommandReceiptPolicy::Replay);
     }
 
     #[test]

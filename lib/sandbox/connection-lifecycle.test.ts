@@ -318,3 +318,45 @@ describe("serializeSandboxConnectionOperation", () => {
     expect(events).toEqual(["first:start", "first:end", "second"])
   })
 })
+
+it("connects E2B through its explicit Host and returns a cloud outcome without Docker placement", async () => {
+  const local = fakeClient()
+  const resource = {
+    id: "desktop",
+    generation: 1,
+    state: "running" as const,
+    providerConfigId: "byo",
+    deadlineAt: 100,
+    idleTimeoutSeconds: 600,
+    createdAt: 1,
+    updatedAt: 1,
+    cleanupAttempts: 0,
+    qualification: "unqualified" as const,
+  }
+  const connect = jest.fn().mockResolvedValue(resource)
+  const cloud = row({
+    provider: "e2b",
+    config: {
+      provider: "e2b",
+      target: { kind: "remote", hostId: "selected-host" },
+      providerConfigId: "byo",
+      desktopId: "desktop",
+      generation: 1,
+      qualification: "unqualified",
+    },
+    capabilities: defaultSandboxCapabilities("e2b", "computer-server"),
+  })
+  await expect(
+    runSandboxConnectionOperation(cloud, "connect", {
+      client: local,
+      managedClient: {
+        connect,
+      } as unknown as import("@/lib/automation/managed-desktop-client").ManagedDesktopClient,
+    })
+  ).resolves.toEqual({ managedDesktop: resource })
+  expect(connect).toHaveBeenCalledWith(
+    { kind: "remote", hostId: "selected-host" },
+    { desktopId: "desktop", generation: 1 }
+  )
+  expect(local.start).not.toHaveBeenCalled()
+})

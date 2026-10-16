@@ -32,6 +32,13 @@ cc = "1"
 [dependencies]
 cognia-instrument = { path = "../cognia-instrument" }
 cognia-core = { path = "../cognia-core" }
+cognia-secrets = { path = "../cognia-secrets" }
+aes-gcm = { workspace = true, features = ["aes"] }
+cognia-e2b = { path = "../cognia-e2b" }
+cognia-environment = { path = "../cognia-environment", default-features = false }
+cognia-net = { path = "../cognia-net" }
+reqwest = { workspace = true, features = ["json", "rustls"] }
+fs2 = "0.4"
 # The execution sandbox (ADR-0028), its own crate since ADR-0196 P2 and
 # re-exported as `crate::sandbox`; the three sandbox Tauri commands and the
 # plugin-grant admission check stay in `src/sandbox.rs`.
@@ -134,6 +141,10 @@ objc2 = "0.6.4"
 # Linux input sim (atspi backend). The seccomp filter moved to
 # `cognia-exec-sandbox` with the bwrap backend.
 enigo = "0.6"
+
+[target."cfg(unix)".dependencies]
+# Secure recovery import must not follow a swapped symlink or block on a FIFO.
+libc.workspace = true
 
 [lints]
 workspace = true

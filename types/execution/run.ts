@@ -383,6 +383,8 @@ export interface ExecutionRunRetryStamp {
 
 export interface ExecutionRun {
   id: string
+  /** Verified owning Host for ADR-0228 acceptance projections and canonical deletion. */
+  managedDesktopHostId?: string
   /** Independent deliverable obligation within a delegation. Absent means this run's id. */
   obligationId?: string
   /** Explicit previous attempt for the same obligation; timestamps never imply replacement. */

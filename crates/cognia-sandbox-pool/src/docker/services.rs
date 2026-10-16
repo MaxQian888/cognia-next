@@ -772,6 +772,7 @@ mod tests {
             let active = Arc::new(AtomicBool::new(true));
             let check = active.clone();
             let authority = GatewayAuthority {
+                delivery_source: None,
                 port: 32123,
                 device_id: Some("device-a".into()),
                 task_id: "task".into(),
@@ -824,6 +825,7 @@ mod tests {
             let live = Arc::new(AtomicBool::new(true));
             let active = live.clone();
             let authority = GatewayAuthority {
+                delivery_source: None,
                 port: 32123,
                 device_id: None,
                 task_id: "task".into(),
@@ -873,6 +875,7 @@ mod tests {
             );
             let calls = AtomicUsize::new(0);
             let authority = GatewayAuthority {
+                delivery_source: None,
                 port: 32123,
                 device_id: Some("device-a".into()),
                 task_id: "task".into(),

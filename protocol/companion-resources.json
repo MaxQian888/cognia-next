@@ -1023,6 +1023,12 @@
     },
     "sandbox": {
       "children": {
+        "managed_desktop": {
+          "children": {
+            "handoff": {},
+            "result": {}
+          }
+        },
         "health": {},
         "remote": {}
       }

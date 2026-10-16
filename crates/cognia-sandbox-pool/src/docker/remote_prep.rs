@@ -797,15 +797,21 @@ impl DockerSandboxBackend {
             .map_err(|error| refused("sandbox_runtime_config_invalid", error.to_string()))?;
 
         if let Some(store) = remote.deliveries.get() {
+            let mut delivery = TaskDeliveryRecord::running(
+                session.clone(), id.clone(),
+                gateway.as_ref().map(|authority| authority.task_id.clone()),
+                remote.provider_id.clone(), instance.clone(), source.branch.clone(),
+            );
+            if let Some(provenance) = gateway.as_ref().and_then(|authority| authority.delivery_source.as_ref()) {
+                if provenance.repository_url != crate::provenance::normalize_repository(&source.remote_url)
+                    .map_err(|error| refused("sandbox_delivery_source_invalid", error))?
+                    || provenance.branch != source.branch || provenance.base_ref != source.base_ref {
+                    return Err(refused("sandbox_delivery_source_mismatch", "Source changed after authenticated admission"));
+                }
+                delivery.source_id = Some(provenance.id.clone());
+            }
             store
-                .create(TaskDeliveryRecord::running(
-                    session.clone(),
-                    id.clone(),
-                    gateway.as_ref().map(|authority| authority.task_id.clone()),
-                    remote.provider_id.clone(),
-                    instance.clone(),
-                    source.branch.clone(),
-                ))
+                .create(delivery)
                 .map_err(|error| fault("sandbox_delivery_store_failed", error))?;
         }
         let cleanup = Arc::new(RemoteSession {

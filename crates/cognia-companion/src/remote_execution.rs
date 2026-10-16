@@ -7,11 +7,11 @@ use uuid::Uuid;
 
 use super::{
     command_manifest::{
-        CommandApproval, CommandDescriptor, CommandIdempotency, CommandOperation, CommandTarget,
+        CommandApproval, CommandDescriptor, CommandIdempotency, CommandOperation, CommandReceiptPolicy, CommandTarget,
         CommandTransport,
     },
     middleware::DeviceContext,
-    security_store::{security_store, IdempotencyDecision, SecurityStoreError},
+    security_store::{security_store, IdempotencyDecision, SecurityStore, SecurityStoreError},
     SharedState,
 };
 
@@ -461,6 +461,11 @@ async fn execute_inner(
     .unwrap_or_default();
     let request_hash = hex::encode(Sha256::digest(payload));
     let now = unix_time_secs();
+    if descriptor.receipt_policy() == CommandReceiptPolicy::HostSemantic {
+        return execute_host_semantic_request(
+            &store, &request, &request_hash, now, dispatch(state, &request),
+        ).await;
+    }
     let operation_id = match store
         .begin_idempotent_operation(
             &request.principal.tenant_id,
@@ -545,6 +550,30 @@ async fn execute_inner(
             Err(error)
         }
     }
+}
+
+/// Every transport uses this hash-only path for private, Host-owned retries.
+/// A future is intentional: wire-key conflicts refuse before domain work starts.
+async fn execute_host_semantic_request(
+    store: &SecurityStore, request: &ExecutionRequest, request_hash: &str, now: i64,
+    dispatch: impl std::future::Future<Output = Result<Value, Problem>>,
+) -> Result<ExecutionOutcome, Problem> {
+    store.bind_host_semantic_request(
+        &request.principal.tenant_id, &request.principal.device_id,
+        request.idempotency_key.as_deref().expect("validated UUID key"), request_hash, now,
+    ).map_err(|error| map_store_error(&request.request_id, error))?;
+    // Always redispatch: current approval/source checks and evidence deletion
+    // fences belong to the Host. Neither successes nor failures enter receipts.
+    let result = dispatch.await?;
+    validate_contract_value(
+        &request.request_id, &request.command, &result,
+        cognia_headless_contract::ContractDirection::Output,
+        contract_plane_for(&request.principal.scope),
+    )?;
+    Ok(ExecutionOutcome::Completed {
+        request_id: request.request_id.clone(), operation_id: None,
+        result, replayed: false,
+    })
 }
 
 /// Which contract plane a request scope maps to.
@@ -2111,6 +2140,41 @@ mod tests {
         assert_eq!(error.code, "contract_output_violation");
         assert_eq!(error.operation_id.as_deref(), Some("operation-a"));
         assert_eq!(error.details, receipt["error"]["details"]);
+    }
+
+    #[tokio::test]
+    async fn private_retries_refresh_cleanup_and_recheck_deleted_or_revoked_results() {
+        let store = SecurityStore::in_memory().unwrap();
+        let mut request = execution_request("device", Some(vec!["host.execute".into()]));
+        request.command = "managed_desktop_results_commit_delete".into();
+        request.idempotency_key = Some(Uuid::new_v4().to_string());
+        let id = Uuid::new_v4().to_string();
+        for (index, transport) in [ExecutionTransport::Http, ExecutionTransport::WebSocket,
+            ExecutionTransport::WebRtc, ExecutionTransport::Internal].into_iter().enumerate() {
+            request.transport = transport;
+            let receipt = json!({"operationId":id,"state":"committed","cleanupPending":index == 0,
+                "taskIds":if index == 0 { vec![] } else { vec!["newly-discovered-task"] }});
+            let result = execute_host_semantic_request(&store, &request, "same-hash", 100,
+                async { Ok(receipt.clone()) }).await.unwrap();
+            match result {
+                ExecutionOutcome::Completed { result, operation_id, replayed, .. } => {
+                    assert_eq!(result, receipt);
+                    assert!(operation_id.is_none());
+                    assert!(!replayed);
+                }
+                _ => panic!("semantic retry must call the Host, never return a cached operation"),
+            }
+        }
+        let denied = execute_host_semantic_request(&store, &request, "same-hash", 101,
+            async { Err(problem("request", StatusCode::FORBIDDEN, "evidence_unavailable", "deleted or revoked")) }).await.unwrap_err();
+        assert_eq!(denied.code, "evidence_unavailable");
+        let dispatched = std::sync::atomic::AtomicBool::new(false);
+        let conflict = execute_host_semantic_request(&store, &request, "different-hash", 102, async {
+            dispatched.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(json!({}))
+        }).await.unwrap_err();
+        assert_eq!(conflict.code, "idempotency_conflict");
+        assert!(!dispatched.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]

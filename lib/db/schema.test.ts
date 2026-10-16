@@ -5070,7 +5070,7 @@ schemaIt("v243 indexes existing source IVs without re-encrypting v242 data", asy
   oldWriter.version(243).stores(previousSchema)
   try {
     await upgraded.open()
-    expect(upgraded.verno).toBe(243)
+    expect(upgraded.verno).toBe(CURRENT_SCHEMA_VERSION)
     expect(encrypt).not.toHaveBeenCalled()
     expect(decrypt).not.toHaveBeenCalled()
     await rawAfter.open()
@@ -5109,3 +5109,39 @@ schemaIt("v243 indexes existing source IVs without re-encrypting v242 data", asy
     __resetAccountContentCipherForTesting()
   }
 })
+
+schemaIt(
+  "v244 adds durable desktop deletion outbox without changing existing history",
+  async () => {
+    const name = "cognia-desktop-deletion-v244"
+    await Dexie.delete(name)
+    const previousSchema = { ...CURRENT_SCHEMA }
+    delete previousSchema.managedDesktopDeletionOutbox
+    const previous = new Dexie(name)
+    previous.version(243).stores(previousSchema)
+    await previous.table("executionRuns").put({ id: "existing-run", title: "Keep history" })
+    previous.close()
+    const current = new CogniaDB(name)
+    try {
+      await current.open()
+      expect(current.verno).toBe(244)
+      expect(await current.executionRuns.get("existing-run")).toMatchObject({
+        title: "Keep history",
+      })
+      expect(
+        current.managedDesktopDeletionOutbox.schema.indexes.map((index) => index.name)
+      ).toEqual(["phase", "createdAt", "ownerAccountId"])
+      await current.managedDesktopDeletionOutbox.put({
+        id: "pending",
+        phase: "committed",
+        createdAt: 1,
+      } as never)
+      current.close()
+      await current.open()
+      expect(await current.managedDesktopDeletionOutbox.get("pending")).toBeDefined()
+    } finally {
+      current.close()
+      await Dexie.delete(name)
+    }
+  }
+)

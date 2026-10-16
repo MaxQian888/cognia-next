@@ -1,3 +1,6 @@
+jest.mock("@/lib/sandbox/delivery-source-hosts", () => ({
+  revokeDeliverySourceHosts: jest.fn(async () => undefined),
+}))
 import {
   createOperationPerformanceRecorder,
   getOperationPerformanceRecorder,
@@ -2280,4 +2283,27 @@ function enableOperationRecording() {
 afterEach(() => {
   operationRecordingSpy?.mockRestore()
   operationRecordingSpy = undefined
+})
+
+it("does not revoke desktop evidence before a legacy session database delete", async () => {
+  const sourceHosts = await import("@/lib/sandbox/delivery-source-hosts")
+  const row = await createSession({ title: "Legacy source" })
+  await deleteSession(row.id)
+  expect(sourceHosts.revokeDeliverySourceHosts).not.toHaveBeenCalled()
+  expect(await getSession(row.id)).toBeUndefined()
+})
+
+it("atomically retains concurrent cleanup Host admissions", async () => {
+  const { recordSessionDeliverySourceHost } = await import("./sessions")
+  const row = await createSession({ title: "Concurrent delivery" })
+  const scope = { db: getDb(), assertActive: () => undefined }
+  await Promise.all([
+    recordSessionDeliverySourceHost(row.id, { kind: "local", hostId: "host-a" }, scope),
+    recordSessionDeliverySourceHost(
+      row.id,
+      { kind: "remote", hostId: "host-b", endpointIdentity: "pairing" },
+      scope
+    ),
+  ])
+  expect((await getSession(row.id))?.deliverySourceHosts).toHaveLength(2)
 })

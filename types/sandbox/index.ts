@@ -58,10 +58,13 @@ export interface SandboxSessionBinding {
  * Who owns the sandbox machine.
  *
  * - `"docker"` — a local container (the original Phase 1 behaviour).
+ * - `"e2b"` — Host-owned managed desktop; create is dormant until qualification.
+ *   GUI, workspace access, suspend/resume, live preview and automatic acceptance
+ *   remain dormant in Phase 1 (ADR-0228).
  * - `"cua-cloud"` — a cua.ai-managed cloud desktop.
  * - `"lume"` — a local Lume VM.
  */
-export type SandboxConnectionProvider = "docker" | "cua-cloud" | "lume"
+export type SandboxConnectionProvider = "docker" | "e2b" | "cua-cloud" | "lume"
 
 /**
  * How we talk to it, orthogonal to who owns it.
@@ -111,6 +114,18 @@ export interface DockerSandboxConfig {
   workspaceMount?: SandboxWorkspaceMount
 }
 
+/** Safe renderer reference only. Host configuration owns credentials and endpoints. */
+export interface E2bSandboxConfig {
+  target: { kind: "local" } | { kind: "remote"; hostId: string }
+  providerConfigId: string
+  desktopId?: string
+  generation?: number
+  /** Projection only; the Host rechecks its qualification receipt on every create. */
+  qualification: "unqualified" | "qualified"
+  /** GUI remains dormant until separate phase-2 Host qualification; never authority by itself. */
+  guiQualified?: boolean
+}
+
 export interface CuaCloudSandboxConfig {
   /** cua.ai instance name. */
   instanceName: string
@@ -146,6 +161,7 @@ export interface LumeSandboxConfig {
 /** Provider-specific configuration, discriminated by the row's `provider`. */
 export type SandboxProviderConfig =
   | ({ provider: "docker" } & DockerSandboxConfig)
+  | ({ provider: "e2b" } & E2bSandboxConfig)
   | ({ provider: "cua-cloud" } & CuaCloudSandboxConfig)
   | ({ provider: "lume" } & LumeSandboxConfig)
 

@@ -1,6 +1,7 @@
 """Authenticate the pinned upstream ASGI application without changing its API."""
 
 import ctypes
+import json
 import os
 import secrets
 import threading
@@ -21,6 +22,12 @@ class TokenAuth:
         valid = len(supplied) == 1 and secrets.compare_digest(supplied[0], self.token)
         valid = valid and not any(key.lower() == b"origin" for key, _ in headers)
         if valid:
+            if scope["type"] == "http" and scope.get("path") == "/cognia/health" and scope.get("method") == "GET":
+                body = json.dumps({"protocol": "computer-server-0.3.46", "recipeRevision": "3",
+                                   "serverVersion": "0.3.46"}).encode("utf-8")
+                await send({"type": "http.response.start", "status": 200,
+                            "headers": [(b"content-type", b"application/json"), (b"cache-control", b"no-store")]})
+                return await send({"type": "http.response.body", "body": body})
             return await self.app(scope, receive, send)
         if scope["type"] == "http":
             await send({"type": "http.response.start", "status": 401,

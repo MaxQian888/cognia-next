@@ -1,5 +1,5 @@
 {
-  "title": "架构决策记录",
+  "title": "\u67b6\u6784\u51b3\u7b56\u8bb0\u5f55",
   "pages": [
     "index",
     "0001-backup-schema-v3",
@@ -222,6 +222,7 @@
     "0224-an-always-on-host-is-a-peer-the-user-brings",
     "0225-the-tray-panel-is-a-glance-surface-assembled-from-modules",
     "0226-library-plugins-declare-contracts-over-ipc",
-    "0227-agent-changes-integrate-through-one-host-queue"
+    "0227-agent-changes-integrate-through-one-host-queue",
+    "0228-a-managed-desktop-accepts-a-delivered-commit"
   ]
 }

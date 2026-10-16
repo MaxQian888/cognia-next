@@ -481,9 +481,15 @@
         "capture": "Unable to capture the desktop. Control has been released.",
         "control": "Unable to acquire or renew control. Try taking control again.",
         "input": "The input could not be confirmed. Control has been released; check the screen before retrying.",
-        "release": "The release could not be confirmed. Control expires automatically within 15 seconds."
+        "release": "The release could not be confirmed. Control expires automatically within 15 seconds.",
+        "session": "The account or Host connection changed. Close and reopen the desktop to observe again; take control explicitly when ready."
       },
-      "doubleClick": "Double-click mode"
+      "doubleClick": "Double-click mode",
+      "quarantined": "Input cleanup uncertain; control unavailable",
+      "otherController": "Another user has control",
+      "agentDormant": "Task and agent control remain dormant until delivery handoff is implemented.",
+      "mobileObservation": "Mobile supports observation only. Desktop input is disabled.",
+      "qualificationRequired": "Cloud desktop viewing and control require a separately authorized GUI smoke test."
     },
     "deleteConfirmTitle": "Delete {name}?",
     "deleteConfirmDescription": "This permanently deletes the container and all files stored inside it. Files in mounted host folders remain. Export any files you need before deleting.",

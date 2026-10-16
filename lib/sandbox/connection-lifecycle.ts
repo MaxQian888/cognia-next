@@ -5,7 +5,9 @@ import {
 } from "@/lib/automation/sandbox-client"
 import type { SandboxConnectionRow, SandboxLifecycleOperation } from "@/types/sandbox"
 import { sandboxAdapterFactoryFor } from "./adapter-registry"
-import type { DockerAdapterOutcome } from "./docker-adapter"
+import type { ManagedDesktopAdapterOptions } from "./e2b-adapter"
+import type { SandboxAdapterOutcome } from "./lifecycle-contract"
+import type { ManagedDesktopResource } from "@/lib/automation/managed-desktop-client"
 import {
   runSandboxOperation,
   SandboxCapabilityError,
@@ -19,9 +21,10 @@ import {
  * purpose: GUI actions ride the `desktop.*` client with a
  * `sandboxConnectionId` in their `CallContext` rather than this path.
  */
-export type SupportedConnectionOperation = Exclude<SandboxLifecycleOperation, "connect" | "gui">
+export type SupportedConnectionOperation = Exclude<SandboxLifecycleOperation, "gui">
 
 export interface SandboxConnectionOperationResult {
+  managedDesktop?: ManagedDesktopResource
   containerId?: string
   port?: number
   health?: boolean
@@ -35,7 +38,7 @@ export interface SandboxConnectionOperationResult {
   contents?: string
 }
 
-export interface SandboxOperationOptions {
+export interface SandboxOperationOptions extends ManagedDesktopAdapterOptions {
   client?: SandboxClient
   /** Required for `workspaceExec`. */
   exec?: SandboxExecRequest
@@ -88,9 +91,9 @@ export async function runSandboxConnectionOperation(
     })
   }
 
-  const outcome: DockerAdapterOutcome = {}
+  const outcome: SandboxAdapterOutcome = {}
   const result: SandboxConnectionOperationResult = {}
-  const adapter = factory(row, options.client ?? sandboxClient, outcome, operation)
+  const adapter = factory(row, options.client ?? sandboxClient, outcome, operation, options)
   const ctx = {
     connectionId: row.id,
     provider: row.provider,
@@ -107,6 +110,8 @@ export async function runSandboxConnectionOperation(
       switch (operation) {
         case "create":
           return resolved.create?.(ctx)
+        case "connect":
+          return resolved.connect?.(ctx)
         case "start":
           return resolved.start?.(ctx)
         case "suspend":
@@ -158,6 +163,7 @@ export async function runSandboxConnectionOperation(
     }
   )
 
+  if (outcome.managedDesktop !== undefined) result.managedDesktop = outcome.managedDesktop
   if (outcome.containerId !== undefined) result.containerId = outcome.containerId
   if (outcome.port !== undefined) result.port = outcome.port
   if (outcome.health !== undefined) result.health = outcome.health

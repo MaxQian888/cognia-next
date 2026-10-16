@@ -31,8 +31,22 @@ const deactivate = jest.fn()
 const writeAuthority = jest.fn()
 
 jest.mock("@/components/settings/automation/sandbox-connections-tab", () => ({
-  SandboxConnectionsTab: ({ framed }: { framed?: boolean }) => (
-    <div data-testid="sandbox-connections-tab" data-framed={String(framed ?? true)} />
+  SandboxConnectionsTab: ({
+    framed,
+    managedOnly,
+    managedDesktopTarget,
+  }: {
+    framed?: boolean
+    managedOnly?: boolean
+    managedDesktopTarget?: { kind: string; hostId?: string }
+  }) => (
+    <div
+      data-testid="sandbox-connections-tab"
+      data-framed={String(framed ?? true)}
+      data-managed-only={String(Boolean(managedOnly))}
+      data-target={managedDesktopTarget?.kind}
+      data-host={managedDesktopTarget?.hostId}
+    />
   ),
 }))
 
@@ -142,13 +156,18 @@ describe("RuntimeSection — sandbox", () => {
   it("embeds the existing sandbox registry for this machine rather than a copy", () => {
     render(<RuntimeSection row={row()} />)
     expect(screen.getByTestId("sandbox-connections-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("sandbox-connections-tab")).toHaveAttribute(
+      "data-managed-only",
+      "false"
+    )
+    expect(screen.getByTestId("sandbox-connections-tab")).toHaveAttribute("data-target", "local")
   })
 
   /**
    * `cua_sandbox_*` are client-target commands, so a Host's sandboxes are not
    * reachable from here at all — an empty list would imply it has none.
    */
-  it("says a host's sandboxes are its own business", () => {
+  it("shows only managed desktops on the selected Host without activating its routing", () => {
     render(
       <RuntimeSection
         row={row({
@@ -161,10 +180,12 @@ describe("RuntimeSection — sandbox", () => {
         })}
       />
     )
-    expect(screen.queryByTestId("sandbox-connections-tab")).not.toBeInTheDocument()
-    // No card says so here any more: the sentence is one row of the
-    // not-applicable record, keyed by `planDeviceSections`.
-    expect(screen.queryByTestId("device-sandbox")).not.toBeInTheDocument()
+    const registry = screen.getByTestId("sandbox-connections-tab")
+    expect(registry).toHaveAttribute("data-managed-only", "true")
+    expect(registry).toHaveAttribute("data-target", "remote")
+    expect(registry).toHaveAttribute("data-host", "h1")
+    expect(screen.queryByTestId("device-machine-summary")).not.toBeInTheDocument()
+    expect(activateHost).not.toHaveBeenCalled()
   })
 
   /**

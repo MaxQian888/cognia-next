@@ -17,6 +17,7 @@
     "cognia-host-service": "foundation",
     "cognia-update-catalog": "foundation",
 
+    "cognia-e2b": "platform",
     "cognia-jobs": "platform",
     "cognia-sidecar": "platform",
     "cognia-environment": "platform",

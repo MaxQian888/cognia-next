@@ -206,3 +206,340 @@ test("client-local capture and control continue without an external network", as
     online.mockRestore()
   }
 })
+
+function managedSession() {
+  let invalidated: (() => void) | undefined
+  const status = {
+    qualified: true,
+    state: "observer" as const,
+    controllerKind: null,
+    controllerIsSelf: false,
+    leaseExpiresAt: null,
+    fence: 1,
+    canAcquire: true,
+    agentControlDormant: true as const,
+  }
+  const proof = { screenshot: frame, frameId: "observer", fence: 1, expiresAt: Date.now() + 5000 }
+  return {
+    managed: true,
+    status: jest.fn().mockResolvedValue(status),
+    frame: jest.fn().mockResolvedValue(proof),
+    acquire: jest
+      .fn()
+      .mockResolvedValue({ token: "managed", fence: 2, expiresAt: Date.now() + 15000 }),
+    renew: jest
+      .fn()
+      .mockResolvedValue({ token: "managed", fence: 2, expiresAt: Date.now() + 15000 }),
+    release: jest.fn().mockResolvedValue(undefined),
+    input: jest.fn().mockResolvedValue(undefined),
+    onInvalidated: (handler: () => void) => {
+      invalidated = handler
+      return () => {
+        invalidated = undefined
+      }
+    },
+    close: jest.fn(),
+    invalidate: () => invalidated?.(),
+  }
+}
+
+test("managed acquisition requires a fresh fenced frame before enabling input", async () => {
+  const desktop = managedSession()
+  const open = jest.fn().mockResolvedValue(desktop)
+  const { result } = renderHook(() => useSandboxDesktop("cloud", true, open))
+  await tick()
+  let complete!: (proof: unknown) => void
+  desktop.frame.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve
+      })
+  )
+  act(() => {
+    void result.current.acquire()
+  })
+  await tick()
+  expect(result.current.controlling).toBe(false)
+  expect(result.current.frame).toBeNull()
+  expect(await result.current.input({ kind: "click" }, { x: 1, y: 1 }, 42)).toBe(false)
+  await act(async () => {
+    complete({ screenshot: frame, frameId: "fresh", fence: 2, expiresAt: Date.now() + 5000 })
+  })
+  expect(result.current.controlling).toBe(true)
+  await act(async () => {
+    expect(await result.current.input({ kind: "click" }, { x: 1, y: 1 }, 42)).toBe(true)
+  })
+  expect(desktop.input).toHaveBeenCalledWith(
+    expect.objectContaining({ fence: 2 }),
+    expect.objectContaining({ frameId: "fresh" }),
+    { x: 1, y: 1 },
+    { kind: "click" }
+  )
+  expect(client.controlInput).not.toHaveBeenCalled()
+})
+
+test("managed invalidation drops queued input and never resumes control on reconnect", async () => {
+  const desktop = managedSession()
+  const open = jest.fn().mockResolvedValue(desktop)
+  const { result } = renderHook(() => useSandboxDesktop("cloud", true, open))
+  await tick()
+  desktop.frame.mockResolvedValue({
+    screenshot: frame,
+    frameId: "fresh",
+    fence: 2,
+    expiresAt: Date.now() + 5000,
+  })
+  await act(async () => {
+    await result.current.acquire()
+  })
+  let complete!: () => void
+  desktop.input.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        complete = () => resolve(undefined)
+      })
+  )
+  const first = result.current.input({ kind: "typeText", text: "a" }, null, 42)
+  const queued = result.current.input({ kind: "typeText", text: "b" }, null, 42)
+  await tick()
+  await act(async () => {
+    desktop.invalidate()
+  })
+  await act(async () => {
+    complete()
+    await first
+    expect(await queued).toBe(false)
+  })
+  expect(result.current.frame).toBeNull()
+  expect(result.current.controlling).toBe(false)
+  expect(desktop.input).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    window.dispatchEvent(new Event("online"))
+  })
+  await tick(1000)
+  expect(desktop.acquire).toHaveBeenCalledTimes(1)
+})
+
+test("managed unqualified status never captures or acquires", async () => {
+  const desktop = managedSession()
+  desktop.status.mockResolvedValue({ qualified: false, state: "dormant", canAcquire: false })
+  const open = jest.fn().mockResolvedValue(desktop)
+  const { result } = renderHook(() => useSandboxDesktop("cloud", true, open))
+  await tick()
+  await act(async () => {
+    await result.current.acquire()
+  })
+  expect(desktop.frame).not.toHaveBeenCalled()
+  expect(desktop.acquire).not.toHaveBeenCalled()
+  expect(result.current.status?.state).toBe("dormant")
+})
+
+test("managed transport replacement releases a late lease on the original session", async () => {
+  const first = managedSession()
+  const second = managedSession()
+  const openFirst = jest.fn().mockResolvedValue(first)
+  const openSecond = jest.fn().mockResolvedValue(second)
+  let complete!: (lease: unknown) => void
+  first.acquire.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve
+      })
+  )
+  const { result, rerender } = renderHook(({ open }) => useSandboxDesktop("cloud", true, open), {
+    initialProps: { open: openFirst },
+  })
+  await tick()
+  act(() => {
+    void result.current.acquire()
+  })
+  rerender({ open: openSecond })
+  await tick()
+  await act(async () => {
+    complete({ token: "late", fence: 9, expiresAt: Date.now() + 15000 })
+  })
+  expect(first.release).toHaveBeenCalledWith(expect.objectContaining({ token: "late", fence: 9 }))
+  expect(second.release).not.toHaveBeenCalled()
+  expect(result.current.controlling).toBe(false)
+})
+
+test("mobile managed observer cannot acquire even when Host permits it", async () => {
+  const desktop = managedSession()
+  const open = jest.fn().mockResolvedValue(desktop)
+  const { result } = renderHook(() => useSandboxDesktop("cloud", true, open, false))
+  await tick()
+  await act(async () => {
+    await result.current.acquire()
+  })
+  expect(result.current.frame).toEqual(frame)
+  expect(desktop.acquire).not.toHaveBeenCalled()
+})
+
+test("managed expiry releases control and requires a new gesture after observation recovers", async () => {
+  const desktop = managedSession()
+  const open = jest.fn().mockResolvedValue(desktop)
+  const { result } = renderHook(() => useSandboxDesktop("cloud", true, open))
+  await tick()
+  desktop.frame.mockImplementation(async () => ({
+    screenshot: frame,
+    frameId: "fresh",
+    fence: 2,
+    expiresAt: Date.now() + 5000,
+  }))
+  desktop.status.mockResolvedValue({
+    qualified: true,
+    state: "controlled",
+    controllerKind: "human",
+    controllerIsSelf: true,
+    fence: 2,
+    canAcquire: false,
+  })
+  desktop.renew.mockImplementationOnce(() => new Promise(() => {}))
+  await act(async () => {
+    await result.current.acquire()
+  })
+  await tick(5000)
+  await tick(10000)
+  expect(result.current.controlling).toBe(false)
+  expect(desktop.release).toHaveBeenCalled()
+  desktop.status.mockResolvedValue({
+    qualified: true,
+    state: "observer",
+    controllerKind: null,
+    controllerIsSelf: false,
+    fence: 3,
+    canAcquire: true,
+  })
+  await tick(1000)
+  expect(result.current.status?.canAcquire).toBe(true)
+  expect(desktop.acquire).toHaveBeenCalledTimes(1)
+  desktop.acquire.mockResolvedValueOnce({ token: "next", fence: 3, expiresAt: Date.now() + 15000 })
+  desktop.frame.mockImplementation(async () => ({
+    screenshot: frame,
+    frameId: "next",
+    fence: 3,
+    expiresAt: Date.now() + 5000,
+  }))
+  await act(async () => {
+    await result.current.acquire()
+  })
+  expect(result.current.controlling).toBe(true)
+  expect(desktop.acquire).toHaveBeenCalledTimes(2)
+})
+
+test("managed frame proof is single use and new pixels enable the next input", async () => {
+  const desktop = managedSession()
+  const open = jest.fn().mockResolvedValue(desktop)
+  const { result } = renderHook(() => useSandboxDesktop("cloud", true, open))
+  await tick()
+  desktop.frame.mockResolvedValue({
+    screenshot: frame,
+    frameId: "one",
+    fence: 2,
+    expiresAt: Date.now() + 5000,
+  })
+  await act(async () => {
+    await result.current.acquire()
+  })
+  desktop.status.mockResolvedValue({
+    qualified: true,
+    state: "controlled",
+    controllerKind: "human",
+    controllerIsSelf: true,
+    fence: 2,
+    canAcquire: false,
+  })
+  let finish!: () => void
+  desktop.input.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve(undefined)
+      })
+  )
+  const first = result.current.input({ kind: "click" }, { x: 1, y: 1 }, 42)
+  const queued = result.current.input({ kind: "click" }, { x: 2, y: 2 }, 42)
+  await tick()
+  expect(desktop.input).toHaveBeenCalledTimes(1)
+  const nextFrame = { ...frame, capturedAt: 43 }
+  desktop.frame.mockResolvedValue({
+    screenshot: nextFrame,
+    frameId: "two",
+    fence: 2,
+    expiresAt: Date.now() + 5000,
+  })
+  await act(async () => {
+    finish()
+    expect(await first).toBe(true)
+    expect(await queued).toBe(false)
+  })
+  expect(result.current.controlling).toBe(true)
+  expect(desktop.release).not.toHaveBeenCalled()
+  expect(result.current.frame).toEqual(nextFrame)
+  await act(async () => {
+    expect(await result.current.input({ kind: "click" }, { x: 3, y: 3 }, 43)).toBe(true)
+  })
+  expect(desktop.input).toHaveBeenCalledTimes(2)
+  expect(desktop.input).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({ frameId: "two" }),
+    { x: 3, y: 3 },
+    { kind: "click" }
+  )
+})
+
+test("capture started before a managed mutation cannot restore a consumed proof", async () => {
+  const desktop = managedSession()
+  const open = jest.fn().mockResolvedValue(desktop)
+  const { result } = renderHook(() => useSandboxDesktop("cloud", true, open))
+  await tick()
+  desktop.frame.mockResolvedValue({
+    screenshot: frame,
+    frameId: "one",
+    fence: 2,
+    expiresAt: Date.now() + 5000,
+  })
+  await act(async () => {
+    await result.current.acquire()
+  })
+  desktop.status.mockResolvedValue({
+    qualified: true,
+    state: "controlled",
+    controllerKind: "human",
+    controllerIsSelf: true,
+    fence: 2,
+    canAcquire: false,
+  })
+  let staleCapture!: (proof: unknown) => void
+  desktop.frame.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        staleCapture = resolve
+      })
+  )
+  await tick(1000)
+  await act(async () => {
+    expect(await result.current.input({ kind: "click" }, { x: 1, y: 1 }, 42)).toBe(true)
+  })
+  const fresh = { ...frame, capturedAt: 44 }
+  desktop.frame.mockResolvedValue({
+    screenshot: fresh,
+    frameId: "three",
+    fence: 2,
+    expiresAt: Date.now() + 5000,
+  })
+  await act(async () => {
+    staleCapture({
+      screenshot: { ...frame, capturedAt: 43 },
+      frameId: "stale",
+      fence: 2,
+      expiresAt: Date.now() + 5000,
+    })
+  })
+  expect(result.current.frame?.capturedAt).not.toBe(43)
+  expect(await result.current.input({ kind: "click" }, { x: 2, y: 2 }, 42)).toBe(false)
+  await tick()
+  expect(result.current.frame).toEqual(fresh)
+  expect(result.current.controlling).toBe(true)
+  expect(desktop.input).toHaveBeenCalledTimes(1)
+  expect(desktop.release).not.toHaveBeenCalled()
+})

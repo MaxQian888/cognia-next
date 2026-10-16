@@ -177,6 +177,7 @@
   "libraryItems": "encrypted-content",
   "loopEvents": "metadata-only",
   "loops": "metadata-only",
+  "managedDesktopDeletionOutbox": "metadata-only",
   "matrixPendingEncryptedEvents": "encrypted-content",
   "mcpAuditLog": "encrypted-content",
   "mcpCapabilityCache": "metadata-only",

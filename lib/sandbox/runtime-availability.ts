@@ -78,7 +78,13 @@ export function projectSandboxConnectionCapabilities(
     Object.fromEntries(
       Object.entries(row.capabilities).map(([operation, enabled]) => [
         operation,
-        adapterAvailable && enabled,
+        adapterAvailable &&
+          enabled &&
+          !(
+            row.config.provider === "e2b" &&
+            operation === "create" &&
+            row.config.qualification !== "qualified"
+          ),
       ])
     )
   ) as SandboxCapabilities

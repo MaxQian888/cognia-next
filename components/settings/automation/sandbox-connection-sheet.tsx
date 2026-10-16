@@ -37,6 +37,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
+import { ManagedDesktopSettings } from "./managed-desktop-settings"
 import { SandboxDesktopViewer } from "./sandbox-desktop-viewer"
 import { supportsSandboxOperation } from "@/lib/sandbox/connection-capabilities"
 import { projectSandboxConnectionCapabilities } from "@/lib/sandbox/runtime-availability"
@@ -144,6 +145,23 @@ function SandboxConnectionDetail({
   }, [])
 
   if (!connection) return null
+
+  // A cloud reference is managed on its owning Host; never run the Docker hook
+  // actions or viewer for an imported cloud row.
+  if (connection.config.provider === "e2b") {
+    return (
+      <ResponsiveDetailSheet
+        open={open}
+        onOpenChange={onOpenChange}
+        title={connection.name}
+        description={t(`state.${connection.state}`)}
+      >
+        <div className="overflow-y-auto px-4 pb-6">
+          <ManagedDesktopSettings target={connection.config.target} />
+        </div>
+      </ResponsiveDetailSheet>
+    )
+  }
 
   const live = projectSandboxConnectionCapabilities(connection, desktop)
   const docker = connection.config.provider === "docker" ? connection.config : null

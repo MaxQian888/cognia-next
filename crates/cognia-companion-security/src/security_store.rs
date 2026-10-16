@@ -1500,6 +1500,38 @@ impl SecurityStore {
         }
     }
 
+    /// Reserve only an opaque request hash. The owning Host domain implements
+    /// retries and deletion fences; never retain its private response or create
+    /// an operation whose receipt could bypass that domain on replay.
+    pub fn bind_host_semantic_request(
+        &self, tenant_id: &str, device_id: &str, idempotency_key: &str,
+        request_hash: &str, now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(String, String)> = tx.query_row(
+            "SELECT request_hash, status FROM idempotency_records
+             WHERE tenant_id = ?1 AND device_id = ?2 AND idempotency_key = ?3",
+            params![tenant_id, device_id, idempotency_key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        if let Some((hash, status)) = existing {
+            return if hash == request_hash && status == "host-semantic" {
+                Ok(())
+            } else { Err(SecurityStoreError::IdempotencyConflict) };
+        }
+        tx.execute(
+            "INSERT INTO idempotency_records
+             (tenant_id, device_id, idempotency_key, request_hash, operation_id,
+              status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'host-semantic', ?6, ?6)",
+            params![tenant_id, device_id, idempotency_key, request_hash,
+                uuid::Uuid::new_v4().to_string(), now],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn begin_idempotent_operation(
         &self,
         tenant_id: &str,
@@ -1595,7 +1627,8 @@ impl SecurityStore {
             .query_row(
                 "SELECT operation_id, status, receipt_json, created_at, updated_at
                  FROM idempotency_records
-                 WHERE tenant_id = ?1 AND device_id = ?2 AND operation_id = ?3",
+                 WHERE tenant_id = ?1 AND device_id = ?2 AND operation_id = ?3
+                   AND status != 'host-semantic'",
                 params![tenant_id, device_id, operation_id],
                 |row| {
                     Ok((
@@ -5685,6 +5718,28 @@ CREATE TABLE devices (
                 .unwrap(),
             vec!["host.admin", "host.observe", "scheduler.manage"]
         );
+    }
+
+    #[test]
+    fn host_semantic_bindings_reject_conflicts_without_private_receipts_or_operations() {
+        let store = SecurityStore::in_memory().unwrap();
+        store.bind_host_semantic_request("tenant", "device", "key", "hash", 100).unwrap();
+        store.bind_host_semantic_request("tenant", "device", "key", "hash", 101).unwrap();
+        assert!(matches!(store.bind_host_semantic_request("tenant", "device", "key", "changed", 102),
+            Err(SecurityStoreError::IdempotencyConflict)));
+        // Independent principals cannot collide; only hashes, never arguments,
+        // pixels, verdicts or approval snapshots are retained.
+        store.bind_host_semantic_request("tenant", "other-device", "key", "changed", 102).unwrap();
+        let (operation, receipt): (String, Option<String>) = store.conn.lock().query_row(
+            "SELECT operation_id, receipt_json FROM idempotency_records WHERE tenant_id = 'tenant' AND device_id = 'device'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert!(receipt.is_none());
+        assert!(store.operation("tenant", "device", &operation).unwrap().is_none());
+        let runs: i64 = store.conn.lock().query_row("SELECT COUNT(*) FROM runs", [], |row| row.get(0)).unwrap();
+        assert_eq!(runs, 0);
+        assert!(matches!(store.begin_idempotent_operation("tenant", "device", "host", "key", "other-command-hash", 103),
+            Err(SecurityStoreError::IdempotencyConflict)));
     }
 
     #[test]

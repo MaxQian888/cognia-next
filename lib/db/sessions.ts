@@ -452,6 +452,30 @@ export async function updateSession(
   })
 }
 
+/** Atomic append: simultaneous admissions cannot lose another Host's cleanup barrier. */
+export async function recordSessionDeliverySourceHost(
+  id: string,
+  host: NonNullable<ChatSession["deliverySourceHosts"]>[number],
+  scope: SessionPersistenceScope
+): Promise<void> {
+  scope.assertActive()
+  await scope.db.transaction("rw", scope.db.sessions, async () => {
+    scope.assertActive()
+    const session = await scope.db.sessions.get(id)
+    scope.assertActive()
+    if (!session) throw new Error("delivery_source_conversation_missing")
+    assertSessionWritable(session, "metadata")
+    const hosts = session.deliverySourceHosts ?? []
+    if (!hosts.some((existing) => JSON.stringify(existing) === JSON.stringify(host))) {
+      await scope.db.sessions.update(id, {
+        deliverySourceHosts: [...hosts, host],
+        updatedAt: Date.now(),
+      })
+    }
+    scope.assertActive()
+  })
+}
+
 /**
  * Set the pinned state for a session batch in one transaction.
  *
@@ -1106,139 +1130,168 @@ export async function bulkDeleteSessions(
   scope?.assertActive()
   const cleanupRows = await db.sessions.bulkGet(cleanupIds)
   scope?.assertActive()
-  await cleanupManagedExternalAgentSessions(cleanupRows, scope)
-  scope?.assertActive()
+  // Desktop-source rows retain their external links in the deletion journal.
+  // Native evidence and tasks must survive a rejected or rolled-back Dexie delete.
+  await cleanupManagedExternalAgentSessions(
+    cleanupRows.filter((row) => !row?.deliverySourceHosts?.length),
+    scope
+  )
+  const { prepareManagedDesktopSessionDeletion, deleteManagedDesktopRunProjections } =
+    await import("@/lib/automation/managed-desktop-result-deletion")
+  const desktopDeletion = await prepareManagedDesktopSessionDeletion(db, cleanupRows, () =>
+    scope?.assertActive()
+  )
   let deletedIds: string[] = []
   let scheduledTaskIds: string[] = []
   const orphanCandidates = new Set<string>()
   const sessionAssetOrphans = new Set<string>()
-  await db.transaction(
-    "rw",
-    [
-      db.sessions,
-      db.messages,
-      db.messageMediaRefs,
-      db.messageMedia,
-      db.sessionState,
-      db.chatDrafts,
-      db.chatInputHistory,
-      db.chatTurnSummaries,
-      db.chatTranscriptIndexState,
-      db.sessionUsage,
-      db.sessionPeerMessages,
-      db.chatGoals,
-      db.chatGoalEvents,
-      db.loops,
-      db.loopEvents,
-      db.syncTombstones,
-      db.mediaGenerationJobs,
-      db.libraryItems,
-    ],
-    async () => {
-      scope?.assertActive()
-      const at = Date.now()
-      deletedIds = (await db.sessions.bulkGet(requestedIds)).flatMap((row) => (row ? [row.id] : []))
-      if (deletedIds.length === 0) return
-      await assertSessionsWritable(db, deletedIds, "delete")
-      const attachedDescendants = await listOwnedAttachedDescendantIds(db, deletedIds, {
-        includeSideChats: true,
-      })
-      deletedIds = [...new Set([...deletedIds, ...attachedDescendants])]
-      const doomedIds = new Set(deletedIds)
-      const doomedRows = await db.sessions.where("id").anyOf(deletedIds).toArray()
-      const doomedById = new Map(doomedRows.map((row) => [row.id, row]))
+  try {
+    await db.transaction(
+      "rw",
+      [
+        db.sessions,
+        db.messages,
+        db.messageMediaRefs,
+        db.messageMedia,
+        db.sessionState,
+        db.chatDrafts,
+        db.chatInputHistory,
+        db.chatTurnSummaries,
+        db.chatTranscriptIndexState,
+        db.sessionUsage,
+        db.sessionPeerMessages,
+        db.chatGoals,
+        db.chatGoalEvents,
+        db.loops,
+        db.loopEvents,
+        db.syncTombstones,
+        db.mediaGenerationJobs,
+        db.libraryItems,
+        db.managedDesktopDeletionOutbox,
+        db.executionRuns,
+        db.executionRunEvents,
+        db.executionRunBindings,
+        db.executionRunInterrupts,
+        db.runResultSummaries,
+        db.notificationProjectionWork,
+      ],
+      async () => {
+        scope?.assertActive()
+        const at = Date.now()
+        deletedIds = (await db.sessions.bulkGet(requestedIds)).flatMap((row) =>
+          row ? [row.id] : []
+        )
+        if (deletedIds.length === 0) return
+        await assertSessionsWritable(db, deletedIds, "delete")
+        const attachedDescendants = await listOwnedAttachedDescendantIds(db, deletedIds, {
+          includeSideChats: true,
+        })
+        deletedIds = [...new Set([...deletedIds, ...attachedDescendants])]
+        await desktopDeletion.commitInsideTransaction(deletedIds)
+        await deleteManagedDesktopRunProjections(db, deletedIds)
+        const doomedIds = new Set(deletedIds)
+        const doomedRows = await db.sessions.where("id").anyOf(deletedIds).toArray()
+        const doomedById = new Map(doomedRows.map((row) => [row.id, row]))
 
-      const goalIds = (await db.chatGoals
-        .where("sessionId")
-        .anyOf(deletedIds)
-        .primaryKeys()) as string[]
-      if (goalIds.length > 0) {
-        await db.chatGoalEvents.where("goalId").anyOf(goalIds).delete()
-        await db.chatGoals.bulkDelete(goalIds)
-      }
-
-      const loopRows = await db.loops.where("sessionId").anyOf(deletedIds).toArray()
-      const loopIds = loopRows.map((row) => row.id)
-      scheduledTaskIds = loopRows.flatMap((row) =>
-        row.scheduledTaskId ? [row.scheduledTaskId] : []
-      )
-      if (loopIds.length > 0) {
-        await db.loopEvents.where("loopId").anyOf(loopIds).delete()
-        await db.loops.bulkDelete(loopIds)
-      }
-
-      const survivingParentOf = (sessionId: string): string | undefined => {
-        let parentId = doomedById.get(sessionId)?.parentSessionId
-        const visited = new Set<string>()
-        while (parentId && doomedIds.has(parentId) && !visited.has(parentId)) {
-          visited.add(parentId)
-          parentId = doomedById.get(parentId)?.parentSessionId
-        }
-        return parentId
-      }
-
-      // Preserve ordinary branches while attached children remain owned by
-      // the deletion set. A surviving branch is connected to the nearest
-      // surviving ancestor, matching the single-delete contract.
-      for (const id of deletedIds) {
-        const childIds = (await db.sessions
-          .where("parentSessionId")
-          .equals(id)
+        const goalIds = (await db.chatGoals
+          .where("sessionId")
+          .anyOf(deletedIds)
           .primaryKeys()) as string[]
-        const fallbackParentId = survivingParentOf(id)
-        for (const childId of childIds) {
-          if (!doomedIds.has(childId)) {
-            await db.sessions.update(childId, { parentSessionId: fallbackParentId })
+        if (goalIds.length > 0) {
+          await db.chatGoalEvents.where("goalId").anyOf(goalIds).delete()
+          await db.chatGoals.bulkDelete(goalIds)
+        }
+
+        const loopRows = await db.loops.where("sessionId").anyOf(deletedIds).toArray()
+        const loopIds = loopRows.map((row) => row.id)
+        scheduledTaskIds = loopRows.flatMap((row) =>
+          row.scheduledTaskId ? [row.scheduledTaskId] : []
+        )
+        if (loopIds.length > 0) {
+          await db.loopEvents.where("loopId").anyOf(loopIds).delete()
+          await db.loops.bulkDelete(loopIds)
+        }
+
+        const survivingParentOf = (sessionId: string): string | undefined => {
+          let parentId = doomedById.get(sessionId)?.parentSessionId
+          const visited = new Set<string>()
+          while (parentId && doomedIds.has(parentId) && !visited.has(parentId)) {
+            visited.add(parentId)
+            parentId = doomedById.get(parentId)?.parentSessionId
+          }
+          return parentId
+        }
+
+        // Preserve ordinary branches while attached children remain owned by
+        // the deletion set. A surviving branch is connected to the nearest
+        // surviving ancestor, matching the single-delete contract.
+        for (const id of deletedIds) {
+          const childIds = (await db.sessions
+            .where("parentSessionId")
+            .equals(id)
+            .primaryKeys()) as string[]
+          const fallbackParentId = survivingParentOf(id)
+          for (const childId of childIds) {
+            if (!doomedIds.has(childId)) {
+              await db.sessions.update(childId, { parentSessionId: fallbackParentId })
+            }
           }
         }
-      }
 
-      // A generated video kept in Files keeps what its job recorded; read
-      // before the refs and jobs below go.
-      await preserveGeneratedVideoRecords(db, deletedIds)
-      const allMessageIds: string[] = []
-      const mediaRefs = await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).toArray()
-      for (const ref of mediaRefs) {
-        if (ref.sessionAsset) sessionAssetOrphans.add(ref.hash)
-        else orphanCandidates.add(ref.hash)
+        // A generated video kept in Files keeps what its job recorded; read
+        // before the refs and jobs below go.
+        await preserveGeneratedVideoRecords(db, deletedIds)
+        const allMessageIds: string[] = []
+        const mediaRefs = await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).toArray()
+        for (const ref of mediaRefs) {
+          if (ref.sessionAsset) sessionAssetOrphans.add(ref.hash)
+          else orphanCandidates.add(ref.hash)
+        }
+        await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).delete()
+        for (const hash of sessionAssetOrphans) {
+          if (!(await db.messageMediaRefs.where("hash").equals(hash).count()))
+            await db.messageMedia.delete(hash)
+        }
+        await db.sessionState.bulkDelete(deletedIds)
+        await db.chatDrafts.bulkDelete(deletedIds)
+        await db.chatInputHistory.where("sessionId").anyOf(deletedIds).delete()
+        await db.chatTurnSummaries.where("sessionId").anyOf(deletedIds).delete()
+        await db.chatTranscriptIndexState.bulkDelete(deletedIds)
+        for (const id of deletedIds) {
+          const msgIds = (await db.messages.where("sessionId").equals(id).primaryKeys()) as string[]
+          allMessageIds.push(...msgIds)
+          await db.messages.where("sessionId").equals(id).delete()
+          await db.sessionUsage.where("sessionId").equals(id).delete()
+          await db.sessions.delete(id)
+        }
+        await db.sessionPeerMessages
+          .filter(
+            (row) => doomedIds.has(row.senderSessionId) || doomedIds.has(row.receiverSessionId)
+          )
+          .delete()
+        // Video jobs a conversation started (ADR-0205); their video is one of
+        // the session assets released above.
+        await db.mediaGenerationJobs.where("sessionId").anyOf(deletedIds).delete()
+        scope?.assertActive()
+        await recordTombstones("sessions", deletedIds, at)
+        scope?.assertActive()
+        await recordTombstones("messages", allMessageIds, at)
+        scope?.assertActive()
+        await recordTombstones("sessionState", deletedIds, at)
+        // Goals are mirrored on their own (`goals`), so the ones this cascade
+        // dropped need their own tombstones or they outlive their session on
+        // every paired client.
+        scope?.assertActive()
+        await recordTombstones("goals", goalIds, at)
+        scope?.assertActive()
       }
-      await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).delete()
-      for (const hash of sessionAssetOrphans) {
-        if (!(await db.messageMediaRefs.where("hash").equals(hash).count()))
-          await db.messageMedia.delete(hash)
-      }
-      await db.sessionState.bulkDelete(deletedIds)
-      await db.chatDrafts.bulkDelete(deletedIds)
-      await db.chatInputHistory.where("sessionId").anyOf(deletedIds).delete()
-      await db.chatTurnSummaries.where("sessionId").anyOf(deletedIds).delete()
-      await db.chatTranscriptIndexState.bulkDelete(deletedIds)
-      for (const id of deletedIds) {
-        const msgIds = (await db.messages.where("sessionId").equals(id).primaryKeys()) as string[]
-        allMessageIds.push(...msgIds)
-        await db.messages.where("sessionId").equals(id).delete()
-        await db.sessionUsage.where("sessionId").equals(id).delete()
-        await db.sessions.delete(id)
-      }
-      await db.sessionPeerMessages
-        .filter((row) => doomedIds.has(row.senderSessionId) || doomedIds.has(row.receiverSessionId))
-        .delete()
-      // Video jobs a conversation started (ADR-0205); their video is one of
-      // the session assets released above.
-      await db.mediaGenerationJobs.where("sessionId").anyOf(deletedIds).delete()
-      scope?.assertActive()
-      await recordTombstones("sessions", deletedIds, at)
-      scope?.assertActive()
-      await recordTombstones("messages", allMessageIds, at)
-      scope?.assertActive()
-      await recordTombstones("sessionState", deletedIds, at)
-      // Goals are mirrored on their own (`goals`), so the ones this cascade
-      // dropped need their own tombstones or they outlive their session on
-      // every paired client.
-      scope?.assertActive()
-      await recordTombstones("goals", goalIds, at)
-      scope?.assertActive()
-    }
-  )
+    )
+  } catch (error) {
+    await desktopDeletion.finish(false).catch(() => undefined)
+    throw error
+  }
+  // A failed external acknowledgment cannot roll a committed conversation back.
+  await desktopDeletion.finish(true).catch(() => undefined)
   scope?.assertActive()
   if (orphanCandidates.size > 0) {
     try {

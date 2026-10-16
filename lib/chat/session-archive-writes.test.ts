@@ -1,3 +1,7 @@
+const deleteAcceptanceMock = jest.fn()
+jest.mock("@/lib/automation/managed-desktop-result-deletion", () => ({
+  deleteManagedDesktopAcceptance: (...args: unknown[]) => deleteAcceptanceMock(...args),
+}))
 let mockDatabaseName = "archive-host-a"
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({ name: mockDatabaseName }) }))
 import {
@@ -217,5 +221,18 @@ describe("Host changes during routed writes", () => {
       expect(deleteWithTeardownMock).not.toHaveBeenCalled()
       expect(announceMock).not.toHaveBeenCalled()
     }
+  )
+})
+
+it("routes acceptance deletion through the captured canonical history scope", async () => {
+  const { deleteManagedDesktopAcceptanceRouted } = await import("./session-archive-writes")
+  await deleteManagedDesktopAcceptanceRouted("acceptance", "conversation")
+  expect(deleteAcceptanceMock).toHaveBeenCalledWith(
+    "acceptance",
+    "conversation",
+    expect.objectContaining({
+      db: { name: "archive-host-a" },
+      assertActive: expect.any(Function),
+    })
   )
 })

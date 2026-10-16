@@ -328,7 +328,9 @@ export interface ExternalRunManager extends Partial<
       allowedTools?: string[]
       cogniaModel?: ExternalAgentCogniaModelBinding | null
       workingDirectory?: string
-      context?: { custom: { chatSessionId: string; callerDeviceId?: string } }
+      context?: {
+        custom: { chatSessionId: string; deliveryOriginRunRef?: string; callerDeviceId?: string }
+      }
       onEvent?: (event: ExternalAgentEvent) => void
       signal?: AbortSignal
     }
@@ -903,6 +905,7 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
         context: {
           custom: {
             chatSessionId: request.chatSessionId,
+            deliveryOriginRunRef: request.runId,
             ...(request.callerDeviceId ? { callerDeviceId: request.callerDeviceId } : {}),
           },
         },

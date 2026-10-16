@@ -457,6 +457,7 @@ commands.allow = [
   "ensure_dir_confined",
   "ensure_system_lsp_host",
   "environment_local_call",
+  "managed_desktop_local_call",
   "external_agent_delete_gateway_task",
   "external_agent_detect_runtimes",
   "external_agent_probe_runtime_version",

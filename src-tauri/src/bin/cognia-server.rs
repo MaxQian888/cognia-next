@@ -2442,6 +2442,9 @@ async fn run_serve(
     let deployment_id = app_lib::headless::deployment_id::resolve(&data_dir)
         .map_err(|e| format!("deployment id: {e}"))?;
     log::info!("deployment id: {deployment_id}");
+    if let Err(error) = cognia_companion_rpc::managed_desktops::install(&data_dir, &deployment_id).await {
+        log::warn!("managed desktops unavailable: {}", error.code);
+    }
     let exec = exec_backend_from_env(&deployment_id).map_err(|e| format!("exec backend: {e}"))?;
     // ADR-0182/0183 — runtime environment sandboxes, in front of whatever the
     // line above resolved. Off unless this deployment enabled the pool, and
@@ -2451,6 +2454,7 @@ async fn run_serve(
     let pool = cognia_sandbox_pool::boot::install(exec, &data_dir, &deployment_id)
         .map_err(|e| format!("sandbox pool: {e}"))?;
     let exec = pool.backend;
+    cognia_companion_rpc::managed_desktop_results::install_task_cleanup_backend(exec.clone());
     // The companion API serves the catalog, the approvals and the driver
     // status out of what the pool installed, so `environment.*` answers
     // `sandbox_pool_disabled` on a deployment that never opted in rather than

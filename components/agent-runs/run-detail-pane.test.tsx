@@ -1,3 +1,10 @@
+jest.mock("./managed-desktop-results", () => ({
+  ManagedDesktopResults: ({ runId, taskId }: { runId?: string; taskId?: string }) => (
+    <div data-testid="managed-desktop-results">
+      {runId}:{taskId}
+    </div>
+  ),
+}))
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -956,4 +963,14 @@ describe("interruptTitleOf", () => {
   it("shows every other interrupt's own title", () => {
     expect(interruptTitleOf({ type: "tool_approval", title: "Bash" }, t)).toBe("Bash")
   })
+})
+
+test("mounts private acceptance history for the selected source run", () => {
+  render(
+    <RunDetailPane
+      row={row({ runId: "origin-run", taskId: "source-task" })}
+      actions={makeActions()}
+    />
+  )
+  expect(screen.getByTestId("managed-desktop-results")).toHaveTextContent("origin-run:source-task")
 })

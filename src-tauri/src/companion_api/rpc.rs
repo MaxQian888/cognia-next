@@ -190,6 +190,35 @@ async fn ensure_terminal_rpc_authorized(
 /// from the table too.
 #[cfg(test)]
 const KNOWN_COMMANDS: &[&str] = &[
+    "managed_desktop_results_get_results",
+    "managed_desktop_results_get_result",
+    "managed_desktop_results_read_evidence",
+    "managed_desktop_results_approve",
+    "managed_desktop_results_capture",
+    "managed_desktop_results_complete",
+    "managed_desktop_results_prepare_delete",
+    "managed_desktop_results_commit_delete",
+    "managed_desktop_results_abort_delete",
+    "managed_desktop_handoff_source_host",
+    "managed_desktop_handoff_deliveries",
+    "managed_desktop_handoff_prepare",
+    "managed_desktop_handoff_revoke_source",
+    "managed_desktop_list_configs",
+    "managed_desktop_list",
+    "managed_desktop_quote",
+    "managed_desktop_authorize",
+    "managed_desktop_prepare_template",
+    "managed_desktop_create",
+    "managed_desktop_connect",
+    "managed_desktop_health",
+    "managed_desktop_delete",
+    "managed_desktop_control_status",
+    "managed_desktop_control_frame",
+    "managed_desktop_control_acquire",
+    "managed_desktop_control_renew",
+    "managed_desktop_control_release",
+    "managed_desktop_control_input",
+
     // Shared media engine, with caller-owned binary transfers.
     "video_get_info",
     "plugin_media_get_video_frame",
@@ -2106,6 +2135,17 @@ static CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| CONTROL_COMMANDS.iter().copied().collect());
 
 const STEP_UP_COMMANDS: &[&str] = &[
+    // ADR-0228: paid desktop operations retain ADR-0153's time-bounded
+    // device lease in addition to the owner-bound spending authorization.
+    "managed_desktop_authorize",
+    "managed_desktop_prepare_template",
+    "managed_desktop_create",
+    "managed_desktop_connect",
+    "managed_desktop_delete",
+    "managed_desktop_control_acquire",
+    "managed_desktop_control_renew",
+    "managed_desktop_control_release",
+    "managed_desktop_control_input",
     "thread_handoff_accept",
     "thread_handoff_commit",
     "fleet_opencode_outbox_repair",
@@ -2982,7 +3022,11 @@ pub async fn rpc_handler(
     headers: HeaderMap,
     State(state): State<SharedState>,
     Json(args): Json<Value>,
-) -> Result<Json<Value>, (StatusCode, Json<RpcError>)> {
+) -> Result<(HeaderMap, Json<Value>), (StatusCode, Json<RpcError>)> {
+    let mut response_headers = HeaderMap::new();
+    if name.starts_with("managed_desktop_results_") {
+        response_headers.insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store"));
+    }
     let idem_key = headers
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
@@ -3063,7 +3107,7 @@ pub async fn rpc_handler(
             {
                 super::idempotency::IdempotencyDecision::Execute => {}
                 super::idempotency::IdempotencyDecision::Cached(cached) => {
-                    return Ok(Json(cached));
+                    return Ok((response_headers, Json(cached)));
                 }
                 super::idempotency::IdempotencyDecision::Conflict => {
                     return Err(RpcError::idempotency_conflict());
@@ -3118,7 +3162,7 @@ pub async fn rpc_handler(
         }
     }
 
-    Ok(Json(result))
+    Ok((response_headers, Json(result)))
 }
 
 /// Execute a command after the canonical remote execution module has completed
@@ -3734,6 +3778,52 @@ pub(super) async fn dispatch(
 
     if terminal::COMMANDS.contains(&name) {
         return terminal::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
+    }
+
+    if cognia_companion_rpc::managed_desktops::COMMANDS.contains(&name) {
+        // The envelope was authenticated above; the domain DTO deliberately
+        // rejects unknown fields and never accepts caller-supplied identity.
+        let admin_check = if STEP_UP_COMMANDS.contains(&name) {
+            let token = args.get("adminLease").or_else(|| args.get("admin_lease")).and_then(Value::as_str).map(str::to_owned);
+            let device = device_id.to_owned();
+            let operation = name.to_owned();
+            Some(std::sync::Arc::new(move || {
+                super::admin_lease::validate(&device, &operation, token.as_deref())
+                    .map_err(|_| cognia_automation::cua_sandbox::managed::refused("managed_desktop_control_admin_lease_expired"))
+            }) as cognia_companion_rpc::managed_desktops::AdminAuthorityCheck)
+        } else { None };
+        let mut args = args;
+        if let Some(args) = args.as_object_mut() {
+            args.remove("adminLease");
+            args.remove("admin_lease");
+        }
+        let runtime = if name == "managed_desktop_control_input" {
+            let event_host = host.clone();
+            let events: cognia_companion_rpc::managed_desktops::HostEventSink =
+                std::sync::Arc::new(move |topic, value| event_host.publish_host_event(topic, value));
+            Some(match &host {
+                super::dispatch_host::DispatchHost::Tauri(app) => {
+                    let automation = app.state::<crate::automation::commands::AutomationState>();
+                    cognia_companion_rpc::managed_desktops::ManagedControlRuntime {
+                        enforcement: crate::automation::dispatcher::Enforcement::from_state(&automation),
+                        events,
+                        refresh_persisted: false,
+                    }
+                }
+                super::dispatch_host::DispatchHost::Headless(_) => {
+                    cognia_companion_rpc::managed_desktops::headless_control_runtime(events).await
+                        .map_err(|error| (StatusCode::BAD_REQUEST, Json(RpcError::new(error.code.clone(), error.to_string()))))?
+                }
+            })
+        } else { None };
+        return cognia_companion_rpc::managed_desktops::dispatch(
+            name, args, cognia_companion_rpc::managed_desktops::Caller {
+                device_id, tenant_id, scope, local: false,
+            }, runtime, admin_check,
+        ).await.map_err(|error| (
+            StatusCode::BAD_REQUEST,
+            Json(RpcError::new(error.code.clone(), error.to_string())),
+        ));
     }
 
     if environment::COMMANDS.contains(&name) {

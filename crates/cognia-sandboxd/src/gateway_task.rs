@@ -599,6 +599,58 @@ pub fn delete_task(task_id: &str, home: &Path) -> Result<(), String> {
     delete_task_for_device(task_id, home, None)
 }
 
+/// Read-only preflight for durable source revocation. Actual deletion repeats
+/// these checks under its own task lock before removing any state.
+pub fn authorize_task_deletion(
+    task_id: &str,
+    home: &Path,
+    device: Option<&str>,
+) -> Result<(), String> {
+    if task_id.is_empty()
+        || task_id.len() > 128
+        || !task_id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+    {
+        return Err("Invalid gateway task id".into());
+    }
+    let home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    let parent = home.join(".local/share/cognia-agent-tasks");
+    if !parent.exists() {
+        return Ok(());
+    }
+    if fs::symlink_metadata(&parent).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err("Gateway task state must not be a symlink".into());
+    }
+    let root = parent.join(task_id);
+    if !root.exists() {
+        return Ok(());
+    }
+    if fs::symlink_metadata(&root).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err("Gateway task state must not be a symlink".into());
+    }
+    #[cfg(unix)]
+    let _lock = lock_task(&home, task_id)?;
+    if let Some(device) = device {
+        let binding: serde_json::Value = serde_json::from_slice(&read_private(&if home
+            == Path::new("/run/cognia-agent-task-state")
+        {
+            parent.join(".bindings").join(format!("{task_id}.json"))
+        } else {
+            root.join("binding.json")
+        })?)
+        .map_err(|_| "Invalid saved gateway task binding")?;
+        if binding
+            .get("originDeviceId")
+            .and_then(|value| value.as_str())
+            != Some(device)
+        {
+            return Err("Gateway task belongs to another paired device".into());
+        }
+    }
+    Ok(())
+}
+
 pub fn delete_task_for_device(
     task_id: &str,
     home: &Path,
@@ -876,6 +928,9 @@ mod tests {
         drop(prepare(&mut remote_env("device-a", "desktop-a"), dir.path()).unwrap());
         assert!(prepare(&mut remote_env("device-b", "desktop-a"), dir.path()).is_err());
         assert!(prepare(&mut remote_env("device-a", "desktop-b"), dir.path()).is_err());
+        assert!(authorize_task_deletion("remote-one", dir.path(), Some("device-b")).is_err());
+        authorize_task_deletion("remote-one", dir.path(), Some("device-a")).unwrap();
+        assert!(dir.path().join(".local/share/cognia-agent-tasks/remote-one").exists(), "preflight must not remove retained history");
         assert!(delete_task_for_device("remote-one", dir.path(), Some("device-b")).is_err());
         delete_task_for_device("remote-one", dir.path(), Some("device-a")).unwrap();
     }

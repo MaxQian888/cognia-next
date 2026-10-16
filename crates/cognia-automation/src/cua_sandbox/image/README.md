@@ -1,6 +1,6 @@
 # Built-in Linux desktop
 
-`cognia-cua-desktop:0.3.46-1` is built locally from these embedded resources on
+`cognia-cua-desktop:0.3.46-2` is built locally from these embedded resources on
 first provisioning. The pinned multi-platform Python 3.12 base supports native
 arm64 and amd64 builds. Debian installs Openbox, Xvfb, a terminal and Chromium;
 the official `cua-computer-server[linux]==0.3.46` package serves the existing
@@ -24,7 +24,7 @@ host. The original nondumpable startup process runs the server after removing
 the credential from its environment. Desktop applications, DBus and supervised
 shell/file commands never receive it. Upstream telemetry is disabled.
 
-Build: `docker build -t cognia-cua-desktop:0.3.46-1 .`
+Build: `docker build -t cognia-cua-desktop:0.3.46-2 .`
 
 Sources verified 2026-10-03:
 

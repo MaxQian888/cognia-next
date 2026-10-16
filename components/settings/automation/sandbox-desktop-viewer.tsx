@@ -7,6 +7,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { useSandboxDesktop } from "@/hooks/automation/use-sandbox-desktop"
 import { screenshotMimeType } from "@/lib/automation/model-frame"
 import type { Point, Screenshot } from "@/lib/automation/types"
+import type { OpenSandboxDesktop } from "@/lib/automation/sandbox-client"
+import { isCapacitor } from "@/lib/platform/detect"
 import { SandboxFileTransfer } from "./sandbox-file-transfer"
 
 function framePoint(
@@ -38,14 +40,23 @@ export function SandboxDesktopViewer({
   connectionId,
   enabled,
   containerId,
+  openDesktop,
+  observeOnly = false,
 }: {
   connectionId: string
   enabled: boolean
   containerId?: string
+  openDesktop?: OpenSandboxDesktop
+  observeOnly?: boolean
 }) {
   const t = useTranslations("automation.sandboxConnections.desktopViewer")
-  const { frame, controlling, acquiring, error, acquire, release, refresh, input } =
-    useSandboxDesktop(connectionId, enabled)
+  const mobileObservation =
+    Boolean(openDesktop) &&
+    (observeOnly ||
+      isCapacitor() ||
+      (typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)))
+  const { frame, controlling, acquiring, error, acquire, release, refresh, input, status } =
+    useSandboxDesktop(connectionId, enabled, openDesktop, !mobileObservation)
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
   const [doubleClick, setDoubleClick] = useState(false)
@@ -60,7 +71,7 @@ export function SandboxDesktopViewer({
 
   useEffect(() => {
     start.current = null
-  }, [connectionId, controlling])
+  }, [connectionId, controlling, openDesktop])
 
   useEffect(() => {
     const element = image.current
@@ -181,10 +192,29 @@ export function SandboxDesktopViewer({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium">{t("title")}</h3>
         <span className="text-xs text-muted-foreground" role="status">
-          {controlling ? t("controlling") : t("readOnly")}
+          {controlling
+            ? t("controlling")
+            : status?.state === "quarantined"
+              ? t("quarantined")
+              : status?.controllerKind === "human"
+                ? t("otherController")
+                : t("readOnly")}
         </span>
       </div>
       <p className="text-xs text-muted-foreground">{t("cadence")}</p>
+      {openDesktop ? (
+        <p className="text-xs text-muted-foreground" data-dormant="managed-desktop-agent-control">
+          {t("agentDormant")}
+        </p>
+      ) : null}
+      {mobileObservation ? (
+        <p className="text-xs text-muted-foreground">{t("mobileObservation")}</p>
+      ) : null}
+      {status && !status.qualified ? (
+        <p className="text-xs text-muted-foreground" data-dormant="managed-desktop-control">
+          {t("qualificationRequired")}
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="text-xs text-destructive">
           {t(`error.${error}`)}
@@ -223,9 +253,20 @@ export function SandboxDesktopViewer({
         </Button>
         <Button
           size="sm"
-          disabled={!enabled || !frame || acquiring || transferring}
+          disabled={
+            !enabled ||
+            !frame ||
+            acquiring ||
+            transferring ||
+            mobileObservation ||
+            (Boolean(openDesktop) && !controlling && !status?.canAcquire)
+          }
           variant={controlling ? "secondary" : "outline"}
-          onClick={() => void (controlling ? release() : acquire())}
+          onClick={() =>
+            void (controlling
+              ? release()
+              : acquire(Boolean(openDesktop) || status?.controllerKind === "agent"))
+          }
         >
           {acquiring ? t("acquiring") : controlling ? t("release") : t("takeControl")}
         </Button>
@@ -263,14 +304,16 @@ export function SandboxDesktopViewer({
           </div>
         </div>
       ) : null}
-      <SandboxFileTransfer
-        key={`${connectionId}:${containerId ?? ""}`}
-        connectionId={connectionId}
-        containerId={containerId}
-        enabled={enabled}
-        releaseControl={release}
-        onBusyChange={setTransferring}
-      />
+      {!openDesktop ? (
+        <SandboxFileTransfer
+          key={`${connectionId}:${containerId ?? ""}`}
+          connectionId={connectionId}
+          containerId={containerId}
+          enabled={enabled}
+          releaseControl={release}
+          onBusyChange={setTransferring}
+        />
+      ) : null}
     </section>
   )
 }

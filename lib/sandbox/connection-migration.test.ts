@@ -349,3 +349,35 @@ describe("migrateSandboxConnectionRows", () => {
     expect(second.rows[0]).toBe(first.rows[0])
   })
 })
+
+it("normalizes E2B compatibility rows without Docker mirrors or dormant capabilities", () => {
+  const row = {
+    id: "cloud",
+    name: "cloud",
+    provider: "e2b" as const,
+    driver: "computer-server" as const,
+    config: {
+      provider: "e2b" as const,
+      target: { kind: "local" as const },
+      providerConfigId: "byo",
+      qualification: "unqualified" as const,
+    },
+    state: "uninitialized" as const,
+    capabilities: defaultSandboxCapabilities("docker", "computer-server"),
+    capabilitiesRevision: 1,
+    lastHealthStatus: "unknown" as const,
+    createdAt: 1,
+    updatedAt: 1,
+    containerId: "stale",
+  }
+  const next = syncLegacySandboxMirrors(migrateSandboxConnectionRow(row))
+  expect(next.capabilities).toMatchObject({
+    create: true,
+    connect: true,
+    gui: false,
+    workspaceExec: false,
+    suspend: false,
+    resume: false,
+  })
+  expect(next).not.toHaveProperty("containerId")
+})
