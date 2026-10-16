@@ -16,6 +16,9 @@ export function transcriptToCells(entries: Iterable<TranscriptEntry>): Cell[] {
     if (entry.role === "user") {
       cells.push({ id, kind: "user", text: entry.content })
     } else if (entry.role === "assistant") {
+      // An interrupted tool-only turn saves its history with no text; there is
+      // nothing to show for it.
+      if (entry.content.trim().length === 0 && entry.meta?.interrupted === true) continue
       cells.push({ id, kind: "assistant", raw: entry.content })
     } else {
       cells.push({ id, kind: "notice", message: entry.content })

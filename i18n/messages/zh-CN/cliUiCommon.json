@@ -174,5 +174,9 @@
       "coreAnthropic": "在 Anthropic 中注册核心文件工具：{state}（同时需要启用核心文件工具类别）。"
     },
     "catalogTitle": "工具目录"
-  }
+  },
+  "rewindNotRestored": "未恢复：{paths}。",
+  "rewindReasonTooLarge": "文件过大，无法快照",
+  "rewindReasonUnreadable": "无法读取",
+  "rewindReasonOutsideWorkspace": "不在工作区内"
 }

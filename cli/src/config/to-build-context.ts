@@ -26,6 +26,7 @@ import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveHome } from "./load"
 
 import type { ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
+import type { ProviderModelDiscoveryEntry } from "@cognia/provider-types/provider"
 import {
   getBuiltInProviderDefaultBaseURL,
   isBuiltInProviderId,
@@ -46,6 +47,7 @@ import { normalizeSearchProviderHealthSettings } from "@cognia/web-search/types"
 import { resolveBuiltinProcessSandbox } from "../runtime/sandbox/builtin-process-sandbox"
 
 import { resolveActiveModel } from "./active-model"
+import { declaredModelWindows } from "./context-window"
 import { effectivePermissionMode } from "./agent-mode"
 import { buildDefaultSystemPrompt } from "./default-system-prompt"
 import { composeSystemPrompt } from "./output-style"
@@ -103,9 +105,15 @@ export interface ToBuildContextParams {
   now?: number
 }
 
+/** A provider entry plus the model rows window lookups read off it. */
+type CliProviderSettingsEntry = ProviderSettingsEntry & {
+  discoveredModels?: ProviderModelDiscoveryEntry[]
+}
+
 /** Build the `providerSettings` map the credential resolver reads. */
-function buildProviderSettings(config: ResolvedConfig): Record<string, ProviderSettingsEntry> {
-  const out: Record<string, ProviderSettingsEntry> = {}
+function buildProviderSettings(config: ResolvedConfig): Record<string, CliProviderSettingsEntry> {
+  const out: Record<string, CliProviderSettingsEntry> = {}
+  const activeModel = resolveActiveModel(config)
   for (const [id, p] of Object.entries(config.providers)) {
     // Subscription providers that ride the OpenAI protocol (OpenCode Zen/Go,
     // codex-style endpoints) authenticate with the subscription token as a
@@ -140,6 +148,18 @@ function buildProviderSettings(config: ResolvedConfig): Record<string, ProviderS
         ? { apiProtocol: p.protocol }
         : {}),
     }
+    // A declared context window reaches the compaction budget the way the
+    // desktop's live `/models` discovery does: as a discovered model row,
+    // which outranks the static catalog. Custom ids carry theirs on the
+    // custom provider below instead.
+    if (!(p.protocol && !isBuiltInProviderId(id))) {
+      const windows = declaredModelWindows(
+        config,
+        id,
+        id === config.provider ? activeModel : undefined
+      )
+      if (windows.length > 0) out[id]!.discoveredModels = windows
+    }
   }
   return out
 }
@@ -152,16 +172,29 @@ function buildProviderSettings(config: ResolvedConfig): Record<string, ProviderS
  * instead (see `buildProviderSettings`), so they need no custom def here.
  */
 function buildCustomProviders(config: ResolvedConfig): AppSettings["customProviders"] {
+  const activeModel = resolveActiveModel(config)
   const customs = Object.entries(config.providers)
     .filter(([id, p]) => p.protocol && !isBuiltInProviderId(id))
-    .map(([id, p]) => ({
-      id,
-      name: id,
-      protocol: p.protocol,
-      ...(p.baseURL ? { baseURL: p.baseURL } : {}),
-      ...(p.apiKey ? { apiKey: p.apiKey } : {}),
-      ...(p.model ? { defaultModel: p.model } : {}),
-    }))
+    .map(([id, p]) => {
+      // Declared windows ride as the custom provider's per-model metadata,
+      // which every window lookup (`resolveModelMeta`) ranks first.
+      const windows = declaredModelWindows(
+        config,
+        id,
+        id === config.provider ? activeModel : undefined
+      )
+      return {
+        id,
+        name: id,
+        protocol: p.protocol,
+        ...(p.baseURL ? { baseURL: p.baseURL } : {}),
+        ...(p.apiKey ? { apiKey: p.apiKey } : {}),
+        ...(p.model ? { defaultModel: p.model } : {}),
+        ...(windows.length > 0
+          ? { customModelMetadata: Object.fromEntries(windows.map((row) => [row.id, row])) }
+          : {}),
+      }
+    })
   return customs.length ? (customs as unknown as AppSettings["customProviders"]) : undefined
 }
 

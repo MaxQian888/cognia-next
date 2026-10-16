@@ -28,7 +28,7 @@ import { runManualCompact } from "../../agent/manual-compact"
 import { readToolApprovals } from "../../agent/tool-approvals"
 import { approvalKey, commandIsAutoApprovable } from "../../agent/command-approval"
 import { resolveHome } from "../../config/load"
-import { writeTranscript, type TranscriptEntry } from "../../agent/transcript"
+import { truncateTranscriptToUserTurns } from "../../agent/transcript"
 import { SIDECAR_EVENT } from "../../runtime/protocol"
 import { createHookRunner, type HookRunner } from "../runtime/hook-runner"
 import { createCheckpointCapture, type CheckpointCapture } from "../runtime/checkpoint-capture"
@@ -60,6 +60,8 @@ export type CreateSession = (params: {
   sessionKind?: import("@cognia/agent-config-types").SessionKind
   onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
   onToolHostStatus?: (snapshot: import("../../agent/tool-host/status").ToolHostSnapshot) => void
+  /** Ask the built-in sidecar for pre-mutation file snapshots (`/rewind`). */
+  fileCheckpoints?: boolean
 }) => AgentSession
 
 /** What a `/rewind` restores: the conversation, the files touched since the
@@ -174,18 +176,6 @@ const defaultCreateCheckpoints = (getSessionId: () => string): CheckpointCapture
     fs: realCheckpointFs,
     now: () => Date.now(),
   })
-
-/** Rebuild transcript entries from the kept cells after a conversation rewind,
- * so the on-disk transcript matches the restored view. */
-function cellsToEntries(cells: Cell[]): TranscriptEntry[] {
-  const entries: TranscriptEntry[] = []
-  for (const cell of cells) {
-    if (cell.kind === "user") entries.push({ ts: 0, role: "user", content: cell.text })
-    else if (cell.kind === "assistant")
-      entries.push({ ts: 0, role: "assistant", content: cell.raw })
-  }
-  return entries
-}
 
 /**
  * The line shown when an unrecoverable fault forces the agent session to be torn
@@ -501,6 +491,22 @@ export function useAgentSession({
     () => createCheckpoints(getSessionId),
     [createCheckpoints, getSessionId]
   )
+  // The built-in sidecar snapshots a mutating call's targets after the gate
+  // allows it and before it runs (sessions are created with `fileCheckpoints`).
+  // Reading the file here on the tool-call event instead raced an
+  // auto-approved write and missed every builtin and sandboxed editor.
+  useEffect(
+    () =>
+      subscribeSidecar((payload) => {
+        if (!payload || typeof payload !== "object") return
+        const frame = payload as { type?: unknown; sessionId?: unknown }
+        if (frame.type !== "file_pre_mutation") return
+        if (frame.sessionId !== sessionRef.current?.sessionId) return
+        if (checkpointAuthorityRef.current?.mode === "native") return
+        checkpoint.onPreMutationFrame(payload)
+      }),
+    [subscribeSidecar, checkpoint]
+  )
 
   const gate = useMemo(
     () =>
@@ -606,6 +612,7 @@ export function useAgentSession({
           config: configRef.current,
           ...(boundId ? { sessionId: boundId } : {}),
           onResolvedExecutionSpec: captureExecutionSpec,
+          fileCheckpoints: true,
         })
       )
       // A chat session just began — fire SessionStart so hook scripts can seed
@@ -920,6 +927,7 @@ export function useAgentSession({
           config: configRef.current,
           sessionId,
           onResolvedExecutionSpec: captureExecutionSpec,
+          fileCheckpoints: true,
         })
       )
       dispatch({ type: "RESET", sessionId })
@@ -1186,13 +1194,23 @@ export function useAgentSession({
       const sid = sessionRef.current?.sessionId
       if (!sid) return
       const kept = cells.slice(0, cellCount)
-      writeTranscript(resolveHome(process.env, os.homedir()), sid, cellsToEntries(kept))
+      // Cut the transcript itself rather than rebuilding it from cells: cells
+      // carry only text, and the next turn resumes the provider conversation
+      // from the last kept assistant entry's `runtimeHistory`. Every user cell
+      // is one transcript user entry (a live prompt appends one; a resumed
+      // transcript maps one to one), so the kept user count is the cut point.
+      truncateTranscriptToUserTurns(
+        resolveHome(process.env, os.homedir()),
+        sid,
+        kept.filter((cell) => cell.kind === "user").length
+      )
       await dropSession()
       sessionRef.current = attachSessionUi(
         createSession({
           config: configRef.current,
           sessionId: sid,
           onResolvedExecutionSpec: captureExecutionSpec,
+          fileCheckpoints: true,
         })
       )
       dispatch({ type: "RESET", sessionId: sid })
@@ -1246,6 +1264,22 @@ export function useAgentSession({
         type: "NOTICE",
         message: `Rewound to checkpoint #${seq} (${scope}) — ${cp.label}.`,
       })
+      // Say which touched files could not come back, rather than implying a
+      // complete restore.
+      if ((scope === "files" || scope === "both") && cp.unrestorable?.length) {
+        const t = createCliTranslator(configRef.current.locale, "cliUiCommon")
+        const why = {
+          "too-large": t("rewindReasonTooLarge"),
+          unreadable: t("rewindReasonUnreadable"),
+          "outside-workspace": t("rewindReasonOutsideWorkspace"),
+        } as const
+        dispatch({
+          type: "NOTICE",
+          message: t("rewindNotRestored", {
+            paths: cp.unrestorable.map((ref) => `${ref.absPath} (${why[ref.reason]})`).join(", "),
+          }),
+        })
+      }
     },
     [checkpoint, dispatch, forkConversationAt]
   )

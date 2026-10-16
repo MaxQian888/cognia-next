@@ -40,6 +40,7 @@ export interface TurnSession {
       onActiveSkills?: (skillIds: string[]) => void
       onAttachments?: (summary: AttachmentSummary) => void
       onTwinNotice?: (message: string) => void
+      onRestoreNotice?: (message: string) => void
       onDatabaseError?: (error: CliDbSnapshotError) => void
       signal?: AbortSignal
       timeoutMs?: number
@@ -368,6 +369,9 @@ export async function runTurn(
         if (message) opts.dispatch({ type: "NOTICE", message })
       },
       onTwinNotice: (message) => {
+        opts.dispatch({ type: "NOTICE", message })
+      },
+      onRestoreNotice: (message) => {
         opts.dispatch({ type: "NOTICE", message })
       },
       onDatabaseError: (error) => {

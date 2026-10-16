@@ -888,3 +888,85 @@ test("a throwing reviewer fails open (original output preserved)", async () => {
     "original"
   )
 })
+
+test("fileCheckpointFrames snapshots a file writer's target after the gate and before it runs", async () => {
+  const fs = await import("node:fs")
+  const os = await import("node:os")
+  const path = await import("node:path")
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ai-sdk-checkpoint-")))
+  try {
+    const file = path.join(dir, "existing.txt")
+    fs.writeFileSync(file, "BEFORE\n")
+    const emitted: Frame[] = []
+    const tools = build({
+      sendOptions: {
+        permissionMode: "bypassPermissions",
+        builtinTools: { coreFiles: true, fileExtras: true },
+        cwd: dir,
+        fileCheckpointFrames: true,
+      },
+      emit: (m) => emitted.push(m),
+      sessionId: "s1",
+    })
+    await tools.file_binary_write!.execute({
+      path: file,
+      data: Buffer.from("AFTER\n").toString("base64"),
+    })
+    assert.equal(fs.readFileSync(file, "utf8"), "AFTER\n")
+    const frame = emitted.find((m) => m.type === "file_pre_mutation") as
+      { entries: { path: string; before: string; contentBase64?: string }[] } | undefined
+    assert.ok(frame, "a pre-mutation frame was emitted")
+    assert.equal(frame.entries[0]!.path, file)
+    assert.equal(Buffer.from(frame.entries[0]!.contentBase64!, "base64").toString(), "BEFORE\n")
+
+    // Off unless the host asked for it.
+    const quiet: Frame[] = []
+    const plain = build({
+      sendOptions: {
+        permissionMode: "bypassPermissions",
+        builtinTools: { fileExtras: true },
+        cwd: dir,
+      },
+      emit: (m) => quiet.push(m),
+      sessionId: "s1",
+    })
+    await plain.file_binary_write!.execute({
+      path: file,
+      data: Buffer.from("x").toString("base64"),
+    })
+    assert.equal(
+      quiet.some((m) => m.type === "file_pre_mutation"),
+      false
+    )
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("fileCheckpointFrames reports a sandboxed editor's target before its plugin round-trip", async () => {
+  const emitted: Frame[] = []
+  const pendingPluginToolCalls = new Map()
+  const tools = build({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      cwd: "/nonexistent-workspace",
+      fileCheckpointFrames: true,
+      pluginTools: [
+        { name: "sandbox_write", description: "", jsonSchema: { type: "object" }, pluginId: "p" },
+      ],
+    },
+    emit: (m) => emitted.push(m),
+    sessionId: "s1",
+    pendingPluginToolCalls,
+  })
+  const exec = tools.sandbox_write!.execute({
+    path: "/nonexistent-workspace/new.txt",
+    content: "x",
+  })
+  await new Promise((r) => setImmediate(r))
+  const types = emitted.map((m) => m.type)
+  assert.deepEqual(types.slice(0, 2), ["file_pre_mutation", "plugin_tool_exec"])
+  const exec_ = emitted[1] as { toolUseId: string }
+  pendingPluginToolCalls.get(exec_.toolUseId).resolve({ result: "ok" })
+  await exec
+})

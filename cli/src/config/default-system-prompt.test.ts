@@ -27,6 +27,12 @@ describe("buildDefaultSystemPrompt", () => {
     expect(out).toMatch(/Read a file before you edit/i)
   })
 
+  it("points a sandboxed session at the edit tools it actually has", () => {
+    const out = buildDefaultSystemPrompt({ cwd: "/x", now: NOW, platform: "darwin" })
+    expect(out).toMatch(/Only call tools that are in your tool list/)
+    expect(out).toContain("`sandbox_edit`/`sandbox_write`")
+  })
+
   it("warns against writing into the home directory", () => {
     const out = buildDefaultSystemPrompt({ cwd: "/x", now: NOW, platform: "linux" })
     expect(out).toMatch(/Never write files into the user's home directory/i)

@@ -923,6 +923,18 @@ export interface InputState {
   /** Redo stack — states popped by undo, restored by Ctrl+Y. Cleared on any new
    * text edit. */
   redo: InputBuffer[]
+  /**
+   * Drafts sent with Enter that the composer has not handed to its submit
+   * callback yet (oldest first). `INPUT_SUBMIT` captures each from the LIVE
+   * buffer: a key handler's own closure can still hold the buffer from before
+   * a paste that landed in the same batch, which used to make an Enter typed
+   * right after a paste do nothing. The composer delivers them after the
+   * render commits and acknowledges with `INPUT_SUBMISSIONS_DELIVERED`; they
+   * survive draft resets so none is dropped or sent twice.
+   */
+  submissions?: Array<{ seq: number; text: string }>
+  /** The last submission `seq` handed out; grows by one per submission. */
+  submissionSeq?: number
 }
 
 // ── Root state ────────────────────────────────────────────────────────────────
@@ -1411,6 +1423,10 @@ export type TuiAction =
    * Undoable: the paste map keeps its entries so an undo restores live labels. */
   | { type: "INPUT_REMOVE_IMAGES"; labels: string[] }
   | { type: "INPUT_CLEAR" }
+  /** Send the live draft: push it to history, clear it, queue it in `submissions`. */
+  | { type: "INPUT_SUBMIT" }
+  /** The composer delivered every queued submission up to `seq`. */
+  | { type: "INPUT_SUBMISSIONS_DELIVERED"; seq: number }
   | { type: "INPUT_PUSH_HISTORY"; entry: string }
   | { type: "INPUT_UNDO" }
   | { type: "INPUT_REDO" }

@@ -546,6 +546,7 @@ export function makeAiSdkAdapter(protocol: string): ProtocolAdapter {
       if (typeof req.maxRetries === "number") streamArgs.maxRetries = req.maxRetries
       if (req.tools && Object.keys(req.tools).length > 0) {
         streamArgs.tools = req.tools
+        if (req.repairToolCall) streamArgs.repairToolCall = req.repairToolCall
         // Multi-step agentic loop: AI SDK runs each tool's `execute` and feeds
         // the result back to the model until it stops or we hit the step cap.
         // `req.stopWhenExtra(steps)` lets the caller end the leg EARLY after a

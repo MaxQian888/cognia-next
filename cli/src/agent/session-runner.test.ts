@@ -22,7 +22,7 @@ import { appendTranscript, readTranscript, type TranscriptFs } from "./transcrip
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { SidecarBootstrap } from "../runtime/bootstrap"
-import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import { RunAndCaptureError, type RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { getCliSubagentContext } from "./subagent-dispatch"
 import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
@@ -1690,8 +1690,12 @@ describe("incompatible durable history", () => {
   })
 })
 
-it("rejects an incomplete AI SDK transcript tail instead of dropping the failed user turn", async () => {
+it("resumes an AI SDK transcript after a failed turn from the last completed snapshot and says so", async () => {
   const { fsx } = memFs()
+  const snapshot = [
+    { role: "user", content: "old" },
+    { role: "assistant", content: "previous" },
+  ]
   appendTranscript(
     HOME,
     "incomplete",
@@ -1699,15 +1703,7 @@ it("rejects an incomplete AI SDK transcript tail instead of dropping the failed 
       role: "assistant",
       content: "previous",
       meta: {
-        runtimeHistory: {
-          version: 1,
-          runtime: "ai-sdk",
-          provider: "deepseek",
-          messages: [
-            { role: "user", content: "old" },
-            { role: "assistant", content: "previous" },
-          ],
-        },
+        runtimeHistory: { version: 1, runtime: "ai-sdk", provider: "deepseek", messages: snapshot },
       },
     },
     fsx
@@ -1718,18 +1714,203 @@ it("rejects an incomplete AI SDK transcript tail instead of dropping the failed 
     { role: "user", content: "failed request must not disappear" },
     fsx
   )
-  const capture = jest.fn()
+  const dispatched: SendOptions[] = []
+  const notices: string[] = []
   const session = createAgentSession({
     config: cfg({ provider: "deepseek" }),
     home: HOME,
     sessionId: "incomplete",
     transcriptFs: fsx,
+    bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as never,
     resolveOptions: async () => ({ provider: "deepseek", model: "m" }) as never,
-    capture,
+    capture: (async (_id: string, _content: unknown, opts: SendOptions) => {
+      dispatched.push({ ...opts })
+      return result("ok")
+    }) as never,
   })
-  await expect(session.send("next", { gate: createPermissionGate({ yes: true }) })).rejects.toThrow(
-    /last turn did not save a completed provider snapshot/
-  )
-  expect(capture).not.toHaveBeenCalled()
+  await session.send("next", {
+    gate: createPermissionGate({ yes: true }),
+    onRestoreNotice: (message) => notices.push(message),
+  })
+  expect(dispatched[0]!.initialConversation).toEqual(snapshot)
+  // The failed request is not silently dropped: the user is told it is not in
+  // the model's context and can resend it.
+  expect(notices).toEqual([
+    "Resumed from the last completed turn: 1 earlier request after it did not finish and is not in the model's context. Send it again if you still need the answer.",
+  ])
+  await session.send("again", {
+    gate: createPermissionGate({ yes: true }),
+    onRestoreNotice: (message) => notices.push(message),
+  })
+  expect(notices).toHaveLength(1)
   await session.close()
+})
+
+it("asks the sidecar for pre-mutation file snapshots only when the host rewinds files", async () => {
+  for (const fileCheckpoints of [true, false]) {
+    const { fsx } = memFs()
+    const dispatched: SendOptions[] = []
+    const session = createAgentSession({
+      config: cfg({ provider: "deepseek" }),
+      home: HOME,
+      sessionId: `checkpoints-${fileCheckpoints}`,
+      transcriptFs: fsx,
+      fileCheckpoints,
+      bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as never,
+      resolveOptions: async () => ({ provider: "deepseek", model: "m" }) as never,
+      capture: (async (_id: string, _content: unknown, opts: SendOptions) => {
+        dispatched.push({ ...opts })
+        return result("ok")
+      }) as never,
+    })
+    await session.send("go", { gate: createPermissionGate({ yes: true }) })
+    expect(dispatched[0]!.fileCheckpointFrames).toBe(fileCheckpoints ? true : undefined)
+    await session.close()
+  }
+})
+
+it("starts a transcript of only failed requests without history, and says so", async () => {
+  const { fsx } = memFs()
+  appendTranscript(HOME, "only-failed", { role: "user", content: "first try" }, fsx)
+  appendTranscript(HOME, "only-failed", { role: "user", content: "second try" }, fsx)
+  const dispatched: SendOptions[] = []
+  const notices: string[] = []
+  const session = createAgentSession({
+    config: cfg({ provider: "deepseek" }),
+    home: HOME,
+    sessionId: "only-failed",
+    transcriptFs: fsx,
+    bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as never,
+    resolveOptions: async () => ({ provider: "deepseek", model: "m" }) as never,
+    capture: (async (_id: string, _content: unknown, opts: SendOptions) => {
+      dispatched.push({ ...opts })
+      return result("ok")
+    }) as never,
+  })
+  await session.send("third", {
+    gate: createPermissionGate({ yes: true }),
+    onRestoreNotice: (message) => notices.push(message),
+  })
+  expect(dispatched[0]!.initialConversation).toBeUndefined()
+  expect(notices).toEqual([
+    "Resumed without model history: 2 earlier requests never finished, so the model has not seen them. Send them again if you still need the answer.",
+  ])
+  await session.close()
+})
+
+describe("interrupted turns", () => {
+  const interrupted = (partial: ConstructorParameters<typeof RunAndCaptureError>[2]) =>
+    new RunAndCaptureError("aborted by signal", "aborted", partial)
+
+  it("saves the interrupted work so --continue resumes from it", async () => {
+    const { fsx } = memFs()
+    const snapshot = [
+      { role: "user", content: "LONG_TASK" },
+      { role: "assistant", content: [{ type: "tool-call", toolCallId: "c1", toolName: "bash" }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: "c1", output: "ok" }] },
+    ]
+    const params = {
+      config: cfg({ provider: "deepseek" }),
+      home: HOME,
+      sessionId: "interrupted",
+      transcriptFs: fsx,
+      bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as never,
+      resolveOptions: async () => ({ provider: "deepseek", model: "m" }) as never,
+    }
+    const first = createAgentSession({
+      ...params,
+      capture: (async () => {
+        throw interrupted({ partial: { text: "half way", conversationSnapshot: snapshot } })
+      }) as never,
+    })
+    await expect(
+      first.send("LONG_TASK", { gate: createPermissionGate({ yes: true }) })
+    ).rejects.toMatchObject({ code: "aborted" })
+    await first.close()
+    const saved = readTranscript(HOME, "interrupted", fsx)
+    expect(saved.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "half way",
+      meta: {
+        interrupted: true,
+        runtimeHistory: { version: 1, runtime: "ai-sdk", provider: "deepseek", messages: snapshot },
+      },
+    })
+
+    const dispatched: SendOptions[] = []
+    const notices: string[] = []
+    const next = createAgentSession({
+      ...params,
+      capture: (async (_id: string, _content: unknown, opts: SendOptions) => {
+        dispatched.push({ ...opts })
+        return result("continued")
+      }) as never,
+    })
+    await next.send("keep going", {
+      gate: createPermissionGate({ yes: true }),
+      onRestoreNotice: (message) => notices.push(message),
+    })
+    expect(dispatched[0]!.initialConversation).toEqual(snapshot)
+    // Nothing was left out of the model's context, so nothing to report.
+    expect(notices).toEqual([])
+    await next.close()
+  })
+
+  it.each([
+    ["no snapshot", { text: "partial" }],
+    [
+      "an unresolved tool call",
+      {
+        text: "",
+        conversationSnapshot: [
+          { role: "user", content: "x" },
+          { role: "assistant", content: [{ type: "tool-call", toolCallId: "open" }] },
+        ],
+      },
+    ],
+  ])("records nothing a restore would reject (%s)", async (_name, partial) => {
+    const { fsx } = memFs()
+    const session = createAgentSession({
+      config: cfg({ provider: "deepseek" }),
+      home: HOME,
+      sessionId: "interrupted-unsaved",
+      transcriptFs: fsx,
+      bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as never,
+      resolveOptions: async () => ({ provider: "deepseek", model: "m" }) as never,
+      capture: (async () => {
+        throw interrupted({ partial })
+      }) as never,
+    })
+    await expect(
+      session.send("go", { gate: createPermissionGate({ yes: true }) })
+    ).rejects.toMatchObject({ code: "aborted" })
+    await session.close()
+    expect(readTranscript(HOME, "interrupted-unsaved", fsx).map((e) => e.role)).toEqual(["user"])
+  })
+
+  it("keeps the native SDK session id of an interrupted Anthropic turn", async () => {
+    const { fsx } = memFs()
+    const session = createAgentSession({
+      config: cfg({ provider: "anthropic" }),
+      home: HOME,
+      sessionId: "interrupted-native",
+      transcriptFs: fsx,
+      bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as never,
+      resolveOptions: async () => ({ provider: "anthropic", model: "m" }) as never,
+      capture: (async () => {
+        throw interrupted({ partial: { text: "", sdkSessionId: "native-1" } })
+      }) as never,
+    })
+    await expect(
+      session.send("go", { gate: createPermissionGate({ yes: true }) })
+    ).rejects.toMatchObject({ code: "aborted" })
+    await session.close()
+    expect(readTranscript(HOME, "interrupted-native", fsx).at(-1)).toMatchObject({
+      role: "assistant",
+      meta: {
+        interrupted: true,
+        runtimeHistory: { runtime: "claude-agent-sdk", sdkSessionId: "native-1" },
+      },
+    })
+  })
 })

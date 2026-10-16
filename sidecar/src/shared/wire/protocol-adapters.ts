@@ -77,6 +77,8 @@ export interface NormalizedRequest extends AdapterTelemetryContext {
   stopWhenExtra?: (steps: unknown) => boolean
   /** AI SDK per-step settings callback (e.g. activeTools). */
   prepareStep?: unknown
+  /** AI SDK `repairToolCall`: fixes a tool call that failed to parse. */
+  repairToolCall?: unknown
   /** Set only for a ledger-reserved call: one reservation, one request. */
   maxRetries?: number
   reasoning?: ReasoningControls

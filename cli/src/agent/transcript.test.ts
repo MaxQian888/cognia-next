@@ -10,6 +10,7 @@ import {
   iterTranscriptEntries,
   readTranscript,
   readTranscriptTail,
+  truncateTranscriptToUserTurns,
   sessionTranscriptPath,
   writeTranscript,
   type TranscriptFs,
@@ -194,6 +195,42 @@ describe("transcript", () => {
     const tail = readTranscriptTail(HOME, "s1", m.fsx)
     expect(tail.latestAssistant?.content).toBe("a1")
     expect(tail.lastNonSystemRole).toBe("user")
+    expect(tail.unfinishedUserTurns).toBe(1)
+  })
+
+  it("readTranscriptTail counts every unfinished request after the last reply", () => {
+    const m = memFs()
+    appendTranscript(HOME, "s1", { role: "user", content: "q1" }, m.fsx, 1)
+    appendTranscript(HOME, "s1", { role: "assistant", content: "a1" }, m.fsx, 2)
+    appendTranscript(HOME, "s1", { role: "user", content: "q2" }, m.fsx, 3)
+    appendTranscript(HOME, "s1", { role: "system", content: "n" }, m.fsx, 4)
+    appendTranscript(HOME, "s1", { role: "user", content: "q3" }, m.fsx, 5)
+    expect(readTranscriptTail(HOME, "s1", m.fsx).unfinishedUserTurns).toBe(2)
+    const only = memFs()
+    appendTranscript(HOME, "s2", { role: "user", content: "x" }, only.fsx, 1)
+    appendTranscript(HOME, "s2", { role: "user", content: "y" }, only.fsx, 2)
+    const tail = readTranscriptTail(HOME, "s2", only.fsx)
+    expect(tail.latestAssistant).toBeUndefined()
+    expect(tail.unfinishedUserTurns).toBe(2)
+  })
+
+  it("truncateTranscriptToUserTurns keeps whole turns, metadata included", () => {
+    const m = memFs()
+    const history = { runtimeHistory: { version: 1, messages: [{ role: "user", content: "q1" }] } }
+    appendTranscript(HOME, "s1", { role: "user", content: "q1" }, m.fsx, 1)
+    appendTranscript(HOME, "s1", { role: "assistant", content: "a1", meta: history }, m.fsx, 2)
+    appendTranscript(HOME, "s1", { role: "system", content: "note" }, m.fsx, 3)
+    appendTranscript(HOME, "s1", { role: "user", content: "q2" }, m.fsx, 4)
+    appendTranscript(HOME, "s1", { role: "assistant", content: "a2" }, m.fsx, 5)
+
+    truncateTranscriptToUserTurns(HOME, "s1", 1, m.fsx)
+    const kept = Array.from(iterTranscriptEntries(HOME, "s1", m.fsx))
+    expect(kept.map((e) => e.content)).toEqual(["q1", "a1", "note"])
+    expect(kept[1]!.meta).toEqual(history)
+    expect(kept[0]!.ts).toBe(1)
+
+    truncateTranscriptToUserTurns(HOME, "s1", 0, m.fsx)
+    expect(Array.from(iterTranscriptEntries(HOME, "s1", m.fsx))).toEqual([])
   })
 
   it("readTranscriptTail returns hasEntries=false for missing/empty/corrupt files", () => {

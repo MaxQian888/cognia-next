@@ -4,6 +4,7 @@
  * without a live session.
  */
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import { usageInfoFromRecord } from "@/lib/claude/usage"
 import {
   isKnownCanonicalAgentEventKind,
   type AgentEventEnvelope,
@@ -445,25 +446,24 @@ export function canonicalEnvelopeToActions(
           ...(event.isError ? { isError: true } : {}),
         },
       ]
-    case "usage":
+    case "usage": {
+      // Live occupancy arrives as `used`/`size`, or as the capture stream's
+      // `contextTokens`/`contextWindow` (external agents).
+      const used = Number(event.usage.used ?? event.usage.contextTokens)
+      const size = Number(event.usage.size ?? event.usage.contextWindow)
       return event.partial
-        ? Number.isFinite(Number(event.usage.used)) &&
-          Number.isFinite(Number(event.usage.size)) &&
-          Number(event.usage.size) > 0
-          ? [
-              {
-                type: "SET_CONTEXT_USAGE",
-                used: Number(event.usage.used),
-                size: Number(event.usage.size),
-              },
-            ]
+        ? Number.isFinite(used) && Number.isFinite(size) && size > 0
+          ? [{ type: "SET_CONTEXT_USAGE", used, size }]
           : []
         : [
             {
               type: "SET_USAGE",
-              usage: event.usage as Parameters<typeof Object.assign>[0],
-            } as TuiAction,
+              // The built-in sidecar's block is snake_case; reading it as
+              // UsageInfo showed every completed turn as 0 tokens.
+              usage: usageInfoFromRecord(event.usage) ?? {},
+            },
           ]
+    }
     case "compact":
       return [
         {

@@ -97,6 +97,31 @@ describe("cliConfigFileSchema.streamIdleTimeoutMs", () => {
   })
 })
 
+describe("cliConfigFileSchema.providers context windows", () => {
+  it("accepts a provider-wide and a per-model window", () => {
+    expect(
+      cliConfigFileSchema.safeParse({
+        providers: {
+          relay: {
+            protocol: "openai",
+            contextWindow: 1_000_000,
+            models: { "deepseek-v4.1-flash-free": { contextWindow: 1_000_000 }, other: {} },
+          },
+        },
+      }).success
+    ).toBe(true)
+  })
+
+  it("rejects non-positive windows and unknown per-model keys", () => {
+    const parse = (relay: unknown) =>
+      cliConfigFileSchema.safeParse({ providers: { relay } }).success
+    expect(parse({ contextWindow: 0 })).toBe(false)
+    expect(parse({ contextWindow: 1.5 })).toBe(false)
+    expect(parse({ models: { m: { contextWindow: -1 } } })).toBe(false)
+    expect(parse({ models: { m: { contextwindow: 1000 } } })).toBe(false)
+  })
+})
+
 describe("cliConfigFileSchema.aiSdkMaxSteps", () => {
   it("defaults to 256 in the resolved config", () => {
     expect(DEFAULT_RESOLVED_CONFIG.aiSdkMaxSteps).toBe(256)

@@ -12,8 +12,10 @@
  * Because the CLI's per-turn capture loop is NOT active between turns, this
  * runner subscribes to that channel itself, sends the control message, and
  * resolves when the boundary arrives (re-using `compactBoundaryFromInner` so the
- * wire shape stays single-sourced) — or after a timeout, so a provider that
- * never emits a boundary can't hang the UI. Pure + fully injected for tests.
+ * wire shape stays single-sourced), when the sidecar reports that no boundary
+ * will follow (see {@link manualCompactOutcomeFromInner}), or after a timeout,
+ * so a provider that never answers can't hang the UI. Pure + fully injected
+ * for tests.
  */
 import { compactBoundaryFromInner, type CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
@@ -22,6 +24,36 @@ interface SidecarEnvelope {
   type?: string
   sessionId?: string
   event?: unknown
+}
+
+/** Why a manual compaction ended without a boundary (mirrors the sidecar). */
+export type ManualCompactOutcome = "nothing_to_compact" | "skipped_by_plugin" | "deferred"
+
+const OUTCOME_FALLBACK: Readonly<Record<ManualCompactOutcome, string>> = {
+  nothing_to_compact: "Nothing to compact yet: the conversation is still short.",
+  skipped_by_plugin: "Compaction skipped: a plugin's PreCompact hook declined it.",
+  deferred: "A turn is running; compaction will apply before the next turn.",
+}
+
+/**
+ * Read the sidecar's `informational` system event that reports a manual
+ * compaction's outcome when no `compact_boundary` follows, or `null`.
+ */
+export function manualCompactOutcomeFromInner(
+  inner: unknown
+): { outcome: ManualCompactOutcome; message: string } | null {
+  const ev = inner as {
+    type?: unknown
+    subtype?: unknown
+    content?: unknown
+    compact_outcome?: unknown
+  } | null
+  if (!ev || ev.type !== "system" || ev.subtype !== "informational") return null
+  const outcome = ev.compact_outcome
+  if (outcome !== "nothing_to_compact" && outcome !== "skipped_by_plugin" && outcome !== "deferred")
+    return null
+  const content = typeof ev.content === "string" ? ev.content.trim() : ""
+  return { outcome, message: content || OUTCOME_FALLBACK[outcome] }
 }
 
 export interface RunManualCompactDeps {
@@ -80,8 +112,16 @@ export function runManualCompact(deps: RunManualCompactDeps): Promise<void> {
       const env = payload as SidecarEnvelope | null
       if (!env || env.type !== "event" || env.sessionId !== sessionId) return
       const boundary = compactBoundaryFromInner(env.event)
-      if (!boundary) return
-      emit(boundary)
+      if (boundary) {
+        emit(boundary)
+        finish()
+        return
+      }
+      // No boundary is coming: the sidecar says why (nothing old enough to
+      // fold, a plugin declined, or a running turn defers it).
+      const outcome = manualCompactOutcomeFromInner(env.event)
+      if (!outcome) return
+      onNotice(outcome.message)
       finish()
     })
 

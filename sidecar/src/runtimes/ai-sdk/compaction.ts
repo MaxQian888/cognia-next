@@ -58,6 +58,30 @@ export interface CompactorOptions {
   streamTextOverride?: (args: Record<string, unknown>) => unknown
   isCancelled(): boolean
 }
+/** Why a manual compaction ended without a `compact_boundary`. */
+export type ManualCompactOutcome = "nothing_to_compact" | "skipped_by_plugin" | "deferred"
+
+/**
+ * The `informational` system event reporting a manual compaction's outcome
+ * when no boundary follows. `compact_outcome` is what a waiting `/compact`
+ * matches; `content` is what any transcript renders.
+ */
+export function manualCompactOutcomeEvent(
+  sdkSessionId: string,
+  outcome: ManualCompactOutcome,
+  content: string
+): Record<string, unknown> {
+  return {
+    type: "system",
+    subtype: "informational",
+    uuid: randomUUID(),
+    session_id: sdkSessionId,
+    level: "info",
+    content,
+    compact_outcome: outcome,
+  }
+}
+
 export function createCompactor({
   state,
   conversation,
@@ -222,6 +246,11 @@ export function createCompactor({
     signal.throwIfAborted()
     if (preCompactDecision.skip) {
       log("info", "compaction skipped by plugin preCompact decision")
+      if (force)
+        reportManualOutcome(
+          "skipped_by_plugin",
+          "Compaction skipped: a plugin's PreCompact hook declined it."
+        )
       return
     }
 
@@ -242,7 +271,16 @@ export function createCompactor({
       // uses) so the drain-line budget doesn't fall back to the regex table.
       ...(typeof comp.contextWindow === "number" ? { contextWindow: comp.contextWindow } : {}),
     })
-    if (plan.kind === "none") return
+    if (plan.kind === "none") {
+      // A manual `/compact` waits for an answer; say why nothing changed
+      // instead of leaving the caller to time out.
+      if (force)
+        reportManualOutcome(
+          "nothing_to_compact",
+          `Nothing to compact yet: the conversation still fits in the ${keepRecent} most recent messages kept verbatim.`
+        )
+      return
+    }
 
     // The renderer-supplied prompt already folds in the app-level focus; a
     // manual `/compact <focus>` arg layers an extra instruction on top.
@@ -494,6 +532,15 @@ export function createCompactor({
         ...(plan.kind === "optical" && !opticalMeta ? { opticalFallback: true } : {}),
       },
     }
+  }
+
+  /** Tell a manual compaction's caller it finished without a boundary. */
+  function reportManualOutcome(outcome: ManualCompactOutcome, content: string) {
+    emit({
+      type: "event",
+      sessionId,
+      event: manualCompactOutcomeEvent(sdkSessionId, outcome, content),
+    })
   }
 
   function publish(job: Job) {

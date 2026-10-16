@@ -10,6 +10,8 @@ import {
   getModelContextWindow,
   resolveContextWindowUsage,
   sumSessionUsage,
+  usageInfoFromRecord,
+  usageInfoFromUsageBlock,
   tokensInWindow,
 } from "./usage"
 import type { UsageInfo } from "./adapter"
@@ -396,5 +398,55 @@ describe("resolveContextWindowUsage", () => {
       resolveContextWindowUsage({ totalTokens: 1, maxTokens: 0, percentage: 0 }, usage, "x", 10_000)
         .windowSource
     ).toBe("override")
+  })
+})
+
+describe("usageInfoFromUsageBlock", () => {
+  it("reads the snake_case result block, cost and duration", () => {
+    expect(
+      usageInfoFromUsageBlock(
+        {
+          input_tokens: 100,
+          output_tokens: 20,
+          context_input_tokens: 80,
+          cache_read_input_tokens: 64,
+          cache_creation_input_tokens: 0,
+          reasoning_tokens: 4,
+          cache_creation: { ephemeral_5m_input_tokens: 3, ephemeral_1h_input_tokens: 0 },
+          server_tool_use: { web_search: 2, web_fetch: 0 },
+        },
+        { totalCostUsd: 0.5, durationMs: 900 }
+      )
+    ).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      contextInputTokens: 80,
+      cacheReadInputTokens: 64,
+      cacheCreationInputTokens: 0,
+      cacheCreation5mInputTokens: 3,
+      reasoningTokens: 4,
+      serverToolUse: { web_search: 2 },
+      totalCostUsd: 0.5,
+      durationMs: 900,
+    })
+  })
+
+  it("returns null when nothing was reported", () => {
+    expect(usageInfoFromUsageBlock(undefined)).toBeNull()
+    expect(usageInfoFromUsageBlock({})).toBeNull()
+  })
+})
+
+describe("usageInfoFromRecord", () => {
+  it("converts a snake_case block and keeps a camel-case one", () => {
+    expect(usageInfoFromRecord({ input_tokens: 7, output_tokens: 1 })).toEqual({
+      inputTokens: 7,
+      outputTokens: 1,
+    })
+    expect(usageInfoFromRecord({ inputTokens: 7, contextWindow: 200 })).toEqual({
+      inputTokens: 7,
+      contextWindow: 200,
+    })
+    expect(usageInfoFromRecord({ estimatedThinkingTokens: 5 })).toBeNull()
   })
 })

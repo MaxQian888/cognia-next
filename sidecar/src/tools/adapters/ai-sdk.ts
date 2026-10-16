@@ -29,6 +29,7 @@ import {
 
 import { awaitPluginToolResponse } from "../plugin/proxy.ts"
 import { createToolPermissionGate } from "../../policy/permission/ai-sdk-gate.ts"
+import { createPreMutationReporter } from "../middleware/file-checkpoint.ts"
 import { createDoomLoopGuard } from "../../policy/doom-loop.ts"
 import { assertModelSafeToolOutput } from "../../policy/pii/tool-output.ts"
 import { markAiSdkToolSource } from "./ai-sdk-tool-search.ts"
@@ -70,6 +71,9 @@ export interface AiSdkToolSendOptions extends PermissionSendOptions {
   planTools?: unknown
   sandboxRuntimeRef?: unknown
   turnId?: string
+  /** Snapshot files before a mutating call runs (see `file-checkpoint.ts`). */
+  fileCheckpointFrames?: boolean
+  additionalDirectories?: unknown
   execution?: {
     composition?: { toolPresentation?: string }
     identity?: { attemptId?: string }
@@ -361,13 +365,39 @@ export function buildAiSdkTools({
   // Anthropic path, which gets a fresh guard per `query()`). Falls back to an
   // owned guard for callers/tests that don't pass one.
   const doomGuard = providedDoomGuard ?? createDoomLoopGuard()
-  const gate = createToolPermissionGate({
+  const permissionGate = createToolPermissionGate({
     emit,
     sessionId,
     pendingApprovals,
     sendOptions,
     doomGuard,
   })
+  // A host that rewinds files gets the original bytes of every target after
+  // the gate allows a call and before the tool runs; earlier would snapshot
+  // calls that are then denied, later would race the write.
+  const reportPreMutation =
+    sendOptions.fileCheckpointFrames === true
+      ? createPreMutationReporter({
+          emit: (frame) => emit({ ...frame }),
+          sessionId,
+          cwd: sendOptions.cwd,
+          workspaceRoots: [
+            ...(sendOptions.cwd ? [sendOptions.cwd] : []),
+            ...(Array.isArray(sendOptions.additionalDirectories)
+              ? sendOptions.additionalDirectories.filter(
+                  (dir): dir is string => typeof dir === "string" && dir.length > 0
+                )
+              : []),
+          ],
+        })
+      : null
+  const gate: ToolPermissionGate = reportPreMutation
+    ? async (toolName, input, signal) => {
+        const effective = await permissionGate(toolName, input, signal)
+        reportPreMutation(toolName, effective)
+        return effective
+      }
+    : permissionGate
 
   // Deny-list enforcement. The Anthropic path delegates allowed/disallowed
   // tool filtering to the agent SDK; `streamText` has no such concept, so the

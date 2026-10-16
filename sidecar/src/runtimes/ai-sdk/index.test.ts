@@ -1752,6 +1752,51 @@ test("dispatchAiSdk ends the turn with an error once stream retries are spent", 
   assert.match(ended!.error, /no events for 30ms/)
 })
 
+test("dispatchAiSdk does not count a tool's run time as a stalled stream", async () => {
+  // The tool executes for several idle bounds between its call and result;
+  // the stream is silent on purpose and the turn must finish on its own.
+  const { events, emit } = captureEmit()
+  let calls = 0
+  const slowTool = () => {
+    calls += 1
+    return {
+      fullStream: (async function* () {
+        yield { type: "tool-call", toolCallId: "c1", toolName: "bash", input: {} }
+        await new Promise((r) => setTimeout(r, 120))
+        yield { type: "tool-result", toolCallId: "c1", toolName: "bash", output: "ok" }
+        yield { type: "text-delta", text: "built" }
+        yield { type: "finish", finishReason: "stop" }
+      })(),
+      usage: Promise.resolve({}),
+      response: Promise.resolve({ id: "r0", messages: [] }),
+      steps: Promise.resolve([{}]),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o-mini",
+      providerCredentials: { apiKey: "sk", protocol: "openai" },
+    },
+    emit,
+    log: () => {},
+    streamText: slowTool,
+    streamIdleTimeoutMs: 30,
+  })
+  await new Promise<void>((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.equal(ended!.error, undefined, "the turn completes without an idle timeout")
+  assert.equal(calls, 1, "no retry was needed")
+})
+
 test("dispatchAiSdk continues the loop on an unknown finishReason that produced output", async () => {
   // opencode v1.18.21: a provider reporting a finishReason the SDK can't map
   // used to truncate the answer mid-generation. The truncated leg is already
@@ -2151,6 +2196,75 @@ test("requestCompact() forces a manual boundary between turns", async () => {
   const boundary = events.find((e) => e.event?.subtype === "compact_boundary")
   assert.ok(boundary, "a manual compact boundary is emitted")
   assert.equal(boundary.event.compact_metadata.trigger, "manual")
+})
+
+test("requestCompact() with nothing older than the kept messages reports it instead of staying silent", async () => {
+  const { events, emit } = captureEmit()
+  const session = startSession({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      // Two messages exist and six are kept verbatim: there is nothing to fold.
+      compaction: { enabled: true, keepRecent: 6 },
+    },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([
+      { type: "text-delta", id: "1", text: "A1" },
+      { type: "finish", finishReason: "stop" },
+    ]),
+  })
+  await waitForEvent(events, (e) => e.event?.type === "assistant")
+  await new Promise<void>((r) => setTimeout(r, 30))
+  await session.requestCompact()
+  assert.equal(
+    events.some((e) => e.event?.subtype === "compact_boundary"),
+    false
+  )
+  const outcome = events.find((e) => e.event?.compact_outcome)
+  assert.ok(outcome, "a manual compaction outcome is emitted")
+  assert.equal(outcome.event.type, "system")
+  assert.equal(outcome.event.subtype, "informational")
+  assert.equal(outcome.event.compact_outcome, "nothing_to_compact")
+  assert.match(String(outcome.event.content), /Nothing to compact yet/)
+  assert.match(String(outcome.event.content), /6 most recent messages/)
+})
+
+test("requestCompact() during a turn says the compaction is deferred", async () => {
+  const { events, emit } = captureEmit()
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const session = startSession({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: { enabled: true, keepRecent: 1 },
+    },
+    emit,
+    log: () => {},
+    streamText: () => ({
+      fullStream: (async function* () {
+        await gate
+        yield { type: "text-delta", id: "1", text: "A1" }
+        yield { type: "finish", finishReason: "stop" }
+      })(),
+    }),
+  })
+  await new Promise<void>((r) => setTimeout(r, 10))
+  await session.requestCompact()
+  const outcome = events.find((e) => e.event?.compact_outcome)
+  assert.ok(outcome, "the deferral is reported while the turn runs")
+  assert.equal(outcome.event.compact_outcome, "deferred")
+  release()
+  await waitForEvent(events, (e) => e.event?.type === "assistant")
 })
 
 test("background compaction leaves the active model leg unchanged and publishes on the next turn", async () => {

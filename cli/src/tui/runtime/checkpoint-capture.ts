@@ -12,11 +12,14 @@
  *
  * Pure-ish: the store fs + clock are injected, so it unit-tests without disk.
  */
+import path from "node:path"
+
 import {
   createCheckpointStore,
   type Checkpoint,
   type CheckpointFs,
   type CheckpointStore,
+  type PreMutationSnapshot,
 } from "./checkpoint-store"
 import { MUTATING_TOOLS } from "./pre-tool-seam"
 
@@ -39,6 +42,11 @@ export interface CheckpointCapture {
   beginTurn(cellCount: number, label: string): void
   /** A tool is about to run; snapshot the target file if the tool mutates it. */
   onToolCall(toolName: string, input: unknown): void
+  /**
+   * The sidecar's `file_pre_mutation` frame: the bytes it read after the gate
+   * allowed a call and before the tool ran. Authoritative over `onToolCall`.
+   */
+  onPreMutationFrame(frame: unknown): void
   /** Flush the open segment and return all checkpoints, newest-first. */
   list(): Checkpoint[]
   /** The underlying store (for restore). */
@@ -54,6 +62,38 @@ function filePathOf(input: unknown): string | null {
     if (typeof value === "string" && value.length > 0) return value
   }
   return null
+}
+
+/**
+ * Decode a sidecar `file_pre_mutation` frame (see
+ * `sidecar/src/tools/middleware/file-checkpoint.ts`). Malformed entries are
+ * dropped; a frame for another session is the caller's to filter.
+ */
+export function preMutationSnapshotsOf(frame: unknown): PreMutationSnapshot[] {
+  if (!frame || typeof frame !== "object") return []
+  const { type, entries } = frame as { type?: unknown; entries?: unknown }
+  if (type !== "file_pre_mutation" || !Array.isArray(entries)) return []
+  const out: PreMutationSnapshot[] = []
+  for (const raw of entries) {
+    if (!raw || typeof raw !== "object") continue
+    const entry = raw as Record<string, unknown>
+    const absPath = entry.path
+    const before = entry.before
+    if (typeof absPath !== "string" || !path.isAbsolute(absPath)) continue
+    if (before !== "file" && before !== "absent" && before !== "directory") continue
+    const omitted = entry.omitted
+    if (omitted === "too-large" || omitted === "unreadable" || omitted === "outside-workspace") {
+      out.push({ absPath, before, omitted })
+      continue
+    }
+    if (before === "file") {
+      if (typeof entry.contentBase64 !== "string") continue
+      out.push({ absPath, before, content: Buffer.from(entry.contentBase64, "base64") })
+      continue
+    }
+    out.push({ absPath, before })
+  }
+  return out
 }
 
 export function createCheckpointCapture(deps: CheckpointCaptureDeps): CheckpointCapture {
@@ -102,6 +142,14 @@ export function createCheckpointCapture(deps: CheckpointCaptureDeps): Checkpoint
       ensureOpen(sid)
       const path = filePathOf(input)
       if (path) store.recordPreMutation(sid, path)
+    },
+    onPreMutationFrame(frame) {
+      const snapshots = preMutationSnapshotsOf(frame)
+      if (snapshots.length === 0) return
+      const sid = deps.getSessionId()
+      if (!sid) return
+      ensureOpen(sid)
+      for (const snapshot of snapshots) store.recordSnapshot(sid, snapshot)
     },
     list() {
       const sid = deps.getSessionId()

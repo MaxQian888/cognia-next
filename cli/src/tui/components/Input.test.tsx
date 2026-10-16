@@ -179,6 +179,36 @@ describe("Input (rich composer)", () => {
     expect(onSubmit).toHaveBeenCalledWith("abc")
   })
 
+  it("sends a multi-line paste when Enter lands in the same batch as the paste", () => {
+    // Regression (TUI-009): a bracketed paste followed at once by Enter left the
+    // two lines in the composer and sent nothing — the Enter handler read the
+    // draft from before the paste, saw it empty, and returned.
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    act(() => {
+      __fireInput("Reply only OK.\nThis is the second line.")
+      __fireInput("\r", { return: true })
+    })
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(onSubmit).toHaveBeenCalledWith("Reply only OK.\nThis is the second line.")
+    expect(container.textContent).not.toContain("second line")
+  })
+
+  it("delivers each submission once, including two sent in one batch", () => {
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} />)
+    act(() => {
+      __fireInput("one")
+      __fireInput("\r", { return: true })
+      __fireInput("two")
+      __fireInput("\r", { return: true })
+    })
+    expect(onSubmit.mock.calls).toEqual([["one"], ["two"]])
+    // An Enter on the now-empty draft sends nothing more.
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledTimes(2)
+  })
+
   it("shows the placeholder when empty and hides it once typing starts", () => {
     const { container } = render(<Harness onSubmit={jest.fn()} />)
     expect(container.textContent).toContain("Ask, run /commands")

@@ -11496,6 +11496,10 @@
       "plan": "plan"
     },
     "restartRequired": "Saved. Restart the CLI to apply screen reader mode.",
+    "rewindNotRestored": "Not restored: {paths}.",
+    "rewindReasonOutsideWorkspace": "outside the workspace",
+    "rewindReasonTooLarge": "too large to snapshot",
+    "rewindReasonUnreadable": "unreadable",
     "screenReader": "Screen reader mode",
     "screenReaderHint": "Plain output without animation or mouse capture. Restart the CLI to apply.",
     "settings": "Settings",

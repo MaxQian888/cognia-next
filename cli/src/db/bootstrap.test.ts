@@ -11,6 +11,7 @@ import { getRecentErrorLogs } from "@/packages/logging/src/recent-errors"
 import {
   __resetCliDbForTesting,
   ensureCliDb,
+  flushOpenCliDb,
   hasSnapshotStore,
   importSnapshotStore,
   installFakeIndexedDb,
@@ -1013,6 +1014,72 @@ describe("ensureCliDb", () => {
       const [primary] = Object.values(written.dbs) as [{ tables: Record<string, unknown> }]
       expect(primary.tables).toHaveProperty("scheduledTasks")
       expect(primary.tables).not.toHaveProperty("scheduledTaskRuns")
+    } finally {
+      await handle.dispose()
+      __resetCliDbForTesting()
+    }
+  })
+})
+
+describe("ensureCliDb — write-triggered flush", () => {
+  // A command that wrote a row and did not call `scheduleFlush` (`/remember`, a
+  // workflow run started by a model tool) used to stay in memory until some
+  // unrelated flush, and vanished when the process ended first.
+  it("schedules a flush of the written table on the default database", async () => {
+    __resetCliDbForTesting()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-write-flush-"))
+    const scheduled: Array<() => void | Promise<void>> = []
+    const handle = await ensureCliDb({
+      home,
+      schedule: (fn) => {
+        scheduled.push(fn)
+        return () => {
+          const at = scheduled.indexOf(fn)
+          if (at >= 0) scheduled.splice(at, 1)
+        }
+      },
+    })
+    try {
+      await handle.flush() // settle the boot-time dirty set
+      expect(scheduled).toHaveLength(0)
+      const { getDb } = await import("@/lib/db/schema")
+      const db = getDb()
+      await db.table("memories").put({ id: "m-write-flush", text: "KESTREL-3957" })
+      await new Promise((r) => setImmediate(r))
+      expect(scheduled).toHaveLength(1)
+      await scheduled[0]!()
+
+      const tableDir = path.join(home, "db.json.tables")
+      const file = fs
+        .readdirSync(tableDir)
+        .find((name) => name.endsWith(".json") && name.includes("memories"))
+      expect(file).toBeDefined()
+      const rows = JSON.parse(fs.readFileSync(path.join(tableDir, file!), "utf8")) as Array<{
+        id: string
+      }>
+      expect(rows.map((row) => row.id)).toContain("m-write-flush")
+    } finally {
+      await handle.dispose()
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("flushOpenCliDb persists the open database and is a no-op when none is open", async () => {
+    __resetCliDbForTesting()
+    await expect(flushOpenCliDb()).resolves.toBeUndefined()
+    const writes: string[] = []
+    const handle = await ensureCliDb({
+      home: "/home",
+      readSnapshot: () => null,
+      writeSnapshot: (_p, data) => {
+        writes.push(data)
+      },
+      schedule: () => () => {},
+    })
+    try {
+      await flushOpenCliDb()
+      expect(writes).toHaveLength(1)
     } finally {
       await handle.dispose()
       __resetCliDbForTesting()

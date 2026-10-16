@@ -6,6 +6,7 @@ import { resolveConfig } from "./load"
 import { resolveAgentMode } from "./agent-mode"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "./schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
+import { resolveModelContextLength } from "@/lib/ai/model-options"
 
 function cfg(p: Partial<ResolvedConfig> = {}): ResolvedConfig {
   const base: ResolvedConfig = {
@@ -398,6 +399,85 @@ describe("toBuildContext — provider credentials", () => {
     // A built-in id with an explicit protocol must NOT also be misclassified
     // as a genuinely custom provider.
     expect(ctx.appSettings?.customProviders).toBeUndefined()
+  })
+
+  it("hands a custom provider's declared windows to the window lookup as model metadata", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "relay",
+        providers: {
+          relay: {
+            protocol: "openai",
+            baseURL: "http://127.0.0.1:8787/v1",
+            model: "deepseek-v4.1-flash-free",
+            contextWindow: 1_000_000,
+            models: { "small-model": { contextWindow: 32_000 } },
+          },
+        },
+      }),
+    })
+    const customs = ctx.appSettings?.customProviders as unknown as Array<{
+      customModelMetadata?: Record<string, { id: string; contextLength: number }>
+    }>
+    expect(customs[0]?.customModelMetadata).toEqual({
+      "small-model": { id: "small-model", contextLength: 32_000 },
+      "deepseek-v4.1-flash-free": { id: "deepseek-v4.1-flash-free", contextLength: 1_000_000 },
+    })
+    expect(
+      resolveModelContextLength(
+        "deepseek-v4.1-flash-free",
+        "relay",
+        ctx.appSettings?.providerSettings,
+        ctx.appSettings?.customProviders
+      )
+    ).toBe(1_000_000)
+    expect(
+      resolveModelContextLength(
+        "small-model",
+        "relay",
+        ctx.appSettings?.providerSettings,
+        ctx.appSettings?.customProviders
+      )
+    ).toBe(32_000)
+  })
+
+  it("lets a built-in provider's declared window outrank its catalog entry", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "openai",
+        providers: { openai: { apiKey: "sk-o", model: "gpt-unlisted", contextWindow: 400_000 } },
+      }),
+    })
+    expect(ctx.appSettings?.providerSettings?.openai?.discoveredModels).toEqual([
+      { id: "gpt-unlisted", contextLength: 400_000 },
+    ])
+    expect(
+      resolveModelContextLength(
+        "gpt-unlisted",
+        "openai",
+        ctx.appSettings?.providerSettings,
+        ctx.appSettings?.customProviders
+      )
+    ).toBe(400_000)
+  })
+
+  it("adds no model rows when nothing declares a window", () => {
+    const ctx = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        provider: "my-llm",
+        providers: { "my-llm": { protocol: "openai", model: "m" }, openai: { apiKey: "k" } },
+      }),
+    })
+    expect(ctx.appSettings?.providerSettings?.openai?.discoveredModels).toBeUndefined()
+    expect(
+      (ctx.appSettings?.customProviders as unknown as Array<Record<string, unknown>>)[0]
+    ).not.toHaveProperty("customModelMetadata")
   })
 
   it("carries a --protocol / COGNIA_PROTOCOL override all the way to apiProtocol", () => {

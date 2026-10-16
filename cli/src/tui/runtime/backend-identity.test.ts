@@ -111,6 +111,24 @@ describe("backendContextWindow", () => {
     expect(backendContextWindow(withModel(base, "claude-x"))).toBe(128_000)
   })
 
+  it("prefers a window the user declared for the built-in agent's model", () => {
+    const relay: ResolvedConfig = {
+      ...base,
+      provider: "relay",
+      model: "deepseek-v4.1-flash-free",
+      providers: {
+        relay: {
+          protocol: "openai",
+          model: "deepseek-v4.1-flash-free",
+          models: { "deepseek-v4.1-flash-free": { contextWindow: 1_000_000 } },
+        },
+      },
+    }
+    expect(backendContextWindow(relay)).toBe(1_000_000)
+    // A window the session resolved still wins.
+    expect(backendContextWindow(relay, 200_000)).toBe(200_000)
+  })
+
   it("reports no window for an external agent nothing resolved one for", () => {
     // Sizing a gauge from the built-in provider's table here would describe a
     // model this session is not running.

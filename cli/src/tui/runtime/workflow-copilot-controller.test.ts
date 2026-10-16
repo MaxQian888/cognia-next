@@ -77,6 +77,7 @@ describe("copilotCreate", () => {
       ensureDb: async () => {},
       create: async () => row,
       createStore: () => fakeStore() as never,
+      mirrorLastRun: () => () => {},
       register,
       ensurePlugin,
     })
@@ -110,6 +111,7 @@ describe("copilotEdit", () => {
       ensureDb: async () => {},
       get: async () => row,
       createStore: () => fakeStore() as never,
+      mirrorLastRun: () => () => {},
       register: jest.fn(),
       ensurePlugin: async () => {},
     })
@@ -256,5 +258,83 @@ describe("copilotExit", () => {
     })
     expect(replace).not.toHaveBeenCalled()
     expect(actions).toContainEqual({ type: "COPILOT_EXIT" })
+  })
+})
+
+describe("last-run mirror", () => {
+  it("starts mirroring on edit, restarts on re-open, and stops on exit", async () => {
+    const { dispatch } = recorder()
+    const stops: jest.Mock[] = []
+    const mirrorLastRun = jest.fn(() => {
+      const stop = jest.fn()
+      stops.push(stop)
+      return stop
+    })
+    const deps: CopilotDeps = {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => row,
+      createStore: () => fakeStore() as never,
+      register: jest.fn(),
+      ensurePlugin: async () => {},
+      mirrorLastRun,
+      getStore: () => fakeStore(),
+      unregister: jest.fn(),
+    }
+    await copilotEdit("w1", deps)
+    expect(mirrorLastRun).toHaveBeenCalledWith("w1", expect.anything())
+    await copilotEdit("w1", deps)
+    expect(stops[0]).toHaveBeenCalledTimes(1)
+    await copilotExit("w1", deps)
+    expect(stops[1]).toHaveBeenCalledTimes(1)
+  })
+
+  it("feeds a run's step outcomes into the store wf_get_last_run reads", async () => {
+    const { installFakeIndexedDb } = await import("../../db/bootstrap")
+    await installFakeIndexedDb()
+    const { getDb, __resetDbForTesting } = await import("@/lib/db/schema")
+    await getDb().delete()
+    __resetDbForTesting()
+    const db = getDb()
+    const setLastRunByStepId = jest.fn()
+    const store = { getState: () => ({ ...fakeStore().state, setLastRunByStepId }) }
+    const { dispatch } = recorder()
+    const deps: CopilotDeps = {
+      dispatch,
+      ensureDb: async () => {},
+      get: async () => row,
+      createStore: () => store as never,
+      register: jest.fn(),
+      ensurePlugin: async () => {},
+      getStore: () => fakeStore(),
+      unregister: jest.fn(),
+    }
+    try {
+      await copilotEdit("w1", deps)
+      await db.workflowRuns.put({
+        id: "r1",
+        workflowId: "w1",
+        status: "succeeded",
+        startedAt: 1,
+      } as never)
+      await db.workflowRunEvents.bulkPut([
+        { id: "e1", runId: "r1", ts: 2, type: "step_started", stepId: "n1" },
+        { id: "e2", runId: "r1", ts: 5, type: "step_completed", stepId: "n1" },
+      ] as never)
+      const deadline = Date.now() + 2_000
+      while (
+        Date.now() < deadline &&
+        !setLastRunByStepId.mock.calls.some(([map]) => map?.n1?.status === "succeeded")
+      ) {
+        await new Promise((r) => setTimeout(r, 10))
+      }
+      expect(setLastRunByStepId).toHaveBeenCalledWith(
+        expect.objectContaining({ n1: expect.objectContaining({ status: "succeeded" }) })
+      )
+    } finally {
+      await copilotExit("w1", deps)
+      await getDb().delete()
+      __resetDbForTesting()
+    }
   })
 })

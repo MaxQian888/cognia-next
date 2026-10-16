@@ -501,6 +501,27 @@ test("start forwards prepareStep so callers can change active tools between step
   assert.equal(captured!.prepareStep, prepareStep)
 })
 
+test("start forwards repairToolCall with tools, and drops it when there are none", async () => {
+  const captured: StreamArgs[] = []
+  const fakeStreamText = (args: Record<string, unknown>) => {
+    captured.push(args as StreamArgs)
+    return { stream: (async function* () {})(), usage: Promise.resolve({}) }
+  }
+  const repairToolCall = async () => null
+  for (const tools of [{ read: { execute: async () => "ok" } }, undefined]) {
+    await makeAiSdkAdapter("openai").start({
+      model: "gpt-x",
+      messages: [],
+      ...(tools ? { tools } : {}),
+      repairToolCall,
+      credentials: { apiKey: "k" },
+      streamTextFn: fakeStreamText,
+    })
+  }
+  assert.equal(captured[0]!.repairToolCall, repairToolCall)
+  assert.equal(captured[1]!.repairToolCall, undefined)
+})
+
 test("buildReasoningProviderOptions(anthropic): a thinking budget enables extended thinking", () => {
   assert.deepEqual(
     buildReasoningProviderOptions("anthropic", undefined, { maxThinkingTokens: 8000 }),

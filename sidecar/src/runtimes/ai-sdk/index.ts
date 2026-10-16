@@ -1,6 +1,6 @@
 import { drainPendingRoundTrips } from "../common/round-trips.ts"
 import { createOutputReviewer } from "./output-review.ts"
-import { createCompactor } from "./compaction.ts"
+import { createCompactor, manualCompactOutcomeEvent } from "./compaction.ts"
 import type { ToolSet } from "ai"
 import type { SendOptions, Prompt } from "../../shared/wire/inbound.ts"
 import type { HostRpcCaller } from "../../tools/state/host-background-shells.ts"
@@ -45,6 +45,7 @@ import { createToolSessionContext } from "../../tools/session.ts"
 import { randomUUID } from "node:crypto"
 import { classifyProviderError } from "@cognia/provider-routing/error-classifier"
 import { createEventAdapter } from "./events.ts"
+import { createToolCallRepair } from "../../tools/adapters/ai-sdk-tool-call-repair.ts"
 import { makeInputStream } from "../../shared/input-stream.ts"
 import { extractHttpErrorMeta } from "../../providers/http-error-meta.ts"
 import {
@@ -58,6 +59,7 @@ import {
 import {
   STREAM_IDLE_TIMEOUT_MS,
   StreamIdleTimeoutError,
+  trackExecutingToolCall,
   withIdleTimeout,
 } from "../../providers/stream-watchdog.ts"
 import { resolveAdapter } from "../../providers/protocol-adapters/registry.ts"
@@ -402,6 +404,7 @@ export function dispatchAiSdk({
   /** @type {Record<string, unknown> | undefined} */
   let toolsCache: ToolSet | undefined
   let toolSearchController: ReturnType<typeof createAiSdkToolSearchController> = null
+  const repairToolCallFn = createToolCallRepair()
   // Doom-loop guards owned by this session (the tool gate's + the MCP gate's).
   // The tools map is built once, so the guards live for the whole multi-turn
   // session; reset them per turn so a legitimate identical call repeated ACROSS
@@ -958,6 +961,9 @@ export function dispatchAiSdk({
           messages: messagesForSend.map((message) => ({ ...message, content: message.content })),
           modelParams,
           tools: toolsCache,
+          // Near-miss tool names and aliased argument keys (common behind
+          // relays) are repaired instead of failing the call.
+          repairToolCall: repairToolCallFn,
           ...(toolSearchController ? { prepareStep: toolSearchController.prepareStep } : {}),
           maxSteps: perLegCap,
           credentials: creds,
@@ -1005,16 +1011,22 @@ export function dispatchAiSdk({
         // The closing `finish` part carries the leg's finishReason — the signal
         // that decides whether to continue the agent loop.
         let finishReason: unknown = null
+        // Tool calls of this leg that are executing locally: the stream emits
+        // nothing between a call and its result, so that gap is the tool's
+        // (bounded by its own timeout), not a stalled provider.
+        const executingToolCalls = new Set<string>()
         try {
           // Idle-gap bound on the event stream (default 5 min, the provider
           // timeout the webview fetch wrapper applies too). `streamIdleTimeoutMs`
           // is a dispatch-level override so tests don't wait out the real bound.
           for await (const event of withIdleTimeout(
             result.fullStream,
-            streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS
+            streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS,
+            { suspended: () => executingToolCalls.size > 0 }
           )) {
             const evt = record(event)
             if (cancelled) break
+            trackExecutingToolCall(executingToolCalls, evt)
             if (evt?.type === "error") streamError = evt.error
             if (evt?.type === "finish") finishReason = evt.finishReason ?? finishReason
             if (evt?.type === "finish-step") {
@@ -1499,6 +1511,15 @@ export function dispatchAiSdk({
       if (closing) return
       if (active) {
         manualCompactPending = { focus }
+        emit({
+          type: "event",
+          sessionId,
+          event: manualCompactOutcomeEvent(
+            sdkSessionId,
+            "deferred",
+            "A turn is running; compaction will apply before the next turn."
+          ),
+        })
         return
       }
       const requestedGeneration = compactionGeneration

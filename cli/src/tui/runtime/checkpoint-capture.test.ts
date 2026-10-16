@@ -1,4 +1,4 @@
-import { createCheckpointCapture } from "./checkpoint-capture"
+import { createCheckpointCapture, preMutationSnapshotsOf } from "./checkpoint-capture"
 import type { CheckpointFs } from "./checkpoint-store"
 
 function memFs(): CheckpointFs & { files: Map<string, string> } {
@@ -70,5 +70,57 @@ describe("createCheckpointCapture", () => {
     cap.onToolCall("Edit", { pattern: "no path" }) // mutating but no path
     const [cp] = cap.list()
     expect(cp.files).toEqual([])
+  })
+})
+
+describe("pre-mutation frames", () => {
+  it("decodes the sidecar frame and drops malformed entries", () => {
+    const snapshots = preMutationSnapshotsOf({
+      type: "file_pre_mutation",
+      entries: [
+        { path: "/w/a", before: "file", contentBase64: Buffer.from("hi").toString("base64") },
+        { path: "/w/b", before: "absent" },
+        { path: "/w/c", before: "directory" },
+        { path: "/w/d", before: "file", omitted: "too-large" },
+        { path: "relative", before: "absent" },
+        { path: "/w/e", before: "file" },
+        { path: "/w/f", before: "weird" },
+        null,
+      ],
+    })
+    expect(snapshots.map((s) => [s.absPath, s.before, s.omitted])).toEqual([
+      ["/w/a", "file", undefined],
+      ["/w/b", "absent", undefined],
+      ["/w/c", "directory", undefined],
+      ["/w/d", "file", "too-large"],
+    ])
+    expect(Buffer.from(snapshots[0]!.content!).toString()).toBe("hi")
+    expect(preMutationSnapshotsOf({ type: "log" })).toEqual([])
+    expect(preMutationSnapshotsOf(null)).toEqual([])
+  })
+
+  it("records frame snapshots into the open turn so a rewind restores them", () => {
+    const fs = memFs()
+    fs.files.set("/w/existing.txt", "CHANGED")
+    fs.files.set("/w/created.txt", "new file")
+    const cap = createCheckpointCapture({ home: "/home", getSessionId: () => "s1", fs })
+    cap.beginTurn(2, "edit things")
+    cap.onPreMutationFrame({
+      type: "file_pre_mutation",
+      sessionId: "s1",
+      entries: [
+        {
+          path: "/w/existing.txt",
+          before: "file",
+          contentBase64: Buffer.from("ORIGINAL").toString("base64"),
+        },
+        { path: "/w/created.txt", before: "absent" },
+      ],
+    })
+    const [cp] = cap.list()
+    expect(cp!.files.map((f) => f.absPath).sort()).toEqual(["/w/created.txt", "/w/existing.txt"])
+    cap.store.restore(cp!, { files: true, conversation: false })
+    expect(fs.read("/w/existing.txt")).toBe("ORIGINAL")
+    expect(fs.exists("/w/created.txt")).toBe(false)
   })
 })

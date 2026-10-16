@@ -21,6 +21,8 @@ import os from "node:os"
 import { type BuildOptionsContext } from "@/lib/claude/build-options"
 import {
   runAndCaptureAssistantReply as defaultCapture,
+  RunAndCaptureError,
+  type RunAndCapturePartial,
   type RunAndCaptureResult,
   type CaptureStreamEvent,
 } from "@/lib/claude/run-and-capture"
@@ -124,6 +126,11 @@ export interface AgentSessionParams {
   compositionSelection?: AgentCompositionSelectionV1
   /** Definition-owned JSON Schema, lowered onto the native SDK output format. */
   outputSchema?: Record<string, unknown>
+  /**
+   * Have the sidecar snapshot each mutating tool call's target files before
+   * the call runs (`file_pre_mutation` frames), for a host that rewinds files.
+   */
+  fileCheckpoints?: boolean
   /** Resolve one CLI-dispatched child with actor-specific transport overrides. */
   resolveSubagentOptions?: (actorRef: string, ctx: BuildOptionsContext) => Promise<SendOptions>
   /** Provide an actor-scoped permission script for one CLI-dispatched child. */
@@ -229,6 +236,9 @@ export interface SendTurnOptions {
   /** Fired at most once per session when twin grounding is enabled but the
    * desktop bridge is unreachable — the turn proceeds without twin context. */
   onTwinNotice?: (message: string) => void
+  /** Fired once, on the first turn after a resume that left earlier requests
+   * out of the model's context (their turn failed before saving a reply). */
+  onRestoreNotice?: (message: string) => void
   /** Fired at most once per session when the CLI-local db could not be opened
    * because its snapshot was corrupt or schema-incompatible. The snapshot has
    * been moved aside (see {@link CliDbSnapshotError.preservedPath}) and the turn
@@ -319,9 +329,70 @@ export interface AgentSession {
  * the sidecar transport mapping — spawning it, keeping the plugin-tool executor
  * subscribed, and streaming the turn through `runAndCaptureAssistantReply`.
  */
+/**
+ * What a restore could not bring back, for the notice the next turn shows.
+ * `unfinishedTurns` counts requests after the last completed turn: their turn
+ * failed before it saved a provider snapshot, so the model never sees them.
+ */
+export interface RuntimeHistoryRestore {
+  unfinishedTurns: number
+  /** True when no turn ever completed, so the model starts without history. */
+  startsFresh: boolean
+}
+
+/** The notice for a restore that left requests out of the model's context. */
+export function runtimeHistoryRestoreNotice(restore: RuntimeHistoryRestore): string | undefined {
+  const n = restore.unfinishedTurns
+  if (n === 0) return undefined
+  const requests = n === 1 ? "1 earlier request" : `${n} earlier requests`
+  return restore.startsFresh
+    ? `Resumed without model history: ${requests} never finished, so the model has not seen ${n === 1 ? "it" : "them"}. Send ${n === 1 ? "it" : "them"} again if you still need the answer.`
+    : `Resumed from the last completed turn: ${requests} after it did not finish and ${n === 1 ? "is" : "are"} not in the model's context. Send ${n === 1 ? "it" : "them"} again if you still need the answer.`
+}
+
+/**
+ * Validate a saved provider-conversation snapshot: every message has a known
+ * role and content, and every tool call is answered exactly once. Returns the
+ * messages to seed, or why the snapshot cannot be replayed faithfully.
+ */
+function checkConversationSnapshot(
+  saved: unknown[]
+): NonNullable<SendOptions["initialConversation"]> | string {
+  const calls = new Set<string>()
+  const messages: NonNullable<SendOptions["initialConversation"]> = []
+  for (const raw of saved) {
+    if (!raw || typeof raw !== "object") return "a saved message is malformed"
+    const message = raw as { role?: string; content?: unknown }
+    if (
+      typeof message.role !== "string" ||
+      !["system", "user", "assistant", "tool"].includes(message.role) ||
+      !(typeof message.content === "string" || Array.isArray(message.content))
+    )
+      return "a saved message has an incompatible format"
+    messages.push({ ...message, role: message.role })
+    if (!Array.isArray(message.content)) continue
+    for (const part of message.content) {
+      if (!part || typeof part !== "object" || typeof part.type !== "string")
+        return "a saved message content part is malformed"
+      if (part.type === "tool-call") {
+        if (typeof part.toolCallId !== "string" || calls.has(part.toolCallId))
+          return "a saved tool call has a missing or duplicate id"
+        calls.add(part.toolCallId)
+      } else if (part?.type === "tool-result") {
+        if (!calls.delete(part.toolCallId)) return "a saved tool result has no matching call"
+      }
+    }
+  }
+  if (calls.size) return "the saved turn has unresolved tool calls"
+  return messages
+}
+
 /** Reject lossy restoration before dispatching a new provider turn. */
-function restoreRuntimeHistory(options: SendOptions, tail: TranscriptTail) {
-  if (!tail.hasEntries) return
+function restoreRuntimeHistory(
+  options: SendOptions,
+  tail: TranscriptTail
+): RuntimeHistoryRestore | undefined {
+  if (!tail.hasEntries) return undefined
   function fail(reason: string): never {
     throw new Error(
       `Cannot resume this conversation: ${reason}. Start a new session or resume with the original runtime/provider.`
@@ -341,6 +412,10 @@ function restoreRuntimeHistory(options: SendOptions, tail: TranscriptTail) {
   const runtime =
     options.execution?.runtimeAdapter ??
     (options.provider === "anthropic" ? "claude-agent-sdk" : "ai-sdk")
+  // Only failed requests so far: nothing durable was ever produced, so there is
+  // no history to lose by starting the provider conversation empty.
+  if (!latest && tail.lastNonSystemRole === "user")
+    return { unfinishedTurns: tail.unfinishedUserTurns, startsFresh: true }
   if (!saved || saved.version !== 1)
     fail("the saved transcript has no compatible durable runtime history")
   if (saved.runtime !== runtime || saved.provider !== options.provider)
@@ -358,39 +433,20 @@ function restoreRuntimeHistory(options: SendOptions, tail: TranscriptTail) {
         fail("the SDK storage binding is invalid")
       options.claudeAgentSdk = sdkOptionsForStorage(saved.sdkSessionStorage, options.claudeAgentSdk)
     }
-    return
+    // The native session keeps its own record of a failed turn, so nothing
+    // here can say what it does or does not contain.
+    return { unfinishedTurns: 0, startsFresh: false }
   }
-  if (tail.lastNonSystemRole !== "assistant")
-    fail("the last turn did not save a completed provider snapshot")
+  // A turn that failed after the latest snapshot saved nothing durable; the
+  // snapshot is still the last complete provider conversation, so resume from
+  // it and report the requests it does not contain.
   if (!Array.isArray(saved.messages) || saved.messages.length === 0)
     fail("the provider message snapshot is missing")
-  const calls = new Set<string>()
-  const messages: NonNullable<SendOptions["initialConversation"]> = []
-  for (const raw of saved.messages) {
-    if (!raw || typeof raw !== "object") fail("a saved message is malformed")
-    const message = raw as { role?: string; content?: unknown }
-    if (
-      typeof message.role !== "string" ||
-      !["system", "user", "assistant", "tool"].includes(message.role) ||
-      !(typeof message.content === "string" || Array.isArray(message.content))
-    )
-      fail("a saved message has an incompatible format")
-    messages.push({ ...message, role: message.role })
-    if (!Array.isArray(message.content)) continue
-    for (const part of message.content) {
-      if (!part || typeof part !== "object" || typeof part.type !== "string")
-        fail("a saved message content part is malformed")
-      if (part.type === "tool-call") {
-        if (typeof part.toolCallId !== "string" || calls.has(part.toolCallId))
-          fail("a saved tool call has a missing or duplicate id")
-        calls.add(part.toolCallId)
-      } else if (part?.type === "tool-result") {
-        if (!calls.delete(part.toolCallId)) fail("a saved tool result has no matching call")
-      }
-    }
-  }
-  if (calls.size) fail("the saved turn has unresolved tool calls")
+  const checked = checkConversationSnapshot(saved.messages)
+  if (typeof checked === "string") fail(checked)
+  const messages = checked
   options.initialConversation = messages
+  return { unfinishedTurns: tail.unfinishedUserTurns, startsFresh: false }
 }
 
 export function createAgentSession(params: AgentSessionParams): AgentSession {
@@ -478,6 +534,8 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   })
 
   let boot: SidecarBootstrap | null = null
+  /** Set by the first restore; shown once, on the turn that follows it. */
+  let pendingRestoreNotice: string | undefined
   let pluginUnsub: UnlistenFn | null = null
   // Bind this session's provider/search config so `ctx.ai.*` and
   // `ctx.agent.invokeTool` resolve to THIS session's credentials. Bound at
@@ -510,10 +568,11 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       // Only the tail of the transcript matters for a provider-runtime resume —
       // the latest assistant snapshot plus the last non-system role. Scanning
       // backwards keeps a large transcript from being parsed a second time.
-      restoreRuntimeHistory(
+      const restored = restoreRuntimeHistory(
         session.sendOptions,
         readTranscriptTail(home, sessionId, params.transcriptFs)
       )
+      pendingRestoreNotice = restored ? runtimeHistoryRestoreNotice(restored) : undefined
       publishStatus(session, "initializing")
       try {
         boot = await bootstrap(params.config.cwd)
@@ -548,6 +607,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     // A `/mode` switch applied to the LIVE sidecar session must survive a later
     // local read of the cached options.
     if (sendOptionsOverrideMode) session.sendOptions.permissionMode = sendOptionsOverrideMode
+    if (params.fileCheckpoints) session.sendOptions.fileCheckpointFrames = true
     publishStatus(session, "ready")
     if (params.outputSchema) {
       session.sendOptions.claudeAgentSdk = {
@@ -563,6 +623,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     sessionId,
     async send(prompt, opts) {
       const session = await ensureReady()
+      if (pendingRestoreNotice) {
+        opts.onRestoreNotice?.(pendingRestoreNotice)
+        pendingRestoreNotice = undefined
+      }
       const sendOptions = session.sendOptions
       const turnNumber = turnSequence++
       const turnIdentity = {
@@ -693,6 +757,56 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         awaitApprovals: opts.awaitApprovals,
       }
       activeInvocation = invocation
+      const runtimeName =
+        sendOptions.execution?.runtimeAdapter ??
+        (sendOptions.provider === "anthropic" ? "claude-agent-sdk" : "ai-sdk")
+      const runtimeHistoryFor = (
+        sdkSessionIdFromRun: string | undefined,
+        snapshot?: unknown[]
+      ) => ({
+        version: 1,
+        runtime: runtimeName,
+        provider: sendOptions.provider,
+        ...(sdkSessionIdFromRun || sendOptions.resumeSessionId
+          ? {
+              sdkSessionId: sdkSessionIdFromRun ?? sendOptions.resumeSessionId,
+              sdkSessionStorage: sdkSessionStorageFromOptions(sendOptions),
+            }
+          : {}),
+        ...(snapshot ? { messages: snapshot } : {}),
+      })
+      const saveInterruptedTurn = (partial: RunAndCapturePartial): void => {
+        if (partial.sdkSessionId) sendOptions.resumeSessionId = partial.sdkSessionId
+        // Only a history a later restore accepts is worth recording: an entry
+        // it would reject would turn a resumable session into a refused one.
+        // The native SDK keeps its own record and needs only the session id.
+        let snapshot: unknown[] | undefined
+        if (runtimeName === "claude-agent-sdk") {
+          if (!(partial.sdkSessionId || sendOptions.resumeSessionId)) return
+        } else {
+          if (!partial.conversationSnapshot?.length) return
+          if (typeof checkConversationSnapshot(partial.conversationSnapshot) === "string") return
+          snapshot = partial.conversationSnapshot
+        }
+        // Same rule as a completed turn: the restored seed is now consumed.
+        delete sendOptions.initialConversation
+        appendTranscript(
+          home,
+          sessionId,
+          {
+            role: "assistant",
+            content: partial.text,
+            meta: {
+              model: sendOptions.model,
+              provider: sendOptions.provider,
+              interrupted: true,
+              runtimeHistory: runtimeHistoryFor(partial.sdkSessionId, snapshot),
+            },
+          },
+          params.transcriptFs,
+          now()
+        )
+      }
       try {
         result = await capture(sessionId, turnContent, sendOptions, {
           // This session's history is the JSONL transcript plus the restored
@@ -728,6 +842,15 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
               }
             : opts.onEvent,
         })
+      } catch (error) {
+        // An interrupted turn still did work: the steps that completed are in
+        // the sidecar's snapshot. Save them as this turn's durable history so
+        // `--continue` resumes from the interrupted work rather than refusing,
+        // or silently dropping everything the turn did.
+        if (error instanceof RunAndCaptureError && error.code === "aborted" && error.partial) {
+          saveInterruptedTurn(error.partial)
+        }
+        throw error
       } finally {
         controller.abort()
         opts.signal?.removeEventListener("abort", onAbort)
@@ -773,20 +896,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
             model: sendOptions.model,
             provider: sendOptions.provider,
             ...(result.usage ? { usage: result.usage } : {}),
-            runtimeHistory: {
-              version: 1,
-              runtime:
-                sendOptions.execution?.runtimeAdapter ??
-                (sendOptions.provider === "anthropic" ? "claude-agent-sdk" : "ai-sdk"),
-              provider: sendOptions.provider,
-              ...(result.sdkSessionId || sendOptions.resumeSessionId
-                ? {
-                    sdkSessionId: result.sdkSessionId ?? sendOptions.resumeSessionId,
-                    sdkSessionStorage: sdkSessionStorageFromOptions(sendOptions),
-                  }
-                : {}),
-              ...(result.conversationSnapshot ? { messages: result.conversationSnapshot } : {}),
-            },
+            runtimeHistory: runtimeHistoryFor(result.sdkSessionId, result.conversationSnapshot),
           },
         },
         params.transcriptFs,

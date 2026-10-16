@@ -2284,6 +2284,55 @@ describe("tuiReducer", () => {
     expect(s.input.history.entries[s.input.history.entries.length - 1]).toBe("e109")
   })
 
+  it("INPUT_SUBMIT queues the live draft with pastes expanded, records history and clears", () => {
+    let s = reduce(
+      base(),
+      { type: "INPUT_ADD_PASTE", id: "[Pasted #1]", text: "line one\nline two" },
+      { type: "INPUT_EDIT", edit: { op: "insert", text: "see [Pasted #1] " } },
+      { type: "INPUT_SUBMIT" }
+    )
+    expect(s.input.submissions).toEqual([{ seq: 1, text: "see line one\nline two" }])
+    expect(s.input.history.entries).toEqual(["see line one\nline two"])
+    expect(s.input.buffer.lines).toEqual([""])
+    // A blank draft queues nothing.
+    expect(reduce(s, { type: "INPUT_SUBMIT" })).toBe(s)
+    s = reduce(
+      s,
+      { type: "INPUT_EDIT", edit: { op: "insert", text: "next" } },
+      { type: "INPUT_SUBMIT" }
+    )
+    expect(s.input.submissions?.map((entry) => entry.seq)).toEqual([1, 2])
+  })
+
+  it("keeps undelivered submissions across draft resets until delivered", () => {
+    let s = reduce(
+      base(),
+      { type: "INPUT_EDIT", edit: { op: "insert", text: "a" } },
+      { type: "INPUT_SUBMIT" },
+      { type: "INPUT_CLEAR" },
+      { type: "INPUT_PUSH_HISTORY", entry: "/help" }
+    )
+    expect(s.input.submissions).toEqual([{ seq: 1, text: "a" }])
+    s = reduce(
+      s,
+      { type: "INPUT_EDIT", edit: { op: "insert", text: "b" } },
+      { type: "INPUT_SUBMIT" }
+    )
+    s = reduce(s, { type: "INPUT_SUBMISSIONS_DELIVERED", seq: 1 })
+    expect(s.input.submissions).toEqual([{ seq: 2, text: "b" }])
+    s = reduce(s, { type: "INPUT_SUBMISSIONS_DELIVERED", seq: 2 })
+    expect(s.input.submissions).toBeUndefined()
+    // Sequence numbers keep growing after the queue empties, and a repeated
+    // acknowledgement is a no-op.
+    expect(reduce(s, { type: "INPUT_SUBMISSIONS_DELIVERED", seq: 2 })).toBe(s)
+    s = reduce(
+      s,
+      { type: "INPUT_EDIT", edit: { op: "insert", text: "c" } },
+      { type: "INPUT_SUBMIT" }
+    )
+    expect(s.input.submissions).toEqual([{ seq: 3, text: "c" }])
+  })
+
   it("CTRL_C records the timestamp and EXIT flips the exit flag", () => {
     let s = reduce(base(), { type: "CTRL_C", at: 123 })
     expect(s.lastCtrlCAt).toBe(123)

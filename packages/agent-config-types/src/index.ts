@@ -599,6 +599,13 @@ export type SendOptions = {
     readableRoots: string[]
     network: boolean
   }
+  /**
+   * Sidecar-protocol field: emit a `file_pre_mutation` frame with each
+   * mutating tool call's original file bytes, after the permission gate and
+   * before the call runs, so the host can rewind file changes (the CLI TUI's
+   * `/rewind`). Off unless the host asks; the ai-sdk rail honours it.
+   */
+  fileCheckpointFrames?: boolean
 
   /**
    * Resolved LSP server list + master toggle for the agent runtime LSP.

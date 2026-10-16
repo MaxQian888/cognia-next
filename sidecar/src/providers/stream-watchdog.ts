@@ -25,6 +25,17 @@ export class StreamIdleTimeoutError extends Error {
   }
 }
 
+export interface IdleTimeoutOptions {
+  /**
+   * Read before each wait. While it answers true the gap is not bounded: the
+   * stream is silent on purpose (a tool is executing, or waiting on a
+   * permission prompt inside its `execute`), and the tool's own timeout bounds
+   * that wait instead. The consumer updates what it reads between events, so
+   * the answer is current when the next wait starts.
+   */
+  suspended?: () => boolean
+}
+
 /**
  * Async-iterate `stream` (an AsyncIterable) with an idle bound: every pending
  * `next()` is raced against `timeoutMs`. Normal completion (`done`) is not a
@@ -32,7 +43,8 @@ export class StreamIdleTimeoutError extends Error {
  */
 export async function* withIdleTimeout<T>(
   stream: AsyncIterable<T>,
-  timeoutMs: number = STREAM_IDLE_TIMEOUT_MS
+  timeoutMs: number = STREAM_IDLE_TIMEOUT_MS,
+  options: IdleTimeoutOptions = {}
 ): AsyncGenerator<T, void, undefined> {
   const iterator = stream[Symbol.asyncIterator]()
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -42,14 +54,16 @@ export async function* withIdleTimeout<T>(
       // Give the pending `next` a handled rejection branch so a stream that
       // fails right as the watchdog fires is not an unhandled rejection.
       next.catch(() => {})
-      const result = await Promise.race([
-        next,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new StreamIdleTimeoutError(timeoutMs)), timeoutMs)
-          // A watchdog must never keep the process alive on its own.
-          timer.unref?.()
-        }),
-      ])
+      const result = options.suspended?.()
+        ? await next
+        : await Promise.race([
+            next,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new StreamIdleTimeoutError(timeoutMs)), timeoutMs)
+              // A watchdog must never keep the process alive on its own.
+              timer.unref?.()
+            }),
+          ])
       clearTimeout(timer)
       timer = undefined
       if (result.done) return
@@ -63,5 +77,35 @@ export async function* withIdleTimeout<T>(
     throw err
   } finally {
     clearTimeout(timer)
+  }
+}
+
+/**
+ * Keep `executing` current from one AI SDK `fullStream` part: a locally run
+ * `tool-call` starts executing, and its `tool-result` / `tool-error` /
+ * `tool-output-denied` ends it. Provider-executed calls are excluded (their
+ * results stream from the provider, so a gap there is a provider stall), and
+ * so are calls whose input failed validation (they never execute; the SDK
+ * answers them with a `tool-error` at once). Pass the set to
+ * {@link withIdleTimeout}'s `suspended`.
+ */
+export function trackExecutingToolCall(executing: Set<string>, part: unknown): void {
+  if (!part || typeof part !== "object") return
+  const evt = part as {
+    type?: unknown
+    toolCallId?: unknown
+    providerExecuted?: unknown
+    invalid?: unknown
+  }
+  if (typeof evt.toolCallId !== "string" || evt.toolCallId.length === 0) return
+  switch (evt.type) {
+    case "tool-call":
+      if (evt.providerExecuted !== true && evt.invalid !== true) executing.add(evt.toolCallId)
+      return
+    case "tool-result":
+    case "tool-error":
+    case "tool-output-denied":
+      executing.delete(evt.toolCallId)
+      return
   }
 }

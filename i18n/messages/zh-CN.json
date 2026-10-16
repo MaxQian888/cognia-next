@@ -11496,6 +11496,10 @@
       "plan": "规划"
     },
     "restartRequired": "已保存。重启 CLI 后启用新的读屏模式设置。",
+    "rewindNotRestored": "未恢复：{paths}。",
+    "rewindReasonOutsideWorkspace": "不在工作区内",
+    "rewindReasonTooLarge": "文件过大，无法快照",
+    "rewindReasonUnreadable": "无法读取",
     "screenReader": "读屏模式",
     "screenReaderHint": "使用纯文本输出，关闭动画和鼠标捕获。重启 CLI 后生效。",
     "settings": "设置",

@@ -32,6 +32,57 @@ describe("renderTui", () => {
     expect(code).toBe(0)
   })
 
+  it("waits for the database flush before resolving a clean exit", async () => {
+    const order: string[] = []
+    const render = jest.fn(() => ({
+      unmount: jest.fn(),
+      waitUntilExit: async () => {
+        order.push("exit")
+      },
+      rerender: jest.fn(),
+      clear: jest.fn(),
+      cleanup: jest.fn(),
+    })) as never
+    const flushDb = jest.fn(async () => {
+      await new Promise((r) => setTimeout(r, 5))
+      order.push("flushed")
+    })
+    await renderTui({ config, render, flushDb })
+    expect(order).toEqual(["exit", "flushed"])
+  })
+
+  it("flushes the database, unmounts and exits 143 on SIGTERM", async () => {
+    const listeners = new Map<string, () => void>()
+    const exit = jest.fn()
+    const signalProcess = {
+      on: (event: string, fn: () => void) => listeners.set(event, fn),
+      off: (event: string) => listeners.delete(event),
+      listenerCount: (event: string) => (listeners.has(event) ? 1 : 0),
+      exit,
+    }
+    let resolveExit: () => void = () => {}
+    const unmount = jest.fn(() => resolveExit())
+    const render = jest.fn(() => ({
+      unmount,
+      waitUntilExit: () => new Promise<void>((r) => (resolveExit = r)),
+      rerender: jest.fn(),
+      clear: jest.fn(),
+      cleanup: jest.fn(),
+    })) as never
+    const flushDb = jest.fn(async () => {})
+    const done = renderTui({ config, render, flushDb, signalProcess })
+    await Promise.resolve()
+    expect([...listeners.keys()].sort()).toEqual(["SIGHUP", "SIGINT", "SIGTERM"])
+    listeners.get("SIGTERM")!()
+    await done
+    await new Promise((r) => setImmediate(r))
+    expect(flushDb).toHaveBeenCalled()
+    expect(unmount).toHaveBeenCalled()
+    expect(exit).toHaveBeenCalledWith(143)
+    // The handlers are removed once the TUI has returned.
+    expect(listeners.size).toBe(0)
+  })
+
   it("disables Ink's built-in Ctrl+C exit so the App owns it (input stays alive)", async () => {
     let renderOptions: { exitOnCtrlC?: boolean } | undefined
     const render = jest.fn((_element: unknown, options?: { exitOnCtrlC?: boolean }) => {

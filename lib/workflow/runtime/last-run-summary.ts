@@ -181,28 +181,35 @@ export function useLastRunSummaryByStep(
   workflowId: string | undefined
 ): Record<string, LastRunSummary> {
   const map = useLiveQuery(
-    async () => {
-      if (!workflowId) return {} as Record<string, LastRunSummary>
-      const db = getDb()
-      const runs = await db.workflowRuns.where("workflowId").equals(workflowId).toArray()
-      // Pull events for every run in chronological order — older runs first
-      // so newer events overwrite. This matches `deriveLastRunSummary`'s
-      // "latest wins" behaviour without any per-event sort overhead.
-      runs.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
-      const all: WorkflowRunEventRow[] = []
-      for (const run of runs) {
-        const events = await db.workflowRunEvents
-          .where("[runId+ts]")
-          .between([run.id, 0], [run.id, Number.MAX_SAFE_INTEGER])
-          .toArray()
-        all.push(...events)
-      }
-      // Same event list, one more pass: `step_usage` rows are already in `all`
-      // and `aggregateRunUsage` is the function the Runs UI reads.
-      return withStepUsage(deriveLastRunSummary(all), all)
-    },
+    async () => (workflowId ? loadLastRunSummaryByStep(workflowId) : {}),
     [workflowId],
     {} as Record<string, LastRunSummary>
   )
   return map ?? ({} as Record<string, LastRunSummary>)
+}
+
+/**
+ * The query behind {@link useLastRunSummaryByStep}, for hosts without React
+ * (the CLI copilot mirrors it into its editor store through Dexie `liveQuery`).
+ */
+export async function loadLastRunSummaryByStep(
+  workflowId: string
+): Promise<Record<string, LastRunSummary>> {
+  const db = getDb()
+  const runs = await db.workflowRuns.where("workflowId").equals(workflowId).toArray()
+  // Pull events for every run in chronological order — older runs first
+  // so newer events overwrite. This matches `deriveLastRunSummary`'s
+  // "latest wins" behaviour without any per-event sort overhead.
+  runs.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
+  const all: WorkflowRunEventRow[] = []
+  for (const run of runs) {
+    const events = await db.workflowRunEvents
+      .where("[runId+ts]")
+      .between([run.id, 0], [run.id, Number.MAX_SAFE_INTEGER])
+      .toArray()
+    all.push(...events)
+  }
+  // Same event list, one more pass: `step_usage` rows are already in `all`
+  // and `aggregateRunUsage` is the function the Runs UI reads.
+  return withStepUsage(deriveLastRunSummary(all), all)
 }

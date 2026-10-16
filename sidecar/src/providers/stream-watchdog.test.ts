@@ -4,6 +4,7 @@ import { test } from "node:test"
 import {
   STREAM_IDLE_TIMEOUT_MS,
   StreamIdleTimeoutError,
+  trackExecutingToolCall,
   withIdleTimeout,
 } from "./stream-watchdog.ts"
 
@@ -88,4 +89,47 @@ test("propagates a source error untouched", async () => {
 
 test("default timeout matches the five-minute provider bound", () => {
   assert.equal(STREAM_IDLE_TIMEOUT_MS, 5 * 60 * 1000)
+})
+
+test("does not bound a gap while a tool call executes, then bounds the next one", async () => {
+  // A tool call, a silent tool run three times the bound, its result, then a
+  // provider that never answers again.
+  async function* toolTurn() {
+    yield { type: "tool-call", toolCallId: "c1" }
+    await new Promise((r) => setTimeout(r, 90))
+    yield { type: "tool-result", toolCallId: "c1" }
+    await new Promise(() => {})
+  }
+  const executing = new Set<string>()
+  const seen: string[] = []
+  await assert.rejects(
+    async () => {
+      for await (const part of withIdleTimeout(toolTurn(), 30, {
+        suspended: () => executing.size > 0,
+      })) {
+        trackExecutingToolCall(executing, part)
+        seen.push(part.type)
+      }
+    },
+    (err: unknown) => err instanceof StreamIdleTimeoutError
+  )
+  assert.deepEqual(seen, ["tool-call", "tool-result"])
+})
+
+test("trackExecutingToolCall follows locally executed calls only", () => {
+  const executing = new Set<string>()
+  trackExecutingToolCall(executing, { type: "tool-call", toolCallId: "a" })
+  trackExecutingToolCall(executing, { type: "tool-call", toolCallId: "b" })
+  trackExecutingToolCall(executing, { type: "tool-call", toolCallId: "p", providerExecuted: true })
+  trackExecutingToolCall(executing, { type: "tool-call", toolCallId: "bad", invalid: true })
+  trackExecutingToolCall(executing, { type: "text-delta", text: "x" })
+  trackExecutingToolCall(executing, null)
+  assert.deepEqual([...executing], ["a", "b"])
+  trackExecutingToolCall(executing, { type: "tool-error", toolCallId: "a" })
+  assert.deepEqual([...executing], ["b"])
+  trackExecutingToolCall(executing, { type: "tool-output-denied", toolCallId: "b" })
+  assert.equal(executing.size, 0)
+  trackExecutingToolCall(executing, { type: "tool-call", toolCallId: "c" })
+  trackExecutingToolCall(executing, { type: "tool-result", toolCallId: "c" })
+  assert.equal(executing.size, 0)
 })

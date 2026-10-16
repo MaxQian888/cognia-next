@@ -8,6 +8,7 @@ import { backendModelMetaTarget } from "../runtime/backend-identity"
 import {
   createImagePaste,
   atomicImageEdit,
+  expandComposerPastes,
   removeImagePlaceholders,
 } from "../input/image-attachments"
 /**
@@ -54,9 +55,11 @@ import {
 import type { ModelPricing } from "@cognia/provider-types/provider"
 import type {
   Cell,
+  HistoryState,
   Inflight,
   InputBuffer,
   InputEditOp,
+  InputState,
   LogEntry,
   McpLogEntry,
   Overlay,
@@ -86,6 +89,26 @@ import {
   moveWordLeft,
   moveWordRight,
 } from "../input/buffer"
+
+/**
+ * Append a composer history entry, skipping a consecutive duplicate (re-running
+ * the same line shouldn't stack it twice) and capping the in-memory ring so a
+ * long session can't grow it without bound. Mirrors the persisted-history cap.
+ */
+function pushHistoryEntry(prev: string[], entry: string): HistoryState {
+  const deduped = prev[prev.length - 1] === entry ? prev : [...prev, entry]
+  const entries =
+    deduped.length > HISTORY_LIMIT ? deduped.slice(deduped.length - HISTORY_LIMIT) : deduped
+  return { entries, index: -1, draft: "" }
+}
+
+/** Carry undelivered submissions (and the sequence) across a draft reset. */
+function withSubmissions(input: InputState): Pick<InputState, "submissions" | "submissionSeq"> {
+  return {
+    ...(input.submissions ? { submissions: input.submissions } : {}),
+    ...(input.submissionSeq !== undefined ? { submissionSeq: input.submissionSeq } : {}),
+  }
+}
 
 function makeId(seq: number): string {
   return `c${seq}`
@@ -2012,21 +2035,49 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     }
     case "INPUT_CLEAR":
       // Clear the live draft (after a popup accept or turn start) but preserve
-      // the accumulated composer history so ↑ keeps recalling past lines.
-      return { ...state, input: { ...emptyInputState(), history: state.input.history } }
-    case "INPUT_PUSH_HISTORY": {
-      if (action.entry.trim().length === 0) return state
-      const prev = state.input.history.entries
-      // Skip a consecutive duplicate (re-running the same line shouldn't stack
-      // it twice) and cap the in-memory ring so a long session can't grow it
-      // without bound. Mirrors the persisted-history cap.
-      const deduped = prev[prev.length - 1] === action.entry ? prev : [...prev, action.entry]
-      const entries =
-        deduped.length > HISTORY_LIMIT ? deduped.slice(deduped.length - HISTORY_LIMIT) : deduped
+      // the accumulated composer history so ↑ keeps recalling past lines, and
+      // a submission the composer has not delivered yet.
       return {
         ...state,
-        input: { ...emptyInputState(), history: { entries, index: -1, draft: "" } },
+        input: {
+          ...emptyInputState(),
+          history: state.input.history,
+          ...withSubmissions(state.input),
+        },
       }
+    case "INPUT_PUSH_HISTORY": {
+      if (action.entry.trim().length === 0) return state
+      return {
+        ...state,
+        input: {
+          ...emptyInputState(),
+          history: pushHistoryEntry(state.input.history.entries, action.entry),
+          ...withSubmissions(state.input),
+        },
+      }
+    }
+    case "INPUT_SUBMIT": {
+      const raw = bufferText(state.input.buffer)
+      if (raw.trim().length === 0) return state
+      const text = expandComposerPastes(raw, state.input.pastes).trim()
+      const seq = (state.input.submissionSeq ?? 0) + 1
+      return {
+        ...state,
+        input: {
+          ...emptyInputState(),
+          history: pushHistoryEntry(state.input.history.entries, text),
+          submissions: [...(state.input.submissions ?? []), { seq, text }],
+          submissionSeq: seq,
+        },
+      }
+    }
+    case "INPUT_SUBMISSIONS_DELIVERED": {
+      const pending = state.input.submissions
+      if (!pending?.some((entry) => entry.seq <= action.seq)) return state
+      const rest = pending.filter((entry) => entry.seq > action.seq)
+      const input: InputState = { ...state.input, submissions: rest }
+      if (rest.length === 0) delete input.submissions
+      return { ...state, input }
     }
 
     // ── Startup onboarding ───────────────────────────────────────────────────────

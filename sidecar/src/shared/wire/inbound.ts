@@ -69,6 +69,8 @@ export interface SendOptions {
     unavailableReason?: string
     [key: string]: unknown
   }
+  /** Emit `file_pre_mutation` frames for a host that rewinds file changes. */
+  fileCheckpointFrames?: boolean
   backgroundProcessHost?: string
   codeGraph?: { watch?: boolean }
   lsp?: Record<string, unknown>

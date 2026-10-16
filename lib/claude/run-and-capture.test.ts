@@ -530,6 +530,28 @@ describe("runAndCaptureAssistantReply", () => {
     expect(unlistenMock).toHaveBeenCalledTimes(1)
   })
 
+  it("hands the interrupted turn's text and provider snapshot to the caller", async () => {
+    const ac = new AbortController()
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      signal: ac.signal,
+      timeoutMs: 1_000,
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(assistantEvent("partial reply"))
+    ac.abort()
+    await Promise.resolve()
+    const conversationSnapshot = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "partial reply" },
+    ]
+    fire({ ...(sessionEnded() as object), conversationSnapshot } as unknown as ClaudeEvent)
+    await expect(promise).rejects.toMatchObject({
+      code: "aborted",
+      partial: { text: "partial reply", conversationSnapshot },
+    })
+  })
+
   it("rejects synchronously when signal is already aborted", async () => {
     const ac = new AbortController()
     ac.abort()
@@ -793,6 +815,65 @@ describe("runAndCaptureAssistantReply", () => {
       jest.advanceTimersByTime(150)
       await rejection
       expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("keeps the watchdog paused while a sibling permission prompt still waits", async () => {
+    // Two parallel calls each ask; answering the first must not start the idle
+    // clock while the second is still on the user's screen.
+    jest.useFakeTimers()
+    try {
+      const answers = new Map<string, (decision: { decision: "allow" }) => void>()
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+        onPermissionRequest: (req) =>
+          new Promise((resolve) => {
+            answers.set(req.requestId, resolve)
+          }),
+      })
+      const rejection = expect(promise).rejects.toMatchObject({ code: "session_error" })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking")) // arms idle
+      fire({ ...(idlePermissionRequest() as object), requestId: "req-a" } as ClaudeEvent)
+      fire({ ...(idlePermissionRequest() as object), requestId: "req-b" } as ClaudeEvent)
+      await flushMicrotasks(10)
+      answers.get("req-a")!({ decision: "allow" })
+      await flushMicrotasks(10)
+      jest.advanceTimersByTime(500) // far past the idle window
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      // The last answer re-arms, so a stall after it is still caught.
+      answers.get("req-b")!({ decision: "allow" })
+      await flushMicrotasks(10)
+      jest.advanceTimersByTime(150)
+      await rejection
+      expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not restart the watchdog when an approved tool is still executing", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+        onPermissionRequest: async () => ({ decision: "allow" }),
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking"))
+      fire(toolUseEventWithId("tu_1", "sandbox_bash", { command: "pnpm build" })) // pauses idle
+      fire(idlePermissionRequest())
+      await flushMicrotasks(10) // approved and dispatched
+      jest.advanceTimersByTime(500) // the approved build runs far past the idle window
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      fire(userToolResultEvent("tu_1", "built"))
+      fire(assistantEvent("done"))
+      fire(sessionEnded())
+      await expect(promise).resolves.toMatchObject({ text: "done" })
     } finally {
       jest.useRealTimers()
     }

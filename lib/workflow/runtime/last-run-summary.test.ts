@@ -1,4 +1,8 @@
-import { deriveLastRunSummary, withStepUsage } from "./last-run-summary"
+/** @jest-environment jsdom */
+import "fake-indexeddb/auto"
+
+import { __resetDbForTesting, getDb } from "@/lib/db/schema"
+import { deriveLastRunSummary, loadLastRunSummaryByStep, withStepUsage } from "./last-run-summary"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 
 function ev(
@@ -155,5 +159,48 @@ describe("withStepUsage", () => {
     ])
     expect(out.n1!.usage?.totalTokens).toBe(10)
     expect(out.n1!.usage?.costUsd).toBeUndefined()
+  })
+})
+
+describe("loadLastRunSummaryByStep", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  it("aggregates every run of the workflow, newest run winning, and ignores other workflows", async () => {
+    const db = getDb()
+    await db.workflowRuns.bulkPut([
+      { id: "old", workflowId: "w1", status: "failed", startedAt: 10 },
+      { id: "new", workflowId: "w1", status: "succeeded", startedAt: 100 },
+      { id: "other", workflowId: "w2", status: "succeeded", startedAt: 50 },
+    ] as never)
+    await db.workflowRunEvents.bulkPut([
+      { id: "a1", runId: "old", ts: 11, type: "step_started", stepId: "s1" },
+      {
+        id: "a2",
+        runId: "old",
+        ts: 12,
+        type: "step_failed",
+        stepId: "s1",
+        payload: { message: "x" },
+      },
+      { id: "b1", runId: "new", ts: 101, type: "step_started", stepId: "s1" },
+      { id: "b2", runId: "new", ts: 104, type: "step_completed", stepId: "s1" },
+      { id: "c1", runId: "other", ts: 51, type: "step_started", stepId: "s9" },
+      { id: "c2", runId: "other", ts: 52, type: "step_completed", stepId: "s9" },
+    ] as never)
+
+    const summary = await loadLastRunSummaryByStep("w1")
+    expect(Object.keys(summary)).toEqual(["s1"])
+    expect(summary.s1).toMatchObject({ status: "succeeded", startedAt: 101, finishedAt: 104 })
+  })
+
+  it("is empty for a workflow that never ran", async () => {
+    await expect(loadLastRunSummaryByStep("nope")).resolves.toEqual({})
   })
 })

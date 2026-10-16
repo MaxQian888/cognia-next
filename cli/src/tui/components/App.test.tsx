@@ -87,6 +87,7 @@ jest.mock("../../handoff/host-state-client", () => ({
 }))
 
 import { App } from "./App"
+import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
 import * as limitsData from "../runtime/limits-data"
 jest.mock("../runtime/limits-data", () => ({
   ...jest.requireActual("../runtime/limits-data"),
@@ -1712,28 +1713,68 @@ describe("App", () => {
     expect(resolveMeta).toHaveBeenCalledWith("anthropic", "claude-x")
   })
 
+  it("sizes context % to a window the user declared over the catalog's", async () => {
+    const { create } = fakeSession("done", { inputTokens: 100_000, outputTokens: 0 })
+    // The catalog does not know the proxied id and answers the 128k default.
+    const resolveMeta = jest.fn(async () => ({ modelId: "claude-x", contextWindow: 128_000 }))
+    const declared = {
+      ...config,
+      providers: {
+        ...config.providers,
+        anthropic: {
+          ...config.providers.anthropic,
+          models: { "claude-x": { contextWindow: 1_000_000 } },
+        },
+      },
+    }
+    const { container } = render(
+      <App config={declared} sessionId="s1" createSession={create} resolveMeta={resolveMeta} />
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    type("hi")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // 100k / 1M = 10%, not 78% of the 128k catalog fallback.
+    await waitFor(() => expect(container.textContent).toContain("10% ctx"))
+  })
+
   it("opens hooks, persists a built-in toggle, and stays in the hooks inventory", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "app-hooks-"))
+    // The inventory also lists the OS user's `~/.claude/settings.json` hooks;
+    // isolate it so a developer's own Claude hooks don't shift the rows.
+    const osHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), "app-hooks-os-"))
     try {
       const { create } = fakeSession()
       const view = render(
-        <App config={config} sessionId="s1" createSession={create} home={homeDir} />
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          home={homeDir}
+          osHome={osHomeDir}
+        />
       )
       type("/hooks list")
       submit()
       await waitFor(() => expect(view.container.textContent).toContain("Ctrl+R"))
-      // The first row is runtime diagnostics; the next one is a built-in hook.
+      // With no file-backed hooks the first row is runtime diagnostics and the
+      // next one is the first built-in hook.
       act(() => __fireInput("", { downArrow: true }))
       await act(async () => {
         __fireInput(" ")
       })
       const persisted = JSON.parse(fs.readFileSync(path.join(homeDir, "config.json"), "utf8"))
-      expect(Object.values(persisted.builtinHookOverrides)).toHaveLength(1)
+      expect(Object.keys(persisted.builtinHookOverrides)).toEqual([BUILTIN_HOOKS[0].id])
       expect(view.container.textContent).toContain("Ctrl+R")
       expect(view.container.textContent).not.toContain("System prompt…")
       view.unmount()
     } finally {
       fs.rmSync(homeDir, { recursive: true, force: true })
+      fs.rmSync(osHomeDir, { recursive: true, force: true })
     }
   })
 

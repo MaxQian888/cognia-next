@@ -22,6 +22,7 @@ import { createLogger } from "@/packages/logging/src/core"
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 
 import { resolveHome } from "../config/load"
+import { installWriteFlush, type DexieLike } from "./write-flush"
 import { VERSION } from "../version"
 import {
   acquireStoreLock,
@@ -115,6 +116,8 @@ export interface CliDbHandle {
 }
 
 let cached: CliDbHandle | null = null
+/** Where the default account database's write-flush middleware reports. */
+let defaultDbWriteSink: ((databaseName: string, tableName: string) => void) | null = null
 
 export class CliDbSnapshotError extends Error {
   readonly snapshotPath: string
@@ -663,7 +666,21 @@ function resolveSourcesFactory(opts: EnsureCliDbOptions): () => Promise<readonly
   }
   return async () => {
     const { SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } = await import("@/lib/scheduler/scheduler-db")
-    const primary = getDb() as unknown as DbLike
+    const dexie = getDb()
+    // Every settled write schedules a flush of its table. Without this a row
+    // reached disk only if the code path that wrote it remembered to call
+    // `scheduleFlush` — a `/remember` or a workflow run started by a model
+    // tool did not, and was lost when the process ended before the next
+    // unrelated flush. Attached here because the dbcore stack is built at
+    // open time: a `use()` after open is inert until a reopen. The callback
+    // goes through `defaultDbWriteSink` so a handle re-created after
+    // `dispose()` still hears writes from the stack the first open built.
+    installWriteFlush(
+      dexie as unknown as DexieLike,
+      (tableName) => defaultDbWriteSink?.(dexie.name, tableName),
+      { ignoreTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES }
+    )
+    const primary = dexie as unknown as DbLike
     return [
       {
         name: primary.name ?? "CogniaDB",
@@ -719,6 +736,13 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   const debounceMs = opts.debounceMs ?? 400
   const installGlobals = opts.installGlobals ?? (() => installFakeIndexedDb())
   const getDatabases = resolveSourcesFactory(opts)
+  // The default account database reports its writes here. Writes made while
+  // booting (seed, restore) are accounted for by the restore bookkeeping
+  // below, so the sink only takes over once `ready` resolves.
+  const usesDefaultDatabase = !opts.getDatabases && !opts.getDatabase
+  const writeSink = (databaseName: string, tableName: string): void => {
+    if (!disposed) scheduleTableFlush(databaseName, tableName)
+  }
   const waitReady = opts.whenReady ?? whenSeeded
   const read = opts.readSnapshot ?? ((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null))
   const write = opts.writeSnapshot ?? writeSnapshotAtomically
@@ -939,7 +963,12 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
 
   // A boot that fails must not keep the store lock: the next process (or the
   // repaired retry) would otherwise follow forever behind a dead writer.
-  void ready.catch(() => releaseStoreLockIfHeld())
+  void ready.then(
+    () => {
+      if (usesDefaultDatabase && !disposed) defaultDbWriteSink = writeSink
+    },
+    () => releaseStoreLockIfHeld()
+  )
 
   async function flushOnce(): Promise<void> {
     if (cancelTimer) {
@@ -1019,6 +1048,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
     if (disposed) return
     await flush()
     disposed = true
+    if (defaultDbWriteSink === writeSink) defaultDbWriteSink = null
     // Final flush has settled; release the store lock so a later process can
     // take over as writer.
     releaseStoreLockIfHeld()
@@ -1076,6 +1106,23 @@ export async function ensureCliDb(opts: EnsureCliDbOptions = {}): Promise<CliDbH
     if (cached === wrapped) cached = null
     throw error
   }
+}
+
+/**
+ * Persist the CLI database now, if this process opened it, and resolve once the
+ * write has settled. A no-op when nothing opened the database, or when its boot
+ * failed (there is nothing restorable to write). Exit and signal paths await
+ * this instead of trusting the debounce timer to fire before the process ends.
+ */
+export async function flushOpenCliDb(): Promise<void> {
+  const handle = cached
+  if (!handle) return
+  try {
+    await handle.ready
+  } catch {
+    return
+  }
+  await handle.flush()
 }
 
 /** Test-only: drop the cached handle. */
@@ -1192,4 +1239,5 @@ export async function importSnapshotStore(
 
 export function __resetCliDbForTesting(): void {
   cached = null
+  defaultDbWriteSink = null
 }

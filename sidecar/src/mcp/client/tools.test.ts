@@ -16,6 +16,7 @@ async function execute(
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { PassThrough } from "node:stream"
+import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio"
 import {
   buildAiSdkMcpTools,
   isRedirectRefusal,
@@ -27,7 +28,10 @@ import {
 // (process-spawning) one in unit tests.
 class FakeStdio implements MCPTransport {
   cfg: StdioConfig
-  async start() {}
+  process?: { stderr: PassThrough }
+  async start() {
+    if (this.cfg.stderr === "pipe") this.process = { stderr: new PassThrough() }
+  }
   async send() {}
   async close() {}
   constructor(cfg: StdioConfig) {
@@ -352,14 +356,48 @@ test("wrapMcpToolWithGate returns the tool unchanged when no gate is supplied", 
   assert.equal(wrapMcpToolWithGate(t, "mcp__s__t", undefined), t)
 })
 
-test("toMcpTransport wires a provided stderr stream into the stdio config", () => {
+test("toMcpTransport spawns stderr as a pipe and forwards it into the provided stream", async () => {
   const s = new PassThrough()
   const t = toMcpTransport(
     { type: "stdio", command: "node" },
     { StdioTransport: FakeStdio, stderr: s }
   )
   assert.ok(t instanceof FakeStdio)
-  assert.equal(t.cfg.stderr, s, "stderr stream forwarded to the transport config")
+  // A PassThrough has no fd, so child_process.spawn rejects it in the stdio
+  // array: the transport must ask for a pipe instead.
+  assert.equal(t.cfg.stderr, "pipe")
+  await t.start()
+  const chunks: string[] = []
+  s.on("data", (c) => chunks.push(c.toString()))
+  t.process?.stderr.write("child says hi\n")
+  await new Promise((r) => setImmediate(r))
+  assert.deepEqual(chunks, ["child says hi\n"])
+})
+
+test("a real stdio child starts with stderr capture and its stderr reaches the sink", async () => {
+  // Regression: passing the PassThrough straight to spawn threw
+  // "The argument 'stdio' is invalid. Received PassThrough".
+  const s = new PassThrough()
+  const t = toMcpTransport(
+    {
+      type: "stdio",
+      command: process.execPath,
+      args: ["-e", "process.stderr.write('real-child-stderr\\n'); setTimeout(() => {}, 5000)"],
+    },
+    { StdioTransport: Experimental_StdioMCPTransport, stderr: s }
+  )
+  assert.ok(t && "start" in t)
+  let seen = ""
+  const got = new Promise<void>((resolve) => {
+    s.on("data", (c) => {
+      seen += c.toString()
+      if (seen.includes("real-child-stderr")) resolve()
+    })
+  })
+  await t.start()
+  await got
+  await t.close()
+  assert.match(seen, /real-child-stderr/)
 })
 
 test("buildAiSdkMcpTools captures stdio server stderr into emitMcpLog", async () => {
@@ -367,8 +405,9 @@ test("buildAiSdkMcpTools captures stdio server stderr into emitMcpLog", async ()
   const capture: { stream?: PassThrough } = {}
   const createClient: McpClientFactory = async ({ transport }) => {
     assert.ok(transport instanceof FakeStdio)
-    assert.ok(transport.cfg.stderr instanceof PassThrough)
-    capture.stream = transport.cfg.stderr // the PassThrough wired by toMcpTransport
+    assert.equal(transport.cfg.stderr, "pipe")
+    await transport.start()
+    capture.stream = transport.process?.stderr // the child's stderr, forwarded into the capture
     return { tools: async () => ({ ping: { execute: async () => "pong" } }), close: async () => {} }
   }
   const { close } = await buildAiSdkMcpTools({

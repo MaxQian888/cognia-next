@@ -1,4 +1,4 @@
-import type { MCPClientConfig } from "@ai-sdk/mcp"
+import type { MCPClientConfig, MCPTransport } from "@ai-sdk/mcp"
 import type { EgressGuard } from "../../platform/net/egress-guard.ts"
 import type { McpLogLevel } from "./log.ts"
 import type {
@@ -28,7 +28,7 @@ import type {
 // honours the allow/deny tool filters. Connections are opened once per session
 // and closed via the returned `close()`.
 
-import { PassThrough } from "node:stream"
+import { PassThrough, type Readable } from "node:stream"
 
 import { createMCPClient } from "@ai-sdk/mcp"
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio"
@@ -62,16 +62,18 @@ export function toMcpTransport(
   const type = entry.type
   if (type === "stdio") {
     if (typeof entry.command !== "string" || !entry.command) return null
-    return new StdioTransport({
+    const transport = new StdioTransport({
       command: entry.command,
       ...(Array.isArray(entry.args) ? { args: entry.args } : {}),
       ...(entry.env && typeof entry.env === "object" ? { env: entry.env } : {}),
       ...(typeof entry.cwd === "string" ? { cwd: entry.cwd } : {}),
-      // Redirect the spawned server's stderr into a stream we read line-by-line
-      // (@ai-sdk/mcp StdioConfig.stderr accepts a Stream) so its diagnostics
-      // reach the MCP log panel instead of being discarded.
-      ...(stderr ? { stderr } : {}),
+      // `StdioConfig.stderr` is handed to `child_process.spawn`'s stdio array,
+      // which only accepts a Stream that owns a file descriptor: a PassThrough
+      // throws `ERR_INVALID_ARG_VALUE` ("The argument 'stdio' is invalid") and
+      // the server never starts. Ask for a pipe and forward it ourselves.
+      ...(stderr ? { stderr: "pipe" as const } : {}),
     })
+    return stderr ? forwardChildStderr(transport, stderr) : transport
   }
   if (type === "sse" || type === "http") {
     if (typeof entry.url !== "string" || !entry.url) return null
@@ -89,6 +91,26 @@ export function toMcpTransport(
     }
   }
   return null
+}
+
+/**
+ * Pipe a started stdio transport's child stderr into `sink`, so the spawned
+ * server's diagnostics reach the MCP log panel instead of being discarded.
+ * `@ai-sdk/mcp` keeps the child on `transport.process` (set before `start()`
+ * resolves); output written before the pipe attaches stays buffered in the
+ * child's stderr stream, so nothing is lost.
+ */
+export function forwardChildStderr<T extends MCPTransport>(transport: T, sink: PassThrough): T {
+  const start = transport.start.bind(transport)
+  transport.start = async () => {
+    await start()
+    const child = (transport as { process?: { stderr?: Readable | null } }).process
+    const childStderr = child?.stderr
+    if (!childStderr) return
+    childStderr.on("error", () => undefined) // a broken pipe must not crash the turn
+    childStderr.pipe(sink, { end: false })
+  }
+  return transport
 }
 
 /**

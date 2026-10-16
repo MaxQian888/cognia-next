@@ -11,6 +11,8 @@ import { hasClipboardImage } from "./clipboard-image"
 import { AppErrorBoundary } from "./components/AppErrorBoundary"
 import { defaultCrashLogger } from "./crash-log"
 import { installProcessCrashGuards } from "./process-guards"
+import { flushWithin, installTuiExitSignals, type SignalProcess } from "./exit-signals"
+import { flushOpenCliDb } from "../db/bootstrap"
 import { loadHistory } from "./input/history-store"
 import { TuiInputProvider } from "./input/input-router"
 import { mintSessionId } from "../agent/run"
@@ -44,6 +46,10 @@ export interface RenderTuiDeps {
   initialCommand?: string
   /** Launch-only mode overlay (for example `--bypass`) that must not be persisted. */
   sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
+  /** Persist the CLI database on exit. Defaults to {@link flushOpenCliDb}. */
+  flushDb?: () => Promise<void>
+  /** Signal source for the exit handlers (tests inject a fake process). */
+  signalProcess?: SignalProcess
 }
 
 export async function renderTui(deps: RenderTuiDeps): Promise<number> {
@@ -159,10 +165,7 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
       isScreenReaderEnabled: config.screenReader ?? false,
     }
   )
-  try {
-    await instance.waitUntilExit()
-  } finally {
-    uninstallCrashGuards()
+  const restoreTerminal = () => {
     disableBracketedPaste()
     // Restore the terminal's default title (no-op if disabled / non-TTY). The
     // App's unmount cleanup already does this on a clean exit; this is the
@@ -177,8 +180,34 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
       exitAltScreen()
     }
   }
+  const flushDb = deps.flushDb ?? flushOpenCliDb
+  const onFlushError = (error: unknown) => crashLogger("database-flush", error)
+  // A killed TUI (SIGTERM, SIGHUP, an external SIGINT) persists the database
+  // before it goes, instead of dropping whatever the debounce still held.
+  const uninstallExitSignals = installTuiExitSignals({
+    flush: flushDb,
+    restore: () => {
+      instance.unmount()
+      restoreTerminal()
+    },
+    onFlushError,
+    ...(deps.signalProcess ? { proc: deps.signalProcess } : {}),
+  })
+  try {
+    await instance.waitUntilExit()
+    // A clean exit waits for the last write too: the debounce timer is not a
+    // promise that the process will still be alive when it fires.
+    await flushWithin(flushDb, EXIT_FLUSH_TIMEOUT_MS).catch(onFlushError)
+  } finally {
+    uninstallExitSignals()
+    uninstallCrashGuards()
+    restoreTerminal()
+  }
   return 0
 }
+
+/** How long a clean exit waits for the final database flush. */
+const EXIT_FLUSH_TIMEOUT_MS = 15_000
 
 /** The terminal escape that turns bracketed paste ON. */
 const BRACKETED_PASTE_ON = "\x1b[?2004h"

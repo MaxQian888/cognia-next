@@ -19,7 +19,6 @@ import {
   listImageAttachments,
   pastedImagePaths,
   collapseImageRefs,
-  expandComposerPastes,
 } from "../input/image-attachments"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Box, Text, type DOMElement } from "ink"
@@ -539,14 +538,26 @@ function InputImpl({
     dispatch({ type: "INPUT_EDIT", edit })
   }
 
+  // Enter sends what the reducer holds, not this render's `buffer`: a paste and
+  // the Enter after it can arrive in one batch (or before the handler ref below
+  // refreshes), and a closure read then saw the pre-paste draft — an empty one
+  // meant the Enter silently did nothing. The reducer queues the live draft in
+  // `input.submissions`; the effect below delivers the queue once committed.
   const doSubmit = () => {
-    const raw = bufferText(buffer)
-    if (raw.trim().length === 0) return
-    const expanded = expandComposerPastes(raw, input.pastes).trim()
-    dispatch({ type: "INPUT_PUSH_HISTORY", entry: expanded })
-    onHistoryPush?.(expanded)
-    onSubmit(expanded)
+    dispatch({ type: "INPUT_SUBMIT" })
   }
+  const submissions = input.submissions
+  useEffect(() => {
+    if (!submissions?.length) return
+    const last = submissions[submissions.length - 1]!.seq
+    dispatch({ type: "INPUT_SUBMISSIONS_DELIVERED", seq: last })
+    for (const { text } of submissions) {
+      onHistoryPush?.(text)
+      onSubmit(text)
+    }
+    // Delivery is keyed on the queue alone; the callbacks are read fresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submissions])
 
   const acceptPopup = (idx: number = safeIndex) => {
     if (popupKind === "slash") {

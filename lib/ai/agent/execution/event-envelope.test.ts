@@ -335,3 +335,31 @@ describe("captureEventFromCanonical", () => {
     ).toBeNull()
   })
 })
+
+it("reads a canonical usage block in the sidecar's snake_case shape as UsageInfo", () => {
+  expect(
+    captureEventFromCanonical({
+      kind: "usage",
+      usage: { input_tokens: 3101, output_tokens: 10, cache_read_input_tokens: 0 },
+    })
+  ).toEqual({
+    type: "usage",
+    usage: {
+      input_tokens: 3101,
+      output_tokens: 10,
+      cache_read_input_tokens: 0,
+      inputTokens: 3101,
+      outputTokens: 10,
+      cacheReadInputTokens: 0,
+    },
+    partial: undefined,
+  })
+  // A partial estimate with no token fields passes through untouched.
+  expect(
+    captureEventFromCanonical({
+      kind: "usage",
+      usage: { estimatedThinkingTokens: 5 },
+      partial: true,
+    })
+  ).toEqual({ type: "usage", usage: { estimatedThinkingTokens: 5 }, partial: true })
+})

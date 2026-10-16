@@ -1,7 +1,11 @@
 /**
  * @jest-environment node
  */
-import { runManualCompact, type RunManualCompactDeps } from "./manual-compact"
+import {
+  manualCompactOutcomeFromInner,
+  runManualCompact,
+  type RunManualCompactDeps,
+} from "./manual-compact"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
 const SESSION = "ses_1"
@@ -83,6 +87,41 @@ describe("runManualCompact", () => {
     expect(h.emitted).toHaveLength(1)
   })
 
+  it("resolves at once with the sidecar's reason when there is nothing to compact", async () => {
+    const h = harness()
+    const done = runManualCompact(h.deps)
+    h.fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "system",
+        subtype: "informational",
+        compact_outcome: "nothing_to_compact",
+        content:
+          "Nothing to compact yet: the conversation still fits in the 6 most recent messages kept verbatim.",
+      },
+    })
+    await done
+    expect(h.emitted).toEqual([])
+    expect(h.notices).toEqual([
+      "Compacting context…",
+      "Nothing to compact yet: the conversation still fits in the 6 most recent messages kept verbatim.",
+    ])
+    expect(h.unsub).toHaveBeenCalled()
+  })
+
+  it("ignores ordinary informational events while waiting", async () => {
+    const h = harness()
+    void runManualCompact(h.deps)
+    h.fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "system", subtype: "informational", content: "unrelated" },
+    })
+    await Promise.resolve()
+    expect(h.unsub).not.toHaveBeenCalled()
+  })
+
   it("resolves via the timeout with an advisory notice when no boundary arrives", async () => {
     const timers: Array<() => void> = []
     const h = harness({
@@ -103,5 +142,49 @@ describe("runManualCompact", () => {
     await runManualCompact(h.deps)
     expect(h.notices.at(-1)).toBe("Compaction failed: no session")
     expect(h.unsub).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("manualCompactOutcomeFromInner", () => {
+  it("reads each outcome and falls back to a stock message when content is empty", () => {
+    expect(
+      manualCompactOutcomeFromInner({
+        type: "system",
+        subtype: "informational",
+        compact_outcome: "deferred",
+      })
+    ).toEqual({
+      outcome: "deferred",
+      message: "A turn is running; compaction will apply before the next turn.",
+    })
+    expect(
+      manualCompactOutcomeFromInner({
+        type: "system",
+        subtype: "informational",
+        compact_outcome: "skipped_by_plugin",
+        content: " Declined. ",
+      })
+    ).toEqual({ outcome: "skipped_by_plugin", message: "Declined." })
+  })
+
+  it("rejects anything that is not a compaction outcome", () => {
+    expect(manualCompactOutcomeFromInner(null)).toBeNull()
+    expect(
+      manualCompactOutcomeFromInner({ type: "system", subtype: "informational", content: "x" })
+    ).toBeNull()
+    expect(
+      manualCompactOutcomeFromInner({
+        type: "system",
+        subtype: "compact_boundary",
+        compact_outcome: "deferred",
+      })
+    ).toBeNull()
+    expect(
+      manualCompactOutcomeFromInner({
+        type: "system",
+        subtype: "informational",
+        compact_outcome: "bogus",
+      })
+    ).toBeNull()
   })
 })

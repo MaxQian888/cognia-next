@@ -119,6 +119,22 @@ describe("resolveInstallPlan", () => {
     expect(resolveInstallPlan("cursor-agent")?.methods[0]?.command).toBe("bash")
   })
 
+  it("installs the ACP-speaking Codex adapter, Gemini and Qwen from their official packages", () => {
+    expect(resolveInstallPlan("codex-acp")?.methods[0]?.display).toBe(
+      "npm install -g @agentclientprotocol/codex-acp"
+    )
+    expect(resolveInstallPlan("gemini")?.methods.map((m) => m.display)).toEqual([
+      "npm install -g @google/gemini-cli",
+      "brew install gemini-cli",
+    ])
+    expect(resolveInstallPlan("qwen")?.methods.map((m) => m.display)).toEqual([
+      "npm install -g @qwen-code/qwen-code",
+      "brew install qwen-code",
+    ])
+    expect(resolveInstallPlan("gemini")?.runtimeId).toBe("gemini-cli")
+    expect(resolveInstallPlan("qwen")?.runtimeId).toBe("qwen-code")
+  })
+
   it("keeps sign-in-required and Node-only agents docs-only", () => {
     expect(resolveInstallPlan("kiro-cli")?.methods).toEqual([])
     expect(resolveInstallPlan("kiro-cli")?.docsUrl).toContain("kiro.dev")

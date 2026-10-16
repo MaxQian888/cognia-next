@@ -16,11 +16,11 @@
  *    streams its output, with the same enriched PATH the resolver uses so
  *    `npm` / `brew` / `curl` are found even from a minimal environment.
  *
- * Agents still run through `npx` (Gemini, Qwen, the Codex ACP shim) fetch on
- * demand. Claude's adapter is intentionally installed once: making every chat
- * startup depend on npm/DNS left the UI stuck at "Starting agent". Pi launches
- * a bare `pi`, so it needs a plan of its own rather than inheriting the `npx`
- * one.
+ * Every catalog runtime that launches its own binary (the Claude and Codex ACP
+ * adapters, Gemini, Qwen, Pi, ...) needs a plan here: making every chat startup
+ * depend on `npx` fetching from npm left the UI stuck at "Starting agent", so
+ * the catalog moved them to system-installed executables. Only legacy saved
+ * launches still go through `npx`, which needs nothing but Node.
  */
 import { spawn as nodeSpawn } from "node:child_process"
 import readline from "node:readline"
@@ -140,6 +140,27 @@ export const INSTALL_PLANS: Record<string, InstallPlan> = {
     name: "OpenAI Codex CLI",
     methods: [npm("npm", "@openai/codex"), brew("codex")],
     docsUrl: "https://developers.openai.com/codex/cli",
+  },
+  "codex-acp": {
+    command: "codex-acp",
+    runtimeId: "codex-acp",
+    name: "Codex ACP adapter",
+    methods: [npm("npm", "@agentclientprotocol/codex-acp")],
+    docsUrl: "https://github.com/agentclientprotocol/codex-acp",
+  },
+  gemini: {
+    command: "gemini",
+    runtimeId: "gemini-cli",
+    name: "Gemini CLI",
+    methods: [npm("npm", "@google/gemini-cli"), brew("gemini-cli")],
+    docsUrl: "https://github.com/google-gemini/gemini-cli",
+  },
+  qwen: {
+    command: "qwen",
+    runtimeId: "qwen-code",
+    name: "Qwen Code",
+    methods: [npm("npm", "@qwen-code/qwen-code"), brew("qwen-code")],
+    docsUrl: "https://github.com/QwenLM/qwen-code",
   },
   copilot: {
     command: "copilot",

@@ -174,5 +174,9 @@
       "coreAnthropic": "Core-file registration on Anthropic: {state} (also requires the core-file category)."
     },
     "catalogTitle": "Tool catalog"
-  }
+  },
+  "rewindNotRestored": "Not restored: {paths}.",
+  "rewindReasonTooLarge": "too large to snapshot",
+  "rewindReasonUnreadable": "unreadable",
+  "rewindReasonOutsideWorkspace": "outside the workspace"
 }

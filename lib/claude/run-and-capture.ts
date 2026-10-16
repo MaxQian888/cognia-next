@@ -284,18 +284,33 @@ export class RunAndCaptureError extends Error {
   readonly httpStatus?: number
   /** `Retry-After` in ms, when the provider sent one. */
   readonly retryAfterMs?: number
+  /**
+   * What an interrupted (`aborted`) turn had produced when it stopped: the
+   * streamed text and the sidecar's provider-conversation snapshot of every
+   * completed step. A host that keeps durable history saves it, so a later
+   * resume continues from the interrupted work instead of losing it.
+   */
+  readonly partial?: RunAndCapturePartial
 
   constructor(
     message: string,
     readonly code:
       "session_error" | "no_assistant_text" | "aborted" | "send_failed" | "sidecar_exited",
-    meta?: { httpStatus?: number; retryAfterMs?: number }
+    meta?: { httpStatus?: number; retryAfterMs?: number; partial?: RunAndCapturePartial }
   ) {
     super(message)
     this.name = "RunAndCaptureError"
     if (typeof meta?.httpStatus === "number") this.httpStatus = meta.httpStatus
     if (typeof meta?.retryAfterMs === "number") this.retryAfterMs = meta.retryAfterMs
+    if (meta?.partial) this.partial = meta.partial
   }
+}
+
+/** See {@link RunAndCaptureError.partial}. */
+export interface RunAndCapturePartial {
+  text: string
+  conversationSnapshot?: unknown[]
+  sdkSessionId?: string
 }
 
 /**
@@ -999,6 +1014,12 @@ async function captureAssistantReplyCore(
     // resolves. Without this, a tool slower than `idleTimeoutMs` (default 60s)
     // tripped the watchdog and interrupted the turn mid-tool.
     const inFlightToolIds = new Set<string>()
+    // Responder round-trips still owed (permission prompts, tool-result
+    // reviews), keyed `permission:<requestId>` / `review:<reviewId>`. Parallel
+    // calls wait separately: answering one prompt must not restart the
+    // watchdog while a sibling still waits on the user, or the second prompt's
+    // think-time is read as a provider stall and the turn is cut mid-tool.
+    const pendingResponses = new Set<string>()
     // SDK-issued session id (sdk_session_id event) — surfaced on the result so
     // headless multi-turn drivers can persist it for resume.
     let capturedSdkSessionId = ""
@@ -1071,70 +1092,75 @@ async function captureAssistantReplyCore(
     const handlePermissionRequest = (req: PermissionRequestEvent) => {
       if (!cap?.onPermissionRequest || answeredPermissions.has(req.requestId)) return
       answeredPermissions.add(req.requestId)
+      const responseKey = `permission:${req.requestId}`
+      pendingResponses.add(responseKey)
       pauseWallClock()
       void (async () => {
-        let outcome: CapturePermissionDecision
         try {
-          // The capture is the sole command responder, including the global
-          // plugin firewall previously run by the competing UI subscriber.
-          const pre = await dispatchPreToolUse(req.toolName, req.input, sessionId)
-          if (settled || abortRequested || signal?.aborted) return
-          // ADR-0201: an approve-every-call tool is the approver's decision on
-          // the input the MODEL sent. A plugin may deny it, but a plugin
-          // "modify" neither rewrites nor pre-approves it.
-          const perCall = req.requiresPerCallApproval === true
-          if (pre.action === "deny") {
+          let outcome: CapturePermissionDecision
+          try {
+            // The capture is the sole command responder, including the global
+            // plugin firewall previously run by the competing UI subscriber.
+            const pre = await dispatchPreToolUse(req.toolName, req.input, sessionId)
+            if (settled || abortRequested || signal?.aborted) return
+            // ADR-0201: an approve-every-call tool is the approver's decision on
+            // the input the MODEL sent. A plugin may deny it, but a plugin
+            // "modify" neither rewrites nor pre-approves it.
+            const perCall = req.requiresPerCallApproval === true
+            if (pre.action === "deny") {
+              outcome = {
+                decision: "deny",
+                message: pre.reason ?? "denied by plugin onPreToolUse",
+                attribution: { authority: "policy-deny" },
+              }
+            } else {
+              const rewritten = !perCall && pre.action === "modify" ? pre.modifiedArgs : undefined
+              outcome = await cap.onPermissionRequest!({
+                ...req,
+                ...(rewritten ? { input: rewritten } : {}),
+              })
+              if (outcome.decision !== "deny" && rewritten && outcome.updatedInput === undefined) {
+                outcome = { ...outcome, updatedInput: rewritten }
+              }
+            }
+          } catch {
             outcome = {
               decision: "deny",
-              message: pre.reason ?? "denied by plugin onPreToolUse",
-              attribution: { authority: "policy-deny" },
+              message: "permission responder failed",
+              attribution: { authority: "system" },
             }
-          } else {
-            const rewritten = !perCall && pre.action === "modify" ? pre.modifiedArgs : undefined
-            outcome = await cap.onPermissionRequest!({
-              ...req,
-              ...(rewritten ? { input: rewritten } : {}),
-            })
-            if (outcome.decision !== "deny" && rewritten && outcome.updatedInput === undefined) {
-              outcome = { ...outcome, updatedInput: rewritten }
-            }
+          } finally {
+            resumeWallClock()
           }
-        } catch {
-          outcome = {
-            decision: "deny",
-            message: "permission responder failed",
-            attribution: { authority: "system" },
+          // A delayed UI response belongs to this turn only. Cancellation may
+          // still be draining usage, so check the signal as well as settlement.
+          if (settled || abortRequested || signal?.aborted) return
+          try {
+            const attribution = await capturePermissionAttribution(
+              sessionId,
+              req.requestId,
+              outcome
+            )
+            if (settled || abortRequested || signal?.aborted) return
+            await approveTool(
+              sessionId,
+              req.requestId,
+              (req.suppressAlwaysAllowRule || req.requiresPerCallApproval) &&
+                outcome.decision === "allow_always"
+                ? "allow"
+                : outcome.decision,
+              outcome.message,
+              outcome.updatedInput,
+              (req as PermissionRequestEvent & { remoteExecutionContext?: RemoteExecutionContext })
+                .remoteExecutionContext,
+              attribution
+            )
+          } catch {
+            /* best-effort — the sidecar may have already moved on */
           }
         } finally {
-          resumeWallClock()
+          settleResponse(responseKey)
         }
-        // A delayed UI response belongs to this turn only. Cancellation may
-        // still be draining usage, so check the signal as well as settlement.
-        if (settled || abortRequested || signal?.aborted) return
-        try {
-          const attribution = await capturePermissionAttribution(sessionId, req.requestId, outcome)
-          if (settled || abortRequested || signal?.aborted) return
-          await approveTool(
-            sessionId,
-            req.requestId,
-            (req.suppressAlwaysAllowRule || req.requiresPerCallApproval) &&
-              outcome.decision === "allow_always"
-              ? "allow"
-              : outcome.decision,
-            outcome.message,
-            outcome.updatedInput,
-            (req as PermissionRequestEvent & { remoteExecutionContext?: RemoteExecutionContext })
-              .remoteExecutionContext,
-            attribution
-          )
-        } catch {
-          /* best-effort — the sidecar may have already moved on */
-        }
-        // Decision dispatched — the model can resume, so re-arm the idle
-        // watchdog now instead of waiting for the next streamed event. This
-        // closes the gap where a post-approval provider stall went uncaught
-        // because `pauseIdle` left the watchdog disabled until something streamed.
-        armIdle()
       })()
     }
 
@@ -1144,47 +1170,51 @@ async function captureAssistantReplyCore(
     //     output passes through unchanged. ──
     const handleToolResultReview = (req: ToolResultReviewEvent) => {
       if (req.toolUseId) reviewedToolUseIds.add(req.toolUseId)
+      const responseKey = `review:${req.reviewId}`
+      pendingResponses.add(responseKey)
       void (async () => {
-        const call = req.toolUseId ? toolCallsById.get(req.toolUseId) : undefined
-        let updatedToolOutput: unknown
         try {
-          const post = await dispatchPostToolUse(
-            req.toolName || call?.name || "",
-            call?.input ?? {},
-            req.result,
-            sessionId
-          )
-          updatedToolOutput = post.modifiedResult
-        } catch {
-          /* Global post-tool observers fail open, matching the interactive path. */
-        }
-        if (cap?.onToolResultReview) {
+          const call = req.toolUseId ? toolCallsById.get(req.toolUseId) : undefined
+          let updatedToolOutput: unknown
           try {
-            const decision = await cap.onToolResultReview({
-              toolName: req.toolName || call?.name || "",
-              input: call?.input ?? {},
-              result: updatedToolOutput ?? req.result,
-              isError: req.isError,
-            })
-            updatedToolOutput = decision?.updatedToolOutput ?? updatedToolOutput
+            const post = await dispatchPostToolUse(
+              req.toolName || call?.name || "",
+              call?.input ?? {},
+              req.result,
+              sessionId
+            )
+            updatedToolOutput = post.modifiedResult
           } catch {
-            /* Keep the global rewrite if the capture-specific observer fails. */
+            /* Global post-tool observers fail open, matching the interactive path. */
           }
+          if (cap?.onToolResultReview) {
+            try {
+              const decision = await cap.onToolResultReview({
+                toolName: req.toolName || call?.name || "",
+                input: call?.input ?? {},
+                result: updatedToolOutput ?? req.result,
+                isError: req.isError,
+              })
+              updatedToolOutput = decision?.updatedToolOutput ?? updatedToolOutput
+            } catch {
+              /* Keep the global rewrite if the capture-specific observer fails. */
+            }
+          }
+          if (settled || abortRequested || signal?.aborted) return
+          try {
+            await toolResultDecision(
+              sessionId,
+              req.reviewId,
+              updatedToolOutput,
+              (req as typeof req & { remoteExecutionContext?: RemoteExecutionContext })
+                .remoteExecutionContext
+            )
+          } catch {
+            /* best-effort — the sidecar may have already moved on */
+          }
+        } finally {
+          settleResponse(responseKey)
         }
-        if (settled || abortRequested || signal?.aborted) return
-        try {
-          await toolResultDecision(
-            sessionId,
-            req.reviewId,
-            updatedToolOutput,
-            (req as typeof req & { remoteExecutionContext?: RemoteExecutionContext })
-              .remoteExecutionContext
-          )
-        } catch {
-          /* best-effort — the sidecar may have already moved on */
-        }
-        // Review dispatched — re-arm the idle watchdog (see handlePermissionRequest).
-        armIdle()
       })()
     }
 
@@ -1264,6 +1294,21 @@ async function captureAssistantReplyCore(
         clearTimeout(idleHandle)
         idleHandle = null
       }
+    }
+    // The stream is legitimately silent while a tool executes or a responder
+    // round-trip is still owed; the watchdog only runs when neither holds.
+    const idleSuspended = () => inFlightToolIds.size > 0 || pendingResponses.size > 0
+    const resumeIdle = () => {
+      if (idleSuspended()) pauseIdle()
+      else armIdle()
+    }
+    // A responder answered. Re-arm now rather than on the next streamed event,
+    // so a provider that stalls after the decision is still caught — unless a
+    // sibling prompt or a running tool keeps the stream silent on purpose.
+    function settleResponse(key: string): void {
+      pendingResponses.delete(key)
+      if (settled || abortRequested || signal?.aborted) return
+      resumeIdle()
     }
 
     // ── Wire up abort handling first so a synchronous-abort signal
@@ -1373,8 +1418,10 @@ async function captureAssistantReplyCore(
       // minutes), and the SDK re-includes the completed tool_use block in every
       // later assistant snapshot — so an unconditional re-arm here would restart
       // the idle timer off a stray repeat and trip the watchdog mid-tool. The
-      // `tool_result` handler re-arms once `inFlightToolIds` drains.
-      if (inFlightToolIds.size === 0) armIdle()
+      // `tool_result` handler re-arms once `inFlightToolIds` drains. Likewise
+      // while a prompt still waits on the user: an event for a sibling call
+      // is not a sign the model is streaming again.
+      if (!idleSuspended()) armIdle()
 
       if (evt.type === "sdk_session_id") {
         if (typeof evt.sdkSessionId === "string" && evt.sdkSessionId) {
@@ -1410,7 +1457,17 @@ async function captureAssistantReplyCore(
           // before reporting the neutral interruption to the caller.
           const usage = evt.result ? (extractUsage(evt.result) ?? undefined) : undefined
           if (usage) emitEvent({ type: "usage", usage })
-          finishErr(new RunAndCaptureError("aborted by signal", "aborted"))
+          finishErr(
+            new RunAndCaptureError("aborted by signal", "aborted", {
+              partial: {
+                text: assembledText.trim(),
+                ...(Array.isArray(evt.conversationSnapshot)
+                  ? { conversationSnapshot: evt.conversationSnapshot }
+                  : {}),
+                ...(capturedSdkSessionId ? { sdkSessionId: capturedSdkSessionId } : {}),
+              },
+            })
+          )
           return
         }
         if (evt.error) {
@@ -1699,8 +1756,7 @@ async function captureAssistantReplyCore(
                 if (typeof block.tool_use_id === "string") {
                   inFlightToolIds.delete(block.tool_use_id)
                 }
-                if (inFlightToolIds.size === 0) armIdle()
-                else pauseIdle()
+                resumeIdle()
                 // PostToolUse observation: fire the responder for tool results
                 // the review round-trip did NOT already handle (so the hook is
                 // called once). The returned `updatedToolOutput` is ignored here

@@ -141,6 +141,7 @@ import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
 import { iterTranscriptEntries, type TranscriptFs } from "../../agent/transcript"
 import { resolveHome } from "../../config/load"
+import { configuredContextWindow } from "../../config/context-window"
 import { setCredential, type CredentialKind } from "../../config/credentials"
 import {
   setConfigValue,
@@ -1374,17 +1375,25 @@ export function App({
     // Recount when a run this session owns settles (a child can settle as interrupted).
   }, [home, state.sessionId, backgroundSettleSeq])
 
+  // A window the user declared in `config.providers` beats the catalog: it
+  // exists precisely for ids the catalog does not know (a proxied model would
+  // otherwise read as 128k in `/context` and the footer).
+  const declaredContextWindow = configuredContextWindow(state.config, activeProvider, activeModel)
   useEffect(() => {
     let cancelled = false
     void resolveMeta(activeProvider, activeModel)
       .then((meta) => {
-        if (!cancelled) dispatch({ type: "SET_MODEL_META", meta })
+        if (cancelled) return
+        dispatch({
+          type: "SET_MODEL_META",
+          meta: declaredContextWindow ? { ...meta, contextWindow: declaredContextWindow } : meta,
+        })
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [resolveMeta, activeProvider, activeModel, dispatch])
+  }, [resolveMeta, activeProvider, activeModel, declaredContextWindow, dispatch])
 
   // Prime + background-refresh the OpenRouter live-models catalog whenever
   // OpenRouter is the active provider, so the `/model` picker reflects the synced
@@ -2625,7 +2634,7 @@ export function App({
         type: "OVERLAY_OPEN",
         overlay:
           ov.kind === "hooks"
-            ? { kind: "hooks", ...readHooksPanel({ home, config: { ...cfg, ...patch } }) }
+            ? { kind: "hooks", ...readHooksPanel({ home, osHome, config: { ...cfg, ...patch } }) }
             : {
                 kind: "settings",
                 sections: settingsSections({ ...cfg, ...patch }, state.backendCapabilities),
@@ -2651,6 +2660,7 @@ export function App({
       agent,
       fullscreen,
       home,
+      osHome,
       clearScreen,
       t,
     ]

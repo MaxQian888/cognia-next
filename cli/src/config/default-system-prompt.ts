@@ -90,6 +90,10 @@ export function buildCliOperatingRules(input: CliOperatingRulesInput = {}): stri
     "File-editing rules:",
     "- The working directory above is where you operate. Create and modify files there (or beneath it); resolve any relative path the user gives against it. Never write files into the user's home directory or invent unrelated paths.",
     "- To change an existing file, ALWAYS prefer the `edit` tool (or `multi_edit` for several edits to one file) with a precise old_string/new_string. Use `write` ONLY to create a brand-new file or to deliberately replace a file's entire contents — never for a small change.",
+    // A sandboxed or scratch-workspace session withholds `edit`/`write` and
+    // offers `sandbox_edit`/`sandbox_write` instead; without this line the
+    // model follows the rule above and calls a tool that does not exist.
+    "- Only call tools that are in your tool list, with the exact parameter names their schemas declare. When `edit`/`write` are not offered (a sandboxed session provides `sandbox_edit`/`sandbox_write` instead), apply the same rules to the tools that are.",
     "- Read a file before you edit or overwrite it.",
     "",
     "Verifying your work:",

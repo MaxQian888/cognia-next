@@ -149,6 +149,11 @@ export interface TranscriptTail {
   latestAssistant?: TranscriptEntry
   /** Role of the most recent non-system entry, when one exists. */
   lastNonSystemRole?: TranscriptRole
+  /**
+   * User entries after {@link latestAssistant} (or in the whole transcript when
+   * there is none): requests whose turn failed before it saved a reply.
+   */
+  unfinishedUserTurns: number
 }
 
 /**
@@ -162,10 +167,11 @@ export function readTranscriptTail(
   fsx: TranscriptFs = realTranscriptFs
 ): TranscriptTail {
   const raw = fsx.read(sessionTranscriptPath(home, sessionId))
-  if (raw === null) return { hasEntries: false }
+  if (raw === null) return { hasEntries: false, unfinishedUserTurns: 0 }
   let hasEntries = false
   let latestAssistant: TranscriptEntry | undefined
   let lastNonSystemRole: TranscriptRole | undefined
+  let unfinishedUserTurns = 0
   let end = raw.length
   while (end > 0) {
     const nl = raw.lastIndexOf("\n", end - 1)
@@ -175,15 +181,40 @@ export function readTranscriptTail(
     if (!entry) continue
     hasEntries = true
     if (entry.role === "assistant" && latestAssistant === undefined) latestAssistant = entry
+    if (entry.role === "user" && latestAssistant === undefined) unfinishedUserTurns += 1
     if (entry.role !== "system" && lastNonSystemRole === undefined) {
       lastNonSystemRole = entry.role
     }
     if (latestAssistant !== undefined && lastNonSystemRole !== undefined) break
   }
-  const tail: TranscriptTail = { hasEntries }
+  const tail: TranscriptTail = { hasEntries, unfinishedUserTurns }
   if (latestAssistant !== undefined) tail.latestAssistant = latestAssistant
   if (lastNonSystemRole !== undefined) tail.lastNonSystemRole = lastNonSystemRole
   return tail
+}
+
+/**
+ * Cut a session transcript back to its first `keepUserTurns` user turns: every
+ * entry before the next user entry stays exactly as written, including the
+ * assistant entries' `meta.runtimeHistory`, which is what a later turn resumes
+ * the provider conversation from. Used by `/rewind` and edit-and-fork.
+ */
+export function truncateTranscriptToUserTurns(
+  home: string,
+  sessionId: string,
+  keepUserTurns: number,
+  fsx: TranscriptFs = realTranscriptFs
+): void {
+  const kept: TranscriptEntry[] = []
+  let users = 0
+  for (const entry of iterTranscriptEntries(home, sessionId, fsx)) {
+    if (entry.role === "user") {
+      if (users >= keepUserTurns) break
+      users += 1
+    }
+    kept.push(entry)
+  }
+  writeTranscript(home, sessionId, kept, fsx)
 }
 
 /**

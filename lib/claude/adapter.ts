@@ -27,6 +27,7 @@ import type {
 } from "./parts-extensions"
 import type { ProjectHistoryEvidence } from "./project-history-evidence-registry"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { usageInfoFromUsageBlock } from "@/lib/claude/usage"
 import { VIDEO_ATTACHMENT_PART_KEY } from "@/lib/chat/attachments/video/attachment-info"
 import { attachUsageToLastAssistant } from "@/lib/chat/message-run-metadata"
 import type { HookNoticePartData } from "./hooks"
@@ -1356,61 +1357,10 @@ export function extractUsage(result: SDKResultMessage): UsageInfo | null {
     duration_ms?: number
     total_cost_usd?: number
   }
-  const raw = top.usage ?? top.message?.usage
-  if (!raw && top.total_cost_usd === undefined) return null
-
-  const num = (k: string) => {
-    if (!raw) return undefined
-    const v = raw[k]
-    return typeof v === "number" ? v : undefined
-  }
-
-  const reasoning = num("reasoning_tokens")
-  const contextInput = num("context_input_tokens")
-
-  // Cache-TTL split and server-tool counters, emitted by the shared usage
-  // normalizer (`lib/ai/chat/usage-normalize.ts` and its sidecar mirror). Both
-  // are absent unless the provider actually reported them, so "no 1-hour
-  // writes" stays distinguishable from "TTL not reported".
-  const cacheCreationDetail = raw?.cache_creation as
-    { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number } | undefined
-  const positive = (v: unknown) =>
-    typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined
-
-  const rawServerToolUse = raw?.server_tool_use as Record<string, unknown> | undefined
-  let serverToolUse: Record<string, number> | undefined
-  if (rawServerToolUse && typeof rawServerToolUse === "object") {
-    const counts: Record<string, number> = {}
-    for (const [tool, value] of Object.entries(rawServerToolUse)) {
-      const n = positive(value)
-      if (n !== undefined) counts[tool] = n
-    }
-    if (Object.keys(counts).length > 0) serverToolUse = counts
-  }
-
-  const info: UsageInfo = {
-    inputTokens: num("input_tokens"),
-    outputTokens: num("output_tokens"),
-    // Only attach when the channel reported a window-prompt size that differs
-    // from the (cumulative) input — i.e. the ai-sdk agent-loop path.
-    contextInputTokens:
-      typeof contextInput === "number" && contextInput !== num("input_tokens")
-        ? contextInput
-        : undefined,
-    cacheCreationInputTokens: num("cache_creation_input_tokens"),
-    cacheReadInputTokens: num("cache_read_input_tokens"),
-    cacheCreation5mInputTokens: positive(cacheCreationDetail?.ephemeral_5m_input_tokens),
-    cacheCreation1hInputTokens: positive(cacheCreationDetail?.ephemeral_1h_input_tokens),
-    serverToolUse,
-    // Only attach when the provider actually reported reasoning tokens (> 0) so
-    // non-reasoning turns don't carry a noisy `reasoningTokens: 0`.
-    reasoningTokens: typeof reasoning === "number" && reasoning > 0 ? reasoning : undefined,
-    totalCostUsd: typeof top.total_cost_usd === "number" ? top.total_cost_usd : undefined,
-    durationMs: typeof top.duration_ms === "number" ? top.duration_ms : undefined,
-  }
-  // Drop fully-empty objects rather than attaching a placeholder.
-  if (Object.values(info).every((v) => v === undefined)) return null
-  return info
+  return usageInfoFromUsageBlock(top.usage ?? top.message?.usage, {
+    totalCostUsd: top.total_cost_usd,
+    durationMs: top.duration_ms,
+  })
 }
 
 /**

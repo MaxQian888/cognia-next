@@ -12,8 +12,11 @@
  * propose against; `useProposalStore` holds staged batches; `applyProposalOps` +
  * `replaceWorkflow` are the desktop's own apply+persist path.
  */
+import { liveQuery } from "dexie"
+
 import { createWorkflow, getWorkflow, replaceWorkflow } from "@/lib/db/workflows"
 import { createEditorStore, type EditorStore } from "@/lib/workflow/editor/store"
+import { loadLastRunSummaryByStep } from "@/lib/workflow/runtime/last-run-summary"
 import {
   getEditorStore,
   registerEditorStore,
@@ -76,6 +79,33 @@ export interface CopilotDeps {
   proposals?: ProposalStoreLike
   /** Load the in-tree plugin runtime + enable workflow-ai so `wf_*` tools surface. */
   ensurePlugin?: () => Promise<void>
+  /** Keep the store's per-step last-run summaries live; returns the stop function. */
+  mirrorLastRun?: LastRunMirror
+}
+
+/**
+ * Feeds `lastRunByStepId` — what `wf_get_last_run` answers from — the way the
+ * desktop canvas does with its Dexie live query. The CLI has no canvas, so
+ * without this the copilot always saw an empty last run, even right after a
+ * run it started itself had succeeded.
+ */
+export type LastRunMirror = (workflowId: string, store: EditorStore) => () => void
+
+const defaultMirrorLastRun: LastRunMirror = (workflowId, store) => {
+  const subscription = liveQuery(() => loadLastRunSummaryByStep(workflowId)).subscribe({
+    next: (summaries) => store.getState().setLastRunByStepId(summaries),
+    // A failed read leaves the previous summaries; the next change retries.
+    error: () => undefined,
+  })
+  return () => subscription.unsubscribe()
+}
+
+/** Live mirrors by workflow id, stopped when copilot mode leaves the workflow. */
+const lastRunMirrors = new Map<string, () => void>()
+
+function stopLastRunMirror(workflowId: string): void {
+  lastRunMirrors.get(workflowId)?.()
+  lastRunMirrors.delete(workflowId)
 }
 
 const dbOf = (d: CopilotDeps) => d.ensureDb ?? (() => ensureCliDb())
@@ -90,6 +120,15 @@ const getStoreOf = (d: CopilotDeps) =>
 const proposalsOf = (d: CopilotDeps): ProposalStoreLike =>
   d.proposals ?? (useProposalStore as unknown as ProposalStoreLike)
 const ensurePluginOf = (d: CopilotDeps) => d.ensurePlugin ?? defaultEnsurePlugin
+const mirrorLastRunOf = (d: CopilotDeps) => d.mirrorLastRun ?? defaultMirrorLastRun
+
+/** Build, register and start mirroring the editor store for `row`. */
+function openEditorStore(row: WorkflowRow, deps: CopilotDeps): void {
+  const store = createStoreOf(deps)(row)
+  registerOf(deps)(row.id, store)
+  stopLastRunMirror(row.id)
+  lastRunMirrors.set(row.id, mirrorLastRunOf(deps)(row.id, store))
+}
 
 /** Default plugin activation: load the runtime once, then enable workflow-ai. */
 async function defaultEnsurePlugin(): Promise<void> {
@@ -139,7 +178,7 @@ export async function copilotCreate(name: string, deps: CopilotDeps): Promise<vo
     deps.dispatch({ type: "NOTICE", message: `Could not create workflow: ${errorMessage(err)}` })
     return
   }
-  registerOf(deps)(row.id, createStoreOf(deps)(row))
+  openEditorStore(row, deps)
   await ensurePluginOf(deps)()
   deps.dispatch({ type: "COPILOT_ENTER", workflowId: row.id, name: row.name, isNew: true })
   deps.dispatch({
@@ -160,7 +199,7 @@ export async function copilotEdit(id: string, deps: CopilotDeps): Promise<void> 
     deps.dispatch({ type: "NOTICE", message: `Workflow ${id} not found.` })
     return
   }
-  registerOf(deps)(row.id, createStoreOf(deps)(row))
+  openEditorStore(row, deps)
   await ensurePluginOf(deps)()
   deps.dispatch({ type: "COPILOT_ENTER", workflowId: row.id, name: row.name, isNew: false })
   deps.dispatch({
@@ -255,6 +294,7 @@ export async function copilotExit(workflowId: string, deps: CopilotDeps): Promis
       })
     }
   }
+  stopLastRunMirror(workflowId)
   unregisterOf(deps)(workflowId)
   deps.dispatch({ type: "COPILOT_EXIT" })
   deps.dispatch({ type: "NOTICE", message: "Left workflow copilot." })

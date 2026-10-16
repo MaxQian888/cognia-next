@@ -194,6 +194,58 @@ describe("canonicalEnvelopeToActions", () => {
     event,
   })
 
+  it("reads the built-in sidecar's snake_case result usage as UsageInfo", () => {
+    // The block the ai-sdk sidecar puts on its `result`, as observed with an
+    // OpenAI-compatible relay (stream_options.include_usage).
+    expect(
+      canonicalEnvelopeToActions(
+        envelope({
+          kind: "usage",
+          usage: {
+            input_tokens: 3101,
+            output_tokens: 10,
+            context_input_tokens: 3000,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 2048,
+            reasoning_tokens: 0,
+          },
+        })
+      )
+    ).toEqual([
+      {
+        type: "SET_USAGE",
+        usage: {
+          inputTokens: 3101,
+          outputTokens: 10,
+          contextInputTokens: 3000,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 2048,
+        },
+      },
+    ])
+  })
+
+  it("keeps camel-case usage from the capture stream as it is", () => {
+    expect(
+      canonicalEnvelopeToActions(
+        envelope({ kind: "usage", usage: { inputTokens: 5, outputTokens: 2, totalCostUsd: 0.01 } })
+      )
+    ).toEqual([
+      { type: "SET_USAGE", usage: { inputTokens: 5, outputTokens: 2, totalCostUsd: 0.01 } },
+    ])
+  })
+
+  it("maps partial occupancy in either the used/size or contextTokens/contextWindow shape", () => {
+    for (const usage of [
+      { used: 24_000, size: 1_000_000 },
+      { contextTokens: 24_000, contextWindow: 1_000_000 },
+    ]) {
+      expect(canonicalEnvelopeToActions(envelope({ kind: "usage", usage, partial: true }))).toEqual(
+        [{ type: "SET_CONTEXT_USAGE", used: 24_000, size: 1_000_000 }]
+      )
+    }
+  })
+
   it("maps a compacting activity report to the live turn-activity slot", () => {
     expect(
       canonicalEnvelopeToActions(

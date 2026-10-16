@@ -596,6 +596,20 @@ export const providerConfigSchema = z
     /** Per-provider default model id. */
     model: z.string().min(1).optional(),
     /**
+     * Context window, in tokens, of this provider's models. Only needed when
+     * no catalog knows the model (a self-hosted or proxied id): without it the
+     * CLI assumes 128k for `/context`, the footer and the auto-compaction
+     * threshold. `models` overrides it per model.
+     */
+    contextWindow: z.number().int().positive().optional(),
+    /** Per-model metadata, keyed by model id. */
+    models: z
+      .record(
+        z.string().min(1),
+        z.object({ contextWindow: z.number().int().positive().optional() }).strict()
+      )
+      .optional(),
+    /**
      * ADR-0090 Phase 4 — EXPLICIT experimental opt-in: run this Anthropic-
      * protocol deployment through the Claude Agent SDK via the built-in
      * Gateway (`runtimePolicy: claude-agent-sdk` + `routePolicy:

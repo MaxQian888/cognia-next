@@ -17,6 +17,7 @@ import {
 } from "@cognia/agent-config-types/agent-execution"
 
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import { usageInfoFromRecord } from "@/lib/claude/usage"
 import { redactText } from "@cognia/redact"
 
 export { isAgentEventEnvelope, isKnownCanonicalAgentEventKind }
@@ -272,12 +273,17 @@ export function captureEventFromCanonical(event: CanonicalAgentEvent): CaptureSt
         summary: event.summary,
         toolCallIds: event.toolCallIds,
       }
-    case "usage":
+    case "usage": {
+      // The block's shape is runtime-specific (snake_case from the built-in
+      // sidecar); the capture stream promises `UsageInfo`. Fields the
+      // conversion does not know (a partial thinking estimate) ride along.
+      const usage = { ...event.usage, ...(usageInfoFromRecord(event.usage) ?? {}) }
       return {
         type: "usage",
-        usage: event.usage as CaptureStreamEvent extends { usage: infer U } ? U : never,
+        usage: usage as CaptureStreamEvent extends { usage: infer U } ? U : never,
         partial: event.partial,
       } as CaptureStreamEvent
+    }
     case "compact":
       return {
         type: "compact",

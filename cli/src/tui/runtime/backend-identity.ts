@@ -16,6 +16,7 @@ import { getModelContextWindow } from "@/lib/claude/usage"
 import { providerIdForPreset } from "@/lib/ai/agent/external/config/preset-provider"
 
 import { resolveBackendModel } from "../../config/active-model"
+import { configuredContextWindow } from "../../config/context-window"
 import type { ResolvedConfig } from "../../config/schema"
 import { isBuiltinBackend } from "./backend-capabilities"
 
@@ -82,7 +83,8 @@ export function backendIdentity(config: ResolvedConfig, presetId?: string): Back
  * from that on an external backend invents a fact, which is exactly what
  * `externalWithoutKnownWindow` (format/status-bar) already refuses to do in the
  * footer — so `/status` and `/context` route through here and print nothing
- * instead.
+ * instead. On the built-in backend a window the user declared for the model in
+ * `config.providers` comes before the pattern table.
  */
 export function backendContextWindow(
   config: ResolvedConfig,
@@ -91,7 +93,8 @@ export function backendContextWindow(
 ): number | undefined {
   if (contextWindow && contextWindow > 0) return contextWindow
   if (!isBuiltinBackend(config.agentBackend)) return undefined
-  return getModelContextWindow(resolveBackendModel(config, presetId))
+  const model = resolveBackendModel(config, presetId)
+  return configuredContextWindow(config, config.provider, model) ?? getModelContextWindow(model)
 }
 
 /** The compact form for the footer's `backend` segment. */

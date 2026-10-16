@@ -280,7 +280,95 @@ describe("checkpoint store", () => {
   })
 })
 
+describe("pre-run snapshots", () => {
+  it("lets a pre-run snapshot replace a disk read that landed after the write", () => {
+    const fs = memFs()
+    fs.files.set("/proj/a.ts", "already-new")
+    const store = createCheckpointStore({ home: "/home", fs })
+    store.openSegment("s1")
+    store.recordPreMutation("s1", "/proj/a.ts") // raced: read the new content
+    store.recordSnapshot("s1", {
+      absPath: "/proj/a.ts",
+      before: "file",
+      content: Buffer.from("original"),
+    })
+    // A second snapshot of the same path in the segment is ignored.
+    store.recordSnapshot("s1", { absPath: "/proj/a.ts", before: "file", content: Buffer.from("x") })
+    store.recordPreMutation("s1", "/proj/a.ts") // and a disk read never overrides it
+    const cp = store.commitCheckpoint("s1", { cellCount: 0, label: "t", ts: 1, seq: 1 })
+    store.restore(cp, { files: true, conversation: false })
+    expect(fs.read("/proj/a.ts")).toBe("original")
+  })
+
+  it("undoes a move: removes the destination and rewrites the source", () => {
+    const fs = memFs()
+    fs.files.set("/proj/b.ts", "moved")
+    const store = createCheckpointStore({ home: "/home", fs })
+    store.openSegment("s1")
+    store.recordSnapshot("s1", { absPath: "/proj/a.ts", before: "file", content: Buffer.from("A") })
+    store.recordSnapshot("s1", { absPath: "/proj/b.ts", before: "absent" })
+    const cp = store.commitCheckpoint("s1", { cellCount: 0, label: "t", ts: 1, seq: 1 })
+    store.restore(cp, { files: true, conversation: false })
+    expect(fs.read("/proj/a.ts")).toBe("A")
+    expect(fs.exists("/proj/b.ts")).toBe(false)
+  })
+
+  it("records what it cannot restore instead of tombstoning it", () => {
+    const fs = memFs()
+    fs.files.set("/proj/huge.bin", "kept")
+    const store = createCheckpointStore({ home: "/home", fs })
+    store.openSegment("s1")
+    store.recordSnapshot("s1", { absPath: "/proj/huge.bin", before: "file", omitted: "too-large" })
+    const cp = store.commitCheckpoint("s1", { cellCount: 0, label: "t", ts: 1, seq: 1 })
+    expect(cp.files).toEqual([])
+    expect(cp.unrestorable).toEqual([{ absPath: "/proj/huge.bin", reason: "too-large" }])
+    store.restore(cp, { files: true, conversation: false })
+    expect(fs.read("/proj/huge.bin")).toBe("kept")
+    // Survives a reload from disk.
+    const reopened = createCheckpointStore({ home: "/home", fs })
+    expect(reopened.listCheckpoints("s1")[0]!.unrestorable).toEqual(cp.unrestorable)
+  })
+})
+
 describe("realCheckpointFs", () => {
+  it("restores binary bytes and a recursively deleted tree", () => {
+    const home = nodeFs.mkdtempSync(path.join(os.tmpdir(), "cp-bin-"))
+    try {
+      const work = path.join(home, "work")
+      const bin = path.join(work, "img.bin")
+      const tree = path.join(work, "tree")
+      const store = createCheckpointStore({ home, fs: realCheckpointFs })
+      store.openSegment("s1")
+      const bytes = Buffer.from([0, 255, 254, 10, 13, 0x80, 0xc3])
+      store.recordSnapshot("s1", { absPath: bin, before: "file", content: bytes })
+      store.recordSnapshot("s1", { absPath: tree, before: "directory" })
+      store.recordSnapshot("s1", { absPath: path.join(tree, "empty"), before: "directory" })
+      store.recordSnapshot("s1", {
+        absPath: path.join(tree, "a.txt"),
+        before: "file",
+        content: Buffer.from("A"),
+      })
+      // A directory the turn created is removed with what it holds.
+      const created = path.join(work, "created")
+      store.recordSnapshot("s1", { absPath: created, before: "absent" })
+      nodeFs.mkdirSync(path.join(created, "deep"), { recursive: true })
+      nodeFs.writeFileSync(path.join(created, "deep", "x"), "x")
+      nodeFs.writeFileSync(bin, "garbled")
+      const cp = store.commitCheckpoint("s1", { cellCount: 0, label: "t", ts: 1, seq: 1 })
+
+      createCheckpointStore({ home, fs: realCheckpointFs }).restore(cp, {
+        files: true,
+        conversation: false,
+      })
+      expect(nodeFs.readFileSync(bin)).toEqual(bytes)
+      expect(nodeFs.readFileSync(path.join(tree, "a.txt"), "utf8")).toBe("A")
+      expect(nodeFs.statSync(path.join(tree, "empty")).isDirectory()).toBe(true)
+      expect(nodeFs.existsSync(created)).toBe(false)
+    } finally {
+      nodeFs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("round-trips a real checkpoint on disk (write/read/list/restore/rm)", () => {
     const home = nodeFs.mkdtempSync(path.join(os.tmpdir(), "cp-"))
     try {
