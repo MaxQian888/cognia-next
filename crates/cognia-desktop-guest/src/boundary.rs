@@ -142,6 +142,25 @@ fn observe_identity(
         .find(|pid| fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmd| cmd == argv))
         .ok_or_else(invalid)?;
     let workload_start = start_time(workload)?;
+    if uid == "1001" {
+        // At the fixed admission barrier the importer has not opened /input.
+        // No socket or outside directory descriptor may survive bootstrap.
+        let mut standard = BTreeSet::new();
+        for entry in fs::read_dir(format!("/proc/{workload}/fd"))? {
+            let entry = entry?;
+            let fd: u32 = entry.file_name().to_str().ok_or_else(invalid)?.parse().map_err(|_| invalid())?;
+            let target = fs::read_link(entry.path())?;
+            let target = target.to_str().ok_or_else(invalid)?;
+            let allowed = match fd {
+                0 => target.starts_with("pipe:[") && target.ends_with(']'),
+                1 | 2 => target == "/dev/null",
+                _ => target == "/opt/cognia-desktop/handoff-import.py",
+            };
+            if !allowed { return Err(invalid()); }
+            if fd <= 2 { standard.insert(fd); }
+        }
+        if standard != BTreeSet::from([0, 1, 2]) { return Err(invalid()); }
+    }
     if !restricted_identity(
         &fs::read_to_string(format!("/proc/{workload}/status"))?,
         uid,

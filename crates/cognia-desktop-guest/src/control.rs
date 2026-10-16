@@ -130,8 +130,7 @@ struct Pending {
 }
 impl Drop for Pending {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        kill_and_reap(&mut self.child);
     }
 }
 pub(crate) struct Control {
@@ -324,11 +323,20 @@ fn duplicate_low(fd: i32) -> io::Result<OwnedFd> {
     }
     Ok(unsafe { OwnedFd::from_raw_fd(value) })
 }
+fn kill_and_reap(child: &mut Child) {
+    let _ = child.kill();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            _ => break,
+        }
+    }
+}
 struct ImportProcess(Child);
 impl Drop for ImportProcess {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        kill_and_reap(&mut self.0);
     }
 }
 fn receive(
