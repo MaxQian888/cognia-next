@@ -34,32 +34,38 @@ class FakeFrame {
       await this.page.triggerDialog("nextFindDialog")
       return { matches: 2, index: 0 }
     }
-    if (argument?.includeText !== undefined) {
+    if (String(fn).includes("__cogniaSnapshot")) {
+      assert.equal(typeof argument, "string")
+      assert.equal(typeof JSON.parse(argument).includeText, "boolean")
       this.snapshotGeneration += 1
       return JSON.stringify({
-        generation: this.snapshotGeneration,
-        url: this._url,
-        title: "App",
-        nodes: [
-          {
-            ref: "e1",
-            role: "button",
-            name: "Submit",
-            tag: "button",
-            rect: { x: 1, y: 2, width: 3, height: 4 },
-            value: null,
-            state: { disabled: false, checked: null, expanded: null },
-          },
-          {
-            ref: "e2",
-            role: "textbox",
-            name: "One-time password",
-            tag: "input",
-            rect: { x: 1, y: 2, width: 3, height: 4 },
-            value: "123456",
-            state: { disabled: false, checked: null, expanded: null },
-          },
-        ],
+        ok: true,
+        error: null,
+        snapshot: {
+          generation: this.snapshotGeneration,
+          url: this._url,
+          title: "App",
+          nodes: [
+            {
+              ref: "e1",
+              role: "button",
+              name: "Submit",
+              tag: "button",
+              rect: { x: 1, y: 2, width: 3, height: 4 },
+              value: null,
+              state: { disabled: false, checked: null, expanded: null },
+            },
+            {
+              ref: "e2",
+              role: "textbox",
+              name: "One-time password",
+              tag: "input",
+              rect: { x: 1, y: 2, width: 3, height: 4 },
+              value: "123456",
+              state: { disabled: false, checked: null, expanded: null },
+            },
+          ],
+        },
       })
     }
     if (argument?.action) return JSON.stringify({ ok: true, error: null, generation: 9 })
@@ -468,6 +474,147 @@ test("keeps cross-frame refs bound to the frame that produced them", async (t) =
 
   assert.deepEqual(childFrame.resolvedRefs, ["e1"])
   assert.deepEqual(page.mainFrame.resolvedRefs, [])
+})
+
+test("snapshot failures reject and publish no partial refs", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const page = chromium.launches[0].context.pages[0]
+  const childFrame = new FakeFrame("https://child.example.com/")
+  childFrame.page = page
+  page.frames = () => [page.mainFrame, childFrame]
+  const first = await service.snapshot("session-1")
+  for (const response of [
+    JSON.stringify({ ok: false, error: "Snapshot scan failed", snapshot: null }),
+    JSON.stringify({ ok: true, error: null, snapshot: null }),
+    JSON.stringify({ nodes: [] }),
+    "not JSON",
+    new Error("Frame execution context destroyed"),
+  ]) {
+    childFrame.evaluate = async () => {
+      if (response instanceof Error) throw response
+      return response
+    }
+    await assert.rejects(
+      () => service.snapshot("session-1"),
+      (error) => {
+        assert.equal(error.code, "browser_snapshot_failed")
+        if (response instanceof Error) assert.equal(error.message, response.message)
+        if (response.includes?.("Snapshot scan failed"))
+          assert.equal(error.message, "Snapshot scan failed")
+        return true
+      }
+    )
+    assert.equal(service.references.size, 0)
+  }
+  await assert.rejects(() => service.act("session-1", first.nodes[0].ref, "click", {}), {
+    code: "browser_stale_ref",
+  })
+})
+
+test("real overlay snapshots resolve to native Chromium actions in local and cloud modes", async (t) => {
+  const { chromium } = await import("playwright-core")
+  const executablePath =
+    process.env.COGNIA_TEST_CHROMIUM_EXECUTABLE_PATH || chromium.executablePath()
+  try {
+    await fs.access(executablePath)
+  } catch (error) {
+    if (process.env.COGNIA_TEST_CHROMIUM_EXECUTABLE_PATH) throw error
+    t.skip("Playwright Chromium is not installed; strict overlay contract tests still run")
+    return
+  }
+  const overlayScript = await fs.readFile(
+    new URL("../../../lib/browser/overlay.injected.js", import.meta.url),
+    "utf8"
+  )
+  for (const mode of ["local", "cloud"]) {
+    await t.test(mode, async (t) => {
+      const { service } = await fixture(t, {
+        mode,
+        chromium: {
+          launch: (options) => chromium.launch({ ...options, executablePath }),
+          launchPersistentContext: (profile, options) =>
+            chromium.launchPersistentContext(profile, { ...options, executablePath }),
+        },
+        overlayScript,
+      })
+      t.after(() => service.closeAll())
+      await service.createSession({
+        id: "real-overlay",
+        ...(mode === "local" ? { headless: true } : {}),
+      })
+      const page = service.activeRecord(service.sessions.get("real-overlay")).page
+      await page.goto("about:blank")
+      await page.setContent(`
+        <title>Overlay contract</title>
+        <h1>Readable heading</h1>
+        <button onclick="this.dataset.clicked='yes'">Main action</button>
+        <input aria-label="Display name">
+        <input type="password" aria-label="PIN" value="withheld-value">
+        <div id="shadow"></div>
+        <iframe srcdoc="<button onclick=&quot;this.dataset.clicked='yes'&quot;>Frame action</button>"></iframe>
+        <iframe src="data:text/html,<button onclick=&quot;this.dataset.clicked='yes'&quot;>Cross-origin action</button>"></iframe>
+      `)
+      await page.evaluate(() => {
+        document.getElementById("shadow").attachShadow({ mode: "open" }).innerHTML =
+          "<button onclick=\"this.dataset.clicked='yes'\">Shadow action</button>"
+      })
+      for (const frame of page.frames())
+        await frame.waitForFunction(() => typeof window.__cogniaSnapshot === "function")
+
+      const lean = await service.snapshot("real-overlay")
+      assert(!lean.nodes.some((node) => node.name === "Readable heading"))
+      const snapshot = await service.snapshot("real-overlay", { includeText: true })
+      assert.equal(snapshot.url, "about:blank")
+      assert.equal(snapshot.title, "Overlay contract")
+      assert(
+        snapshot.nodes.some((node) => node.role === "heading" && node.name === "Readable heading")
+      )
+      assert(!snapshot.nodes.some((node) => node.secret || node.name === "PIN"))
+      assert(!JSON.stringify(snapshot).includes("withheld-value"))
+      const input = snapshot.nodes.find((node) => node.name === "Display name")
+      assert.equal(input.role, "textbox")
+      assert.equal(input.tag, "input")
+      assert.deepEqual(input.state, { disabled: false, checked: null, expanded: null })
+      assert.equal(typeof input.rect.width, "number")
+      await service.act("real-overlay", input.ref, "fill", { text: "Ada" })
+      assert.equal(await page.getByRole("textbox", { name: "Display name" }).inputValue(), "Ada")
+      for (const name of ["Main action", "Shadow action", "Frame action", "Cross-origin action"]) {
+        // Exercise the child frame's own registry as well as the main overlay's recursive scan.
+        const node = snapshot.nodes.find(
+          (node) =>
+            node.name === name &&
+            (!node.frame || service.references.get(node.ref).frame !== page.mainFrame())
+        )
+        assert(node, name)
+        const target = service.references.get(node.ref)
+        assert.notEqual(node.ref, target.nativeRef)
+        await service.act("real-overlay", node.ref, "click", {})
+        assert.equal(
+          await target.frame
+            .getByRole("button", { name, exact: true })
+            .getAttribute("data-clicked"),
+          "yes"
+        )
+      }
+      await service.snapshot("real-overlay")
+      await assert.rejects(
+        () => service.act("real-overlay", input.ref, "fill", { text: "Stale" }),
+        {
+          code: "browser_stale_ref",
+        }
+      )
+      await page.mainFrame().evaluate(() => {
+        window.__cogniaSnapshot = () =>
+          JSON.stringify({ ok: false, error: "Overlay failed", snapshot: null })
+      })
+      await assert.rejects(() => service.snapshot("real-overlay"), {
+        code: "browser_snapshot_failed",
+        message: "Overlay failed",
+      })
+      assert.equal(service.references.size, 0)
+    })
+  }
 })
 
 test("tracks popups as pages and keeps exactly one global active page", async (t) => {

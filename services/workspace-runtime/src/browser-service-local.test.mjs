@@ -754,12 +754,19 @@ test("local uploads are confined to uploadRoots", async (t) => {
   await fs.writeFile(path.join(root, "secret.txt"), "no")
   await service.createSession({ id: "s1", uploadRoots: [uploads] })
   const page = chromium.launches[0].context._pages[0]
-  page.mainFrame.evaluate = async () =>
-    JSON.stringify({
-      url: "https://x.example/",
-      title: "x",
-      nodes: [{ ref: "e1", role: "button", name: "Upload", tag: "input", type: "file" }],
+  page.mainFrame.evaluate = async (_fn, optsJson) => {
+    assert.equal(typeof optsJson, "string")
+    assert.deepEqual(JSON.parse(optsJson), { includeText: false })
+    return JSON.stringify({
+      ok: true,
+      error: null,
+      snapshot: {
+        url: "https://x.example/",
+        title: "x",
+        nodes: [{ ref: "e1", role: "button", name: "Upload", tag: "input", type: "file" }],
+      },
     })
+  }
   const snapshot = await service.snapshot("s1")
   const result = await service.setFiles("s1", snapshot.nodes[0].ref, [path.join(uploads, "cv.pdf")])
   assert.equal(result.ok, true)

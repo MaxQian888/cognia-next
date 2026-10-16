@@ -1203,28 +1203,38 @@ export class RemoteChromiumService {
     record.generation += 1
     this.invalidatePage(sessionId, pageId)
     const nodes = []
+    const references = new Map()
     let url = record.page.url()
     let title = await record.page.title()
     const mainFrame = pageMainFrame(record.page)
     for (const frame of record.page.frames()) {
       let frameSnapshot
       try {
-        frameSnapshot = parseEnvelope(
-          await frame.evaluate(({ includeText }) => window.__cogniaSnapshot({ includeText }), {
-            includeText: !!options.includeText,
-          })
+        const envelope = parseEnvelope(
+          await frame.evaluate(
+            (optsJson) => window.__cogniaSnapshot(optsJson),
+            JSON.stringify({ includeText: !!options.includeText })
+          )
         )
-      } catch {
-        continue
+        if (envelope?.ok !== true || !Array.isArray(envelope.snapshot?.nodes)) {
+          throw new Error(envelope?.error || "Invalid browser snapshot envelope")
+        }
+        frameSnapshot = envelope.snapshot
+      } catch (error) {
+        throw new RemoteBrowserError(
+          "browser_snapshot_failed",
+          error instanceof Error ? error.message : String(error)
+        )
       }
       if (frame === mainFrame) {
         url = frameSnapshot.url || url
         title = frameSnapshot.title || title
       }
       for (const node of frameSnapshot.nodes ?? []) {
-        if (SECRET_FIELD.test(`${node.name} ${node.tag} ${node.type ?? ""}`)) continue
+        if (node.secret || SECRET_FIELD.test(`${node.name} ${node.tag} ${node.type ?? ""}`))
+          continue
         const opaqueRef = this.createId()
-        this.references.set(opaqueRef, {
+        references.set(opaqueRef, {
           sessionId,
           pageId,
           generation: record.generation,
@@ -1239,6 +1249,8 @@ export class RemoteChromiumService {
         })
       }
     }
+    // Publish refs only after every frame succeeded: failed snapshots expose no usable refs.
+    for (const [reference, target] of references) this.references.set(reference, target)
     return {
       generation: record.generation,
       url,
