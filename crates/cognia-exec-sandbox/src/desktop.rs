@@ -225,6 +225,7 @@ fn profile_args() -> Vec<String> {
         "/etc/X11",
         "/etc/xdg",
         "/etc/dbus-1",
+        "/etc/chromium.d",
         "/etc/alternatives",
         "/etc/ssl/certs",
         "/etc/mime.types",
@@ -394,6 +395,11 @@ mod tests {
         }
         assert!(args.windows(2).any(|pair| pair == ["--seccomp", "4"]));
         assert!(args.windows(2).any(|pair| pair == ["--info-fd", "5"]));
+        // Debian's Chromium launcher sources this image-owned configuration
+        // before starting the browser. It must stay read-only and narrow.
+        assert!(args
+            .windows(3)
+            .any(|triple| triple == ["--ro-bind-try", "/etc/chromium.d", "/etc/chromium.d"]));
     }
 
     #[test]
