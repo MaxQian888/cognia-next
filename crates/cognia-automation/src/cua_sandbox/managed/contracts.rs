@@ -681,6 +681,10 @@ pub struct HostAuthoritySmokeEvidence {
     pub admin_wrong_operation_rejected: bool,
     pub admin_expiry_rejected: bool,
     pub admin_revocation_rejected: bool,
+    pub host_denial_not_delivered: bool,
+    pub consent_timeout_not_delivered: bool,
+    pub policy_disabled_while_waiting_not_delivered: bool,
+    pub consent_timeout_ms: u64,
     pub positive_input_acknowledged: bool,
     pub cancelled_consent_not_delivered: bool,
     pub late_approval_not_replayed: bool,
@@ -706,6 +710,10 @@ impl HostAuthoritySmokeEvidence {
             && self.admin_wrong_operation_rejected
             && self.admin_expiry_rejected
             && self.admin_revocation_rejected
+            && self.host_denial_not_delivered
+            && self.consent_timeout_not_delivered
+            && self.policy_disabled_while_waiting_not_delivered
+            && self.consent_timeout_ms == 5000
             && self.positive_input_acknowledged
             && self.cancelled_consent_not_delivered
             && self.late_approval_not_replayed

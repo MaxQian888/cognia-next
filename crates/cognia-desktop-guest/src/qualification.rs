@@ -97,6 +97,8 @@ pub struct ImporterProbe {
 pub struct WorkloadQualificationReport {
     pub report_version: u32,
     pub boundary_generation: String,
+    /// Actual provider-root collector context; must fail workload admission.
+    pub negative_control: ProcessSnapshot,
     pub desktop: ProcessBoundaryReport,
     pub acceptance_admission: ProcessBoundaryReport,
     pub importer_admission: ProcessBoundaryReport,
@@ -261,11 +263,84 @@ impl ProbeRun {
         Ok(())
     }
 }
+/// Runtime validator checks, run by both immutable collector and native Host.
+/// These mutate observations, never the production kernel launch profile.
+fn reject_tampered_probe(
+    good: &ProbeRun,
+    namespaces: &BTreeMap<String, String>,
+) -> Result<(), &'static str> {
+    let fail = "managed_desktop_negative_control_failed";
+    good.validate(1000, namespaces)?;
+    for (key, replacement) in [("CapEff", "1"), ("Seccomp", "0"), ("NoNewPrivs", "0")] {
+        let mut bad = good.clone();
+        bad.process.status = bad
+            .process
+            .status
+            .lines()
+            .map(|line| {
+                if line.split_once(':').is_some_and(|(name, _)| name == key) {
+                    format!("{key}:{replacement}")
+                } else {
+                    line.into()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if bad.validate(1000, namespaces).is_ok() {
+            return Err(fail);
+        }
+    }
+    let mut bad = good.clone();
+    bad.process
+        .namespaces
+        .insert("net".into(), "net:[1]".into());
+    if bad.validate(1000, namespaces).is_ok() {
+        return Err(fail);
+    }
+    let mut bad = good.clone();
+    bad.process.descriptors.insert(
+        127,
+        crate::observation::DescriptorObservation {
+            target: "socket:[123]".into(),
+            flags: 0,
+            socket_scope: Some("outside".into()),
+        },
+    );
+    if bad.validate(1000, namespaces).is_ok() {
+        return Err(fail);
+    }
+    let mut bad = good.clone();
+    bad.sockets[0].result = 0;
+    bad.sockets[0].errno = 0;
+    if bad.validate(1000, namespaces).is_ok() {
+        return Err(fail);
+    }
+    Ok(())
+}
 impl WorkloadQualificationReport {
     pub fn validate(&self) -> Result<(), &'static str> {
         use crate::observation::ObservationPhase;
         let fail = "managed_desktop_qualification_invalid";
         self.desktop.validate(1000)?;
+        let root_uid = self
+            .negative_control
+            .status
+            .lines()
+            .find_map(|line| line.strip_prefix("Uid:"))
+            .map(|value| value.split_whitespace().collect::<Vec<_>>());
+        if self.negative_control.pid <= 1
+            || self.negative_control.start_time == 0
+            || root_uid != Some(vec!["0", "0", "0", "0"])
+            || self.negative_control.executable != "/usr/local/bin/cognia-desktop-guest"
+            || self.negative_control.namespaces != self.desktop.provider_namespaces
+            || self
+                .negative_control
+                .validate(1000, &self.desktop.namespaces)
+                .is_ok()
+        {
+            return Err(fail);
+        }
+        reject_tampered_probe(&self.desktop_probe.acceptance, &self.desktop.namespaces)?;
         self.acceptance_admission.validate(1000)?;
         self.importer_admission.validate(1001)?;
         if self.report_version != PROBE_VERSION

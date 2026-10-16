@@ -714,11 +714,18 @@ fn install_host_consent_bridge(
         let device_id = device_id.clone();
         let id = event.id.clone();
         let timeout = Duration::from_millis(event.timeout_ms);
+        let request_id = ask.id;
         let task = tokio::spawn(async move {
             let started = tokio::time::Instant::now();
             loop {
                 if cognia_companion::host_consent::take_approved(&device_id, &operations) {
                     broker.resolve(&id, true, false, None, None);
+                    return;
+                }
+                // Denial, expiry or device revocation removes the pending ask.
+                // Approval is consumed above before inspecting this state.
+                if !cognia_companion::host_consent::pending().iter().any(|request| request.id == request_id) {
+                    broker.resolve(&id, false, false, None, None);
                     return;
                 }
                 if started.elapsed() >= timeout {
@@ -1599,6 +1606,25 @@ mod tests {
         drop(tasks);
         cognia_companion::host_consent::forget_device(&device);
     }
+    #[tokio::test(flavor = "current_thread")]
+    async fn explicit_host_denial_resolves_before_the_consent_timeout() {
+        let mut enforcement = consent_enforcement();
+        let device = format!("denied-test-{}", uuid::Uuid::new_v4());
+        let tasks = install_host_consent_bridge(
+            &mut enforcement,
+            Arc::new(|_, value| {
+                cognia_companion::host_consent::resolve(
+                    value["id"].as_str().unwrap(), false,
+                    cognia_companion::host_consent::Approver::Host,
+                ).unwrap();
+            }), device.clone(), None, "desk:generation=2:fence=3".into(), "type",
+        );
+        let result = tokio::time::timeout(Duration::from_secs(1), request_bridge(&enforcement, 5_000)).await;
+        assert_eq!(result.unwrap(), false);
+        drop(tasks);
+        cognia_companion::host_consent::forget_device(&device);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn cancelled_consent_wait_cannot_be_replayed_by_a_late_approval() {
         use std::sync::atomic::{AtomicUsize, Ordering};

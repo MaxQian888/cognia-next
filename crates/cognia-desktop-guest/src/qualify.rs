@@ -323,6 +323,7 @@ fn collect() -> io::Result<WorkloadQualificationReport> {
         return Err(refused());
     }
     let desktop = boundary::report(&live, live.workload_pid, 1000, &live.generation)?;
+    let negative_control = crate::probe::snapshot(std::process::id())?;
     let (supervisor_pid, supervisor_start_time, supervisor_fd) =
         supervisor(live.namespace_init_pid)?;
     stage(2);
@@ -408,6 +409,7 @@ fn collect() -> io::Result<WorkloadQualificationReport> {
     let report = WorkloadQualificationReport {
         report_version: PROBE_VERSION,
         boundary_generation: live.generation.clone(),
+        negative_control,
         desktop,
         acceptance_admission,
         importer_admission,

@@ -54,6 +54,8 @@ fn runtime(events: HostEventSink) -> ManagedControlRuntime {
     let gate = cognia_automation::automation::permission::PermissionGate::new(Default::default());
     gate.update(|settings| {
         settings.enabled = true;
+        settings.consent_timeout_ms =
+            cognia_automation::automation::permission::MIN_CONSENT_TIMEOUT_MS;
         settings.per_surface.computer_use.tier =
             cognia_automation::automation::permission::Tier::PerCall;
     });
@@ -125,9 +127,8 @@ pub async fn run(
         device: device.clone(),
     };
     install_security_store(Some(store.clone()));
-    let binding =
-        host_identity::bind_local_account(&p.owner_principal_id, &uuid::Uuid::new_v4().to_string())
-            .map_err(|_| refused(FAILED))?;
+    let binding = host_identity::bind_local_account_from_operator(&p.owner_principal_id)
+        .map_err(|_| refused(FAILED))?;
     let tenant = binding.remote_tenant_id;
     let now = chrono::Utc::now().timestamp();
     let challenge = store
@@ -280,6 +281,124 @@ pub async fn run(
 
         let denied = Arc::new(AtomicU64::new(0));
         authority.admission_observer = Some(observer(&denied));
+        let frame = service
+            .control_frame_smoke(
+                &paired,
+                &desktop.id,
+                desktop.generation,
+                &authority,
+                &permit,
+            )
+            .await?;
+        let denial_observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let rejected = denial_observed.clone();
+        let denied_result = execute_input_inner(
+            &service,
+            &paired,
+            &authority,
+            input(&desktop, &lease, &frame, false),
+            runtime(Arc::new(move |_, value| {
+                if let Some(id) = value["id"].as_str() {
+                    rejected.store(
+                        host_consent::resolve(id, false, host_consent::Approver::Host).is_ok(),
+                        Ordering::SeqCst,
+                    );
+                }
+            })),
+            Some(&permit),
+        )
+        .await;
+        evidence.host_denial_not_delivered = denial_observed.load(Ordering::SeqCst)
+            && denied_result
+                .is_err_and(|error| error.code == "managed_desktop_control_consent_denied")
+            && denied.load(Ordering::SeqCst) == 0;
+
+        let lease = service
+            .control_renew_smoke(
+                &paired,
+                &desktop.id,
+                desktop.generation,
+                &lease.token,
+                lease.fence,
+                &authority,
+                &permit,
+            )
+            .await?;
+        let frame = service
+            .control_frame_smoke(
+                &paired,
+                &desktop.id,
+                desktop.generation,
+                &authority,
+                &permit,
+            )
+            .await?;
+        let prompt_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = prompt_seen.clone();
+        let started = tokio::time::Instant::now();
+        let timed_out = execute_input_inner(
+            &service,
+            &paired,
+            &authority,
+            input(&desktop, &lease, &frame, false),
+            runtime(Arc::new(move |_, _| {
+                seen.store(true, Ordering::SeqCst);
+            })),
+            Some(&permit),
+        )
+        .await;
+        evidence.consent_timeout_ms =
+            cognia_automation::automation::permission::MIN_CONSENT_TIMEOUT_MS;
+        evidence.consent_timeout_not_delivered = prompt_seen.load(Ordering::SeqCst)
+            && started.elapsed() >= Duration::from_millis(evidence.consent_timeout_ms)
+            && timed_out.is_err_and(|error| error.code == "managed_desktop_control_consent_denied")
+            && denied.load(Ordering::SeqCst) == 0;
+        host_consent::forget_device(&device);
+
+        let lease = service
+            .control_renew_smoke(
+                &paired,
+                &desktop.id,
+                desktop.generation,
+                &lease.token,
+                lease.fence,
+                &authority,
+                &permit,
+            )
+            .await?;
+        let frame = service
+            .control_frame_smoke(
+                &paired,
+                &desktop.id,
+                desktop.generation,
+                &authority,
+                &permit,
+            )
+            .await?;
+        let mut disabled_runtime = runtime(Arc::new(|_, _| {}));
+        let gate = disabled_runtime.enforcement.gate.clone();
+        let policy_prompt_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = policy_prompt_seen.clone();
+        disabled_runtime.events = Arc::new(move |event, value| {
+            seen.store(true, Ordering::SeqCst);
+            gate.update(|settings| settings.enabled = false);
+            approve_event(event, value);
+        });
+        let policy_denied = execute_input_inner(
+            &service,
+            &paired,
+            &authority,
+            input(&desktop, &lease, &frame, false),
+            disabled_runtime,
+            Some(&permit),
+        )
+        .await;
+        evidence.policy_disabled_while_waiting_not_delivered = policy_prompt_seen
+            .load(Ordering::SeqCst)
+            && policy_denied
+                .is_err_and(|error| error.code == "managed_desktop_control_policy_denied")
+            && denied.load(Ordering::SeqCst) == 0;
+
         let frame = service
             .control_frame_smoke(
                 &paired,
