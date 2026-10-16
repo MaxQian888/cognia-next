@@ -89,14 +89,9 @@ pub(crate) struct AcceptanceJob {
     helper: Child,
     pins: PinnedDesktop,
     deadline: Instant,
-    workload_pid: u32,
 }
 
 impl AcceptanceJob {
-    pub(crate) fn pid(&self) -> u32 {
-        self.workload_pid
-    }
-
     /// Call on every supervisor monitor tick; do not discard successful jobs.
     pub(crate) fn check(&mut self) -> io::Result<()> {
         let live = match alive(self.pins.init.as_fd()) {
@@ -216,7 +211,6 @@ pub(crate) fn spawn(
         helper: child,
         pins,
         deadline,
-        workload_pid: 0,
     };
     let spec = LaunchSpec {
         generation: boundary.generation.clone(),
@@ -241,7 +235,6 @@ pub(crate) fn spawn(
     if acknowledged != *b"E" {
         return Err(refused());
     }
-    job.workload_pid = pid;
     job.check()?;
     Ok(job)
 }
