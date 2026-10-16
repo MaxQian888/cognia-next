@@ -69,6 +69,7 @@ pub(super) async fn run_with_wait(
     let provider = Arc::new(FailOneDelete {
         inner: host.provider(),
         fail: AtomicBool::new(false),
+        retry_delete_succeeded: AtomicBool::new(false),
     });
     let service = host.open(provider.clone())?;
     let config = service.config(p, config_id).await?;
@@ -249,6 +250,13 @@ async fn run_steps(
     .await?;
     let second = service.create_smoke(p, request).await?;
     let second = wait_ready(&service, p, second, wait).await?;
+    let second_record = service.scoped(p, &second.id, second.generation).await?;
+    let second_resource = second_record.resource_id.as_deref()
+        .ok_or_else(|| refused("managed_desktop_smoke_missing_resource"))?;
+    let second_deadline = provider.inspect(&config, &key, second_resource).await?
+        .and_then(|resource| resource.deadline_at)
+        .ok_or_else(|| refused("managed_desktop_delete_retry_unproven"))?;
+    provider.retry_delete_succeeded.store(false, Ordering::SeqCst);
     provider.fail.store(true, Ordering::SeqCst);
     let pending = service.delete(p, &second.id, second.generation).await?;
     if pending.state != ManagedDesktopState::DestroyRetrying || pending.cleanup_attempts != 1 {
@@ -273,6 +281,14 @@ async fn run_steps(
     }
     if service.scoped(p, &second.id, 1).await?.desktop.state != ManagedDesktopState::Destroyed {
         return Err(refused("managed_desktop_smoke_cleanup_pending"));
+    }
+    // Native expiry cannot stand in for a successful real delete retry. The
+    // service has already GET-verified absence; require the retry itself and
+    // completion before the provider's observed expiry as independent proof.
+    if !provider.retry_delete_succeeded.load(Ordering::SeqCst)
+        || service.now().await >= second_deadline
+    {
+        return Err(refused("managed_desktop_delete_retry_unproven"));
     }
     let receipt = QualificationReceipt {
         binding_digest: config.binding_digest(),
@@ -307,7 +323,12 @@ pub(super) async fn wait_ready(
             return Ok(desktop);
         }
         if desktop.state != ManagedDesktopState::Creating {
-            return Err(refused("managed_desktop_smoke_not_ready"));
+            return Err(refused(
+                desktop
+                    .last_error_code
+                    .as_deref()
+                    .unwrap_or("managed_desktop_smoke_not_ready"),
+            ));
         }
         wait.wait(Duration::from_secs(2)).await;
         desktop = service.connect(p, &desktop.id, desktop.generation).await?;
@@ -327,6 +348,7 @@ fn reopen(
 struct FailOneDelete {
     inner: Arc<dyn ManagedDesktopProvider>,
     fail: AtomicBool,
+    retry_delete_succeeded: AtomicBool,
 }
 #[async_trait]
 impl ManagedDesktopProvider for FailOneDelete {
@@ -370,7 +392,14 @@ impl ManagedDesktopProvider for FailOneDelete {
         n: u64,
         admission: LifecycleAdmission,
     ) -> Result<CreatedDesktop> {
-        self.inner.create(r, k, s, n, admission).await
+        let created = self.inner.create(r, k, s, n, admission).await?;
+        eprintln!(
+            "smoke endpoint: domain_omitted={} domain_is_e2b_app={} domain_is_e2b_dev={}",
+            created.secrets.domain.is_none(),
+            created.secrets.domain.as_deref() == Some("e2b.app"),
+            created.secrets.domain.as_deref() == Some("e2b.dev"),
+        );
+        Ok(created)
     }
     async fn inspect(
         &self,
@@ -378,7 +407,24 @@ impl ManagedDesktopProvider for FailOneDelete {
         k: &ProviderSecret,
         id: &str,
     ) -> Result<Option<ProviderDesktop>> {
-        self.inner.inspect(c, k, id).await
+        let resource = self.inner.inspect(c, k, id).await?;
+        // Native operator diagnostics only: emit policy observations, never
+        // endpoint credentials, provider responses or owner metadata. Cleanup
+        // can otherwise erase the reason a newly created desktop was refused.
+        if let Some(resource) = &resource {
+            eprintln!(
+                "smoke policy: running={} kill_on_timeout={} auto_resume={} private_ingress={} egress_matches={} deadline_at={:?}",
+                resource.running,
+                resource.kill_on_timeout,
+                resource.auto_resume,
+                resource.private_ingress,
+                egress_matches(&c.egress, resource),
+                resource.deadline_at,
+            );
+        } else {
+            eprintln!("smoke policy: resource absent");
+        }
+        Ok(resource)
     }
     async fn list(
         &self,
@@ -392,7 +438,9 @@ impl ManagedDesktopProvider for FailOneDelete {
         if self.fail.swap(false, Ordering::SeqCst) {
             Err(retryable("managed_desktop_smoke_injected_delete_timeout"))
         } else {
-            self.inner.delete(c, k, id).await
+            self.inner.delete(c, k, id).await?;
+            self.retry_delete_succeeded.store(true, Ordering::SeqCst);
+            Ok(())
         }
     }
     async fn bootstrap(&self, r: &DesktopRecord, s: &DesktopSecrets) -> Result<()> {
@@ -406,6 +454,31 @@ impl ManagedDesktopProvider for FailOneDelete {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn readiness_reports_the_lifecycle_failure_before_cleanup() {
+        let f = super::super::tests::Fixture::new();
+        let desktop = ManagedDesktop {
+            id: "failed-smoke".into(),
+            provider_config_id: "e2b".into(),
+            generation: 1,
+            state: ManagedDesktopState::DestroyRetrying,
+            deadline_at: 60_000,
+            idle_timeout_seconds: 60,
+            created_at: 0,
+            updated_at: 1,
+            last_error_code: Some("managed_desktop_bootstrap_failed".into()),
+            cleanup_attempts: 1,
+            qualification: "smoke".into(),
+        };
+        assert_eq!(
+            wait_ready(&f.service, &f.p, desktop, &RealWait)
+                .await
+                .unwrap_err()
+                .code,
+            "managed_desktop_bootstrap_failed",
+        );
+    }
+
     #[test]
     fn paid_authorization_requires_the_exact_operator_flag() {
         assert!(

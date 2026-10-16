@@ -502,9 +502,15 @@ impl ManagedDesktopProvider for E2bDesktopProvider {
                 .send()
                 .await
                 .map_err(|_| retryable("managed_desktop_health_unavailable"))?;
-            if !matches!(response.status().as_u16(), 401 | 403) {
-                return Err(refused("managed_desktop_unauthenticated_endpoint"));
+            if record.smoke {
+                // Operator-only diagnostics: no endpoint, headers or body.
+                eprintln!(
+                    "smoke HTTP auth: edge_token_present={} status={}",
+                    edge_token.is_some(),
+                    response.status().as_u16(),
+                );
             }
+            require_auth_rejection(response.status().as_u16())?;
         }
         let mut response = client
             .get(health)
@@ -514,6 +520,9 @@ impl ManagedDesktopProvider for E2bDesktopProvider {
             .await
             .map_err(|_| retryable("managed_desktop_health_unavailable"))?;
         if !response.status().is_success() {
+            if matches!(response.status().as_u16(), 502 | 503 | 504) {
+                return Err(retryable("managed_desktop_health_unavailable"));
+            }
             return Err(refused("managed_desktop_health_rejected"));
         }
         let mut body = Vec::new();
@@ -538,6 +547,16 @@ impl ManagedDesktopProvider for E2bDesktopProvider {
         screenshot_probe(endpoint, token, &secrets.guest_token).await
     }
 }
+fn require_auth_rejection(status: u16) -> Result<()> {
+    match status {
+        401 | 403 => Ok(()),
+        // A process-start acknowledgement precedes the guest listener. Edge
+        // upstream failures prove neither access nor denial: retry readiness
+        // within the existing deadline, without restarting or extending it.
+        502 | 503 | 504 => Err(retryable("managed_desktop_health_unavailable")),
+        _ => Err(refused("managed_desktop_unauthenticated_endpoint")),
+    }
+}
 pub(super) fn bootstrap_request(
     record: &DesktopRecord,
     secrets: &DesktopSecrets,
@@ -552,7 +571,7 @@ pub(super) fn bootstrap_request(
         domain: secrets
             .domain
             .clone()
-            .ok_or_else(|| refused("managed_desktop_missing_endpoint_credentials"))?,
+            .unwrap_or_else(|| "e2b.app".into()),
         envd_access_token: secrets
             .envd_token
             .clone()
@@ -578,7 +597,9 @@ pub(super) fn desktop_endpoint(resource: &str, domain: Option<&str>) -> Result<U
     {
         return Err(refused("managed_desktop_endpoint_invalid"));
     }
-    let domain = domain.ok_or_else(|| refused("managed_desktop_endpoint_invalid"))?;
+    // E2B omits/nulls the domain for its default hosted domain. Match the
+    // official SDK fallback, while still rejecting any supplied foreign host.
+    let domain = domain.unwrap_or("e2b.app");
     if !matches!(domain, "e2b.app" | "e2b.dev")
         && !domain.ends_with(".e2b.app")
         && !domain.ends_with(".e2b.dev")
@@ -715,6 +736,22 @@ fn validate_frame(data: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn readiness_requires_auth_denial_and_never_accepts_upstream_unavailability() {
+        for status in [401, 403] {
+            assert!(require_auth_rejection(status).is_ok());
+        }
+        for status in [502, 503, 504] {
+            let error = require_auth_rejection(status).unwrap_err();
+            assert!(error.retryable);
+            assert_eq!(error.code, "managed_desktop_health_unavailable");
+        }
+        for status in [200, 204, 301, 302, 404, 500] {
+            let error = require_auth_rejection(status).unwrap_err();
+            assert!(!error.retryable);
+            assert_eq!(error.code, "managed_desktop_unauthenticated_endpoint");
+        }
+    }
     struct TestImageVerifier;
     #[async_trait]
     impl ManagedDesktopImageVerifier for TestImageVerifier {
@@ -782,10 +819,15 @@ mod tests {
     #[test]
     fn endpoint_rejects_provider_supplied_url_poisoning() {
         assert_eq!(
+            desktop_endpoint("abc", None).unwrap().as_str(),
+            "https://8000-abc.e2b.app/"
+        );
+        assert_eq!(
             desktop_endpoint("abc", Some("e2b.app")).unwrap().as_str(),
             "https://8000-abc.e2b.app/"
         );
         for domain in [
+            "",
             "evil.test",
             "e2b.app.evil.test",
             "e2b.app/path",

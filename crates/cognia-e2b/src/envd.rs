@@ -639,7 +639,9 @@ async fn start_desktop_at(
             "COGNIA_CUA_AUTH_TOKEN".into(),
             bootstrap.guest_token.clone(),
         )]),
-        cwd: None,
+        // envd does not inherit the image WORKDIR. The entrypoint drops to
+        // cua; dependency startup must not inspect dotenv from root's cwd.
+        cwd: Some("/home/cua".into()),
         stdin: false,
     };
     let result = tokio::time::timeout(deadline, async {
@@ -1019,7 +1021,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(
             value,
-            json!({"process":{"cmd":"/usr/local/bin/cognia-desktop","args":[],"envs":{"COGNIA_CUA_AUTH_TOKEN":"guest-secret"}},"stdin":false})
+            json!({"process":{"cmd":"/usr/local/bin/cognia-desktop","args":[],"envs":{"COGNIA_CUA_AUTH_TOKEN":"guest-secret"},"cwd":"/home/cua"},"stdin":false})
         );
     }
 

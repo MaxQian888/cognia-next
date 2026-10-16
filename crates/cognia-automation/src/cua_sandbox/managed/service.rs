@@ -419,7 +419,7 @@ impl ManagedDesktopService {
             return Ok(existing);
         }
         if let Some(existing) =
-            latest_template(&self.state.lock().await, &c.binding_digest()).cloned()
+            latest_template(&*self.state.lock().await, &c.binding_digest()).cloned()
         {
             admission()?;
             // A single bound build is reused; an unknown registration cannot
@@ -2075,6 +2075,32 @@ pub(super) mod tests {
         assert_eq!(host.approved.load(Ordering::SeqCst), 3);
         let service = host.open(provider.clone()).unwrap();
         assert!(service.list_configs(&p).await.unwrap()[0].can_create);
+    }
+    #[tokio::test]
+    async fn native_smoke_rejects_expiry_without_a_successful_delete_retry() {
+        let Fixture { directory, provider, secrets, clock, service, p, config } = Fixture::new();
+        drop(service);
+        provider.auto_expire.store(true, Ordering::SeqCst);
+        provider.fail_delete.store(true, Ordering::SeqCst);
+        let waiter = TestWait { clock: clock.clone(), provider: provider.clone() };
+        let host = SmokeHost {
+            directory,
+            provider: provider.clone(),
+            secrets,
+            clock,
+            release: config.release,
+            approved: AtomicUsize::new(0),
+            deny: false,
+        };
+        assert_eq!(
+            smoke::run_with_wait(&host, &p, "e2b", &waiter).await.unwrap_err().code,
+            "managed_desktop_delete_retry_unproven",
+        );
+        assert_eq!(provider.creates.load(Ordering::SeqCst), 2);
+        assert!(provider.deletes.load(Ordering::SeqCst) > 0);
+        assert!(provider.resources.lock().await.is_empty());
+        let service = host.open(provider).unwrap();
+        assert!(service.state.lock().await.qualifications.is_empty());
     }
     #[tokio::test]
     async fn native_smoke_operator_decline_cannot_allocate_or_install_receipt() {
