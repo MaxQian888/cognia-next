@@ -11,6 +11,7 @@ use cognia_environment::{
     image::ImageReference,
     registry::{
         http::ReqwestTransport, Platform, RegistryClient, RegistryCredentials, RegistryEndpoint,
+        RegistryError,
     },
 };
 
@@ -62,7 +63,16 @@ impl ManagedDesktopImageVerifier for OciDesktopImageVerifier {
 }
 
 async fn verify_image(release: &DesktopRelease) -> Result<()> {
-    let invalid = |_| refused("managed_desktop_image_verification_failed");
+    // Registry errors may contain signed redirect URLs. Only fixed classes
+    // and numeric status are safe to expose in Host/operator diagnostics.
+    let invalid = |error: RegistryError| {
+        eprintln!(
+            "desktop image verification: class={} status={:?}",
+            error.code(),
+            registry_status(&error)
+        );
+        refused("managed_desktop_image_verification_failed")
+    };
     let reference = ImageReference::parse(&release.image)
         .map_err(|_| refused("managed_desktop_release_invalid"))?;
     // Public Cognia release images need no ambient Docker/provider credential.
@@ -97,7 +107,14 @@ async fn verify_image(release: &DesktopRelease) -> Result<()> {
     }
     // The existing registry client streams and hashes each blob; nothing is
     // accumulated in memory or written as an untracked Host cache.
-    for layer in layers {
+    let layer_count = layers.len();
+    for (index, layer) in layers.into_iter().enumerate() {
+        eprintln!(
+            "desktop image verification: layer={}/{} bytes={}",
+            index + 1,
+            layer_count,
+            layer.size
+        );
         image
             .fetch_blob(&layer, &mut std::io::sink())
             .await
@@ -106,9 +123,32 @@ async fn verify_image(release: &DesktopRelease) -> Result<()> {
     Ok(())
 }
 
+fn registry_status(error: &RegistryError) -> Option<u16> {
+    match error {
+        RegistryError::UnexpectedStatus { status, .. } => Some(*status),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn registry_diagnostics_never_include_redirect_urls_or_error_bodies() {
+        let error = RegistryError::UnexpectedStatus {
+            status: 503,
+            url: "https://cdn.example.test/blob?signature=private".into(),
+        };
+        assert_eq!(registry_status(&error), Some(503));
+        assert_eq!(error.code(), "registry_unexpected_status");
+        assert_eq!(
+            registry_status(&RegistryError::Unreachable {
+                registry: "cdn.example.test".into(),
+                message: "private response".into(),
+            }),
+            None
+        );
+    }
 
     fn release() -> DesktopRelease {
         DesktopRelease {

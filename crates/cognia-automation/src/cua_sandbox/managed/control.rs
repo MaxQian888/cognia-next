@@ -163,7 +163,7 @@ fn control_error(_: crate::automation::types::AutomationError) -> ManagedDesktop
 }
 
 /// Native operator entry, deliberately absent from all RPC/agent registries.
-/// Creates one explicitly quoted 60s resource and measures the control path.
+/// Creates one explicitly quoted 120s resource and measures the control path.
 /// The receipt cannot be installed from caller-provided success booleans.
 pub async fn run_control_qualification_smoke(
     host: &dyn ManagedDesktopSmokeHost,

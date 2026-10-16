@@ -301,7 +301,18 @@ impl ManagedDesktopProvider for E2bDesktopProvider {
         let request = bootstrap_request(record, secrets)?;
         let evidence = cognia_e2b::envd::probe_desktop_egress(&request)
             .await
-            .map_err(|_| refused("managed_desktop_egress_probe_failed"))?;
+            .map_err(|error| {
+                let class = match error {
+                    cognia_e2b::envd::EnvdError::Unauthorized(_) => "unauthorized",
+                    cognia_e2b::envd::EnvdError::Transport(_) => "transport_or_timeout",
+                    cognia_e2b::envd::EnvdError::Rpc(_) => "rpc",
+                    cognia_e2b::envd::EnvdError::Protocol(_) => "protocol",
+                };
+                eprintln!("smoke egress: class={class}");
+                refused("managed_desktop_egress_probe_failed")
+            })?;
+        // The report accepts only the fixed target names and booleans.
+        eprintln!("smoke egress: observations={:?}", evidence.observations);
         if !evidence.all_no_response() {
             return Err(refused("managed_desktop_egress_probe_failed"));
         }

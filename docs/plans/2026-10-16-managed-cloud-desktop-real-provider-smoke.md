@@ -1,12 +1,16 @@
 # ADR-0228 real-provider smoke record
 
-Date: 2026-10-16. Status: partial live verification; full native qualification
-blocked by registry transfer failures. All E2B smoke resources cleaned up.
+Date: 2026-10-16. Status: partial live verification; three subsequent full GHCR
+verifications passed. Native qualification is now blocked by a metadata-network
+boundary mismatch. All E2B smoke resources are cleaned up.
 
 The user explicitly authorized compiling the native operator, preparing the
 image/template and running real E2B smoke, with cleanup of billed resources.
 Rust tests remain skipped. The dev merge remains paused. Production remains
 dormant; this smoke uses a separate Host data directory and identity.
+
+The sections below retain the initial attempts. The final follow-up section
+records the current blocker, additional allocations and cleanup.
 
 ## Build and image provenance
 
@@ -165,3 +169,91 @@ fresh account-local template from the same pinned release, and run the native
 lifecycle command before control smoke. Fresh quote approval and qualification
 must come from the native operator; diagnostic observations cannot be imported
 as receipts. No merge or enablement was performed.
+
+## GHCR follow-up and metadata boundary (2026-10-16)
+
+The pinned public manifest returned HTTP 200. Its 11 layers total about 556 MB;
+the largest layer is 510,051,848 bytes. Three consecutive native verifier runs
+streamed all layers and passed every digest/size check. The historical transfer
+failure did not recur, so no exact transport root cause or transport fix is
+claimed. The 900-second overall ceiling, per-read timeout, redirect/auth and
+SSRF checks remain unchanged. Safe diagnostics now expose only layer ordinal,
+expected size, fixed registry error class and numeric status; never signed
+redirect URLs, headers, provider bodies or credentials.
+
+Additional native attempts:
+
+| Resource                | Quoted lifetime | Outcome                                                                                 |
+| ----------------------- | --------------- | --------------------------------------------------------------------------------------- |
+| `imwk4ru7xz8q3al9kp5eq` | 60 s            | Authenticated readiness, then egress probe failed; expired before cleanup inspection    |
+| `ixz4qm0x5wo0e8o8dvosc` | 120 s           | Authenticated readiness, then egress probe failed while provider still running; deleted |
+| `iw3w58n5kimi88giupwgq` | 120 s           | Safe diagnostics established a metadata HTTP response; qualification refused; deleted   |
+
+The 60-second harness also had insufficient timing margin: 15 seconds are
+reserved for provider create admission, observed readiness consumed about
+24–31 seconds, and ten sequential egress probes can consume another 20 seconds
+before DNS/transport overhead. Native lifecycle and control smoke now request
+an explicitly quoted 120 seconds, still subject to config/plan admission.
+This is a harness reliability correction, not proof that timing caused the
+original egress failure. Production's 60-minute limit is unchanged. The fake
+smoke host asserts duration/cost; the negative delete-retry regression explicitly
+caps provider lifetime to keep testing natural expiry without successful delete.
+Those Rust tests were written/updated but not run.
+
+The final probe completed and reported:
+
+- `metadata` (`169.254.169.254:80`): HTTP response observed.
+- `publicIp`, `publicDns`, `private10`, `private172`, `private192`,
+  `carrierPrivate`, `linkLocal`, `publicIpv6`, `metadataIpv6`: no response.
+
+This is not a claim that cloud-host credentials were exposed: no metadata body,
+token, or credential was requested or retained by this HEAD-only probe. It does
+mean that the current all-no-response requirement failed. Provider inspection
+still reported deny-all IPv4 egress, private ingress, kill-on-timeout and no
+resume. Those fields cannot override the failed observation.
+
+The [E2B envd source](https://github.com/e2b-dev/runtime/blob/main/packages/envd/internal/host/mmds_route_linux.go)
+explicitly pins a route for sandbox MMDS at this address. Its
+[MMDS client](https://github.com/e2b-dev/runtime/blob/main/packages/envd/internal/host/mmds.go)
+uses that endpoint for initialization. An
+[open upstream issue](https://github.com/e2b-dev/runtime/issues/3625) reports
+reachability even with an explicit /32 deny; the related
+[documentation proposal](https://github.com/e2b-dev/runtime/pull/3627) remains
+open as of this check. That proposal is not an accepted provider guarantee.
+The observed response is consistent with local MMDS, but this probe alone does
+not establish the identity or complete isolation contract of that service.
+
+ADR-0228 section 6 requires blocked metadata egress and refusal of required
+policies that cannot be implemented. Therefore the existing qualification gate
+is retained. No lifecycle or control receipt was installed, and control smoke
+was not run because it requires lifecycle qualification. A future resolution
+must either establish and test workload-level metadata denial without breaking
+envd, or explicitly review an ADR/provider-attestation change that distinguishes
+sandbox-local MMDS from cloud-host metadata. Removing the target, accepting an
+arbitrary HTTP denial as isolation proof, or manufacturing a receipt is not a
+resolution. No such policy change was made here.
+
+The two account-local templates used in this follow-up were
+`pqosi4ctww5m9pc7yodw` / build `07c96f1c-667c-43f9-919b-ec5b6718fae1` and
+`ilpf54qt59bn9zeapy06` / build `cf12ff73-6547-4efd-ac7e-03804f315e85`.
+The three desktops add a conservative maximum of USD 0.01380 in compute at the
+quoted rate; the combined ten desktop sessions are bounded by USD 0.03312.
+Template-build charges remain separate and these are not invoice amounts.
+
+At `2026-10-16T06:54:26.325Z`, all three new resource IDs returned HTTP 404,
+both new templates had DELETE 204 followed by GET 404, and the Host-scoped
+running/paused list returned HTTP 200 with zero entries. Both qualification
+maps remain empty. The isolated provider is disabled again; production stays
+dormant and dev merge stays paused.
+
+Validation: 4 Python guest-auth tests and 7 Node release tests passed. The final
+operator compiled and ran its help entrypoint, then executed the diagnostic
+provider run above. One intervening build misleadingly exited zero after a
+strip-stage ENOSPC warning and left invalid output; that artifact was not used.
+The final build uses `cargo rustc ... -- -C strip=none` with debug/incremental
+already disabled. Its preserved executable SHA-256 is
+`d1113788e5944aa9a2348577cc8203f59b56a273ce3ba5f9b091952308af6805`.
+No Rust tests, coverage, full suites, production enablement or dev merge ran.
+Only this task's temporary build directory was removed after preserving the
+working operator and log. Private evidence includes `ghcr-followup-build.json`,
+`ghcr-followup-build.log` and `ghcr-followup-cleanup.json` under the isolated Host.

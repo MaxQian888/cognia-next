@@ -1316,6 +1316,7 @@ pub(super) mod tests {
         bad_policy: AtomicBool,
         lose_bootstrap: AtomicBool,
         auto_expire: AtomicBool,
+        lifetime_cap_ms: AtomicI64,
         now: AtomicI64,
         verify_gate: Mutex<Option<Arc<TestGate>>>,
         create_gate: Mutex<Option<Arc<TestGate>>>,
@@ -1345,6 +1346,7 @@ pub(super) mod tests {
                 bad_policy: AtomicBool::new(false),
                 lose_bootstrap: AtomicBool::new(false),
                 auto_expire: AtomicBool::new(false),
+                lifetime_cap_ms: AtomicI64::new(i64::MAX),
                 now: AtomicI64::new(1000),
                 verify_gate: Mutex::new(None),
                 create_gate: Mutex::new(None),
@@ -1412,7 +1414,10 @@ pub(super) mod tests {
                 running: true,
                 metadata: r.metadata(),
                 template_id: Some(r.template.template_id.clone()),
-                deadline_at: Some(r.desktop.deadline_at - 1000),
+                deadline_at: Some((r.desktop.deadline_at - 1000).min(
+                    self.now.load(Ordering::SeqCst)
+                        .saturating_add(self.lifetime_cap_ms.load(Ordering::SeqCst)),
+                )),
                 kill_on_timeout: !self.bad_policy.load(Ordering::SeqCst),
                 auto_resume: false,
                 private_ingress: true,
@@ -2016,9 +2021,14 @@ pub(super) mod tests {
         }
         async fn approve_quote(
             &self,
-            _: &ManagedDesktopQuote,
+            quote: &ManagedDesktopQuote,
             _: AuthorizationPurpose,
         ) -> Result<()> {
+            assert_eq!(quote.lifetime_seconds, 120);
+            assert_eq!(
+                quote.maximum_compute_cost_micros,
+                (quote.hourly_rate_micros * 120).div_ceil(3600),
+            );
             if self.deny {
                 return Err(refused("operator_declined"));
             }
@@ -2082,6 +2092,9 @@ pub(super) mod tests {
         drop(service);
         provider.auto_expire.store(true, Ordering::SeqCst);
         provider.fail_delete.store(true, Ordering::SeqCst);
+        // A shortened provider TTL expires before the third delete retry,
+        // reproducing natural expiry while every real delete still fails.
+        provider.lifetime_cap_ms.store(60_000, Ordering::SeqCst);
         let waiter = TestWait { clock: clock.clone(), provider: provider.clone() };
         let host = SmokeHost {
             directory,

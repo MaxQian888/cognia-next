@@ -48,7 +48,7 @@ impl SmokeWait for RealWait {
     }
 }
 
-/// Two 60-second desktops at most. All qualifications come from assertions;
+/// Two 120-second desktops at most. All qualifications come from assertions;
 /// no operator-supplied receipt or success flags are accepted.
 pub async fn run_qualification_smoke(
     host: &dyn ManagedDesktopSmokeHost,
@@ -106,7 +106,9 @@ pub(super) async fn authorized_request(
     purpose: AuthorizationPurpose,
     source: &str,
 ) -> Result<CreateManagedDesktop> {
-    let quote = service.quote(p, config_id, 60).await?;
+    // Provisioning, ingress readiness and the bounded negative-egress probe
+    // consume the same deadline; 60s could expire before those checks finish.
+    let quote = service.quote(p, config_id, 120).await?;
     host.approve_quote(&quote, purpose.clone()).await?;
     let authorization = service
         .authorize(p, config_id, &quote.id, purpose, Some(source.into()))
