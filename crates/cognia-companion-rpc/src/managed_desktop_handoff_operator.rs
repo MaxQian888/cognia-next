@@ -159,6 +159,8 @@ pub async fn run(
         if !tokio::task::spawn_blocking(move || current()).await.unwrap_or(false) { return Err(refused("managed_desktop_handoff_source_unavailable")); }
         budget.check().map_err(|_| refused("managed_desktop_handoff_deadline"))?;
         let authorization = service.authorize(p, config_id, &quote.id, AuthorizationPurpose::Smoke, Some(format!("handoff:{}",input.operation_id))).await?;
+        let kind = if input.request.mode == TransferMode::Bundle { NativeQualificationKind::Bundle } else { NativeQualificationKind::Commit };
+        service.invalidate_native_qualification(p, config_id, kind).await?;
         row.state = "creating".into(); row.cleanup_pending = true; persist_async(&report, &row).await?;
         let mut desktop = service.create_smoke(p, CreateManagedDesktop { provider_config_id:config_id.into(), quote_id:quote.id, authorization_id:authorization.id, idempotency_key:input.operation_id.clone() }).await?;
         row.desktop_id = Some(desktop.id.clone()); row.desktop_generation = Some(desktop.generation);

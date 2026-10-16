@@ -261,6 +261,10 @@ pub async fn run(
                 Some(format!("authority:{operation}")),
             )
             .await?;
+        stage = "invalidate_previous_qualification";
+        service
+            .invalidate_native_qualification(p, config_id, NativeQualificationKind::Authority)
+            .await?;
         stage = "create_and_readiness";
         let mut desktop = service
             .create_smoke(

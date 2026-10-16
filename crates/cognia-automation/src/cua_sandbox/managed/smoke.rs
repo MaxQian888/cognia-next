@@ -170,6 +170,7 @@ async fn run_steps(
         source,
     )
     .await?;
+    service.invalidate_native_qualification(p, config_id, NativeQualificationKind::Lifecycle).await?;
     let first = service.create_smoke(p, request).await?;
     let first = wait_ready(&service, p, first, wait).await?;
     let first_record = service.scoped(p, &first.id, first.generation).await?;

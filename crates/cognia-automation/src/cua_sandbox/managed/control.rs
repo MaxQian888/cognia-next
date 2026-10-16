@@ -374,6 +374,10 @@ async fn control_smoke_steps(
             source,
         )
         .await?;
+        stage = "invalidate_previous_qualification";
+        service
+            .invalidate_native_qualification(p, config_id, NativeQualificationKind::Control)
+            .await?;
         stage = "create_and_readiness";
         let desktop = service.create_smoke(p, request).await?;
         let desktop = smoke::wait_ready(&service, p, desktop, &smoke::RealWait).await?;

@@ -424,6 +424,16 @@ pub struct WorkloadQualificationEvidence {
 
 /// Native-only records collected by fixed smoke producers. No RPC or operator
 /// input accepts caller-authored qualification assertions.
+#[derive(Clone, Copy, Debug)]
+pub enum NativeQualificationKind {
+    Lifecycle,
+    Control,
+    Authority,
+    Workload,
+    Commit,
+    Bundle,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeHandoffDiagnostic {

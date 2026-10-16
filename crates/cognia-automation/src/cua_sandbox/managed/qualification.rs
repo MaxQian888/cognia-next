@@ -142,6 +142,34 @@ pub(super) fn derive_evidence(
 }
 
 impl ManagedDesktopService {
+    /// A newly authorized diagnostic supersedes prior evidence even if it
+    /// subsequently fails. Keep independent categories and cleanup history.
+    pub async fn invalidate_native_qualification(
+        &self,
+        p: &ManagedDesktopPrincipal,
+        config_id: &str,
+        kind: NativeQualificationKind,
+    ) -> Result<()> {
+        p.require_admin()?;
+        let digest = self.config(p, config_id).await?.binding_digest();
+        self.transaction(move |s, _| {
+            s.qualifications.remove(&digest);
+            match kind {
+                NativeQualificationKind::Lifecycle => { s.lifecycle_diagnostics.remove(&digest); }
+                NativeQualificationKind::Control => { s.control_qualifications.remove(&digest); }
+                NativeQualificationKind::Authority => { s.authority_diagnostics.remove(&digest); }
+                NativeQualificationKind::Workload => { s.workload_diagnostics.remove(&digest); }
+                NativeQualificationKind::Commit | NativeQualificationKind::Bundle => {
+                    let mode = if matches!(kind, NativeQualificationKind::Commit) { "commit" } else { "bundle" };
+                    s.handoff_diagnostics.retain(|_, record| {
+                        record.mode != mode || record.boundary.binding_digest != digest
+                    });
+                }
+            }
+            Ok(())
+        }).await
+    }
+
     /// Called after native install, journal reopen and private checkpoint. This
     /// method accepts no file/path or success flags and revalidates live identity.
     pub async fn record_native_handoff_smoke(
@@ -300,6 +328,7 @@ pub async fn run_workload_qualification_smoke(
         authorization_id: auth.id,
         idempotency_key: Uuid::new_v4().to_string(),
     };
+    service.invalidate_native_qualification(p, config_id, NativeQualificationKind::Workload).await?;
     let outcome = async {
         let desktop = service.create_smoke(p, request).await?;
         let desktop = smoke::wait_ready(&service, p, desktop, &smoke::RealWait).await?;
@@ -357,6 +386,47 @@ pub async fn run_workload_qualification_smoke(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn authorized_retry_durably_removes_old_category_and_composed_receipt() {
+        let f = super::super::tests::Fixture::new();
+        f.prepare().await;
+        let digest = f.config.binding_digest();
+        let key = digest.clone();
+        f.service.transaction(move |s, _| {
+            let template = latest_template(s, &key).unwrap().identity.clone().unwrap();
+            let receipt = QualificationReceipt {
+                evidence_version: 2, workload_evidence: None, provider_root_observation: None,
+                binding_digest: key.clone(), template: template.clone(), observed_at: 1,
+                smoke_desktop_ids: vec![], native_expiry_killed: true, no_auto_resume: true,
+                ingress_denied: true, guest_auth_denied: true, decoded_frame_verified: true,
+                protocol_verified: true, restart_deadline_verified: true,
+                delete_retry_verified: true, private_egress_probe_no_response: false,
+                egress_policy_verified: true,
+            };
+            s.lifecycle_diagnostics.insert(key.clone(), receipt.clone());
+            s.qualifications.insert(key.clone(), receipt);
+            s.control_qualifications.insert(key.clone(), control::ControlQualificationReceipt {
+                binding_digest: key, template, smoke_desktop_id: "old".into(),
+                smoke_desktop_generation: 1, observed_at: 1, protocol_revision: 1,
+                evidence_version: 2, assertions: Default::default(),
+            });
+            Ok(())
+        }).await.unwrap();
+        let mut agent = f.p.clone();
+        agent.authority = ManagedDesktopAuthority::Agent;
+        assert!(f.service.invalidate_native_qualification(&agent, "e2b", NativeQualificationKind::Control).await.is_err());
+        assert!(f.service.state.lock().await.qualifications.contains_key(&digest));
+        f.service.invalidate_native_qualification(&f.p, "e2b", NativeQualificationKind::Control).await.unwrap();
+        let state = f.service.state.lock().await;
+        assert!(!state.qualifications.contains_key(&digest));
+        assert!(!state.control_qualifications.contains_key(&digest));
+        assert!(state.lifecycle_diagnostics.contains_key(&digest));
+        assert!(derive_evidence(&state, &digest, &state.lifecycle_diagnostics[&digest].template).is_none());
+        drop(state);
+        f.service.invalidate_native_qualification(&f.p, "e2b", NativeQualificationKind::Lifecycle).await.unwrap();
+        assert!(!f.service.state.lock().await.lifecycle_diagnostics.contains_key(&digest));
+    }
+
     #[test]
     fn missing_native_records_cannot_qualify_from_hashes_or_labels() {
         let state = ManagedDesktopJournal::default();
