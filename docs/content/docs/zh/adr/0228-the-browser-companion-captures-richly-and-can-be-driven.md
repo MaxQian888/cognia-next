@@ -125,9 +125,12 @@ Host 以自己的 `host:browser-companion` 调用方把字节暂存在现有会�
 ### 9. 无界面 Host 同样提供代理模式
 
 `cognia-server` 提供同一个设备套接字，而该 Host 的对话在它的 brain 里运行，所以代理模式是 Host 的属性，而不是桌面端独有。
-brain 通过自己服务器的服务平面访问套接字：`companion_browser_extension_status`、`_call` 和 `_notify` 是
-`target: service` 命令（`rpc/service_plane.rs`），任何已配对设备都无法借此驱动另一台设备的浏览器；`call` 仍对每个操作检查
-`browser.drive` 和 Browser Access 开关。被拒绝的操作保留原错误码（`browser_drive_forbidden`、`browser_extension_offline` 等），
+brain 通过自己服务器的服务平面访问套接字：`companion_browser_extension_status`、`_read`、`_call` 和 `_notify` 是
+`target: service` 命令（`rpc/service_plane.rs`），任何已配对设备都无法借此驱动另一台设备的浏览器；每个操作仍检查
+`browser.drive` 和 Browser Access 开关。操作按效果拆分（`READ_OPERATIONS`）：只读操作（快照、截图、等待、页面、控制台、网络、
+Cookie 和存储读取）走 `_read`，Host 的持久幂等账本从不记录它；会产生动作的操作走 `_call`，账本保留其回执，重试的点击不会点两次。
+全部走 `_call` 会让每次查看都把页面内容和 Cookie 值写进安全存储；全部当作读取则会让重试重复动作。两个命令都以
+`browser_operation_wrong_command` 拒绝另一半操作。桌面端 IPC 没有账本，所有操作都走 `_call`。被拒绝的操作保留原错误码（`browser_drive_forbidden`、`browser_extension_offline` 等），
 并附带说明责任方的状态码：请求本身（400）、Owner 的授权（403）、浏览器连接（503，可重试）、超时（504）或页面本身（422）。
 
 负责重新绑定代理对话、提示浏览器的同一个 Host 运行时，在 brain 中以 `browser-companion-agent` 运行

@@ -13473,6 +13473,89 @@
       "outputTyped": true
     },
     {
+      "name": "companion_browser_extension_read",
+      "category": "system",
+      "resource": "companion",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "companion_browser_extension_read (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "example": {}
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "device_id"
+                ]
+              },
+              {
+                "required": [
+                  "deviceId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The answer of one browser operation, defined per operation by the extension's agent protocol (browser-extension/src/lib/agent/protocol.ts) and parsed by lib/browser/extension-engine.ts: a snapshot, an action result, a tab list, or nothing. The Host relays it unread over the device socket.",
+        "x-cognia-schema-owner": "companion"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "companion_browser_extension_status",
       "category": "system",
       "resource": "companion",
@@ -89738,5 +89821,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "c611f7145f4f40eed692b5b0971a1bdcb3a57fe09cf76bae542d7223297c1ae6"
+  "catalogHash": "66de1cdd87fa279c0204464c7452f98d80bef7a7a41301eb1e0c087f4fe66d3d"
 }

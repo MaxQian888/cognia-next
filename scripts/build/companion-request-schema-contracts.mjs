@@ -849,6 +849,12 @@ const schemas = {
   // vocabulary on the Host, so it is not restated here; `args` is that
   // operation's argument object, relayed to the extension unread.
   companion_browser_extension_status: z.object({ deviceId: z.string().min(1) }),
+  companion_browser_extension_read: z.object({
+    deviceId: z.string().min(1),
+    operation: z.string().min(1),
+    args: z.record(z.string(), z.unknown()).optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  }),
   companion_browser_extension_call: z.object({
     deviceId: z.string().min(1),
     operation: z.string().min(1),

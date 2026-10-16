@@ -4524,6 +4524,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "companion_browser_extension_read",
+      "resource": "companion.browser_extension",
+      "verb": "read",
+      "arm": "companion_browser_extension_read",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "companion_browser_extension_set_drive",
       "resource": "companion.browser_extension.drive",
       "verb": "set",

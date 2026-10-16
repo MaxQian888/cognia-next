@@ -13245,6 +13245,9 @@
     "companion_browser_extension_status": {
       "$ref": "#/$defs/BrowserDeviceStatus"
     },
+    "companion_browser_extension_read": {
+      "$ref": "#/$defs/BrowserExtensionOperationResult"
+    },
     "companion_browser_extension_call": {
       "$ref": "#/$defs/BrowserExtensionOperationResult"
     },

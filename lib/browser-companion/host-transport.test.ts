@@ -13,6 +13,8 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
 }))
 
 import {
+  BROWSER_READ_OPERATIONS,
+  browserSocketCommand,
   browserSocketStatus,
   callBrowserSocket,
   hostServesBrowserSockets,
@@ -65,14 +67,14 @@ describe("the Host's way to its paired browsers' sockets", () => {
     await expect(
       callBrowserSocket({
         deviceId: "browser-3",
-        operation: "snapshot",
+        operation: "navigate",
         args: { session: "chat-1" },
         timeoutMs: 5_000,
       })
     ).resolves.toEqual({ ok: true })
     expect(routedCall).toHaveBeenCalledWith("companion_browser_extension_call", {
       deviceId: "browser-3",
-      operation: "snapshot",
+      operation: "navigate",
       args: { session: "chat-1" },
       timeoutMs: 5_000,
     })
@@ -85,5 +87,33 @@ describe("the Host's way to its paired browsers' sockets", () => {
     await expect(
       callBrowserSocket({ deviceId: "b", operation: "act", args: {}, timeoutMs: 1_000 })
     ).rejects.toMatchObject({ code: "browser_drive_forbidden" })
+  })
+
+  it("sends a look as a read and an action as a call off the desktop", async () => {
+    headless = true
+    routedCall.mockResolvedValue({})
+    await callBrowserSocket({ deviceId: "b", operation: "snapshot", args: {}, timeoutMs: 1_000 })
+    await callBrowserSocket({ deviceId: "b", operation: "act", args: {}, timeoutMs: 1_000 })
+    expect(routedCall.mock.calls.map(([command]) => command)).toEqual([
+      "companion_browser_extension_read",
+      "companion_browser_extension_call",
+    ])
+  })
+
+  it("sends every operation the one way over the desktop's IPC, which keeps no ledger", () => {
+    tauri = true
+    expect(browserSocketCommand("snapshot")).toBe("companion_browser_extension_call")
+    expect(browserSocketCommand("act")).toBe("companion_browser_extension_call")
+  })
+
+  it("names exactly the Host's read operations", async () => {
+    const { readFile } = await import("node:fs/promises")
+    const source = await readFile("crates/cognia-companion/src/ws_browser_companion.rs", "utf8")
+    const block = source.slice(source.indexOf("pub const READ_OPERATIONS"))
+    const names = [...block.slice(0, block.indexOf("];")).matchAll(/"([a-z_]+)"/g)].map(
+      (match) => match[1]
+    )
+    expect(names.length).toBeGreaterThan(0)
+    expect([...BROWSER_READ_OPERATIONS].sort()).toEqual(names.sort())
   })
 })

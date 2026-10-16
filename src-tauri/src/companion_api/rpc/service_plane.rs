@@ -3,6 +3,7 @@ use super::*;
 pub(super) const COMMANDS: &[&str] = &[
     // ADR-0228 — the brain asking after, driving and hinting a paired browser.
     "companion_browser_extension_status",
+    "companion_browser_extension_read",
     "companion_browser_extension_call",
     "companion_browser_extension_notify",
     "spawn_external_agent",
@@ -231,18 +232,32 @@ pub(super) async fn dispatch(
             to_json(crate::companion_api::ws_browser_companion::rpc_device_status(&browser))
         }
 
-        "companion_browser_extension_call" => {
+        // Split by effect (`ws_browser_companion::READ_OPERATIONS`): a look
+        // is a read the ledger never stores, an action keeps its receipt so a
+        // retry is not run twice.
+        "companion_browser_extension_read" | "companion_browser_extension_call" => {
             let browser: String = required_aliased(&args, "device_id", "deviceId")?;
             let operation: String = required(&args, "operation")?;
-            let operation_args: Option<Value> = optional(&args, "args")?;
+            let operation_args = optional::<Value>(&args, "args")?
+                .unwrap_or_else(|| Value::Object(Default::default()));
             let timeout_ms: Option<u64> = optional_aliased(&args, "timeout_ms", "timeoutMs")?;
-            crate::companion_api::ws_browser_companion::rpc_call(
-                &browser,
-                &operation,
-                operation_args.unwrap_or_else(|| Value::Object(Default::default())),
-                timeout_ms,
-            )
-            .await
+            if name == "companion_browser_extension_read" {
+                crate::companion_api::ws_browser_companion::rpc_read(
+                    &browser,
+                    &operation,
+                    operation_args,
+                    timeout_ms,
+                )
+                .await
+            } else {
+                crate::companion_api::ws_browser_companion::rpc_call(
+                    &browser,
+                    &operation,
+                    operation_args,
+                    timeout_ms,
+                )
+                .await
+            }
         }
 
         "companion_browser_extension_notify" => {

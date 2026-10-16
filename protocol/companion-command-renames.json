@@ -787,6 +787,9 @@
     "companion_browser_extension_notify": {
       "to": "companion.browser_extension.notify"
     },
+    "companion_browser_extension_read": {
+      "to": "companion.browser_extension.read"
+    },
     "companion_browser_extension_set_drive": {
       "to": "companion.browser_extension.drive.set"
     },

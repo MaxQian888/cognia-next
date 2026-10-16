@@ -424,6 +424,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // ADR-0228 — the brain's view of a paired browser's device socket.
     // Service scope only (SERVICE_ONLY_COMMANDS).
     "companion_browser_extension_status",
+    "companion_browser_extension_read",
     "companion_browser_extension_call",
     "companion_browser_extension_notify",
     // ADR-0059 R11 — headless external-agent execution plane. Service-scope
@@ -2736,6 +2737,7 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     // ADR-0228 — the brain asking after, driving and hinting a paired
     // browser. A device never drives another device's browser.
     "companion_browser_extension_status",
+    "companion_browser_extension_read",
     "companion_browser_extension_call",
     "companion_browser_extension_notify",
 ];

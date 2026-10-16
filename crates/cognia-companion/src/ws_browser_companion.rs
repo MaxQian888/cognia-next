@@ -108,6 +108,34 @@ pub const OPERATIONS: &[&str] = &[
     "finalize_tabs",
 ];
 
+/// The operations that only look: they change nothing on the page or in the
+/// browser that a second run would change again, so a caller may repeat one
+/// freely and nothing about it is worth remembering.
+///
+/// On the RPC plane they travel as `companion_browser_extension_read` (a read,
+/// never written to the idempotency ledger), and everything else as
+/// `companion_browser_extension_call`, whose answer the ledger keeps so a
+/// retried click is not clicked twice. The split matters because the ledger
+/// is durable: snapshots, screenshots and cookie or storage values would
+/// otherwise be written to the security store on every look.
+/// `lib/browser-companion/host-transport.ts` keeps the same list, pinned to
+/// this one by its test.
+pub const READ_OPERATIONS: &[&str] = &[
+    "snapshot",
+    "read_console",
+    "read_network",
+    "get_page",
+    "list_pages",
+    "downloads",
+    "wait_for_text",
+    "wait_for_selector",
+    "wait_for_network_idle",
+    "wait_for_load",
+    "screenshot",
+    "list_cookies",
+    "get_storage",
+];
+
 #[derive(Debug, Deserialize)]
 pub struct BrowserCompanionSocketQuery {
     ticket: String,
@@ -787,8 +815,41 @@ pub fn rpc_device_status(device_id: &str) -> BrowserDeviceStatus {
     device_status(&paired_tenant(), device_id)
 }
 
-/// Run one operation in a paired browser, for the brain.
+/// Run one acting operation in a paired browser, for the brain. A
+/// [`READ_OPERATIONS`] entry is refused here: it belongs on [`rpc_read`].
 pub async fn rpc_call(
+    device_id: &str,
+    operation: &str,
+    args: Value,
+    timeout_ms: Option<u64>,
+) -> Result<Value, RpcFailure> {
+    if READ_OPERATIONS.contains(&operation) {
+        return Err(operation_error_response(OperationError::new(
+            "browser_operation_wrong_command",
+            format!("{operation} only reads; send it as companion_browser_extension_read"),
+        )));
+    }
+    rpc_operation(device_id, operation, args, timeout_ms).await
+}
+
+/// Run one looking operation in a paired browser, for the brain. Anything
+/// outside [`READ_OPERATIONS`] is refused: it belongs on [`rpc_call`].
+pub async fn rpc_read(
+    device_id: &str,
+    operation: &str,
+    args: Value,
+    timeout_ms: Option<u64>,
+) -> Result<Value, RpcFailure> {
+    if OPERATIONS.contains(&operation) && !READ_OPERATIONS.contains(&operation) {
+        return Err(operation_error_response(OperationError::new(
+            "browser_operation_wrong_command",
+            format!("{operation} acts on the page; send it as companion_browser_extension_call"),
+        )));
+    }
+    rpc_operation(device_id, operation, args, timeout_ms).await
+}
+
+async fn rpc_operation(
     device_id: &str,
     operation: &str,
     args: Value,
@@ -811,7 +872,9 @@ pub fn rpc_notify_status(device_id: &str) {
 /// request, the Owner's grant, the browser's connection, or the page.
 pub fn operation_error_response(error: OperationError) -> RpcFailure {
     let (status, retryable) = match error.code.as_str() {
-        "browser_operation_unknown" => (StatusCode::BAD_REQUEST, false),
+        "browser_operation_unknown" | "browser_operation_wrong_command" => {
+            (StatusCode::BAD_REQUEST, false)
+        }
         "browser_operation_too_large" => (StatusCode::PAYLOAD_TOO_LARGE, false),
         "browser_drive_forbidden" | "browser_submissions_disabled" => {
             (StatusCode::FORBIDDEN, false)
@@ -1022,6 +1085,7 @@ mod tests {
     fn a_failed_operation_keeps_its_code_and_says_whose_problem_it_is() {
         let cases = [
             ("browser_operation_unknown", StatusCode::BAD_REQUEST, false),
+            ("browser_operation_wrong_command", StatusCode::BAD_REQUEST, false),
             ("browser_operation_too_large", StatusCode::PAYLOAD_TOO_LARGE, false),
             ("browser_drive_forbidden", StatusCode::FORBIDDEN, false),
             ("browser_submissions_disabled", StatusCode::FORBIDDEN, false),
@@ -1046,7 +1110,7 @@ mod tests {
         // No browser here holds `browser.drive` (and Browser Access may be off
         // in this process): either way the refusal is the Owner's to lift.
         let (status, body) =
-            rpc_call("browser-without-drive", "snapshot", Value::Null, Some(1_000))
+            rpc_call("browser-without-drive", "navigate", Value::Null, Some(1_000))
                 .await
                 .unwrap_err();
         assert_eq!(status, StatusCode::FORBIDDEN);
@@ -1063,6 +1127,40 @@ mod tests {
             (status, body.code.as_str()),
             (StatusCode::BAD_REQUEST, "browser_operation_unknown")
         );
+    }
+
+    #[test]
+    fn every_read_operation_is_an_operation() {
+        for operation in READ_OPERATIONS {
+            assert!(OPERATIONS.contains(operation), "{operation}");
+        }
+        // The acting half is never empty, and the obvious actors are in it.
+        for operation in ["act", "navigate", "set_files", "clear_cookies", "set_storage"] {
+            assert!(!READ_OPERATIONS.contains(&operation), "{operation}");
+        }
+    }
+
+    #[tokio::test]
+    async fn each_rpc_command_refuses_the_other_half_of_the_vocabulary() {
+        let (status, body) = rpc_call("browser-x", "snapshot", Value::Null, Some(1_000))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (status, body.code.as_str()),
+            (StatusCode::BAD_REQUEST, "browser_operation_wrong_command")
+        );
+        let (status, body) = rpc_read("browser-x", "act", Value::Null, Some(1_000))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (status, body.code.as_str()),
+            (StatusCode::BAD_REQUEST, "browser_operation_wrong_command")
+        );
+        // An unknown name is refused as unknown on either command.
+        let (_, body) = rpc_read("browser-x", "run_shell", Value::Null, None)
+            .await
+            .unwrap_err();
+        assert_eq!(body.code, "browser_operation_unknown");
     }
 
     #[test]

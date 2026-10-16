@@ -187,10 +187,19 @@ decisions live in `chrome.storage.local`; captured content never does.
 `cognia-server` serves the same device socket, and its brain is where that
 Host's conversations run, so agent mode is a Host property rather than a
 desktop one. The brain reaches the socket over its own server's service plane:
-`companion_browser_extension_status`, `_call` and `_notify` are
+`companion_browser_extension_status`, `_read`, `_call` and `_notify` are
 `target: service` commands (`rpc/service_plane.rs`), so no paired device can
-drive another device's browser through them, and `call` still checks
-`browser.drive` and the Browser Access switch for every operation. A refused
+drive another device's browser through them, and every operation still checks
+`browser.drive` and the Browser Access switch. Operations are split by effect
+(`READ_OPERATIONS`): a look — snapshot, screenshot, waits, page, console,
+network, cookie and storage reads — travels as `_read`, a read the Host's
+durable idempotency ledger never stores; anything that acts travels as
+`_call`, whose receipt the ledger keeps so a retried click is not clicked
+twice. Sending everything as `_call` would write page content and cookie
+values to the security store on every look; sending everything as a read would
+let a retry repeat an action. Each command refuses the other half with
+`browser_operation_wrong_command`. The desktop's IPC has no ledger and sends
+every operation as `_call`. A refused
 operation keeps its code (`browser_drive_forbidden`, `browser_extension_offline`,
 …) and travels with a status that says whose problem it is: the request (400),
 the Owner's grant (403), the browser's connection (503, retryable), a timeout

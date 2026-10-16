@@ -478,6 +478,7 @@ mod tests {
 
         // ── service_plane (rpc/service_plane.rs) ─────────────────────────────
         ("companion_browser_extension_status", OutputShape::Declared(RootType::Object)),
+        ("companion_browser_extension_read", OutputShape::Opaque(RootType::Any)),
         ("companion_browser_extension_call", OutputShape::Opaque(RootType::Any)),
         ("companion_browser_extension_notify", OutputShape::Scalar(ScalarShape::Null)),
         ("spawn_external_agent", OutputShape::Scalar(ScalarShape::Text)),
@@ -1054,12 +1055,14 @@ mod tests {
     // nothing to do with the command. `Opaque` is the one worth refusing,
     // because it is where an arm escapes having a shape at all.
     //
-    // Raised once, 158 → 159, for `companion_browser_extension_call` (ADR-0228
-    // §9): it relays one browser operation's answer from the extension unread,
-    // and that answer is defined per operation by the extension's agent
-    // protocol. Pinning it here would refuse real browser results the moment
-    // the two drift; the engine that reads it owns the shape.
-    const OPAQUE_CEILING: usize = 159;
+    // Raised once, 158 → 160, for `companion_browser_extension_read` and
+    // `_call` (ADR-0228 §9): they relay one browser operation's answer from the
+    // extension unread, and that answer is defined per operation by the
+    // extension's agent protocol. Pinning it here would refuse real browser
+    // results the moment the two drift; the engine that reads it owns the
+    // shape. They are two arms only because a look must stay out of the
+    // idempotency ledger and an action must not.
+    const OPAQUE_CEILING: usize = 160;
     const DERIVED_FLOOR: usize = 70;
 
     // ── Reading a JSON Schema down to what a client can break on ────────────

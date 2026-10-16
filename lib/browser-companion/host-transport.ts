@@ -55,9 +55,41 @@ export interface BrowserSocketCall {
   timeoutMs: number
 }
 
+/**
+ * The operations that only look (`READ_OPERATIONS` in
+ * `crates/cognia-companion/src/ws_browser_companion.rs`, which the test pins
+ * this list to). Off the desktop they travel as a read the Host's idempotency
+ * ledger never stores — snapshots, screenshots and cookie values must not be
+ * written to the security store on every look — while an action keeps its
+ * receipt so a retry is not run twice. The desktop's IPC has no ledger, so it
+ * sends every operation the one way.
+ */
+export const BROWSER_READ_OPERATIONS: ReadonlySet<string> = new Set([
+  "snapshot",
+  "read_console",
+  "read_network",
+  "get_page",
+  "list_pages",
+  "downloads",
+  "wait_for_text",
+  "wait_for_selector",
+  "wait_for_network_idle",
+  "wait_for_load",
+  "screenshot",
+  "list_cookies",
+  "get_storage",
+])
+
+/** The command one operation travels as on this Host. */
+export function browserSocketCommand(operation: string): string {
+  return !isTauri() && BROWSER_READ_OPERATIONS.has(operation)
+    ? "companion_browser_extension_read"
+    : "companion_browser_extension_call"
+}
+
 /** Run one operation in a paired browser; its refusal keeps the socket's code. */
 export function callBrowserSocket(input: BrowserSocketCall): Promise<unknown> {
-  return browserSocketTransport().call<unknown>("companion_browser_extension_call", {
+  return browserSocketTransport().call<unknown>(browserSocketCommand(input.operation), {
     deviceId: input.deviceId,
     operation: input.operation,
     args: input.args,
