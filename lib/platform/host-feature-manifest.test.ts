@@ -398,6 +398,9 @@ describe("host feature manifest", () => {
     expect(manifest.features["workspace.files"]?.operations).toContain(
       "fs_read_workspace_file_chunk"
     )
+    expect(manifest.features["workspace.files"]?.operations).toContain(
+      "fs_read_workspace_file_versioned"
+    )
     expect(
       manifest.operations.find((operation) => operation.name === "browser_capability")
     ).toMatchObject({ healthy: false, reason: "workspace probe failed" })

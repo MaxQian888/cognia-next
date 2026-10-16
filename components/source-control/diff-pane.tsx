@@ -34,7 +34,13 @@ import { loadFullGitDiff } from "@/lib/git/full-diff"
 import { notifyProjectFileSaved } from "@/lib/files/project-editor-bridge"
 import { joinProjectPath } from "@/hooks/codeserver/use-code-server-project-opener"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
-import { readWorkspaceFile, writeWorkspaceFile } from "@/lib/files/workspace-fs"
+import {
+  isWorkspaceFileConflict,
+  readWorkspaceFile,
+  readWorkspaceFileVersioned,
+  writeWorkspaceFile,
+  writeWorkspaceFileChecked,
+} from "@/lib/files/workspace-fs"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { fileDiffKey, type GitDiff, type GitFileChange, type GitHunk } from "@/types/git"
 import { diffEditKey, useGitStore } from "@/stores/git/git-store"
@@ -263,10 +269,22 @@ export function DiffPane({
             draftKey: diffEditKey(rootDir, path),
             save: async (content, expectedDisk) => {
               if (expectedDisk !== null) {
-                const disk = await readWorkspaceFile(rootDir, path)
-                if (disk !== expectedDisk) return "conflict"
+                // Pin the write to the hash of the exact bytes compared here,
+                // so a change landing between this read and the write is a
+                // conflict rather than a silent overwrite.
+                const disk = await readWorkspaceFileVersioned(rootDir, path)
+                if (disk.content !== expectedDisk) return "conflict"
+                try {
+                  await writeWorkspaceFileChecked(rootDir, path, content, {
+                    expectedSha256: disk.sha256,
+                  })
+                } catch (error) {
+                  if (isWorkspaceFileConflict(error)) return "conflict"
+                  throw error
+                }
+              } else {
+                await writeWorkspaceFile(rootDir, path, content)
               }
-              await writeWorkspaceFile(rootDir, path, content)
               // An editor tab on the same file learns it was written here.
               notifyProjectFileSaved(joinProjectPath(rootDir, path))
               invalidateDiff(fileDiffKey(path, staged))

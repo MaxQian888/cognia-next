@@ -840,6 +840,7 @@ export function buildLocalHostFeatureManifest({
         "fs_search_content_workspace",
         "fs_read_workspace_file",
         "fs_read_workspace_file_chunk",
+        "fs_read_workspace_file_versioned",
         "fs_write_workspace_file",
         "fs_list_workspace_dir",
         "fs_stat_workspace_file",

@@ -860,6 +860,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fs_read_workspace_file",
     "fs_read_workspace_file_base64",
     "fs_read_workspace_file_chunk",
+    "fs_read_workspace_file_versioned",
     "fs_write_workspace_file",
     "project_environment_execute",
     // Task-scoped resource ledger. File bodies use bounded reads or verified
@@ -1535,6 +1536,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "fs_read_workspace_file",
     "fs_read_workspace_file_base64",
     "fs_read_workspace_file_chunk",
+    "fs_read_workspace_file_versioned",
     "task_workspace_status",
     "task_workspace_managed_get",
     "task_workspace_managed_list",

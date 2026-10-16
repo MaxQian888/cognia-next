@@ -13,7 +13,14 @@ import type { ProjectGitStatusDeps } from "@/components/editor/project/use-proje
 import type { ProjectQuickOpenDeps } from "@/components/editor/project/project-quick-open"
 import type { ProjectSearchDeps } from "@/components/editor/project/project-search-panel"
 import type { WorkspaceContentMatch, WorkspaceEntry, WorkspaceStat } from "@/lib/files/types"
-import type { WorkspaceWalkOptions, WorkspaceWalkResult } from "@/lib/files/workspace-fs"
+import {
+  WorkspaceFileConflictError,
+  type WorkspaceFileVersioned,
+  type WorkspaceFileWritePrecondition,
+  type WorkspaceFileWriteResult,
+  type WorkspaceWalkOptions,
+  type WorkspaceWalkResult,
+} from "@/lib/files/workspace-fs"
 import type { WorkspaceFsChange } from "@/lib/files/workspace-watch"
 import type { GitFileStatus, GitStatus } from "@/types/git"
 
@@ -420,6 +427,49 @@ export function createMockWorkspace(
     write(normalizeRel(relPath), content, false)
   }
 
+  // Same contract as the host: hash the raw UTF-8 bytes, refuse a stale base.
+  const sha256 = async (content: string): Promise<string> => {
+    const digest = await crypto.subtle.digest("SHA-256", encoder.encode(content))
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
+
+  const readFileVersioned = async (
+    root: string,
+    relPath: string,
+    maxBytes?: number
+  ): Promise<WorkspaceFileVersioned> => {
+    const file = files.get(normalizeRel(relPath))
+    if (!file) throw new Error(`ENOENT: ${relPath}`)
+    return {
+      content: await readFile(root, relPath, maxBytes),
+      sha256: await sha256(file.content),
+      size: encoder.encode(file.content).byteLength,
+      mtimeMs: file.mtimeMs,
+    }
+  }
+
+  const writeFileChecked = async (
+    _root: string,
+    relPath: string,
+    content: string,
+    precondition: WorkspaceFileWritePrecondition
+  ): Promise<WorkspaceFileWriteResult> => {
+    const rel = normalizeRel(relPath)
+    const existing = files.get(rel)
+    const current = existing ? await sha256(existing.content) : null
+    const matches =
+      precondition.expectAbsent === true
+        ? current === null
+        : current === precondition.expectedSha256
+    if (!matches) throw new WorkspaceFileConflictError(current)
+    write(rel, content, false)
+    return {
+      sha256: await sha256(content),
+      size: encoder.encode(content).byteLength,
+      mtimeMs: files.get(rel)?.mtimeMs ?? null,
+    }
+  }
+
   const createDir = async (_root: string, relPath: string) => {
     const rel = normalizeRel(relPath)
     if (!rel) return
@@ -585,9 +635,11 @@ export function createMockWorkspace(
     deps: {
       listDir,
       readFile,
+      readFileVersioned,
       readFileBase64,
       statFile,
       writeFile,
+      writeFileChecked,
       createDir,
       deleteEntry,
       renameEntry,

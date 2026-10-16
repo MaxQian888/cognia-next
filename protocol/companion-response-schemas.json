@@ -7890,6 +7890,49 @@
       },
       "additionalProperties": false
     },
+    "WorkspaceWriteResult": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-files/src/files.rs WorkspaceWriteResult",
+      "required": ["sha256", "size", "mtimeMs"],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mtimeMs": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkspaceVersionedRead": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-files/src/files.rs WorkspaceVersionedRead",
+      "required": ["content", "sha256", "size", "mtimeMs"],
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mtimeMs": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
     "WorkspaceRootsReport": {
       "type": "object",
       "x-cognia-wire-source": "crates/cognia-files/src/files.rs WorkspaceRootsReport",
@@ -13995,6 +14038,9 @@
     "fs_read_workspace_file_chunk": {
       "$ref": "#/$defs/WorkspaceFileChunk"
     },
+    "fs_read_workspace_file_versioned": {
+      "$ref": "#/$defs/WorkspaceVersionedRead"
+    },
     "fs_rename_workspace_entry": {
       "$ref": "#/$defs/NullResult"
     },
@@ -14011,7 +14057,7 @@
       "$ref": "#/$defs/WorkspaceRootsReport"
     },
     "fs_write_workspace_file": {
-      "$ref": "#/$defs/NullResult"
+      "$ref": "#/$defs/WorkspaceWriteResult"
     },
     "get_external_agent_status": {
       "$ref": "#/$defs/StringResult"

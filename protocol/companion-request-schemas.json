@@ -8351,6 +8351,26 @@
       },
       "additionalProperties": false
     },
+    "fs_read_workspace_file_versioned": {
+      "type": "object",
+      "required": [
+        "root",
+        "relPath"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "relPath": {
+          "type": "string"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
     "fs_rename_workspace_entry": {
       "type": "object",
       "required": [
@@ -8448,6 +8468,13 @@
         },
         "content": {
           "type": "string"
+        },
+        "expectedSha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "expectAbsent": {
+          "type": "boolean"
         },
         "encoding": {
           "type": "string",

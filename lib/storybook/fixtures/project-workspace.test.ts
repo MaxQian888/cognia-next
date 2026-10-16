@@ -64,6 +64,30 @@ describe("createMockWorkspace", () => {
     ])
   })
 
+  it("checked writes compare the base hash like the host and refuse a stale one", async () => {
+    const ws = createMockWorkspace()
+    const read = await ws.deps.readFileVersioned!(ws.root, "src/lib/utils.ts")
+    expect(read.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(read.content).toContain("export function clamp")
+
+    const written = await ws.deps.writeFileChecked!(ws.root, "src/lib/utils.ts", "v2\n", {
+      expectedSha256: read.sha256,
+    })
+    expect(written.sha256).not.toBe(read.sha256)
+    expect(await ws.deps.readFile!(ws.root, "src/lib/utils.ts")).toBe("v2\n")
+
+    await expect(
+      ws.deps.writeFileChecked!(ws.root, "src/lib/utils.ts", "v3\n", {
+        expectedSha256: read.sha256,
+      })
+    ).rejects.toMatchObject({ name: "WorkspaceFileConflictError", currentSha256: written.sha256 })
+    await expect(
+      ws.deps.writeFileChecked!(ws.root, "src/lib/utils.ts", "v3\n", { expectAbsent: true })
+    ).rejects.toMatchObject({ currentSha256: written.sha256 })
+    await ws.deps.writeFileChecked!(ws.root, "src/new.ts", "fresh\n", { expectAbsent: true })
+    expect(await ws.deps.readFile!(ws.root, "src/new.ts")).toBe("fresh\n")
+  })
+
   it("deleteEntry removes files and guarded directories", async () => {
     const ws = createMockWorkspace()
     const { changes } = collect(ws)

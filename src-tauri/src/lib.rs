@@ -961,6 +961,7 @@ pub fn run() {
             files::fs_read_workspace_file,
             files::fs_read_workspace_file_base64,
             files::fs_read_workspace_file_chunk,
+            files::fs_read_workspace_file_versioned,
             files::fs_write_workspace_file,
             task_workspace::task_workspace_status,
             task_workspace::task_workspace_begin,

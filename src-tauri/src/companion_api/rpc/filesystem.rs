@@ -10,6 +10,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "fs_search_workspace",
     "fs_search_content_workspace",
     "fs_read_workspace_file",
+    "fs_read_workspace_file_versioned",
     "fs_read_workspace_file_base64",
     "fs_read_workspace_file_chunk",
     "fs_write_workspace_file",
@@ -115,6 +116,21 @@ pub(super) const COMMANDS: &[&str] = &[
 // Bound disk work across all paired peers. A permit moves into the blocking
 // closure, so disconnecting a caller cannot free capacity while its I/O runs.
 static TRANSFER_IO_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+
+/// Keep conflicts distinct; the stable message prefix carries their hash in
+/// the existing three-field RPC error envelope.
+fn workspace_write_error(error: crate::files::WorkspaceWriteError) -> (StatusCode, Json<RpcError>) {
+    match error {
+        crate::files::WorkspaceWriteError::Conflict { .. } => (
+            StatusCode::CONFLICT,
+            Json(RpcError::new("workspace_file_conflict", error.to_string())),
+        ),
+        crate::files::WorkspaceWriteError::InvalidPrecondition { message } => {
+            RpcError::validation_failed(message)
+        }
+        crate::files::WorkspaceWriteError::Other { message } => RpcError::internal(message),
+    }
+}
 
 /// HTTP status for the changeset / integration rejections the shared
 /// problem table does not know: a state race is a conflict, an unmet gate is
@@ -300,6 +316,19 @@ pub(super) async fn dispatch(
             .map(Value::String)
             .map_err(RpcError::internal)
         }
+        "fs_read_workspace_file_versioned" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let rel_path: String = required(&args, "relPath")?;
+            let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
+            let allow_sensitive = authorize_workspace_read(&root, &rel_path, device_id, scope)?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::read_workspace_file_versioned(root, rel_path, max_bytes, allow_sensitive)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
         "fs_read_workspace_file_base64" => {
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
@@ -338,13 +367,17 @@ pub(super) async fn dispatch(
             let rel_path: String = required(&args, "relPath")?;
             let content: String = required(&args, "content")?;
             let encoding: Option<String> = optional(&args, "encoding")?;
+            let expected_sha256: Option<String> = optional(&args, "expectedSha256")?;
+            let expect_absent: Option<bool> = optional(&args, "expectAbsent")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_write_workspace_file(root, rel_path, content, encoding)
+                crate::files::fs_write_workspace_file(
+                    root, rel_path, content, encoding, expected_sha256, expect_absent,
+                )
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
-            .map(|_| Value::Null)
-            .map_err(RpcError::internal)
+            .map_err(workspace_write_error)
+            .and_then(to_json)
         }
         "project_environment_execute" => {
             let script: crate::project_environment::EnvironmentScript = required(&args, "script")?;
@@ -1374,6 +1407,26 @@ pub(super) async fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_write_conflict_preserves_current_hash_and_http_status() {
+        for current_sha256 in [None, Some("a".repeat(64))] {
+            let error = crate::files::WorkspaceWriteError::Conflict {
+                current_sha256: current_sha256.clone(),
+            };
+            let (status, Json(rpc_error)) = workspace_write_error(error);
+            assert_eq!(status, StatusCode::CONFLICT);
+            assert_eq!(rpc_error.code, "workspace_file_conflict");
+            assert!(!rpc_error.retryable);
+            let payload: Value = serde_json::from_str(
+                rpc_error.message.strip_prefix("workspace_file_conflict:").unwrap(),
+            ).unwrap();
+            assert_eq!(payload, json!({ "currentSha256": current_sha256 }));
+        }
+        assert_eq!(workspace_write_error(crate::files::WorkspaceWriteError::InvalidPrecondition {
+            message: "invalid hash".into(),
+        }).0, StatusCode::BAD_REQUEST);
+    }
 
     #[test]
     fn changeset_rejections_answer_a_client_status_not_a_server_fault() {

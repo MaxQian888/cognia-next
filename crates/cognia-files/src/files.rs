@@ -6,9 +6,11 @@
 use gray_matter::{engine::YAML, Matter, Pod};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 
 // ---------------------------------------------------------------------------
 // Allowed-roots registry (ADR-0028 follow-up) + enforced containment.
@@ -646,6 +648,94 @@ pub struct WorkspaceStat {
     pub is_symlink: Option<bool>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceWriteResult {
+    pub sha256: String,
+    pub size: u64,
+    pub mtime_ms: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceVersionedRead {
+    pub content: String,
+    pub sha256: String,
+    pub size: u64,
+    pub mtime_ms: Option<u64>,
+}
+
+/// Structured on both the Tauri and companion transports.
+#[derive(Debug, Serialize)]
+#[serde(tag = "code")]
+pub enum WorkspaceWriteError {
+    #[serde(rename = "workspace_file_conflict")]
+    Conflict {
+        #[serde(rename = "currentSha256")]
+        current_sha256: Option<String>,
+    },
+    #[serde(rename = "validation_failed")]
+    InvalidPrecondition { message: String },
+    #[serde(rename = "workspace_file_write_failed")]
+    Other { message: String },
+}
+
+impl std::fmt::Display for WorkspaceWriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict { current_sha256 } => {
+                write!(f, "workspace_file_conflict:{}", serde_json::json!({
+                    "currentSha256": current_sha256,
+                }))
+            }
+            Self::InvalidPrecondition { message } | Self::Other { message } => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for WorkspaceWriteError {}
+
+impl From<String> for WorkspaceWriteError {
+    fn from(message: String) -> Self {
+        Self::Other { message }
+    }
+}
+
+impl From<&str> for WorkspaceWriteError {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
+    }
+}
+
+fn workspace_file_sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn workspace_write_lock(path: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
+    workspace_path_lock(path, LOCKS.get_or_init(|| Mutex::new(HashMap::new())))
+}
+
+fn workspace_directory_commit_lock(path: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
+    workspace_path_lock(path, LOCKS.get_or_init(|| Mutex::new(HashMap::new())))
+}
+
+fn workspace_path_lock(
+    path: &Path,
+    registry: &Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>,
+) -> Arc<Mutex<()>> {
+    let mut locks = registry
+        .lock().unwrap_or_else(|error| error.into_inner());
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(path).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
+    lock
+}
+
 /// Milliseconds-since-epoch of a file's mtime, or `None` when unavailable.
 fn mtime_ms_of(meta: &std::fs::Metadata) -> Option<u64> {
     meta.modified()
@@ -1014,6 +1104,29 @@ pub fn read_workspace_file(
     max_bytes: Option<usize>,
     allow_sensitive: bool,
 ) -> Result<String, String> {
+    read_workspace_file_versioned(root, rel_path, max_bytes, allow_sensitive)
+        .map(|result| result.content)
+}
+
+/// Read text and its raw-byte version from the same open file. `max_bytes`
+/// retains the preview truncation behavior of [`fs_read_workspace_file`]; the
+/// hash and size always describe the complete raw file, never the preview.
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn fs_read_workspace_file_versioned(
+    root: String,
+    rel_path: String,
+    max_bytes: Option<usize>,
+) -> Result<WorkspaceVersionedRead, String> {
+    read_workspace_file_versioned(root, rel_path, max_bytes, true)
+}
+
+/// Versioned text read with the same sensitive-name floor as other reads.
+pub fn read_workspace_file_versioned(
+    root: String,
+    rel_path: String,
+    max_bytes: Option<usize>,
+    allow_sensitive: bool,
+) -> Result<WorkspaceVersionedRead, String> {
     let root_path = PathBuf::from(&root)
         .canonicalize()
         .map_err(|e| format!("canonicalize root {}: {}", root, e))?;
@@ -1029,8 +1142,14 @@ pub fn read_workspace_file(
         ));
     }
     refuse_sensitive_read(&root_path, &rel_path, &canonical, allow_sensitive)?;
-    let mut content =
-        std::fs::read_to_string(&canonical).map_err(|e| format!("read {}: {}", rel_path, e))?;
+    let mut file = std::fs::File::open(&canonical)
+        .map_err(|e| format!("read {}: {}", rel_path, e))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|e| format!("read {}: {}", rel_path, e))?;
+    let metadata = file.metadata().map_err(|e| format!("stat {}: {}", rel_path, e))?;
+    let sha256 = workspace_file_sha256(&bytes);
+    let size = bytes.len() as u64;
+    let mut content = String::from_utf8(bytes).map_err(|e| format!("read {}: {}", rel_path, e))?;
     if let Some(limit) = max_bytes {
         if content.len() > limit {
             let mut boundary = limit.min(content.len());
@@ -1041,7 +1160,7 @@ pub fn read_workspace_file(
             content.push_str("\n... (truncated)");
         }
     }
-    Ok(content)
+    Ok(WorkspaceVersionedRead { content, sha256, size, mtime_ms: mtime_ms_of(&metadata) })
 }
 
 /// Hard ceiling for a base64 read when the caller passes no `max_bytes` —
@@ -1171,14 +1290,34 @@ pub fn read_workspace_file_chunk(
 /// check as [`fs_read_workspace_file`]. `rel_path` is joined to `root`; parent
 /// directories are created as needed, and the resolved parent must canonicalize
 /// back inside `root` so a `../` escape cannot write outside the workspace.
+/// Stages to an exclusive same-directory temp file, fsyncs, and atomically
+/// replaces the target. All callers take a process-wide canonical-path lock;
+/// the commit also takes a canonical-parent lock so absent case aliases on
+/// case-insensitive filesystems cannot bypass serialization. A content
+/// precondition is checked immediately before rename. External
+/// writers that do not use this command still have a check-then-rename race.
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub fn fs_write_workspace_file(
     root: String,
     rel_path: String,
     content: String,
     encoding: Option<String>,
-) -> Result<(), String> {
+    expected_sha256: Option<String>,
+    expect_absent: Option<bool>,
+) -> Result<WorkspaceWriteResult, WorkspaceWriteError> {
     use base64::Engine;
+    if expected_sha256.is_some() && expect_absent.is_some() {
+        return Err(WorkspaceWriteError::InvalidPrecondition {
+            message: "expectedSha256 and expectAbsent are mutually exclusive".into(),
+        });
+    }
+    if let Some(expected) = expected_sha256.as_ref() {
+        if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(WorkspaceWriteError::InvalidPrecondition {
+                message: "expectedSha256 must be a 64-character hexadecimal SHA-256".into(),
+            });
+        }
+    }
     let bytes = match encoding.as_deref().unwrap_or("utf-8") {
         "utf-8" => content.into_bytes(),
         "base64" => {
@@ -1217,7 +1356,7 @@ pub fn fs_write_workspace_file(
             "path escapes workspace: {} (root {})",
             canonical_existing.display(),
             root_path.display()
-        ));
+        ).into());
     }
     std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {}", parent.display(), e))?;
     let canonical_parent = parent
@@ -1234,14 +1373,101 @@ pub fn fs_write_workspace_file(
             "path escapes workspace: {} (root {})",
             canonical_parent.display(),
             root_path.display()
-        ));
+        ).into());
     }
     let file_name = target
         .file_name()
         .ok_or_else(|| format!("invalid target path: {}", target.display()))?;
     let final_path = canonical_parent.join(file_name);
     reject_symlinked_final(&final_path)?;
-    std::fs::write(&final_path, bytes).map_err(|e| format!("write {}: {}", rel_path, e))
+    // Resolve an existing basename as well: on case-insensitive filesystems,
+    // different spellings must share the same cooperative-writer lock.
+    let lock_path = match final_path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => final_path.clone(),
+        Err(error) => return Err(format!("canonicalize {}: {}", rel_path, error).into()),
+    };
+    let lock = workspace_write_lock(&lock_path);
+    let _guard = lock.lock().unwrap_or_else(|error| error.into_inner());
+    reject_symlinked_final(&final_path)?;
+    // The counter distinguishes concurrent calls; the timestamp + PID avoid
+    // stale names from previous processes. create_new remains authoritative.
+    static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_nanos();
+    let (temp_path, mut temp_file) = loop {
+        let serial = NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = canonical_parent.join(format!(
+            ".cognia-workspace-write-{}-{stamp}-{serial}.tmp", std::process::id(),
+        ));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => break (path, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("create temp {}: {}", rel_path, error).into()),
+        }
+    };
+    // Move the handle into the closure, so it is closed before cleanup on
+    // every error path (including Windows, where an open handle blocks unlink).
+    let temp_path_for_write = temp_path.clone();
+    let result = (move || {
+        temp_file.write_all(&bytes).map_err(|e| format!("write {}: {}", rel_path, e))?;
+        // An absent basename cannot be canonicalized (e.g. Foo/foo on APFS).
+        // Serialize commits in its canonical directory, keeping temp writes
+        // parallel and using a registry distinct from the per-file locks.
+        let commit_lock = workspace_directory_commit_lock(&canonical_parent);
+        let _commit_guard = commit_lock.lock().unwrap_or_else(|error| error.into_inner());
+        reject_symlinked_final(&final_path)?;
+        let permissions = match std::fs::metadata(&final_path) {
+            Ok(metadata) => Some(metadata.permissions()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("stat {}: {}", rel_path, error).into()),
+        };
+        if let Some(permissions) = permissions {
+            temp_file.set_permissions(permissions)
+                .map_err(|e| format!("permissions {}: {}", rel_path, e))?;
+        }
+        temp_file.sync_all().map_err(|e| format!("fsync {}: {}", rel_path, e))?;
+        let metadata = temp_file.metadata().map_err(|e| format!("stat temp {}: {}", rel_path, e))?;
+        let written = WorkspaceWriteResult {
+            sha256: workspace_file_sha256(&bytes),
+            size: bytes.len() as u64,
+            mtime_ms: mtime_ms_of(&metadata),
+        };
+        drop(temp_file);
+        reject_symlinked_final(&final_path)?;
+        if expected_sha256.is_some() || expect_absent == Some(true) {
+            let current_sha256 = match std::fs::read(&final_path) {
+                Ok(current) => Some(workspace_file_sha256(&current)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(format!("read {}: {}", rel_path, error).into()),
+            };
+            let matches = match expected_sha256.as_ref() {
+                Some(expected) => current_sha256.as_ref()
+                    .is_some_and(|current| expected.eq_ignore_ascii_case(current)),
+                None => current_sha256.is_none(),
+            };
+            if !matches {
+                return Err(WorkspaceWriteError::Conflict { current_sha256 });
+            }
+        }
+        std::fs::rename(&temp_path_for_write, &final_path)
+            .map_err(|e| format!("rename {}: {}", rel_path, e))?;
+        Ok(written)
+    })();
+    if result.is_err() {
+        // Windows refuses to unlink a readonly file. Only clear the copied
+        // attribute on our staging file; never change the target on failure.
+        #[cfg(windows)]
+        if let Ok(metadata) = std::fs::metadata(&temp_path) {
+            let mut permissions = metadata.permissions();
+            if permissions.readonly() {
+                permissions.set_readonly(false);
+                let _ = std::fs::set_permissions(&temp_path, permissions);
+            }
+        }
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result
 }
 
 /// List the immediate children of `root`/`rel_path` (empty/None `rel_path` =
@@ -2551,13 +2777,15 @@ mod tests {
     }
 
     #[test]
-    fn write_workspace_file_writes_and_blocks_traversal() {
+    fn fs_write_workspace_file_writes_and_blocks_traversal() {
         let root = make_sandbox("write-sandbox");
         // Writes to a nested rel path, creating parent dirs.
         fs_write_workspace_file(
             root.to_string_lossy().to_string(),
             "nested/dir/out.txt".into(),
             "payload".into(),
+            None,
+            None,
             None,
         )
         .unwrap();
@@ -2571,13 +2799,15 @@ mod tests {
             "../escape.txt".into(),
             "x".into(),
             None,
+            None,
+            None,
         );
         assert!(escape.is_err(), "traversal write must be rejected");
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn write_workspace_binary_round_trip_and_validation() {
+    fn fs_write_workspace_file_binary_round_trip_and_validation() {
         let root = make_sandbox("binary-write");
         let root_name = root.to_string_lossy().to_string();
         fs_write_workspace_file(
@@ -2585,6 +2815,8 @@ mod tests {
             "image.bin".into(),
             "AAEC/w==".into(),
             Some("base64".into()),
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -2596,7 +2828,9 @@ mod tests {
                 root_name.clone(),
                 "invalid.bin".into(),
                 "not base64".into(),
-                Some("base64".into())
+                Some("base64".into()),
+                None,
+                None,
             )
             .is_err()
         );
@@ -2605,14 +2839,16 @@ mod tests {
             root_name,
             "../escape.bin".into(),
             "AA==".into(),
-            Some("base64".into())
+            Some("base64".into()),
+            None,
+            None,
         )
         .is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn write_workspace_file_rejects_escape_without_creating_parent() {
+    fn fs_write_workspace_file_rejects_escape_without_creating_parent() {
         let root = make_sandbox("write-sandbox-no-mutation");
         let outside_dir = root
             .parent()
@@ -2626,6 +2862,8 @@ mod tests {
             format!("../{outside_name}/evil.txt"),
             "x".into(),
             None,
+            None,
+            None,
         );
 
         assert!(escape.is_err(), "traversal write must be rejected");
@@ -2635,6 +2873,238 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside_dir);
+    }
+
+    #[test]
+    fn fs_write_workspace_file_matching_hash_returns_written_version() {
+        let root = make_sandbox("write-cas-match");
+        std::fs::write(root.join("file.txt"), "original").unwrap();
+        let result = fs_write_workspace_file(
+            root.to_string_lossy().into(), "file.txt".into(), "updated 🦀".into(),
+            None, Some(workspace_file_sha256(b"original")), None,
+        ).unwrap();
+        let bytes = std::fs::read(root.join("file.txt")).unwrap();
+        assert_eq!(bytes, "updated 🦀".as_bytes());
+        assert_eq!(result.sha256, workspace_file_sha256(&bytes));
+        assert_eq!(result.size, bytes.len() as u64);
+        assert_eq!(result.mtime_ms, mtime_ms_of(&std::fs::metadata(root.join("file.txt")).unwrap()));
+        let wire = serde_json::to_value(&result).unwrap();
+        assert_eq!(wire["mtimeMs"], serde_json::json!(result.mtime_ms));
+        assert!(wire.get("mtime_ms").is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fs_write_workspace_file_conflict_keeps_bytes_and_cleans_temp() {
+        let root = make_sandbox("write-cas-conflict");
+        std::fs::write(root.join("file.txt"), "external edit").unwrap();
+        let error = fs_write_workspace_file(
+            root.to_string_lossy().into(), "file.txt".into(), "draft".into(),
+            None, Some(workspace_file_sha256(b"original")), None,
+        ).unwrap_err();
+        assert!(matches!(&error, WorkspaceWriteError::Conflict { current_sha256 }
+            if current_sha256.as_deref() == Some(workspace_file_sha256(b"external edit").as_str())));
+        assert_eq!(serde_json::to_value(&error).unwrap(), serde_json::json!({
+            "code": "workspace_file_conflict",
+            "currentSha256": workspace_file_sha256(b"external edit"),
+        }));
+        assert_eq!(std::fs::read(root.join("file.txt")).unwrap(), b"external edit");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fs_write_workspace_file_missing_and_absent_preconditions() {
+        let root = make_sandbox("write-cas-missing");
+        let root_name = root.to_string_lossy().to_string();
+        let missing = fs_write_workspace_file(
+            root_name.clone(), "file.txt".into(), "draft".into(),
+            None, Some(workspace_file_sha256(b"original")), None,
+        ).unwrap_err();
+        assert!(matches!(missing, WorkspaceWriteError::Conflict { current_sha256: None }));
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        fs_write_workspace_file(
+            root_name.clone(), "file.txt".into(), "restored".into(), None, None, Some(true),
+        ).unwrap();
+        let existing = fs_write_workspace_file(
+            root_name, "file.txt".into(), "another draft".into(), None, None, Some(true),
+        ).unwrap_err();
+        assert!(matches!(existing, WorkspaceWriteError::Conflict { current_sha256: Some(hash) }
+            if hash == workspace_file_sha256(b"restored")));
+        assert_eq!(std::fs::read(root.join("file.txt")).unwrap(), b"restored");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fs_write_workspace_file_readonly_conflict_cleans_temp_preserves_target() {
+        let root = make_sandbox("write-readonly-conflict");
+        let path = root.join("file.txt");
+        std::fs::write(&path, "external edit").unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        let error = fs_write_workspace_file(
+            root.to_string_lossy().into(), "file.txt".into(), "draft".into(),
+            None, Some(workspace_file_sha256(b"original")), None,
+        ).unwrap_err();
+        assert!(matches!(error, WorkspaceWriteError::Conflict { .. }));
+        assert_eq!(std::fs::read(&path).unwrap(), b"external edit");
+        assert!(std::fs::metadata(&path).unwrap().permissions().readonly());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fs_write_workspace_file_invalid_preconditions_leave_no_files() {
+        let root = make_sandbox("write-cas-invalid");
+        for (hash, absent) in [
+            ("bad".into(), None),
+            (workspace_file_sha256(b""), Some(true)),
+            (workspace_file_sha256(b""), Some(false)),
+        ] {
+            let error = fs_write_workspace_file(
+                root.to_string_lossy().into(), "nested/file.txt".into(), "draft".into(),
+                None, Some(hash), absent,
+            ).unwrap_err();
+            assert!(matches!(error, WorkspaceWriteError::InvalidPrecondition { .. }));
+        }
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fs_write_workspace_file_failed_rename_cleans_temp_and_keeps_target() {
+        let root = make_sandbox("write-rename-failure");
+        std::fs::create_dir(root.join("target")).unwrap();
+        std::fs::write(root.join("target/keep.txt"), "original").unwrap();
+        assert!(fs_write_workspace_file(
+            root.to_string_lossy().into(), "target".into(), "draft".into(), None, None, None,
+        ).is_err());
+        assert_eq!(std::fs::read(root.join("target/keep.txt")).unwrap(), b"original");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fs_write_workspace_file_atomic_replace_preserves_permissions() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let root = make_sandbox("write-atomic-permissions");
+        let path = root.join("run.sh");
+        std::fs::write(&path, "original").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o751)).unwrap();
+        let old_file = std::fs::File::open(&path).unwrap();
+        let old_inode = old_file.metadata().unwrap().ino();
+        fs_write_workspace_file(
+            root.to_string_lossy().into(), "run.sh".into(), "updated".into(), None, None, None,
+        ).unwrap();
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o7777, 0o751);
+        assert_ne!(metadata.ino(), old_inode, "replacement must create a new inode");
+        let mut old_content = String::new();
+        (&old_file).read_to_string(&mut old_content).unwrap();
+        assert_eq!(old_content, "original", "readers of the original inode see complete old bytes");
+        assert_eq!(std::fs::read(path).unwrap(), b"updated");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fs_write_workspace_file_rejects_symlink_targets_and_parents() {
+        let root = make_sandbox("write-cas-symlinks");
+        let outside = make_sandbox("write-cas-outside");
+        std::fs::write(outside.join("file.txt"), "keep").unwrap();
+        std::os::unix::fs::symlink(outside.join("file.txt"), root.join("alias.txt")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("escape")).unwrap();
+        for path in ["alias.txt", "escape/file.txt", "escape/nested/new.txt"] {
+            assert!(fs_write_workspace_file(
+                root.to_string_lossy().into(), path.into(), "draft".into(), None, None, None,
+            ).is_err());
+        }
+        assert_eq!(std::fs::read(outside.join("file.txt")).unwrap(), b"keep");
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn fs_write_workspace_file_versioned_read_hashes_loaded_bytes_and_checks_boundaries() {
+        let root = make_sandbox("write-versioned-read");
+        let root_name = root.to_string_lossy().to_string();
+        std::fs::write(root.join("file.txt"), "a🦀z").unwrap();
+        let read = fs_read_workspace_file_versioned(root_name.clone(), "file.txt".into(), None).unwrap();
+        assert_eq!(read.content, "a🦀z");
+        assert_eq!(read.sha256, workspace_file_sha256(read.content.as_bytes()));
+        assert_eq!(read.size, 6);
+        let preview = fs_read_workspace_file_versioned(root_name.clone(), "file.txt".into(), Some(3)).unwrap();
+        assert_eq!(preview.content, "a\n... (truncated)");
+        assert_eq!(preview.sha256, read.sha256);
+        assert_eq!(preview.size, read.size);
+        std::fs::write(root.join(".env"), "secret").unwrap();
+        assert!(read_workspace_file_versioned(root_name.clone(), ".env".into(), None, false).is_err());
+        assert!(fs_read_workspace_file_versioned(root_name.clone(), "../outside.txt".into(), None).is_err());
+        std::fs::write(root.join("binary"), [0xff]).unwrap();
+        assert!(fs_read_workspace_file_versioned(root_name, "binary".into(), None).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fs_write_workspace_file_concurrent_same_version_has_one_winner() {
+        let root = make_sandbox("write-cas-concurrent");
+        std::fs::write(root.join("file.txt"), "original").unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let second_path = if root.join("FILE.txt").exists() { "FILE.txt" } else { "./file.txt" };
+        let threads: Vec<_> = ["first", "second"].into_iter().map(|content| {
+            let barrier = barrier.clone();
+            let root_name = root.to_string_lossy().to_string();
+            let rel_path = if content == "first" { "file.txt" } else { second_path };
+            std::thread::spawn(move || {
+                barrier.wait();
+                fs_write_workspace_file(
+                    root_name, rel_path.into(), content.into(),
+                    None, Some(workspace_file_sha256(b"original")), None,
+                )
+            })
+        }).collect();
+        let results: Vec<_> = threads.into_iter().map(|thread| thread.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let current_hash = workspace_file_sha256(&std::fs::read(root.join("file.txt")).unwrap());
+        assert!(results.iter().any(|result| matches!(result,
+            Err(WorkspaceWriteError::Conflict { current_sha256: Some(hash) }) if hash == &current_hash)));
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fs_write_workspace_file_concurrent_absent_aliases_have_one_winner() {
+        let root = make_sandbox("write-cas-absent-alias");
+        std::fs::write(root.join("probe"), "").unwrap();
+        let second_path = if root.join("PROBE").exists() { "FILE.txt" } else { "file.txt" };
+        std::fs::remove_file(root.join("probe")).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let threads: Vec<_> = ["file.txt", second_path].into_iter().enumerate().map(|(index, path)| {
+            let barrier = barrier.clone();
+            let root_name = root.to_string_lossy().to_string();
+            std::thread::spawn(move || {
+                barrier.wait();
+                fs_write_workspace_file(
+                    root_name, path.into(), format!("draft-{index}"), None, None, Some(true),
+                )
+            })
+        }).collect();
+        let results: Vec<_> = threads.into_iter().map(|thread| thread.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let winner = results.iter().find_map(|result| result.as_ref().ok()).unwrap();
+        assert!(results.iter().any(|result| matches!(result,
+            Err(WorkspaceWriteError::Conflict { current_sha256: Some(hash) }) if hash == &winner.sha256)));
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

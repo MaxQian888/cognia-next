@@ -9098,6 +9098,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "fs_read_workspace_file_versioned",
+      "resource": "fs.workspace_file",
+      "verb": "read_versioned",
+      "arm": "fs_read_workspace_file_versioned",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "fs_rename_workspace_entry",
       "resource": "fs.workspace_entry",
       "verb": "rename",

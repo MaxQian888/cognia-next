@@ -58713,6 +58713,195 @@ paths:
         - dpopAccess: []
       parameters:
         - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/fs_read_workspace_file_versioned:
+    post:
+      operationId: publicRpcFsReadWorkspaceFileVersioned
+      tags:
+        - rpc-dispatch
+      summary: fs_read_workspace_file_versioned (host.observe)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                root:
+                  type: string
+                relPath:
+                  type: string
+                maxBytes:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+              required:
+                - root
+                - relPath
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
   /api/_rpc/fs_rename_workspace_entry:
     post:
       operationId: publicRpcFsRenameWorkspaceEntry
@@ -59650,7 +59839,7 @@ paths:
         - rpc-dispatch
       summary: fs_write_workspace_file (workspace.write)
       description: "Device-reachable write command. Risk: high; approval: interactive."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: zod-contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -59660,11 +59849,6 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - root
-                - relPath
-                - content
-                - adminLease
               properties:
                 root:
                   type: string
@@ -59677,9 +59861,19 @@ paths:
                   enum:
                     - utf-8
                     - base64
+                expectedSha256:
+                  type: string
+                  pattern: ^[a-fA-F0-9]{64}$
+                expectAbsent:
+                  type: boolean
                 adminLease:
                   type: string
                   minLength: 1
+              required:
+                - root
+                - relPath
+                - content
+                - adminLease
               additionalProperties: false
       responses:
         "200":
@@ -142053,6 +142247,7 @@ components:
           - fs_read_workspace_file
           - fs_read_workspace_file_base64
           - fs_read_workspace_file_chunk
+          - fs_read_workspace_file_versioned
           - fs_rename_workspace_entry
           - fs_search_content_workspace
           - fs_search_workspace
@@ -143814,9 +144009,9 @@ x-cognia-generated:
     - protocol/companion-request-schemas.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  publicCommandCount: 705
-  generatedRequestSchemaCount: 705
+  publicCommandCount: 706
+  generatedRequestSchemaCount: 706
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 705
+  contractRequestSchemaCount: 706
   genericRequestSchemaCount: 0
   legacyCompatibility: false

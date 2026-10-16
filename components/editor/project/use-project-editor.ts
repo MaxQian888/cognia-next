@@ -10,9 +10,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   listWorkspaceDir,
   readWorkspaceFile,
+  readWorkspaceFileVersioned,
+  isWorkspaceFileConflict,
+  WorkspaceFileConflictError,
+  type WorkspaceFileWritePrecondition,
   readWorkspaceFileBase64,
   statWorkspaceFile,
   writeWorkspaceFile,
+  writeWorkspaceFileChecked,
   createWorkspaceDir,
   deleteWorkspaceEntry,
   renameWorkspaceEntry,
@@ -75,6 +80,10 @@ export interface OpenFile {
   /** Full-fidelity Monaco id (`rust`, `go`, `html`, …); `language` stays on the closed CM union. */
   monacoLanguage: string
   savedContent: string
+  /** Hash of the exact bytes loaded or last saved. Absent only on placeholders. */
+  baseSha256?: string
+  /** Disk version reported by a conflict, pinned for explicit overwrite. */
+  conflictSha256?: string | null
   draftContent: string
   /** Monotonic in-memory model version used by proposal compare-and-swap. */
   draftVersion: number
@@ -276,9 +285,11 @@ export type ProjectEditorConfirmVerdict = "confirm" | "save" | "cancel"
 export interface ProjectEditorDeps {
   listDir: typeof listWorkspaceDir
   readFile: typeof readWorkspaceFile
+  readFileVersioned: typeof readWorkspaceFileVersioned
   readFileBase64: typeof readWorkspaceFileBase64
   statFile: typeof statWorkspaceFile
   writeFile: typeof writeWorkspaceFile
+  writeFileChecked: typeof writeWorkspaceFileChecked
   createDir: typeof createWorkspaceDir
   deleteEntry: typeof deleteWorkspaceEntry
   renameEntry: typeof renameWorkspaceEntry
@@ -291,9 +302,11 @@ export interface ProjectEditorDeps {
 const defaultDeps: ProjectEditorDeps = {
   listDir: listWorkspaceDir,
   readFile: readWorkspaceFile,
+  readFileVersioned: readWorkspaceFileVersioned,
   readFileBase64: readWorkspaceFileBase64,
   statFile: statWorkspaceFile,
   writeFile: writeWorkspaceFile,
+  writeFileChecked: writeWorkspaceFileChecked,
   createDir: createWorkspaceDir,
   deleteEntry: deleteWorkspaceEntry,
   renameEntry: renameWorkspaceEntry,
@@ -666,8 +679,8 @@ export function useProjectEditor({
             : await d
                 // Forced opens pass no cap: the Rust reader would otherwise
                 // append a truncation marker into what looks like the file.
-                .readFile(rootPath, relPath, allowLarge ? undefined : MAX_EDITOR_BYTES + 1)
-                .then((content) => ({ ok: true as const, content }))
+                .readFileVersioned(rootPath, relPath, allowLarge ? undefined : MAX_EDITOR_BYTES + 1)
+                .then((version) => ({ ok: true as const, ...version }))
                 .catch((error: unknown) => ({ ok: false as const, error }))
         // Opening a second preview while this read was in flight evicts this
         // tab — `evictTab` has already dropped the ref entry and released the
@@ -678,7 +691,9 @@ export function useProjectEditor({
         // capped preview appends a truncation marker; that is never editable
         // file content. Check UTF-8 bytes, not UTF-16 string length.
         const oversizedRead =
-          !allowLarge && read.ok && new Blob([read.content]).size > MAX_EDITOR_BYTES
+          !allowLarge &&
+          read.ok &&
+          (read.size > MAX_EDITOR_BYTES || new Blob([read.content]).size > MAX_EDITOR_BYTES)
         const blocked =
           binaryByName || (!read.ok && isUtf8ReadError(read.error))
             ? ("binary" as const)
@@ -696,10 +711,11 @@ export function useProjectEditor({
             language: languageFromPath(relPath),
             monacoLanguage: monacoLanguageFromPath(relPath),
             savedContent: content,
+            baseSha256: !blocked && read.ok ? read.sha256 : undefined,
             draftContent: content,
             draftVersion: 1,
-            mtime: stat?.mtimeMs ?? undefined,
-            sizeBytes: stat?.size,
+            mtime: (read.ok ? read.mtimeMs : null) ?? stat?.mtimeMs ?? undefined,
+            sizeBytes: read.ok ? read.size : stat?.size,
             blocked,
             externallyChanged: false,
           }
@@ -719,8 +735,8 @@ export function useProjectEditor({
           next[idx] = {
             ...entry,
             draftVersion: current.draftVersion + 1,
-            mtime: stat?.mtimeMs ?? current.mtime,
-            sizeBytes: stat?.size ?? current.sizeBytes,
+            mtime: entry.mtime ?? current.mtime,
+            sizeBytes: entry.sizeBytes ?? current.sizeBytes,
             ...(dirtiedInFlight
               ? { draftContent: current.draftContent, externallyChanged: true }
               : {}),
@@ -994,7 +1010,10 @@ export function useProjectEditor({
       file: OpenFile,
       epoch = operationEpoch.current,
       seq = openSeqRef.current.get(file.relPath),
-      confirm?: () => ProjectEditorConfirmVerdict | Promise<ProjectEditorConfirmVerdict>
+      confirm?: (
+        conflicted: OpenFile
+      ) => ProjectEditorConfirmVerdict | Promise<ProjectEditorConfirmVerdict>,
+      approvedVersion?: WorkspaceFileWritePrecondition
     ): Promise<boolean> => {
       const current = () =>
         operationEpoch.current === epoch &&
@@ -1002,37 +1021,84 @@ export function useProjectEditor({
         file.absolutePath === joinRootRel(rootPath, file.relPath) &&
         openPathsRef.current.has(file.relPath) &&
         openSeqRef.current.get(file.relPath) === seq
-      const write = async (): Promise<boolean> => {
-        // Queued writes belong to this document incarnation, never a reopened
-        // tab or another root. A failed predecessor must not poison retries.
+      const assertCurrent = () => {
         if (!current()) throw new Error(t("saveContextChanged"))
-        // The overwrite confirmation runs at write time — after the context
-        // guard, so a draft from a dead host rejects instead of prompting,
-        // and the check reads the freshest flag state.
-        if (confirm !== undefined && (await confirm()) !== "confirm") return false
-        await d.writeFile(rootPath, file.relPath, file.draftContent)
-        // Stamp before the watcher can possibly deliver the write's echo.
+      }
+      const patchFile = (patch: Partial<OpenFile>) => {
+        const patchFiles = (files: OpenFile[]) =>
+          files.map((entry) =>
+            entry.absolutePath === file.absolutePath ? { ...entry, ...patch } : entry
+          )
+        // Queued saves must see the acknowledged hash before React commits.
+        openFilesRef.current = patchFiles(openFilesRef.current)
+        setOpenFiles(patchFiles)
+      }
+      const precondition = (sha256: string | null): WorkspaceFileWritePrecondition =>
+        sha256 === null ? { expectAbsent: true } : { expectedSha256: sha256 }
+      const write = async (): Promise<boolean> => {
+        assertCurrent()
+        const fresh = openFilesRef.current.find((entry) => entry.relPath === file.relPath)!
+        if (!fresh.baseSha256) throw new Error(t("saveContextChanged"))
+        let expected =
+          approvedVersion ??
+          precondition(
+            fresh.deletedOnDisk
+              ? null
+              : fresh.conflictSha256 !== undefined
+                ? fresh.conflictSha256
+                : fresh.baseSha256
+          )
+        let approved = approvedVersion !== undefined || confirm === undefined
+        if (
+          fresh.externallyChanged &&
+          fresh.conflictSha256 !== undefined &&
+          confirm !== undefined &&
+          !approved
+        ) {
+          // A prior CAS refusal already identified the version being approved.
+          // A metadata-only watcher signal still goes through CAS below: the
+          // host can hash even binary bytes without loading them into a draft.
+          expected = precondition(fresh.conflictSha256)
+          if ((await confirm(fresh)) !== "confirm") return false
+          approved = true
+        }
+        assertCurrent()
+        const attempt = async () => {
+          try {
+            return await d.writeFileChecked(rootPath, file.relPath, file.draftContent, expected)
+          } catch (error) {
+            if (!isWorkspaceFileConflict(error)) throw error
+            if (!current()) return null
+            patchFile({
+              externallyChanged: true,
+              conflictSha256: error.currentSha256,
+              deletedOnDisk: error.currentSha256 === null,
+            })
+            return null
+          }
+        }
+        let written = await attempt()
+        if (written === null && !approved && current()) {
+          const conflicted = openFilesRef.current.find((entry) => entry.relPath === file.relPath)!
+          // Capture before awaiting the prompt: a third version is not authorized.
+          expected = precondition(conflicted.conflictSha256!)
+          if ((await confirm!(conflicted)) !== "confirm") return false
+          assertCurrent()
+          written = await attempt()
+        }
+        if (written === null) return false
         recentSelfWrites.current.set(file.absolutePath, Date.now())
         notifyProjectFileSaved(file.absolutePath)
         if (!current()) return true
-        const stat = await d.statFile(rootPath, file.relPath).catch(() => null)
-        if (!current()) return true
-        setOpenFiles((prev) =>
-          prev.map((f) =>
-            f.absolutePath === file.absolutePath
-              ? {
-                  ...f,
-                  savedContent: file.draftContent,
-                  externallyChanged: false,
-                  // The file provably exists again — saving a `deletedOnDisk`
-                  // buffer IS how it gets restored.
-                  deletedOnDisk: false,
-                  mtime: stat?.mtimeMs ?? f.mtime,
-                  sizeBytes: stat?.size ?? f.sizeBytes,
-                }
-              : f
-          )
-        )
+        patchFile({
+          savedContent: file.draftContent,
+          baseSha256: written.sha256,
+          conflictSha256: undefined,
+          externallyChanged: false,
+          deletedOnDisk: false,
+          mtime: written.mtimeMs ?? fresh.mtime,
+          sizeBytes: written.size,
+        })
         return true
       }
       const previous = pendingSaves.current.get(file.absolutePath)
@@ -1051,19 +1117,17 @@ export function useProjectEditor({
   const saveFile = useCallback(
     async (relPath: string, opts?: { force?: boolean }): Promise<boolean> => {
       const file = openFilesRef.current.find((f) => f.relPath === relPath)
-      // Placeholders contain no file bytes and must never be saved.
       if (!file || file.blocked) return false
-      const confirm = opts?.force
-        ? undefined
-        : () => {
-            const fresh = openFilesRef.current.find((f) => f.relPath === relPath)
-            return fresh !== undefined ? confirmOverwriteExternal([fresh]) : "cancel"
-          }
       return saveSnapshot(
         file,
         operationEpoch.current,
         openSeqRef.current.get(file.relPath),
-        confirm
+        opts?.force ? undefined : (conflicted) => confirmOverwriteExternal([conflicted]),
+        opts?.force
+          ? file.deletedOnDisk || file.conflictSha256 === null
+            ? { expectAbsent: true }
+            : { expectedSha256: file.conflictSha256 ?? file.baseSha256! }
+          : undefined
       )
     },
     [saveSnapshot, confirmOverwriteExternal]
@@ -1078,33 +1142,53 @@ export function useProjectEditor({
       const snapshots = dirty.map((file) => ({
         file,
         seq: openSeqRef.current.get(file.relPath),
+        // Explicit overwrite authorizes the version known at invocation, not
+        // a conflict another pending save may discover while this one waits.
+        approvedVersion: opts?.force
+          ? ((file.deletedOnDisk || file.conflictSha256 === null
+              ? { expectAbsent: true }
+              : {
+                  expectedSha256: file.conflictSha256 ?? file.baseSha256!,
+                }) as WorkspaceFileWritePrecondition)
+          : undefined,
       }))
-      // One batch prompt at the first conflicted write — declined paths are
-      // skipped while clean drafts still write. The confirm sits inside
-      // saveSnapshot so stale-context drafts reject before any prompt.
-      const approved = new Set<string>()
-      let asked = false
-      const confirm =
-        opts?.force === true
-          ? undefined
-          : async (relPath: string): Promise<ProjectEditorConfirmVerdict> => {
-              const fresh = openFilesRef.current.find((f) => f.relPath === relPath)
-              if (fresh === undefined) return "cancel"
-              if (!fresh.externallyChanged) return "confirm"
-              if (!asked) {
-                asked = true
-                if ((await confirmOverwriteExternal(dirty)) === "confirm")
-                  for (const f of dirty) approved.add(f.relPath)
-              }
-              return approved.has(relPath) ? "confirm" : "cancel"
-            }
-      for (const { file, seq } of snapshots)
-        await saveSnapshot(
+      const conflicts: Array<
+        (typeof snapshots)[number] & { version: WorkspaceFileWritePrecondition }
+      > = []
+      // Collect conflicts before the single batch prompt. Each retry keeps the
+      // version discovered in this pass, including files later in the batch.
+      for (const { file, seq, approvedVersion } of snapshots) {
+        const saved = await saveSnapshot(
           file,
           epoch,
           seq,
-          confirm === undefined ? undefined : () => confirm(file.relPath)
+          opts?.force
+            ? undefined
+            : (conflicted) => {
+                conflicts.push({
+                  file: { ...file, externallyChanged: true },
+                  seq,
+                  approvedVersion,
+                  version:
+                    conflicted.conflictSha256 === null
+                      ? { expectAbsent: true }
+                      : { expectedSha256: conflicted.conflictSha256! },
+                })
+                return "cancel"
+              },
+          approvedVersion
         )
+        // Bridge flush callers use rejection to distinguish persisted drafts
+        // from a refused save; a force conflict must never report success.
+        if (!saved && opts?.force) {
+          const conflicted = openFilesRef.current.find((entry) => entry.relPath === file.relPath)
+          throw new WorkspaceFileConflictError(conflicted?.conflictSha256 ?? null)
+        }
+      }
+      if (conflicts.length === 0 || operationEpoch.current !== epoch) return
+      if ((await confirmOverwriteExternal(conflicts.map(({ file }) => file))) !== "confirm") return
+      for (const { file, seq, version } of conflicts)
+        await saveSnapshot(file, epoch, seq, undefined, version)
     },
     [saveSnapshot, confirmOverwriteExternal]
   )

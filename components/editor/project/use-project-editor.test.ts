@@ -3,6 +3,8 @@
  */
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { mkdtemp, readFile, writeFile, stat, rm } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { WorkspaceFileConflictError } from "@/lib/files/workspace-fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -72,7 +74,7 @@ function makeDeps(overrides: Partial<ProjectEditorDeps> = {}): Partial<ProjectEd
     "src/a.ts": "export const a = 1\n",
     "src/b.ts": "export const b = 2\n",
   }
-  return {
+  const deps: Partial<ProjectEditorDeps> = {
     listDir: jest.fn(async () => []),
     readFile: jest.fn(async (_root: string, rel: string) => files[rel] ?? ""),
     statFile: jest.fn(async () => ({ exists: true, isDir: false, size: 10, mtimeMs: 1234 })),
@@ -109,6 +111,21 @@ function makeDeps(overrides: Partial<ProjectEditorDeps> = {}): Partial<ProjectEd
     watch: jest.fn(() => () => {}),
     ...overrides,
   }
+  // Keep legacy fixture hooks usable while exercising the production
+  // versioned/checked dependency boundary on every editor read and save.
+  deps.readFileVersioned ??= jest.fn(async (root, rel, maxBytes) => {
+    const content = await deps.readFile!(root, rel, maxBytes)
+    return { content, sha256: hash(content), size: 10, mtimeMs: null }
+  })
+  deps.writeFileChecked ??= jest.fn(async (root, rel, content) => {
+    await deps.writeFile!(root, rel, content)
+    return { sha256: hash(content), size: Buffer.byteLength(content), mtimeMs: null }
+  })
+  return deps
+}
+
+function hash(content: string): string {
+  return createHash("sha256").update(content).digest("hex")
 }
 
 beforeEach(() => {
@@ -444,6 +461,9 @@ describe("useProjectEditor", () => {
       await first
     })
     expect(deps.writeFile).toHaveBeenNthCalledWith(2, "/repo", "src/a.ts", "second")
+    expect(deps.writeFileChecked).toHaveBeenNthCalledWith(2, "/repo", "src/a.ts", "second", {
+      expectedSha256: hash("first"),
+    })
     await act(async () => {
       finishes[1]()
       await second
@@ -1102,6 +1122,9 @@ describe("useProjectEditor", () => {
 
     it("refuses to overwrite an external change until confirmed", async () => {
       const { result, deps } = await conflicted({})
+      jest
+        .mocked(deps.writeFileChecked!)
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(hash("external edit")))
       const confirm = jest.spyOn(window, "confirm").mockReturnValue(false)
       try {
         await act(async () => {
@@ -1158,6 +1181,289 @@ describe("useProjectEditor", () => {
       })
       expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/a.ts", "last surviving draft")
       expect(result.current.openFiles[0]?.deletedOnDisk).toBe(false)
+      expect(deps.writeFileChecked).toHaveBeenCalledWith(
+        "/repo",
+        "src/a.ts",
+        "last surviving draft",
+        { expectAbsent: true }
+      )
+    })
+  })
+
+  describe("conditional saves", () => {
+    const openDraft = async (
+      deps: Partial<ProjectEditorDeps>,
+      confirm = jest.fn().mockResolvedValue(false)
+    ) => {
+      const hook = renderHook(() =>
+        useProjectEditor({
+          scopeKey: "team:team1",
+          workingDir: "/repo",
+          deps,
+          confirm,
+        })
+      )
+      await act(async () => hook.result.current.openFile("src/a.ts"))
+      act(() => hook.result.current.setDraft("src/a.ts", "my draft"))
+      return { ...hook, confirm }
+    }
+
+    it("keeps the draft and base hash when an unseen external write conflicts", async () => {
+      const diskHash = hash("agent edit")
+      const writeFileChecked = jest.fn().mockRejectedValue(new WorkspaceFileConflictError(diskHash))
+      const { result, confirm } = await openDraft(makeDeps({ writeFileChecked }))
+      const baseSha256 = result.current.activeFile!.baseSha256
+      await act(async () => expect(result.current.saveFile("src/a.ts")).resolves.toBe(false))
+      expect(writeFileChecked).toHaveBeenCalledWith("/repo", "src/a.ts", "my draft", {
+        expectedSha256: baseSha256,
+      })
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(result.current.activeFile).toMatchObject({
+        draftContent: "my draft",
+        baseSha256,
+        conflictSha256: diskHash,
+        externallyChanged: true,
+      })
+      expect(result.current.dirtyCount).toBe(1)
+    })
+
+    it("confirms and retries once against the reported hash, then uses the saved hash", async () => {
+      const diskHash = hash("agent edit")
+      const savedHash = hash("my draft")
+      const writeFileChecked = jest
+        .fn()
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(diskHash))
+        .mockResolvedValue({ sha256: savedHash, size: 8, mtimeMs: 4567 })
+      const { result, confirm } = await openDraft(
+        makeDeps({ writeFileChecked }),
+        jest.fn().mockResolvedValue(true)
+      )
+      await act(async () => expect(result.current.saveFile("src/a.ts")).resolves.toBe(true))
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(writeFileChecked).toHaveBeenNthCalledWith(2, "/repo", "src/a.ts", "my draft", {
+        expectedSha256: diskHash,
+      })
+      expect(result.current.activeFile).toMatchObject({
+        baseSha256: savedHash,
+        mtime: 4567,
+        sizeBytes: 8,
+        externallyChanged: false,
+      })
+      act(() => result.current.setDraft("src/a.ts", "next draft"))
+      await act(async () => result.current.saveFile("src/a.ts"))
+      expect(writeFileChecked).toHaveBeenLastCalledWith("/repo", "src/a.ts", "next draft", {
+        expectedSha256: savedHash,
+      })
+    })
+
+    it("returns to conflict when a third version wins during the prompt", async () => {
+      const firstHash = hash("first agent edit")
+      const thirdHash = hash("third version")
+      const writeFileChecked = jest
+        .fn()
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(firstHash))
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(thirdHash))
+      const { result, confirm } = await openDraft(
+        makeDeps({ writeFileChecked }),
+        jest.fn().mockResolvedValue(true)
+      )
+      await act(async () => expect(result.current.saveFile("src/a.ts")).resolves.toBe(false))
+      expect(writeFileChecked).toHaveBeenCalledTimes(2)
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(result.current.activeFile).toMatchObject({
+        draftContent: "my draft",
+        externallyChanged: true,
+        conflictSha256: thirdHash,
+      })
+    })
+
+    it("uses host CAS when a watcher reports an external binary replacement", async () => {
+      let fire!: (change: WorkspaceFsChange) => void
+      const diskHash = hash("binary bytes")
+      const deps = makeDeps({
+        watch: jest.fn((_root, handler) => {
+          fire = handler
+          return () => {}
+        }),
+      })
+      const { result, confirm } = await openDraft(deps, jest.fn().mockResolvedValue(true))
+      jest.mocked(deps.readFileVersioned!).mockRejectedValue(new Error("invalid UTF-8"))
+      jest
+        .mocked(deps.writeFileChecked!)
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(diskHash))
+      act(() => fire({ kind: "modify", path: "/repo/src/a.ts" }))
+      await act(async () => expect(result.current.saveFile("src/a.ts")).resolves.toBe(true))
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(deps.readFileVersioned).toHaveBeenCalledTimes(1)
+      expect(deps.writeFileChecked).toHaveBeenLastCalledWith("/repo", "src/a.ts", "my draft", {
+        expectedSha256: diskHash,
+      })
+    })
+
+    it("retries a missing-file conflict with expectAbsent", async () => {
+      const writeFileChecked = jest
+        .fn()
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(null))
+        .mockResolvedValue({ sha256: hash("my draft"), size: 8, mtimeMs: 4567 })
+      const { result } = await openDraft(
+        makeDeps({ writeFileChecked }),
+        jest.fn().mockResolvedValue(true)
+      )
+      await act(async () => result.current.saveFile("src/a.ts"))
+      expect(writeFileChecked).toHaveBeenNthCalledWith(2, "/repo", "src/a.ts", "my draft", {
+        expectAbsent: true,
+      })
+      expect(result.current.activeFile?.deletedOnDisk).toBe(false)
+    })
+
+    it("force uses the last reported hash and never retries a newer conflict", async () => {
+      const diskHash = hash("agent edit")
+      const writeFileChecked = jest
+        .fn()
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(diskHash))
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(hash("newer edit")))
+      const { result, confirm } = await openDraft(makeDeps({ writeFileChecked }))
+      await act(async () => result.current.saveFile("src/a.ts"))
+      await act(async () =>
+        expect(result.current.saveFile("src/a.ts", { force: true })).resolves.toBe(false)
+      )
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(writeFileChecked).toHaveBeenLastCalledWith("/repo", "src/a.ts", "my draft", {
+        expectedSha256: diskHash,
+      })
+      expect(result.current.activeFile?.draftContent).toBe("my draft")
+    })
+
+    it("pins a queued forced save before its predecessor discovers a conflict", async () => {
+      let rejectFirst!: (error: unknown) => void
+      const diskHash = hash("agent edit")
+      const writeFileChecked = jest
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((_resolve, reject) => {
+              rejectFirst = reject
+            })
+        )
+        .mockRejectedValue(new WorkspaceFileConflictError(diskHash))
+      const { result } = await openDraft(makeDeps({ writeFileChecked }))
+      const baseSha256 = result.current.activeFile!.baseSha256
+      let first!: Promise<boolean>
+      let forced!: Promise<boolean>
+      await act(async () => {
+        first = result.current.saveFile("src/a.ts")
+        forced = result.current.saveFile("src/a.ts", { force: true })
+      })
+      await act(async () => {
+        rejectFirst(new WorkspaceFileConflictError(diskHash))
+        await first
+        await forced
+      })
+      expect(await forced).toBe(false)
+      expect(writeFileChecked).toHaveBeenNthCalledWith(2, "/repo", "src/a.ts", "my draft", {
+        expectedSha256: baseSha256,
+      })
+      expect(result.current.activeFile).toMatchObject({
+        draftContent: "my draft",
+        externallyChanged: true,
+      })
+    })
+
+    it("rejects a forced batch conflict so the draft flush cannot report success", async () => {
+      const diskHash = hash("agent edit")
+      const writeFileChecked = jest.fn().mockRejectedValue(new WorkspaceFileConflictError(diskHash))
+      const { result, confirm } = await openDraft(makeDeps({ writeFileChecked }))
+      await act(async () => {
+        await expect(result.current.saveAll({ force: true })).rejects.toMatchObject({
+          currentSha256: diskHash,
+        })
+      })
+      expect(confirm).not.toHaveBeenCalled()
+      expect(result.current.activeFile).toMatchObject({
+        draftContent: "my draft",
+        externallyChanged: true,
+      })
+    })
+
+    it("updates the base from exactly the content loaded on reload", async () => {
+      const deps = makeDeps()
+      const { result } = await openDraft(deps)
+      jest.mocked(deps.readFileVersioned!).mockResolvedValueOnce({
+        content: "reloaded",
+        sha256: hash("reloaded"),
+        size: 8,
+        mtimeMs: 9876,
+      })
+      await act(async () => result.current.reloadFile("src/a.ts"))
+      expect(result.current.activeFile).toMatchObject({
+        savedContent: "reloaded",
+        draftContent: "reloaded",
+        baseSha256: hash("reloaded"),
+        mtime: 9876,
+      })
+      act(() => result.current.setDraft("src/a.ts", "new draft"))
+      await act(async () => result.current.saveFile("src/a.ts"))
+      expect(deps.writeFileChecked).toHaveBeenLastCalledWith("/repo", "src/a.ts", "new draft", {
+        expectedSha256: hash("reloaded"),
+      })
+    })
+
+    it("collects saveAll conflicts into one prompt and pins every retry version", async () => {
+      const aHash = hash("external a")
+      const bHash = hash("external b")
+      const writeFileChecked = jest
+        .fn()
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(aHash))
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(bHash))
+        .mockResolvedValueOnce({ sha256: hash("my draft"), size: 8, mtimeMs: 2 })
+        .mockRejectedValueOnce(new WorkspaceFileConflictError(hash("third b")))
+      const { result, confirm } = await openDraft(
+        makeDeps({ writeFileChecked }),
+        jest.fn().mockResolvedValue(true)
+      )
+      await act(async () => result.current.openFile("src/b.ts"))
+      act(() => result.current.setDraft("src/b.ts", "draft b"))
+      await act(async () => result.current.saveAll())
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(writeFileChecked).toHaveBeenNthCalledWith(3, "/repo", "src/a.ts", "my draft", {
+        expectedSha256: aHash,
+      })
+      expect(writeFileChecked).toHaveBeenNthCalledWith(4, "/repo", "src/b.ts", "draft b", {
+        expectedSha256: bHash,
+      })
+      expect(result.current.openFiles[0].externallyChanged).toBe(false)
+      expect(result.current.openFiles[1]).toMatchObject({
+        draftContent: "draft b",
+        externallyChanged: true,
+      })
+    })
+
+    it("rechecks the host epoch after an overwrite prompt resolves", async () => {
+      let answer!: (confirmed: boolean) => void
+      const confirm = jest.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            answer = resolve
+          })
+      )
+      const writeFileChecked = jest
+        .fn()
+        .mockRejectedValue(new WorkspaceFileConflictError(hash("external")))
+      const { result } = await openDraft(makeDeps({ writeFileChecked }), confirm)
+      let saving!: Promise<unknown>
+      await act(async () => {
+        saving = result.current.saveFile("src/a.ts").catch((error: unknown) => error)
+      })
+      act(() => mockHostChanged?.())
+      await act(async () => {
+        answer(true)
+        await saving
+      })
+      expect(await saving).toEqual(
+        expect.objectContaining({ message: expect.stringContaining("workspace host changed") })
+      )
+      expect(writeFileChecked).toHaveBeenCalledTimes(1)
+      expect(result.current.activeFile?.draftContent).toBe("my draft")
     })
   })
 

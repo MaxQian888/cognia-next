@@ -3866,15 +3866,9 @@
       }
     },
     "fs_write_workspace_file": {
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "zod-contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "root",
-          "relPath",
-          "content",
-          "adminLease"
-        ],
         "properties": {
           "root": {
             "type": "string"
@@ -3892,11 +3886,24 @@
               "base64"
             ]
           },
+          "expectedSha256": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          },
+          "expectAbsent": {
+            "type": "boolean"
+          },
           "adminLease": {
             "type": "string",
             "minLength": 1
           }
         },
+        "required": [
+          "root",
+          "relPath",
+          "content",
+          "adminLease"
+        ],
         "additionalProperties": false
       }
     },

@@ -1,3 +1,5 @@
+import Ajv from "ajv"
+import responseSchemas from "@/protocol/companion-response-schemas.json"
 import { transport } from "@/lib/tauri"
 import {
   copyWorkspaceEntry,
@@ -5,14 +7,19 @@ import {
   deleteWorkspaceEntry,
   listWorkspaceDir,
   listWorkspaceRoots,
+  isWorkspaceFileConflict,
   readWorkspaceFile,
   readWorkspaceFileBase64,
   readWorkspaceFileChunk,
+  readWorkspaceFileVersioned,
   renameWorkspaceEntry,
   searchWorkspaceContent,
   statWorkspaceFile,
   writeWorkspaceFile,
+  writeWorkspaceFileChecked,
+  WorkspaceFileConflictError,
 } from "./workspace-fs"
+import { CompanionError } from "@/lib/tauri/transport-companion"
 
 afterEach(() => {
   jest.restoreAllMocks()
@@ -168,14 +175,119 @@ describe("read/write wrappers", () => {
     })
   })
 
-  it("writeWorkspaceFile forwards root/relPath/content", async () => {
-    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce(null)
-    await writeWorkspaceFile("/repo", "a.txt", "body")
+  it("writeWorkspaceFile stays unconditional and discards the host result", async () => {
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce({
+      sha256: "a".repeat(64),
+      size: 4,
+      mtimeMs: 123,
+    })
+    const result: Promise<void> = writeWorkspaceFile("/repo", "a.txt", "body")
+    await expect(result).resolves.toBeUndefined()
     expect(callSpy).toHaveBeenCalledWith("fs_write_workspace_file", {
       root: "/repo",
       relPath: "a.txt",
       content: "body",
     })
+  })
+
+  it("readWorkspaceFileVersioned keeps the content and host version together", async () => {
+    const version = { content: "你好", sha256: "a".repeat(64), size: 6, mtimeMs: null }
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce(version)
+    await expect(readWorkspaceFileVersioned("/repo", "a.txt", 1024)).resolves.toEqual(version)
+    expect(callSpy).toHaveBeenCalledWith("fs_read_workspace_file_versioned", {
+      root: "/repo",
+      relPath: "a.txt",
+      maxBytes: 1024,
+    })
+  })
+})
+
+describe("writeWorkspaceFileChecked", () => {
+  const hash = "a".repeat(64)
+  const conflictMessage = `workspace_file_conflict:${JSON.stringify({ currentSha256: hash })}`
+
+  it.each([{ expectedSha256: hash }, { expectAbsent: true as const }])(
+    "passes the precondition and returns the written version: %j",
+    async (precondition) => {
+      const version = { sha256: "b".repeat(64), size: 4, mtimeMs: 123 }
+      const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce(version)
+      await expect(
+        writeWorkspaceFileChecked("/repo", "a.txt", "body", precondition)
+      ).resolves.toEqual(version)
+      expect(callSpy).toHaveBeenCalledWith("fs_write_workspace_file", {
+        root: "/repo",
+        relPath: "a.txt",
+        content: "body",
+        ...precondition,
+      })
+    }
+  )
+
+  it.each([
+    ["Tauri structured error", { code: "workspace_file_conflict", currentSha256: hash }],
+    ["Tauri legacy string", conflictMessage],
+    [
+      "companion transport error",
+      new CompanionError({
+        code: "workspace_file_conflict",
+        message: conflictMessage,
+        retryable: false,
+      }),
+    ],
+    [
+      "companion problem document",
+      {
+        type: "https://cognia.dev/problems/workspace_file_conflict",
+        title: "Conflict",
+        status: 409,
+        detail: conflictMessage,
+        code: "workspace_file_conflict",
+        requestId: "test-request",
+        retryable: false,
+        details: {},
+      },
+    ],
+  ])("normalizes %s with the current hash", async (_name, rejection) => {
+    jest.spyOn(transport, "call").mockRejectedValueOnce(rejection)
+    const error = await writeWorkspaceFileChecked("/repo", "a.txt", "draft", {
+      expectedSha256: "b".repeat(64),
+    }).catch((caught: unknown) => caught)
+    expect(isWorkspaceFileConflict(error)).toBe(true)
+    expect(error).toBeInstanceOf(WorkspaceFileConflictError)
+    expect(error).toMatchObject({ code: "workspace_file_conflict", currentSha256: hash })
+  })
+
+  it.each([
+    { code: "workspace_file_conflict", currentSha256: null },
+    'workspace_file_conflict:{"currentSha256":null}',
+  ])("preserves a missing-file conflict: %j", async (rejection) => {
+    jest.spyOn(transport, "call").mockRejectedValueOnce(rejection)
+    await expect(
+      writeWorkspaceFileChecked("/repo", "a.txt", "draft", { expectedSha256: hash })
+    ).rejects.toMatchObject({ currentSha256: null })
+  })
+
+  it("preserves a conflict already normalized by a transport adapter", async () => {
+    const conflict = new WorkspaceFileConflictError(hash)
+    jest.spyOn(transport, "call").mockRejectedValueOnce(conflict)
+    await expect(
+      writeWorkspaceFileChecked("/repo", "a.txt", "draft", { expectedSha256: hash })
+    ).rejects.toBe(conflict)
+  })
+
+  it.each([
+    new Error("permission denied"),
+    "workspace_file_conflict:invalid-json",
+    "workspace_file_conflict:{}",
+    'workspace_file_conflict:{"currentSha256":17}',
+    { code: "workspace_file_conflict" },
+  ])("preserves unknown or malformed errors without assuming absence: %j", async (rejection) => {
+    jest.spyOn(transport, "call").mockRejectedValueOnce(rejection)
+    const error = await writeWorkspaceFileChecked("/repo", "a.txt", "draft", {
+      expectAbsent: true,
+    }).catch((caught: unknown) => caught)
+    expect(error).toBe(rejection)
+    expect(isWorkspaceFileConflict(error)).toBe(false)
   })
 })
 
@@ -268,5 +380,24 @@ describe("listWorkspaceRoots", () => {
   it("tolerates a response that is not the report shape", async () => {
     jest.spyOn(transport, "call").mockResolvedValueOnce(null)
     await expect(listWorkspaceRoots()).resolves.toEqual([])
+  })
+})
+
+describe("published workspace version response contracts", () => {
+  it.each([
+    ["fs_write_workspace_file", { sha256: "a".repeat(64), size: 4, mtimeMs: null }],
+    [
+      "fs_read_workspace_file_versioned",
+      { content: "text", sha256: "a".repeat(64), size: 4, mtimeMs: 123 },
+    ],
+  ] as const)("accepts the complete %s result off desktop", (command, result) => {
+    const validate = new Ajv({ strict: false }).compile({
+      ...responseSchemas.commands[command],
+      $defs: responseSchemas.$defs,
+    })
+    expect(validate(result)).toBe(true)
+    expect(validate(null)).toBe(false)
+    expect(validate({ ...result, mtimeMs: undefined })).toBe(false)
+    expect(validate({ ...result, mtime_ms: result.mtimeMs })).toBe(false)
   })
 })

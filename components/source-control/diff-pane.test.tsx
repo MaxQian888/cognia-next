@@ -3,7 +3,11 @@ let mockFsBackend = true
 jest.mock("@/lib/files/workspace-backend", () => ({ hasWorkspaceFsBackend: () => mockFsBackend }))
 jest.mock("@/lib/files/workspace-fs", () => ({
   readWorkspaceFile: jest.fn(),
+  readWorkspaceFileVersioned: jest.fn(),
   writeWorkspaceFile: jest.fn(),
+  writeWorkspaceFileChecked: jest.fn(),
+  isWorkspaceFileConflict: (error: unknown) =>
+    error instanceof Error && error.name === "WorkspaceFileConflictError",
 }))
 jest.mock("@/lib/files/project-editor-bridge", () => ({ notifyProjectFileSaved: jest.fn() }))
 let mockSettings: unknown = { gitSettings: {} }
@@ -549,12 +553,23 @@ describe("DiffPane toolbar", () => {
 })
 
 describe("DiffPane editing and whole-file loading", () => {
-  const { readWorkspaceFile, writeWorkspaceFile } = jest.requireMock(
-    "@/lib/files/workspace-fs"
-  ) as {
+  const {
+    readWorkspaceFile,
+    readWorkspaceFileVersioned,
+    writeWorkspaceFile,
+    writeWorkspaceFileChecked,
+  } = jest.requireMock("@/lib/files/workspace-fs") as {
     readWorkspaceFile: jest.Mock
+    readWorkspaceFileVersioned: jest.Mock
     writeWorkspaceFile: jest.Mock
+    writeWorkspaceFileChecked: jest.Mock
   }
+  const versioned = (content: string, sha256 = "a".repeat(64)) => ({
+    content,
+    sha256,
+    size: content.length,
+    mtimeMs: 1,
+  })
   const { notifyProjectFileSaved } = jest.requireMock("@/lib/files/project-editor-bridge") as {
     notifyProjectFileSaved: jest.Mock
   }
@@ -566,7 +581,11 @@ describe("DiffPane editing and whole-file loading", () => {
     mockFsBackend = true
     mockSaveResult = null
     readWorkspaceFile.mockReset()
+    readWorkspaceFileVersioned.mockReset()
     writeWorkspaceFile.mockReset().mockResolvedValue(undefined)
+    writeWorkspaceFileChecked
+      .mockReset()
+      .mockResolvedValue({ sha256: "b".repeat(64), size: 5, mtimeMs: 2 })
     notifyProjectFileSaved.mockReset()
     gitReadBlobAtRef.mockReset()
   })
@@ -597,25 +616,43 @@ describe("DiffPane editing and whole-file loading", () => {
     expect(screen.queryByTestId("stub-save")).toBeNull()
   })
 
-  it("saves only over the disk text the edit started from, then tells open editors", async () => {
-    readWorkspaceFile.mockResolvedValue("disk\n")
+  it("saves only over the disk text the edit started from, pinned to its hash, then tells open editors", async () => {
+    readWorkspaceFileVersioned.mockResolvedValue(versioned("disk\n", "c".repeat(64)))
     render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
     await act(async () => {
       fireEvent.click(await screen.findByTestId("stub-save"))
     })
     await waitFor(() => expect(mockSaveResult).toBe("saved"))
-    expect(writeWorkspaceFile).toHaveBeenCalledWith("/r", "a.ts", "mine\n")
+    expect(writeWorkspaceFileChecked).toHaveBeenCalledWith("/r", "a.ts", "mine\n", {
+      expectedSha256: "c".repeat(64),
+    })
+    expect(writeWorkspaceFile).not.toHaveBeenCalled()
     expect(notifyProjectFileSaved).toHaveBeenCalledWith("/r/a.ts")
   })
 
+  it("reports a conflict when the file changes between the comparison and the write", async () => {
+    readWorkspaceFileVersioned.mockResolvedValue(versioned("disk\n"))
+    const conflict = Object.assign(new Error("workspace_file_conflict"), {
+      name: "WorkspaceFileConflictError",
+    })
+    writeWorkspaceFileChecked.mockRejectedValue(conflict)
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId("stub-save"))
+    })
+    await waitFor(() => expect(mockSaveResult).toBe("conflict"))
+    expect(notifyProjectFileSaved).not.toHaveBeenCalled()
+  })
+
   it("reports a conflict without writing when the disk moved on, and overwrites when told to", async () => {
-    readWorkspaceFile.mockResolvedValue("someone else's\n")
+    readWorkspaceFileVersioned.mockResolvedValue(versioned("someone else's\n"))
     render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
     await act(async () => {
       fireEvent.click(await screen.findByTestId("stub-save"))
     })
     await waitFor(() => expect(mockSaveResult).toBe("conflict"))
     expect(writeWorkspaceFile).not.toHaveBeenCalled()
+    expect(writeWorkspaceFileChecked).not.toHaveBeenCalled()
     await act(async () => {
       fireEvent.click(screen.getByTestId("stub-save-force"))
     })

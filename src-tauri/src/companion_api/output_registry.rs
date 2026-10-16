@@ -704,7 +704,8 @@ mod tests {
         ("fs_read_workspace_file", OutputShape::Scalar(ScalarShape::Text)),
         ("fs_read_workspace_file_base64", OutputShape::Scalar(ScalarShape::Text)),
         ("fs_read_workspace_file_chunk", OutputShape::Declared(RootType::Object)),
-        ("fs_write_workspace_file", OutputShape::Scalar(ScalarShape::Null)),
+        ("fs_read_workspace_file_versioned", OutputShape::Declared(RootType::Object)),
+        ("fs_write_workspace_file", OutputShape::Declared(RootType::Object)),
         ("project_environment_execute", OutputShape::Opaque(RootType::Object)),
         ("task_workspace_status", OutputShape::Derived(DerivedOutput { rust_type: "crate::task_workspace::TaskWorkspaceStatus", schema: schema_of::<crate::task_workspace::TaskWorkspaceStatus> })),
         ("task_workspace_begin", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::TaskRun", schema: schema_of::<cognia_task_workspace::TaskRun> })),
@@ -1237,6 +1238,40 @@ mod tests {
              failing to parse:\n  {}",
             wrong.join("\n  ")
         );
+    }
+
+    #[test]
+    fn workspace_version_results_publish_their_exact_fields() {
+        let published = published();
+        for (arm, value) in [
+            (
+                "fs_write_workspace_file",
+                serde_json::to_value(crate::files::WorkspaceWriteResult {
+                    sha256: "a".repeat(64),
+                    size: 4,
+                    mtime_ms: None,
+                }).unwrap(),
+            ),
+            (
+                "fs_read_workspace_file_versioned",
+                serde_json::to_value(crate::files::WorkspaceVersionedRead {
+                    content: "text".into(),
+                    sha256: "a".repeat(64),
+                    size: 4,
+                    mtime_ms: Some(123),
+                }).unwrap(),
+            ),
+        ] {
+            let reference = published["commands"][arm]["$ref"].as_str().unwrap();
+            let definition = &published["$defs"][reference.strip_prefix("#/$defs/").unwrap()];
+            let actual: BTreeSet<_> = value.as_object().unwrap().keys().map(String::as_str).collect();
+            let declared: BTreeSet<_> = definition["properties"].as_object().unwrap().keys().map(String::as_str).collect();
+            let required: BTreeSet<_> = definition["required"].as_array().unwrap().iter().map(|field| field.as_str().unwrap()).collect();
+            assert_eq!(actual, declared, "{arm} must declare every serialized field");
+            assert_eq!(actual, required, "{arm} must require every serialized field");
+            assert_eq!(definition["additionalProperties"], false);
+            assert_eq!(definition["properties"]["mtimeMs"]["type"], serde_json::json!(["integer", "null"]));
+        }
     }
 
     #[test]

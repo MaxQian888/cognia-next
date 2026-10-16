@@ -31032,6 +31032,74 @@
       "outputTyped": true
     },
     {
+      "name": "fs_read_workspace_file_versioned",
+      "category": "development",
+      "resource": "workspace-files",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "fs_read_workspace_file_versioned (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "relPath": {
+            "type": "string"
+          },
+          "maxBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "root",
+          "relPath"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crates/cognia-files/src/files.rs WorkspaceVersionedRead",
+        "required": [
+          "content",
+          "sha256",
+          "size",
+          "mtimeMs"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mtimeMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "fs_rename_workspace_entry",
       "category": "development",
       "resource": "workspace-files",
@@ -31294,14 +31362,9 @@
       "idempotency": "required",
       "summary": "fs_write_workspace_file (workspace.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "zod-contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "root",
-          "relPath",
-          "content"
-        ],
         "properties": {
           "root": {
             "type": "string"
@@ -31318,13 +31381,49 @@
               "utf-8",
               "base64"
             ]
+          },
+          "expectedSha256": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          },
+          "expectAbsent": {
+            "type": "boolean"
           }
         },
+        "required": [
+          "root",
+          "relPath",
+          "content"
+        ],
         "additionalProperties": false
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "null"
+        "type": "object",
+        "x-cognia-wire-source": "crates/cognia-files/src/files.rs WorkspaceWriteResult",
+        "required": [
+          "sha256",
+          "size",
+          "mtimeMs"
+        ],
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mtimeMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -87022,5 +87121,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "ebdcbaa12dd348f2078234e3e73cd42034658ca13056179fec6522e5546acd00"
+  "catalogHash": "ebf21161fdd6451b0e5019ca7ae6df27a001662b1084126311a6b15c3d5ef277"
 }

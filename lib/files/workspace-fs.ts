@@ -10,6 +10,7 @@
 // require the remote-control capability when issued from a paired device.
 
 import { transport } from "@/lib/tauri"
+import { parseInvokeError } from "@/lib/tauri/command-error"
 import {
   fromRawWorkspaceEntry,
   fromRawWorkspaceStat,
@@ -184,6 +185,29 @@ export async function readWorkspaceFile(
   return transport.call<string>("fs_read_workspace_file", { root, relPath, maxBytes })
 }
 
+export interface WorkspaceFileWriteResult {
+  sha256: string
+  size: number
+  mtimeMs: number | null
+}
+
+export interface WorkspaceFileVersioned extends WorkspaceFileWriteResult {
+  content: string
+}
+
+/** Read text and the hash of exactly the raw bytes decoded by the host. */
+export async function readWorkspaceFileVersioned(
+  root: string,
+  relPath: string,
+  maxBytes?: number
+): Promise<WorkspaceFileVersioned> {
+  return transport.call<WorkspaceFileVersioned>("fs_read_workspace_file_versioned", {
+    root,
+    relPath,
+    maxBytes,
+  })
+}
+
 /**
  * Read a workspace file's raw bytes as base64 — the binary counterpart to
  * {@link readWorkspaceFile}, for file types text cannot represent (image
@@ -244,7 +268,78 @@ export async function writeWorkspaceFile(
   relPath: string,
   content: string
 ): Promise<void> {
-  await transport.call<null>("fs_write_workspace_file", { root, relPath, content })
+  await transport.call<WorkspaceFileWriteResult>("fs_write_workspace_file", {
+    root,
+    relPath,
+    content,
+  })
+}
+
+export type WorkspaceFileWritePrecondition =
+  { expectedSha256: string; expectAbsent?: never } | { expectAbsent: true; expectedSha256?: never }
+
+const WORKSPACE_FILE_CONFLICT = "workspace_file_conflict"
+
+export class WorkspaceFileConflictError extends Error {
+  readonly code = WORKSPACE_FILE_CONFLICT
+
+  constructor(readonly currentSha256: string | null) {
+    super(WORKSPACE_FILE_CONFLICT)
+    this.name = "WorkspaceFileConflictError"
+  }
+}
+
+/** Recognize the error returned by checked writes on either host transport. */
+export function isWorkspaceFileConflict(error: unknown): error is WorkspaceFileConflictError {
+  return error instanceof WorkspaceFileConflictError
+}
+
+function workspaceFileConflictFrom(error: unknown): WorkspaceFileConflictError | null {
+  if (isWorkspaceFileConflict(error)) return error
+  if (error && typeof error === "object" && "code" in error && "currentSha256" in error) {
+    if (
+      error.code === WORKSPACE_FILE_CONFLICT &&
+      (error.currentSha256 === null || typeof error.currentSha256 === "string")
+    ) {
+      return new WorkspaceFileConflictError(error.currentSha256)
+    }
+  }
+  // Companion errors retain code/message but discard arbitrary payload fields.
+  // The stable prefix carries the hash through them and legacy Tauri strings.
+  const { message } = parseInvokeError(error)
+  const prefix = `${WORKSPACE_FILE_CONFLICT}:`
+  if (!message.startsWith(prefix)) return null
+  try {
+    const payload: unknown = JSON.parse(message.slice(prefix.length))
+    if (payload && typeof payload === "object" && "currentSha256" in payload) {
+      if (payload.currentSha256 === null || typeof payload.currentSha256 === "string") {
+        return new WorkspaceFileConflictError(payload.currentSha256)
+      }
+    }
+  } catch {
+    // A malformed payload must not be treated as "missing file": that would
+    // turn an unknown failure into permission to recreate it on retry.
+  }
+  return null
+}
+
+/** Atomically replace a file only if the host still observes the given base. */
+export async function writeWorkspaceFileChecked(
+  root: string,
+  relPath: string,
+  content: string,
+  precondition: WorkspaceFileWritePrecondition
+): Promise<WorkspaceFileWriteResult> {
+  try {
+    return await transport.call<WorkspaceFileWriteResult>("fs_write_workspace_file", {
+      root,
+      relPath,
+      content,
+      ...precondition,
+    })
+  } catch (error) {
+    throw workspaceFileConflictFrom(error) ?? error
+  }
 }
 
 /** Create a directory (and missing parents) relative to `root`. */

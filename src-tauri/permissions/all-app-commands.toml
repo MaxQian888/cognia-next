@@ -514,6 +514,7 @@ commands.allow = [
   "fs_read_workspace_file",
   "fs_read_workspace_file_base64",
   "fs_read_workspace_file_chunk",
+  "fs_read_workspace_file_versioned",
   "fs_rename_workspace_entry",
   "fs_search_content_workspace",
   "fs_search_workspace",

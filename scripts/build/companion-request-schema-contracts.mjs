@@ -354,6 +354,19 @@ const workspaceProvisioning = z.object({
 })
 
 const schemas = {
+  fs_read_workspace_file_versioned: z.object({
+    root: z.string(),
+    relPath: z.string(),
+    maxBytes: z.number().int().nonnegative().optional(),
+  }),
+  fs_write_workspace_file: z.object({
+    root: z.string(),
+    relPath: z.string(),
+    content: z.string(),
+    encoding: z.enum(["utf-8", "base64"]).optional(),
+    expectedSha256: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
+    expectAbsent: z.boolean().optional(),
+  }),
   task_workspace_changeset_get: changesetReference,
   task_workspace_changeset_list: z.object({
     filter: z.object({
