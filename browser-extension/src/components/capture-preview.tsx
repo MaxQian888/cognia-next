@@ -18,6 +18,7 @@ const MODE_KEY: Record<BrowserCaptureMode, string> = {
   metadata: "captureModeMetadata",
   selection: "captureModeSelection",
   "readable-page": "captureModeReadable",
+  article: "captureModeArticle",
 }
 
 /**
@@ -36,9 +37,22 @@ export function CapturePreview({
   includeFullUrl,
   onToggleFullUrl,
 }: CapturePreviewProps) {
+  // What this mode actually sends, counted as the Host counts it: the
+  // selection rides along with every mode but metadata, the page text with
+  // `readable-page`, the article with `article`, and a transcript with any.
+  const sendsSelection = mode !== "metadata"
+  const transcriptText = page.transcript?.status === "available" ? page.transcript.text : ""
   const bodyBytes =
-    utf8ByteLength(page.selection?.text ?? "") + utf8ByteLength(page.readableText?.text ?? "")
-  const truncated = Boolean(page.selection?.truncated || page.readableText?.truncated)
+    (sendsSelection ? utf8ByteLength(page.selection?.markdown ?? page.selection?.text ?? "") : 0) +
+    (mode === "readable-page" ? utf8ByteLength(page.readableText?.text ?? "") : 0) +
+    (mode === "article" ? utf8ByteLength(page.article?.text ?? "") : 0) +
+    utf8ByteLength(transcriptText)
+  const truncated = Boolean(
+    (sendsSelection && page.selection?.truncated) ||
+    (mode === "readable-page" && page.readableText?.truncated) ||
+    (mode === "article" && page.article?.truncated) ||
+    (page.transcript?.status === "available" && page.transcript.truncated)
+  )
 
   return (
     <Card data-testid="capture-preview">

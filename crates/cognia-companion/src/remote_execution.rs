@@ -302,6 +302,9 @@ pub(super) fn rate_limit_class(descriptor: &CommandDescriptor) -> super::rate_li
             | "task_resource_upload_write_chunk"
             | "code_snapshot_upload_write_chunk"
             | "code_result_read_chunk"
+            // A screenshot or PDF a browser attaches is up to 320 chunks;
+            // charged to the mutating bucket, one attachment would spend it.
+            | "browser_attachment_upload_chunk"
     ) {
         return super::rate_limit::RequestClass::MediaTransfer;
     }

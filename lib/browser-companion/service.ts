@@ -37,7 +37,10 @@
  * capability for exactly one device class.
  */
 import type {
+  BrowserAttachmentRefV1,
   BrowserCompanionCapabilityV1,
+  BrowserCompanionFeature,
+  BrowserPageContextV1,
   BrowserContextResultV1,
   BrowserWorkKind,
   BrowserDeliveryTargetV1,
@@ -57,16 +60,25 @@ import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
 
 import { sha256Hex } from "@/lib/share/hash"
 
-import { buildBrowserContextPrompt, sourceHostOf } from "./build-prompt"
+import {
+  buildBrowserContextPrompt,
+  sourceHostOf,
+  type BrowserPromptAttachment,
+} from "./build-prompt"
 import {
   NEW_CHAT_TARGET_ID,
   agentIdOfTarget,
+  isBrowserAgentTarget,
   issueProjectIdOfTarget,
   resolveDeliveryTarget,
   sessionIdOfTarget,
   templateIdOfTarget,
 } from "./targets"
-import { validateBrowserSubmission, type BrowserSubmissionRejection } from "./limits"
+import {
+  pageContentBytes,
+  validateBrowserSubmission,
+  type BrowserSubmissionRejection,
+} from "./limits"
 
 /** A refusal the side panel can act on, rather than an English sentence. */
 export class BrowserCompanionError extends Error {
@@ -127,8 +139,44 @@ export interface BrowserCompanionDeps {
   }>
   /** `startNewSession`, narrowed to what this module needs. */
   createSession: (input: { title: string; projectId: string }) => Promise<{ id: string }>
-  /** Enqueue one message on a session and start its turn. */
-  enqueueMessage: (input: { sessionId: string; messageId: string; text: string }) => Promise<void>
+  /**
+   * Enqueue one message on a session and start its turn.
+   *
+   * `attachments` are refs the Host staged itself (ADR-0228 §3), never bytes:
+   * {@link resolveAttachments} answered them for this device and submission.
+   */
+  enqueueMessage: (input: {
+    sessionId: string
+    messageId: string
+    text: string
+    attachments?: readonly BrowserStagedAttachment[]
+  }) => Promise<void>
+  /**
+   * Resolve a submission's attachment refs to what this device staged for it.
+   *
+   * Absent on a Host that cannot stage attachments, in which case it does not
+   * list the `attachments` feature and a submission naming one is refused.
+   * Throws `unknown_attachment` for an id this device did not commit under this
+   * submission id — the same answer whether it never existed or belongs to
+   * someone else.
+   */
+  resolveAttachments?: (input: {
+    deviceId: string
+    submissionId: string
+    sessionId: string
+    attachments: readonly BrowserAttachmentRefV1[]
+  }) => Promise<BrowserStagedAttachment[]>
+  /**
+   * Whether this device holds `browser.drive` and has a live device socket
+   * (ADR-0228 §5). Absent means a Host that cannot be driven.
+   */
+  driveStatus?: (deviceId: string) => Promise<{ allowed: boolean; connected: boolean }>
+  /**
+   * Bind a conversation to the browser that started it in agent mode, so its
+   * browser tools act there (ADR-0228 §6). Absent on a Host that cannot be
+   * driven, which then never offers the target.
+   */
+  bindBrowserAgent?: (input: { sessionId: string; deviceId: string; tabId?: number }) => void
   /** Persist the side-note row. */
   recordSubmission: (row: BrowserSubmissionRow) => Promise<void>
   /** Read one side-note row back. */
@@ -208,6 +256,17 @@ export interface BrowserCompanionDeps {
   abortTurn: (sessionId: string) => Promise<{ stopped: boolean; reasonCode?: string }>
 }
 
+/** An attachment the Host staged, as `message.enqueue` carries it. */
+export interface BrowserStagedAttachment {
+  name: string
+  mediaType: string
+  size: number
+  hash: string
+  /** `cognia-upload:<uploadId>`, bound to the conversation. */
+  ref: string
+  kind: BrowserAttachmentRefV1["kind"]
+}
+
 /**
  * The HostState rejection that means another device is the effective
  * controller of this session (`notControllerReceipt` in
@@ -269,9 +328,10 @@ export async function browserCompanionCapability(
       ? payload.preferredMode
       : undefined
   const { appearance, followsSystem } = await deps.appearance(preferredMode)
+  const drive = deps.driveStatus ? await deps.driveStatus(deviceId) : null
   return {
     schemaVersion: 1,
-    limits: BROWSER_CONTEXT_LIMITS,
+    limits: { ...BROWSER_CONTEXT_LIMITS },
     supportedCaptureModes: [...BROWSER_CAPTURE_MODES],
     workspaces: await deps.listWorkspaces(),
     appearance,
@@ -280,7 +340,31 @@ export async function browserCompanionCapability(
     // this browser's own past submissions, so an unbound caller is offered the
     // one target that names nothing.
     deliveryTargets: await deps.listDeliveryTargets(deviceId),
+    features: browserCompanionFeatures(deps),
+    ...(drive ? { driveAllowed: drive.allowed } : {}),
   }
+}
+
+/**
+ * What this Host understands beyond ADR-0154, derived from what it was wired
+ * with rather than declared — a Host without attachment staging must not
+ * advertise attachments it would refuse.
+ */
+export function browserCompanionFeatures(
+  deps: Pick<BrowserCompanionDeps, "resolveAttachments" | "driveStatus">
+): BrowserCompanionFeature[] {
+  const features: BrowserCompanionFeature[] = [
+    "article",
+    "markdown-selection",
+    "metadata",
+    "transcript",
+    "link-image",
+    "multi-page",
+    "list-paging",
+  ]
+  if (deps.resolveAttachments) features.push("attachments")
+  if (deps.driveStatus) features.push("device-socket", "browser-agent")
+  return features
 }
 
 export async function submitBrowserContext(
@@ -309,14 +393,15 @@ export async function submitBrowserContext(
   // work that had already run. It also re-recorded a template use per replay.
   // Nothing in the replay path needs the target unless the row is redrivable,
   // so the resolution moved inside that branch.
-  const urlFingerprint = await sha256Hex(request.context.url)
+  const pages = submissionPages(request)
+  const urlFingerprint = await pagesFingerprint(pages)
   const existing = await deps.readSubmission(request.submissionId)
   if (existing) {
+    // Same answer as a read of someone else's submission: telling "this id is
+    // taken by another browser" apart from "no such id" would let one browser
+    // probe another's submission ids through the write path instead.
     if (existing.deviceId !== deviceId) {
-      throw new BrowserCompanionError(
-        "submission_owned_elsewhere",
-        "this submission id belongs to another device"
-      )
+      throw new BrowserCompanionError("submission_not_found", "no such submission for this device")
     }
     let status = existing.status
     if (REDRIVABLE_STATUSES.includes(existing.status)) {
@@ -325,10 +410,15 @@ export async function submitBrowserContext(
       // declaration that may since have changed or gone.
       const redriveTarget = await resolveSubmissionTarget(deps, deviceId, request)
       const redriveInstruction = await resolveSubmissionInstruction(deps, redriveTarget, request)
+      const redriveAttachments =
+        existing.sessionId && request.attachments?.length
+          ? await resolveSubmissionAttachments(deps, deviceId, request, existing.sessionId)
+          : []
       const { prompt, derivedTitle } = buildBrowserContextPrompt(
-        request.context,
+        pages,
         redriveInstruction,
-        request.suggestedTitle
+        request.suggestedTitle,
+        redriveAttachments.map(promptAttachment)
       )
       // The submission id is the caller's, so "the row is still mid-flight"
       // does not on its own make this the same capture. Redriving a *different*
@@ -345,6 +435,7 @@ export async function submitBrowserContext(
       status = await enqueueAndSettle(deps, existing, {
         messageId: `browser-${request.submissionId}`,
         text: prompt,
+        attachments: redriveAttachments,
       })
     }
     return {
@@ -383,11 +474,27 @@ export async function submitBrowserContext(
     )
   }
 
-  const { prompt, derivedTitle } = buildBrowserContextPrompt(
-    request.context,
-    instruction,
-    request.suggestedTitle
-  )
+  if (request.attachments?.length) {
+    // Attachments only ride a turn. A filed issue and an agent task carry the
+    // instruction as text, and dropping the screenshot the user attached would
+    // be a quiet loss of the very thing they pointed at.
+    if (!deps.resolveAttachments) {
+      throw new BrowserCompanionError(
+        "attachments_unsupported",
+        "this Host cannot accept attachments from a browser"
+      )
+    }
+    if (issueProjectIdOfTarget(target) || agentIdOfTarget(target)) {
+      throw new BrowserCompanionError(
+        "attachments_unsupported",
+        "attachments can only be sent to a conversation"
+      )
+    }
+  }
+
+  // Titled from the page and the instruction alone; the attachment names are
+  // only known once they are resolved against the conversation below.
+  const { derivedTitle } = buildBrowserContextPrompt(pages, instruction, request.suggestedTitle)
   const now = deps.now()
   // Where the work goes, decided in one place. The three conversation kinds
   // differ only in whether they create the conversation; the other two do not
@@ -399,7 +506,19 @@ export async function submitBrowserContext(
     workspaceId: request.workspaceId,
     sourceHost: sourceHostOf(request.context.url),
     url: request.context.url,
+    deviceId,
+    ...(request.browserAgent ? { tabId: request.browserAgent.tabId } : {}),
   })
+  const attachments =
+    placement.row.sessionId && request.attachments?.length
+      ? await resolveSubmissionAttachments(deps, deviceId, request, placement.row.sessionId)
+      : []
+  const { prompt } = buildBrowserContextPrompt(
+    pages,
+    instruction,
+    request.suggestedTitle,
+    attachments.map(promptAttachment)
+  )
   // Persist the recoverable intent first, then settle the status only after
   // HostState has answered. A retry can redrive any row still in
   // `REDRIVABLE_STATUSES` without creating another session or transcript item.
@@ -415,6 +534,8 @@ export async function submitBrowserContext(
     workspaceId: request.workspaceId,
     targetId: target.id,
     captureMode: request.context.captureMode,
+    ...(pages.length > 1 ? { pageCount: pages.length } : {}),
+    ...(attachments.length > 0 ? { attachmentCount: attachments.length } : {}),
     contentBytes: capturedContentBytes(request),
     truncated: capturedTruncated(request),
     // `submitting` means "the row exists and the work has not started yet",
@@ -438,6 +559,7 @@ export async function submitBrowserContext(
         // capture arrives twice in one transcript.
         messageId: `browser-${request.submissionId}`,
         text: prompt,
+        attachments,
       })
     : await settleWithoutTurn(deps, submission)
 
@@ -465,6 +587,8 @@ async function placeWork(
     workspaceId: string
     sourceHost: string
     url: string
+    deviceId: string
+    tabId?: number
   }
 ): Promise<{ row: Pick<BrowserSubmissionRow, "sessionId" | "workKind" | "workId"> }> {
   const issueProjectId = issueProjectIdOfTarget(target)
@@ -495,6 +619,31 @@ async function placeWork(
   // one. Deciding it here rather than inside `createSession` keeps the two
   // effects visible side by side, which is the difference the capability
   // argument turns on.
+  if (isBrowserAgentTarget(target)) {
+    // Checked before anything is created: a conversation told it can act in a
+    // browser it cannot reach is the failure the target exists to avoid.
+    if (!deps.bindBrowserAgent || !deps.driveStatus) {
+      throw new BrowserCompanionError(
+        "browser_agent_unsupported",
+        "this Host cannot act in a browser"
+      )
+    }
+    const drive = await deps.driveStatus(work.deviceId)
+    if (!drive.allowed || !drive.connected) {
+      throw new BrowserCompanionError(
+        "unknown_target",
+        "this browser is not allowed to be driven, or is not connected"
+      )
+    }
+    const session = await deps.createSession({ title: work.title, projectId: work.workspaceId })
+    deps.bindBrowserAgent({
+      sessionId: session.id,
+      deviceId: work.deviceId,
+      ...(work.tabId !== undefined ? { tabId: work.tabId } : {}),
+    })
+    return { row: { sessionId: session.id, workKind: "session" } }
+  }
+
   const appendTo = sessionIdOfTarget(target)
   const session = appendTo
     ? { id: appendTo }
@@ -572,6 +721,16 @@ async function resolveSubmissionInstruction(
       `these values are required: ${rendered.missing.join(", ")}`
     )
   }
+  // The same ceiling a typed instruction has. A template's body is the user's
+  // own, but a rendered one carries the values the browser sent, and an
+  // unbounded instruction would be the one field this contract left uncapped.
+  const bytes = utf8ByteLength(rendered.text)
+  if (bytes > BROWSER_CONTEXT_LIMITS.instructionBytes) {
+    throw new BrowserCompanionError(
+      "payload_too_large",
+      `the rendered template is ${bytes} bytes, over the ${BROWSER_CONTEXT_LIMITS.instructionBytes}-byte limit`
+    )
+  }
   return rendered.text
 }
 
@@ -611,7 +770,7 @@ const REDRIVABLE_STATUSES: readonly BrowserSubmissionStatus[] = [
 async function enqueueAndSettle(
   deps: BrowserCompanionDeps,
   row: BrowserSubmissionRow,
-  message: { messageId: string; text: string }
+  message: { messageId: string; text: string; attachments?: readonly BrowserStagedAttachment[] }
 ): Promise<BrowserSubmissionStatus> {
   if (!row.sessionId) {
     // Unreachable by construction: only a `chat`, `session` or `template`
@@ -625,7 +784,12 @@ async function enqueueAndSettle(
   }
   const sessionId = row.sessionId
   try {
-    await deps.enqueueMessage({ sessionId, ...message })
+    await deps.enqueueMessage({
+      sessionId,
+      messageId: message.messageId,
+      text: message.text,
+      ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+    })
   } catch (error) {
     const code = error instanceof BrowserCompanionError ? error.code : "enqueue_failed"
     const status: BrowserSubmissionStatus =
@@ -647,21 +811,46 @@ async function enqueueAndSettle(
   return "queued"
 }
 
+/**
+ * Rows a device keeps, and therefore the most a list can page through.
+ *
+ * `lib/db/browser-submissions.ts` prunes to this many per device, so reading
+ * them all and paging in memory is a bounded read rather than a scan.
+ */
+const LIST_SCAN_ROWS = 100
+
 export async function listBrowserContextSubmissions(
   deps: BrowserCompanionDeps,
   deviceId: string,
-  payload: { limit?: number } = {}
+  payload: { limit?: number; offset?: number; query?: unknown } = {}
 ): Promise<BrowserContextSubmissionSummaryPageV1> {
   if (!deviceId) throw new BrowserCompanionError("caller_unbound", "the caller device is unknown")
+  // The wire is `pageSize` / `pageToken`; the companion bridge
+  // (`bridged_page_args`) decodes those into `limit` / `offset` before this arm
+  // runs and wraps the answer back into `{ items, nextPageToken }`.
   const limit = Math.min(50, Math.max(1, Math.trunc(payload.limit ?? 20)))
-  const rows = await deps.listSubmissions(deviceId, limit)
+  const offset = Math.max(0, Math.trunc(payload.offset ?? 0))
+  const query = typeof payload.query === "string" ? payload.query.trim().toLowerCase() : ""
+  // A device's ledger is pruned to `LIST_SCAN_ROWS`, so reading all of it and
+  // paging in memory is a bounded read — and the only way a title search can
+  // page without an index on titles.
+  const rows = await deps.listSubmissions(deviceId, LIST_SCAN_ROWS)
+  const matching = query
+    ? rows.filter(
+        (row) =>
+          row.title.toLowerCase().includes(query) || row.sourceHost.toLowerCase().includes(query)
+      )
+    : rows
+  const pageRows = matching.slice(offset, offset + limit)
   const capabilityRevision = await deps.capabilityRevision(deviceId)
   const items = await Promise.all(
-    rows.map(async (row) => ({
+    pageRows.map(async (row) => ({
       submissionId: row.submissionId,
       title: row.title,
       sourceHost: row.sourceHost,
       captureMode: row.captureMode,
+      ...(row.pageCount && row.pageCount > 1 ? { pageCount: row.pageCount } : {}),
+      ...(row.attachmentCount ? { attachmentCount: row.attachmentCount } : {}),
       status: await currentStatus(deps, row),
       submittedAt: row.submittedAt,
       updatedAt: row.updatedAt,
@@ -858,23 +1047,65 @@ function describesSameCapture(
     titleMatches &&
     row.sourceHost === sourceHostOf(request.context.url) &&
     row.captureMode === request.context.captureMode &&
+    (row.pageCount ?? 1) === submissionPages(request).length &&
     row.contentBytes === capturedContentBytes(request) &&
     row.truncated === capturedTruncated(request)
   )
 }
 
+/** The primary page first, then the added ones in the order the user put them. */
+function submissionPages(request: BrowserContextSubmitRequestV1): BrowserPageContextV1[] {
+  return [request.context, ...(request.additionalContexts ?? [])]
+}
+
+/**
+ * The digest that settles "same capture". A single page keeps the digest of
+ * its URL alone, which is what every row written before multi-page carries;
+ * several pages digest their ordered URL list, so the same tabs in a
+ * different order are a different submission.
+ */
+async function pagesFingerprint(pages: readonly BrowserPageContextV1[]): Promise<string> {
+  if (pages.length === 1) return sha256Hex(pages[0]?.url ?? "")
+  return sha256Hex(pages.map((page) => page.url).join("\n"))
+}
+
 function capturedTruncated(request: BrowserContextSubmitRequestV1): boolean {
-  return (
-    Boolean(request.context.selection?.truncated) ||
-    Boolean(request.context.readableText?.truncated)
+  return submissionPages(request).some(
+    (page) =>
+      Boolean(page.selection?.truncated) ||
+      Boolean(page.readableText?.truncated) ||
+      Boolean(page.article?.truncated) ||
+      (page.transcript?.status === "available" && page.transcript.truncated)
   )
 }
 
 function capturedContentBytes(request: BrowserContextSubmitRequestV1): number {
-  return (
-    utf8ByteLength(request.context.selection?.text ?? "") +
-    utf8ByteLength(request.context.readableText?.text ?? "")
-  )
+  return submissionPages(request).reduce((sum, page) => sum + pageContentBytes(page), 0)
+}
+
+async function resolveSubmissionAttachments(
+  deps: BrowserCompanionDeps,
+  deviceId: string,
+  request: BrowserContextSubmitRequestV1,
+  sessionId: string
+): Promise<BrowserStagedAttachment[]> {
+  if (!request.attachments?.length) return []
+  if (!deps.resolveAttachments) {
+    throw new BrowserCompanionError(
+      "attachments_unsupported",
+      "this Host cannot accept attachments from a browser"
+    )
+  }
+  return deps.resolveAttachments({
+    deviceId,
+    submissionId: request.submissionId,
+    sessionId,
+    attachments: request.attachments,
+  })
+}
+
+function promptAttachment(attachment: BrowserStagedAttachment): BrowserPromptAttachment {
+  return { name: attachment.name, kind: attachment.kind }
 }
 
 function rejectionError(rejection: BrowserSubmissionRejection): BrowserCompanionError {

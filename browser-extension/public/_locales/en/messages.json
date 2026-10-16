@@ -85,6 +85,9 @@
   "captureModeReadable": {
     "message": "Whole page text"
   },
+  "captureModeArticle": {
+    "message": "Article (Markdown)"
+  },
   "captureTruncated": {
     "message": "Trimmed to fit"
   },
@@ -312,5 +315,427 @@
   },
   "captureNoGrant": {
     "message": "Cognia has no access to this tab. Click the toolbar icon on the page you want to send, or use the right-click menu."
+  },
+  "openPanelCommand": {
+    "message": "Open the Cognia side panel"
+  },
+  "captureSelectionCommand": {
+    "message": "Send the selection to Cognia"
+  },
+  "captureArticleCommand": {
+    "message": "Send this article to Cognia"
+  },
+  "contextMenuArticle": {
+    "message": "Send article to Cognia"
+  },
+  "contextMenuLink": {
+    "message": "Send link to Cognia"
+  },
+  "contextMenuImage": {
+    "message": "Send image to Cognia"
+  },
+  "contextMenuQuick": {
+    "message": "Ask Cognia to…"
+  },
+  "quickActionSummarize": {
+    "message": "Summarize"
+  },
+  "quickActionExplain": {
+    "message": "Explain"
+  },
+  "quickActionTranslate": {
+    "message": "Translate"
+  },
+  "omniboxSuggestion": {
+    "message": "Ask Cognia about this page"
+  },
+  "notifyCompleted": {
+    "message": "Cognia finished a task"
+  },
+  "notifyFailed": {
+    "message": "A Cognia task failed"
+  },
+  "notifyNeedsInput": {
+    "message": "A Cognia task needs your input"
+  },
+  "notifySiteQuestionTitle": {
+    "message": "Allow Cognia on this site?"
+  },
+  "notifySiteQuestion": {
+    "message": "An agent wants to act on $HOST$. Answer in the Cognia side panel.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentBarActing": {
+    "message": "Cognia is acting in this tab"
+  },
+  "agentBarPaused": {
+    "message": "You have control — Cognia is paused"
+  },
+  "agentBarStop": {
+    "message": "Stop"
+  },
+  "agentBarTakeOver": {
+    "message": "Take over"
+  },
+  "agentBarResume": {
+    "message": "Hand back"
+  },
+  "agentTitle": {
+    "message": "Agent mode"
+  },
+  "agentModeLabel": {
+    "message": "Let agents act in this browser"
+  },
+  "agentModeHint": {
+    "message": "Asks Chrome for access to all sites. Cognia still asks you before acting on each site."
+  },
+  "agentSitesDenied": {
+    "message": "Chrome did not grant access to sites, so agent mode stays off."
+  },
+  "agentPermissionDenied": {
+    "message": "Chrome did not grant that permission."
+  },
+  "agentSocketLabel": {
+    "message": "Connection to Cognia:"
+  },
+  "agentSocketConnected": {
+    "message": "connected"
+  },
+  "agentSocketConnecting": {
+    "message": "connecting…"
+  },
+  "agentSocketRetrying": {
+    "message": "reconnecting soon"
+  },
+  "agentSocketRefused": {
+    "message": "refused — check this browser in Cognia's settings"
+  },
+  "agentSocketStopped": {
+    "message": "not connected"
+  },
+  "agentDriveAllowed": {
+    "message": "The Cognia Owner allows agents to act in this browser."
+  },
+  "agentDriveNotAllowed": {
+    "message": "Agents cannot act here yet: allow it for this browser in Cognia → Settings → Companion."
+  },
+  "agentDownloadsLabel": {
+    "message": "Let agents see and manage downloads"
+  },
+  "agentCookiesLabel": {
+    "message": "Let agents read and clear cookies"
+  },
+  "agentConversationsTitle": {
+    "message": "Conversations acting here"
+  },
+  "agentConversationTabs": {
+    "message": "$COUNT$ tabs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentTakenOver": {
+    "message": "You have control"
+  },
+  "agentDecisionsTitle": {
+    "message": "Site decisions"
+  },
+  "agentDecisionForget": {
+    "message": "Forget"
+  },
+  "attachVisible": {
+    "message": "Screenshot"
+  },
+  "attachRegion": {
+    "message": "Region"
+  },
+  "attachFullPage": {
+    "message": "Full page"
+  },
+  "attachPdf": {
+    "message": "Attach PDF"
+  },
+  "attachWorking": {
+    "message": "Working…"
+  },
+  "attachFull": {
+    "message": "Attachment limit reached"
+  },
+  "attachRemove": {
+    "message": "Remove $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "attachRegionHint": {
+    "message": "Drag over the screenshot to choose a region."
+  },
+  "attachRegionAlt": {
+    "message": "Screenshot of the visible page"
+  },
+  "attachRegionConfirm": {
+    "message": "Use this region"
+  },
+  "attachFailed": {
+    "message": "The screenshot could not be taken."
+  },
+  "attachTooLarge": {
+    "message": "That file is larger than Cognia accepts."
+  },
+  "attachFullPageCut": {
+    "message": "The page is very long; only its first part was captured."
+  },
+  "attachImageUnreadable": {
+    "message": "The image could not be read, so only its address is sent."
+  },
+  "attachImageUnsupported": {
+    "message": "That image type cannot be attached; only its address is sent."
+  },
+  "attachPdfUnreadable": {
+    "message": "The PDF could not be read."
+  },
+  "attachUploadFailed": {
+    "message": "An attachment could not be uploaded: $REASON$",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "blockedHostsLabel": {
+    "message": "Never capture these sites"
+  },
+  "blockedHostsHint": {
+    "message": "Pages on these sites and their subdomains are never read."
+  },
+  "blockedHostAdd": {
+    "message": "Add"
+  },
+  "blockedHostInvalid": {
+    "message": "That is not a site address."
+  },
+  "blockedHostFull": {
+    "message": "The list is full."
+  },
+  "blockedHostRemove": {
+    "message": "Remove $HOST$",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "captureArticle": {
+    "message": "Send article"
+  },
+  "captureBlocked": {
+    "message": "You have set this site never to be captured."
+  },
+  "captureEditTitle": {
+    "message": "Title"
+  },
+  "captureEditText": {
+    "message": "What will be sent (you can trim it)"
+  },
+  "captureLinkLabel": {
+    "message": "Link:"
+  },
+  "captureImageLabel": {
+    "message": "Image:"
+  },
+  "captureStale": {
+    "message": "This tab has moved on since it was captured."
+  },
+  "draftDroppedAttachments": {
+    "message": "Your draft was restored without its $COUNT$ attachments; add them again if you need them.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "followUp": {
+    "message": "Follow up"
+  },
+  "metadataSite": {
+    "message": "Site"
+  },
+  "metadataByline": {
+    "message": "By"
+  },
+  "metadataPublished": {
+    "message": "Published"
+  },
+  "metadataLanguage": {
+    "message": "Language"
+  },
+  "notificationsLabel": {
+    "message": "Notify me when tasks finish"
+  },
+  "notificationsHint": {
+    "message": "Shows a system notification while the panel is closed."
+  },
+  "notificationsDenied": {
+    "message": "Chrome did not allow notifications."
+  },
+  "pagesAdd": {
+    "message": "Add another tab"
+  },
+  "pagesBudget": {
+    "message": "$USED$ of $LIMIT$ KB",
+    "placeholders": {
+      "used": {
+        "content": "$1"
+      },
+      "limit": {
+        "content": "$2"
+      }
+    }
+  },
+  "pagesFull": {
+    "message": "No more pages fit in one request."
+  },
+  "pagesNoTabs": {
+    "message": "No other web tabs are open in this window."
+  },
+  "pagesTabsDenied": {
+    "message": "Chrome did not allow listing tabs."
+  },
+  "pagesOriginDenied": {
+    "message": "Chrome did not allow reading that site."
+  },
+  "pagesReadFailed": {
+    "message": "That tab could not be read."
+  },
+  "pagesReading": {
+    "message": "Reading…"
+  },
+  "pagesPageLabel": {
+    "message": "Page $NUMBER$:",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "pagesOverBudget": {
+    "message": "Together these pages are more than Cognia accepts in one request; remove one or trim the text."
+  },
+  "promptsManage": {
+    "message": "Saved prompts"
+  },
+  "promptsSaveCurrent": {
+    "message": "Save current instruction"
+  },
+  "promptsNone": {
+    "message": "No saved prompts yet."
+  },
+  "promptsTitleLabel": {
+    "message": "Name"
+  },
+  "promptsInstructionLabel": {
+    "message": "Instruction"
+  },
+  "promptsSave": {
+    "message": "Save"
+  },
+  "promptsEdit": {
+    "message": "Edit"
+  },
+  "promptsDelete": {
+    "message": "Delete"
+  },
+  "promptsEmpty": {
+    "message": "An empty instruction cannot be saved."
+  },
+  "promptsTooLong": {
+    "message": "That instruction is too long to save."
+  },
+  "promptsFull": {
+    "message": "You have saved as many prompts as fit."
+  },
+  "quickPromptSummarize": {
+    "message": "Summarize this page: the main points, then anything I should act on."
+  },
+  "quickPromptExplain": {
+    "message": "Explain this clearly, as if to someone new to the subject."
+  },
+  "quickPromptTranslate": {
+    "message": "Translate this into my language, keeping the formatting."
+  },
+  "recentSearch": {
+    "message": "Search tasks"
+  },
+  "recentNoMatch": {
+    "message": "No task matches that search."
+  },
+  "recentLoadMore": {
+    "message": "Load more"
+  },
+  "recentLoadFailed": {
+    "message": "More tasks could not be loaded."
+  },
+  "remove": {
+    "message": "Remove"
+  },
+  "resultCopy": {
+    "message": "Copy answer"
+  },
+  "siteQuestionTitle": {
+    "message": "Allow Cognia on $HOST$?",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "siteQuestionDetail": {
+    "message": "An agent wants to $ACTION$ on this site.",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      }
+    }
+  },
+  "siteOpNavigate": {
+    "message": "open a page"
+  },
+  "siteOpAct": {
+    "message": "click, type or change something"
+  },
+  "siteOpRead": {
+    "message": "read the page"
+  },
+  "siteAllowOnce": {
+    "message": "Allow for this task"
+  },
+  "siteAllowAlways": {
+    "message": "Always allow"
+  },
+  "siteNever": {
+    "message": "Never"
+  },
+  "submitShortcutHint": {
+    "message": "Ctrl/⌘ + Enter to send"
+  },
+  "transcriptAvailable": {
+    "message": "Transcript included"
+  },
+  "transcriptAutoGenerated": {
+    "message": "auto-generated"
+  },
+  "transcriptNoCaptions": {
+    "message": "This video has no captions"
+  },
+  "transcriptFailed": {
+    "message": "The transcript could not be read"
   }
 }

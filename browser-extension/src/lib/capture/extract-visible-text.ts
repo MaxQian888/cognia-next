@@ -53,7 +53,10 @@ export function extractFromDocument(wholePage: boolean): ExtractionResult {
 
   /** Whether an element's subtree may contribute text. */
   function isVisible(element: Element): boolean {
-    if (SKIP_TAGS.has(element.tagName)) return false
+    // Upper-cased: an SVG element keeps its lower-case tag name in an HTML
+    // document, so `SKIP_TAGS.has(element.tagName)` let every `<svg>`'s text
+    // through.
+    if (SKIP_TAGS.has(element.tagName.toUpperCase())) return false
     if (element.getAttribute("aria-hidden") === "true") return false
     if (element.hasAttribute("hidden")) return false
     // Anything the user is editing is their input, not the page's content —

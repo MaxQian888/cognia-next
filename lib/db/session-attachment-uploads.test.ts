@@ -11,6 +11,8 @@ import {
   commitAttachmentUpload,
   consumeAttachmentRefs,
   parseUploadRef,
+  readAttachmentUploadMeta,
+  rebindAttachmentUploads,
   releaseDeviceAttachmentUploads,
   resolveAttachmentRef,
   sniffImageMediaType,
@@ -585,5 +587,89 @@ describe("AttachmentUploadError", () => {
     expect(error).toBeInstanceOf(Error)
     expect(error.code).toBe("attachment_too_many")
     expect(error.message).toBe("attachment_too_many")
+  })
+})
+
+describe("rebindAttachmentUploads (ADR-0228 §3)", () => {
+  it("moves committed uploads onto the conversation and is idempotent", async () => {
+    const { init } = await uploadWhole({
+      sessionId: "staging:1",
+      deviceId: "host:browser-companion",
+      bytes: pngBytes(40),
+    })
+    const moved = await rebindAttachmentUploads({
+      uploadIds: [init.uploadId],
+      deviceId: "host:browser-companion",
+      fromSessionId: "staging:1",
+      toSessionId: "session-9",
+    })
+    expect(moved.map((row) => row.sessionId)).toEqual(["session-9"])
+    expect(moved[0]).not.toHaveProperty("bytes")
+    expect(
+      await resolveAttachmentRef(`cognia-upload:${init.uploadId}`, { sessionId: "session-9" })
+    ).not.toBeNull()
+    // A redrive finds the rows already moved and accepts them.
+    await expect(
+      rebindAttachmentUploads({
+        uploadIds: [init.uploadId],
+        deviceId: "host:browser-companion",
+        fromSessionId: "staging:1",
+        toSessionId: "session-9",
+      })
+    ).resolves.toHaveLength(1)
+    expect((await readAttachmentUploadMeta(init.uploadId))?.sessionId).toBe("session-9")
+  })
+
+  it("refuses a foreign, uncommitted or misplaced upload as not found", async () => {
+    const { init } = await uploadWhole({
+      sessionId: "staging:1",
+      deviceId: "host:browser-companion",
+      bytes: pngBytes(40),
+    })
+    const hash = await sha256(pngBytes(41))
+    const pending = await beginAttachmentUpload({
+      sessionId: "staging:1",
+      deviceId: "host:browser-companion",
+      name: "half.png",
+      mediaType: "image/png",
+      size: 41,
+      hash,
+    })
+    for (const attempt of [
+      { uploadIds: [init.uploadId], deviceId: "phone-1", fromSessionId: "staging:1" },
+      {
+        uploadIds: [pending.uploadId],
+        deviceId: "host:browser-companion",
+        fromSessionId: "staging:1",
+      },
+      {
+        uploadIds: [init.uploadId],
+        deviceId: "host:browser-companion",
+        fromSessionId: "staging:2",
+      },
+      {
+        uploadIds: ["upl_missing"],
+        deviceId: "host:browser-companion",
+        fromSessionId: "staging:1",
+      },
+    ]) {
+      await expect(
+        rebindAttachmentUploads({ ...attempt, toSessionId: "session-9" })
+      ).rejects.toMatchObject({ code: "attachment_not_found" })
+    }
+    // Nothing moved: a refused set is refused whole.
+    expect((await readAttachmentUploadMeta(init.uploadId))?.sessionId).toBe("staging:1")
+  })
+
+  it("reads metadata without the bytes", async () => {
+    const { init } = await uploadWhole({
+      sessionId: "staging:1",
+      deviceId: "host:browser-companion",
+      bytes: pngBytes(16),
+    })
+    const meta = await readAttachmentUploadMeta(init.uploadId)
+    expect(meta).toMatchObject({ uploadId: init.uploadId, status: "committed", size: 16 })
+    expect(meta).not.toHaveProperty("bytes")
+    expect(await readAttachmentUploadMeta("upl_missing")).toBeNull()
   })
 })

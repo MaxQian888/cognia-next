@@ -1881,6 +1881,18 @@ paths:
                 payload:
                   type: object
                   additionalProperties: true
+  /ws/browser-companion:
+    get:
+      operationId: getWsBrowserCompanion
+      tags:
+        - api
+      summary: GET /ws/browser-companion
+      security: []
+      responses:
+        "200":
+          description: Successful response.
+        "401":
+          $ref: "#/components/responses/AuthenticationRejected"
   /ws/acp:
     get:
       operationId: getWsAcp
@@ -10986,6 +10998,784 @@ paths:
                 $ref: "#/components/schemas/Problem"
       security:
         - dpopAccess: []
+  /api/_rpc/browser_attachment_upload_abort:
+    post:
+      operationId: publicRpcBrowserAttachmentUploadAbort
+      tags:
+        - rpc-dispatch
+      summary: browser_attachment_upload_abort (browser.submit)
+      description: "Device-reachable write command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - uploadId
+              properties:
+                uploadId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+        - dpopAccess: []
+  /api/_rpc/browser_attachment_upload_chunk:
+    post:
+      operationId: publicRpcBrowserAttachmentUploadChunk
+      tags:
+        - rpc-dispatch
+      summary: browser_attachment_upload_chunk (browser.submit)
+      description: "Device-reachable write command. Risk: high; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - uploadId
+                - offset
+                - dataBase64
+              properties:
+                uploadId:
+                  type: string
+                  minLength: 1
+                offset:
+                  type: integer
+                  minimum: 0
+                  description: Where this chunk starts. Must equal the bytes the host already holds; a chunk entirely below the write head
+                    is a no-op, so a retry after a lost response is safe.
+                dataBase64:
+                  type: string
+                  minLength: 1
+                  description: Chunk payload, base64, sized from the init response's chunkSize.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+        - dpopAccess: []
+  /api/_rpc/browser_attachment_upload_commit:
+    post:
+      operationId: publicRpcBrowserAttachmentUploadCommit
+      tags:
+        - rpc-dispatch
+      summary: browser_attachment_upload_commit (browser.submit)
+      description: "Device-reachable write command. Risk: high; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - uploadId
+              properties:
+                uploadId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+        - dpopAccess: []
+  /api/_rpc/browser_attachment_upload_init:
+    post:
+      operationId: publicRpcBrowserAttachmentUploadInit
+      tags:
+        - rpc-dispatch
+      summary: browser_attachment_upload_init (browser.submit)
+      description: "Device-reachable write command. Risk: high; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - submissionId
+                - name
+                - mediaType
+                - kind
+                - size
+                - hash
+              properties:
+                submissionId:
+                  type: string
+                  minLength: 1
+                  description: The submission this attachment will ride. The host stages the upload under it and refuses to attach it to
+                    any other.
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                mediaType:
+                  type: string
+                  enum:
+                    - image/png
+                    - image/jpeg
+                    - image/webp
+                    - application/pdf
+                kind:
+                  type: string
+                  enum:
+                    - screenshot
+                    - pdf
+                    - image
+                size:
+                  type: integer
+                  minimum: 1
+                  maximum: 10485760
+                hash:
+                  type: string
+                  pattern: ^[0-9a-f]{64}$
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+        - dpopAccess: []
   /api/_rpc/browser_back:
     post:
       operationId: publicRpcBrowserBack
@@ -12126,6 +12916,10 @@ paths:
                   type: string
                   minLength: 1
                   description: The nextPageToken of the previous page, handed back unchanged.
+                query:
+                  type: string
+                  maxLength: 200
+                  description: Case-insensitive match on a submission's title and source host.
               additionalProperties: false
       responses:
         "200":
@@ -12534,6 +13328,7 @@ paths:
                         - metadata
                         - selection
                         - readable-page
+                        - article
                     url:
                       type: string
                       minLength: 1
@@ -12554,6 +13349,11 @@ paths:
                           maxLength: 32768
                         truncated:
                           type: boolean
+                        format:
+                          type: string
+                          enum:
+                            - plain
+                            - markdown
                       additionalProperties: false
                     readableText:
                       type: object
@@ -12570,8 +13370,332 @@ paths:
                         originalCharacterCount:
                           type: integer
                           minimum: 0
+                        format:
+                          type: string
+                          enum:
+                            - plain
+                            - markdown
+                      additionalProperties: false
+                    article:
+                      type: object
+                      required:
+                        - text
+                        - truncated
+                        - originalCharacterCount
+                      properties:
+                        text:
+                          type: string
+                          maxLength: 131072
+                        truncated:
+                          type: boolean
+                        originalCharacterCount:
+                          type: integer
+                          minimum: 0
+                        format:
+                          type: string
+                          enum:
+                            - plain
+                            - markdown
+                      additionalProperties: false
+                    metadata:
+                      type: object
+                      properties:
+                        byline:
+                          type: string
+                          maxLength: 2048
+                        publishedAt:
+                          type: string
+                          maxLength: 2048
+                        siteName:
+                          type: string
+                          maxLength: 2048
+                        lang:
+                          type: string
+                          maxLength: 2048
+                        description:
+                          type: string
+                          maxLength: 2048
+                        canonicalUrl:
+                          type: string
+                          maxLength: 2048
+                        kind:
+                          type: string
+                          maxLength: 2048
+                      additionalProperties: false
+                    transcript:
+                      oneOf:
+                        - type: object
+                          required:
+                            - status
+                            - text
+                            - truncated
+                          properties:
+                            status:
+                              type: string
+                              const: available
+                            text:
+                              type: string
+                              maxLength: 131072
+                            truncated:
+                              type: boolean
+                            language:
+                              type: string
+                              maxLength: 35
+                            autoGenerated:
+                              type: boolean
+                          additionalProperties: false
+                        - type: object
+                          required:
+                            - status
+                            - reason
+                          properties:
+                            status:
+                              type: string
+                              const: unavailable
+                            reason:
+                              type: string
+                              enum:
+                                - no_captions
+                                - not_a_video
+                                - fetch_failed
+                          additionalProperties: false
+                    link:
+                      type: object
+                      required:
+                        - url
+                      properties:
+                        url:
+                          type: string
+                          minLength: 1
+                          maxLength: 4096
+                        text:
+                          type: string
+                          maxLength: 2048
+                      additionalProperties: false
+                    image:
+                      type: object
+                      required:
+                        - url
+                      properties:
+                        url:
+                          type: string
+                          minLength: 1
+                          maxLength: 4096
+                        alt:
+                          type: string
+                          maxLength: 2048
                       additionalProperties: false
                   additionalProperties: false
+                additionalContexts:
+                  type: array
+                  maxItems: 9
+                  items:
+                    type: object
+                    required:
+                      - schemaVersion
+                      - captureMode
+                      - url
+                      - title
+                      - capturedAt
+                    properties:
+                      schemaVersion:
+                        type: integer
+                        const: 1
+                      captureMode:
+                        type: string
+                        enum:
+                          - metadata
+                          - selection
+                          - readable-page
+                          - article
+                      url:
+                        type: string
+                        minLength: 1
+                        maxLength: 4096
+                      title:
+                        type: string
+                        maxLength: 1024
+                      capturedAt:
+                        type: integer
+                      selection:
+                        type: object
+                        required:
+                          - text
+                          - truncated
+                        properties:
+                          text:
+                            type: string
+                            maxLength: 32768
+                          truncated:
+                            type: boolean
+                          format:
+                            type: string
+                            enum:
+                              - plain
+                              - markdown
+                        additionalProperties: false
+                      readableText:
+                        type: object
+                        required:
+                          - text
+                          - truncated
+                          - originalCharacterCount
+                        properties:
+                          text:
+                            type: string
+                            maxLength: 131072
+                          truncated:
+                            type: boolean
+                          originalCharacterCount:
+                            type: integer
+                            minimum: 0
+                          format:
+                            type: string
+                            enum:
+                              - plain
+                              - markdown
+                        additionalProperties: false
+                      article:
+                        type: object
+                        required:
+                          - text
+                          - truncated
+                          - originalCharacterCount
+                        properties:
+                          text:
+                            type: string
+                            maxLength: 131072
+                          truncated:
+                            type: boolean
+                          originalCharacterCount:
+                            type: integer
+                            minimum: 0
+                          format:
+                            type: string
+                            enum:
+                              - plain
+                              - markdown
+                        additionalProperties: false
+                      metadata:
+                        type: object
+                        properties:
+                          byline:
+                            type: string
+                            maxLength: 2048
+                          publishedAt:
+                            type: string
+                            maxLength: 2048
+                          siteName:
+                            type: string
+                            maxLength: 2048
+                          lang:
+                            type: string
+                            maxLength: 2048
+                          description:
+                            type: string
+                            maxLength: 2048
+                          canonicalUrl:
+                            type: string
+                            maxLength: 2048
+                          kind:
+                            type: string
+                            maxLength: 2048
+                        additionalProperties: false
+                      transcript:
+                        oneOf:
+                          - type: object
+                            required:
+                              - status
+                              - text
+                              - truncated
+                            properties:
+                              status:
+                                type: string
+                                const: available
+                              text:
+                                type: string
+                                maxLength: 131072
+                              truncated:
+                                type: boolean
+                              language:
+                                type: string
+                                maxLength: 35
+                              autoGenerated:
+                                type: boolean
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - status
+                              - reason
+                            properties:
+                              status:
+                                type: string
+                                const: unavailable
+                              reason:
+                                type: string
+                                enum:
+                                  - no_captions
+                                  - not_a_video
+                                  - fetch_failed
+                            additionalProperties: false
+                      link:
+                        type: object
+                        required:
+                          - url
+                        properties:
+                          url:
+                            type: string
+                            minLength: 1
+                            maxLength: 4096
+                          text:
+                            type: string
+                            maxLength: 2048
+                        additionalProperties: false
+                      image:
+                        type: object
+                        required:
+                          - url
+                        properties:
+                          url:
+                            type: string
+                            minLength: 1
+                            maxLength: 4096
+                          alt:
+                            type: string
+                            maxLength: 2048
+                        additionalProperties: false
+                    additionalProperties: false
+                  description: More pages in the same submission (ADR-0228), in the order the user arranged them.
+                attachments:
+                  type: array
+                  maxItems: 6
+                  items:
+                    type: object
+                    required:
+                      - attachmentId
+                      - kind
+                    properties:
+                      attachmentId:
+                        type: string
+                        minLength: 1
+                      kind:
+                        type: string
+                        enum:
+                          - screenshot
+                          - pdf
+                          - image
+                    additionalProperties: false
+                  description: Attachments staged with browser_attachment_upload_* under this submission id.
+                browserAgent:
+                  type: object
+                  required:
+                    - tabId
+                  properties:
+                    tabId:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
+                  description: "For a browser-agent target: the extension's id for the tab the agent starts on."
               additionalProperties: false
       responses:
         "200":
@@ -142003,6 +143127,10 @@ components:
           - bot_run_manual
           - bot_trigger_set_armed
           - browser_act
+          - browser_attachment_upload_abort
+          - browser_attachment_upload_chunk
+          - browser_attachment_upload_commit
+          - browser_attachment_upload_init
           - browser_back
           - browser_capability
           - browser_close_page
@@ -144009,9 +145137,9 @@ x-cognia-generated:
     - protocol/companion-request-schemas.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  publicCommandCount: 706
-  generatedRequestSchemaCount: 706
+  publicCommandCount: 710
+  generatedRequestSchemaCount: 710
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 706
+  contractRequestSchemaCount: 710
   genericRequestSchemaCount: 0
   legacyCompatibility: false

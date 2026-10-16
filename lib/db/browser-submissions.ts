@@ -73,6 +73,23 @@ export async function listBrowserSubmissions(
 }
 
 /**
+ * Every submission that started a conversation acting in its browser
+ * (ADR-0228 §6), newest first — what rebinds those conversations to their
+ * browsers after a restart.
+ *
+ * A scan rather than an index: the table is capped at
+ * {@link MAX_BROWSER_SUBMISSIONS_TOTAL} rows and this runs once at startup.
+ */
+export async function listBrowserAgentSubmissions(
+  targetId: string
+): Promise<BrowserSubmissionRow[]> {
+  const rows = await getDb()
+    .browserSubmissions.filter((row) => row.targetId === targetId && Boolean(row.sessionId))
+    .toArray()
+  return rows.sort((left, right) => right.submittedAt - left.submittedAt)
+}
+
+/**
  * Record a submission, and apply retention: this device's cap, then the age
  * ceiling and the table-wide cap.
  *

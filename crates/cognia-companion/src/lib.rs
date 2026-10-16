@@ -132,6 +132,9 @@ pub mod workflow_app_challenge;
 pub mod workspace_access;
 pub mod ws;
 pub mod ws_bridge;
+/// The Browser Companion's device socket: status hints and, for a browser
+/// allowed `browser.drive`, agent operations (ADR-0228 §5).
+pub mod ws_browser_companion;
 pub mod ws_terminal;
 pub mod ws_worker;
 

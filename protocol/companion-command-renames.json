@@ -209,6 +209,18 @@
     "browser_act": {
       "to": "browser.act"
     },
+    "browser_attachment_upload_abort": {
+      "to": "browser.attachment.upload.cancel"
+    },
+    "browser_attachment_upload_chunk": {
+      "to": "browser.attachment.upload.write_chunk"
+    },
+    "browser_attachment_upload_commit": {
+      "to": "browser.attachment.upload.commit"
+    },
+    "browser_attachment_upload_init": {
+      "to": "browser.attachment.upload.init"
+    },
     "browser_back": {
       "to": "browser.page.navigate_back"
     },

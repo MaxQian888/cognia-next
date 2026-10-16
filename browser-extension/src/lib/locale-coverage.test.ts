@@ -41,8 +41,12 @@ async function referencedKeys(): Promise<Set<string>> {
     for (const match of text.matchAll(/(?:message|getMessage)\("([a-zA-Z]+)"/g)) {
       keys.add(requiredCapture(match))
     }
-    // Lookup tables: `queued: "statusQueued",` and friends.
-    for (const match of text.matchAll(/:\s*"(status[A-Z]\w*|capture(?:Mode)[A-Z]\w*)"/g)) {
+    // Lookup tables (`queued: "statusQueued",`) and keys passed through a
+    // helper (`menu(id, "contextMenuLink", …)`, `notificationMessageKey`): a
+    // quoted literal in one of the families that are only ever keys.
+    for (const match of text.matchAll(
+      /["']((?:status|captureMode|notify|agentBar|contextMenu|quickAction)[A-Z]\w*)["']/g
+    )) {
       keys.add(requiredCapture(match))
     }
   }

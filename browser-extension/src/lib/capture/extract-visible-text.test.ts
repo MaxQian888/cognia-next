@@ -77,6 +77,11 @@ describe("extractFromDocument", () => {
     expect(extractFromDocument(true).readableText).toBe("Visible")
   })
 
+  it("skips inline SVG, whose tag name stays lower-case in an HTML document", () => {
+    page("<p>Before</p><svg><title>icon title</title><text>chart label</text></svg><p>After</p>")
+    expect(extractFromDocument(true).readableText).toBe("Before\nAfter")
+  })
+
   it("skips script, style and embedded frames", () => {
     page(`
       <script>var secret = 1</script>

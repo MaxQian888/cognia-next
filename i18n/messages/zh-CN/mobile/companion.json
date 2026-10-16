@@ -484,7 +484,18 @@
     "historyClearConfirm": "清除",
     "historyClearConfirmDescription": "将从这台电脑删除 {count, plural, other {# 条提交记录}}。它们开启的会话、问题和任务不受影响。此操作无法撤销。",
     "historyClearConfirmTitle": "清除提交记录？",
-    "requiresRestart": "浏览器访问已开启，但监听器尚未运行。请在 连接 → 本机主机 中重启 Companion 服务，然后再生成配对码。"
+    "requiresRestart": "浏览器访问已开启，但监听器尚未运行。请在 连接 → 本机主机 中重启 Companion 服务，然后再生成配对码。",
+    "pairedLoadFailed": "无法读取已配对的浏览器。",
+    "pairedEmpty": "还没有配对任何浏览器。",
+    "pairedConnected": "已连接",
+    "pairedOffline": "未连接",
+    "pairedVersion": "扩展 {version}",
+    "driveLabel": "允许代理在此操作",
+    "driveAria": "允许代理在 {name} 中操作",
+    "driveConfirmTitle": "允许代理在这个浏览器中操作？",
+    "driveConfirmDescription": "从 {name} 以“在此浏览器中操作”发起的对话中，代理将能在那里打开页面、点击、输入并读取你已登录的标签页。扩展在每个新网站上操作前仍会先询问，你随时可以停止或接管。",
+    "driveConfirm": "允许",
+    "driveConfirmCancel": "取消"
   },
   "workspaceRoots": {
     "description": "该主机允许已连接客户端打开的目录，其余一律拒绝。",

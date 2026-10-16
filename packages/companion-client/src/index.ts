@@ -15,7 +15,12 @@ export {
   utf8ByteLength,
 } from "./base64url"
 export { clipToBytes, type ClippedText } from "./clip-to-bytes"
-export { CompanionApiError, companionErrorCode, expectCompanionJson } from "./errors"
+export {
+  CompanionApiError,
+  companionErrorCode,
+  companionRetryAfterMs,
+  expectCompanionJson,
+} from "./errors"
 export {
   isProblem,
   parseProblem,

@@ -5329,6 +5329,230 @@
       "outputTyped": true
     },
     {
+      "name": "browser_attachment_upload_abort",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "browser.submit",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "browser_attachment_upload_abort (browser.submit)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_attachment_upload_chunk",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "browser.submit",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "browser_attachment_upload_chunk (browser.submit)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId",
+          "offset",
+          "dataBase64"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Where this chunk starts. Must equal the bytes the host already holds; a chunk entirely below the write head is a no-op, so a retry after a lost response is safe."
+          },
+          "dataBase64": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Chunk payload, base64, sized from the init response's chunkSize."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "lib/browser-companion/attachments.ts writeBrowserAttachmentChunk",
+        "required": [
+          "receivedBytes"
+        ],
+        "properties": {
+          "receivedBytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_attachment_upload_commit",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "browser.submit",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "browser_attachment_upload_commit (browser.submit)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "lib/browser-companion/attachments.ts commitBrowserAttachmentUpload",
+        "required": [
+          "attachmentId"
+        ],
+        "properties": {
+          "attachmentId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_attachment_upload_init",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "browser.submit",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "browser_attachment_upload_init (browser.submit)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "submissionId",
+          "name",
+          "mediaType",
+          "kind",
+          "size",
+          "hash"
+        ],
+        "properties": {
+          "submissionId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The submission this attachment will ride. The host stages the upload under it and refuses to attach it to any other."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "image/png",
+              "image/jpeg",
+              "image/webp",
+              "application/pdf"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "screenshot",
+              "pdf",
+              "image"
+            ]
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10485760
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "lib/browser-companion/attachments.ts initBrowserAttachmentUpload",
+        "required": [
+          "uploadId",
+          "chunkSize",
+          "receivedBytes"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "chunkSize": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "receivedBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attachmentId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "browser_back",
       "category": "development",
       "resource": "browser",
@@ -5525,6 +5749,30 @@
               "requestBytes": {
                 "type": "integer",
                 "minimum": 1
+              },
+              "articleBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "transcriptBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxPages": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "totalContextBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxAttachments": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "attachmentBytes": {
+                "type": "integer",
+                "minimum": 1
               }
             },
             "additionalProperties": false
@@ -5536,9 +5784,31 @@
               "enum": [
                 "metadata",
                 "selection",
-                "readable-page"
+                "readable-page",
+                "article"
               ]
             }
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "article",
+                "markdown-selection",
+                "metadata",
+                "transcript",
+                "link-image",
+                "multi-page",
+                "attachments",
+                "list-paging",
+                "device-socket",
+                "browser-agent"
+              ]
+            }
+          },
+          "driveAllowed": {
+            "type": "boolean"
           },
           "workspaces": {
             "type": "array",
@@ -5586,7 +5856,8 @@
                     "session",
                     "template",
                     "issue",
-                    "agent-task"
+                    "agent-task",
+                    "browser-agent"
                   ]
                 },
                 "label": {
@@ -5889,6 +6160,11 @@
             "type": "string",
             "minLength": 1,
             "description": "The nextPageToken of the previous page, handed back unchanged."
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Case-insensitive match on a submission's title and source host."
           }
         },
         "additionalProperties": false
@@ -5942,8 +6218,17 @@
                   "enum": [
                     "metadata",
                     "selection",
-                    "readable-page"
+                    "readable-page",
+                    "article"
                   ]
+                },
+                "pageCount": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "attachmentCount": {
+                  "type": "integer",
+                  "minimum": 1
                 },
                 "status": {
                   "type": "string",
@@ -5971,6 +6256,10 @@
               },
               "additionalProperties": false
             }
+          },
+          "nextPageToken": {
+            "type": "string",
+            "minLength": 1
           },
           "capabilityRevision": {
             "type": "string",
@@ -6138,7 +6427,8 @@
                 "enum": [
                   "metadata",
                   "selection",
-                  "readable-page"
+                  "readable-page",
+                  "article"
                 ]
               },
               "url": {
@@ -6166,6 +6456,13 @@
                   },
                   "truncated": {
                     "type": "boolean"
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "plain",
+                      "markdown"
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -6188,12 +6485,464 @@
                   "originalCharacterCount": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "plain",
+                      "markdown"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "article": {
+                "type": "object",
+                "required": [
+                  "text",
+                  "truncated",
+                  "originalCharacterCount"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 131072
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  },
+                  "originalCharacterCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "plain",
+                      "markdown"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "metadata": {
+                "type": "object",
+                "properties": {
+                  "byline": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "publishedAt": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "siteName": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "lang": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "canonicalUrl": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "kind": {
+                    "type": "string",
+                    "maxLength": 2048
+                  }
+                },
+                "additionalProperties": false
+              },
+              "transcript": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "status",
+                      "text",
+                      "truncated"
+                    ],
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "const": "available"
+                      },
+                      "text": {
+                        "type": "string",
+                        "maxLength": 131072
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      },
+                      "language": {
+                        "type": "string",
+                        "maxLength": 35
+                      },
+                      "autoGenerated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "status",
+                      "reason"
+                    ],
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "const": "unavailable"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "enum": [
+                          "no_captions",
+                          "not_a_video",
+                          "fetch_failed"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "link": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 2048
+                  }
+                },
+                "additionalProperties": false
+              },
+              "image": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "alt": {
+                    "type": "string",
+                    "maxLength": 2048
                   }
                 },
                 "additionalProperties": false
               }
             },
             "additionalProperties": false
+          },
+          "additionalContexts": {
+            "type": "array",
+            "maxItems": 9,
+            "items": {
+              "type": "object",
+              "required": [
+                "schemaVersion",
+                "captureMode",
+                "url",
+                "title",
+                "capturedAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "captureMode": {
+                  "type": "string",
+                  "enum": [
+                    "metadata",
+                    "selection",
+                    "readable-page",
+                    "article"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                "capturedAt": {
+                  "type": "integer"
+                },
+                "selection": {
+                  "type": "object",
+                  "required": [
+                    "text",
+                    "truncated"
+                  ],
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 32768
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "format": {
+                      "type": "string",
+                      "enum": [
+                        "plain",
+                        "markdown"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "readableText": {
+                  "type": "object",
+                  "required": [
+                    "text",
+                    "truncated",
+                    "originalCharacterCount"
+                  ],
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 131072
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "originalCharacterCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "format": {
+                      "type": "string",
+                      "enum": [
+                        "plain",
+                        "markdown"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "article": {
+                  "type": "object",
+                  "required": [
+                    "text",
+                    "truncated",
+                    "originalCharacterCount"
+                  ],
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 131072
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "originalCharacterCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "format": {
+                      "type": "string",
+                      "enum": [
+                        "plain",
+                        "markdown"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "byline": {
+                      "type": "string",
+                      "maxLength": 2048
+                    },
+                    "publishedAt": {
+                      "type": "string",
+                      "maxLength": 2048
+                    },
+                    "siteName": {
+                      "type": "string",
+                      "maxLength": 2048
+                    },
+                    "lang": {
+                      "type": "string",
+                      "maxLength": 2048
+                    },
+                    "description": {
+                      "type": "string",
+                      "maxLength": 2048
+                    },
+                    "canonicalUrl": {
+                      "type": "string",
+                      "maxLength": 2048
+                    },
+                    "kind": {
+                      "type": "string",
+                      "maxLength": 2048
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "transcript": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "text",
+                        "truncated"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "available"
+                        },
+                        "text": {
+                          "type": "string",
+                          "maxLength": 131072
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        },
+                        "language": {
+                          "type": "string",
+                          "maxLength": 35
+                        },
+                        "autoGenerated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "reason"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "unavailable"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "no_captions",
+                            "not_a_video",
+                            "fetch_failed"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "link": {
+                  "type": "object",
+                  "required": [
+                    "url"
+                  ],
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "text": {
+                      "type": "string",
+                      "maxLength": 2048
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "image": {
+                  "type": "object",
+                  "required": [
+                    "url"
+                  ],
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "alt": {
+                      "type": "string",
+                      "maxLength": 2048
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "More pages in the same submission (ADR-0228), in the order the user arranged them."
+          },
+          "attachments": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "required": [
+                "attachmentId",
+                "kind"
+              ],
+              "properties": {
+                "attachmentId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "screenshot",
+                    "pdf",
+                    "image"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "Attachments staged with browser_attachment_upload_* under this submission id."
+          },
+          "browserAgent": {
+            "type": "object",
+            "required": [
+              "tabId"
+            ],
+            "properties": {
+              "tabId": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false,
+            "description": "For a browser-agent target: the extension's id for the tab the agent starts on."
           }
         },
         "additionalProperties": false
@@ -87121,5 +87870,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "ebf21161fdd6451b0e5019ca7ae6df27a001662b1084126311a6b15c3d5ef277"
+  "catalogHash": "89cec7fd1f1b6a70a251001b2141fe4fba27088da30acf4e5d4d700dfb1d06e5"
 }

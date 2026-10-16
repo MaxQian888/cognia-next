@@ -104,7 +104,21 @@ export interface DeliveryTargetDeps {
    * refuse, or worse, silently recreate.
    */
   existingSessionIds: (sessionIds: readonly string[]) => Promise<ReadonlySet<string>>
+  /**
+   * Whether this browser may be driven (`browser.drive`) and is connected on
+   * its device socket right now (ADR-0228 §5). Absent on a Host that cannot be
+   * driven. Both must hold before "act in this browser" is offered: a target
+   * that starts a conversation whose every tool call answers "offline" is a
+   * worse answer than not offering it.
+   */
+  driveStatus?: (deviceId: string) => Promise<{ allowed: boolean; connected: boolean }>
 }
+
+/** The one `browser-agent` target: a new conversation that acts in this browser. */
+export const BROWSER_AGENT_TARGET_ID = "browser-agent:new"
+
+/** English fallback; a Cognia panel renders its own translation for the kind. */
+export const BROWSER_AGENT_LABEL = "Act in this browser"
 
 /** `template:<id>` — the id form, in one place so the reader and writer agree. */
 export function templateTargetId(templateId: string): string {
@@ -170,6 +184,15 @@ export async function listDeliveryTargets(
     { id: NEW_CHAT_TARGET_ID, kind: "chat", label: NEW_CHAT_LABEL, isDefault: true },
   ]
   if (!deviceId) return targets
+  const drive = deps.driveStatus ? await deps.driveStatus(deviceId) : null
+  if (drive?.allowed && drive.connected) {
+    targets.push({
+      id: BROWSER_AGENT_TARGET_ID,
+      kind: "browser-agent",
+      label: BROWSER_AGENT_LABEL,
+      isDefault: false,
+    })
+  }
   const rows = await deps.listSubmissions(deviceId, SESSION_TARGET_SCAN)
   // One candidate per conversation, newest row first. Every append to a task
   // writes another row naming the same session, so a task somebody kept
@@ -299,4 +322,9 @@ export function agentIdOfTarget(target: BrowserDeliveryTargetV1): string | undef
   if (target.kind !== "agent-task") return undefined
   const agentId = target.id.slice("agent-task:".length)
   return agentId.length > 0 ? agentId : undefined
+}
+
+/** Whether a target starts a conversation that acts in the submitting browser. */
+export function isBrowserAgentTarget(target: BrowserDeliveryTargetV1): boolean {
+  return target.kind === "browser-agent" && target.id === BROWSER_AGENT_TARGET_ID
 }

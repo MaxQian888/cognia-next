@@ -25,6 +25,7 @@ export const BROWSER_OPEN_BACKENDS = [
   "local-chromium",
   "user-chrome",
   "remote-chromium",
+  "extension",
 ] as const
 
 /** The user browsers `browser_open` can attach to with `backend: "user-chrome"`. */
@@ -71,7 +72,7 @@ export const BROWSER_TOOL_DEFINITIONS = {
   browser_open: def({
     name: "browser_open",
     description:
-      'Show the browser pane and/or choose the browser backend for this chat. backend: "auto" (default routing: localhost → embedded preview, public sites → local Chromium once installed), "embedded" (the in-app webview), "local-chromium" (Cognia\'s own Chromium: tabs, downloads, extensions, PDF, emulation), "user-chrome" (attach to the user\'s running Chrome/Edge/Brave — the user must allow the connection in their browser; pass `browser`), "remote-chromium" (the cloud browser). Optional `url` navigates after switching and returns a fresh snapshot.',
+      'Show the browser pane and/or choose the browser backend for this chat. backend: "auto" (default routing: localhost → embedded preview, public sites → local Chromium once installed), "embedded" (the in-app webview), "local-chromium" (Cognia\'s own Chromium: tabs, downloads, extensions, PDF, emulation), "user-chrome" (attach to the user\'s running Chrome/Edge/Brave — the user must allow the connection in their browser; pass `browser`), "remote-chromium" (the cloud browser), "extension" (the user\'s own browser through the Cognia browser extension — only in a conversation the user started from the extension\'s side panel with agent mode; no PDF printing, emulation, request bodies or password autofill there). Optional `url` navigates after switching and returns a fresh snapshot.',
     parametersSchema: {
       type: "object",
       properties: {

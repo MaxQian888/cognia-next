@@ -17,6 +17,7 @@ import {
 } from "@/lib/browser/downloads-client"
 import type { BrowserExtension } from "@/lib/browser/extensions-client"
 import { isUserChromeBrowser, localBrowser } from "@/lib/browser/local-client"
+import { extensionBindingFor, extensionEngineFor } from "@/lib/browser/extension-engine"
 import { LocalChromiumEngine, type LocalEngineBackend } from "@/lib/browser/local-chromium-engine"
 import { fillCredential, type CredentialFillReason } from "@/lib/browser/passwords"
 import {
@@ -149,7 +150,13 @@ export interface EvaluateOptions {
 }
 
 /** The engine-level backend names (the router's `EngineRoute.backend`). */
-export type BrowserEngineBackend = "embedded" | "local-chromium" | "user-chrome" | "remote-chromium"
+export type BrowserEngineBackend =
+  | "embedded"
+  | "local-chromium"
+  | "user-chrome"
+  | "remote-chromium"
+  /** The user's own browser through the Browser Companion extension (ADR-0228 §6). */
+  | "extension"
 
 export interface BrowserPdfOptions {
   /** Page to print; defaults to the active page. */
@@ -817,7 +824,7 @@ export interface EngineRoute {
 }
 
 export type EngineBackendPreference =
-  "auto" | "embedded" | "remote-chromium" | "local-chromium" | "user-chrome"
+  "auto" | "embedded" | "remote-chromium" | "local-chromium" | "user-chrome" | "extension"
 
 export interface EngineRoutingContext {
   hostProfile?: HostProfile
@@ -1058,6 +1065,15 @@ function userChromeRoute(tier: TrustTier): EngineRoute {
   return { engine, backend: "user-chrome", tier, untrusted: tier === "public" }
 }
 
+function extensionRoute(tier: TrustTier, chatSessionId: string | undefined): EngineRoute {
+  return {
+    engine: extensionEngineFor(chatSessionId),
+    backend: "extension",
+    tier,
+    untrusted: tier === "public",
+  }
+}
+
 function localChromiumRoute(tier: TrustTier, chatSessionId: string | undefined): EngineRoute {
   return {
     engine: ownedPageEngine(agentPageOwner(chatSessionId)),
@@ -1128,6 +1144,10 @@ export function routeEngine(url: string, context: EngineRoutingContext = {}): En
         "browser_feature_unsupported",
         "No session is attached to your Chrome. Open the browser pane, choose “Your Chrome”, and allow the connection in Chrome."
       )
+    case "extension":
+      // Refuses, with the remedy, when the conversation is not bound to a
+      // paired browser.
+      return extensionRoute(tier, context.chatSessionId)
     case "auto":
     default:
       break
@@ -1135,6 +1155,11 @@ export function routeEngine(url: string, context: EngineRoutingContext = {}): En
 
   if (profile === "cloud-companion" || profile === "mobile-companion" || profile === "headless") {
     return remoteRoute()
+  }
+  // A conversation the user started from the extension's "let Cognia act in
+  // this browser" acts there, whatever the URL: that is what they asked for.
+  if (extensionBindingFor(context.chatSessionId)) {
+    return extensionRoute(tier, context.chatSessionId)
   }
   // The user chose their own Chrome in the pane: drive what they see.
   if (paneLocalEngine) return userChromeRoute(tier)

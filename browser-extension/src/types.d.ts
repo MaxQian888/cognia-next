@@ -6,3 +6,10 @@
  * it because the import is ours, not an entrypoint's.
  */
 declare module "*.css"
+
+/**
+ * The embedded engine's overlay (`lib/browser/overlay.injected.js`), aliased in
+ * wxt.config.ts. A self-installing script with no exports; imported for its
+ * side effect only.
+ */
+declare module "@cognia-overlay"

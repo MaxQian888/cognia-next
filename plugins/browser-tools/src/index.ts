@@ -302,7 +302,10 @@ function paneBackend(choice: BackendChoice) {
   switch (choice) {
     case "remote-chromium":
       return "remote" as const
+    // The user's own browser is the pane: there is nothing for the in-app
+    // browser to show, and switching it would hide the conversation's own tabs.
     case "auto":
+    case "extension":
       return undefined
     default:
       return choice

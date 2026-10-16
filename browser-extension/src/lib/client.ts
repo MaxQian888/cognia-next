@@ -15,6 +15,11 @@ import {
   decodeBrowserEnrollmentPayload,
   expectCompanionJson,
   signerFromCryptoKey,
+  type BrowserAttachmentUploadChunkRequestV1,
+  type BrowserAttachmentUploadChunkResponseV1,
+  type BrowserAttachmentUploadCommitResponseV1,
+  type BrowserAttachmentUploadInitRequestV1,
+  type BrowserAttachmentUploadInitResponseV1,
   type BrowserCompanionCapabilityV1,
   type BrowserContextResultV1,
   type BrowserContextSubmissionStatusV1,
@@ -147,7 +152,19 @@ export async function pairWithHost({
   }
 }
 
-/** The six calls the panel makes, over one authenticated session. */
+/** Paging and search for the recent list (ADR-0228 §4). */
+export interface ListOptions {
+  limit?: number
+  /** `nextPageToken` from the previous page. */
+  pageToken?: string
+  /** Case-insensitive match on title and host. */
+  query?: string
+}
+
+/**
+ * The calls the panel and the service worker make, over one authenticated
+ * session.
+ */
 export interface HostClient {
   /**
    * What the Host can do, and how it looks.
@@ -174,7 +191,7 @@ export interface HostClient {
     request: BrowserContextSubmitRequestV1,
     options?: { idempotencyKey?: string }
   ): Promise<BrowserContextSubmitResponseV1>
-  list(limit?: number): Promise<BrowserContextSubmissionSummaryPageV1>
+  list(options?: ListOptions): Promise<BrowserContextSubmissionSummaryPageV1>
   /**
    * One submission, by id.
    *
@@ -194,8 +211,39 @@ export interface HostClient {
    * rather than reporting a failure the user cannot act on from here.
    */
   cancel(submissionId: string): Promise<BrowserContextSubmissionStatusV1>
+  /** Stage an attachment for a submission (ADR-0228 §3). */
+  uploadInit(
+    request: BrowserAttachmentUploadInitRequestV1
+  ): Promise<BrowserAttachmentUploadInitResponseV1>
+  uploadChunk(
+    request: BrowserAttachmentUploadChunkRequestV1
+  ): Promise<BrowserAttachmentUploadChunkResponseV1>
+  uploadCommit(uploadId: string): Promise<BrowserAttachmentUploadCommitResponseV1>
+  uploadAbort(uploadId: string): Promise<void>
+  /**
+   * A single-use ticket for the device socket (ADR-0228 §5). Spent by the
+   * WebSocket upgrade within its lifetime; a fresh one per connection.
+   */
+  socketTicket(): Promise<{ ticket: string; expiresIn: number }>
   invalidate(): void
 }
+
+/**
+ * Commands that declare `idempotency: required` and take a fresh key per call.
+ *
+ * `cancel`: a person may stop the same task twice, and replaying the first
+ * receipt would make the second press do nothing while reporting success. The
+ * upload steps: each is already idempotent at the Host by its own arguments —
+ * the upload id, the byte offset — so a fresh key costs nothing and a reused
+ * one would replay a receipt for a different chunk.
+ */
+const FRESH_KEY_COMMANDS = new Set([
+  "browser_context_cancel",
+  "browser_attachment_upload_init",
+  "browser_attachment_upload_chunk",
+  "browser_attachment_upload_commit",
+  "browser_attachment_upload_abort",
+])
 
 export interface HostClientOptions {
   pairing: PairingRecord
@@ -231,11 +279,8 @@ export function createHostClient({
     if (command === "browser_context_submit" && typeof args.submissionId === "string") {
       headers["Idempotency-Key"] = idempotencyKey ?? args.submissionId
     }
-    // `cancel` declares `idempotency: required` too, and the Host parses the
-    // header as a UUID. A fresh one per press rather than the submission id: a
-    // person may stop the same task twice, and replaying the first receipt
-    // would make the second press do nothing while reporting success.
-    if (command === "browser_context_cancel") {
+    // The Host parses the header as a UUID; see FRESH_KEY_COMMANDS.
+    if (FRESH_KEY_COMMANDS.has(command)) {
       headers["Idempotency-Key"] = crypto.randomUUID()
     }
     const body = await expectCompanionJson(
@@ -260,17 +305,52 @@ export function createHostClient({
         request as unknown as Record<string, unknown>,
         options?.idempotencyKey
       ),
-    list: (limit) =>
-      call<BrowserContextSubmissionSummaryPageV1>(
-        "browser_context_list",
-        limit ? { pageSize: limit } : {}
-      ),
+    list: (options = {}) =>
+      call<BrowserContextSubmissionSummaryPageV1>("browser_context_list", {
+        ...(options.limit ? { pageSize: options.limit } : {}),
+        ...(options.pageToken ? { pageToken: options.pageToken } : {}),
+        ...(options.query?.trim() ? { query: options.query.trim() } : {}),
+      }),
     get: (submissionId) =>
       call<BrowserContextSubmissionStatusV1>("browser_context_get", { submissionId }),
     result: (submissionId) =>
       call<BrowserContextResultV1>("browser_context_result", { submissionId }),
     cancel: (submissionId) =>
       call<BrowserContextSubmissionStatusV1>("browser_context_cancel", { submissionId }),
+    uploadInit: (request) =>
+      call<BrowserAttachmentUploadInitResponseV1>(
+        "browser_attachment_upload_init",
+        request as unknown as Record<string, unknown>
+      ),
+    uploadChunk: (request) =>
+      call<BrowserAttachmentUploadChunkResponseV1>(
+        "browser_attachment_upload_chunk",
+        request as unknown as Record<string, unknown>
+      ),
+    uploadCommit: (uploadId) =>
+      call<BrowserAttachmentUploadCommitResponseV1>("browser_attachment_upload_commit", {
+        uploadId,
+      }),
+    uploadAbort: async (uploadId) => {
+      await call<unknown>("browser_attachment_upload_abort", { uploadId })
+    },
+    socketTicket: async () => {
+      const path = "/api/auth/socket-ticket"
+      const body = await expectCompanionJson(
+        fetchImpl(`${pairing.baseUrl}${path}`, {
+          method: "POST",
+          headers: {
+            ...(await session.authorizationHeaders("POST", path)),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ channel: "browser-companion" }),
+        })
+      )
+      if (typeof body.ticket !== "string" || typeof body.expiresIn !== "number") {
+        throw new Error("socket ticket response is malformed")
+      }
+      return { ticket: body.ticket, expiresIn: body.expiresIn }
+    },
     invalidate: () => session.invalidate(),
   }
 }

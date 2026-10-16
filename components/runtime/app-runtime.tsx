@@ -37,6 +37,7 @@ import { WindowTitleInitializer } from "@/components/providers/initializers/wind
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
 import { SessionFocusInitializer } from "@/components/providers/initializers/session-focus-initializer"
 import { DockPagesLifecycleInitializer } from "@/components/providers/initializers/dock-pages-lifecycle-initializer"
+import { BrowserCompanionAgentInitializer } from "@/components/providers/initializers/browser-companion-agent-initializer"
 import { AppShortcutDispatcher } from "@/components/providers/app-shortcut-dispatcher"
 import { DeferredBootInitializers } from "@/components/providers/initializers/deferred-boot-initializers"
 import { BootCapabilityRouteActivator } from "@/components/providers/initializers/boot-capability-route-activator"
@@ -294,6 +295,7 @@ export function AppRuntime({ children }: { children: React.ReactNode }) {
                             {/* The chat dock's page tabs: a conversation's pages
                              * follow it into the background and back (ADR-0214). */}
                             <DockPagesLifecycleInitializer />
+                            <BrowserCompanionAgentInitializer />
                             {/* Single keydown listener for all rebindable in-app
                              * (renderer-scope) shortcuts. Reads the context-key
                              * store, so it mounts after ContextKeysInitializer. */}

@@ -484,7 +484,18 @@
     "historyClearConfirm": "Clear",
     "historyClearConfirmDescription": "{count, plural, one {# recorded submission} other {# recorded submissions}} will be deleted from this computer. The conversations, issues and tasks they started stay where they are. This cannot be undone.",
     "historyClearConfirmTitle": "Clear recorded submissions?",
-    "requiresRestart": "Browser access is on, but its listener is not running yet. Restart the Companion server from Connectivity → Local host, then generate a code."
+    "requiresRestart": "Browser access is on, but its listener is not running yet. Restart the Companion server from Connectivity → Local host, then generate a code.",
+    "pairedLoadFailed": "Could not read the paired browsers.",
+    "pairedEmpty": "No browser is paired yet.",
+    "pairedConnected": "Connected",
+    "pairedOffline": "Not connected",
+    "pairedVersion": "Extension {version}",
+    "driveLabel": "Let agents act here",
+    "driveAria": "Let agents act in {name}",
+    "driveConfirmTitle": "Let agents act in this browser?",
+    "driveConfirmDescription": "Agents in conversations started from {name} with “Act in this browser” will be able to open pages, click, type and read your signed-in tabs there. The extension still asks before acting on each new site, and you can stop or take over at any time.",
+    "driveConfirm": "Allow",
+    "driveConfirmCancel": "Cancel"
   },
   "workspaceRoots": {
     "description": "Folders this Host lets a connected client open. Everything else is refused.",

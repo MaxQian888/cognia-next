@@ -449,6 +449,71 @@ export function sniffImageMediaType(bytes: Uint8Array): string | null {
   return null
 }
 
+/**
+ * An upload's metadata, without its bytes, or `null` when there is none.
+ *
+ * For a caller that scopes ownership more narrowly than the device id the row
+ * was written under — the Browser Companion stages under the Host's own
+ * caller and keys each row to the browser by its placeholder session.
+ */
+export async function readAttachmentUploadMeta(
+  uploadId: string
+): Promise<Omit<SessionAttachmentUploadRow, "bytes"> | null> {
+  const row = await getDb().sessionAttachmentUploads.get(uploadId)
+  if (!row) return null
+  const { bytes: _bytes, ...meta } = row
+  return meta
+}
+
+/**
+ * Move committed uploads from the session they were staged under to the one
+ * they will be sent into.
+ *
+ * For a staging that happens before its conversation exists (ADR-0228 §3): a
+ * browser uploads a screenshot while the Host has not yet created the session
+ * its submission will open. Every row must be this device's, committed, not yet
+ * consumed, and staged under `fromSessionId` — or already moved to
+ * `toSessionId`, which is what a redrive of the same submission finds. Anything
+ * else refuses the whole move as `attachment_not_found`, the same answer a
+ * foreign or missing id gets.
+ */
+export async function rebindAttachmentUploads(input: {
+  uploadIds: readonly string[]
+  deviceId: string
+  fromSessionId: string
+  toSessionId: string
+  now?: number
+}): Promise<Omit<SessionAttachmentUploadRow, "bytes">[]> {
+  const now = input.now ?? Date.now()
+  const db = getDb()
+  return db.transaction("rw", db.sessionAttachmentUploads, async () => {
+    const moved: Omit<SessionAttachmentUploadRow, "bytes">[] = []
+    for (const uploadId of input.uploadIds) {
+      const row = await db.sessionAttachmentUploads.get(uploadId)
+      if (
+        !row ||
+        row.deviceId !== input.deviceId ||
+        row.status !== "committed" ||
+        row.consumedAt !== undefined ||
+        readStoredBytes(row.bytes) === undefined ||
+        (row.sessionId !== input.fromSessionId && row.sessionId !== input.toSessionId)
+      ) {
+        throw new AttachmentUploadError("attachment_not_found")
+      }
+      if (row.sessionId !== input.toSessionId) {
+        await db.sessionAttachmentUploads.update(uploadId, {
+          sessionId: input.toSessionId,
+          updatedAt: now,
+          expiresAt: now + ATTACHMENT_OBJECT_TTL_MS,
+        })
+      }
+      const { bytes: _bytes, ...meta } = row
+      moved.push({ ...meta, sessionId: input.toSessionId })
+    }
+    return moved
+  })
+}
+
 /** Drop an upload the client gave up on. Idempotent, and scoped to its owner. */
 export async function abortAttachmentUpload(input: {
   uploadId: string

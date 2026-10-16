@@ -18,6 +18,10 @@ describe("browser companion command surface", () => {
     // because the dispatch binding and the caller-id injection both key off
     // it. A mismatch would leave one of them reading an unbound account.
     expect([...BROWSER_COMPANION_COMMANDS].sort()).toEqual([
+      "browser_attachment_upload_abort",
+      "browser_attachment_upload_chunk",
+      "browser_attachment_upload_commit",
+      "browser_attachment_upload_init",
       "browser_companion_capability",
       "browser_context_cancel",
       "browser_context_get",
@@ -38,7 +42,7 @@ describe("browser companion command surface", () => {
 })
 
 describe("the Rust and TypeScript command lists agree", () => {
-  it("lists the same six names on both sides", async () => {
+  it("lists the same names on both sides", async () => {
     const { readFile } = await import("node:fs/promises")
     const source = await readFile("src-tauri/src/companion_api/rpc.rs", "utf8")
     const block = source.slice(source.indexOf("pub(super) const BROWSER_COMPANION_COMMANDS"))

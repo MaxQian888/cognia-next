@@ -1245,19 +1245,24 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_session_get",
     "browser_capability",
     "browser_runtime_status",
-    // Browser Companion (ADR-0154) — the extension's whole surface. Six
-    // commands, two of which write (`browser_context_submit` and
-    // `browser_context_cancel`); those two are the ones excluded from
-    // `READ_ONLY_COMMANDS` and gated by the browser-access kill switch. The
-    // dispatch arm lives in `rpc/data_sync.rs`; the decisions live in TypeScript
-    // (`lib/browser-companion/service.ts`), because the submit path creates a
-    // session and enqueues a turn.
+    // Browser Companion (ADR-0154, ADR-0228) — the extension's whole RPC
+    // surface. The writes (`browser_context_submit`, `browser_context_cancel`
+    // and the four `browser_attachment_upload_*` that stage a submission's
+    // attachments) are the ones excluded from `READ_ONLY_COMMANDS` and gated by
+    // the browser-access kill switch. The dispatch arm lives in
+    // `rpc/data_sync.rs`; the decisions live in TypeScript
+    // (`lib/browser-companion/`), because the submit path creates a session and
+    // enqueues a turn.
     "browser_companion_capability",
     "browser_context_submit",
     "browser_context_list",
     "browser_context_get",
     "browser_context_result",
     "browser_context_cancel",
+    "browser_attachment_upload_init",
+    "browser_attachment_upload_chunk",
+    "browser_attachment_upload_commit",
+    "browser_attachment_upload_abort",
     "browser_session_close",
     "browser_profile_delete",
     "browser_navigate",
@@ -2201,7 +2206,7 @@ pub(crate) use super::workspace_access::device_can_control;
 /// Commands whose TS dispatch arm needs the authenticated caller's device id
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
 /// exactly these names — see [`inject_caller_device_id`].
-/// The Browser Companion's six commands.
+/// The Browser Companion's commands.
 ///
 /// Named once so the dispatch binding and the caller-id injection cannot
 /// disagree about which commands are the extension's — a mismatch would leave
@@ -2213,6 +2218,10 @@ pub(super) const BROWSER_COMPANION_COMMANDS: &[&str] = &[
     "browser_context_get",
     "browser_context_result",
     "browser_context_cancel",
+    "browser_attachment_upload_init",
+    "browser_attachment_upload_chunk",
+    "browser_attachment_upload_commit",
+    "browser_attachment_upload_abort",
 ];
 
 const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
@@ -2344,6 +2353,10 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "browser_context_get",
     "browser_context_result",
     "browser_context_cancel",
+    "browser_attachment_upload_init",
+    "browser_attachment_upload_chunk",
+    "browser_attachment_upload_commit",
+    "browser_attachment_upload_abort",
     "workflow_trigger_manual",
     "workflow_handoff_create",
     "device_capabilities_report",

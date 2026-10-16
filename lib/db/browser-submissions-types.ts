@@ -94,6 +94,14 @@ export interface BrowserSubmissionRow {
    */
   targetId?: string
   captureMode: BrowserCaptureMode
+  /**
+   * Pages in the submission, when more than one (ADR-0228 §2). Absent means
+   * one, which is every row written before multi-page existed. Not indexed,
+   * so adding it needed no schema change.
+   */
+  pageCount?: number
+  /** Attachments the submission carried, when any (ADR-0228 §3). */
+  attachmentCount?: number
   /** Bytes of page content sent, for the local diagnostics line. */
   contentBytes: number
   /** Whether anything was cut to fit, so the record does not overstate itself. */

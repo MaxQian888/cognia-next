@@ -12,10 +12,40 @@
  * `#imports`. The entrypoints under `src/app` do, and pass the real thing in.
  */
 
+import type { BrowserTranscriptV1 } from "@cognia/companion-client"
+import type { SiteAnswer } from "./agent/site-permissions"
+import type { PageCapture, PageCaptureOptions } from "./capture/page-capture"
+
 export interface TabRef {
   id: number
   url: string
   title: string
+  /** The window the tab is in; a visible-area capture is per window. */
+  windowId?: number
+}
+
+/** Optional permissions the panel asks for inside the person's click. */
+export interface PermissionRequest {
+  permissions?: ("tabs" | "notifications" | "downloads" | "cookies")[]
+  origins?: string[]
+}
+
+/** A scroll position and the page's size, for a full-page screenshot. */
+export interface ScrollMetrics {
+  scrollHeight: number
+  viewportHeight: number
+  viewportWidth: number
+  scrollY: number
+  dpr: number
+}
+
+/** The port the side panel holds open to the worker while it is open. */
+export const PANEL_PORT = "cognia-panel"
+
+/** The open port to the service worker; closing the panel closes it. */
+export interface PanelPort {
+  post(message: { kind: "refresh-status" }): void
+  disconnect(): void
 }
 
 export interface ExtractionResult {
@@ -37,8 +67,9 @@ export interface BrowserApi {
    * opens the active tab may be a different one — or the panel itself.
    */
   tabById(id: number): Promise<TabRef | null>
-  /** Run the extractor in `tabId` and return what it found. */
-  extract(tabId: number, wholePage: boolean): Promise<ExtractionResult>
+  capturePage(tabId: number, options: PageCaptureOptions): Promise<PageCapture>
+  /** MAIN world; resolves unavailable/not_a_video off YouTube. */
+  captureTranscript(tabId: number, preferredLanguage: string): Promise<BrowserTranscriptV1>
   /** Read a value from `chrome.storage.local`. */
   read<T>(key: string): Promise<T | null>
   /** Write a value to `chrome.storage.local`. */
@@ -66,6 +97,43 @@ export interface BrowserApi {
   openUrl(url: string): Promise<void>
   /** A localized message from `_locales`. */
   message(key: string, substitutions?: string[]): string
+
+  /** `chrome.storage.session` — memory only (ADR-0228 §8). */
+  readSession<T>(key: string): Promise<T | null>
+  writeSession(key: string, value: unknown): Promise<void>
+  removeSession(keys: string[]): Promise<void>
+  onSessionChange(key: string, listener: (value: unknown) => void): () => void
+
+  hasPermissions(request: PermissionRequest): Promise<boolean>
+  /** Must run inside a user gesture. */
+  requestPermissions(request: PermissionRequest): Promise<boolean>
+  removePermissions(request: PermissionRequest): Promise<boolean>
+
+  /** The tabs of the panel's window. Needs the optional `tabs` permission. */
+  listTabs(): Promise<TabRef[]>
+  /** The visible area of a window's active tab, as a PNG data URL. */
+  captureVisible(windowId: number): Promise<string>
+  /** Make a tab the active one in its window. */
+  activateTab(tabId: number): Promise<void>
+  scrollMetrics(tabId: number): Promise<ScrollMetrics>
+  /** Scroll to `y`; answers where the page actually landed. */
+  scrollTo(tabId: number, y: number): Promise<number>
+  /** Crop a capture, in device pixels; base64 PNG without the prefix. */
+  cropImage(
+    dataUrl: string,
+    rect: { x: number; y: number; width: number; height: number }
+  ): Promise<string>
+  /** Stack captures top to bottom, keeping the bottom `heights[i]` rows of each. */
+  stitchImages(dataUrls: string[], width: number, heights: number[]): Promise<string>
+  /** Fetch a URL's bytes from the extension (needs its origin granted). */
+  fetchBytes(url: string, maxBytes: number): Promise<{ bytes: Uint8Array; mediaType: string }>
+
+  /** Hold a port to the worker while the panel is open. */
+  connectPanel(): PanelPort
+  /** Answer a pending site question (ADR-0228 §7), inside the person's click. */
+  answerSiteQuestion(questionId: string, answer: SiteAnswer): Promise<void>
+  /** Forget a standing site decision. */
+  forgetSiteDecision(origin: string): Promise<void>
 }
 
 /**
@@ -73,10 +141,11 @@ export interface BrowserApi {
  *
  * `chrome.storage.local` is not a vault: it is readable by anything that can
  * read the profile directory. So it holds the public half of the pairing (the
- * base URL, the tenant, the device id), the appearance the Host last sent, and
- * one UI preference. The private key lives in IndexedDB as a non-extractable
- * `CryptoKey`; access tokens live in memory; captured page text lives in the
- * panel's React state and nowhere else.
+ * base URL, the tenant, the device id), the appearance the Host last sent, the
+ * person's preferences and the instructions they chose to save. The private key
+ * lives in IndexedDB as a non-extractable `CryptoKey`; access tokens live in
+ * memory; captured page text lives in the panel's React state and, for an
+ * unsent draft, in `chrome.storage.session` ({@link SESSION_KEYS}) — never here.
  */
 export const STORAGE_KEYS = {
   /** `{ baseUrl, tenantId, deviceId, extensionOrigin, pairedAt }`. */
@@ -89,6 +158,25 @@ export const STORAGE_KEYS = {
   pendingSubmission: "cognia.pending.v1",
   /** `follow-host` | `light` | `dark` — how the panel is themed. */
   appearanceOverride: "cognia.appearanceOverride.v1",
+  /** Notifications, agent mode and sites never to capture (`preferences.ts`). */
+  preferences: "cognia.preferences.v1",
+  /** The person's saved instructions — their own text, not page content. */
+  savedPrompts: "cognia.savedPrompts.v1",
+} as const
+
+/**
+ * Keys in `chrome.storage.session`: memory only, gone when the browser exits
+ * and never written to the profile (ADR-0228 §8). The unsent draft is the one
+ * place captured page content is kept outside the panel's React state, and
+ * this is why it may be.
+ */
+export const SESSION_KEYS = {
+  /** The unsent capture and its instruction (`drafts.ts`). */
+  draft: "cognia.draft.v1",
+  /** The device socket's state, written by the worker for the panel. */
+  socketState: "cognia.socketState.v1",
+  /** When the Host last said a submission moved; the panel refreshes on change. */
+  statusHint: "cognia.statusHint.v1",
 } as const
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS]

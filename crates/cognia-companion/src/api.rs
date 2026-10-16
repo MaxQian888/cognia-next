@@ -2133,6 +2133,9 @@ enum SocketChannel {
     Browser,
     Acp,
     Worker,
+    /// The Browser Companion's device socket (ADR-0228 §5).
+    #[serde(rename = "browser-companion")]
+    BrowserCompanion,
 }
 
 impl SocketChannel {
@@ -2142,6 +2145,9 @@ impl SocketChannel {
             Self::Terminal => "terminal.open",
             Self::Browser | Self::Acp => "agent.run",
             Self::Worker => "agent.worker",
+            // Status hints for the browser's own submissions. Operations on
+            // the same socket are gated per frame on `browser.drive`.
+            Self::BrowserCompanion => "browser.read-own",
         }
     }
 
@@ -2151,6 +2157,10 @@ impl SocketChannel {
             (Self::Terminal, None) => Ok(("/ws/terminal".to_string(), "terminal")),
             (Self::Acp, None) => Ok(("/ws/acp".to_string(), "acp")),
             (Self::Worker, None) => Ok(("/ws/worker".to_string(), "worker")),
+            (Self::BrowserCompanion, None) => Ok((
+                "/ws/browser-companion".to_string(),
+                "browser-companion",
+            )),
             (Self::Browser, Some(session_id)) if !session_id.is_empty() => {
                 Ok((format!("/ws/browser/{session_id}"), "browser"))
             }
@@ -2554,7 +2564,7 @@ fn store_error(error: SecurityStoreError) -> Problem {
         SecurityStoreError::CapabilityOutsideDeviceClass => api_error(
             StatusCode::FORBIDDEN,
             "capability_outside_device_class",
-            "a browser companion device can hold only browser.submit and browser.read-own",
+            "a browser companion device can hold only browser.submit, browser.read-own and browser.drive",
         ),
         SecurityStoreError::HostBindingMismatch => api_error(
             StatusCode::FORBIDDEN,
@@ -2908,6 +2918,16 @@ mod tests {
             ("/ws/worker".to_string(), "worker")
         );
         assert_eq!(SocketChannel::Worker.capability(), "agent.worker");
+        assert_eq!(
+            SocketChannel::BrowserCompanion.binding(None).unwrap(),
+            ("/ws/browser-companion".to_string(), "browser-companion")
+        );
+        assert_eq!(
+            SocketChannel::BrowserCompanion.capability(),
+            "browser.read-own"
+        );
+        let parsed: SocketChannel = serde_json::from_str("\"browser-companion\"").unwrap();
+        assert!(matches!(parsed, SocketChannel::BrowserCompanion));
     }
 
     /// A browser gets an untyped `error` event off a rejected WebSocket

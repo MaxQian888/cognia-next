@@ -219,6 +219,10 @@ pub(super) const COMMANDS: &[&str] = &[
     "browser_context_get",
     "browser_context_result",
     "browser_context_cancel",
+    "browser_attachment_upload_init",
+    "browser_attachment_upload_chunk",
+    "browser_attachment_upload_commit",
+    "browser_attachment_upload_abort",
     "perf_close_lease",
     "perf_hotspots",
     "perf_lease_snapshot",
@@ -1092,7 +1096,11 @@ pub(super) async fn dispatch(
         | "browser_context_list"
         | "browser_context_get"
         | "browser_context_result"
-        | "browser_context_cancel" => {
+        | "browser_context_cancel"
+        | "browser_attachment_upload_init"
+        | "browser_attachment_upload_chunk"
+        | "browser_attachment_upload_commit"
+        | "browser_attachment_upload_abort" => {
             // The kill switch, checked per request rather than only at boot.
             //
             // `BrowserAccessConfig.enabled` used to be read exactly once, when
@@ -1102,12 +1110,21 @@ pub(super) async fn dispatch(
             // `companion_browser_access_set` now mirrors the saved value into
             // the process-global this reads, so it takes effect immediately.
             //
-            // Only the write. The reads keep answering on purpose: a browser
-            // that already started tasks must still be able to see them and
-            // open them in Cognia, which is exactly what "leaving existing
-            // sessions reachable" means. They are also polled every few
-            // seconds, and this is a file read.
-            if matches!(name, "browser_context_submit" | "browser_context_cancel")
+            // Only the writes — a submission, a stop, and staging the
+            // attachments a submission will carry. The reads keep answering on
+            // purpose: a browser that already started tasks must still be able
+            // to see them and open them in Cognia, which is exactly what
+            // "leaving existing sessions reachable" means. They are also polled
+            // every few seconds, and this is a file read.
+            if matches!(
+                name,
+                "browser_context_submit"
+                    | "browser_context_cancel"
+                    | "browser_attachment_upload_init"
+                    | "browser_attachment_upload_chunk"
+                    | "browser_attachment_upload_commit"
+                    | "browser_attachment_upload_abort"
+            )
                 && !crate::companion_api::browser_access::submissions_enabled()
             {
                 return Err(RpcError::browser_submissions_disabled());
@@ -1147,6 +1164,14 @@ pub(super) async fn dispatch(
                 )
                 .await
                 .map_err(|error| map_desktop_write_bridge_error(name, error))?;
+            // A submission or a stop just changed this browser's list: hint its
+            // device socket (ADR-0228 §5) so a second panel or the badge sees
+            // it without waiting for a poll. Best-effort by design.
+            if matches!(name, "browser_context_submit" | "browser_context_cancel") {
+                if let Some(tenant_id) = tenant_id {
+                    crate::companion_api::ws_browser_companion::notify_status(tenant_id, device_id);
+                }
+            }
             Ok(bridged_page_result(name, paging, result))
         }
         "thread_handoff_offer"
@@ -1296,15 +1321,17 @@ fn wire_offset(offset: u64) -> Result<u32, (StatusCode, Json<RpcError>)> {
 }
 
 /// The bridged list arms that page, and the legacy member each answers its
-/// rows under. `browser_context_list` has no offset underneath, so it is one
-/// page and never issues a token. `pet_chat_list`, `files_library_list` and
+/// rows under. `browser_context_list` takes an offset (ADR-0228: the side
+/// panel's "load more" and search page through a device's ledger), so it
+/// issues a token whenever a page comes back full. `pet_chat_list`,
+/// `files_library_list` and
 /// `files_library_folder_list` are deliberately absent: their TS arms read
 /// `pageSize`/`pageToken` and issue their own tokens, so translating them here
 /// would page them twice.
 const BRIDGED_PAGED_ARMS: &[(&str, &str, bool)] = &[
     ("workflow_run_list", "runs", true),
     ("memory_list", "memories", false),
-    ("browser_context_list", "items", false),
+    ("browser_context_list", "items", true),
 ];
 
 struct BridgedPaging {
@@ -1561,14 +1588,36 @@ mod tests {
         );
         assert_eq!(refusal["ok"], false);
 
-        // browser_context_list keeps capabilityRevision beside the items.
+        // browser_context_list keeps capabilityRevision beside the items, and
+        // pages by offset (ADR-0228): a full page issues the next token, the
+        // search query passes through untouched.
+        let (args, paging) = bridged_page_args(
+            "browser_context_list",
+            serde_json::json!({ "pageSize": 2, "query": "docs" }),
+        )
+        .unwrap();
+        assert_eq!(args["limit"], 2);
+        assert_eq!(args["offset"], 0);
+        assert_eq!(args["query"], "docs");
+        let page = bridged_page_result(
+            "browser_context_list",
+            paging,
+            serde_json::json!({ "items": [1, 2], "capabilityRevision": "r1" }),
+        );
+        assert_eq!(page["capabilityRevision"], "r1");
+        assert_eq!(
+            page["nextPageToken"]
+                .as_str()
+                .map(super::super::super::paging::PageToken::decode),
+            Some(Ok(super::super::super::paging::PageToken::Offset(2)))
+        );
         let (_, paging) = bridged_page_args("browser_context_list", serde_json::json!({})).unwrap();
         let page = bridged_page_result(
             "browser_context_list",
             paging,
             serde_json::json!({ "items": [], "capabilityRevision": "r1" }),
         );
-        assert_eq!(page["capabilityRevision"], "r1");
+        assert!(page.get("nextPageToken").is_none());
 
         // A legacy spelling is refused before anything crosses the bridge.
         assert!(bridged_page_args("workflow_run_list", serde_json::json!({ "limit": 3 })).is_err());

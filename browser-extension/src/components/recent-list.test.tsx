@@ -169,4 +169,60 @@ describe("RecentList", () => {
     )
     expect(screen.getAllByRole("listitem")).toHaveLength(2)
   })
+
+  it("searches, and says when nothing matches rather than that nothing exists", () => {
+    const onQueryChange = jest.fn()
+    render(<RecentList api={makeApi()} items={[]} query="laptops" onQueryChange={onQueryChange} />)
+    expect(screen.getByTestId("recent-empty")).toHaveTextContent("recentNoMatch")
+    fireEvent.change(screen.getByTestId("recent-search"), { target: { value: "phones" } })
+    expect(onQueryChange).toHaveBeenCalledWith("phones")
+  })
+
+  it("loads another page when there is one", () => {
+    const onLoadMore = jest.fn()
+    const { rerender } = render(
+      <RecentList api={makeApi()} items={[item()]} hasMore onLoadMore={onLoadMore} />
+    )
+    fireEvent.click(screen.getByTestId("recent-load-more"))
+    expect(onLoadMore).toHaveBeenCalled()
+    rerender(
+      <RecentList api={makeApi()} items={[item()]} hasMore onLoadMore={onLoadMore} loadingMore />
+    )
+    expect(screen.getByTestId("recent-load-more")).toBeDisabled()
+    rerender(<RecentList api={makeApi()} items={[item()]} onLoadMore={onLoadMore} />)
+    expect(screen.queryByTestId("recent-load-more")).toBeNull()
+  })
+
+  it("renders an answer as Markdown and copies the Markdown", async () => {
+    const writeText = jest.fn(async () => undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    render(
+      <RecentList
+        api={makeApi()}
+        items={[item()]}
+        expanded={["sub-1"]}
+        answers={{ "sub-1": { text: "## Result\n\n- **cheap**" } }}
+      />
+    )
+    const answer = screen.getByTestId("recent-answer-sub-1")
+    expect(answer.querySelector("h4")?.textContent).toBe("Result")
+    expect(answer.querySelector("li strong")?.textContent).toBe("cheap")
+    fireEvent.click(screen.getByTestId("recent-answer-copy"))
+    expect(writeText).toHaveBeenCalledWith("## Result\n\n- **cheap**")
+  })
+
+  it("offers a follow-up only on rows whose conversation can take one", () => {
+    const onFollowUp = jest.fn()
+    render(
+      <RecentList
+        api={makeApi()}
+        items={[item(), item({ submissionId: "sub-2" })]}
+        followUpIds={["sub-2"]}
+        onFollowUp={onFollowUp}
+      />
+    )
+    expect(screen.queryByTestId("recent-follow-up-sub-1")).toBeNull()
+    fireEvent.click(screen.getByTestId("recent-follow-up-sub-2"))
+    expect(onFollowUp).toHaveBeenCalledWith(expect.objectContaining({ submissionId: "sub-2" }))
+  })
 })

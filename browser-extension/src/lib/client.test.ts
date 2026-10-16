@@ -179,9 +179,9 @@ describe("createHostClient", () => {
   /** Challenge, token, then whatever the command answers with. */
   function hostAnswering(rpcBody: unknown): {
     fetchImpl: (input: string, init: RequestInit) => Promise<Response>
-    calls: { path: string; headers: Headers }[]
+    calls: { path: string; headers: Headers; body: unknown }[]
   } {
-    const calls: { path: string; headers: Headers }[] = []
+    const calls: { path: string; headers: Headers; body: unknown }[] = []
     const accessToken = [
       btoa(JSON.stringify({ alg: "HS256" })),
       btoa(JSON.stringify({ jti: "token-jti" })),
@@ -191,7 +191,11 @@ describe("createHostClient", () => {
       calls,
       fetchImpl: async (input, init) => {
         const path = new URL(input).pathname
-        calls.push({ path, headers: new Headers(init.headers) })
+        calls.push({
+          path,
+          headers: new Headers(init.headers),
+          body: typeof init.body === "string" ? JSON.parse(init.body) : null,
+        })
         if (path === "/api/auth/device/challenge") {
           return jsonResponse({ challengeId: "c1", nonce: "n1", expiresAt: NOW + 60_000 })
         }
@@ -264,6 +268,64 @@ describe("createHostClient", () => {
       ["/api/_rpc/browser_context_list", null],
       ["/api/_rpc/browser_context_submit", submissionId],
     ])
+  })
+
+  it("sends paging and search to the list, trimming an empty query away", async () => {
+    const host = hostAnswering({ requestId: "r1", result: { items: [] } })
+    const client = createHostClient({ pairing, signer, fetchImpl: host.fetchImpl })
+
+    await client.list({ limit: 20, pageToken: "20", query: "  docs " })
+    await client.list({ query: "   " })
+
+    const lists = host.calls.filter((call) => call.path === "/api/_rpc/browser_context_list")
+    expect(lists.map((call) => call.body)).toEqual([
+      { pageSize: 20, pageToken: "20", query: "docs" },
+      {},
+    ])
+  })
+
+  it("gives every upload step and cancel a fresh key", async () => {
+    const host = hostAnswering({ requestId: "r1", result: { uploadId: "u1" } })
+    const client = createHostClient({ pairing, signer, fetchImpl: host.fetchImpl })
+
+    await client.uploadInit({
+      submissionId: "s1",
+      name: "shot.png",
+      mediaType: "image/png",
+      kind: "screenshot",
+      size: 3,
+      hash: "ab",
+    })
+    await client.uploadChunk({ uploadId: "u1", offset: 0, dataBase64: "AAAA" })
+    await client.uploadCommit("u1")
+    await client.uploadAbort("u1")
+    await client.cancel("s1")
+    await client.cancel("s1")
+
+    const keys = host.calls
+      .filter((call) => call.path.startsWith("/api/_rpc/"))
+      .map((call) => call.headers.get("Idempotency-Key"))
+    expect(keys.every((key) => typeof key === "string" && /^[0-9a-f-]{36}$/.test(key))).toBe(true)
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(host.calls.find((call) => call.path.endsWith("upload_commit"))?.body).toEqual({
+      uploadId: "u1",
+    })
+  })
+
+  it("asks for a device-socket ticket with a DPoP proof", async () => {
+    const host = hostAnswering({ ticket: "tk", expiresIn: 30 })
+    const client = createHostClient({ pairing, signer, fetchImpl: host.fetchImpl })
+
+    await expect(client.socketTicket()).resolves.toEqual({ ticket: "tk", expiresIn: 30 })
+    const call = host.calls.find((entry) => entry.path === "/api/auth/socket-ticket")
+    expect(call?.body).toEqual({ channel: "browser-companion" })
+    expect(call?.headers.get("DPoP")).toBeTruthy()
+    expect(call?.headers.get("Authorization")).toMatch(/^DPoP |^Bearer /)
+
+    const malformed = hostAnswering({ ticket: 5 })
+    await expect(
+      createHostClient({ pairing, signer, fetchImpl: malformed.fetchImpl }).socketTicket()
+    ).rejects.toThrow("malformed")
   })
 
   it("presents a fresh key, under the same submission id, only when asked to re-drive", async () => {

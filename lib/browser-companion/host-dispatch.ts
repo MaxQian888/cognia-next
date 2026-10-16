@@ -19,9 +19,16 @@ import type {
 } from "@/types/browser-companion"
 import {
   getBrowserSubmission,
+  listBrowserAgentSubmissions,
   listBrowserSubmissions,
   putBrowserSubmission,
 } from "@/lib/db/browser-submissions"
+import {
+  bindExtensionSession,
+  extensionBindingFor,
+  unbindExtensionSession,
+} from "@/lib/browser/extension-engine"
+import { isTauri } from "@/lib/tauri"
 import { listExecutionRuns } from "@/lib/db/execution-runs"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { getSettings } from "@/lib/db/settings"
@@ -30,7 +37,17 @@ import type { HostStateAction } from "@cognia/agent-config-types/host-state"
 import { sessionStateChannel } from "@cognia/agent-config-types/host-state"
 
 import { buildBrowserCompanionAppearance, capabilityRevisionOf } from "./appearance"
-import { listDeliveryTargets } from "./targets"
+import {
+  BROWSER_COMPANION_HOST_DEVICE,
+  abortBrowserAttachmentUpload,
+  commitBrowserAttachmentUpload,
+  initBrowserAttachmentUpload,
+  resolveBrowserAttachments,
+  writeBrowserAttachmentChunk,
+} from "./attachments"
+import { AGENT_BINDING_RECONCILE_MS, reconcileAgentBindings } from "./agent-bindings"
+import { BROWSER_AGENT_TARGET_ID, listDeliveryTargets } from "./targets"
+import { startBrowserStatusNotifier } from "./status-notifier"
 import { browserStatusForAgentTask, browserStatusForIssue, browserStatusForRun } from "./run-status"
 import {
   BrowserCompanionError,
@@ -41,9 +58,10 @@ import {
   listBrowserContextSubmissions,
   submitBrowserContext,
   type BrowserCompanionDeps,
+  type BrowserStagedAttachment,
 } from "./service"
 
-/** The six commands this module answers. */
+/** The commands this module answers. */
 export const BROWSER_COMPANION_COMMANDS: readonly string[] = [
   "browser_companion_capability",
   "browser_context_submit",
@@ -51,6 +69,11 @@ export const BROWSER_COMPANION_COMMANDS: readonly string[] = [
   "browser_context_get",
   "browser_context_result",
   "browser_context_cancel",
+  // ADR-0228 §3 — staging for a submission's attachments.
+  "browser_attachment_upload_init",
+  "browser_attachment_upload_chunk",
+  "browser_attachment_upload_commit",
+  "browser_attachment_upload_abort",
 ]
 
 export function isBrowserCompanionCommand(command: string): boolean {
@@ -75,6 +98,8 @@ export async function dispatchBrowserCompanionCommand(
     case "browser_context_list":
       return listBrowserContextSubmissions(deps, deviceId, {
         limit: typeof payload.limit === "number" ? payload.limit : undefined,
+        offset: typeof payload.offset === "number" ? payload.offset : undefined,
+        query: payload.query,
       })
     case "browser_context_get":
       return getBrowserContextSubmission(deps, deviceId, payload)
@@ -82,6 +107,14 @@ export async function dispatchBrowserCompanionCommand(
       return getBrowserContextResult(deps, deviceId, payload)
     case "browser_context_cancel":
       return cancelBrowserContext(deps, deviceId, payload)
+    case "browser_attachment_upload_init":
+      return initBrowserAttachmentUpload(deviceId, payload)
+    case "browser_attachment_upload_chunk":
+      return writeBrowserAttachmentChunk(deviceId, payload)
+    case "browser_attachment_upload_commit":
+      return commitBrowserAttachmentUpload(deviceId, payload)
+    case "browser_attachment_upload_abort":
+      return abortBrowserAttachmentUpload(deviceId, payload)
     default:
       throw new BrowserCompanionError("unknown_command", `unknown command: ${command}`)
   }
@@ -100,6 +133,19 @@ export function createBrowserCompanionDeps(
       return { id: session.id }
     },
     enqueueMessage: (input) => enqueueOnHostAuthority(payload, resolveHostState, input),
+    resolveAttachments: resolveBrowserAttachments,
+    // Only the desktop shell can reach a browser's device socket; elsewhere the
+    // Host neither advertises nor offers agent mode.
+    ...(isTauri()
+      ? {
+          driveStatus: hostDriveStatus,
+          bindBrowserAgent: ({ sessionId, deviceId, tabId }: BindBrowserAgentInput) =>
+            bindExtensionSession(sessionId, {
+              deviceId,
+              ...(tabId !== undefined ? { tabId } : {}),
+            }),
+        }
+      : {}),
     listDeliveryTargets: (callerDeviceId) => listDeliveryTargets(targetDeps(), callerDeviceId),
     renderTemplate: renderHostTemplate,
     // Built from the same readers the capability call uses, so the digest and
@@ -214,7 +260,12 @@ async function hostAppearance(preferredMode?: "light" | "dark"): Promise<{
 async function enqueueOnHostAuthority(
   payload: Record<string, unknown>,
   resolveHostState: HostStateResolver,
-  input: { sessionId: string; messageId: string; text: string }
+  input: {
+    sessionId: string
+    messageId: string
+    text: string
+    attachments?: readonly BrowserStagedAttachment[]
+  }
 ): Promise<void> {
   const active = getActiveRuntimeTargetContext()
   if (!active) {
@@ -242,13 +293,21 @@ async function enqueueOnHostAuthority(
       kind: "message.enqueue",
       messageId: input.messageId,
       text: input.text,
-      attachments: [],
+      // Refs the Host staged under its own caller (`attachments.ts`) and bound
+      // to this session; HostState re-checks both bindings at enqueue.
+      attachments: (input.attachments ?? []).map((attachment) => ({
+        name: attachment.name,
+        mediaType: attachment.mediaType,
+        size: attachment.size,
+        hash: attachment.hash,
+        ref: attachment.ref,
+      })),
     },
   }
   const response = await service.submit(
     { accountId: active.accountId, runtimeTargetId: active.targetId, actions: [action] },
     // See this function's docstring. Constructed, not forwarded.
-    { deviceId: "host:browser-companion", grants: ["workspace.write"] }
+    { deviceId: BROWSER_COMPANION_HOST_DEVICE, grants: ["workspace.write"] }
   )
   const receipt = response.results[0]
   // `duplicate` is a success: it is what a redrive of the same `actionId`
@@ -465,6 +524,81 @@ function targetDeps() {
     listIssueProjects: hostIssueBoards,
     listTaskAgents: hostTaskAgents,
     existingSessionIds: hostExistingSessionIds,
+    ...(isTauri() ? { driveStatus: hostDriveStatus } : {}),
+  }
+}
+
+interface BindBrowserAgentInput {
+  sessionId: string
+  deviceId: string
+  tabId?: number
+}
+
+/**
+ * Whether a browser holds `browser.drive` and is on its device socket.
+ *
+ * A failed read answers "no": offering agent mode on a guess would start a
+ * conversation whose every browser call is refused.
+ */
+async function hostDriveStatus(
+  deviceId: string
+): Promise<{ allowed: boolean; connected: boolean }> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const status = await invoke<{ connected: boolean; driveAllowed: boolean }>(
+      "companion_browser_extension_status",
+      { deviceId }
+    )
+    return { allowed: status.driveAllowed === true, connected: status.connected === true }
+  } catch {
+    return { allowed: false, connected: false }
+  }
+}
+
+/**
+ * Start the desktop half of ADR-0228: rebind agent conversations to their
+ * browsers and hint browsers when their submissions move. Returns the teardown.
+ */
+export async function startBrowserCompanionAgentRuntime(): Promise<() => void> {
+  // Bindings follow the Owner's grant: restored on start for every browser
+  // that may still be driven, and re-checked while the app runs so a revoked
+  // grant stops adding browser tools to the conversation (agent-bindings.ts).
+  const reconcile = async () =>
+    reconcileAgentBindings({
+      rows: await listBrowserAgentSubmissions(BROWSER_AGENT_TARGET_ID),
+      driveAllowed: async (deviceId) => (await hostDriveStatus(deviceId)).allowed,
+      isBound: (sessionId) => extensionBindingFor(sessionId) !== null,
+      bind: (sessionId, deviceId) => bindExtensionSession(sessionId, { deviceId }),
+      unbind: unbindExtensionSession,
+    }).catch(() => undefined)
+  await reconcile()
+  const [{ liveQuery }, { getDb }, { invoke }] = await Promise.all([
+    import("dexie"),
+    import("@/lib/db/schema"),
+    import("@tauri-apps/api/core"),
+  ])
+  const reconcileTimer = setInterval(() => void reconcile(), AGENT_BINDING_RECONCILE_MS)
+  const stop = startBrowserStatusNotifier({
+    observe: (read, onResult) => {
+      const subscription = liveQuery(read).subscribe({ next: onResult, error: () => undefined })
+      return () => subscription.unsubscribe()
+    },
+    listSubmissions: () => getDb().browserSubmissions.toArray(),
+    latestRunStatuses: async (sessionIds) => {
+      const statuses = new Map<string, string>()
+      for (const sessionId of sessionIds) {
+        const [latest] = await listExecutionRuns({ sessionId, limit: 1 })
+        if (latest) statuses.set(sessionId, latest.status)
+      }
+      return statuses
+    },
+    notify: async (deviceId) => {
+      await invoke("companion_browser_extension_notify", { deviceId })
+    },
+  })
+  return () => {
+    clearInterval(reconcileTimer)
+    stop()
   }
 }
 

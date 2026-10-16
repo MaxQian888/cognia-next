@@ -11,43 +11,80 @@
  * `runtime.getURL` into signatures generated from `_locales`, which is a build
  * step this module has no reason to depend on.
  */
-import type { BrowserApi, ExtractionResult, TabRef } from "./browser-api"
-import { extractFromDocument } from "./capture/extract-visible-text"
+import { createAgentStores } from "./agent/agent-runtime"
+import { chromeStorageArea } from "./agent/chrome-agent-browser"
+import { browserImageOps } from "./agent/image-ops"
+import { pageScrollMetrics, pageScrollTo } from "./agent/page-functions"
+import { PANEL_PORT, type BrowserApi, type PermissionRequest, type TabRef } from "./browser-api"
+import { isYouTubeWatchUrl, readYouTubeTranscript } from "./capture/youtube-transcript"
 
 /** The one host permission this extension ever asks for. */
 const LOOPBACK_ORIGIN = "http://127.0.0.1/*"
 
+function tabRef(tab: chrome.tabs.Tab | null | undefined): TabRef | null {
+  if (!tab?.id || !tab.url) return null
+  return { id: tab.id, url: tab.url, title: tab.title ?? "", windowId: tab.windowId }
+}
+
+function permissions(request: PermissionRequest): chrome.permissions.Permissions {
+  return {
+    ...(request.permissions
+      ? { permissions: request.permissions as chrome.permissions.Permissions["permissions"] }
+      : {}),
+    ...(request.origins ? { origins: request.origins } : {}),
+  }
+}
+
 export function createChromeBrowserApi(): BrowserApi {
+  const session = chromeStorageArea("session")
+  // Built on first use: the panel only needs the agent stores to answer a
+  // question or forget a decision, and both touch `chrome.storage` only then.
+  let stores: ReturnType<typeof createAgentStores> | null = null
+  const agentStores = () =>
+    (stores ??= createAgentStores({
+      local: chromeStorageArea("local"),
+      session,
+      now: () => Date.now(),
+      newId: () => crypto.randomUUID(),
+      // The panel answers questions; it never asks one.
+      onQuestion: () => undefined,
+    }))
+  const image = browserImageOps()
+
   return {
     async activeTab(): Promise<TabRef | null> {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab?.id || !tab.url) return null
-      return { id: tab.id, url: tab.url, title: tab.title ?? "" }
+      return tabRef(tab)
     },
 
     async tabById(id): Promise<TabRef | null> {
       // `chrome.tabs.get` rejects rather than resolving null for a tab that
       // has closed, and a closed tab is an ordinary outcome here: the request
       // may have been recorded up to a minute ago.
-      const tab = await chrome.tabs.get(id).catch(() => null)
-      if (!tab?.id || !tab.url) return null
-      return { id: tab.id, url: tab.url, title: tab.title ?? "" }
+      return tabRef(await chrome.tabs.get(id).catch(() => null))
     },
 
-    async extract(tabId, wholePage): Promise<ExtractionResult> {
-      // `func` rather than `files`: the extractor is a pure function over the
-      // live DOM, and injecting it by value keeps it in one module with its
-      // tests instead of a separate bundle whose behaviour is asserted
-      // indirectly. It cannot close over anything — `executeScript`
-      // serializes it — which is why the whole extractor is self-contained.
+    async capturePage(tabId, options) {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["/page-capture.js"] })
       const [injected] = await chrome.scripting.executeScript({
         target: { tabId },
-        func: extractFromDocument,
-        args: [wholePage],
+        func: (opts) => globalThis.__cogniaPageCapture?.capture(opts),
+        args: [options],
       })
-      const result = injected?.result as ExtractionResult | undefined
-      if (!result) throw new Error("the page could not be read")
-      return result
+      if (!injected?.result) throw new Error("the page could not be read")
+      return injected.result
+    },
+
+    async captureTranscript(tabId, preferredLanguage) {
+      const tab = await chrome.tabs.get(tabId)
+      if (!isYouTubeWatchUrl(tab.url ?? "")) return { status: "unavailable", reason: "not_a_video" }
+      const [injected] = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: readYouTubeTranscript,
+        args: [preferredLanguage],
+      })
+      return injected?.result ?? { status: "unavailable", reason: "fetch_failed" }
     },
 
     async read<T>(key: string): Promise<T | null> {
@@ -102,5 +139,74 @@ export function createChromeBrowserApi(): BrowserApi {
     message(key, substitutions) {
       return chrome.i18n.getMessage(key, substitutions)
     },
+
+    readSession: (key) => session.get(key),
+    writeSession: (key, value) => session.set(key, value),
+    async removeSession(keys) {
+      await chrome.storage.session.remove(keys)
+    },
+    onSessionChange: (key, listener) => session.onChange(key, listener),
+
+    hasPermissions: (request) => chrome.permissions.contains(permissions(request)),
+    requestPermissions: (request) => chrome.permissions.request(permissions(request)),
+    removePermissions: (request) => chrome.permissions.remove(permissions(request)),
+
+    async listTabs() {
+      const tabs = await chrome.tabs.query({ currentWindow: true })
+      return tabs.map(tabRef).filter((tab): tab is TabRef => tab !== null)
+    },
+
+    captureVisible: (windowId) => chrome.tabs.captureVisibleTab(windowId, { format: "png" }),
+
+    async activateTab(tabId) {
+      await chrome.tabs.update(tabId, { active: true })
+    },
+
+    async scrollMetrics(tabId) {
+      const [injected] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: pageScrollMetrics,
+      })
+      if (!injected?.result) throw new Error("the page could not be measured")
+      return injected.result
+    },
+
+    async scrollTo(tabId, y) {
+      const [injected] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: pageScrollTo,
+        args: [y],
+      })
+      return typeof injected?.result === "number" ? injected.result : y
+    },
+
+    cropImage: (dataUrl, rect) => image.crop(dataUrl, rect),
+    stitchImages: (dataUrls, width, heights) => image.stitch(dataUrls, width, heights),
+
+    async fetchBytes(url, maxBytes) {
+      // `omit`: the bytes are the page's resource, not a request made as the
+      // person; their cookies have no business riding along.
+      const response = await fetch(url, { credentials: "omit", redirect: "follow" })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const declared = Number(response.headers.get("content-length") ?? "0")
+      if (declared > maxBytes) throw new Error("too_large")
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      if (bytes.byteLength > maxBytes) throw new Error("too_large")
+      const mediaType =
+        (response.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase() ?? ""
+      return { bytes, mediaType }
+    },
+
+    connectPanel() {
+      const port = chrome.runtime.connect({ name: PANEL_PORT })
+      return {
+        post: (message) => port.postMessage(message),
+        disconnect: () => port.disconnect(),
+      }
+    },
+
+    answerSiteQuestion: (questionId, answer) =>
+      agentStores().permissions.answer(questionId, answer),
+    forgetSiteDecision: (origin) => agentStores().permissions.setDecision(origin, null),
   }
 }

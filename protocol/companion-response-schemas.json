@@ -1610,6 +1610,54 @@
       },
       "additionalProperties": false
     },
+    "BrowserAttachmentUploadChunk": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/browser-companion/attachments.ts writeBrowserAttachmentChunk",
+      "required": ["receivedBytes"],
+      "properties": {
+        "receivedBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "BrowserAttachmentUploadCommit": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/browser-companion/attachments.ts commitBrowserAttachmentUpload",
+      "required": ["attachmentId"],
+      "properties": {
+        "attachmentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "BrowserAttachmentUploadInit": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/browser-companion/attachments.ts initBrowserAttachmentUpload",
+      "required": ["uploadId", "chunkSize", "receivedBytes"],
+      "properties": {
+        "uploadId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chunkSize": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "receivedBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attachmentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
     "BrowserCompanionCapability": {
       "type": "object",
       "required": ["schemaVersion", "limits", "supportedCaptureModes", "workspaces", "appearance"],
@@ -1637,6 +1685,30 @@
             "requestBytes": {
               "type": "integer",
               "minimum": 1
+            },
+            "articleBytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "transcriptBytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxPages": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "totalContextBytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxAttachments": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "attachmentBytes": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "additionalProperties": false
@@ -1645,8 +1717,29 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["metadata", "selection", "readable-page"]
+            "enum": ["metadata", "selection", "readable-page", "article"]
           }
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "article",
+              "markdown-selection",
+              "metadata",
+              "transcript",
+              "link-image",
+              "multi-page",
+              "attachments",
+              "list-paging",
+              "device-socket",
+              "browser-agent"
+            ]
+          }
+        },
+        "driveAllowed": {
+          "type": "boolean"
         },
         "workspaces": {
           "type": "array",
@@ -1680,7 +1773,7 @@
               },
               "kind": {
                 "type": "string",
-                "enum": ["chat", "session", "template", "issue", "agent-task"]
+                "enum": ["chat", "session", "template", "issue", "agent-task", "browser-agent"]
               },
               "label": {
                 "type": "string"
@@ -1990,7 +2083,15 @@
         },
         "captureMode": {
           "type": "string",
-          "enum": ["metadata", "selection", "readable-page"]
+          "enum": ["metadata", "selection", "readable-page", "article"]
+        },
+        "pageCount": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "attachmentCount": {
+          "type": "integer",
+          "minimum": 1
         },
         "status": {
           "$ref": "#/$defs/BrowserSubmissionStatus"
@@ -2017,6 +2118,10 @@
           "items": {
             "$ref": "#/$defs/BrowserSubmissionSummary"
           }
+        },
+        "nextPageToken": {
+          "type": "string",
+          "minLength": 1
         },
         "capabilityRevision": {
           "type": "string",
@@ -13103,6 +13208,18 @@
     },
     "browser_act": {
       "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_attachment_upload_abort": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "browser_attachment_upload_chunk": {
+      "$ref": "#/$defs/BrowserAttachmentUploadChunk"
+    },
+    "browser_attachment_upload_commit": {
+      "$ref": "#/$defs/BrowserAttachmentUploadCommit"
+    },
+    "browser_attachment_upload_init": {
+      "$ref": "#/$defs/BrowserAttachmentUploadInit"
     },
     "browser_back": {
       "$ref": "#/$defs/LegacyResult"

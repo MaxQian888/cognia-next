@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises"
  * The manifest is the product's security claim, so it is asserted rather than
  * reviewed.
  *
- * Every entry here corresponds to a promise in ADR-0154 §1. A permission added
+ * Every entry here corresponds to a promise in ADR-0154 §1 as amended by
+ * ADR-0228. A permission added
  * by accident — or by a future feature that forgot the ADR — fails this suite
  * instead of shipping and changing what Chrome tells the user at install time.
  */
@@ -21,48 +22,78 @@ async function declaredConfig(): Promise<string> {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "")
 }
 
-async function manifestBlock(): Promise<{ raw: string; permissions: string[] }> {
+function listAt(raw: string, key: string): string[] {
+  const match = raw.match(new RegExp(`(?<![a-z_])${key}: \\[([^\\]]*)\\]`))
+  if (!match) return []
+  return [...(match[1] ?? "").matchAll(/"([^"]+)"/g)].map((entry) => entry[1] ?? "")
+}
+
+async function manifestBlock(): Promise<{
+  raw: string
+  permissions: string[]
+  optionalPermissions: string[]
+  optionalHosts: string[]
+}> {
   const source = await declaredConfig()
-  const raw = source.slice(source.indexOf("  manifest: {"), source.indexOf("  vite:"))
+  const raw = source.slice(source.indexOf("  manifest: {"), source.indexOf("  alias:"))
   return {
     raw,
-    permissions: [...raw.matchAll(/"(sidePanel|storage|activeTab|scripting|contextMenus)"/g)].map(
-      (match) => {
-        const permission = match[1]
-        if (!permission) throw new Error("Missing permission capture")
-        return permission
-      }
-    ),
+    permissions: listAt(raw, "permissions"),
+    optionalPermissions: listAt(raw, "optional_permissions"),
+    optionalHosts: listAt(raw, "optional_host_permissions"),
   }
 }
 
 describe("the extension manifest", () => {
-  it("asks for exactly five permissions and no more", async () => {
+  it("asks at install only for what carries no page access", async () => {
+    // `alarms` and `tabGroups` have no install warning; nothing here reads a
+    // page without a gesture.
     const { permissions } = await manifestBlock()
     expect([...new Set(permissions)].sort()).toEqual([
       "activeTab",
+      "alarms",
       "contextMenus",
       "scripting",
       "sidePanel",
       "storage",
+      "tabGroups",
     ])
   })
 
-  it("never asks for all-urls access", async () => {
-    // The starter this began from had it. It would have made "read and change
-    // all your data on all websites" the install prompt for a feature that
-    // reads a page only when asked.
-    const { raw } = await manifestBlock()
-    expect(raw).not.toContain("<all_urls>")
+  it("keeps every broader grant optional, asked for by the feature that needs it", async () => {
+    const { optionalPermissions } = await manifestBlock()
+    expect(optionalPermissions.sort()).toEqual(["cookies", "downloads", "notifications", "tabs"])
+  })
+
+  it("never asks for all-urls access at install", async () => {
+    // It would make "read and change all your data on all websites" the
+    // install prompt. It exists only as an optional grant agent mode asks for.
+    const { raw, optionalHosts } = await manifestBlock()
+    expect(optionalHosts).toEqual(["http://127.0.0.1/*", "<all_urls>"])
+    expect(raw.match(/<all_urls>/g)).toHaveLength(1)
     // The negative lookbehind matters: `optional_host_permissions` contains
-    // this key as a substring, and it is precisely the version that is
-    // allowed — granted during pairing, not at install.
+    // this key as a substring, and it is precisely the version that is allowed.
     expect(raw).not.toMatch(/(?<!optional_)host_permissions/)
   })
 
   it("keeps loopback access optional, so installing grants nothing", async () => {
+    const { optionalHosts, permissions } = await manifestBlock()
+    expect(optionalHosts).toContain("http://127.0.0.1/*")
+    expect(permissions.join(" ")).not.toContain("127.0.0.1")
+  })
+
+  it("suggests at most the four shortcuts Chrome honours, and the omnibox keyword", async () => {
     const { raw } = await manifestBlock()
-    expect(raw).toContain('optional_host_permissions: ["http://127.0.0.1/*"]')
+    expect(raw.match(/suggested_key/g)).toHaveLength(4)
+    for (const command of [
+      "_execute_action",
+      '"capture-page"',
+      '"capture-selection"',
+      '"capture-article"',
+    ]) {
+      expect(raw).toContain(command)
+    }
+    expect(raw).toContain('omnibox: { keyword: "cog" }')
   })
 
   it("declares no content scripts", async () => {
@@ -74,22 +105,24 @@ describe("the extension manifest", () => {
   })
 
   it("holds none of the permissions that would change its trust posture", async () => {
-    const { raw } = await manifestBlock()
+    const { raw, permissions } = await manifestBlock()
     // `debugger` in particular cannot be requested optionally, so having it at
     // all would mean asking every user for it at install.
     for (const forbidden of [
       "debugger",
       "nativeMessaging",
       "history",
-      "downloads",
       "tabCapture",
       "webRequest",
-      "cookies",
       "bookmarks",
       "management",
       "proxy",
     ]) {
       expect(raw).not.toContain(`"${forbidden}"`)
+    }
+    // These exist only as optional grants, never at install.
+    for (const optionalOnly of ["tabs", "notifications", "downloads", "cookies"]) {
+      expect(permissions).not.toContain(optionalOnly)
     }
   })
 

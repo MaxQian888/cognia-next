@@ -1,5 +1,7 @@
 /** @jest-environment jsdom */
 import { createChromeBrowserApi } from "./chrome-browser-api"
+import { readYouTubeTranscript } from "./capture/youtube-transcript"
+import type { PageCapture, PageCaptureOptions } from "./capture/page-capture"
 
 interface ChromeStub {
   tabs: { query: jest.Mock; create: jest.Mock; get: jest.Mock }
@@ -38,6 +40,85 @@ function stub(): ChromeStub {
 }
 
 describe("createChromeBrowserApi", () => {
+  it("injects the capture bundle before invoking it in the isolated world", async () => {
+    const chromeStub = stub()
+    const options = { wholePage: true, article: true }
+    const result: PageCapture = {
+      title: "Captured",
+      url: "https://example.com",
+      selection: null,
+      readableText: "Body",
+      readableCharacterCount: 4,
+      article: null,
+      metadata: {},
+      isPdf: false,
+    }
+    chromeStub.scripting.executeScript.mockResolvedValueOnce([]).mockResolvedValueOnce([{ result }])
+    expect(await createChromeBrowserApi().capturePage(7, options)).toEqual(result)
+    expect(chromeStub.scripting.executeScript.mock.calls[0][0]).toEqual({
+      target: { tabId: 7 },
+      files: ["/page-capture.js"],
+    })
+    const invocation = chromeStub.scripting.executeScript.mock.calls[1][0] as {
+      target: { tabId: number }
+      args: PageCaptureOptions[]
+      world?: string
+      func: (options: PageCaptureOptions) => PageCapture
+    }
+    expect(invocation.target).toEqual({ tabId: 7 })
+    expect(invocation.args).toEqual([options])
+    expect(invocation.world).toBeUndefined()
+    const capture = jest.fn(() => result)
+    globalThis.__cogniaPageCapture = { capture }
+    expect(invocation.func(options)).toBe(result)
+    expect(capture).toHaveBeenCalledWith(options)
+    globalThis.__cogniaPageCapture = undefined
+  })
+
+  it("rejects a missing page capture and propagates bundle injection failures", async () => {
+    const chromeStub = stub()
+    chromeStub.scripting.executeScript.mockResolvedValueOnce([]).mockResolvedValueOnce([])
+    await expect(
+      createChromeBrowserApi().capturePage(7, { wholePage: false, article: true })
+    ).rejects.toThrow("the page could not be read")
+    chromeStub.scripting.executeScript
+      .mockReset()
+      .mockRejectedValueOnce(new Error("permission denied"))
+    await expect(
+      createChromeBrowserApi().capturePage(7, { wholePage: false, article: true })
+    ).rejects.toThrow("permission denied")
+    expect(chromeStub.scripting.executeScript).toHaveBeenCalledTimes(1)
+  })
+
+  it("reads transcripts in MAIN only after checking the tab URL", async () => {
+    const chromeStub = stub()
+    chromeStub.tabs.get.mockResolvedValue({ id: 7, url: "https://www.youtube.com/watch?v=video" })
+    const transcript = { status: "available", text: "[0:00] Hello", truncated: false }
+    chromeStub.scripting.executeScript.mockResolvedValueOnce([{ result: transcript }])
+    expect(await createChromeBrowserApi().captureTranscript(7, "en")).toEqual(transcript)
+    expect(chromeStub.tabs.get).toHaveBeenCalledWith(7)
+    expect(chromeStub.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 7 },
+      world: "MAIN",
+      func: readYouTubeTranscript,
+      args: ["en"],
+    })
+    chromeStub.scripting.executeScript.mockResolvedValueOnce([])
+    expect(await createChromeBrowserApi().captureTranscript(7, "en")).toEqual({
+      status: "unavailable",
+      reason: "fetch_failed",
+    })
+  })
+
+  it("does not inject transcript readers into non-video tabs", async () => {
+    const chromeStub = stub()
+    expect(await createChromeBrowserApi().captureTranscript(7, "en")).toEqual({
+      status: "unavailable",
+      reason: "not_a_video",
+    })
+    expect(chromeStub.scripting.executeScript).not.toHaveBeenCalled()
+  })
+
   it("returns the active tab, or null when there is none we may touch", async () => {
     const chromeStub = stub()
     const api = createChromeBrowserApi()
@@ -60,26 +141,6 @@ describe("createChromeBrowserApi", () => {
     // request may be up to a minute old.
     chromeStub.tabs.get.mockRejectedValueOnce(new Error("No tab with id: 7."))
     expect(await api.tabById(7)).toBeNull()
-  })
-
-  it("injects the extractor by value into exactly one tab", async () => {
-    const chromeStub = stub()
-    await createChromeBrowserApi().extract(7, true)
-    const call = chromeStub.scripting.executeScript.mock.calls[0][0]
-    expect(call.target).toEqual({ tabId: 7 })
-    expect(typeof call.func).toBe("function")
-    expect(call.args).toEqual([true])
-    // `files` would put the extractor in a separate bundle whose behaviour
-    // could only be asserted indirectly.
-    expect(call.files).toBeUndefined()
-  })
-
-  it("fails loudly when the page could not be read", async () => {
-    // A silent `undefined` here would become an empty capture the user
-    // reviewed and approved.
-    const chromeStub = stub()
-    chromeStub.scripting.executeScript.mockResolvedValueOnce([{ result: undefined }])
-    await expect(createChromeBrowserApi().extract(7, false)).rejects.toThrow()
   })
 
   it("reads a missing storage key as null rather than undefined", async () => {
@@ -134,5 +195,116 @@ describe("createChromeBrowserApi", () => {
     const chromeStub = stub()
     createChromeBrowserApi().message("pairFailed", ["boom"])
     expect(chromeStub.i18n.getMessage).toHaveBeenCalledWith("pairFailed", ["boom"])
+  })
+})
+
+describe("createChromeBrowserApi — ADR-0228 surface", () => {
+  function wideStub() {
+    const base = stub() as unknown as Record<string, Record<string, unknown>>
+    const port = { postMessage: jest.fn(), disconnect: jest.fn() }
+    Object.assign(base.tabs!, {
+      captureVisibleTab: jest.fn(async () => "data:image/png;base64,AA=="),
+      update: jest.fn(async () => undefined),
+    })
+    Object.assign(base.permissions!, { remove: jest.fn(async () => true) })
+    Object.assign(base.runtime!, { connect: jest.fn(() => port) })
+    Object.assign(base.storage!, {
+      session: {
+        get: jest.fn(async () => ({ "s.key": { draft: true } })),
+        set: jest.fn(async () => undefined),
+        remove: jest.fn(async () => undefined),
+      },
+    })
+    return { chromeStub: base as unknown as ChromeStub & Record<string, never>, raw: base, port }
+  }
+
+  it("reads and writes session storage separately from local", async () => {
+    const { raw } = wideStub()
+    const api = createChromeBrowserApi()
+    expect(await api.readSession("s.key")).toEqual({ draft: true })
+    await api.writeSession("s.key", 1)
+    await api.removeSession(["s.key"])
+    const session = (raw.storage as { session: { set: jest.Mock; remove: jest.Mock } }).session
+    expect(session.set).toHaveBeenCalledWith({ "s.key": 1 })
+    expect(session.remove).toHaveBeenCalledWith(["s.key"])
+  })
+
+  it("passes optional permission requests through unchanged", async () => {
+    const { raw } = wideStub()
+    const api = createChromeBrowserApi()
+    await api.requestPermissions({ permissions: ["tabs"], origins: ["https://a.test/*"] })
+    await api.removePermissions({ origins: ["<all_urls>"] })
+    const permissions = raw.permissions as { request: jest.Mock; remove: jest.Mock }
+    expect(permissions.request).toHaveBeenCalledWith({
+      permissions: ["tabs"],
+      origins: ["https://a.test/*"],
+    })
+    expect(permissions.remove).toHaveBeenCalledWith({ origins: ["<all_urls>"] })
+  })
+
+  it("lists the window's tabs, dropping ones it cannot read, with their window", async () => {
+    const { raw } = wideStub()
+    ;(raw.tabs as { query: jest.Mock }).query.mockResolvedValueOnce([
+      { id: 1, url: "https://a.test/", title: "A", windowId: 4 },
+      { id: 2, title: "no url" },
+    ])
+    expect(await createChromeBrowserApi().listTabs()).toEqual([
+      { id: 1, url: "https://a.test/", title: "A", windowId: 4 },
+    ])
+    expect((raw.tabs as { query: jest.Mock }).query).toHaveBeenCalledWith({ currentWindow: true })
+  })
+
+  it("captures PNG and measures and scrolls the page", async () => {
+    const { raw } = wideStub()
+    const api = createChromeBrowserApi()
+    expect(await api.captureVisible(4)).toBe("data:image/png;base64,AA==")
+    expect((raw.tabs as { captureVisibleTab: jest.Mock }).captureVisibleTab).toHaveBeenCalledWith(
+      4,
+      { format: "png" }
+    )
+    const executeScript = (raw.scripting as { executeScript: jest.Mock }).executeScript
+    executeScript.mockResolvedValueOnce([
+      { result: { scrollHeight: 10, viewportHeight: 5, viewportWidth: 3, scrollY: 0, dpr: 1 } },
+    ])
+    expect(await api.scrollMetrics(7)).toMatchObject({ scrollHeight: 10 })
+    executeScript.mockResolvedValueOnce([{ result: 4 }])
+    expect(await api.scrollTo(7, 9)).toBe(4)
+    expect(executeScript.mock.calls.at(-1)?.[0]).toMatchObject({ target: { tabId: 7 }, args: [9] })
+  })
+
+  it("fetches bytes without credentials and refuses oversized ones", async () => {
+    wideStub()
+    const fetchMock = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        "content-type": "Application/PDF; charset=binary",
+        "content-length": "3",
+      }),
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    }))
+    ;(globalThis as unknown as { fetch: unknown }).fetch = fetchMock
+    const api = createChromeBrowserApi()
+    expect(await api.fetchBytes("https://a.test/f.pdf", 10)).toEqual({
+      bytes: new Uint8Array([1, 2, 3]),
+      mediaType: "application/pdf",
+    })
+    expect(fetchMock).toHaveBeenCalledWith("https://a.test/f.pdf", {
+      credentials: "omit",
+      redirect: "follow",
+    })
+    await expect(api.fetchBytes("https://a.test/f.pdf", 2)).rejects.toThrow("too_large")
+  })
+
+  it("holds a named port to the worker", () => {
+    const { raw, port } = wideStub()
+    const handle = createChromeBrowserApi().connectPanel()
+    expect((raw.runtime as { connect: jest.Mock }).connect).toHaveBeenCalledWith({
+      name: "cognia-panel",
+    })
+    handle.post({ kind: "refresh-status" })
+    handle.disconnect()
+    expect(port.postMessage).toHaveBeenCalledWith({ kind: "refresh-status" })
+    expect(port.disconnect).toHaveBeenCalled()
   })
 })

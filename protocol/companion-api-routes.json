@@ -118,6 +118,7 @@
     { "path": "/ws/terminal", "method": "get", "document": "public" },
     { "path": "/ws/worker", "method": "get", "document": "public" },
     { "path": "/ws/browser/{session_id}", "method": "get", "document": "public" },
+    { "path": "/ws/browser-companion", "method": "get", "document": "public" },
     { "path": "/ws/acp", "method": "get", "document": "public" },
     { "path": "/a2a", "method": "post", "document": "public" },
     {

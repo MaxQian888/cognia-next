@@ -5,7 +5,7 @@ description: "Chrome 侧边栏以独立的最小权限设备类别与桌面宿�
 
 # ADR 0154 — 浏览器交出一个页面，而不是一次会话
 
-**状态：** 已接受**日期：** 2026-08-27 **相关：** [ADR-0055](./0055-agent-browser-loop)、[ADR-0085](./0085-cloud-shared-browser)、[ADR-0125](./0125-work-submission-contract)、[ADR-0136](./0136-cross-device-placement)、[ADR-0144](./0144-workspace-as-the-unit-of-work)、[ADR-0148](./0148-style-packs-and-surface-tiers)、[ADR-0149](./0149-a-person-is-not-a-device)
+**状态：** 已接受；§1、§2、§11 部分被 [ADR-0228](./0228-the-browser-companion-captures-richly-and-can-be-driven) 取代**日期：** 2026-08-27 **相关：** [ADR-0055](./0055-agent-browser-loop)、[ADR-0085](./0085-cloud-shared-browser)、[ADR-0125](./0125-work-submission-contract)、[ADR-0136](./0136-cross-device-placement)、[ADR-0144](./0144-workspace-as-the-unit-of-work)、[ADR-0148](./0148-style-packs-and-surface-tiers)、[ADR-0149](./0149-a-person-is-not-a-device)
 
 ## 背景
 

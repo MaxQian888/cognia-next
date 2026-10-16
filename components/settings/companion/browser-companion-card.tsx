@@ -27,6 +27,8 @@ import {
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { localTransport as transport } from "@/lib/tauri"
 
+import { PairedBrowsersList, type PairedBrowsersListProps } from "./paired-browsers-list"
+
 /** Mirrors Rust `companion_api::commands::BrowserEnrollmentIssue`. */
 export interface BrowserEnrollmentIssue {
   enrollment: string
@@ -62,6 +64,8 @@ export interface BrowserCompanionCardProps {
   clearHistory?: (deviceId: string) => Promise<number>
   /** Test seam — defaults to the real retention sweep. */
   pruneHistory?: () => Promise<number>
+  /** Test seam — the paired-browsers list's own seams. */
+  pairedBrowsers?: PairedBrowsersListProps
 }
 
 const defaultLoadListener = () =>
@@ -96,6 +100,7 @@ export function BrowserCompanionCard({
   loadHistory = summarizeBrowserSubmissions,
   clearHistory = clearBrowserSubmissions,
   pruneHistory = pruneBrowserSubmissions,
+  pairedBrowsers,
 }: BrowserCompanionCardProps = {}) {
   const t = useTranslations("mobile.companion.browserCompanion")
   // The listener and the enrolment code both live in the desktop process. A
@@ -400,15 +405,16 @@ export function BrowserCompanionCard({
         </div>
       ) : null}
 
-      {/* A sentence, not a second link: the pairing panel renders the device
-          console link directly below this card, and two links to one place
-          side by side read as two different places. */}
+      {/* Each paired browser, its connection, and whether agents may act in
+          it (ADR-0228 §5). The revoke itself stays in the device console the
+          pairing panel links below this card; the hint inside says so rather
+          than adding a second link to one place. */}
       <div className="space-y-1 border-t pt-3">
         <p className="flex items-center gap-1.5 text-xs font-medium">
           <MonitorSmartphoneIcon className="size-3.5" aria-hidden="true" />
           {t("pairedTitle")}
         </p>
-        <p className="text-xs text-muted-foreground">{t("pairedHint")}</p>
+        <PairedBrowsersList {...(pairedBrowsers ?? {})} />
       </div>
     </SettingsBlock>
   )

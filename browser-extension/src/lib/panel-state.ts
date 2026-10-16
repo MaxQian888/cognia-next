@@ -12,6 +12,11 @@
 import {
   isTerminalBrowserSubmissionStatus,
   type BrowserCompanionCapabilityV1,
+  type BrowserCompanionFeature,
+  type BrowserImageContextV1,
+  type BrowserLinkContextV1,
+  type BrowserPageMetadataV1,
+  type BrowserTranscriptV1,
   type BrowserContextSubmissionSummaryV1,
   type BrowserDeliveryTargetV1,
   type BrowserSubmissionStatus,
@@ -20,17 +25,47 @@ import {
 
 import type { PairFailure, PairingRecord } from "./client"
 
-/** The page the user captured, held in memory only. */
+/**
+ * The page the user captured, held in the panel's state and, while unsent, in
+ * the session-only draft (ADR-0228 §8) — never in `chrome.storage.local`.
+ *
+ * The fields after `strippedQuery` are ADR-0228's richer capture. Optional so
+ * a draft written before them still reads.
+ */
 export interface CapturedPage {
   tabId: number
   title: string
   /** Already normalized: credentials gone, query/fragment gone unless asked. */
   url: string
   rawUrl: string
-  selection: { text: string; truncated: boolean } | null
+  selection: { text: string; truncated: boolean; markdown?: string } | null
   readableText: { text: string; truncated: boolean; originalCharacterCount: number } | null
   capturedAt: number
   strippedQuery: boolean
+  /** The main content as Markdown. */
+  article?: { text: string; truncated: boolean; originalCharacterCount: number } | null
+  metadata?: BrowserPageMetadataV1 | null
+  transcript?: BrowserTranscriptV1 | null
+  link?: BrowserLinkContextV1 | null
+  image?: BrowserImageContextV1 | null
+  /** The tab shows a PDF, which may be attached as a file. */
+  isPdf?: boolean
+  /** The title as captured, so an edit can be sent as `suggestedTitle`. */
+  originalTitle?: string
+}
+
+/**
+ * What the person asked to capture: `auto` is the selection when there is one
+ * and the page's metadata otherwise; `page` is everything visible; `article`
+ * is the main content as Markdown.
+ */
+export type CaptureScope = "auto" | "page" | "article"
+
+export function hasFeature(
+  capability: Pick<BrowserCompanionCapabilityV1, "features"> | undefined,
+  feature: BrowserCompanionFeature
+): boolean {
+  return capability?.features?.includes(feature) ?? false
 }
 
 export type PanelState =
@@ -101,9 +136,14 @@ export function isCompatible(capability: { schemaVersion: number }): boolean {
  */
 export function captureModeFor(
   page: CapturedPage,
-  wholePageRequested: boolean
-): "metadata" | "selection" | "readable-page" {
-  if (wholePageRequested && page.readableText) return "readable-page"
+  scope: CaptureScope | boolean,
+  features: readonly BrowserCompanionFeature[] = []
+): "metadata" | "selection" | "readable-page" | "article" {
+  const requested: CaptureScope = scope === true ? "page" : scope === false ? "auto" : scope
+  // An article the Host cannot read is sent as the page it came from, never
+  // dropped: the Host lists what it understands (ADR-0228 §1).
+  if (requested === "article" && page.article && features.includes("article")) return "article"
+  if ((requested === "page" || requested === "article") && page.readableText) return "readable-page"
   if (page.selection) return "selection"
   return "metadata"
 }

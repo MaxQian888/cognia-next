@@ -34,7 +34,10 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use super::{a2a, acp, healthz, tls::TlsMaterial, ws, ws_bridge, ws_terminal, ws_worker};
+use super::{
+    a2a, acp, healthz, tls::TlsMaterial, ws, ws_bridge, ws_browser_companion, ws_terminal,
+    ws_worker,
+};
 use axum::{
     extract::Request,
     http::{header, HeaderValue, Method, StatusCode},
@@ -55,6 +58,13 @@ use super::{lark_entry, middleware, SharedState};
 const BODY_LIMIT_BYTES: usize = 64 * 1024;
 const INTERNAL_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const WORKFLOW_APP_UPLOAD_BODY_LIMIT_BYTES: usize = 11 * 1024 * 1024;
+/// `browser_context_submit` carries captured page text, up to
+/// `BROWSER_CONTEXT_LIMITS.requestBytes` in `packages/companion-client`
+/// (ADR-0228 §2). The contract's own validator is the boundary; this only has
+/// to let a request the contract admits reach it. Kept equal to that constant —
+/// a smaller transport cap answered `payload_too_large` for every whole-page
+/// capture over 64 KiB that the contract had promised to accept.
+const BROWSER_CONTEXT_SUBMIT_BODY_LIMIT_BYTES: usize = 640 * 1024;
 
 async fn limit_public_request_body(request: Request, next: Next) -> Response {
     use tower::{Layer as _, ServiceExt as _};
@@ -63,16 +73,14 @@ async fn limit_public_request_body(request: Request, next: Next) -> Response {
     // always-on host (ADR-0224 A11b). Keep other public requests at their
     // existing 64 KiB cap; the transfer handler still validates the decoded
     // chunk size and hash.
-    let limit = if request.method() == Method::POST
-        && matches!(
-            request.uri().path(),
+    let limit = match (request.method() == Method::POST, request.uri().path()) {
+        (
+            true,
             "/api/_rpc/task_resource_upload_write_chunk"
-                | "/api/_rpc/code_snapshot_upload_write_chunk"
-        )
-    {
-        128 * 1024
-    } else {
-        BODY_LIMIT_BYTES
+            | "/api/_rpc/code_snapshot_upload_write_chunk",
+        ) => 128 * 1024,
+        (true, "/api/_rpc/browser_context_submit") => BROWSER_CONTEXT_SUBMIT_BODY_LIMIT_BYTES,
+        _ => BODY_LIMIT_BYTES,
     };
     let service = tower::service_fn(
         move |request: Request<tower_http::body::Limited<axum::body::Body>>| {
@@ -801,6 +809,12 @@ fn build_router_for_mode(
         // browser stream, so a bearer access token never enters the URL.
         .route("/ws/terminal", any(ws_terminal::ws_terminal_handler))
         .route("/ws/worker", any(ws_worker::ws_worker_handler))
+        // The Browser Companion's device socket (ADR-0228 §5): single-use
+        // ticket, bound to the extension origin like every browser request.
+        .route(
+            "/ws/browser-companion",
+            any(ws_browser_companion::ws_browser_companion_handler),
+        )
         .with_state(state.clone());
 
     // Fleet ingress (`/api/fleet/*`) — its own auth tier: loopback-source
@@ -1777,7 +1791,18 @@ mod tests {
                 body.clone(),
                 StatusCode::OK,
             ),
-            ("write_text_file", body, StatusCode::PAYLOAD_TOO_LARGE),
+            ("write_text_file", body.clone(), StatusCode::PAYLOAD_TOO_LARGE),
+            ("browser_context_submit", body, StatusCode::OK),
+            (
+                "browser_context_submit",
+                format!("\"{}\"", "x".repeat(400 * 1024)),
+                StatusCode::OK,
+            ),
+            (
+                "browser_context_submit",
+                "x".repeat(BROWSER_CONTEXT_SUBMIT_BODY_LIMIT_BYTES + 1),
+                StatusCode::PAYLOAD_TOO_LARGE,
+            ),
             (
                 "task_resource_upload_write_chunk",
                 "x".repeat(128 * 1024 + 1),

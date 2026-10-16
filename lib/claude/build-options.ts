@@ -200,6 +200,8 @@ import {
   foldCapabilityGrants,
   type AgentCapabilityGrantV1,
 } from "@cognia/agent-config-types/agent-capability-grant"
+import { browserCompanionGrant } from "@/lib/browser-companion/agent-grant"
+import { extensionBindingFor } from "@/lib/browser/extension-engine"
 import { resolveTurnCompositionSafely } from "./resolve-turn-composition-safely"
 import {
   applySupportAgentSafety,
@@ -1509,6 +1511,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Keep the pre-routing authority even when fallback drops the original persona.
   const readOnlyAside = Boolean(asideBinding && requiresReadOnlyAside)
   const asideGrants: AgentCapabilityGrantV1[] = []
+  // A conversation the user started from the Browser Companion's agent mode
+  // acts in that browser (ADR-0228 §6). The grant says so to the model; the
+  // browser tools themselves are admitted at the plugin-manifest gate below,
+  // because adding them to an empty allow list would narrow the turn to them.
+  const extensionBinding = session?.id ? extensionBindingFor(session.id) : null
+  if (extensionBinding) asideGrants.push(browserCompanionGrant(extensionBinding.deviceId))
   if (asideBinding) {
     if (asideParentPermission) {
       asideGrants.push({
@@ -3557,7 +3565,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Agent browser tools (ADR-0055) drive the embedded preview webview, which
   // only exists in the desktop shell. Opt-in per character; never surfaced on
   // IM-bound sessions (no embedded webview there).
-  const browserAllowedForChat = character?.enableBrowserTools === true && !imSession
+  const browserAllowedForChat =
+    (character?.enableBrowserTools === true || extensionBinding !== null) && !imSession
 
   // OCR tool (`cognia-ocr` / `ocr.extract`, ADR-0024) is low-risk and
   // default-allowed everywhere (incl. IM); see `isOcrToolAllowed`.

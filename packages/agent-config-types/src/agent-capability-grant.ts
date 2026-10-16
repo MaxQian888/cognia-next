@@ -48,6 +48,8 @@ export type CapabilityGrantSourceKind =
   | "issue"
   | "cli"
   | "automation"
+  /** A conversation started from the Browser Companion's agent mode (ADR-0228 §6). */
+  | "browser-companion"
 
 export const CAPABILITY_GRANT_SOURCE_KINDS: readonly CapabilityGrantSourceKind[] = [
   "scheduler",
@@ -61,6 +63,7 @@ export const CAPABILITY_GRANT_SOURCE_KINDS: readonly CapabilityGrantSourceKind[]
   "issue",
   "cli",
   "automation",
+  "browser-companion",
 ]
 
 /** Additive/subtractive change to an id set. `remove` beats `add` for the same id. */

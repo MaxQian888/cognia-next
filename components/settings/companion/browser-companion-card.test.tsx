@@ -50,6 +50,7 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof BrowserCompan
       loadHistory={async () => ({ deviceIds: [], total: 0 })}
       clearHistory={async () => 0}
       pruneHistory={async () => 0}
+      pairedBrowsers={{ loadBrowsers: async () => [], setDrive: async () => undefined }}
       {...overrides}
     />
   )
@@ -430,5 +431,27 @@ describe("BrowserCompanionCard history, against the real table", () => {
         "mobile.companion.browserCompanion.historyCount:1"
       )
     )
+  })
+})
+
+describe("paired browsers section", () => {
+  it("lists the paired browsers inside the card", async () => {
+    renderCard({
+      pairedBrowsers: {
+        loadBrowsers: async () => [
+          {
+            deviceId: "browser-a",
+            displayName: "Chrome",
+            status: "active",
+            createdAt: 1,
+            connected: true,
+            extensionVersion: "0.2.0",
+            driveAllowed: false,
+          },
+        ],
+        setDrive: async () => undefined,
+      },
+    })
+    expect(await screen.findByTestId("paired-browser-browser-a")).toBeInTheDocument()
   })
 })

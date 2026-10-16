@@ -8,6 +8,19 @@
  * the same contract instead of two copies of it.
  */
 export type {
+  BrowserAttachmentKind,
+  BrowserAttachmentRefV1,
+  BrowserAttachmentUploadChunkRequestV1,
+  BrowserAttachmentUploadChunkResponseV1,
+  BrowserAttachmentUploadCommitResponseV1,
+  BrowserAttachmentUploadInitRequestV1,
+  BrowserAttachmentUploadInitResponseV1,
+  BrowserCompanionFeature,
+  BrowserContextListRequestV1,
+  BrowserImageContextV1,
+  BrowserLinkContextV1,
+  BrowserPageMetadataV1,
+  BrowserTranscriptV1,
   BrowserCapturedText,
   BrowserCaptureMode,
   BrowserCompanionAppearanceV1,
@@ -30,6 +43,9 @@ export type {
 } from "@cognia/companion-client/browser-companion"
 
 export {
+  BROWSER_ATTACHMENT_MEDIA_TYPES,
+  BROWSER_COMPANION_FEATURES,
+  resolveBrowserContextLimits,
   BROWSER_CAPTURE_MODES,
   BROWSER_RESULT_TEXT_BYTES,
   BROWSER_CONTEXT_LIMITS,

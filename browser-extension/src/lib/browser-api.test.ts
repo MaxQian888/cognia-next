@@ -1,4 +1,4 @@
-import { STORAGE_KEYS } from "./browser-api"
+import { SESSION_KEYS, STORAGE_KEYS } from "./browser-api"
 
 describe("STORAGE_KEYS", () => {
   it("names only things that are safe on disk in a browser profile", () => {
@@ -11,6 +11,8 @@ describe("STORAGE_KEYS", () => {
       "lastWorkspaceId",
       "pairing",
       "pendingSubmission",
+      "preferences",
+      "savedPrompts",
     ])
   })
 
@@ -38,5 +40,15 @@ describe("STORAGE_KEYS", () => {
   it("keeps the values distinct", () => {
     const values = Object.values(STORAGE_KEYS)
     expect(new Set(values).size).toBe(values.length)
+  })
+})
+
+describe("SESSION_KEYS", () => {
+  it("is the only place a draft may live, and never overlaps local keys", () => {
+    expect(Object.keys(SESSION_KEYS).sort()).toEqual(["draft", "socketState", "statusHint"])
+    for (const value of Object.values(SESSION_KEYS)) {
+      expect(value).toMatch(/^cognia\.[a-zA-Z]+\.v\d+$/)
+      expect(Object.values(STORAGE_KEYS)).not.toContain(value)
+    }
   })
 })

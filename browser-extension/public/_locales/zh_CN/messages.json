@@ -85,6 +85,9 @@
   "captureModeReadable": {
     "message": "整页正文"
   },
+  "captureModeArticle": {
+    "message": "文章正文（Markdown）"
+  },
   "captureTruncated": {
     "message": "已截断以适配上限"
   },
@@ -312,5 +315,427 @@
   },
   "captureNoGrant": {
     "message": "Cognia 没有这个标签页的访问权限。请在想发送的页面上点击工具栏图标，或使用右键菜单。"
+  },
+  "openPanelCommand": {
+    "message": "打开 Cognia 侧边栏"
+  },
+  "captureSelectionCommand": {
+    "message": "将选中内容发送到 Cognia"
+  },
+  "captureArticleCommand": {
+    "message": "将本文正文发送到 Cognia"
+  },
+  "contextMenuArticle": {
+    "message": "将文章正文发送到 Cognia"
+  },
+  "contextMenuLink": {
+    "message": "将链接发送到 Cognia"
+  },
+  "contextMenuImage": {
+    "message": "将图片发送到 Cognia"
+  },
+  "contextMenuQuick": {
+    "message": "让 Cognia…"
+  },
+  "quickActionSummarize": {
+    "message": "总结"
+  },
+  "quickActionExplain": {
+    "message": "解释"
+  },
+  "quickActionTranslate": {
+    "message": "翻译"
+  },
+  "omniboxSuggestion": {
+    "message": "就当前页面询问 Cognia"
+  },
+  "notifyCompleted": {
+    "message": "Cognia 已完成一项任务"
+  },
+  "notifyFailed": {
+    "message": "一项 Cognia 任务失败了"
+  },
+  "notifyNeedsInput": {
+    "message": "一项 Cognia 任务需要你的回复"
+  },
+  "notifySiteQuestionTitle": {
+    "message": "允许 Cognia 在此网站上操作？"
+  },
+  "notifySiteQuestion": {
+    "message": "有智能体想在 $HOST$ 上操作，请在 Cognia 侧边栏中答复。",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentBarActing": {
+    "message": "Cognia 正在此标签页中操作"
+  },
+  "agentBarPaused": {
+    "message": "你已接管，Cognia 已暂停"
+  },
+  "agentBarStop": {
+    "message": "停止"
+  },
+  "agentBarTakeOver": {
+    "message": "接管"
+  },
+  "agentBarResume": {
+    "message": "交还"
+  },
+  "agentTitle": {
+    "message": "智能体模式"
+  },
+  "agentModeLabel": {
+    "message": "允许智能体在此浏览器中操作"
+  },
+  "agentModeHint": {
+    "message": "需要向 Chrome 申请所有网站的访问权限。Cognia 在每个网站上首次操作前仍会征求你的同意。"
+  },
+  "agentSitesDenied": {
+    "message": "Chrome 未授予网站访问权限，智能体模式保持关闭。"
+  },
+  "agentPermissionDenied": {
+    "message": "Chrome 未授予该权限。"
+  },
+  "agentSocketLabel": {
+    "message": "与 Cognia 的连接："
+  },
+  "agentSocketConnected": {
+    "message": "已连接"
+  },
+  "agentSocketConnecting": {
+    "message": "正在连接…"
+  },
+  "agentSocketRetrying": {
+    "message": "即将重新连接"
+  },
+  "agentSocketRefused": {
+    "message": "被拒绝——请在 Cognia 设置中检查此浏览器"
+  },
+  "agentSocketStopped": {
+    "message": "未连接"
+  },
+  "agentDriveAllowed": {
+    "message": "Cognia 所有者已允许智能体在此浏览器中操作。"
+  },
+  "agentDriveNotAllowed": {
+    "message": "智能体暂时无法在此操作：请在 Cognia → 设置 → 伴侣中为此浏览器开启。"
+  },
+  "agentDownloadsLabel": {
+    "message": "允许智能体查看和管理下载"
+  },
+  "agentCookiesLabel": {
+    "message": "允许智能体读取和清除 Cookie"
+  },
+  "agentConversationsTitle": {
+    "message": "正在此处操作的对话"
+  },
+  "agentConversationTabs": {
+    "message": "$COUNT$ 个标签页",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentTakenOver": {
+    "message": "你已接管"
+  },
+  "agentDecisionsTitle": {
+    "message": "网站授权"
+  },
+  "agentDecisionForget": {
+    "message": "移除"
+  },
+  "attachVisible": {
+    "message": "截图"
+  },
+  "attachRegion": {
+    "message": "区域截图"
+  },
+  "attachFullPage": {
+    "message": "整页截图"
+  },
+  "attachPdf": {
+    "message": "附加 PDF"
+  },
+  "attachWorking": {
+    "message": "处理中…"
+  },
+  "attachFull": {
+    "message": "已达到附件数量上限"
+  },
+  "attachRemove": {
+    "message": "移除 $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "attachRegionHint": {
+    "message": "在截图上拖动以选择区域。"
+  },
+  "attachRegionAlt": {
+    "message": "当前可见页面的截图"
+  },
+  "attachRegionConfirm": {
+    "message": "使用此区域"
+  },
+  "attachFailed": {
+    "message": "无法截取屏幕。"
+  },
+  "attachTooLarge": {
+    "message": "该文件超过了 Cognia 允许的大小。"
+  },
+  "attachFullPageCut": {
+    "message": "页面过长，只截取了前一部分。"
+  },
+  "attachImageUnreadable": {
+    "message": "无法读取该图片，只会发送其地址。"
+  },
+  "attachImageUnsupported": {
+    "message": "无法附加此类型的图片，只会发送其地址。"
+  },
+  "attachPdfUnreadable": {
+    "message": "无法读取该 PDF。"
+  },
+  "attachUploadFailed": {
+    "message": "附件上传失败：$REASON$",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "blockedHostsLabel": {
+    "message": "从不捕获这些网站"
+  },
+  "blockedHostsHint": {
+    "message": "这些网站及其子域名上的页面永远不会被读取。"
+  },
+  "blockedHostAdd": {
+    "message": "添加"
+  },
+  "blockedHostInvalid": {
+    "message": "这不是有效的网站地址。"
+  },
+  "blockedHostFull": {
+    "message": "列表已满。"
+  },
+  "blockedHostRemove": {
+    "message": "移除 $HOST$",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "captureArticle": {
+    "message": "发送正文"
+  },
+  "captureBlocked": {
+    "message": "你已将此网站设为从不捕获。"
+  },
+  "captureEditTitle": {
+    "message": "标题"
+  },
+  "captureEditText": {
+    "message": "将要发送的内容（可修改删减）"
+  },
+  "captureLinkLabel": {
+    "message": "链接："
+  },
+  "captureImageLabel": {
+    "message": "图片："
+  },
+  "captureStale": {
+    "message": "捕获后该标签页已跳转到其他页面。"
+  },
+  "draftDroppedAttachments": {
+    "message": "草稿已恢复，但其中的 $COUNT$ 个附件未保留，如有需要请重新添加。",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "followUp": {
+    "message": "继续追问"
+  },
+  "metadataSite": {
+    "message": "网站"
+  },
+  "metadataByline": {
+    "message": "作者"
+  },
+  "metadataPublished": {
+    "message": "发布时间"
+  },
+  "metadataLanguage": {
+    "message": "语言"
+  },
+  "notificationsLabel": {
+    "message": "任务完成时通知我"
+  },
+  "notificationsHint": {
+    "message": "侧边栏关闭时显示系统通知。"
+  },
+  "notificationsDenied": {
+    "message": "Chrome 未允许发送通知。"
+  },
+  "pagesAdd": {
+    "message": "添加其他标签页"
+  },
+  "pagesBudget": {
+    "message": "已用 $USED$ / $LIMIT$ KB",
+    "placeholders": {
+      "used": {
+        "content": "$1"
+      },
+      "limit": {
+        "content": "$2"
+      }
+    }
+  },
+  "pagesFull": {
+    "message": "一次请求无法再添加更多页面。"
+  },
+  "pagesNoTabs": {
+    "message": "此窗口中没有其他网页标签页。"
+  },
+  "pagesTabsDenied": {
+    "message": "Chrome 未允许列出标签页。"
+  },
+  "pagesOriginDenied": {
+    "message": "Chrome 未允许读取该网站。"
+  },
+  "pagesReadFailed": {
+    "message": "无法读取该标签页。"
+  },
+  "pagesReading": {
+    "message": "正在读取…"
+  },
+  "pagesPageLabel": {
+    "message": "第 $NUMBER$ 页：",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "pagesOverBudget": {
+    "message": "这些页面合计超过 Cognia 单次请求允许的大小，请移除一页或删减文字。"
+  },
+  "promptsManage": {
+    "message": "已保存的指令"
+  },
+  "promptsSaveCurrent": {
+    "message": "保存当前指令"
+  },
+  "promptsNone": {
+    "message": "还没有已保存的指令。"
+  },
+  "promptsTitleLabel": {
+    "message": "名称"
+  },
+  "promptsInstructionLabel": {
+    "message": "指令"
+  },
+  "promptsSave": {
+    "message": "保存"
+  },
+  "promptsEdit": {
+    "message": "编辑"
+  },
+  "promptsDelete": {
+    "message": "删除"
+  },
+  "promptsEmpty": {
+    "message": "不能保存空指令。"
+  },
+  "promptsTooLong": {
+    "message": "该指令过长，无法保存。"
+  },
+  "promptsFull": {
+    "message": "已保存的指令数量已达上限。"
+  },
+  "quickPromptSummarize": {
+    "message": "总结这个页面：先列出要点，再列出需要我采取行动的事项。"
+  },
+  "quickPromptExplain": {
+    "message": "请清楚地解释这些内容，就像讲给初次接触该主题的人听。"
+  },
+  "quickPromptTranslate": {
+    "message": "将这些内容翻译成我的语言，并保留原有格式。"
+  },
+  "recentSearch": {
+    "message": "搜索任务"
+  },
+  "recentNoMatch": {
+    "message": "没有与搜索匹配的任务。"
+  },
+  "recentLoadMore": {
+    "message": "加载更多"
+  },
+  "recentLoadFailed": {
+    "message": "无法加载更多任务。"
+  },
+  "remove": {
+    "message": "移除"
+  },
+  "resultCopy": {
+    "message": "复制回答"
+  },
+  "siteQuestionTitle": {
+    "message": "允许 Cognia 在 $HOST$ 上操作？",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "siteQuestionDetail": {
+    "message": "有智能体想在此网站上$ACTION$。",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      }
+    }
+  },
+  "siteOpNavigate": {
+    "message": "打开页面"
+  },
+  "siteOpAct": {
+    "message": "点击、输入或修改内容"
+  },
+  "siteOpRead": {
+    "message": "读取页面"
+  },
+  "siteAllowOnce": {
+    "message": "本次任务允许"
+  },
+  "siteAllowAlways": {
+    "message": "始终允许"
+  },
+  "siteNever": {
+    "message": "从不"
+  },
+  "submitShortcutHint": {
+    "message": "按 Ctrl/⌘ + Enter 发送"
+  },
+  "transcriptAvailable": {
+    "message": "已包含字幕文本"
+  },
+  "transcriptAutoGenerated": {
+    "message": "自动生成"
+  },
+  "transcriptNoCaptions": {
+    "message": "此视频没有字幕"
+  },
+  "transcriptFailed": {
+    "message": "无法读取字幕"
   }
 }

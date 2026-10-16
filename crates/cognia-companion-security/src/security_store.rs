@@ -33,11 +33,12 @@ pub enum SecurityStoreError {
     #[error("the requested device capability set is invalid")]
     InvalidCapabilities,
     /// A grant the target device's class does not admit. A browser companion
-    /// (ADR-0154) holds `browser.submit` and `browser.read-own` and nothing
-    /// else, whichever surface — the desktop toggles, `fleet_worker_set`, the
-    /// Owner route or `cognia-server devices` — asks for more.
+    /// (ADR-0154, ADR-0228) holds `browser.submit`, `browser.read-own` and, when
+    /// the Owner allows it, `browser.drive` — and nothing else, whichever
+    /// surface — the desktop toggles, `fleet_worker_set`, the Owner route or
+    /// `cognia-server devices` — asks for more.
     #[error(
-        "the device's class does not admit this capability: a browser companion holds only browser.submit and browser.read-own"
+        "the device's class does not admit this capability: a browser companion holds only browser.submit, browser.read-own and browser.drive"
     )]
     CapabilityOutsideDeviceClass,
     #[error("security schema migration failed: {0}")]
@@ -118,6 +119,15 @@ const BROWSER_ENROLLMENT: EnrollmentClass = EnrollmentClass {
     created_audit: "browser_enrollment.created",
     registered_audit: "browser.registered",
 };
+
+/// Everything a browser companion device may ever hold (ADR-0228 §5).
+///
+/// A superset of what enrollment grants: `browser.drive` — letting agents act
+/// in that browser's tabs — is in the class, so the Owner can turn it on for one
+/// browser, but no enrollment hands it out. A browser that was paired to hand
+/// over pages does not become a browser agents can drive by being paired.
+pub const BROWSER_CLASS_CAPABILITIES: &[&str] =
+    &["browser.submit", "browser.read-own", "browser.drive"];
 
 /// The device half of a registration, gathered so the shared path does not take
 /// nine positional `&str`s that are trivial to transpose.
@@ -1138,6 +1148,24 @@ impl SecurityStore {
             })
             .collect();
         Ok(workers)
+    }
+
+    /// The devices registered through a browser enrollment (ADR-0154), with
+    /// their live capabilities — the desktop's Browser Companion card reads
+    /// these to offer `browser.drive` per browser (ADR-0228 §5).
+    pub fn list_browser_devices(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Vec<DeviceSummary>, SecurityStoreError> {
+        let devices = self.list_devices(tenant_id)?;
+        let conn = self.conn.lock();
+        let mut browsers = Vec::new();
+        for device in devices {
+            if is_browser_device(&conn, tenant_id, &device.device_id)? {
+                browsers.push(device);
+            }
+        }
+        Ok(browsers)
     }
 
     /// Atomically replace the complete live capability snapshot for one device.
@@ -2627,13 +2655,14 @@ pub fn is_assignable_device_capability(capability: &str) -> bool {
     )
 }
 
-/// Whether `capability` is one of the browser companion class's own two.
+/// Whether `capability` belongs to the browser companion class.
 ///
 /// Never assignable to an ordinary device, and the only thing a browser device
-/// may hold. [`BROWSER_ENROLLMENT`] is the one list, so the enrollment, the
-/// grant check and [`confine_browser_device_grants`] cannot disagree.
+/// may hold. [`BROWSER_CLASS_CAPABILITIES`] is the one list, so the grant check
+/// and [`confine_browser_device_grants`] cannot disagree; enrollment hands out
+/// the subset in [`BROWSER_ENROLLMENT`].
 fn is_browser_class_capability(capability: &str) -> bool {
-    BROWSER_ENROLLMENT.capabilities.contains(&capability)
+    BROWSER_CLASS_CAPABILITIES.contains(&capability)
 }
 
 /// Whether `(tenant_id, device_id)` was registered through a browser
@@ -5050,6 +5079,86 @@ CREATE TABLE devices (
     }
 
     #[test]
+    fn list_browser_devices_names_only_browser_enrollments() {
+        let store = SecurityStore::in_memory().unwrap();
+        register_browser(&store, "tenant-a", "browser-a", 101);
+        register(&store, "tenant-a", "phone-a", 102);
+        let browsers = store.list_browser_devices("tenant-a").unwrap();
+        assert_eq!(
+            browsers
+                .iter()
+                .map(|device| device.device_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["browser-a"]
+        );
+        assert!(store.list_browser_devices("tenant-b").unwrap().is_empty());
+    }
+
+    #[test]
+    fn browser_drive_is_in_the_class_but_never_granted_at_enrollment() {
+        // ADR-0228 §5: enrollment hands out the ADR-0154 pair only. Driving is
+        // an Owner decision per browser, made through the ordinary grant edit,
+        // and an ordinary device can never be given it.
+        let store = SecurityStore::in_memory().unwrap();
+        register_browser(&store, "tenant-a", "browser-a", 101);
+        assert_eq!(
+            browser_snapshot(&store, "browser-a"),
+            vec!["browser.read-own", "browser.submit"]
+        );
+        assert!(!store
+            .has_capability("tenant-a", "browser-a", "browser.drive")
+            .unwrap());
+
+        let granted = store
+            .replace_device_capabilities(
+                "tenant-a",
+                "owner-a",
+                "browser-a",
+                &[
+                    "browser.read-own".into(),
+                    "browser.submit".into(),
+                    "browser.drive".into(),
+                ],
+                102,
+            )
+            .unwrap();
+        assert_eq!(
+            granted,
+            vec!["browser.drive", "browser.read-own", "browser.submit"]
+        );
+        assert!(store
+            .has_capability("tenant-a", "browser-a", "browser.drive")
+            .unwrap());
+
+        // Revoking it leaves the device's capture capabilities alone.
+        store
+            .replace_device_capabilities(
+                "tenant-a",
+                "owner-a",
+                "browser-a",
+                &["browser.read-own".into(), "browser.submit".into()],
+                103,
+            )
+            .unwrap();
+        assert!(!store
+            .has_capability("tenant-a", "browser-a", "browser.drive")
+            .unwrap());
+
+        register(&store, "tenant-a", "device-a", 104);
+        assert!(matches!(
+            store.replace_device_capabilities(
+                "tenant-a",
+                "owner-a",
+                "device-a",
+                &["browser.drive".into()],
+                105,
+            ),
+            Err(SecurityStoreError::CapabilityOutsideDeviceClass)
+                | Err(SecurityStoreError::InvalidCapabilities)
+        ));
+    }
+
+    #[test]
     fn a_browser_device_keeps_its_own_capabilities_through_a_grant_edit() {
         // Every caller of `replace_device_capabilities` reads the device's live
         // snapshot and hands it back with one grant added or removed. Refusing
@@ -5932,7 +6041,7 @@ CREATE TABLE devices (
     #[test]
     fn every_device_capability_in_the_manifest_is_grantable() {
         const NOT_A_DEVICE_CAPABILITY: &[&str] = &["service.internal", "client.local"];
-        let browser_only = super::BROWSER_ENROLLMENT.capabilities;
+        let browser_only = super::BROWSER_CLASS_CAPABILITIES;
 
         let mut unreachable: Vec<&str> = cognia_companion_contract::command_manifest::commands()
             .iter()

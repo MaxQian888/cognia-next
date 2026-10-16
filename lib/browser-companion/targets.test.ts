@@ -3,7 +3,9 @@ import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { BrowserDeliveryTargetV1 } from "@/types/browser-companion"
 
 import {
+  BROWSER_AGENT_TARGET_ID,
   MAX_SESSION_TARGETS,
+  isBrowserAgentTarget,
   agentTaskTargetId,
   browserFillableParams,
   issueTargetId,
@@ -428,5 +430,42 @@ describe("issue and agent-task targets", () => {
       NEW_CHAT_TARGET_ID,
       sessionTargetId("session-a"),
     ])
+  })
+})
+
+describe("the browser-agent target (ADR-0228 §6)", () => {
+  it("is offered only to a browser that may be driven and is connected", async () => {
+    const cases: [{ allowed: boolean; connected: boolean } | null, boolean][] = [
+      [{ allowed: true, connected: true }, true],
+      [{ allowed: true, connected: false }, false],
+      [{ allowed: false, connected: true }, false],
+      [null, false],
+    ]
+    for (const [status, offered] of cases) {
+      const targets = await listDeliveryTargets(
+        {
+          ...deps([]),
+          ...(status ? { driveStatus: async () => status } : {}),
+        },
+        "browser-a"
+      )
+      expect(targets.some((target) => target.id === BROWSER_AGENT_TARGET_ID)).toBe(offered)
+    }
+  })
+
+  it("is never offered to an unbound caller, and never the default", async () => {
+    const unbound = await listDeliveryTargets(
+      { ...deps([]), driveStatus: async () => ({ allowed: true, connected: true }) },
+      ""
+    )
+    expect(unbound.map((target) => target.id)).toEqual([NEW_CHAT_TARGET_ID])
+    const bound = await listDeliveryTargets(
+      { ...deps([]), driveStatus: async () => ({ allowed: true, connected: true }) },
+      "browser-a"
+    )
+    const agent = bound.find((target) => target.id === BROWSER_AGENT_TARGET_ID)
+    expect(agent).toMatchObject({ kind: "browser-agent", isDefault: false })
+    expect(agent && isBrowserAgentTarget(agent)).toBe(true)
+    expect(bound.find((target) => target.isDefault)?.id).toBe(NEW_CHAT_TARGET_ID)
   })
 })

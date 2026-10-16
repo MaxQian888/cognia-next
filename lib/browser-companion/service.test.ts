@@ -118,6 +118,7 @@ function harness(
           listTaskAgents: async () => agents,
           existingSessionIds: async (sessionIds) =>
             new Set(sessionIds.filter((sessionId) => !deletedSessions.has(sessionId))),
+          ...(overrides.driveStatus ? { driveStatus: overrides.driveStatus } : {}),
         },
         deviceId
       ),
@@ -225,7 +226,12 @@ describe("browserCompanionCapability", () => {
     const h = harness()
     const capability = await browserCompanionCapability(h.deps, "browser-a")
     expect(capability.schemaVersion).toBe(1)
-    expect(capability.supportedCaptureModes).toEqual(["metadata", "selection", "readable-page"])
+    expect(capability.supportedCaptureModes).toEqual([
+      "metadata",
+      "selection",
+      "readable-page",
+      "article",
+    ])
     expect(capability.workspaces[0]).toMatchObject({ id: "ws-default", isDefault: true })
     expect(capability.appearance).toEqual(APPEARANCE)
     expect(capability.limits.readableTextBytes).toBeGreaterThan(0)
@@ -521,8 +527,10 @@ describe("submitBrowserContext", () => {
   it("refuses to replay another device's submission id", async () => {
     const h = harness()
     await submitBrowserContext(h.deps, "browser-a", payload())
+    // The same answer a read gives, so the write path cannot be used to probe
+    // which ids another browser has used.
     await expect(submitBrowserContext(h.deps, "browser-b", payload())).rejects.toMatchObject({
-      code: "submission_owned_elsewhere",
+      code: "submission_not_found",
     })
   })
 
@@ -613,18 +621,49 @@ describe("listBrowserContextSubmissions", () => {
     expect(page.items[0].deepLink).toBe(browserSubmissionDeepLink("session-1"))
   })
 
-  it("clamps the limit rather than trusting it", async () => {
-    const seen: number[] = []
-    const h = harness({
-      listSubmissions: async (_deviceId, limit) => {
-        seen.push(limit)
-        return []
-      },
+  it("clamps the page size rather than trusting it", async () => {
+    const h = harness()
+    for (let index = 0; index < 60; index++) {
+      await submitBrowserContext(h.deps, "browser-a", payload({ submissionId: `sub-${index}` }))
+    }
+    const sizes = await Promise.all([
+      listBrowserContextSubmissions(h.deps, "browser-a", { limit: 5_000 }),
+      listBrowserContextSubmissions(h.deps, "browser-a", { limit: 0 }),
+      listBrowserContextSubmissions(h.deps, "browser-a"),
+    ])
+    expect(sizes.map((page) => page.items.length)).toEqual([50, 1, 20])
+  })
+
+  it("pages by offset and searches titles and hosts", async () => {
+    const h = harness()
+    const pages = ["alpha.example", "beta.example", "alpha.example"]
+    for (const [index, host] of pages.entries()) {
+      await submitBrowserContext(
+        h.deps,
+        "browser-a",
+        payload({
+          submissionId: `sub-${index}`,
+          instruction: `Question ${index}`,
+          context: { ...payload().context, url: `https://${host}/page-${index}` },
+        })
+      )
+    }
+    const first = await listBrowserContextSubmissions(h.deps, "browser-a", { limit: 2 })
+    const second = await listBrowserContextSubmissions(h.deps, "browser-a", {
+      limit: 2,
+      offset: 2,
     })
-    await listBrowserContextSubmissions(h.deps, "browser-a", { limit: 5_000 })
-    await listBrowserContextSubmissions(h.deps, "browser-a", { limit: 0 })
-    await listBrowserContextSubmissions(h.deps, "browser-a")
-    expect(seen).toEqual([50, 1, 20])
+    expect([...first.items, ...second.items].map((item) => item.submissionId).sort()).toEqual([
+      "sub-0",
+      "sub-1",
+      "sub-2",
+    ])
+    const alpha = await listBrowserContextSubmissions(h.deps, "browser-a", { query: "ALPHA" })
+    expect(alpha.items.map((item) => item.sourceHost)).toEqual(["alpha.example", "alpha.example"])
+    const byTitle = await listBrowserContextSubmissions(h.deps, "browser-a", {
+      query: "question 1",
+    })
+    expect(byTitle.items.map((item) => item.submissionId)).toEqual(["sub-1"])
   })
 
   it("falls back to the recorded status when the runtime cannot be read", async () => {
@@ -966,5 +1005,235 @@ describe("filing and dispatching instead of chatting", () => {
     await expect(
       cancelBrowserContext(h.deps, "browser-a", { submissionId: "sub-1" })
     ).rejects.toMatchObject({ code: "nothing_to_stop" })
+  })
+})
+
+describe("ADR-0228 capture v2", () => {
+  const BOARDS = [{ id: "board-1", name: "Inbox", workspaceId: "ws-default" }]
+  const article = {
+    text: "# Heading\n\nBody with [a link](https://example.com/x).",
+    truncated: false,
+    originalCharacterCount: 52,
+  }
+
+  it("advertises the features this Host was wired for", async () => {
+    const bare = await browserCompanionCapability(harness().deps, "browser-a")
+    expect(bare.features).toEqual([
+      "article",
+      "markdown-selection",
+      "metadata",
+      "transcript",
+      "link-image",
+      "multi-page",
+      "list-paging",
+    ])
+    expect(bare).not.toHaveProperty("driveAllowed")
+
+    const full = await browserCompanionCapability(
+      harness({
+        resolveAttachments: async () => [],
+        driveStatus: async () => ({ allowed: true, connected: true }),
+      }).deps,
+      "browser-a"
+    )
+    expect(full.features).toEqual(
+      expect.arrayContaining(["attachments", "device-socket", "browser-agent"])
+    )
+    expect(full.driveAllowed).toBe(true)
+    expect(full.limits.maxPages).toBeGreaterThan(1)
+  })
+
+  it("puts article Markdown, metadata and a transcript inside the fence", async () => {
+    const h = harness()
+    await submitBrowserContext(
+      h.deps,
+      "browser-a",
+      payload({
+        context: {
+          schemaVersion: 1,
+          captureMode: "article",
+          url: "https://example.com/post",
+          title: "Post",
+          capturedAt: 1,
+          article,
+          metadata: { byline: "Ada", siteName: "Example", unknownKey: "dropped" },
+          transcript: { status: "available", text: "[00:01] hello", truncated: false },
+        },
+      })
+    )
+    const text = h.enqueued[0]?.text ?? ""
+    const fence = text.indexOf("<untrusted_content>")
+    expect(fence).toBeGreaterThan(0)
+    for (const fragment of ["Author: Ada", "Site: Example", "# Heading", "[00:01] hello"]) {
+      expect(text.indexOf(fragment)).toBeGreaterThan(fence)
+    }
+    expect(text).not.toContain("dropped")
+    expect(h.rows.get("sub-1")).toMatchObject({ captureMode: "article" })
+  })
+
+  it("fences every page separately and records how many there were", async () => {
+    const h = harness()
+    const second = {
+      ...payload().context,
+      url: "https://other.example/b",
+      title: "B",
+    }
+    await submitBrowserContext(h.deps, "browser-a", payload({ additionalContexts: [second] }))
+    const text = h.enqueued[0]?.text ?? ""
+    expect(text.match(/<untrusted_content>/g)).toHaveLength(2)
+    expect(text).toContain("Page 2 of 2:")
+    expect(h.rows.get("sub-1")?.pageCount).toBe(2)
+    const page = await listBrowserContextSubmissions(h.deps, "browser-a")
+    expect(page.items[0]?.pageCount).toBe(2)
+  })
+
+  it("treats the same tabs in another order as a different capture on redrive", async () => {
+    const h = harness({
+      enqueueMessage: async () => {
+        throw new BrowserCompanionError("runtime_target_unavailable", "no runtime")
+      },
+    })
+    const a = payload().context
+    const b = { ...a, url: "https://other.example/b", title: "B" }
+    await submitBrowserContext(h.deps, "browser-a", payload({ additionalContexts: [b] }))
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ context: b, additionalContexts: [a] }))
+    ).rejects.toMatchObject({ code: "submission_payload_mismatch" })
+  })
+
+  it("refuses more pages than the limit allows", async () => {
+    const h = harness()
+    const extra = Array.from({ length: 10 }, (_, index) => ({
+      ...payload().context,
+      url: `https://example.com/${index}`,
+    }))
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ additionalContexts: extra }))
+    ).rejects.toMatchObject({ code: "payload_too_large" })
+  })
+
+  it("binds staged attachments to the conversation and names them in the prompt", async () => {
+    const resolved: unknown[] = []
+    const h = harness({
+      resolveAttachments: async (input) => {
+        resolved.push(input)
+        return [
+          {
+            name: "shot.png",
+            mediaType: "image/png",
+            size: 3,
+            hash: "a".repeat(64),
+            ref: "cognia-upload:upl_1",
+            kind: "screenshot",
+          },
+        ]
+      },
+    })
+    const enqueued: { attachments?: unknown[] }[] = []
+    h.deps.enqueueMessage = async (input) => {
+      enqueued.push(input as { attachments?: unknown[] })
+    }
+    await submitBrowserContext(
+      h.deps,
+      "browser-a",
+      payload({ attachments: [{ attachmentId: "upl_1", kind: "screenshot" }] })
+    )
+    expect(resolved).toEqual([
+      {
+        deviceId: "browser-a",
+        submissionId: "sub-1",
+        sessionId: "session-1",
+        attachments: [{ attachmentId: "upl_1", kind: "screenshot" }],
+      },
+    ])
+    expect(enqueued[0]?.attachments).toHaveLength(1)
+    expect(h.rows.get("sub-1")?.attachmentCount).toBe(1)
+  })
+
+  it("refuses attachments a Host cannot stage, or a target without a turn", async () => {
+    const withoutStaging = harness()
+    await expect(
+      submitBrowserContext(
+        withoutStaging.deps,
+        "browser-a",
+        payload({ attachments: [{ attachmentId: "upl_1", kind: "image" }] })
+      )
+    ).rejects.toMatchObject({ code: "attachments_unsupported" })
+    expect(withoutStaging.createdSessions).toHaveLength(0)
+
+    const toIssue = harness({ boards: BOARDS, resolveAttachments: async () => [] })
+    await expect(
+      submitBrowserContext(
+        toIssue.deps,
+        "browser-a",
+        payload({
+          targetId: "issue:board-1",
+          attachments: [{ attachmentId: "upl_1", kind: "image" }],
+        })
+      )
+    ).rejects.toMatchObject({ code: "attachments_unsupported" })
+    expect(toIssue.filedIssues).toHaveLength(0)
+  })
+
+  it("caps a rendered template the way it caps a typed instruction", async () => {
+    const h = harness({
+      templates: [{ ...TEMPLATE, id: "tpl-big", body: "x".repeat(9 * 1024), params: [] }],
+    })
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ targetId: "template:tpl-big" }))
+    ).rejects.toMatchObject({ code: "payload_too_large" })
+  })
+})
+
+describe("browser-agent submissions (ADR-0228 §6)", () => {
+  function agentHarness(status = { allowed: true, connected: true }) {
+    const bound: { sessionId: string; deviceId: string; tabId?: number }[] = []
+    const h = harness({
+      driveStatus: async () => status,
+      bindBrowserAgent: (input) => {
+        bound.push(input)
+      },
+    })
+    return { h, bound }
+  }
+
+  it("starts a conversation bound to the submitting browser and its tab", async () => {
+    const { h, bound } = agentHarness()
+    const response = await submitBrowserContext(
+      h.deps,
+      "browser-a",
+      payload({ targetId: "browser-agent:new", browserAgent: { tabId: 42 } })
+    )
+    expect(response.sessionId).toBe("session-1")
+    expect(bound).toEqual([{ sessionId: "session-1", deviceId: "browser-a", tabId: 42 }])
+    expect(h.enqueued).toHaveLength(1)
+    expect(h.rows.get("sub-1")).toMatchObject({ targetId: "browser-agent:new" })
+  })
+
+  it("refuses before creating anything when the browser cannot be driven", async () => {
+    const { h, bound } = agentHarness({ allowed: true, connected: false })
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ targetId: "browser-agent:new" }))
+    ).rejects.toMatchObject({ code: "unknown_target" })
+    expect(h.createdSessions).toHaveLength(0)
+    expect(bound).toHaveLength(0)
+  })
+
+  it("is not a target on a Host that cannot drive a browser", async () => {
+    const h = harness()
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ targetId: "browser-agent:new" }))
+    ).rejects.toMatchObject({ code: "unknown_target" })
+  })
+
+  it("rejects a malformed starting tab", async () => {
+    const { h } = agentHarness()
+    await expect(
+      submitBrowserContext(
+        h.deps,
+        "browser-a",
+        payload({ targetId: "browser-agent:new", browserAgent: { tabId: "x" } })
+      )
+    ).rejects.toMatchObject({ code: "malformed" })
   })
 })

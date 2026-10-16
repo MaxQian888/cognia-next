@@ -90,6 +90,26 @@ interface Harness {
   submitOptions: ({ idempotencyKey?: string } | undefined)[]
   /** `onStorageChange` listeners, by key. */
   storageListeners: Map<string, Set<(value: unknown) => void>>
+  /** `chrome.storage.session`, and its listeners. */
+  sessionStore: Map<string, unknown>
+  sessionListeners: Map<string, Set<(value: unknown) => void>>
+  /** Optional permissions and origins granted so far. */
+  granted: Set<string>
+  /** Whether a permission request is answered yes. */
+  grantRequests: boolean
+  permissionRequests: string[][]
+  /** Messages posted on the panel's port to the worker. */
+  portMessages: unknown[]
+  portOpen: boolean
+  siteAnswers: [string, string][]
+  forgottenDecisions: string[]
+  openedUrls: string[]
+  /** The options each `list()` call carried, and what later pages answer. */
+  listCalls: unknown[]
+  nextPageToken?: string
+  olderPage: BrowserContextSubmissionSummaryV1[]
+  /** Upload calls, in order, as `command:arg`. */
+  uploads: string[]
 }
 
 function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: never } {
@@ -107,21 +127,48 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
     invalidations: [],
     submitOptions: [],
     storageListeners: new Map(),
+    sessionStore: new Map(),
+    sessionListeners: new Map(),
+    granted: new Set(),
+    grantRequests: true,
+    permissionRequests: [],
+    portMessages: [],
+    portOpen: false,
+    siteAnswers: [],
+    forgottenDecisions: [],
+    openedUrls: [],
+    listCalls: [],
+    olderPage: [],
+    uploads: [],
     ...overrides,
     // After the spread, not before: `overrides` carries its own `store`, and
     // letting it win here would leave the harness reading one Map while the
     // api wrote to another.
     store,
     api: {
-      activeTab: async () => ({ id: 1, url: "https://example.com/a?x=1", title: "A page" }),
-      tabById: async (id) => ({ id, url: `https://example.com/tab-${id}`, title: `Tab ${id}` }),
-      extract: async () => ({
+      activeTab: async () => ({
+        id: 1,
+        url: "https://example.com/a?x=1",
+        title: "A page",
+        windowId: 1,
+      }),
+      tabById: async (id) => ({
+        id,
+        url: `https://example.com/tab-${id}`,
+        title: `Tab ${id}`,
+        windowId: 1,
+      }),
+      capturePage: async () => ({
         title: "A page",
         url: "https://example.com/a?x=1",
-        selection: "the selected sentence",
+        selection: { text: "the selected sentence", markdown: "the selected sentence" },
         readableText: null,
         readableCharacterCount: 0,
+        article: null,
+        metadata: {},
+        isPdf: false,
       }),
+      captureTranscript: async () => ({ status: "unavailable", reason: "not_a_video" }),
       read: async (key) => (store.get(key) ?? null) as never,
       // Writes and removals notify `onStorageChange` listeners the way
       // `chrome.storage.onChanged` does, so a test can play the background
@@ -145,8 +192,78 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
       hasLoopbackPermission: async () => true,
       requestLoopbackPermission: async () => true,
       extensionOrigin: () => "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
-      openUrl: async () => undefined,
+      openUrl: async (url) => {
+        state.openedUrls.push(url)
+      },
       message: (key) => key,
+      readSession: async (key) => (state.sessionStore.get(key) ?? null) as never,
+      writeSession: async (key, value) => {
+        state.sessionStore.set(key, value)
+        for (const listener of state.sessionListeners.get(key) ?? []) listener(value)
+      },
+      removeSession: async (keys) => {
+        for (const key of keys) {
+          state.sessionStore.delete(key)
+          for (const listener of state.sessionListeners.get(key) ?? []) listener(null)
+        }
+      },
+      onSessionChange: (key, listener) => {
+        const listeners = state.sessionListeners.get(key) ?? new Set()
+        listeners.add(listener)
+        state.sessionListeners.set(key, listeners)
+        return () => listeners.delete(listener)
+      },
+      hasPermissions: async (request) =>
+        [...(request.permissions ?? []), ...(request.origins ?? [])].every((entry) =>
+          state.granted.has(entry)
+        ),
+      requestPermissions: async (request) => {
+        const entries = [...(request.permissions ?? []), ...(request.origins ?? [])]
+        state.permissionRequests.push(entries)
+        if (!state.grantRequests) return false
+        for (const entry of entries) state.granted.add(entry)
+        return true
+      },
+      removePermissions: async (request) => {
+        for (const entry of [...(request.permissions ?? []), ...(request.origins ?? [])])
+          state.granted.delete(entry)
+        return true
+      },
+      listTabs: async () => [
+        { id: 1, url: "https://example.com/a?x=1", title: "A page", windowId: 1 },
+        { id: 2, url: "https://other.test/b", title: "B page", windowId: 1 },
+        { id: 3, url: "chrome://settings", title: "Settings", windowId: 1 },
+      ],
+      captureVisible: async () => "data:image/png;base64,iVBORw0KGgo=",
+      activateTab: async () => undefined,
+      scrollMetrics: async () => ({
+        scrollHeight: 1000,
+        viewportHeight: 1000,
+        viewportWidth: 800,
+        scrollY: 0,
+        dpr: 1,
+      }),
+      scrollTo: async (_tab, y) => y,
+      cropImage: async () => "Y3JvcA==",
+      stitchImages: async () => "c3RpdGNo",
+      fetchBytes: async () => ({ bytes: new Uint8Array([1, 2, 3]), mediaType: "image/png" }),
+      connectPanel: () => {
+        state.portOpen = true
+        return {
+          post: (message) => {
+            state.portMessages.push(message)
+          },
+          disconnect: () => {
+            state.portOpen = false
+          },
+        }
+      },
+      answerSiteQuestion: async (id, answer) => {
+        state.siteAnswers.push([id, answer])
+      },
+      forgetSiteDecision: async (origin) => {
+        state.forgottenDecisions.push(origin)
+      },
       ...overrides.api,
     },
   }
@@ -178,10 +295,30 @@ function clientFactory(state: Harness, capability: BrowserCompanionCapabilityV1 
         deepLink: "cognia://session/session-1",
       }
     },
-    list: async () => ({
-      items: state.recent,
-      ...(state.capabilityRevision ? { capabilityRevision: state.capabilityRevision } : {}),
-    }),
+    list: async (options: { pageToken?: string; query?: string } = {}) => {
+      state.listCalls.push(options)
+      if (options.pageToken) return { items: state.olderPage }
+      return {
+        items: state.recent,
+        ...(state.nextPageToken ? { nextPageToken: state.nextPageToken } : {}),
+        ...(state.capabilityRevision ? { capabilityRevision: state.capabilityRevision } : {}),
+      }
+    },
+    uploadInit: async (request: { name: string; size: number }) => {
+      state.uploads.push(`init:${request.name}`)
+      return { uploadId: `u-${request.name}`, chunkSize: 1024 * 1024, receivedBytes: 0 }
+    },
+    uploadChunk: async (request: { uploadId: string; offset: number; dataBase64: string }) => {
+      state.uploads.push(`chunk:${request.uploadId}`)
+      return { receivedBytes: request.offset + atob(request.dataBase64).length }
+    },
+    uploadCommit: async (uploadId: string) => {
+      state.uploads.push(`commit:${uploadId}`)
+      return { attachmentId: `att-${uploadId}` }
+    },
+    uploadAbort: async (uploadId: string) => {
+      state.uploads.push(`abort:${uploadId}`)
+    },
     result: async (submissionId: string) => {
       state.resultReads.push(submissionId)
       const answer = state.answers.get(submissionId)
@@ -357,7 +494,7 @@ describe("SidePanel capture and settings", () => {
     const state = harness({
       store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
       api: {
-        extract: async () => {
+        capturePage: async () => {
           throw new Error("Cannot access contents of the page")
         },
       } as never,
@@ -1136,14 +1273,17 @@ describe("SidePanel resilience", () => {
     const state = harness({
       store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
       api: {
-        extract: async () => ({
+        capturePage: async () => ({
           title: "A page",
           url: "https://example.com/a",
           // Three bytes of ASCII, then an emoji: a five-byte ceiling lands
           // inside the surrogate pair.
-          selection: "abc😀def",
+          selection: { text: "abc😀def", markdown: "abc😀def" },
           readableText: null,
           readableCharacterCount: 0,
+          article: null,
+          metadata: {},
+          isPdf: false,
         }),
       } as never,
     })
@@ -1155,5 +1295,338 @@ describe("SidePanel resilience", () => {
     await waitFor(() => expect(state.submitted).toHaveLength(1))
     const selection = (state.submitted[0] as { context: { selection: unknown } }).context.selection
     expect(selection).toEqual({ text: "abc", truncated: true })
+  })
+})
+
+describe("SidePanel — ADR-0228", () => {
+  const FEATURED: BrowserCompanionCapabilityV1 = {
+    ...CAPABILITY,
+    limits: {
+      ...CAPABILITY.limits,
+      requestBytes: 655360,
+      articleBytes: 131072,
+      transcriptBytes: 131072,
+      maxPages: 3,
+      totalContextBytes: 524288,
+      maxAttachments: 2,
+      attachmentBytes: 1024 * 1024,
+    },
+    supportedCaptureModes: ["metadata", "selection", "readable-page", "article"],
+    features: [
+      "article",
+      "markdown-selection",
+      "metadata",
+      "transcript",
+      "link-image",
+      "multi-page",
+      "attachments",
+      "list-paging",
+      "device-socket",
+      "browser-agent",
+    ],
+    deliveryTargets: [
+      ...(CAPABILITY.deliveryTargets ?? []),
+      { id: "browser-agent:new", kind: "browser-agent", label: "Agent", isDefault: false },
+    ],
+    driveAllowed: true,
+  }
+
+  const RICH_CAPTURE = {
+    title: "A page",
+    url: "https://example.com/a",
+    selection: { text: "plain", markdown: "**plain**" },
+    readableText: "all the words",
+    readableCharacterCount: 13,
+    article: { markdown: "# Heading\n\nbody", characterCount: 15 },
+    metadata: { byline: "Ann" },
+    isPdf: false,
+  }
+
+  function paired(overrides: Partial<Harness> = {}) {
+    return harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      ...overrides,
+      api: { capturePage: async () => RICH_CAPTURE, ...overrides.api } as never,
+    })
+  }
+
+  async function captureAndAsk(
+    kind: "capture-now" | "capture-article" = "capture-now",
+    text = "Go"
+  ) {
+    fireEvent.click(await screen.findByTestId(kind))
+    await screen.findByTestId("capture-preview")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: text } })
+  }
+
+  it("sends the article, Markdown selection and metadata to a Host that reads them", async () => {
+    const state = paired()
+    renderPanel(state, FEATURED)
+    await captureAndAsk("capture-article")
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect((state.submitted[0] as { context: unknown }).context).toMatchObject({
+      captureMode: "article",
+      selection: { text: "**plain**", format: "markdown" },
+      article: { text: "# Heading\n\nbody", format: "markdown" },
+      metadata: { byline: "Ann" },
+    })
+  })
+
+  it("keeps the old shape for a Host that lists no features", async () => {
+    const state = paired()
+    renderPanel(state)
+    expect(screen.queryByTestId("capture-article")).toBeNull()
+    await captureAndAsk()
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    const context = (state.submitted[0] as { context: Record<string, unknown> }).context
+    expect(context.selection).toEqual({ text: "plain", truncated: false })
+    expect(context.metadata).toBeUndefined()
+    expect(screen.queryByTestId("attachments-bar")).toBeNull()
+    expect(screen.queryByTestId("extra-pages")).toBeNull()
+  })
+
+  it("sends an edited title as the suggested one", async () => {
+    const state = paired()
+    renderPanel(state, FEATURED)
+    await captureAndAsk()
+    fireEvent.change(screen.getByTestId("capture-title-input"), { target: { value: "My title" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect(state.submitted[0]).toMatchObject({
+      suggestedTitle: "My title",
+      context: { title: "My title" },
+    })
+  })
+
+  it("adds another tab as a second page", async () => {
+    const state = paired()
+    renderPanel(state, FEATURED)
+    await captureAndAsk()
+    fireEvent.click(screen.getByTestId("extra-pages-add"))
+    fireEvent.click(await screen.findByTestId("extra-pages-tab-2"))
+    await screen.findByTestId("extra-page-0")
+    expect(state.permissionRequests).toEqual([["tabs"], ["https://other.test/*"]])
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    const additional = (state.submitted[0] as { additionalContexts: { captureMode: string }[] })
+      .additionalContexts
+    expect(additional).toHaveLength(1)
+    expect(additional[0]).toMatchObject({ captureMode: "readable-page" })
+  })
+
+  it("uploads a screenshot under the submission and sends its ref", async () => {
+    const state = paired()
+    renderPanel(state, FEATURED)
+    await captureAndAsk()
+    fireEvent.click(screen.getByTestId("attach-visible"))
+    await screen.findByTestId(/^attachment-remove-/)
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    const submitted = state.submitted[0] as {
+      submissionId: string
+      attachments: { kind: string }[]
+    }
+    expect(submitted.attachments).toEqual([
+      { attachmentId: expect.stringMatching(/^att-/), kind: "screenshot" },
+    ])
+    expect(state.uploads[0]).toMatch(/^init:screenshot-visible-/)
+    expect(state.uploads.at(-1)).toMatch(/^commit:/)
+  })
+
+  it("restores the unsent draft, keeps it current, and clears it on send", async () => {
+    const draft = {
+      v: 1,
+      captured: {
+        tabId: 1,
+        title: "Draft page",
+        url: "https://example.com/a",
+        rawUrl: "https://example.com/a?x=1",
+        selection: { text: "kept", truncated: false },
+        readableText: null,
+        capturedAt: 900,
+        strippedQuery: true,
+      },
+      extraPages: [],
+      scope: "auto",
+      instruction: "half written",
+      workspaceId: "ws-default",
+      targetId: "browser-agent:new",
+      targetParams: {},
+      includeFullUrl: false,
+      droppedAttachments: 2,
+      savedAt: 950,
+    }
+    const state = paired({ sessionStore: new Map([["cognia.draft.v1", draft]]) })
+    renderPanel(state, FEATURED)
+    expect(await screen.findByTestId("draft-dropped-attachments")).toBeInTheDocument()
+    expect(screen.getByTestId("instruction")).toHaveValue("half written")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "now finished" } })
+    await waitFor(() =>
+      expect(
+        (state.sessionStore.get("cognia.draft.v1") as { instruction: string }).instruction
+      ).toBe("now finished")
+    )
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    // The draft named the agent target: the conversation starts from its tab.
+    expect(state.submitted[0]).toMatchObject({
+      targetId: "browser-agent:new",
+      browserAgent: { tabId: 1 },
+    })
+    await waitFor(() => expect(state.sessionStore.has("cognia.draft.v1")).toBe(false))
+    expect(state.portMessages).toContainEqual({ kind: "refresh-status" })
+  })
+
+  it("holds a port to the worker while open, and refreshes on its hint", async () => {
+    const state = paired()
+    const view = renderPanel(state, FEATURED)
+    await screen.findByTestId("capture-empty")
+    expect(state.portOpen).toBe(true)
+    const before = state.listCalls.length
+    await state.api.writeSession("cognia.statusHint.v1", 5)
+    await waitFor(() => expect(state.listCalls.length).toBeGreaterThan(before))
+    view.unmount()
+    expect(state.portOpen).toBe(false)
+  })
+
+  it("acts on a quick action and a right-clicked link recorded by the worker", async () => {
+    const state = paired({
+      store: new Map<string, unknown>([
+        [STORAGE_KEYS.pairing, PAIRING],
+        [
+          CAPTURE_REQUEST_KEY,
+          {
+            tabId: 4,
+            mode: "link",
+            requestedAt: 990,
+            linkUrl: "https://b.test/x",
+            quickAction: "summarize",
+          },
+        ],
+      ]) as never,
+    })
+    renderPanel(state, FEATURED)
+    await screen.findByTestId("capture-link")
+    expect(screen.getByTestId("instruction")).toHaveValue("quickPromptSummarize")
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect((state.submitted[0] as { context: unknown }).context).toMatchObject({
+      link: { url: "https://b.test/x" },
+    })
+  })
+
+  it("refuses to capture a site the person blocked", async () => {
+    const state = paired({
+      store: new Map<string, unknown>([
+        [STORAGE_KEYS.pairing, PAIRING],
+        [STORAGE_KEYS.preferences, { blockedHosts: ["example.com"] }],
+      ]) as never,
+    })
+    renderPanel(state, FEATURED)
+    await screen.findByTestId("extension-settings")
+    await waitFor(() => expect(screen.getByTestId("blocked-hosts")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("capture-now"))
+    expect(await screen.findByTestId("submit-error")).toHaveTextContent("captureBlocked")
+  })
+
+  it("searches the list and loads another page", async () => {
+    const state = paired({
+      nextPageToken: "20",
+      recent: [
+        {
+          submissionId: "sub-1",
+          sessionId: "session-1",
+          title: "First",
+          sourceHost: "example.com",
+          captureMode: "selection",
+          status: "completed",
+          submittedAt: 1,
+          updatedAt: 2,
+          deepLink: "cognia://session/session-1",
+        },
+      ],
+      olderPage: [
+        {
+          submissionId: "sub-0",
+          title: "Older",
+          sourceHost: "example.com",
+          captureMode: "metadata",
+          status: "completed",
+          submittedAt: 0,
+          updatedAt: 0,
+          deepLink: "cognia://session/x",
+        },
+      ],
+    })
+    renderPanel(state, FEATURED)
+    fireEvent.click(await screen.findByTestId("recent-load-more"))
+    expect(await screen.findByText("Older")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("recent-search"), { target: { value: "first" } })
+    await waitFor(() => expect(state.listCalls).toContainEqual({ query: "first" }))
+    expect(state.listCalls).toContainEqual({ pageToken: "20" })
+  })
+
+  it("follows a task up in its own conversation", async () => {
+    const state = paired({
+      recent: [
+        {
+          submissionId: "sub-1",
+          sessionId: "session-1",
+          title: "A guide",
+          sourceHost: "example.com",
+          captureMode: "selection",
+          status: "completed",
+          submittedAt: 1,
+          updatedAt: 2,
+          deepLink: "cognia://session/session-1",
+        },
+      ],
+    })
+    renderPanel(state, FEATURED)
+    fireEvent.click(await screen.findByTestId("recent-follow-up-sub-1"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "And then?" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect(state.submitted[0]).toMatchObject({ targetId: "session:session-1" })
+  })
+
+  it("sends with Ctrl/⌘+Enter", async () => {
+    const state = paired()
+    renderPanel(state, FEATURED)
+    await captureAndAsk()
+    fireEvent.keyDown(screen.getByTestId("instruction"), { key: "Enter", metaKey: true })
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+  })
+
+  it("says so when the captured tab has moved on", async () => {
+    let url = "https://example.com/a?x=1"
+    const state = paired({
+      api: {
+        tabById: async (id: number) => ({ id, url, title: "A page", windowId: 1 }),
+        activeTab: async () => ({ id: 1, url, title: "A page", windowId: 1 }),
+      } as never,
+    })
+    renderPanel(state, FEATURED)
+    await captureAndAsk()
+    expect(screen.queryByTestId("capture-stale")).toBeNull()
+    url = "https://example.com/elsewhere"
+    expect(await screen.findByTestId("capture-stale", {}, { timeout: 3_000 })).toBeInTheDocument()
+  })
+
+  it("shows a pending site question above everything", async () => {
+    const state = paired({
+      sessionStore: new Map([
+        [
+          "cognia.agent.siteQuestions.v1",
+          [{ id: "q1", session: "s", origin: "https://shop.test", operation: "act", askedAt: 1 }],
+        ],
+      ]),
+    })
+    renderPanel(state, FEATURED)
+    fireEvent.click(await screen.findByTestId("site-allow-always-q1"))
+    await waitFor(() => expect(state.siteAnswers).toEqual([["q1", "always"]]))
   })
 })

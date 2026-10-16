@@ -11,6 +11,7 @@ import {
   SUPPORTED_SCHEMA_VERSION,
   appearanceOverrideMessage,
   captureModeFor,
+  hasFeature,
   failureReasonMessage,
   isAppearanceOverride,
   isCompatible,
@@ -94,6 +95,24 @@ describe("captureModeFor", () => {
 
   it("falls back to metadata when there is nothing else", () => {
     expect(captureModeFor(page(), true)).toBe("metadata")
+  })
+
+  it("sends an article only to a Host that reads one, else the page it came from", () => {
+    const withArticle = page({
+      readableText: { text: "body", truncated: false, originalCharacterCount: 4 },
+      article: { text: "# body", truncated: false, originalCharacterCount: 6 },
+    })
+    expect(captureModeFor(withArticle, "article", ["article"])).toBe("article")
+    expect(captureModeFor(withArticle, "article", [])).toBe("readable-page")
+    expect(captureModeFor(withArticle, "auto", ["article"])).toBe("metadata")
+  })
+})
+
+describe("hasFeature", () => {
+  it("reads the capability's feature list, absent meaning none", () => {
+    expect(hasFeature({ features: ["attachments"] }, "attachments")).toBe(true)
+    expect(hasFeature({}, "attachments")).toBe(false)
+    expect(hasFeature(undefined, "attachments")).toBe(false)
   })
 })
 

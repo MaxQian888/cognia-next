@@ -5,7 +5,7 @@ description: "Adds a Chrome side panel that pairs with the desktop Host as a sep
 
 # ADR 0154 — The browser hands over a page, not a session
 
-**Status:** Accepted
+**Status:** Accepted; superseded in part (§1, §2, §11) by [ADR-0228](./0228-the-browser-companion-captures-richly-and-can-be-driven)
 **Date:** 2026-08-27
 **Related:** [ADR-0055](./0055-agent-browser-loop), [ADR-0085](./0085-cloud-shared-browser), [ADR-0125](./0125-work-submission-contract), [ADR-0136](./0136-cross-device-placement), [ADR-0144](./0144-workspace-as-the-unit-of-work), [ADR-0148](./0148-style-packs-and-surface-tiers), [ADR-0149](./0149-a-person-is-not-a-device)
 

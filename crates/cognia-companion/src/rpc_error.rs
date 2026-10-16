@@ -75,8 +75,9 @@ impl RpcError {
         )
     }
 
-    /// A grant the target device's class does not admit (ADR-0154): a browser
-    /// companion holds only `browser.submit` and `browser.read-own`. The same
+    /// A grant the target device's class does not admit (ADR-0154, ADR-0228):
+    /// a browser companion holds only `browser.submit`, `browser.read-own` and
+    /// `browser.drive`. The same
     /// code and status the Owner route answers with for the same store error.
     ///
     /// Not retryable: the class is fixed by the enrollment the device spent.

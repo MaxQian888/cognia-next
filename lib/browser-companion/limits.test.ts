@@ -190,3 +190,120 @@ describe("validateBrowserSubmission", () => {
     expect(result.request.suggestedTitle).toBeUndefined()
   })
 })
+
+describe("ADR-0228 fields", () => {
+  const base = payload().context
+
+  it("accepts an article with metadata, a transcript, a link and an image", () => {
+    const result = validateBrowserSubmission(
+      payload({
+        context: {
+          ...base,
+          captureMode: "article",
+          article: { text: "# A", truncated: false, originalCharacterCount: 3, format: "markdown" },
+          selection: { text: "**b**", truncated: false, format: "markdown" },
+          metadata: { byline: " Ada ", canonicalUrl: "javascript:alert(1)", extra: "x" },
+          transcript: { status: "available", text: "[00:01] hi", truncated: false, language: "en" },
+          link: { url: "https://example.com/l", text: "Link" },
+          image: { url: "https://cdn.example.com/i.png", alt: "Chart" },
+        },
+      })
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const context = result.request.context
+    expect(context.article).toMatchObject({ text: "# A", format: "markdown" })
+    expect(context.selection).toMatchObject({ format: "markdown" })
+    // Trimmed, and a canonical URL that is not http(s) is dropped, as is a key
+    // the contract does not name.
+    expect(context.metadata).toEqual({ byline: "Ada" })
+    expect(context.transcript).toEqual({
+      status: "available",
+      text: "[00:01] hi",
+      truncated: false,
+      language: "en",
+    })
+    expect(context.link).toEqual({ url: "https://example.com/l", text: "Link" })
+    expect(context.image).toEqual({ url: "https://cdn.example.com/i.png", alt: "Chart" })
+  })
+
+  it("requires the article an article capture names", () => {
+    expect(
+      validateBrowserSubmission(payload({ context: { ...base, captureMode: "article" } }))
+    ).toEqual({
+      ok: false,
+      rejection: { code: "capture_mode_missing_content", field: "context.article" },
+    })
+  })
+
+  it("refuses a link or image that is not http(s), and an unknown transcript shape", () => {
+    for (const [key, value] of [
+      ["link", { url: "file:///etc/passwd" }],
+      ["image", { url: "data:image/png;base64,AAAA" }],
+      ["transcript", { status: "maybe" }],
+      ["transcript", { status: "unavailable", reason: "because" }],
+    ] as const) {
+      const result = validateBrowserSubmission(payload({ context: { ...base, [key]: value } }))
+      expect(result).toEqual({
+        ok: false,
+        rejection: { code: "malformed", field: `context.${key}` },
+      })
+    }
+  })
+
+  it("validates every added page and names the one that failed", () => {
+    const result = validateBrowserSubmission(
+      payload({ additionalContexts: [base, { ...base, url: "chrome://settings" }] })
+    )
+    expect(result).toEqual({
+      ok: false,
+      rejection: { code: "malformed", field: "additionalContexts[1].url" },
+    })
+  })
+
+  it("bounds the pages and their total content", () => {
+    const tooMany = validateBrowserSubmission(
+      payload({ additionalContexts: Array.from({ length: 10 }, () => base) })
+    )
+    expect(tooMany).toMatchObject({
+      ok: false,
+      rejection: { code: "too_large", field: "additionalContexts" },
+    })
+    const big = {
+      ...base,
+      captureMode: "readable-page",
+      readableText: {
+        text: "x".repeat(BROWSER_CONTEXT_LIMITS.readableTextBytes),
+        truncated: true,
+        originalCharacterCount: 1_000_000,
+      },
+    }
+    // Four full pages are exactly the total budget; one more byte of
+    // selection tips it over while the envelope stays under its own ceiling.
+    const withSelection = { ...big, selection: { text: "y", truncated: false } }
+    const overBudget = validateBrowserSubmission(
+      payload({ context: withSelection, additionalContexts: [big, big, big] })
+    )
+    expect(overBudget).toMatchObject({
+      ok: false,
+      rejection: { code: "too_large", field: "contexts" },
+    })
+  })
+
+  it("accepts attachment refs once each, and only known kinds", () => {
+    const ok = validateBrowserSubmission(
+      payload({ attachments: [{ attachmentId: "upl_1", kind: "pdf", extra: true }] })
+    )
+    expect(ok.ok && ok.request.attachments).toEqual([{ attachmentId: "upl_1", kind: "pdf" }])
+    for (const attachments of [
+      [{ attachmentId: "upl_1", kind: "video" }],
+      [
+        { attachmentId: "upl_1", kind: "pdf" },
+        { attachmentId: "upl_1", kind: "pdf" },
+      ],
+      "upl_1",
+    ]) {
+      expect(validateBrowserSubmission(payload({ attachments })).ok).toBe(false)
+    }
+  })
+})
