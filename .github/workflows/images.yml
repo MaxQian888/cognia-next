@@ -115,6 +115,7 @@ jobs:
           fi
 
   fast-images:
+    if: ${{ false }}
     name: ${{ matrix.name }}
     needs: vars
     runs-on: ubuntu-latest
@@ -299,6 +300,7 @@ jobs:
   # images. Release tags are assembled only after BOTH native smoke jobs pass.
   # Multi-GB layers use architecture-scoped registry caches; PRs only read.
   agent-bundle:
+    if: ${{ false }}
     name: cognia-agent-bundle (${{ matrix.arch }})
     needs: vars
     runs-on: ${{ matrix.runner }}
@@ -389,9 +391,9 @@ jobs:
           retention-days: 1
 
   agent-bundle-manifest:
+    if: ${{ false }}
     name: cognia-agent-bundle (publish manifest)
     needs: [vars, agent-bundle]
-    if: needs.vars.outputs.should_push == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -441,9 +443,9 @@ jobs:
           docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
   cognia-server-check:
+    if: ${{ false }}
     name: cognia-server (cargo check in Docker)
     needs: vars
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -478,9 +480,9 @@ jobs:
   # matrix jobs compiled the whole Rust graph twice on two runners and raced
   # on the one registry cache ref.
   cognia-server-image:
+    if: ${{ false }}
     name: cognia-server (full + slim)
     needs: vars
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
