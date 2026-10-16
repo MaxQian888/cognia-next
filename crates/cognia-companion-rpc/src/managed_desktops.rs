@@ -683,6 +683,17 @@ impl Drop for PendingTasks {
         }
     }
 }
+// Pending and approved states are read under separate shared-store locks.
+// A request can become approved between those reads; consume once more before
+// treating a disappeared pending request as denial/revocation/expiry.
+fn resolve_closed_host_consent(
+    broker: &cognia_automation::automation::consent::ConsentBroker,
+    id: &str, device: &str, operations: &[String],
+) {
+    let approved = cognia_companion::host_consent::take_approved(device, operations);
+    broker.resolve(id, approved, false, None, None);
+}
+
 fn install_host_consent_bridge(
     enforcement: &mut Enforcement,
     events: HostEventSink,
@@ -722,10 +733,10 @@ fn install_host_consent_bridge(
                     broker.resolve(&id, true, false, None, None);
                     return;
                 }
-                // Denial, expiry or device revocation removes the pending ask.
-                // Approval is consumed above before inspecting this state.
+                // Denial, expiry, revocation and a racing approval all remove
+                // the pending ask. Recheck approval before resolving it closed.
                 if !cognia_companion::host_consent::pending().iter().any(|request| request.id == request_id) {
-                    broker.resolve(&id, false, false, None, None);
+                    resolve_closed_host_consent(&broker, &id, &device_id, &operations);
                     return;
                 }
                 if started.elapsed() >= timeout {
@@ -1606,6 +1617,29 @@ mod tests {
         drop(tasks);
         cognia_companion::host_consent::forget_device(&device);
     }
+    #[tokio::test(flavor = "current_thread")]
+    async fn approval_between_consumption_and_pending_snapshot_is_not_denied() {
+        let mut enforcement = consent_enforcement();
+        let broker = enforcement.consent.clone();
+        let device = format!("race-test-{}", uuid::Uuid::new_v4());
+        let requester = device.clone();
+        enforcement.consent_event_sink = Some(Arc::new(move |event| {
+            let operations = vec![format!("managed-desktop:race:{}", event.id)];
+            let ask = cognia_companion::host_consent::request(&requester, None, operations.clone());
+            // Deterministically place Host approval between the bridge's first
+            // take_approved and its subsequent pending-state snapshot.
+            assert!(!cognia_companion::host_consent::take_approved(&requester, &operations));
+            cognia_companion::host_consent::resolve(&ask.id, true,
+                cognia_companion::host_consent::Approver::Host).unwrap();
+            assert!(!cognia_companion::host_consent::pending().iter().any(|request| request.id == ask.id));
+            resolve_closed_host_consent(&broker, &event.id, &requester, &operations);
+            assert!(!cognia_companion::host_consent::take_approved(&requester, &operations));
+            Ok(())
+        }));
+        assert!(request_bridge(&enforcement, 1_000).await);
+        cognia_companion::host_consent::forget_device(&device);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn explicit_host_denial_resolves_before_the_consent_timeout() {
         let mut enforcement = consent_enforcement();
