@@ -13,12 +13,12 @@ The integration audit caught an additional hash defect: the runtime-health hello
 ## Validation
 
 - Integrated application selection: 33 Jest suites, 913 tests passed.
-- Desktop schema/governance selection: two tests, unrelated tests excluded.
+- Desktop schema/governance selection: two tests passed, 204 unrelated tests excluded. CLI protocol, bridge client and runtime control: three suites, 35 tests passed.
 - Generator/grammar/results/release selection: 94 Node tests passed after the hash repair. Independent review also validated all 19 golden frames against generated AsyncAPI.
 - Generation freshness: 893 remote commands, 107 classified routes.
 - i18n aggregate freshness and sorting passed; source parity/reference lint and co-located tests preserve existing baselines.
 - Scoped TypeScript check still reports the same 22 diagnostics in unchanged dependency files, including unavailable dependency declarations; none is in the changed entrypoints. This is not a full TypeScript pass.
-- Normal staged ESLint/Prettier, staged i18n and commitlint checks remain enabled. The isolated commit invocation disables only lint-staged's temporary stash to honor the no-stash instruction.
+- Normal staged ESLint/Prettier, staged i18n and commitlint checks passed for the integration commit; post-hook generator freshness also passed. The isolated commit invocation disables only lint-staged's temporary stash to honor the no-stash instruction.
 - Rust, coverage, full test suite, rendered UI, live Host/provider and image-build validation remain explicitly unrun. Prior static native/source and component test evidence does not establish provider qualification.
 
 ## Shared checkout preservation
