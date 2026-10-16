@@ -36,7 +36,7 @@ fn parse_start_time(stat: &str) -> io::Result<u64> {
         .map_err(|_| invalid())
 }
 
-fn descendants(pid: u32) -> io::Result<BTreeSet<u32>> {
+pub(crate) fn descendants(pid: u32) -> io::Result<BTreeSet<u32>> {
     let mut found = BTreeSet::new();
     let mut pending = vec![pid];
     while let Some(parent) = pending.pop() {
@@ -58,7 +58,7 @@ fn descendants(pid: u32) -> io::Result<BTreeSet<u32>> {
     Ok(found)
 }
 
-fn namespace(pid: u32, name: &str) -> io::Result<String> {
+pub(crate) fn namespace(pid: u32, name: &str) -> io::Result<String> {
     let value = fs::read_link(format!("/proc/{pid}/ns/{name}"))?;
     let value = value.to_str().ok_or_else(invalid)?;
     let expected = format!("{name}:[");
@@ -68,7 +68,11 @@ fn namespace(pid: u32, name: &str) -> io::Result<String> {
     Ok(value.into())
 }
 
-fn restricted_status(status: &str) -> bool {
+pub(crate) fn restricted_status(status: &str) -> bool {
+    restricted_identity(status, "1000")
+}
+
+fn restricted_identity(status: &str, uid: &str) -> bool {
     let fields: BTreeMap<_, _> = status
         .lines()
         .filter_map(|line| line.split_once(':'))
@@ -77,7 +81,7 @@ fn restricted_status(status: &str) -> bool {
     ["Uid", "Gid"].iter().all(|key| {
         fields.get(key).is_some_and(|value| {
             let ids: Vec<_> = value.split_whitespace().collect();
-            ids.len() == 4 && ids.iter().all(|id| *id == "1000")
+            ids.len() == 4 && ids.iter().all(|id| *id == uid)
         })
     }) && ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"]
         .iter()
@@ -101,6 +105,32 @@ fn loopback_only(devices: &str) -> bool {
 }
 
 pub(crate) fn observe(supervisor_child: u32, init: u32, generation: &str) -> io::Result<Boundary> {
+    observe_identity(
+        supervisor_child,
+        init,
+        generation,
+        "1000",
+        b"/usr/local/bin/python3\0-I\0/opt/cognia-desktop/startup.py\0--managed\0",
+    )
+}
+
+pub(crate) fn observe_importer(child: u32, init: u32) -> io::Result<Boundary> {
+    observe_identity(
+        child,
+        init,
+        "importer",
+        "1001",
+        b"/usr/local/bin/python3\0-I\0/opt/cognia-desktop/handoff-import.py\0",
+    )
+}
+
+fn observe_identity(
+    supervisor_child: u32,
+    init: u32,
+    generation: &str,
+    uid: &str,
+    argv: &[u8],
+) -> io::Result<Boundary> {
     if init <= 1 || !descendants(supervisor_child)?.contains(&init) && init != supervisor_child {
         return Err(invalid());
     }
@@ -109,14 +139,13 @@ pub(crate) fn observe(supervisor_child: u32, init: u32, generation: &str) -> io:
     candidates.insert(init);
     let workload = candidates
         .into_iter()
-        .find(|pid| {
-            fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmd| {
-                cmd == b"/usr/local/bin/python3\0-I\0/opt/cognia-desktop/startup.py\0--managed\0"
-            })
-        })
+        .find(|pid| fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmd| cmd == argv))
         .ok_or_else(invalid)?;
     let workload_start = start_time(workload)?;
-    if !restricted_status(&fs::read_to_string(format!("/proc/{workload}/status"))?) {
+    if !restricted_identity(
+        &fs::read_to_string(format!("/proc/{workload}/status"))?,
+        uid,
+    ) {
         return Err(invalid());
     }
     let mut namespaces = BTreeMap::new();
@@ -181,6 +210,10 @@ mod tests {
     fn status_requires_all_privilege_dimensions() {
         let status = "Uid:\t1000 1000 1000 1000\nGid:\t1000 1000 1000 1000\nGroups:\nCapInh:\t0\nCapPrm:\t0\nCapEff:\t0\nCapBnd:\t0\nCapAmb:\t0\nNoNewPrivs:\t1\nSeccomp:\t2\n";
         assert!(restricted_status(status));
+        let importer = status.replace("1000", "1001");
+        assert!(restricted_identity(&importer, "1001"));
+        assert!(!restricted_status(&importer));
+        assert!(!restricted_identity(status, "1001"));
         for (before, after) in [
             ("CapBnd:\t0", "CapBnd:\t1"),
             ("Seccomp:\t2", "Seccomp:\t0"),

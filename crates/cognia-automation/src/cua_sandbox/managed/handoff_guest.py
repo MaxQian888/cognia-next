@@ -1,31 +1,47 @@
-"""Fixed ADR-0228 receiver. Invoked only by Host protected envd, never shell text."""
-import ctypes
+"""Fixed unprivileged importer. Root promotion independently verifies every byte.
+
+Only the managed native supervisor admits this program after observing its actual
+confinement. This program never promotes, changes ownership, launches project
+code, or emits an authoritative receipt.
+"""
+import errno
 import hashlib
 import json
 import math
 import os
 from pathlib import Path, PurePosixPath
-import pwd
 import re
 import select
-import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
-ROOT = Path("/var/lib/cognia-acceptance")
 BUNDLE_LIMIT = 512 * 1024 * 1024
 FILE_LIMIT = 8 * 1024 * 1024
 FILES_LIMIT = 32 * 1024 * 1024
 STAGING_LIMIT = 2 * 1024 * 1024 * 1024
-ENV = {"PATH": "/usr/bin:/bin", "HOME": "/home/cua", "DISPLAY": ":99", "XDG_RUNTIME_DIR": "/run/user/1000", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1"}
+METADATA_LIMIT = 32 * 1024 * 1024
+ENV = {"PATH": "/usr/bin:/bin", "HOME": "/home/importer", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1", "LC_ALL": "C"}
 
 
 def fail():
     raise ValueError("managed_handoff_guest_refused")
+
+
+def strict_json(raw):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                fail()
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=pairs)
 
 
 def safe_path(value):
@@ -58,10 +74,12 @@ def validate(request):
     raw = request["manifest"]
     if not isinstance(raw, str) or len(raw.encode()) > 120 * 1024 or hashlib.sha256(raw.encode()).hexdigest() != request["manifestDigest"]:
         fail()
-    manifest = json.loads(raw)
-    if set(manifest) != {"version", "commit", "bundleBytes", "bundleSha256", "files"} or type(manifest["version"]) is not int or manifest["version"] != 1 or not object_id(manifest["commit"]):
+    manifest = strict_json(raw)
+    if set(manifest) != {"version", "commit", "bundleBytes", "bundleSha256", "sourceTreeSha256", "sourceFileCount", "sourceBytes", "files"} or type(manifest["version"]) is not int or manifest["version"] != 2 or not object_id(manifest["commit"]):
         fail()
     if type(manifest["bundleBytes"]) is not int or not 0 < manifest["bundleBytes"] <= BUNDLE_LIMIT or not digest(manifest["bundleSha256"]):
+        fail()
+    if not digest(manifest["sourceTreeSha256"]) or type(manifest["sourceFileCount"]) is not int or not 0 <= manifest["sourceFileCount"] <= 100000 or type(manifest["sourceBytes"]) is not int or not 0 <= manifest["sourceBytes"] <= STAGING_LIMIT:
         fail()
     files = manifest["files"]
     if not isinstance(files, list) or len(files) > 100:
@@ -83,194 +101,255 @@ def validate(request):
     return manifest
 
 
-def read_chunk(stream, size):
-    # Real stdin is unbuffered, so readiness covers every byte. Fixture BytesIO
-    # has no fd; it is already bounded in memory. A disconnected/stalled Host
-    # cannot leave the receiver alive until a long desktop hard deadline.
-    try:
-        descriptor = stream.fileno()
-    except (AttributeError, OSError):
-        return stream.read(size)
-    if not select.select([descriptor], [], [], 30)[0]:
+
+def check_deadline(deadline):
+    if int(time.time() * 1000) >= deadline:
         fail()
-    return stream.read(size)
-
-
-def receive(stream, path, size, expected_hash):
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-    fd = os.open(path, flags, 0o600)
-    try:
-        hashed, remaining = hashlib.sha256(), size
-        with os.fdopen(fd, "wb", closefd=False) as output:
-            while remaining:
-                chunk = read_chunk(stream, min(65536, remaining))
-                if not chunk:
-                    fail()
-                output.write(chunk)
-                hashed.update(chunk)
-                remaining -= len(chunk)
-            output.flush()
-            os.fsync(fd)
-        if hashed.hexdigest() != expected_hash:
-            fail()
-    finally:
-        os.close(fd)
 
 
 def size_bound(root):
     total, count = 0, 0
     for directory, dirs, files in os.walk(root, followlinks=False):
         for name in dirs + files:
-            entry = Path(directory) / name
             try:
-                info = entry.lstat()
+                info = (Path(directory) / name).lstat()
             except FileNotFoundError:
-                # Git atomically renames/removes its lock and temporary pack
-                # files while the monitor walks. Final traversal still verifies.
-                continue
+                continue  # Git may atomically rename its own temporary files.
             count += 1
             if stat.S_ISREG(info.st_mode):
                 total += info.st_size
+                if info.st_nlink != 1:
+                    fail()
             elif not stat.S_ISDIR(info.st_mode):
-                # Source checkout symlinks are forbidden too: they must never
-                # redirect a later acceptance upload or preview outside cwd.
                 fail()
-            if total > STAGING_LIMIT or count > 100000:
+            if total > STAGING_LIMIT or count > 300000:
                 fail()
 
 
-def git(root, args, deadline):
-    command = ["/usr/bin/git", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always"] + args
-    with subprocess.Popen(command, cwd=root, env=ENV, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True) as process:
-        try:
-            while process.poll() is None:
-                if int(time.time() * 1000) >= deadline:
+def git_command(args):
+    return ["/usr/bin/git", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always"] + args
+
+
+def git(root, args, deadline, limit=4096):
+    # A bounded file avoids pipe deadlock and unbounded communicate() allocation.
+    with tempfile.TemporaryFile() as output:
+        with subprocess.Popen(git_command(args), cwd=root, env=ENV, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.DEVNULL, start_new_session=True) as process:
+            try:
+                while process.poll() is None:
+                    check_deadline(deadline)
+                    if os.fstat(output.fileno()).st_size > limit:
+                        fail()
+                    size_bound(root)
+                    time.sleep(0.02)
+                if process.returncode or os.fstat(output.fileno()).st_size > limit:
                     fail()
                 size_bound(root)
-                time.sleep(0.05)
-            if process.returncode:
+                output.seek(0)
+                return output.read(limit + 1)
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+
+
+def exact(stream, size, deadline):
+    result = bytearray()
+    while len(result) < size:
+        check_deadline(deadline)
+        remaining = max(0, (deadline - time.time() * 1000) / 1000)
+        if not select.select([stream.fileno()], [], [], min(30, remaining))[0]:
+            fail()
+        chunk = os.read(stream.fileno(), min(65536, size - len(result)))
+        if not chunk:
+            fail()
+        result.extend(chunk)
+    return bytes(result)
+
+
+def source_entries(listing):
+    if len(listing) > METADATA_LIMIT or (listing and not listing.endswith(b"\0")):
+        fail()
+    entries, names, total, metadata = [], set(), 0, 0
+    for record in listing[:-1].split(b"\0") if listing else []:
+        fields, path = record.split(b"\t", 1)
+        fields = fields.split()
+        if len(fields) != 4 or fields[0] not in (b"100644", b"100755") or fields[1] != b"blob" or not object_id(fields[2].decode("ascii")) or not fields[3].isdigit():
+            fail()
+        if not path or len(path) > 4096 or any(p in (b"", b".", b"..") or p.lower() == b".git" for p in path.split(b"/")) or path in names:
+            fail()
+        names.add(path)
+        size = int(fields[3])
+        total += size
+        metadata += len(path) * 2 + 45
+        if len(names) > 100000 or total > STAGING_LIMIT or metadata > METADATA_LIMIT:
+            fail()
+        entries.append((path, fields[0] == b"100755", size, fields[2]))
+    for path in names:
+        if any(path[:index] in names for index, byte in enumerate(path) if byte == 47):
+            fail()
+    return sorted(entries)
+
+
+def materialize(root, commit, deadline):
+    entries = source_entries(git(root, ["ls-tree", "-rz", "--full-tree", "-l", commit], deadline, METADATA_LIMIT))
+    proof = hashlib.sha256(b"cognia-source-tree-v1\0")
+    total = sum(entry[2] for entry in entries)
+    proof.update(len(entries).to_bytes(8, "big"))
+    proof.update(total.to_bytes(8, "big"))
+    with subprocess.Popen(git_command(["cat-file", "--batch"]), cwd=root, env=ENV, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0, start_new_session=True) as process:
+        try:
+            for path, executable, size, oid in entries:
+                process.stdin.write(oid + b"\n")
+                header = bytearray()
+                while not header.endswith(b"\n"):
+                    if len(header) >= 128:
+                        fail()
+                    header.extend(exact(process.stdout, 1, deadline))
+                if header != oid + b" blob " + str(size).encode() + b"\n":
+                    fail()
+                target = os.path.join(os.fsencode(root), path)
+                os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
+                fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700 if executable else 0o600)
+                content, remaining = hashlib.sha256(), size
+                with os.fdopen(fd, "wb") as output:
+                    while remaining:
+                        chunk = exact(process.stdout, min(65536, remaining), deadline)
+                        output.write(chunk)
+                        content.update(chunk)
+                        remaining -= len(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+                if exact(process.stdout, 1, deadline) != b"\n":
+                    fail()
+                proof.update(len(path).to_bytes(4, "big") + path + bytes([executable]) + size.to_bytes(8, "big") + content.digest())
+            process.stdin.close()
+            try:
+                code = process.wait(timeout=max(0.001, (deadline - time.time() * 1000) / 1000))
+            except subprocess.TimeoutExpired:
                 fail()
-            size_bound(root)
+            if code or process.stdout.read(1):
+                fail()
         finally:
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
+    size_bound(root)
+    return proof.hexdigest(), len(entries), total
 
 
-def install(request, stream, root=ROOT):
+def checked_file(path, size, expected, destination=None):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size != size:
+            fail()
+        digest_value = hashlib.sha256()
+        output = None
+        try:
+            if destination is not None:
+                destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                output = os.fdopen(os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), "wb")
+            remaining = size
+            while remaining:
+                chunk = source.read(min(65536, remaining))
+                if not chunk:
+                    fail()
+                remaining -= len(chunk)
+                digest_value.update(chunk)
+                if output:
+                    output.write(chunk)
+            if source.read(1) or digest_value.hexdigest() != expected:
+                fail()
+            if output:
+                output.flush()
+                os.fsync(output.fileno())
+        finally:
+            if output:
+                output.close()
+
+
+def import_source(request, input_root=Path("/input"), output_root=Path("/output")):
     manifest = validate(request)
-    if root.is_symlink():
+    if any(output_root.iterdir()):
         fail()
-    root.mkdir(mode=0o711, parents=True, exist_ok=True)
-    info = root.stat()
-    if info.st_uid != os.getuid() or info.st_mode & 0o022:
+    bundle = input_root / "source.bundle"
+    checked_file(bundle, manifest["bundleBytes"], manifest["bundleSha256"])
+    workspace, acceptance = output_root / "workspace", output_root / "acceptance"
+    workspace.mkdir(mode=0o700)
+    acceptance.mkdir(mode=0o700)
+    deadline = request["deadlineAtMs"]
+    git(workspace, ["init", "--object-format=" + ("sha256" if len(manifest["commit"]) == 64 else "sha1"), "."], deadline)
+    git(workspace, ["bundle", "verify", str(bundle)], deadline)
+    git(workspace, ["fetch", "--no-tags", "--", str(bundle), "refs/cognia/acceptance"], deadline)
+    actual = materialize(workspace, manifest["commit"], deadline)
+    if actual != (manifest["sourceTreeSha256"], manifest["sourceFileCount"], manifest["sourceBytes"]):
         fail()
-    operation = request["operationId"]
-    final = root / operation
-    staging = root / (operation + ".partial")
-    # No mutable destination/retry overwrite, including after an uncertain ack.
-    if final.exists() or final.is_symlink() or staging.exists() or staging.is_symlink():
-        fail()
-    staging.mkdir(mode=0o700)
-    child = None
-    committed = False
-    try:
-        if shutil.disk_usage(staging).free < STAGING_LIMIT * 2:
-            fail()
-        reservation = staging / ".reservation"
-        with open(reservation, "xb") as reserve:
-            os.posix_fallocate(reserve.fileno(), 0, BUNDLE_LIMIT * 2 + FILES_LIMIT)
-        bundle = staging / "source.bundle"
-        receive(stream, bundle, manifest["bundleBytes"], manifest["bundleSha256"])
-        acceptance = staging / "acceptance"
-        acceptance.mkdir(mode=0o700)
-        for file in manifest["files"]:
-            path = acceptance.joinpath(*safe_path(file["path"]))
-            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            receive(stream, path, file["bytes"], file["sha256"])
-        if read_chunk(stream, 1):
-            fail()
-        workspace = staging / "workspace"
-        workspace.mkdir(mode=0o700)
-        deadline = request["deadlineAtMs"]
-        git(workspace, ["init", "--object-format=" + ("sha256" if len(manifest["commit"]) == 64 else "sha1"), "."], deadline)
-        git(workspace, ["bundle", "verify", str(bundle)], deadline)
-        git(workspace, ["fetch", "--no-tags", "--", str(bundle), "refs/cognia/acceptance"], deadline)
-        git(workspace, ["checkout", "--detach", manifest["commit"]], deadline)
-        # A detached HEAD is a bounded text file and cannot be forged by checkout.
-        if (workspace / ".git" / "HEAD").read_text().strip() != manifest["commit"]:
-            fail()
-        bundle.unlink()
-        reservation.unlink()
-        # Transfer only workspace ownership; control manifest and receipt remain
-        # root-owned and source processes cannot replace them.
-        account = pwd.getpwnam("cua")
-        for tree in (workspace, acceptance):
-            for directory, dirs, files in os.walk(tree):
-                os.chown(directory, account.pw_uid, account.pw_gid)
-                for name in files:
-                    os.chown(Path(directory) / name, account.pw_uid, account.pw_gid, follow_symlinks=False)
-        (staging / "manifest.json").write_text(request["manifest"], encoding="utf-8")
-        os.chmod(staging / "manifest.json", 0o600)
-        os.chmod(staging, 0o711)
-        # rename without replacing an existing operation; root is trusted and
-        # this single-Host operation is fenced by the service before dispatch.
-        if final.exists() or final.is_symlink():
-            fail()
-        staging.rename(final)
-        committed = True
-        if request["launch"] is not None:
-            remaining = max(1, math.ceil((deadline - time.time() * 1000) / 1000))
-            if remaining <= 1:
+    # Useful Git metadata, never the authority for source identity or promotion.
+    git(workspace, ["update-ref", "--no-deref", "HEAD", manifest["commit"]], deadline)
+    git(workspace, ["read-tree", manifest["commit"]], deadline)
+    for index, file in enumerate(manifest["files"]):
+        checked_file(input_root / ("file-" + str(index)), file["bytes"], file["sha256"], acceptance.joinpath(*safe_path(file["path"])))
+    size_bound(output_root)
+    check_deadline(deadline)
+
+
+def verify_offline_network():
+    # Defense in depth from the actual admitted interpreter. The native parent
+    # independently verifies namespace identity, interfaces and routes; this
+    # result is not a replacement for its boundary observation.
+    targets = [(socket.AF_INET, "169.254.169.254", 0),
+               (socket.AF_INET6, "::ffff:169.254.169.254", 0),
+               (socket.AF_INET, "10.0.0.1", 0),
+               (socket.AF_INET, "172.16.0.1", 0),
+               (socket.AF_INET, "192.168.0.1", 0),
+               (socket.AF_INET6, "fd00::1", 0),
+               (socket.AF_INET6, "fe80::1", 1)]
+    for family, target, scope in targets:
+        for kind, port in [(socket.SOCK_STREAM, 80), (socket.SOCK_STREAM, 443), (socket.SOCK_DGRAM, 443)]:
+            try:
+                connection = socket.socket(family, kind)
+            except OSError as error:
+                if family == socket.AF_INET6 and error.errno == errno.EAFNOSUPPORT:
+                    continue  # IPv6 may be entirely disabled by the namespace.
+                raise
+            with connection:
+                connection.settimeout(0.5)
+                try:
+                    connection.connect((target, port, 0, scope) if family == socket.AF_INET6 else (target, port))
+                except OSError as error:
+                    if error.errno == errno.ENETUNREACH:
+                        continue
+                    raise
                 fail()
-            child = subprocess.Popen([
-                "/usr/bin/timeout", "--signal=TERM", "--kill-after=3", str(remaining),
-                "/usr/sbin/gosu", "cua", "/usr/bin/npm", "--ignore-scripts", "run", request["launch"]["script"],
-            ], cwd=final / "workspace", env=ENV, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-            time.sleep(0.1)
-            if child.poll() is not None and child.returncode != 0:
-                fail()
-        return {"operationId": operation, "commit": manifest["commit"], "manifestDigest": request["manifestDigest"], "workspace": str(final / "workspace"), "launched": request["launch"] is not None}
-    except BaseException:
-        if child is not None and child.poll() is None:
-            os.killpg(child.pid, signal.SIGKILL)
-            child.wait()
-        if committed:
-            shutil.rmtree(final)
-        raise
-    finally:
-        if staging.exists():
-            shutil.rmtree(staging)
 
 
 def main():
-    if sys.platform != "linux" or os.getuid() != 0:
-        fail()
-    if ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0) != 0:
+    if sys.platform != "linux" or os.getuid() != 1001 or os.getgid() != 1001 or os.getgroups():
         fail()
     os.umask(0o077)
     os.environ.clear()
     signal.signal(signal.SIGALRM, lambda *_: fail())
-    # An abandoned caller cannot leave a receiver waiting forever for header.
     signal.alarm(30)
-    stream = sys.stdin.buffer.raw
-    header = stream.readline(128 * 1024 + 1)
-    if len(header) > 128 * 1024 or not header.endswith(b"\n"):
+    # No untrusted source is touched until the root supervisor has observed this
+    # actual Python process inside all mandatory boundaries.
+    if sys.stdin.buffer.read(1) != b"G" or sys.stdin.buffer.read(1):
         fail()
-    request = json.loads(header)
+    verify_offline_network()
+    raw = Path("/input/request.json").read_bytes()
+    if len(raw) > 128 * 1024:
+        fail()
+    request = strict_json(raw)
     validate(request)
     remaining = min(3600, math.ceil((request["deadlineAtMs"] - time.time() * 1000) / 1000))
     if remaining <= 0:
         fail()
     signal.alarm(remaining)
-    result = install(request, stream)
-    print(json.dumps(result, separators=(",", ":")), flush=True)
+    import_source(request)
 
 
 if __name__ == "__main__":
     try:
         main()
     except BaseException:
-        # Never echo source code, paths, Git errors or credentials to transport.
         print("managed_handoff_guest_failed", file=sys.stderr)
         sys.exit(1)

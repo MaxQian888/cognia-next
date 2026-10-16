@@ -1,4 +1,0 @@
-interface:
-  display_name: "Component Test Completer"
-  short_description: "Fill Cognia component test gaps and prove 90% coverage"
-  default_prompt: "Use $component-unit-test-completer to add missing Cognia component tests and verify the 90% Jest coverage gate."

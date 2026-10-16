@@ -1,6 +1,6 @@
 //! Root-only fixed bootstrap. The workload never receives supervisor authority.
 
-use crate::{boundary, relay};
+use crate::{boundary, control, relay};
 use cognia_exec_sandbox::desktop::DesktopLaunch;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -38,6 +38,7 @@ pub(crate) fn failure_stage() -> &'static str {
         11 => "workload_exit",
         12 => "relay_exit",
         13 => "boundary_changed",
+        14 => "handoff_control",
         _ => "supervisor_identity",
     }
 }
@@ -111,7 +112,7 @@ impl Drop for Processes {
     }
 }
 
-fn init_pid(input: &mut UnixStream, child: &mut Child) -> io::Result<u32> {
+pub(crate) fn init_pid(input: &mut UnixStream, child: &mut Child) -> io::Result<u32> {
     let deadline = Instant::now() + Duration::from_secs(10);
     input.set_read_timeout(Some(Duration::from_millis(200)))?;
     let mut bytes = Vec::new();
@@ -254,7 +255,7 @@ pub(crate) fn run() -> io::Result<()> {
     }
     protected_directory(DATA, 0o711, 0, 0)?;
     protected_directory(HOME, 0o700, 1000, 1000)?;
-    protected_directory(WORKSPACE, 0o700, 1000, 1000)?;
+    protected_directory(WORKSPACE, 0o711, 0, 0)?;
     phase(3);
     let listener = UnixListener::bind(relay::SOCKET)?;
     let mut processes = Processes {
@@ -332,6 +333,8 @@ pub(crate) fn run() -> io::Result<()> {
     processes.relay = Some(relay.spawn()?);
     drop(tcp);
     drop(listener);
+    phase(14);
+    let mut control = control::Control::bind()?;
     phase(10);
     loop {
         if STOP.load(Ordering::Relaxed) {
@@ -361,6 +364,9 @@ pub(crate) fn run() -> io::Result<()> {
             phase(13);
             return Err(refused());
         }
+        phase(14);
+        control.tick(&boundary)?;
+        phase(10);
         thread::sleep(Duration::from_millis(200));
     }
 }

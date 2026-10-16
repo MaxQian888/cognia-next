@@ -1,17 +1,16 @@
-"""Offline fixture coverage of the actual installer, without provider access."""
+"""Offline raw-object importer fixtures; no provider or privileged execution."""
 import hashlib
 import importlib.util
-import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
-import types
 import unittest
-from unittest.mock import patch
 import uuid
+from unittest.mock import patch, MagicMock
 
 spec = importlib.util.spec_from_file_location("handoff_guest", Path(__file__).with_name("handoff_guest.py"))
 guest = importlib.util.module_from_spec(spec)
@@ -46,7 +45,8 @@ class HandoffTests(unittest.TestCase):
 
     def packet(self):
         manifest = {
-            "version": 1, "commit": self.commit,
+            "version": 2,
+            "sourceTreeSha256": self.source_proof()[0], "sourceFileCount": self.source_proof()[1], "sourceBytes": self.source_proof()[2], "commit": self.commit,
             "bundleBytes": len(self.bundle_bytes),
             "bundleSha256": hashlib.sha256(self.bundle_bytes).hexdigest(),
             "files": [{"path": path, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()} for path, data in self.files],
@@ -55,72 +55,105 @@ class HandoffTests(unittest.TestCase):
         request = {"operationId": str(uuid.uuid4()), "manifest": raw, "manifestDigest": hashlib.sha256(raw.encode()).hexdigest(), "deadlineAtMs": int(time.time() * 1000) + 30000, "launch": None}
         return request, self.bundle_bytes + b"".join(data for _, data in self.files)
 
-    def install(self, payload=None, request=None):
-        # The fixture uses its own current uid; production main requires root
-        # and resolves the pinned image's cua account. No provider is involved.
-        account = types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
-        with patch.object(guest.pwd, "getpwnam", return_value=account), patch.object(guest.shutil, "disk_usage", return_value=types.SimpleNamespace(free=16 * 1024**3)), patch.object(guest.os, "posix_fallocate", create=True):
-            return guest.install(request or self.request, io.BytesIO(self.payload if payload is None else payload), self.root / "destination")
+    def source_proof(self):
+        entries = []
+        listing = self.git("ls-tree", "-rz", "--full-tree", "-l", self.commit)
+        for record in listing[:-1].split(b"\0") if listing else []:
+            fields, path = record.split(b"\t", 1)
+            mode, kind, oid, size = fields.split()
+            blob = self.git("cat-file", "blob", oid.decode()) if kind == b"blob" else b""
+            entries.append((path, mode == b"100755", blob))
+        total = sum(len(blob) for _, _, blob in entries)
+        proof = hashlib.sha256(b"cognia-source-tree-v1\0" + len(entries).to_bytes(8, "big") + total.to_bytes(8, "big"))
+        for path, executable, blob in sorted(entries):
+            proof.update(len(path).to_bytes(4, "big") + path + bytes([executable]) + len(blob).to_bytes(8, "big") + hashlib.sha256(blob).digest())
+        return proof.hexdigest(), len(entries), total
 
-    def test_actual_bundle_reconstruction_pins_commit_and_selected_files(self):
-        (self.repo / "check.json").write_text("moving branch")
-        self.git("add", ".")
-        self.git("commit", "-m", "later")
-        result = self.install()
-        workspace = Path(result["workspace"])
-        self.assertEqual((workspace / ".git" / "HEAD").read_text().strip(), self.commit)
-        self.assertEqual((workspace / "check.json").read_bytes(), self.files[0][1])
-        self.assertEqual((workspace.parent / "acceptance/check.json").read_bytes(), self.files[0][1])
-        self.assertFalse(result["launched"])
-        self.assertFalse((workspace.parent / "source.bundle").exists())
-        self.assertFalse((workspace.parent / ".reservation").exists())
+    def install(self, request=None):
+        input_root, output = self.root / "input", self.root / "output"
+        input_root.mkdir(exist_ok=True)
+        output.mkdir(exist_ok=True)
+        (input_root / "source.bundle").write_bytes(self.bundle_bytes)
+        for index, (_, data) in enumerate(self.files):
+            (input_root / ("file-" + str(index))).write_bytes(data)
+        guest.import_source(request or self.request, input_root, output)
+        return output / "workspace"
 
-    def test_duplicate_operation_never_overwrites_workspace(self):
-        result = self.install()
-        with self.assertRaises(ValueError):
-            self.install()
-        self.assertEqual((Path(result["workspace"]) / "check.json").read_bytes(), self.files[0][1])
-
-    def test_corrupt_truncated_and_extra_stream_remove_partial_directory(self):
-        for payload in [self.payload[:-1], b"bad" + self.payload[3:], self.payload + b"unexpected"]:
-            with self.subTest(size=len(payload)):
-                with self.assertRaises(ValueError):
-                    self.install(payload=payload)
-                self.assertEqual(list((self.root / "destination").iterdir()), [])
-
-    def test_wrong_exact_commit_is_rejected_and_cleaned(self):
-        self.commit = "f" * 40
-        self.request, self.payload = self.packet()
-        with self.assertRaises(ValueError):
-            self.install()
-        self.assertEqual(list((self.root / "destination").iterdir()), [])
-
-    def test_recovery_bundle_needs_prerequisites_before_guest_transfer(self):
-        base = self.commit
-        (self.repo / "new").write_text("incremental")
-        self.git("add", ".")
-        self.git("commit", "-m", "incremental")
-        self.commit = self.git("rev-parse", "HEAD").decode().strip()
-        self.git("update-ref", "refs/cognia/acceptance", self.commit)
-        self.git("bundle", "create", str(self.bundle), "refs/cognia/acceptance", "^" + base)
-        self.bundle_bytes = self.bundle.read_bytes()
-        self.request, self.payload = self.packet()
-        with self.assertRaises(ValueError):
-            self.install()
-        self.assertEqual(list((self.root / "destination").iterdir()), [])
-
-    def test_source_symlink_is_rejected_before_launch(self):
-        (self.repo / "escape").symlink_to("/etc/passwd")
-        self.git("add", "escape")
-        self.git("commit", "-m", "symlink")
+    def rebundle(self):
         self.commit = self.git("rev-parse", "HEAD").decode().strip()
         self.git("update-ref", "refs/cognia/acceptance", self.commit)
         self.git("bundle", "create", str(self.bundle), "refs/cognia/acceptance")
         self.bundle_bytes = self.bundle.read_bytes()
         self.request, self.payload = self.packet()
+
+    def test_actual_bundle_reconstruction_pins_commit_and_selected_files(self):
+        (self.repo / "check.json").write_text("moving branch")
+        self.git("add", ".")
+        self.git("commit", "-m", "later")
+        workspace = self.install()
+        self.assertEqual((workspace / ".git" / "HEAD").read_text().strip(), self.commit)
+        self.assertEqual((workspace / "check.json").read_bytes(), self.files[0][1])
+        self.assertEqual((workspace.parent / "acceptance/check.json").read_bytes(), self.files[0][1])
+        self.assertEqual(sorted(p.name for p in workspace.parent.iterdir()), ["acceptance", "workspace"])
+
+    def test_duplicate_import_never_overwrites_workspace(self):
+        workspace = self.install()
         with self.assertRaises(ValueError):
             self.install()
-        self.assertEqual(list((self.root / "destination").iterdir()), [])
+        self.assertEqual((workspace / "check.json").read_bytes(), self.files[0][1])
+
+    def test_raw_objects_preserve_ident_crlf_modes_and_nonutf8_paths(self):
+        (self.repo / ".gitattributes").write_bytes(b"*.txt ident text eol=crlf\n")
+        (self.repo / "raw.txt").write_bytes(b"$Id$\nhello\n")
+        (self.repo / "script").write_bytes(b"#!/bin/sh\n")
+        (self.repo / "script").chmod(0o755)
+        raw_name = os.fsencode(self.repo) + b"/raw-\xff"
+        if sys.platform == "linux":
+            with open(raw_name, "wb") as out:
+                out.write(b"raw path")
+        self.git("add", ".")
+        self.git("commit", "-m", "attributes")
+        self.rebundle()
+        workspace = self.install()
+        self.assertEqual((workspace / "raw.txt").read_bytes(), b"$Id$\nhello\n")
+        self.assertTrue((workspace / "script").stat().st_mode & 0o100)
+        if sys.platform == "linux":
+            with open(os.fsencode(workspace) + b"/raw-\xff", "rb") as source:
+                self.assertEqual(source.read(), b"raw path")
+
+    def test_wrong_tree_digest_refuses_even_correct_commit(self):
+        request = dict(self.request)
+        manifest = json.loads(request["manifest"])
+        manifest["sourceTreeSha256"] = "0" * 64
+        request["manifest"] = json.dumps(manifest)
+        request["manifestDigest"] = hashlib.sha256(request["manifest"].encode()).hexdigest()
+        with self.assertRaises(ValueError):
+            self.install(request=request)
+
+    def test_corrupt_bundle_refused(self):
+        self.bundle_bytes = b"bad" + self.bundle_bytes[3:]
+        with self.assertRaises(ValueError):
+            self.install()
+
+    def test_recovery_bundle_requires_host_to_complete_prerequisites(self):
+        base = self.commit
+        (self.repo / "new").write_text("incremental")
+        self.git("add", ".")
+        self.git("commit", "-m", "incremental")
+        self.rebundle()
+        self.git("bundle", "create", str(self.bundle), "refs/cognia/acceptance", "^" + base)
+        self.bundle_bytes = self.bundle.read_bytes()
+        self.request, self.payload = self.packet()
+        with self.assertRaises(ValueError):
+            self.install()
+
+    def test_source_symlink_is_rejected_before_materialization(self):
+        (self.repo / "escape").symlink_to("/etc/passwd")
+        self.git("add", "escape")
+        self.git("commit", "-m", "symlink")
+        self.rebundle()
+        with self.assertRaises(ValueError):
+            self.install()
 
     def test_selected_credentials_traversal_and_special_paths_refused(self):
         for value in ["../outside", "/outside", "a/../b", "a//b", "a\\b", ".env", "a/.env.local", ".git/config", ".ssh/id_rsa", "x.key", "cookies.sqlite"]:
@@ -155,19 +188,48 @@ class HandoffTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             guest.validate({**self.request, "operationId": "../outside"})
 
-    def test_exclusive_receiver_does_not_follow_or_overwrite_target(self):
-        target = self.root / "target"
-        target.write_bytes(b"original")
+    def test_input_symlink_hardlink_and_wrong_hash_refused(self):
+        source = self.root / "file"
+        source.write_bytes(b"content")
         link = self.root / "link"
-        link.symlink_to(target)
-        for path in [target, link]:
-            with self.assertRaises(FileExistsError):
-                guest.receive(io.BytesIO(b"replacement"), path, 11, hashlib.sha256(b"replacement").hexdigest())
-        self.assertEqual(target.read_bytes(), b"original")
-
-    def test_partial_file_hash_is_verified(self):
+        link.symlink_to(source)
+        with self.assertRaises(OSError):
+            guest.checked_file(link, 7, hashlib.sha256(b"content").hexdigest())
+        link.unlink()
+        os.link(source, link)
         with self.assertRaises(ValueError):
-            guest.receive(io.BytesIO(b"corrupt"), self.root / "out", 7, "0" * 64)
+            guest.checked_file(source, 7, hashlib.sha256(b"content").hexdigest())
+        link.unlink()
+        with self.assertRaises(ValueError):
+            guest.checked_file(source, 7, "0" * 64)
+
+    def test_network_check_requires_no_route_and_rejects_success_or_timeout(self):
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        with patch.object(guest.socket, "socket", return_value=connection):
+            connection.connect.side_effect = OSError(guest.errno.ENETUNREACH, "no route")
+            guest.verify_offline_network()
+            self.assertEqual(connection.connect.call_count, 21)
+            connection.connect.side_effect = None
+            with self.assertRaises(ValueError):
+                guest.verify_offline_network()
+            connection.connect.side_effect = TimeoutError("timeout is not namespace denial")
+            with self.assertRaises(TimeoutError):
+                guest.verify_offline_network()
+
+    def test_duplicate_json_keys_and_path_collisions_refused(self):
+        with self.assertRaises(ValueError):
+            guest.strict_json('{"version":2,"version":1}')
+        oid = b"a" * 40
+        listing = b"".join(b"100644 blob " + oid + b" 0\t" + path + b"\0" for path in (b"a", b"a-b", b"a/b"))
+        with self.assertRaises(ValueError):
+            guest.source_entries(listing)
+
+    def test_import_never_launches_requested_project_script(self):
+        request = {**self.request, "launch": {"script": "dev"}}
+        workspace = self.install(request=request)
+        self.assertTrue(workspace.is_dir())
+        self.assertFalse((workspace.parent / "receipt.json").exists())
 
 
 if __name__ == "__main__":

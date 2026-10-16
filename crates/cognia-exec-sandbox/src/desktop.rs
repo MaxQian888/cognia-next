@@ -275,9 +275,9 @@ fn validate_source(path: &Path, expected: &str) -> io::Result<()> {
         ));
     }
     let leaf = fs::symlink_metadata(path)?;
-    if !leaf.is_dir() || leaf.uid() != DESKTOP_UID || leaf.gid() != DESKTOP_GID {
+    if !leaf.is_dir() || !valid_source_owner(expected, leaf.uid(), leaf.gid(), leaf.mode()) {
         return Err(invalid(
-            "desktop writable root must be a cua-owned directory",
+            "desktop source directory has an invalid owner or mode",
         ));
     }
     // A workload may mutate files inside its root, but cannot replace the
@@ -293,11 +293,20 @@ fn validate_source(path: &Path, expected: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn duplicate_high(fd: BorrowedFd<'_>) -> io::Result<OwnedFd> {
+fn valid_source_owner(expected: &str, uid: u32, gid: u32, mode: u32) -> bool {
+    if expected == WORKSPACE_SOURCE {
+        // Only the supervisor may publish/remove operation directories.
+        uid == 0 && gid == 0 && mode & 0o7777 == 0o711
+    } else {
+        uid == DESKTOP_UID && gid == DESKTOP_GID
+    }
+}
+
+pub(crate) fn duplicate_high(fd: BorrowedFd<'_>) -> io::Result<OwnedFd> {
     duplicate_at_least(fd, 6)
 }
 
-fn duplicate_at_least(fd: BorrowedFd<'_>, minimum: i32) -> io::Result<OwnedFd> {
+pub(crate) fn duplicate_at_least(fd: BorrowedFd<'_>, minimum: i32) -> io::Result<OwnedFd> {
     // SAFETY: duplicates a valid borrowed descriptor without taking ownership
     // of it. High sources avoid dup2 collisions; low reservations fill holes.
     let raw = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, minimum) };
@@ -349,7 +358,7 @@ fn validate_unix_socket(fd: BorrowedFd<'_>, listening: bool) -> io::Result<()> {
     Ok(())
 }
 
-fn validate_info(fd: BorrowedFd<'_>) -> io::Result<()> {
+pub(crate) fn validate_info(fd: BorrowedFd<'_>) -> io::Result<()> {
     // SAFETY: fstat fills the valid uninitialized output on success.
     let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
     if unsafe { libc::fstat(fd.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
@@ -371,6 +380,20 @@ fn validate_info(fd: BorrowedFd<'_>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_workspace_parent_is_never_owned_or_replaceable_by_desktop() {
+        assert!(valid_source_owner(WORKSPACE_SOURCE, 0, 0, 0o40711));
+        for (uid, gid, mode) in [
+            (1000, 1000, 0o700),
+            (0, 0, 0o777),
+            (0, 1000, 0o711),
+            (0, 0, 0o2711),
+        ] {
+            assert!(!valid_source_owner(WORKSPACE_SOURCE, uid, gid, mode));
+        }
+        assert!(valid_source_owner(HOME_SOURCE, 1000, 1000, 0o700));
+    }
 
     #[test]
     fn profile_has_no_outside_network_or_control_filesystem() {

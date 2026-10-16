@@ -23,6 +23,8 @@
 #[cfg(target_os = "linux")]
 pub mod desktop;
 pub mod env;
+#[cfg(target_os = "linux")]
+pub mod importer;
 pub mod launcher;
 pub mod limits;
 #[cfg(target_os = "linux")]

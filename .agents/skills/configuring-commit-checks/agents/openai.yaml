@@ -1,4 +1,0 @@
-interface:
-  display_name: "Commit Checks Configurator"
-  short_description: "Repair Cognia's Husky, lint-staged, and commitlint gates"
-  default_prompt: "Use $configuring-commit-checks to diagnose and repair Cognia's existing commit-check setup."

@@ -41,12 +41,18 @@ export function stageManagedDesktopContext(binary, output, root = ROOT) {
   }
   const bytes = readFileSync(binary)
   verifyGuestExecutable(bytes)
+  const importer = join(root, "crates/cognia-automation/src/cua_sandbox/managed/handoff_guest.py")
+  const importerInfo = lstatSync(importer)
+  if (!importerInfo.isFile() || importerInfo.size > 128 * 1024) {
+    throw new Error("Importer must be a bounded regular file")
+  }
   // Require a new destination. Never replace another session's staged context.
   mkdirSync(output, { recursive: false })
   for (const name of INPUTS) copyFileSync(join(root, IMAGE, name), join(output, name))
+  copyFileSync(importer, join(output, "handoff-import.py"))
   writeFileSync(join(output, "cognia-desktop-guest"), bytes, { mode: 0o755, flag: "wx" })
   const dockerfile = readFileSync(join(output, "Dockerfile"), "utf8")
-  writeFileSync(join(output, "Dockerfile"), `${dockerfile}\nCOPY --chmod=0755 cognia-desktop-guest /usr/local/bin/cognia-desktop-guest\n`)
+  writeFileSync(join(output, "Dockerfile"), `${dockerfile}\nCOPY --chmod=0755 cognia-desktop-guest /usr/local/bin/cognia-desktop-guest\nCOPY --chmod=0444 handoff-import.py /opt/cognia-desktop/handoff-import.py\n`)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

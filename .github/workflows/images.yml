@@ -238,6 +238,9 @@ jobs:
       - name: Verify managed desktop release contract
         run: node --test scripts/build/managed-desktop-release.test.mjs scripts/build/managed-desktop-context.test.mjs
 
+      - name: Verify confined source import fixtures
+        run: python3 -m unittest crates/cognia-automation/src/cua_sandbox/managed/handoff_guest_test.py
+
       - name: Build the mandatory Linux guest guard
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc

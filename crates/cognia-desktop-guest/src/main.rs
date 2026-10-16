@@ -1,7 +1,15 @@
 //! Release-owned guest operations. No user-selected paths or commands.
 
 #[cfg(target_os = "linux")]
+mod acceptance;
+#[cfg(target_os = "linux")]
 mod boundary;
+#[cfg(target_os = "linux")]
+mod control;
+#[cfg(target_os = "linux")]
+mod promotion;
+#[cfg(target_os = "linux")]
+mod protocol;
 #[cfg(target_os = "linux")]
 mod relay;
 #[cfg(target_os = "linux")]
@@ -15,6 +23,11 @@ fn main() {
             (result, supervisor::failure_stage())
         }
         [operation] if operation == "relay" => (relay::run(), "relay"),
+        [operation] if operation == "handoff" => (control::forward(), "handoff"),
+        [operation] if operation == "handoff-worker" => (control::worker(), "handoff_worker"),
+        [operation] if operation == "acceptance-helper" => {
+            (acceptance::helper_main(), "acceptance")
+        }
         _ => (
             Err(std::io::Error::other("invalid guest operation")),
             "operation",

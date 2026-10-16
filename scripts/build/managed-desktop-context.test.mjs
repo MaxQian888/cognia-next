@@ -40,6 +40,8 @@ test("stages only reviewed inputs and an executable; refuses replacement and sym
     stageManagedDesktopContext(binary, output)
     assert.deepEqual(readFileSync(join(output, "cognia-desktop-guest")), elf())
     assert.match(readFileSync(join(output, "Dockerfile"), "utf8"), /COPY --chmod=0755 cognia-desktop-guest/)
+    assert.match(readFileSync(join(output, "Dockerfile"), "utf8"), /COPY --chmod=0444 handoff-import.py/ )
+    assert.match(readFileSync(join(output, "handoff-import.py"), "utf8"), /def import_source/ )
     assert.throws(() => stageManagedDesktopContext(binary, output))
     const link = join(root, "link")
     symlinkSync(binary, link)

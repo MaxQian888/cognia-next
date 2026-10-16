@@ -35,7 +35,7 @@ process keeps the listener. Managed Uvicorn uses the pre-opened descriptor,
 preserving the same HTTP/WebSocket authentication without a TCP listener inside
 the workload. The no-argument Docker entrypoint retains its port 8000 listener.
 
-Recipe 4 includes Bubblewrap for the guard's mandatory confinement profile.
+Recipe 5 includes Bubblewrap for the guard's mandatory confinement profile.
 Installing Bubblewrap or passing a listener is not isolation attestation: the
 native guard and Host qualification must verify namespaces, privilege dropping,
 and the actual desktop/import/acceptance paths. The base Docker build alone
@@ -49,4 +49,20 @@ Sources verified 2026-10-03:
 - https://pypi.org/project/cua-computer-server/0.3.46/
 - https://github.com/docker-library/python
 
-Managed publication compiles `cognia-desktop-guest` for `x86_64-unknown-linux-musl` with the repository toolchain and lockfile. `scripts/build/managed-desktop-context.mjs` verifies a static amd64 ELF and stages a fresh context containing the guard; the Images workflow builds that context. The embedded Docker context stays independently buildable. Recipe 4 readiness checks require both Bubblewrap and the guard before E2B template admission.
+Managed publication compiles `cognia-desktop-guest` for `x86_64-unknown-linux-musl` with the repository toolchain and lockfile. `scripts/build/managed-desktop-context.mjs` verifies a static amd64 ELF and stages a fresh context containing the guard; the Images workflow builds that context. The embedded Docker context stays independently buildable. Recipe 5 readiness checks require both Bubblewrap and the guard before E2B template admission.
+
+
+Recipe 5 packages the fixed importer as root-owned, read-only image code. Host
+handoff invokes `cognia-desktop-guest handoff`; it no longer uploads a Python
+program for root execution. The supervisor admits Git only in the separate
+UID 1001 importer boundary, then independently hashes a no-follow copy against
+the Host-derived manifest v2 source proof. Importer stdout and `.git/HEAD` are
+not source authority. Promotion preserves ordinary executable bits but rejects
+links, special files and mounted subtrees. Acceptance files remain read-only.
+
+Acceptance starts through the supervisor's generation-pinned desktop boundary,
+with the same loopback network and GUI filesystem. The fixed helper closes all
+privileged descriptors and drops setup privileges before running the validated
+npm script. Cancellation or uncertain launch terminates the entire desktop
+generation; project descendants cannot survive by creating another session.
+These implementation paths remain dormant until exact-image qualification.

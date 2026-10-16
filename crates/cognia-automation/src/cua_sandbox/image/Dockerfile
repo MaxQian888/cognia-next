@@ -22,6 +22,7 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove gcc libc6-dev linux-libc-dev \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 --shell /bin/bash cua \
+    && useradd --no-create-home --uid 1001 --shell /usr/sbin/nologin importer \
     && mkdir -p /home/cua/.config/openbox /opt/cognia-desktop \
     && chown -R cua:cua /home/cua \
     && test -s /usr/sbin/gosu \
@@ -39,7 +40,7 @@ RUN chmod 0755 /usr/local/bin/cognia-desktop
 
 LABEL org.opencontainers.image.title="Cognia Linux Desktop" \
       cognia.cua.protocol="computer-server-0.3.46" \
-      cognia.cua.recipe="4"
+      cognia.cua.recipe="5"
 EXPOSE 8000
 WORKDIR /home/cua
 ENTRYPOINT ["/usr/local/bin/cognia-desktop"]
