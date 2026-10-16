@@ -1,0 +1,25 @@
+{
+  "label": "Workspace ports",
+  "range": "{base}–{end} · {count} ports",
+  "host": "Host",
+  "runtime": "Runtime: {namespace}",
+  "unassigned": "Ports not assigned yet",
+  "loading": "Loading port lease…",
+  "readError": "Could not read port lease: {error}",
+  "desktopRequired": "Port leases require the desktop app or a connected host",
+  "occupancyUnchecked": "Occupancy not checked",
+  "occupancyUnavailable": "Occupancy unavailable",
+  "occupied": "Bound ports: {ports} (report only)",
+  "unoccupied": "No bound ports at last check",
+  "diagnostics": {
+    "duplicateRoot": "Duplicate root lease",
+    "overlap": "Overlapping port blocks",
+    "outOfRange": "Outside configured range",
+    "ambiguousRegistryLink": "Ambiguous workspace link",
+    "unresolvedRegistryRoot": "Workspace root unresolved",
+    "registryRootMismatch": "Workspace root mismatch",
+    "missingRoot": "Missing root / orphan lease",
+    "discoveryRejected": "Checkout discovery boundary",
+    "discoveryFailed": "Checkout discovery failed"
+  }
+}

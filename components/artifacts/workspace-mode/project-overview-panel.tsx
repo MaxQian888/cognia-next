@@ -21,6 +21,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { BranchHeader } from "@/components/source-control/branch-header"
 import { ChangesView } from "@/components/source-control/changes-view"
 import { RootSwitcher } from "@/components/source-control/root-switcher"
+import { PortLeaseBadge } from "@/components/workspace/port-lease-badge"
+import { usePortLeaseResolve } from "@/hooks/task-workspace/use-port-lease-resolve"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useGitActions } from "@/hooks/git/use-git-actions"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
@@ -72,6 +74,7 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
 
   const roots = project?.roots ?? []
   const rootPaths = roots.map((root) => root.path)
+  const portLeases = usePortLeaseResolve(rootPaths)
   const primaryRoot = project ? primaryRootOf(project) : undefined
   const boundToProject = Boolean(rootDir && rootPaths.includes(rootDir))
   // The repository these links open: the project root the store is bound to,
@@ -245,6 +248,9 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
                   <p className="truncate text-xs text-muted-foreground" title={root.path}>
                     {root.path}
                   </p>
+                  <div className="mt-1" aria-label={t("roots.portLease")}>
+                    <PortLeaseBadge {...portLeases[root.path]} />
+                  </div>
                 </div>
               </div>
             ))}

@@ -743,15 +743,49 @@
     "fields": {
       "activeDirectoryCap": "Worktree directories kept",
       "snapshotRetentionDays": "Snapshot retention (days)",
-      "blobBudgetBytes": "Content store budget (bytes)"
+      "blobBudgetBytes": "Content store budget (bytes)",
+      "portRangeStart": "First port",
+      "portRangeEnd": "Last port",
+      "portBlockSize": "Ports per block"
     },
     "hints": {
       "activeDirectoryCap": "How many materialized worktrees stay on disk before the oldest are reclaimed.",
       "snapshotRetentionDays": "How long a settled run's snapshot can still be restored from.",
-      "blobBudgetBytes": "Ceiling for the content-addressed store backing those snapshots."
+      "blobBudgetBytes": "Ceiling for the content-addressed store backing those snapshots.",
+      "portRangeStart": "The first port in the allocation range (at least 1024).",
+      "portRangeEnd": "The last port in the allocation range (at most 65535).",
+      "portBlockSize": "A contiguous block reserved for each physical workspace root."
     },
+    "newLeasesOnly": "Changes affect only new leases. Existing blocks keep their assigned ports.",
+    "capacity": "Capacity: {count} blocks",
+    "invalidPorts": "Use whole numbers from 1024 to 65535, with the first port no greater than the last. The block size must be at least 1 and fit within the range.",
     "mustBePositive": "Each value must be greater than zero.",
     "save": "Save",
     "saved": "Saved"
+  },
+  "portLeases": {
+    "title": "Workspace port leases",
+    "description": "Port blocks recorded by this host. Registry leases can be released only while the workspace is archived and its ports are idle. Missing-root subjects can be detached individually.",
+    "needsHost": "Port lease management is inactive in web mode. Connect to a host or use the desktop app.",
+    "refresh": "Refresh",
+    "loading": "Loading port leases…",
+    "empty": "No port leases have been assigned yet.",
+    "occupancyNotice": "Occupancy is a live observation, not a reservation or a process ownership check. Bound ports are reported; processes are never stopped or reassigned.",
+    "listLabel": "Port leases",
+    "root": "Root: {path}",
+    "subjects": {
+      "registry": "Registry workspace: {key}",
+      "desktop-session": "Desktop session: {key}",
+      "project-root": "Project root: {key}",
+      "checkoutRoot": "Host-discovered checkout root: {key}"
+    },
+    "release": "Release",
+    "releaseSubject": "Release {subject}",
+    "diagnosticsTitle": "Host diagnostics",
+    "confirmTitle": "Release this port lease?",
+    "confirmDescription": "This removes the selected subject’s reference. Once no subjects remain, the block may be reassigned to another workspace. Running shells keep their existing environment. Registry releases are refused unless the workspace is archived and all ports are idle.",
+    "cancel": "Cancel",
+    "confirmRelease": "Confirm release",
+    "releasing": "Releasing…"
   }
 }

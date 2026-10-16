@@ -94,6 +94,8 @@ import { resolveCoordinatorConfig } from "@/lib/project-coordinator/config"
 import { WorkspaceMembers } from "./workspace-members"
 import { WorkspaceActivity } from "./workspace-activity"
 import { AgentBranchesSection } from "./agent-branches-section"
+import { PortLeaseBadge } from "./port-lease-badge"
+import { usePortLeaseResolve } from "@/hooks/task-workspace/use-port-lease-resolve"
 import { AGENTS_WORKING_REGION_ID, WorkspaceAgentsWorking } from "./workspace-agents-working"
 import { WorkspaceEnvironmentList } from "./workspace-environment-list"
 import { WorkspaceContextSummary } from "./workspace-context-summary"
@@ -151,6 +153,7 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
   const workspaceId = useProjectStore((s) => s.activeProjectId)
   const workspaces = useProjectStore((s) => s.projects)
   const workspace = workspaces.find((candidate) => candidate.id === workspaceId)
+  const portLeases = usePortLeaseResolve(workspace?.roots?.map((root) => root.path) ?? [])
   const coordination = resolveCoordinatorConfig(workspace)
   const coordinatorSessionId = coordination.enabled ? coordination.sessionId : undefined
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -598,6 +601,9 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
                               )}
                               {isTrusted ? t("workspace.trusted") : t("workspace.untrusted")}
                             </Badge>
+                          </span>
+                          <span className="basis-full" aria-label={tManage("portLease")}>
+                            <PortLeaseBadge {...portLeases[root.path]} />
                           </span>
                         </li>
                       )

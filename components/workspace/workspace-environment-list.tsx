@@ -24,6 +24,8 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
+import { PortLeaseBadge } from "./port-lease-badge"
+import { usePortLeaseList } from "@/hooks/task-workspace/use-port-lease-list"
 
 import {
   AlertDialog,
@@ -276,6 +278,10 @@ export function WorkspaceEnvironmentList({
   const now = useNow({ updateInterval: 60_000 })
   const router = useRouter()
   const [rows, setRows] = useState<WorkspaceEnvironmentSummary[] | null>(null)
+  const portInventory = usePortLeaseList({
+    enabled: rows?.some((row) => Boolean(row.portLease)) ?? false,
+    refreshKey: rows,
+  })
   const [showAllProjects, setShowAllProjects] = useState(false)
   const [query, setQuery] = useState("")
   const [bandFilter, setBandFilter] = useState<BandFilter>("all")
@@ -601,6 +607,9 @@ export function WorkspaceEnvironmentList({
     const head = shortHead(row.head)
     const owner = renderOwner(row)
     const pulse = pulseOf(row)
+    const portStatus = portInventory.data?.leases.find(
+      (status) => status.lease.leaseId === row.portLease?.leaseId
+    )
     return (
       <>
         <div className="flex min-w-0 items-center gap-1.5">
@@ -620,6 +629,14 @@ export function WorkspaceEnvironmentList({
           <div className="min-w-0 flex-1 truncate font-mono text-xs" title={row.path}>
             {row.path}
           </div>
+        </div>
+        <div className="pt-1" aria-label={t("portLease")}>
+          <PortLeaseBadge
+            lease={row.portLease}
+            occupiedPorts={portStatus?.occupiedPorts}
+            occupancyError={portStatus?.occupancyError ?? portInventory.error}
+            diagnostics={portInventory.data?.diagnostics}
+          />
         </div>
         {/*
           Branch and HEAD used to be invisible here: `branch` only appeared as a

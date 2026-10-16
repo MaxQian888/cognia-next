@@ -1,0 +1,25 @@
+{
+  "label": "工作区端口",
+  "range": "{base}–{end} · {count} 个端口",
+  "host": "主机",
+  "runtime": "运行环境：{namespace}",
+  "unassigned": "尚未分配端口",
+  "loading": "正在读取端口租约…",
+  "readError": "无法读取端口租约：{error}",
+  "desktopRequired": "端口租约需要桌面应用或已连接的主机",
+  "occupancyUnchecked": "尚未检查占用情况",
+  "occupancyUnavailable": "无法获取占用情况",
+  "occupied": "已绑定端口：{ports}（仅报告）",
+  "unoccupied": "上次检查时无端口被绑定",
+  "diagnostics": {
+    "duplicateRoot": "根目录租约重复",
+    "overlap": "端口区间重叠",
+    "outOfRange": "超出配置范围",
+    "ambiguousRegistryLink": "工作区关联不明确",
+    "unresolvedRegistryRoot": "无法解析工作区根目录",
+    "registryRootMismatch": "工作区根目录不匹配",
+    "missingRoot": "根目录缺失／孤立租约",
+    "discoveryRejected": "检出目录发现边界限制",
+    "discoveryFailed": "检出目录发现失败"
+  }
+}

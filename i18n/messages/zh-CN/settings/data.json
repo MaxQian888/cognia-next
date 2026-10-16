@@ -743,15 +743,49 @@
     "fields": {
       "activeDirectoryCap": "保留的工作树目录数",
       "snapshotRetentionDays": "快照保留天数",
-      "blobBudgetBytes": "内容存储配额（字节）"
+      "blobBudgetBytes": "内容存储配额（字节）",
+      "portRangeStart": "起始端口",
+      "portRangeEnd": "结束端口",
+      "portBlockSize": "每个端口块的端口数"
     },
     "hints": {
       "activeDirectoryCap": "磁盘上最多保留多少个已展开的工作树，超出后从最旧的开始回收。",
       "snapshotRetentionDays": "已结算运行的快照可回溯多久。",
-      "blobBudgetBytes": "支撑这些快照的内容寻址存储上限。"
+      "blobBudgetBytes": "支撑这些快照的内容寻址存储上限。",
+      "portRangeStart": "可分配范围的起始端口，不小于 1024。",
+      "portRangeEnd": "可分配范围的结束端口，不大于 65535。",
+      "portBlockSize": "为每个实际工作区根目录分配的连续端口数量。"
     },
+    "newLeasesOnly": "修改仅影响新租约，已有端口块保持不变。",
+    "capacity": "容量：{count} 个端口块",
+    "invalidPorts": "端口须为 1024 至 65535 之间的整数，起始端口不得大于结束端口。每块至少包含 1 个端口，且不能超出整个范围。",
     "mustBePositive": "每个值都必须大于零。",
     "save": "保存",
     "saved": "已保存"
+  },
+  "portLeases": {
+    "title": "工作区端口租约",
+    "description": "此主机记录的端口块。注册工作区仅在已归档且端口空闲时可释放租约；根目录已丢失的关联主体可逐个解除。",
+    "needsHost": "网页模式下端口租约管理不可用。请连接主机或使用桌面应用。",
+    "refresh": "刷新",
+    "loading": "正在加载端口租约…",
+    "empty": "尚未分配端口租约。",
+    "occupancyNotice": "占用情况是实时检测结果，并非端口预留或进程归属判断。仅报告已绑定的端口，不会终止进程或重新分配端口。",
+    "listLabel": "端口租约",
+    "root": "根目录：{path}",
+    "subjects": {
+      "registry": "注册工作区：{key}",
+      "desktop-session": "桌面会话：{key}",
+      "project-root": "项目根目录：{key}",
+      "checkoutRoot": "主机发现的检出根目录：{key}"
+    },
+    "release": "释放",
+    "releaseSubject": "释放 {subject}",
+    "diagnosticsTitle": "主机诊断",
+    "confirmTitle": "释放此端口租约？",
+    "confirmDescription": "这将移除所选主体的关联。当不再有主体关联时，端口块可重新分配给其他工作区。运行中的终端仍保留原有环境变量。注册工作区必须已归档且所有端口空闲，否则主机会拒绝释放。",
+    "cancel": "取消",
+    "confirmRelease": "确认释放",
+    "releasing": "正在释放…"
   }
 }

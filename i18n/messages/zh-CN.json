@@ -34426,6 +34426,31 @@
       }
     }
   },
+  "portLease": {
+    "desktopRequired": "端口租约需要桌面应用或已连接的主机",
+    "diagnostics": {
+      "ambiguousRegistryLink": "工作区关联不明确",
+      "discoveryFailed": "检出目录发现失败",
+      "discoveryRejected": "检出目录发现边界限制",
+      "duplicateRoot": "根目录租约重复",
+      "missingRoot": "根目录缺失／孤立租约",
+      "outOfRange": "超出配置范围",
+      "overlap": "端口区间重叠",
+      "registryRootMismatch": "工作区根目录不匹配",
+      "unresolvedRegistryRoot": "无法解析工作区根目录"
+    },
+    "host": "主机",
+    "label": "工作区端口",
+    "loading": "正在读取端口租约…",
+    "occupancyUnavailable": "无法获取占用情况",
+    "occupancyUnchecked": "尚未检查占用情况",
+    "occupied": "已绑定端口：{ports}（仅报告）",
+    "range": "{base}–{end} · {count} 个端口",
+    "readError": "无法读取端口租约：{error}",
+    "runtime": "运行环境：{namespace}",
+    "unassigned": "尚未分配端口",
+    "unoccupied": "上次检查时无端口被绑定"
+  },
   "presets": {
     "actions": {
       "cancel": "取消",
@@ -35906,6 +35931,7 @@
     "noDescription": "尚未填写项目描述。",
     "panelTitle": "项目",
     "roots": {
+      "portLease": "根目录端口租约",
       "primary": "主目录",
       "title": "工作区根目录"
     },
@@ -47980,6 +48006,31 @@
         },
         "success": "成功"
       },
+      "portLeases": {
+        "cancel": "取消",
+        "confirmDescription": "这将移除所选主体的关联。当不再有主体关联时，端口块可重新分配给其他工作区。运行中的终端仍保留原有环境变量。注册工作区必须已归档且所有端口空闲，否则主机会拒绝释放。",
+        "confirmRelease": "确认释放",
+        "confirmTitle": "释放此端口租约？",
+        "description": "此主机记录的端口块。注册工作区仅在已归档且端口空闲时可释放租约；根目录已丢失的关联主体可逐个解除。",
+        "diagnosticsTitle": "主机诊断",
+        "empty": "尚未分配端口租约。",
+        "listLabel": "端口租约",
+        "loading": "正在加载端口租约…",
+        "needsHost": "网页模式下端口租约管理不可用。请连接主机或使用桌面应用。",
+        "occupancyNotice": "占用情况是实时检测结果，并非端口预留或进程归属判断。仅报告已绑定的端口，不会终止进程或重新分配端口。",
+        "refresh": "刷新",
+        "release": "释放",
+        "releaseSubject": "释放 {subject}",
+        "releasing": "正在释放…",
+        "root": "根目录：{path}",
+        "subjects": {
+          "checkoutRoot": "主机发现的检出根目录：{key}",
+          "desktop-session": "桌面会话：{key}",
+          "project-root": "项目根目录：{key}",
+          "registry": "注册工作区：{key}"
+        },
+        "title": "工作区端口租约"
+      },
       "preview": "预览（文件中的条目数）",
       "privacyTitle": "隐私",
       "reset": "重置",
@@ -48174,18 +48225,27 @@
         "usernamePlaceholder": "你的用户名"
       },
       "workspaceLifecycle": {
+        "capacity": "容量：{count} 个端口块",
         "description": "下方维护任务实际回收的依据。没有运行关联的工作树目录，会在超出上限后按最旧优先被清理。",
         "fields": {
           "activeDirectoryCap": "保留的工作树目录数",
           "blobBudgetBytes": "内容存储配额（字节）",
+          "portBlockSize": "每个端口块的端口数",
+          "portRangeEnd": "结束端口",
+          "portRangeStart": "起始端口",
           "snapshotRetentionDays": "快照保留天数"
         },
         "hints": {
           "activeDirectoryCap": "磁盘上最多保留多少个已展开的工作树，超出后从最旧的开始回收。",
           "blobBudgetBytes": "支撑这些快照的内容寻址存储上限。",
+          "portBlockSize": "为每个实际工作区根目录分配的连续端口数量。",
+          "portRangeEnd": "可分配范围的结束端口，不大于 65535。",
+          "portRangeStart": "可分配范围的起始端口，不小于 1024。",
           "snapshotRetentionDays": "已结算运行的快照可回溯多久。"
         },
+        "invalidPorts": "端口须为 1024 至 65535 之间的整数，起始端口不得大于结束端口。每块至少包含 1 个端口，且不能超出整个范围。",
         "mustBePositive": "每个值都必须大于零。",
+        "newLeasesOnly": "修改仅影响新租约，已有端口块保持不变。",
         "save": "保存",
         "saved": "已保存",
         "title": "工作树生命周期"
@@ -67613,6 +67673,7 @@
       },
       "path": "路径",
       "pin": "固定环境",
+      "portLease": "工作区端口租约",
       "prunable": "可清理",
       "prune": "清理失效工作树",
       "pulses": {
@@ -67734,6 +67795,7 @@
       "noSelectionTitle": "尚未选择工作区",
       "pickDir": "选择目录",
       "pickDirTitle": "选择一个目录",
+      "portLease": "根目录端口租约",
       "primaryBadge": "主",
       "remotePicker": {
         "chooseCurrent": "选择此文件夹",

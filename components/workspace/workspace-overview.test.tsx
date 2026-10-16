@@ -3,7 +3,8 @@
  */
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: (namespace: string) => (key: string, values?: Record<string, unknown>) =>
+    namespace === "portLease" && values ? `${key}:${JSON.stringify(values)}` : key,
   // Members and activity format dates through the app's locale.
   useFormatter: () => ({
     dateTime: (value: Date | number) => new Date(value).toISOString(),
@@ -116,6 +117,10 @@ jest.mock("@/components/settings/project-environment-manager", () => ({
   ProjectEnvironmentManager: () => <section data-testid="project-environment-manager-stub" />,
 }))
 const listWorkspaceEnvironmentsMock = jest.fn()
+const portLeaseResolveMock = jest.fn()
+jest.mock("@/hooks/task-workspace/use-port-lease-resolve", () => ({
+  usePortLeaseResolve: (roots: string[]) => portLeaseResolveMock(roots),
+}))
 jest.mock("@/lib/task-workspace/client", () => ({
   listWorkspaceEnvironments: (...args: unknown[]) => listWorkspaceEnvironmentsMock(...args),
 }))
@@ -197,6 +202,8 @@ beforeEach(() => {
   storeState = { activeProjectId: "w1", projects: [] }
   listWorkspaceEnvironmentsMock.mockReset()
   listWorkspaceEnvironmentsMock.mockResolvedValue([])
+  portLeaseResolveMock.mockReset()
+  portLeaseResolveMock.mockReturnValue({})
 })
 
 /**
@@ -321,6 +328,37 @@ describe("WorkspaceOverview", () => {
     expect(screen.getByTestId("workspace-roots")).toHaveTextContent("/tmp/repo")
     expect(screen.getAllByTestId("workspace-root-trust-trusted")).toHaveLength(1)
     expect(screen.getAllByTestId("workspace-root-trust-untrusted")).toHaveLength(1)
+  })
+
+  it("shows each root's read-only lease, including unassigned roots", () => {
+    storeState = {
+      activeProjectId: "w1",
+      projects: [
+        {
+          id: "w1",
+          name: "Cognia",
+          roots: [
+            { id: "r1", path: "/repo", isPrimary: true },
+            { id: "r2", path: "/other" },
+          ],
+        },
+      ],
+    }
+    portLeaseResolveMock.mockReturnValue({
+      "/repo": {
+        lease: {
+          leaseId: "lease-1",
+          basePort: 41000,
+          portCount: 10,
+          namespaceKey: "host-loopback",
+        },
+      },
+      "/other": { lease: null },
+    })
+    render(<WorkspaceOverview />)
+    expect(portLeaseResolveMock).toHaveBeenCalledWith(["/repo", "/other"])
+    expect(screen.getByText('range:{"base":41000,"end":41009,"count":10}')).toBeInTheDocument()
+    expect(screen.getByText("unassigned")).toBeInTheDocument()
   })
 
   it("counts issues with an active run as agents working", () => {

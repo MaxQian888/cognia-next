@@ -38,6 +38,7 @@ import { createLogger } from "@cognia/logging"
 const log = createLogger("settings.data.maintenance")
 import { RotateCcwIcon, ShieldAlertIcon, ShieldIcon, Trash2Icon } from "lucide-react"
 import { StorageCleanupDialog } from "@/components/data/storage/storage-cleanup-dialog"
+import { PortLeasesBlock } from "@/components/settings/data/port-leases-block"
 import { useStorageBreakdown } from "@/hooks/storage"
 import {
   getBehaviorTelemetrySettings,
@@ -74,6 +75,7 @@ export function MaintenanceTab() {
     <div className="space-y-6">
       <CleanupBlock />
       <WorkspaceLifecyclePolicyBlock />
+      <PortLeasesBlock />
       <WorkspaceMaintenanceBlock />
       <RetentionBlock />
       <ClearBlock />
@@ -96,7 +98,7 @@ export function MaintenanceTab() {
  * (`service.rs::set_workspace_lifecycle_policy`), so refusing it here is the
  * difference between a disabled Save and a raw Rust error string.
  */
-type EditableLifecycleField = "activeDirectoryCap" | "snapshotRetentionDays" | "blobBudgetBytes"
+type EditableLifecycleField = keyof WorkspaceLifecyclePolicy
 
 function WorkspaceLifecyclePolicyBlock() {
   const t = useTranslations("settings.data.workspaceLifecycle")
@@ -107,6 +109,7 @@ function WorkspaceLifecyclePolicyBlock() {
   const { error, setError, run, busy } = useWorkspaceActionController()
 
   useEffect(() => {
+    if (!hasHostRuntime()) return
     let cancelled = false
     void getWorkspaceLifecyclePolicy().then(
       (next) => {
@@ -116,28 +119,51 @@ function WorkspaceLifecyclePolicyBlock() {
           activeDirectoryCap: String(next.activeDirectoryCap),
           snapshotRetentionDays: String(next.snapshotRetentionDays),
           blobBudgetBytes: String(next.blobBudgetBytes),
+          portRangeStart: String(next.portRangeStart),
+          portRangeEnd: String(next.portRangeEnd),
+          portBlockSize: String(next.portBlockSize),
         })
       },
-      () => {
-        // A host that cannot answer the read is not an error worth shouting
-        // about here; the block simply has nothing to show.
-        if (!cancelled) setUnavailable(true)
+      (cause: unknown) => {
+        if (!cancelled) {
+          setUnavailable(true)
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
       }
     )
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [setError])
 
   const parsed = draft
     ? {
         activeDirectoryCap: Math.floor(Number(draft.activeDirectoryCap)),
         snapshotRetentionDays: Math.floor(Number(draft.snapshotRetentionDays)),
         blobBudgetBytes: Math.floor(Number(draft.blobBudgetBytes)),
+        portRangeStart: Number(draft.portRangeStart),
+        portRangeEnd: Number(draft.portRangeEnd),
+        portBlockSize: Number(draft.portBlockSize),
       }
     : null
-  const valid =
-    parsed !== null && Object.values(parsed).every((value) => Number.isFinite(value) && value > 0)
+  const lifecycleValid =
+    parsed !== null &&
+    [parsed.activeDirectoryCap, parsed.snapshotRetentionDays, parsed.blobBudgetBytes].every(
+      (value) => Number.isFinite(value) && value > 0
+    )
+  const portsValid =
+    parsed !== null &&
+    [parsed.portRangeStart, parsed.portRangeEnd, parsed.portBlockSize].every(Number.isInteger) &&
+    parsed.portRangeStart >= 1024 &&
+    parsed.portRangeEnd <= 65535 &&
+    parsed.portRangeStart <= parsed.portRangeEnd &&
+    parsed.portBlockSize >= 1 &&
+    parsed.portBlockSize <= parsed.portRangeEnd - parsed.portRangeStart + 1
+  const capacity =
+    portsValid && parsed
+      ? Math.floor((parsed.portRangeEnd - parsed.portRangeStart + 1) / parsed.portBlockSize)
+      : 0
+  const valid = lifecycleValid && portsValid
   const dirty =
     policy !== null &&
     parsed !== null &&
@@ -156,7 +182,16 @@ function WorkspaceLifecyclePolicyBlock() {
     setSaved(true)
   }
 
-  if (unavailable || !draft) return null
+  if (unavailable)
+    return (
+      <Card className="space-y-3 p-4">
+        <h3 className="text-sm font-medium">{t("title")}</h3>
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      </Card>
+    )
+  if (!draft) return null
 
   const field = (key: EditableLifecycleField) => (
     <div className="grid gap-1.5">
@@ -166,7 +201,9 @@ function WorkspaceLifecyclePolicyBlock() {
       <Input
         id={`workspace-lifecycle-${key}`}
         type="number"
-        min={1}
+        min={key === "portRangeStart" || key === "portRangeEnd" ? 1024 : 1}
+        max={key === "portRangeStart" || key === "portRangeEnd" ? 65535 : undefined}
+        step={1}
         inputMode="numeric"
         value={draft[key]}
         data-testid={`workspace-lifecycle-${key}`}
@@ -194,15 +231,30 @@ function WorkspaceLifecyclePolicyBlock() {
         {field("snapshotRetentionDays")}
         {field("blobBudgetBytes")}
       </div>
+      <p className="text-xs text-muted-foreground">{t("newLeasesOnly")}</p>
+      <div className="grid gap-3 @md:grid-cols-3">
+        {field("portRangeStart")}
+        {field("portRangeEnd")}
+        {field("portBlockSize")}
+      </div>
+      <p className="text-xs text-muted-foreground" role="status">
+        {t("capacity", { count: capacity })}
+      </p>
 
       {error ? (
         <p className="text-xs text-destructive" role="alert">
           {error}
         </p>
       ) : null}
-      {!valid ? (
+      {!lifecycleValid ? (
         <p className="text-xs text-destructive" role="alert">
           {t("mustBePositive")}
+        </p>
+      ) : null}
+
+      {!portsValid ? (
+        <p className="text-xs text-destructive" role="alert">
+          {t("invalidPorts")}
         </p>
       ) : null}
 

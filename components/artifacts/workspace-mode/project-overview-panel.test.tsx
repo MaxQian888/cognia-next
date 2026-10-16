@@ -13,6 +13,10 @@ const sync = jest.fn(async () => {})
 const setRootDir = jest.fn()
 const selectFile = jest.fn()
 const onOpenWorkspace = jest.fn()
+const portLeaseResolveMock = jest.fn()
+jest.mock("@/hooks/task-workspace/use-port-lease-resolve", () => ({
+  usePortLeaseResolve: (roots: string[]) => portLeaseResolveMock(roots),
+}))
 
 let projects: Project[] = []
 let available = true
@@ -40,7 +44,8 @@ jest.mock("@/lib/db/sessions", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
+  useTranslations: (namespace: string) => (key: string, values?: Record<string, unknown>) =>
+    `${namespace}.${key}${namespace === "portLease" && values ? `:${JSON.stringify(values)}` : ""}`,
 }))
 
 jest.mock("@/stores/project/project-store", () => ({
@@ -155,6 +160,7 @@ function status(): GitStatus {
 }
 
 beforeEach(() => {
+  portLeaseResolveMock.mockReturnValue({})
   jest.clearAllMocks()
   available = true
   liveCounts = { conversations: 5, messages: 23 }
@@ -176,6 +182,21 @@ beforeEach(() => {
 })
 
 describe("ProjectOverviewPanel", () => {
+  it("shows resolved and unassigned port leases for the requested project's roots", () => {
+    portLeaseResolveMock.mockReturnValue({
+      "/repo/b": {
+        lease: { leaseId: "lease-b", basePort: 42000, portCount: 5, namespaceKey: "host-loopback" },
+      },
+      "/repo/shared": { lease: null },
+    })
+    render(<ProjectOverviewPanel projectId="project-b" onOpenWorkspace={onOpenWorkspace} />)
+    expect(portLeaseResolveMock).toHaveBeenCalledWith(["/repo/b", "/repo/shared"])
+    expect(
+      screen.getByText('portLease.range:{"base":42000,"end":42004,"count":5}')
+    ).toBeInTheDocument()
+    expect(screen.getByText("portLease.unassigned")).toBeInTheDocument()
+  })
+
   it("scopes project information, analysis, roots, and SCM to the requested project", () => {
     render(<ProjectOverviewPanel projectId="project-b" onOpenWorkspace={onOpenWorkspace} />)
 

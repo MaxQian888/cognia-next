@@ -22,6 +22,7 @@
   "noDescription": "尚未填写项目描述。",
   "panelTitle": "项目",
   "roots": {
+    "portLease": "根目录端口租约",
     "primary": "主目录",
     "title": "工作区根目录"
   },

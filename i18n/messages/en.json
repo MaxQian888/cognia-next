@@ -34426,6 +34426,31 @@
       }
     }
   },
+  "portLease": {
+    "desktopRequired": "Port leases require the desktop app or a connected host",
+    "diagnostics": {
+      "ambiguousRegistryLink": "Ambiguous workspace link",
+      "discoveryFailed": "Checkout discovery failed",
+      "discoveryRejected": "Checkout discovery boundary",
+      "duplicateRoot": "Duplicate root lease",
+      "missingRoot": "Missing root / orphan lease",
+      "outOfRange": "Outside configured range",
+      "overlap": "Overlapping port blocks",
+      "registryRootMismatch": "Workspace root mismatch",
+      "unresolvedRegistryRoot": "Workspace root unresolved"
+    },
+    "host": "Host",
+    "label": "Workspace ports",
+    "loading": "Loading port lease…",
+    "occupancyUnavailable": "Occupancy unavailable",
+    "occupancyUnchecked": "Occupancy not checked",
+    "occupied": "Bound ports: {ports} (report only)",
+    "range": "{base}–{end} · {count} ports",
+    "readError": "Could not read port lease: {error}",
+    "runtime": "Runtime: {namespace}",
+    "unassigned": "Ports not assigned yet",
+    "unoccupied": "No bound ports at last check"
+  },
   "presets": {
     "actions": {
       "cancel": "Cancel",
@@ -35906,6 +35931,7 @@
     "noDescription": "No project description yet.",
     "panelTitle": "Project",
     "roots": {
+      "portLease": "Root port lease",
       "primary": "Primary",
       "title": "Workspace roots"
     },
@@ -47980,6 +48006,31 @@
         },
         "success": "Success"
       },
+      "portLeases": {
+        "cancel": "Cancel",
+        "confirmDescription": "This removes the selected subject’s reference. Once no subjects remain, the block may be reassigned to another workspace. Running shells keep their existing environment. Registry releases are refused unless the workspace is archived and all ports are idle.",
+        "confirmRelease": "Confirm release",
+        "confirmTitle": "Release this port lease?",
+        "description": "Port blocks recorded by this host. Registry leases can be released only while the workspace is archived and its ports are idle. Missing-root subjects can be detached individually.",
+        "diagnosticsTitle": "Host diagnostics",
+        "empty": "No port leases have been assigned yet.",
+        "listLabel": "Port leases",
+        "loading": "Loading port leases…",
+        "needsHost": "Port lease management is inactive in web mode. Connect to a host or use the desktop app.",
+        "occupancyNotice": "Occupancy is a live observation, not a reservation or a process ownership check. Bound ports are reported; processes are never stopped or reassigned.",
+        "refresh": "Refresh",
+        "release": "Release",
+        "releaseSubject": "Release {subject}",
+        "releasing": "Releasing…",
+        "root": "Root: {path}",
+        "subjects": {
+          "checkoutRoot": "Host-discovered checkout root: {key}",
+          "desktop-session": "Desktop session: {key}",
+          "project-root": "Project root: {key}",
+          "registry": "Registry workspace: {key}"
+        },
+        "title": "Workspace port leases"
+      },
       "preview": "Preview (counts in file)",
       "privacyTitle": "Privacy",
       "reset": "Reset",
@@ -48174,18 +48225,27 @@
         "usernamePlaceholder": "your-username"
       },
       "workspaceLifecycle": {
+        "capacity": "Capacity: {count} blocks",
         "description": "What the maintenance run below reclaims. A worktree directory with no run attached is removed once the machine is over the cap, oldest first.",
         "fields": {
           "activeDirectoryCap": "Worktree directories kept",
           "blobBudgetBytes": "Content store budget (bytes)",
+          "portBlockSize": "Ports per block",
+          "portRangeEnd": "Last port",
+          "portRangeStart": "First port",
           "snapshotRetentionDays": "Snapshot retention (days)"
         },
         "hints": {
           "activeDirectoryCap": "How many materialized worktrees stay on disk before the oldest are reclaimed.",
           "blobBudgetBytes": "Ceiling for the content-addressed store backing those snapshots.",
+          "portBlockSize": "A contiguous block reserved for each physical workspace root.",
+          "portRangeEnd": "The last port in the allocation range (at most 65535).",
+          "portRangeStart": "The first port in the allocation range (at least 1024).",
           "snapshotRetentionDays": "How long a settled run's snapshot can still be restored from."
         },
+        "invalidPorts": "Use whole numbers from 1024 to 65535, with the first port no greater than the last. The block size must be at least 1 and fit within the range.",
         "mustBePositive": "Each value must be greater than zero.",
+        "newLeasesOnly": "Changes affect only new leases. Existing blocks keep their assigned ports.",
         "save": "Save",
         "saved": "Saved",
         "title": "Worktree lifecycle"
@@ -67613,6 +67673,7 @@
       },
       "path": "Path",
       "pin": "Pin environment",
+      "portLease": "Workspace port lease",
       "prunable": "Prunable",
       "prune": "Prune stale worktrees",
       "pulses": {
@@ -67734,6 +67795,7 @@
       "noSelectionTitle": "No workspace selected",
       "pickDir": "Choose directory",
       "pickDirTitle": "Select a directory",
+      "portLease": "Root port lease",
       "primaryBadge": "Primary",
       "remotePicker": {
         "chooseCurrent": "Choose this folder",

@@ -22,6 +22,7 @@
   "noDescription": "No project description yet.",
   "panelTitle": "Project",
   "roots": {
+    "portLease": "Root port lease",
     "primary": "Primary",
     "title": "Workspace roots"
   },

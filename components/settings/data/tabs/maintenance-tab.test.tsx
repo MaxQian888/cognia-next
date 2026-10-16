@@ -11,6 +11,9 @@ let storeState: { settings: Record<string, unknown> | null; save: typeof saveMoc
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
 }))
+jest.mock("@/components/settings/data/port-leases-block", () => ({
+  PortLeasesBlock: () => <div data-testid="port-leases-block" />,
+}))
 // Heavy siblings reduce to inert stubs so we can mount just the tab.
 jest.mock("@/hooks/storage", () => ({
   useStorageBreakdown: () => ({ formatBytes: (n: number) => String(n), refresh: jest.fn() }),
@@ -42,6 +45,7 @@ const runWorkspaceUserActionMock = jest.fn((_command: string, operation: () => P
   operation()
 )
 jest.mock("@/lib/task-workspace/user-action", () => ({
+  ...jest.requireActual("@/lib/task-workspace/user-action"),
   runWorkspaceUserAction: (...args: unknown[]) =>
     (runWorkspaceUserActionMock as unknown as (...a: unknown[]) => unknown)(...args),
 }))
@@ -112,6 +116,7 @@ describe("<MaintenanceTab /> managed workspace block", () => {
     expect(within(block).getByTestId("workspace-maintenance-run")).toBeDisabled()
     expect(within(block).queryByRole("alert")).not.toBeInTheDocument()
     expect(listWorkspaceMaintenanceEventsMock).not.toHaveBeenCalled()
+    expect(getWorkspaceLifecyclePolicyMock).not.toHaveBeenCalled()
   })
 })
 
@@ -254,11 +259,69 @@ describe("<MaintenanceTab /> worktree lifecycle policy", () => {
     expect(screen.getByTestId("workspace-lifecycle-save")).toBeDisabled()
   })
 
-  it("renders nothing when the host cannot answer for a policy", async () => {
+  it("surfaces the verbatim host policy read error", async () => {
     getWorkspaceLifecyclePolicyMock.mockRejectedValue(new Error("unsupported"))
     render(<MaintenanceTab />)
 
     await waitFor(() => expect(getWorkspaceLifecyclePolicyMock).toHaveBeenCalled())
-    expect(screen.queryByTestId("workspace-lifecycle-policy")).not.toBeInTheDocument()
+    expect(await screen.findByRole("alert")).toHaveTextContent("unsupported")
+  })
+})
+
+describe("<MaintenanceTab /> port policy", () => {
+  it("mounts lease management and shows inclusive range capacity", async () => {
+    render(<MaintenanceTab />)
+    expect(screen.getByTestId("port-leases-block")).toBeInTheDocument()
+    await screen.findByTestId("workspace-lifecycle-policy")
+    expect(screen.getByText("Capacity: 200 blocks")).toBeInTheDocument()
+    expect(screen.getByText(/Changes affect only new leases/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Last port"), { target: { value: "42040" } })
+    expect(screen.getByText("Capacity: 2 blocks")).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("First port"), { target: { value: "42040" } })
+    fireEvent.change(screen.getByLabelText("Ports per block"), { target: { value: "1" } })
+    expect(screen.getByText("Capacity: 1 blocks")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("workspace-lifecycle-save"))
+    await waitFor(() =>
+      expect(setWorkspaceLifecyclePolicyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          portRangeStart: 42040,
+          portRangeEnd: 42040,
+          portBlockSize: 1,
+        })
+      )
+    )
+  })
+
+  it.each([
+    ["First port", "1023"],
+    ["First port", "46000"],
+    ["First port", "42000.5"],
+    ["Last port", "65536"],
+    ["Last port", "41999"],
+    ["Last port", ""],
+    ["Ports per block", "0"],
+    ["Ports per block", "4001"],
+    ["Ports per block", "1.5"],
+  ])("rejects invalid %s = %s before saving", async (field, value) => {
+    render(<MaintenanceTab />)
+    await screen.findByTestId("workspace-lifecycle-policy")
+    fireEvent.change(screen.getByLabelText(field), { target: { value } })
+    expect(screen.getByTestId("workspace-lifecycle-save")).toBeDisabled()
+    expect(screen.getByRole("alert")).toHaveTextContent("Use whole numbers")
+    fireEvent.click(screen.getByTestId("workspace-lifecycle-save"))
+    expect(setWorkspaceLifecyclePolicyMock).not.toHaveBeenCalled()
+  })
+
+  it("shows server save errors verbatim", async () => {
+    setWorkspaceLifecyclePolicyMock.mockRejectedValue(
+      new Error("host policy refused: database is locked")
+    )
+    render(<MaintenanceTab />)
+    await screen.findByTestId("workspace-lifecycle-policy")
+    fireEvent.change(screen.getByLabelText("First port"), { target: { value: "41000" } })
+    fireEvent.click(screen.getByTestId("workspace-lifecycle-save"))
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "host policy refused: database is locked"
+    )
   })
 })

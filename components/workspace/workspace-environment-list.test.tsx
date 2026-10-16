@@ -8,8 +8,12 @@ const mockDateTime = jest.fn(
 )
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: { error?: string }) =>
-    values?.error ? `${key}:${values.error}` : key,
+  useTranslations: (namespace: string) => (key: string, values?: Record<string, unknown>) =>
+    namespace === "portLease" && values
+      ? `${key}:${JSON.stringify(values)}`
+      : values?.error
+        ? `${key}:${values.error}`
+        : key,
   // The row reports when an environment was last used. A relative time needs
   // no locale data to be asserted on, so the mock returns a stable marker.
   useFormatter: () => ({ relativeTime: mockRelativeTime, dateTime: mockDateTime }),
@@ -28,8 +32,16 @@ const createBranchMock = jest.fn()
 const removeMock = jest.fn()
 const pruneMock = jest.fn()
 const openMock = jest.fn()
+const ensurePortLeaseMock = jest.fn()
+const portLeaseListMock = jest.fn()
+jest.mock("@/hooks/task-workspace/use-port-lease-list", () => ({
+  usePortLeaseList: (options: unknown) => portLeaseListMock(options),
+}))
 
 jest.mock("@/lib/task-workspace/client", () => ({
+  ensureWorkspacePortLease: (...args: unknown[]) => ensurePortLeaseMock(...args),
+  ensureSubjectPortLease: (...args: unknown[]) => ensurePortLeaseMock(...args),
+  resolveWorkspacePortLeaseEnsure: (...args: unknown[]) => ensurePortLeaseMock(...args),
   listWorkspaceEnvironments: (...args: unknown[]) => listMock(...args),
   pinManagedWorkspace: (...args: unknown[]) => pinMock(...args),
   archiveManagedWorkspace: (...args: unknown[]) => archiveMock(...args),
@@ -152,6 +164,7 @@ const prunableManual: WorkspaceEnvironmentSummary = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  portLeaseListMock.mockReturnValue({ status: "ready", data: null, error: null })
   listMock.mockResolvedValue([managed, manual, prunableManual])
   pinMock.mockResolvedValue(undefined)
   archiveMock.mockResolvedValue(undefined)
@@ -163,6 +176,53 @@ beforeEach(() => {
   createBranchMock.mockResolvedValue({ workspaceId: "ws-1", branch: "feature/review" })
   removeMock.mockResolvedValue(undefined)
   pruneMock.mockResolvedValue(undefined)
+})
+
+it("shows projected leases with live occupancy and conflicts without allocating", async () => {
+  const lease = {
+    leaseId: "lease-1",
+    namespaceKey: "host-loopback",
+    subjectKind: "registry" as const,
+    subjectKey: "ws-1",
+    canonicalRoot: managed.path,
+    registryWorkspaceId: "ws-1",
+    basePort: 41000,
+    portCount: 10,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  listMock.mockResolvedValue([{ ...managed, portLease: lease }, manual])
+  portLeaseListMock.mockReturnValue({
+    status: "ready",
+    error: null,
+    data: {
+      leases: [
+        {
+          lease: { ...lease, leaseId: "remote", namespaceKey: "runtime:other" },
+          occupiedPorts: [41009],
+          occupancyError: null,
+        },
+        { lease, occupiedPorts: [41001], occupancyError: null },
+      ],
+      diagnostics: [{ kind: "overlap", leaseIds: ["lease-1"], detail: "overlaps another block" }],
+    },
+  })
+  render(<WorkspaceEnvironmentList rootDir="/repo" />)
+  expect(await screen.findByText('range:{"base":41000,"end":41009,"count":10}')).toBeInTheDocument()
+  expect(screen.getByText('occupied:{"ports":"41001"}')).toBeInTheDocument()
+  expect(screen.queryByText('occupied:{"ports":"41009"}')).not.toBeInTheDocument()
+  expect(screen.getByText("diagnostics.overlap")).toBeInTheDocument()
+  expect(screen.getByText("unassigned")).toBeInTheDocument()
+  expect(portLeaseListMock).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: true }))
+  expect(ensurePortLeaseMock).not.toHaveBeenCalled()
+  expect(archiveMock).not.toHaveBeenCalled()
+  expect(restoreMock).not.toHaveBeenCalled()
+})
+
+it("does not request a port inventory when all projections are unassigned", async () => {
+  render(<WorkspaceEnvironmentList rootDir="/repo" />)
+  expect(await screen.findAllByText("unassigned")).toHaveLength(3)
+  expect(portLeaseListMock).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }))
 })
 
 it("renders the canonical manual and managed inventory in sheet presentation", async () => {

@@ -77,6 +77,7 @@
       "permanent": "Permanent"
     },
     "path": "Path",
+    "portLease": "Workspace port lease",
     "pin": "Pin environment",
     "prunable": "Prunable",
     "prune": "Prune stale worktrees",
@@ -180,6 +181,7 @@
     "pickDir": "Choose directory",
     "pickDirTitle": "Select a directory",
     "primaryBadge": "Primary",
+    "portLease": "Root port lease",
     "remotePicker": {
       "chooseCurrent": "Choose this folder",
       "description": "Browse folders on the paired Cognia server. The selected path becomes available to this workspace.",
