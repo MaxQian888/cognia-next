@@ -35,6 +35,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
+      managed_desktop_only:
+        description: "Build only the managed desktop image for provider smoke"
+        type: boolean
+        default: false
       push:
         description: "Push images to GHCR"
         type: boolean
@@ -114,6 +118,7 @@ jobs:
           fi
 
   fast-images:
+    if: inputs.managed_desktop_only != true
     name: ${{ matrix.name }}
     needs: vars
     runs-on: ubuntu-latest
@@ -286,6 +291,7 @@ jobs:
   # images. Release tags are assembled only after BOTH native smoke jobs pass.
   # Multi-GB layers use architecture-scoped registry caches; PRs only read.
   agent-bundle:
+    if: inputs.managed_desktop_only != true
     name: cognia-agent-bundle (${{ matrix.arch }})
     needs: vars
     runs-on: ${{ matrix.runner }}
@@ -378,7 +384,7 @@ jobs:
   agent-bundle-manifest:
     name: cognia-agent-bundle (publish manifest)
     needs: [vars, agent-bundle]
-    if: needs.vars.outputs.should_push == 'true'
+    if: inputs.managed_desktop_only != true && (needs.vars.outputs.should_push == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -430,7 +436,7 @@ jobs:
   cognia-server-check:
     name: cognia-server (cargo check in Docker)
     needs: vars
-    if: github.event_name == 'pull_request'
+    if: inputs.managed_desktop_only != true && (github.event_name == 'pull_request')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -467,7 +473,7 @@ jobs:
   cognia-server-image:
     name: cognia-server (full + slim)
     needs: vars
-    if: github.event_name != 'pull_request'
+    if: inputs.managed_desktop_only != true && (github.event_name != 'pull_request')
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
