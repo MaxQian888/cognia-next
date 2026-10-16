@@ -27,6 +27,14 @@ The shared checkout has unrelated dirty files, including locale aggregates and A
 
 A separate uncommitted browser-companion ADR in the shared tree also currently uses number 0228. This integration retains the user's accepted managed desktop ADR and leaves the other session's file and metadata untouched; numbering coordination for that foreign draft is outside this change.
 
+## Concurrent dev advancement and merge guards
+
+During final merge preparation, another session advanced dev to `c3a1307f628554f109ccc756cfd8e8b33e92e299`. The expected-ref guard refused the stale attempt before any shared mutation. That already-committed Chromium change was merged into this isolated checkout; all four incoming paths remain byte-identical to that dev commit. The resulting integration commit is `289369971f11c27f42761e78a261a6fd7ac001be`; protocol freshness still passes. Post-hook application checks again passed 33 suites / 913 tests.
+
+The shared working tree then acquired 19 overlapping dirty paths, including permission/receipt code and generated protocols. Five overlapping Rust source merges were conflict-free in a separate preservation snapshot, and metadata/locale additions were retained separately from the committed feature. However, generation from that foreign snapshot refused with `not declared: * /ws/browser-companion`, and a later hash guard detected ongoing changes to `lib/browser-companion/limits.ts`. No shared file, index or ref was changed by these attempts. The other session's unfinished route contract must be completed before this combined working tree can be safely regenerated and installed. None of those foreign changes belongs to the integration commit.
+
+The scoped fast-forward safety procedure was exercised in a disposable repository: disjoint JSON edits and appended metadata survive; unrelated staged and untracked files remain unchanged; stale dev revisions and conflicting semantic edits refuse without applying. The real merge remains pending while the shared snapshot is changing. No stash, reset or hook bypass was used.
+
 ## Provider credentials and later qualification
 
 E2B's current [API key documentation](https://docs.e2b.dev/api-key) directs users to the [E2B Console](https://console.e2b.dev/) to obtain an API key (checked 2026-10-16). Use the intended account/team. The key authenticates E2B SDK/CLI operations; obtaining it does not authorize this agent to spend.
