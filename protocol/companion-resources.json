@@ -1208,7 +1208,12 @@
             "snapshot": {},
             "source": {},
             "tool_event": {},
-            "watch": {}
+            "watch": {},
+            "port_lease": {
+              "children": {
+                "subject": {}
+              }
+            }
           }
         }
       }

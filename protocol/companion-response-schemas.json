@@ -1085,7 +1085,7 @@
     },
     "AgentReadResult": {
       "type": "object",
-      "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all \u2014 the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
+      "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all — the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
       "required": ["path", "exists", "writable", "format", "raw", "parsed"],
       "properties": {
         "path": {
@@ -1104,7 +1104,7 @@
           "type": "string"
         },
         "parsed": {
-          "x-cognia-opaque-reason": "serde_json::Value \u2014 the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
+          "x-cognia-opaque-reason": "serde_json::Value — the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
         },
         "parseError": {
           "type": "string"
@@ -2957,7 +2957,7 @@
     },
     "FleetSnapshot": {
       "type": "object",
-      "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent \u2014 not empty arrays \u2014 on a quiet host.",
+      "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent — not empty arrays — on a quiet host.",
       "x-cognia-fixes": "Previously LegacyList, which requires an ARRAY. FleetSnapshot is a struct and always serializes as an object, so the enforced output contract rejected every fleet_get_snapshot response with contract_output_violation. The helper directly above the dispatch arm (fleet_event_payload) already asserted 'fleet snapshot must serialize as an object'.",
       "required": ["sessions", "liveness", "generatedAt"],
       "properties": {
@@ -3608,7 +3608,7 @@
     },
     "GitStackBranchPairList": {
       "type": "array",
-      "x-cognia-wire-source": "Vec<(String, String)> \u2014 a Rust tuple serialises as a two-element JSON array, not an object.",
+      "x-cognia-wire-source": "Vec<(String, String)> — a Rust tuple serialises as a two-element JSON array, not an object.",
       "items": {
         "type": "array",
         "items": {
@@ -4387,7 +4387,7 @@
     },
     "LarkEntryToken": {
       "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone \u2014 so only `token` is guaranteed.",
+      "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone — so only `token` is guaranteed.",
       "required": ["token"],
       "properties": {
         "token": {
@@ -4404,7 +4404,7 @@
     },
     "LarkMetricAck": {
       "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_metrics_record \u2014 json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
+      "x-cognia-wire-source": "lark_entry::rpc_metrics_record — json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
       "required": ["ok"],
       "properties": {
         "ok": {
@@ -4415,7 +4415,7 @@
     },
     "LarkResultAck": {
       "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_result_complete \u2014 json!({ \"accepted\": bool }).",
+      "x-cognia-wire-source": "lark_entry::rpc_result_complete — json!({ \"accepted\": bool }).",
       "required": ["accepted"],
       "properties": {
         "accepted": {
@@ -4871,7 +4871,7 @@
                 "type": "string"
               },
               "fields": {
-                "x-cognia-opaque-reason": "serde_json::Value \u2014 arbitrary structured fields captured at the log call site."
+                "x-cognia-opaque-reason": "serde_json::Value — arbitrary structured fields captured at the log call site."
               }
             },
             "additionalProperties": false
@@ -5171,7 +5171,7 @@
     },
     "NullableStringResult": {
       "type": ["string", "null"],
-      "x-cognia-wire-source": "Option<String> \u2014 null means absent-at-that-ref or binary, which is an ordinary answer rather than an error."
+      "x-cognia-wire-source": "Option<String> — null means absent-at-that-ref or binary, which is an ordinary answer rather than an error."
     },
     "OcrModelFileStatus": {
       "type": "object",
@@ -5696,7 +5696,7 @@
     },
     "PluginRuntimeSnapshot": {
       "type": "object",
-      "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/lib.rs PluginRuntimeSnapshot. NOTE: no rename_all \u2014 the fields stay snake_case on the wire. The two Option fields carry no skip_serializing_if, so they are always present as null.",
+      "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/lib.rs PluginRuntimeSnapshot. NOTE: no rename_all — the fields stay snake_case on the wire. The two Option fields carry no skip_serializing_if, so they are always present as null.",
       "required": ["plugin_id", "version", "status", "last_error", "loaded_at", "install_path"],
       "properties": {
         "plugin_id": {
@@ -5823,7 +5823,7 @@
     "RawWorkspaceEntry": {
       "type": "object",
       "x-cognia-wire-source": "lib/files/types.ts RawWorkspaceEntry",
-      "description": "snake_case on the wire \u2014 the Rust side does not rename these; the client maps them via fromRawWorkspaceEntry.",
+      "description": "snake_case on the wire — the Rust side does not rename these; the client maps them via fromRawWorkspaceEntry.",
       "required": ["rel_path", "absolute_path", "is_dir", "size"],
       "properties": {
         "rel_path": {
@@ -6126,7 +6126,7 @@
     },
     "SecretValue": {
       "type": ["string", "null"],
-      "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent \u2014 a successful read, not an error.",
+      "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent — a successful read, not an error.",
       "x-cognia-fixes": "Previously LegacyRecord, which requires an object. Every successful secret_store_get / keyring_secret_get response is a bare string or null, so the enforced output contract rejected all of them with contract_output_violation."
     },
     "SessionAttachmentUploadChunk": {
@@ -6304,7 +6304,7 @@
     },
     "SidecarStatus": {
       "type": "object",
-      "x-cognia-wire-source": "crate::claude::commands::SidecarStatus \u2014 derives Serialize with NO rename_all, and has exactly one field.",
+      "x-cognia-wire-source": "crate::claude::commands::SidecarStatus — derives Serialize with NO rename_all, and has exactly one field.",
       "required": ["ready"],
       "properties": {
         "ready": {
@@ -6760,7 +6760,7 @@
     },
     "TerminalHostStatus": {
       "type": "object",
-      "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms \u2014 provisioning a device descriptor has no remote path.",
+      "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms — provisioning a device descriptor has no remote path.",
       "required": ["running", "endpoint", "settings"],
       "properties": {
         "running": {
@@ -6777,7 +6777,7 @@
     },
     "TerminalKilledPidList": {
       "type": "array",
-      "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port \u2014 the PIDs actually signalled, possibly empty when nothing was listening.",
+      "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port — the PIDs actually signalled, possibly empty when nothing was listening.",
       "items": {
         "type": "integer",
         "minimum": 0
@@ -6803,7 +6803,7 @@
     "TerminalPathExecutableList": {
       "type": "object",
       "description": "One page of executable names found on PATH (ADR-0175 B3).",
-      "x-cognia-wire-source": "Vec<String> \u2014 cognia_terminal::path_scan::list_path_executables_inner, paged by companion_api::paging::Page::slice_all.",
+      "x-cognia-wire-source": "Vec<String> — cognia_terminal::path_scan::list_path_executables_inner, paged by companion_api::paging::Page::slice_all.",
       "required": ["items"],
       "properties": {
         "items": {
@@ -6820,7 +6820,7 @@
     },
     "TerminalProfileSyncResult": {
       "type": "object",
-      "x-cognia-wire-source": "rpc/terminal.rs `terminal_host_sync_profiles` \u2014 how many profiles the device now owns on the host.",
+      "x-cognia-wire-source": "rpc/terminal.rs `terminal_host_sync_profiles` — how many profiles the device now owns on the host.",
       "required": ["installed"],
       "properties": {
         "installed": {
@@ -6832,7 +6832,7 @@
     },
     "TerminalSession": {
       "type": "object",
-      "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null \u2014 process_id and the two ssh_host_key_* fields are the exceptions and do skip.",
+      "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null — process_id and the two ssh_host_key_* fields are the exceptions and do skip.",
       "required": [
         "id",
         "hostId",
@@ -8280,7 +8280,9 @@
         },
         "notResent": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "For a regenerate or an edit: the filenames of the turn's attachments the host could not send again (a natively sent video, an image whose bytes are gone). The rest were resent; absent when every file was."
         }
       },
@@ -8824,7 +8826,7 @@
       "description": "Outcome of one reconcile pass. Callers persist the changes; the\nplanner itself does not mutate.",
       "properties": {
         "imported": {
-          "description": "Worktrees on disk that Registry did not create. Callers store these\nas `Imported` \u2014 they must never be auto-pruned.",
+          "description": "Worktrees on disk that Registry did not create. Callers store these\nas `Imported` — they must never be auto-pruned.",
           "items": {
             "$ref": "#/$defs/ImportedWorkspaceHint"
           },
@@ -9921,6 +9923,16 @@
         "pinned": {
           "type": "boolean"
         },
+        "portLease": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspacePortLease"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "projectId": {
           "description": "Owning Workspace, so the inventory can be scoped to one project instead\nof only ever being shown machine-wide. `None` for a directory found on\ndisk that no project claims.",
           "type": ["string", "null"]
@@ -9968,7 +9980,7 @@
     },
     "WorkspaceLifecyclePolicy": {
       "additionalProperties": false,
-      "description": "Retention policy inputs. All three knobs are user-adjustable in settings.",
+      "description": "Retention and new-lease port allocation settings. Existing leases keep their numbers.",
       "properties": {
         "activeDirectoryCap": {
           "format": "uint32",
@@ -9980,13 +9992,38 @@
           "minimum": 0,
           "type": "integer"
         },
+        "portBlockSize": {
+          "default": 10,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "portRangeEnd": {
+          "default": 48999,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "portRangeStart": {
+          "default": 41000,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "snapshotRetentionDays": {
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         }
       },
-      "required": ["activeDirectoryCap", "blobBudgetBytes", "snapshotRetentionDays"],
+      "required": [
+        "activeDirectoryCap",
+        "blobBudgetBytes",
+        "portBlockSize",
+        "portRangeEnd",
+        "portRangeStart",
+        "snapshotRetentionDays"
+      ],
       "type": "object"
     },
     "WorkspaceMaintenanceEvent": {
@@ -10072,7 +10109,7 @@
       "type": "object"
     },
     "WorkspaceOwnerType": {
-      "description": "Who created this managed workspace. Ownership determines whether the\nRegistry may prune or unlock the workspace during reconciliation.\n\n`Imported` is reserved for worktrees discovered on disk that the Registry\ncannot verify as its own \u2014 those rows never participate in auto-prune.",
+      "description": "Who created this managed workspace. Ownership determines whether the\nRegistry may prune or unlock the workspace during reconciliation.\n\n`Imported` is reserved for worktrees discovered on disk that the Registry\ncannot verify as its own — those rows never participate in auto-prune.",
       "enum": ["user", "imported", "session", "team", "scheduled"],
       "type": "string"
     },
@@ -10122,8 +10159,18 @@
         "pinned": {
           "type": "boolean"
         },
+        "portLease": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspacePortLease"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "projectId": {
-          "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" \u2014\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` \u2014 never auto-pruned (ADR-0111).",
+          "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
           "type": ["string", "null"]
         },
         "sizeBytes": {
@@ -10160,7 +10207,7 @@
     },
     "WorkspaceRootLease": {
       "additionalProperties": false,
-      "description": "One logical root inside a Bundle, resolved to its physical execution\nlocation.\n\n`alias_path` is the path executors see. Multiple leases may point at the\nsame physical worktree when they share a Git common dir \u2014 the Bundle\ncomposer collapses roots by `git_common_dir` before creating worktrees.",
+      "description": "One logical root inside a Bundle, resolved to its physical execution\nlocation.\n\n`alias_path` is the path executors see. Multiple leases may point at the\nsame physical worktree when they share a Git common dir — the Bundle\ncomposer collapses roots by `git_common_dir` before creating worktrees.",
       "properties": {
         "aliasPath": {
           "type": "string"
@@ -10187,7 +10234,7 @@
       "type": "string"
     },
     "WorkspaceState": {
-      "description": "Managed workspace lifecycle state. Transitions outside the Registry's\ncontrolled paths are rejected fail-closed.\n\nLegal transitions (all others error):\n\n- `Provisioning \u2192 Active | Removing`\n- `Active \u2192 Archived | Conflict | Removing`\n- `Archived \u2192 Restorable | Removing`\n- `Restorable \u2192 Active | Removing`\n- `Conflict \u2192 Active | Removing`   (via `ConflictResolution`)\n- `Removing \u2192 Removed`\n\n`Removed` is terminal.",
+      "description": "Managed workspace lifecycle state. Transitions outside the Registry's\ncontrolled paths are rejected fail-closed.\n\nLegal transitions (all others error):\n\n- `Provisioning → Active | Removing`\n- `Active → Archived | Conflict | Removing`\n- `Archived → Restorable | Removing`\n- `Restorable → Active | Removing`\n- `Conflict → Active | Removing`   (via `ConflictResolution`)\n- `Removing → Removed`\n\n`Removed` is terminal.",
       "enum": [
         "provisioning",
         "active",
@@ -10434,7 +10481,7 @@
         },
         "effectiveFloor": {
           "$ref": "#/$defs/IsolationTier",
-          "description": "`max(entry floor, baseline floor, tenant floor)` \u2014 never lower than\nwhat the entry itself declares."
+          "description": "`max(entry floor, baseline floor, tenant floor)` — never lower than\nwhat the entry itself declares."
         },
         "entry": {
           "$ref": "#/$defs/CatalogEntry"
@@ -10580,7 +10627,7 @@
       "type": "object"
     },
     "DeclarationRead": {
-      "description": "One declaration file, as bytes plus the digest of those bytes.\n\nDeliberately *not* parsed here. The devcontainer and workspace-config\ngrammars, their closed-world refusals and the RFC 8785 declaration digest\nlive in one place \u2014 `lib/project-environment` \u2014 and a second\nimplementation in Rust would be a parity liability with nothing to gain:\nthis Host's job on this path is access to a checkout the approver's\nbrowser cannot reach. The digest over the raw bytes is what makes \"the\nfile changed since you looked at it\" answerable without parsing either\ngrammar.",
+      "description": "One declaration file, as bytes plus the digest of those bytes.\n\nDeliberately *not* parsed here. The devcontainer and workspace-config\ngrammars, their closed-world refusals and the RFC 8785 declaration digest\nlive in one place — `lib/project-environment` — and a second\nimplementation in Rust would be a parity liability with nothing to gain:\nthis Host's job on this path is access to a checkout the approver's\nbrowser cannot reach. The digest over the raw bytes is what makes \"the\nfile changed since you looked at it\" answerable without parsing either\ngrammar.",
       "properties": {
         "bytesSha256": {
           "description": "SHA-256 (lowercase hex) of the exact bytes above.",
@@ -11096,7 +11143,7 @@
       "type": "object"
     },
     "CreatedBy": {
-      "description": "Who created a grant. `Agent` is an agent's `filespace_share` /\n`filespace_enable_webdav` call the person approved (ADR-0222 \u00a79): the\npolicy's `allow_agent_sharing` gates it at creation and while it lives.",
+      "description": "Who created a grant. `Agent` is an agent's `filespace_share` /\n`filespace_enable_webdav` call the person approved (ADR-0222 §9): the\npolicy's `allow_agent_sharing` gates it at creation and while it lives.",
       "enum": ["user", "agent"],
       "type": "string"
     },
@@ -11148,7 +11195,7 @@
           "type": "array"
         },
         "sftpHostKeyFingerprint": {
-          "description": "`SHA256:\u2026` of the SFTP host key, for the client to verify.",
+          "description": "`SHA256:…` of the SFTP host key, for the client to verify.",
           "type": ["string", "null"]
         },
         "tlsFingerprint": {
@@ -11802,7 +11849,7 @@
         },
         "workspace": {
           "type": "object",
-          "description": "Set on a workspace file (ADR-0223 \u00a78): where it lives on the host's disk and what the agent did to it last.",
+          "description": "Set on a workspace file (ADR-0223 §8): where it lives on the host's disk and what the agent did to it last.",
           "required": ["sessionId", "workspaceRoot", "executionRoot", "relPath"],
           "properties": {
             "sessionId": {
@@ -12913,6 +12960,155 @@
       },
       "required": ["sha256", "sizeBytes", "snapshotId"],
       "type": "object"
+    },
+    "PortSubjectKind": {
+      "enum": ["registry", "desktop-session", "project-root"],
+      "type": "string"
+    },
+    "WorkspacePortLease": {
+      "additionalProperties": false,
+      "properties": {
+        "basePort": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "canonicalRoot": {
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "leaseId": {
+          "type": "string"
+        },
+        "namespaceKey": {
+          "type": "string"
+        },
+        "portCount": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "registryWorkspaceId": {
+          "type": ["string", "null"]
+        },
+        "subjectKey": {
+          "type": "string"
+        },
+        "subjectKind": {
+          "$ref": "#/$defs/PortSubjectKind"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "basePort",
+        "canonicalRoot",
+        "createdAt",
+        "leaseId",
+        "namespaceKey",
+        "portCount",
+        "registryWorkspaceId",
+        "subjectKey",
+        "subjectKind",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "PortLeaseDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PortLeaseDiagnosticKind"
+        },
+        "leaseIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["detail", "kind", "leaseIds"],
+      "type": "object"
+    },
+    "PortLeaseDiagnosticKind": {
+      "enum": [
+        "duplicateRoot",
+        "overlap",
+        "outOfRange",
+        "ambiguousRegistryLink",
+        "unresolvedRegistryRoot",
+        "registryRootMismatch"
+      ],
+      "type": "string"
+    },
+    "PortLeaseSubject": {
+      "additionalProperties": false,
+      "description": "Every owner of a physical-root lease, including aliases.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PortSubjectKind"
+        }
+      },
+      "required": ["key", "kind"],
+      "type": "object"
+    },
+    "WorkspacePortLeaseStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "lease": {
+          "$ref": "#/$defs/WorkspacePortLease"
+        },
+        "occupancyError": {
+          "type": ["string", "null"]
+        },
+        "occupiedPorts": {
+          "description": "None when the host cannot inspect this network namespace.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": ["array", "null"]
+        },
+        "subjects": {
+          "items": {
+            "$ref": "#/$defs/PortLeaseSubject"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["lease", "occupancyError", "occupiedPorts", "subjects"],
+      "type": "object"
+    },
+    "WorkspacePortLeaseList": {
+      "additionalProperties": false,
+      "properties": {
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/PortLeaseDiagnostic"
+          },
+          "type": "array"
+        },
+        "leases": {
+          "items": {
+            "$ref": "#/$defs/WorkspacePortLeaseStatus"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["diagnostics", "leases"],
+      "type": "object"
     }
   },
   "commands": {
@@ -13580,7 +13776,7 @@
     },
     "connector_enqueue_outbound": {
       "type": "object",
-      "description": "What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an existing job \u2014 i.e. this was a retry replay, not a second send.",
+      "description": "What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an existing job — i.e. this was a retry replay, not a second send.",
       "required": ["jobId", "messageId", "reused"],
       "properties": {
         "jobId": {
@@ -14753,8 +14949,13 @@
       "description": "The secret as stored: the provider id, or the git host normalized from what was sent. Never the value.",
       "required": ["kind", "name"],
       "properties": {
-        "kind": { "type": "string", "enum": ["provider", "git"] },
-        "name": { "type": "string" }
+        "kind": {
+          "type": "string",
+          "enum": ["provider", "git"]
+        },
+        "name": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -14766,8 +14967,13 @@
       "description": "The secret as stored: the provider id, or the git host normalized from what was sent. Never the value.",
       "required": ["kind", "name"],
       "properties": {
-        "kind": { "type": "string", "enum": ["provider", "git"] },
-        "name": { "type": "string" }
+        "kind": {
+          "type": "string",
+          "enum": ["provider", "git"]
+        },
+        "name": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -14782,8 +14988,12 @@
             "type": "object",
             "required": ["providerId", "apiKey"],
             "properties": {
-              "providerId": { "type": "string" },
-              "apiKey": { "type": "string" }
+              "providerId": {
+                "type": "string"
+              },
+              "apiKey": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
@@ -14802,15 +15012,26 @@
             "type": "object",
             "required": ["kind", "name"],
             "properties": {
-              "kind": { "type": "string", "enum": ["provider", "git", "connector"] },
-              "name": { "type": "string" },
-              "setAt": { "type": "integer" },
+              "kind": {
+                "type": "string",
+                "enum": ["provider", "git", "connector"]
+              },
+              "name": {
+                "type": "string"
+              },
+              "setAt": {
+                "type": "integer"
+              },
               "setBy": {
                 "type": "object",
                 "required": ["deviceId"],
                 "properties": {
-                  "deviceId": { "type": "string" },
-                  "label": { "type": "string" }
+                  "deviceId": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  }
                 },
                 "additionalProperties": false
               }
@@ -15392,7 +15613,9 @@
       "description": "The workspace copy this host now holds.",
       "required": ["id", "created"],
       "properties": {
-        "id": { "type": "string" },
+        "id": {
+          "type": "string"
+        },
         "created": {
           "type": "boolean",
           "description": "False when an earlier send already made it; its name, folders and repository were brought up to date."
@@ -15512,27 +15735,53 @@
               "expiresAt"
             ],
             "properties": {
-              "interruptId": { "type": "string" },
-              "runId": { "type": "string" },
-              "type": { "type": "string", "enum": ["tool_approval", "bot_approval"] },
-              "title": { "type": "string" },
-              "runTitle": { "type": "string" },
-              "runKind": { "type": "string" },
-              "toolName": { "type": "string" },
+              "interruptId": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["tool_approval", "bot_approval"]
+              },
+              "title": {
+                "type": "string"
+              },
+              "runTitle": {
+                "type": "string"
+              },
+              "runKind": {
+                "type": "string"
+              },
+              "toolName": {
+                "type": "string"
+              },
               "permissionClass": {
                 "type": "string",
                 "enum": ["workspace", "outbound", "secrets", "hostConfig"]
               },
-              "message": { "type": "string" },
-              "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+              "message": {
+                "type": "string"
+              },
+              "risk": {
+                "type": "string",
+                "enum": ["low", "medium", "high"]
+              },
               "detail": {
                 "type": "object",
                 "additionalProperties": true,
                 "description": "A Bot's proposal, rendered as data. Absent when larger than the inline limit."
               },
-              "detailTruncated": { "type": "boolean" },
-              "createdAt": { "type": "integer" },
-              "expiresAt": { "type": "integer" }
+              "detailTruncated": {
+                "type": "boolean"
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": "integer"
+              }
             },
             "additionalProperties": false
           }
@@ -15549,10 +15798,19 @@
       "description": "Whether the answer was taken. A refusal names why: the approval is gone (answered elsewhere, expired, or not one this command serves), the payload was malformed, or the control gate refused it.",
       "required": ["ok"],
       "properties": {
-        "ok": { "type": "boolean" },
-        "status": { "type": "string", "enum": ["approved", "denied"] },
-        "reason": { "type": "string" },
-        "field": { "type": "string" }
+        "ok": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["approved", "denied"]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -17640,7 +17898,7 @@
       "required": ["removed"]
     },
     "environment_declaration_read": {
-      "description": "Every declaration file a repository has, plus where the Host looked.\n\n**All** of them, not the first one that matched. Precedence between\n`.cognia/workspace.json` and a devcontainer file is decided by\n`lib/project-environment/read-environment-declaration.ts`, together with\nthe trust gate and the parse \u2014 and a Host that returned only its own first\nmatch would be a second, silent answer to the same question. Returning the\nset keeps that rule in one place and still costs one round trip.",
+      "description": "Every declaration file a repository has, plus where the Host looked.\n\n**All** of them, not the first one that matched. Precedence between\n`.cognia/workspace.json` and a devcontainer file is decided by\n`lib/project-environment/read-environment-declaration.ts`, together with\nthe trust gate and the parse — and a Host that returned only its own first\nmatch would be a second, silent answer to the same question. Returning the\nset keeps that rule in one place and still costs one round trip.",
       "properties": {
         "files": {
           "description": "In `DECLARATION_FILES` order; empty when the repository declares nothing,\nwhich is the common case and not an error.",
@@ -18741,6 +18999,57 @@
     },
     "code_result_discard": {
       "$ref": "#/$defs/NullResult"
+    },
+    "task_workspace_port_lease_get": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspacePortLease"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_workspace_port_lease_resolve": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspacePortLease"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_workspace_port_lease_resolve_ensure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspacePortLease"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_workspace_port_lease_ensure": {
+      "$ref": "#/$defs/WorkspacePortLease"
+    },
+    "task_workspace_port_lease_subject_ensure": {
+      "$ref": "#/$defs/WorkspacePortLease"
+    },
+    "task_workspace_port_lease_subject_get": {
+      "items": {
+        "$ref": "#/$defs/WorkspacePortLease"
+      },
+      "type": "array"
+    },
+    "task_workspace_port_lease_release": {
+      "type": "null"
+    },
+    "task_workspace_port_lease_subject_release": {
+      "type": "null"
+    },
+    "task_workspace_port_lease_list": {
+      "$ref": "#/$defs/WorkspacePortLeaseList"
     }
   }
 }

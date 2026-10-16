@@ -5,10 +5,12 @@
  *
  * `authorize_approval` (`src-tauri/src/companion_api/remote_execution.rs`)
  * refuses any `approval: "interactive"` command that does not carry a valid
- * `adminLease`. Every task-workspace WRITE command carries that flag:
+ * `adminLease`. Workspace lifecycle mutations carrying that flag include:
  * `task_workspace_managed_delete`, `_archive`, `_restore`, `_pin`,
  * `_permanent`, `_adopt`, `task_workspace_environment_adopt`,
- * `_create_branch`, `task_workspace_policy_set`.
+ * `_create_branch`, `task_workspace_policy_set`, and explicit port-lease
+ * releases. Port-lease ensure commands are idempotent execution bookkeeping:
+ * they require `workspace.write` but no admin lease, and never open a host port.
  *
  * `lib/task-workspace/client.ts` called `transport.call` bare, so every one of
  * those actions answered `interactive_approval_required` from a paired phone

@@ -5,6 +5,7 @@ import {
   type BootstrapValidationCode,
 } from "./bootstrap-agent"
 import { isTauri, transport } from "@/lib/tauri"
+import { ensureExecutionPortLease } from "@/lib/task-workspace/execution-port-lease"
 import { sha256Hex } from "@/lib/data/crypto"
 import { readWorkspaceFile, statWorkspaceFile } from "@/lib/files/workspace-fs"
 import {
@@ -268,12 +269,22 @@ async function runScript(
     )
   }
 
+  let portLeaseFailed = false
   try {
     if (options.validationError !== undefined) throw options.validationError
     const bootstrap =
       options.recordInitialization && input.environment.bootstrapAgent?.enabled
         ? prepareBootstrapExecution(input.environment, input.force === true)
         : undefined
+    try {
+      await ensureExecutionPortLease({
+        cwd: input.executionRoot,
+        projectId: input.environment.projectId,
+      })
+    } catch (cause) {
+      portLeaseFailed = true
+      throw cause
+    }
     const result = await transport.call<NativeEnvironmentResult>("project_environment_execute", {
       script: bootstrap?.script ?? script,
       cwd: input.executionRoot,
@@ -320,7 +331,8 @@ async function runScript(
     }
   } catch (cause) {
     const error = cause instanceof Error ? cause.message : String(cause)
-    const bypassed = input.surface === "interactive" && input.bypassOnFailure === true
+    const bypassed =
+      !portLeaseFailed && input.surface === "interactive" && input.bypassOnFailure === true
     if (options.recordInitialization) {
       const completedAt = Date.now()
       await updateProjectEnvironmentInitialization(

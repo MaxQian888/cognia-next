@@ -22,6 +22,10 @@ const persistActiveProjectId = jest.fn()
 const ensureDefaultProject = jest.fn()
 const deleteProjectCascade = jest.fn()
 const detachProjectContents = jest.fn()
+const releaseProjectPortLeases = jest.fn()
+jest.mock("@/lib/task-workspace/execution-port-lease", () => ({
+  releaseProjectPortLeases: (...args: unknown[]) => releaseProjectPortLeases(...args),
+}))
 
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({
@@ -81,6 +85,7 @@ function projectFixture(overrides: Partial<Project> = {}): Project {
 }
 
 beforeEach(() => {
+  releaseProjectPortLeases.mockReset().mockResolvedValue(undefined)
   clearActiveRuntimeTargetContext()
   useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   dispatchProjectCreate.mockClear()
@@ -180,6 +185,47 @@ describe("updateProject dispatch", () => {
 })
 
 describe("deleteProject dispatch", () => {
+  it("releases project subjects on deletion but retains them while archived", async () => {
+    const project = useProjectStore.getState().createProject({ name: "leased", rootDir: "/repo" })
+    useProjectStore.getState().archiveProject(project.id)
+    expect(releaseProjectPortLeases).not.toHaveBeenCalled()
+    await useProjectStore.getState().deleteProject(project.id)
+    expect(releaseProjectPortLeases).toHaveBeenCalledWith(project.id)
+  })
+
+  it("keeps the project when lease release fails", async () => {
+    const project = useProjectStore.getState().createProject({ name: "leased", rootDir: "/repo" })
+    const error = new Error("Occupied: 41000")
+    releaseProjectPortLeases.mockRejectedValueOnce(error)
+    await expect(useProjectStore.getState().deleteProject(project.id)).rejects.toBe(error)
+    expect(useProjectStore.getState().projects).toContain(project)
+    expect(deleteProjectRow).not.toHaveBeenCalled()
+    expect(dispatchProjectDelete).not.toHaveBeenCalled()
+  })
+
+  it("retains the lease when project cleanup refuses deletion", async () => {
+    const project = projectFixture({ id: "leased-project" })
+    useProjectStore.setState({ projects: [project], loaded: true })
+    deleteProjectCascade.mockRejectedValueOnce(new Error("gateway task is active"))
+    await expect(
+      useProjectStore.getState().deleteProject(project.id, "delete-data")
+    ).rejects.toThrow("gateway task is active")
+    expect(releaseProjectPortLeases).not.toHaveBeenCalled()
+    expect(deleteProjectRow).not.toHaveBeenCalled()
+    expect(useProjectStore.getState().projects).toContain(project)
+  })
+
+  it("releases the subject after cleanup and before deleting the durable project row", async () => {
+    const project = projectFixture({ id: "leased-project" })
+    useProjectStore.setState({ projects: [project], loaded: true })
+    await useProjectStore.getState().deleteProject(project.id, "delete-data")
+    expect(deleteProjectCascade.mock.invocationCallOrder[0]).toBeLessThan(
+      releaseProjectPortLeases.mock.invocationCallOrder[0]
+    )
+    expect(releaseProjectPortLeases.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteProjectRow.mock.invocationCallOrder[0]
+    )
+  })
   it("fires dispatchProjectDelete with the deleted project id", async () => {
     const project = useProjectStore.getState().createProject({ name: "Alpha" })
     dispatchProjectDelete.mockClear()

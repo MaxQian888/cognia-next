@@ -6,6 +6,12 @@ import { spawnDefaultTerminal } from "./spawn-default"
 import { spawnFromDock } from "./spawn-orchestrator"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
+import { ensureExecutionPortLease } from "@/lib/task-workspace/execution-port-lease"
+
+jest.mock("@/lib/task-workspace/execution-port-lease", () => ({
+  ensureExecutionPortLease: jest.fn(),
+  releaseProjectPortLeases: jest.fn(),
+}))
 
 jest.mock("./spawn-orchestrator", () => ({
   spawnFromDock: jest.fn(async () => ({
@@ -45,6 +51,7 @@ function lastRequest() {
 }
 
 beforeEach(() => {
+  jest.mocked(ensureExecutionPortLease).mockReset().mockResolvedValue(null)
   mockedSpawn.mockClear()
   mockEnsureHostCapabilities.mockClear()
   mockHostCapabilities = null
@@ -53,6 +60,66 @@ beforeEach(() => {
 })
 
 describe("spawnDefaultTerminal", () => {
+  it.each([false, true])(
+    "ensures the final cwd lease before spawning (profile=%s)",
+    async (profile) => {
+      const project = useProjectStore.getState().createProject({ name: "p", rootDir: "/repo" })
+      useProjectStore.getState().setActiveProject(project.id)
+      if (profile)
+        withSettings({
+          defaultProfileId: "p1",
+          profiles: [{ id: "p1", name: "Shell", shell: "/bin/zsh", cwd: "/profile" }],
+        })
+      await spawnDefaultTerminal({
+        cwdOverride: "/repo/child",
+        sessionId: "chat-1",
+        sessionExecutionContext: null,
+      })
+      expect(ensureExecutionPortLease).toHaveBeenCalledWith({
+        cwd: "/repo/child",
+        project: expect.objectContaining({ id: project.id, roots: project.roots }),
+        projectId: project.id,
+        sessionId: "chat-1",
+        executionContext: null,
+      })
+      expect(jest.mocked(ensureExecutionPortLease).mock.invocationCallOrder[0]).toBeLessThan(
+        mockedSpawn.mock.invocationCallOrder[0]
+      )
+    }
+  )
+
+  it.each([false, true])(
+    "returns lease exhaustion without spawning a terminal (profile=%s)",
+    async (profile) => {
+      if (profile)
+        withSettings({
+          defaultProfileId: "p1",
+          profiles: [{ id: "p1", name: "Shell", shell: "/bin/zsh", cwd: "/repo" }],
+        })
+      const error = new Error("portRangeEnd exhausted")
+      jest.mocked(ensureExecutionPortLease).mockRejectedValueOnce(error)
+      await expect(spawnDefaultTerminal({ cwdOverride: "/repo" })).resolves.toEqual({
+        kind: "error",
+        message: error.message,
+      })
+      expect(mockedSpawn).not.toHaveBeenCalled()
+    }
+  )
+
+  it("preserves the requested project identity before the project store hydrates", async () => {
+    await spawnDefaultTerminal({
+      projectId: "unhydrated-project",
+      cwdOverride: "/repo",
+      sessionId: null,
+    })
+    expect(ensureExecutionPortLease).toHaveBeenCalledWith({
+      cwd: "/repo",
+      project: undefined,
+      projectId: "unhydrated-project",
+      sessionId: null,
+      executionContext: null,
+    })
+  })
   it("falls back to the platform default with no project or settings", async () => {
     await spawnDefaultTerminal()
     expect(lastRequest()).toMatchObject({

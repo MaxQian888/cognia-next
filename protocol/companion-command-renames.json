@@ -4318,6 +4318,33 @@
     },
     "host_provider_credentials_load": {
       "to": "host.secret.provider.load"
+    },
+    "task_workspace_port_lease_ensure": {
+      "to": "task.workspace.port_lease.ensure"
+    },
+    "task_workspace_port_lease_get": {
+      "to": "task.workspace.port_lease.get"
+    },
+    "task_workspace_port_lease_list": {
+      "to": "task.workspace.port_lease.snapshot"
+    },
+    "task_workspace_port_lease_release": {
+      "to": "task.workspace.port_lease.release"
+    },
+    "task_workspace_port_lease_resolve": {
+      "to": "task.workspace.port_lease.resolve"
+    },
+    "task_workspace_port_lease_resolve_ensure": {
+      "to": "task.workspace.port_lease.resolve_ensure"
+    },
+    "task_workspace_port_lease_subject_ensure": {
+      "to": "task.workspace.port_lease.subject.ensure"
+    },
+    "task_workspace_port_lease_subject_get": {
+      "to": "task.workspace.port_lease.subject.get"
+    },
+    "task_workspace_port_lease_subject_release": {
+      "to": "task.workspace.port_lease.subject.release"
     }
   }
 }

@@ -19,6 +19,10 @@ import {
   getManagedWorkspace,
   getWorkspaceBundle,
   listWorkspaceBundles,
+  ensureSubjectPortLease,
+  getSubjectPortLeases,
+  releaseSubjectPortLeases,
+  WorkspacePortLeaseError,
 } from "./client"
 import { runWorkspaceUserAction } from "./user-action"
 import { validateSessionScratchBundle } from "./session-bundle"
@@ -49,19 +53,25 @@ interface ManagedDirectoryEntry {
 }
 
 export interface ManagedWorkspaceDeps {
+  isTauri: () => boolean
   now: () => number
   managedBaseRoot: () => Promise<string>
   getSession: (sessionId: string) => Promise<ChatSession | undefined>
   updateSession: (sessionId: string, patch: Partial<ChatSession>) => Promise<unknown>
   exists: (path: string) => Promise<boolean>
   mkdir: (path: string) => Promise<unknown>
+  remove: (path: string) => Promise<unknown>
   rename: (from: string, to: string) => Promise<unknown>
   readDir: (path: string) => Promise<ManagedDirectoryEntry[]>
   readFile: (path: string) => Promise<Uint8Array>
   writeFile: (path: string, bytes: Uint8Array) => Promise<unknown>
   registerAllowedRoot: (path: string) => Promise<unknown>
   createProject: (rootDir: string, name: string) => { id: string }
+  deleteProject: (projectId: string) => Promise<void>
   addSessionToProject: (projectId: string, sessionId: string) => unknown
+  ensureSubjectPortLease: typeof ensureSubjectPortLease
+  getSubjectPortLeases: typeof getSubjectPortLeases
+  releaseSubjectPortLeases: typeof releaseSubjectPortLeases
 }
 
 function safeWorkspaceSegment(workspaceId: string): string {
@@ -343,6 +353,82 @@ async function persistContext(
   return context
 }
 
+/** The new binding is durable; callers must not undo its filesystem change. */
+export class ManagedWorkspacePortLeaseCleanupError extends WorkspacePortLeaseError {
+  readonly committed = true
+
+  constructor(
+    readonly sessionId: string,
+    readonly leaseIds: string[],
+    cause: unknown
+  ) {
+    super("task_workspace_port_lease_subject_release", cause)
+    this.name = "ManagedWorkspacePortLeaseCleanupError"
+    this.message = `Workspace binding was saved, but previous port lease cleanup failed: ${this.message}`
+  }
+}
+
+/** Retain the old lease until the new folder binding has been saved. */
+async function withDesktopSessionPortLease<T>(
+  sessionId: string,
+  root: string,
+  deps: ManagedWorkspaceDeps,
+  save: () => Promise<T>
+): Promise<T> {
+  if (!deps.isTauri()) return save()
+  const subject = { kind: "desktop-session" as const, key: sessionId }
+  const ensure = (root: string) =>
+    runWorkspaceUserAction("task_workspace_port_lease_subject_ensure", () =>
+      deps.ensureSubjectPortLease({ ...subject, root })
+    )
+  const release = (leaseId: string) =>
+    runWorkspaceUserAction("task_workspace_port_lease_subject_release", () =>
+      deps.releaseSubjectPortLeases({ ...subject, leaseId })
+    )
+  const previous = await deps.getSubjectPortLeases(subject)
+  const lease = await ensure(root)
+  const added = !previous.some((entry) => entry.leaseId === lease.leaseId)
+  let result: T
+  try {
+    result = await save()
+  } catch (error) {
+    try {
+      if (added) await release(lease.leaseId)
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "Managed workspace port lease rollback failed",
+        {
+          cause: error,
+        }
+      )
+    }
+    throw error
+  }
+  const failedLeaseIds: string[] = []
+  const errors: unknown[] = []
+  for (const prior of previous) {
+    if (prior.leaseId === lease.leaseId) continue
+    try {
+      await release(prior.leaseId)
+    } catch (error) {
+      failedLeaseIds.push(prior.leaseId)
+      errors.push(error)
+    }
+  }
+  if (errors.length) {
+    throw new ManagedWorkspacePortLeaseCleanupError(
+      sessionId,
+      failedLeaseIds,
+      new AggregateError(
+        errors,
+        errors.map((error) => (error instanceof Error ? error.message : String(error))).join("; ")
+      )
+    )
+  }
+  return result
+}
+
 export async function materializeManagedWorkspace(
   sessionId: string,
   providedDeps?: ManagedWorkspaceDeps
@@ -354,22 +440,48 @@ export async function materializeManagedWorkspace(
     context.managedWorkspace.localRoot &&
     (await deps.exists(context.managedWorkspace.localRoot))
   ) {
-    return context
+    return withDesktopSessionPortLease(
+      sessionId,
+      context.managedWorkspace.localRoot,
+      deps,
+      async () => context
+    )
   }
   const baseRoot = await deps.managedBaseRoot()
   const localRoot = joinPath(baseRoot, safeWorkspaceSegment(context.workspaceBinding!.workspaceId))
+  const existed = await deps.exists(localRoot)
   await deps.mkdir(localRoot)
-  await deps.registerAllowedRoot(localRoot)
   const now = deps.now()
-  return persistContext(
-    sessionId,
-    {
-      ...context,
-      projectRoot: localRoot,
-      managedWorkspace: { availability: "available", localRoot, materializedAt: now },
-    },
-    deps
-  )
+  try {
+    return await withDesktopSessionPortLease(sessionId, localRoot, deps, async () => {
+      await deps.registerAllowedRoot(localRoot)
+      return persistContext(
+        sessionId,
+        {
+          ...context,
+          projectRoot: localRoot,
+          managedWorkspace: { availability: "available", localRoot, materializedAt: now },
+        },
+        deps
+      )
+    })
+  } catch (error) {
+    if (error instanceof ManagedWorkspacePortLeaseCleanupError) throw error
+    if (!existed) {
+      try {
+        await deps.remove(localRoot)
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "Managed workspace folder rollback failed",
+          {
+            cause: error,
+          }
+        )
+      }
+    }
+    throw error
+  }
 }
 
 export async function rebindManagedWorkspace(
@@ -383,22 +495,24 @@ export async function rebindManagedWorkspace(
     throw new Error("Managed workspace directory does not exist")
   }
   const context = requireManagedContext(await deps.getSession(sessionId))
-  await deps.registerAllowedRoot(normalizedRoot)
-  return persistContext(
-    sessionId,
-    {
-      ...context,
-      projectRoot: normalizedRoot,
-      worktreePath: undefined,
-      branch: undefined,
-      managedWorkspace: {
-        availability: "available",
-        localRoot: normalizedRoot,
-        reboundAt: deps.now(),
+  return withDesktopSessionPortLease(sessionId, normalizedRoot, deps, async () => {
+    await deps.registerAllowedRoot(normalizedRoot)
+    return persistContext(
+      sessionId,
+      {
+        ...context,
+        projectRoot: normalizedRoot,
+        worktreePath: undefined,
+        branch: undefined,
+        managedWorkspace: {
+          availability: "available",
+          localRoot: normalizedRoot,
+          reboundAt: deps.now(),
+        },
       },
-    },
-    deps
-  )
+      deps
+    )
+  })
 }
 
 export async function deleteManagedWorkspace(
@@ -431,6 +545,9 @@ export async function deleteManagedWorkspace(
       branch: undefined,
       managedWorkspace: {
         availability: "deleted",
+        // Retain the original location so restoring a rebound folder reuses
+        // the same physical-root lease rather than allocating a second block.
+        localRoot,
         deletedRoot: trashRoot,
         deletedAt: deps.now(),
       },
@@ -453,24 +570,49 @@ export async function restoreManagedWorkspace(
     throw new Error("Recoverable managed workspace data is unavailable")
   }
   const baseRoot = await deps.managedBaseRoot()
-  const localRoot = joinPath(baseRoot, safeWorkspaceSegment(context.workspaceBinding!.workspaceId))
+  const retainedLeases =
+    !context.managedWorkspace.localRoot && deps.isTauri()
+      ? await deps.getSubjectPortLeases({ kind: "desktop-session", key: sessionId })
+      : []
+  const localRoot =
+    context.managedWorkspace.localRoot ??
+    (retainedLeases.length === 1 ? retainedLeases[0].canonicalRoot : undefined) ??
+    joinPath(baseRoot, safeWorkspaceSegment(context.workspaceBinding!.workspaceId))
   if (await deps.exists(localRoot))
     throw new Error("Managed workspace restore target already exists")
   await deps.rename(deletedRoot, localRoot)
-  await deps.registerAllowedRoot(localRoot)
-  return persistContext(
-    sessionId,
-    {
-      ...context,
-      projectRoot: localRoot,
-      managedWorkspace: {
-        availability: "available",
-        localRoot,
-        materializedAt: deps.now(),
-      },
-    },
-    deps
-  )
+  try {
+    return await withDesktopSessionPortLease(sessionId, localRoot, deps, async () => {
+      await deps.registerAllowedRoot(localRoot)
+      return persistContext(
+        sessionId,
+        {
+          ...context,
+          projectRoot: localRoot,
+          managedWorkspace: {
+            availability: "available",
+            localRoot,
+            materializedAt: deps.now(),
+          },
+        },
+        deps
+      )
+    })
+  } catch (error) {
+    if (error instanceof ManagedWorkspacePortLeaseCleanupError) throw error
+    try {
+      await deps.rename(localRoot, deletedRoot)
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "Managed workspace restore rollback failed",
+        {
+          cause: error,
+        }
+      )
+    }
+    throw error
+  }
 }
 
 function assertSafeRelativePath(path: string): void {
@@ -585,7 +727,6 @@ export async function convertManagedWorkspaceToProject(
   }
   if (!(await deps.exists(localRoot))) throw new Error("Managed workspace directory does not exist")
   const project = deps.createProject(localRoot, name)
-  deps.addSessionToProject(project.id, sessionId)
   const projectContext: SessionExecutionContext = {
     ...context,
     location: "local",
@@ -597,7 +738,30 @@ export async function convertManagedWorkspaceToProject(
     branch: undefined,
     lifecycle: undefined,
   }
-  await deps.updateSession(sessionId, { projectId: project.id, executionContext: projectContext })
+  try {
+    // The project must hold the physical block before its originating session
+    // can be permanently deleted. Its desktop-session reference remains intact.
+    if (deps.isTauri()) {
+      await runWorkspaceUserAction("task_workspace_port_lease_subject_ensure", () =>
+        deps.ensureSubjectPortLease({ kind: "project-root", key: project.id, root: localRoot })
+      )
+    }
+    await deps.updateSession(sessionId, { projectId: project.id, executionContext: projectContext })
+  } catch (error) {
+    try {
+      await deps.deleteProject(project.id)
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "Managed workspace conversion rollback failed",
+        {
+          cause: error,
+        }
+      )
+    }
+    throw error
+  }
+  deps.addSessionToProject(project.id, sessionId)
   return { projectId: project.id, context: projectContext }
 }
 
@@ -623,19 +787,25 @@ async function defaultManagedWorkspaceDeps(): Promise<ManagedWorkspaceDeps> {
     import("@tauri-apps/plugin-fs"),
   ])
   return {
+    isTauri,
     now: Date.now,
     managedBaseRoot: async () => joinPath(await appLocalDataDir(), "managed-workspaces"),
     getSession,
     updateSession,
     exists: fs.exists,
     mkdir: (path) => fs.mkdir(path, { recursive: true }),
+    remove: (path) => fs.remove(path),
     rename: fs.rename,
     readDir: fs.readDir,
     readFile: fs.readFile,
     writeFile: fs.writeFile,
     registerAllowedRoot: registerDialogPathInRust,
     createProject: (rootDir, name) => useProjectStore.getState().createProject({ name, rootDir }),
+    deleteProject: (projectId) => useProjectStore.getState().deleteProject(projectId, "detach"),
     addSessionToProject: (projectId, sessionId) =>
       useProjectStore.getState().addSessionToProject(projectId, sessionId),
+    ensureSubjectPortLease,
+    getSubjectPortLeases,
+    releaseSubjectPortLeases,
   }
 }

@@ -9932,6 +9932,63 @@
         "additionalProperties": false
       }
     },
+    "task_workspace_port_lease_release": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ]
+      }
+    },
+    "task_workspace_port_lease_subject_release": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "desktop-session",
+              "project-root"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "leaseId": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "key",
+          "adminLease"
+        ]
+      }
+    },
     "task_workspace_prune": {
       "inputSchemaSource": "contract",
       "inputSchema": {

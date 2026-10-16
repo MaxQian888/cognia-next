@@ -62,6 +62,37 @@ import { loggers } from "@cognia/logging"
 import * as chatDrafts from "./chat-drafts"
 import { commitTranscriptIndexPage } from "./chat-transcript-index"
 import { putSessionAsset, getSessionAsset, listSessionAssets } from "./session-assets"
+import { isTauri } from "@/lib/platform/detect"
+import {
+  ensureSubjectPortLease,
+  getSubjectPortLeases,
+  releaseSubjectPortLeases,
+  resolveWorkspacePortLeaseEnsure,
+} from "@/lib/task-workspace/client"
+import { runWorkspaceUserAction } from "@/lib/task-workspace/user-action"
+import {
+  convertManagedWorkspaceToProject,
+  createManagedWorkspaceContext,
+  type ManagedWorkspaceDeps,
+} from "@/lib/task-workspace/managed-workspace"
+import { ensureExecutionPortLease } from "@/lib/task-workspace/execution-port-lease"
+import type { WorkspacePortLease } from "@/lib/task-workspace/types"
+
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: jest.fn(() => false),
+}))
+jest.mock("@/lib/task-workspace/client", () => ({
+  WorkspacePortLeaseError: jest.requireActual("@/lib/task-workspace/client")
+    .WorkspacePortLeaseError,
+  ensureSubjectPortLease: jest.fn(),
+  getSubjectPortLeases: jest.fn(),
+  releaseSubjectPortLeases: jest.fn(),
+  resolveWorkspacePortLeaseEnsure: jest.fn(),
+}))
+jest.mock("@/lib/task-workspace/user-action", () => ({
+  runWorkspaceUserAction: jest.fn((_command, action) => action()),
+}))
 
 it("does not create a session after the scope changes while defaults are read", async () => {
   const db = getDb()
@@ -295,6 +326,12 @@ it("keeps the conversation link when external task cleanup fails so deletion can
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()
+  jest.mocked(isTauri).mockReturnValue(false)
+  jest.mocked(releaseSubjectPortLeases).mockReset().mockResolvedValue(undefined)
+  jest.mocked(ensureSubjectPortLease).mockReset()
+  jest.mocked(getSubjectPortLeases).mockReset()
+  jest.mocked(resolveWorkspacePortLeaseEnsure).mockReset()
+  jest.mocked(runWorkspaceUserAction).mockClear()
   markSessionRemovedMock.mockClear()
   releaseSandboxSessionMock.mockReset().mockResolvedValue(undefined)
   await getDb().promptPresets.clear()
@@ -1055,6 +1092,144 @@ describe("updateSession + listSessions", () => {
 })
 
 describe("bulkDeleteSessions", () => {
+  it("keeps the converted project's port numbers after deleting its original session and executing", async () => {
+    jest.mocked(isTauri).mockReturnValue(true)
+    const root = "/managed/converted"
+    const original = await createSession({ title: "Convert to project" })
+    await updateSession(original.id, {
+      executionContext: createManagedWorkspaceContext(original.id, 10, root),
+    })
+    // A physical-root block survives while either subject references it. A
+    // premature final release makes the next allocation visibly change numbers.
+    let allocationCount = 0
+    let lease: WorkspacePortLease | null = null
+    const subjects = new Set<string>()
+    jest
+      .mocked(ensureSubjectPortLease)
+      .mockImplementation(async ({ kind, key, root: requestedRoot }) => {
+        expect(requestedRoot).toBe(root)
+        if (!lease) {
+          lease = {
+            leaseId: `lease-${++allocationCount}`,
+            namespaceKey: "host-loopback",
+            subjectKind: kind,
+            subjectKey: key,
+            canonicalRoot: root,
+            registryWorkspaceId: null,
+            basePort: 41000 + (allocationCount - 1) * 10,
+            portCount: 10,
+            createdAt: 10,
+            updatedAt: 10,
+          }
+        }
+        subjects.add(`${kind}:${key}`)
+        return lease
+      })
+    jest
+      .mocked(getSubjectPortLeases)
+      .mockImplementation(async ({ kind, key }) =>
+        lease && subjects.has(`${kind}:${key}`) ? [lease] : []
+      )
+    jest.mocked(releaseSubjectPortLeases).mockImplementation(async ({ kind, key, leaseId }) => {
+      if (leaseId && leaseId !== lease?.leaseId) return
+      subjects.delete(`${kind}:${key}`)
+      if (subjects.size === 0) lease = null
+    })
+    jest.mocked(resolveWorkspacePortLeaseEnsure).mockImplementation(async (cwd) => {
+      expect(cwd).toBe(root)
+      return lease
+    })
+    const initial = await ensureSubjectPortLease({
+      kind: "desktop-session",
+      key: original.id,
+      root,
+    })
+    const deps: ManagedWorkspaceDeps = {
+      isTauri: () => true,
+      now: () => 20,
+      managedBaseRoot: async () => "/managed",
+      getSession,
+      updateSession,
+      exists: async () => true,
+      mkdir: jest.fn(),
+      remove: jest.fn(),
+      rename: jest.fn(),
+      readDir: jest.fn(),
+      readFile: jest.fn(),
+      writeFile: jest.fn(),
+      registerAllowedRoot: jest.fn(),
+      createProject: () => ({ id: "converted-project" }),
+      deleteProject: jest.fn(),
+      addSessionToProject: jest.fn(),
+      ensureSubjectPortLease,
+      getSubjectPortLeases,
+      releaseSubjectPortLeases,
+    }
+    const converted = await convertManagedWorkspaceToProject(original.id, "Converted", deps)
+    expect(subjects).toEqual(
+      new Set([`desktop-session:${original.id}`, `project-root:${converted.projectId}`])
+    )
+    await bulkDeleteSessions([original.id])
+    expect(await getSession(original.id)).toBeUndefined()
+    expect(subjects).toEqual(new Set([`project-root:${converted.projectId}`]))
+    const executed = await ensureExecutionPortLease({
+      cwd: root,
+      project: { id: converted.projectId, rootDir: root },
+    })
+    expect(executed).toEqual(initial)
+    expect(allocationCount).toBe(1)
+  })
+
+  it("releases desktop-session subjects on permanent deletion, including trashed folders", async () => {
+    jest.mocked(isTauri).mockReturnValue(true)
+    const active = await createSession({ title: "Active folder" })
+    const trashed = await createSession({ title: "Trashed folder" })
+    await getDb().sessions.update(trashed.id, {
+      executionContext: {
+        workspaceBinding: { kind: "managed", workspaceId: `managed-workspace:${trashed.id}` },
+        managedWorkspace: { availability: "deleted", deletedRoot: "/data/.trash/folder" },
+      } as ChatSession["executionContext"],
+    })
+    await bulkDeleteSessions([active.id, trashed.id, "missing"])
+    expect(releaseSubjectPortLeases).toHaveBeenCalledTimes(2)
+    expect(runWorkspaceUserAction).toHaveBeenCalledWith(
+      "task_workspace_port_lease_subject_release",
+      expect.any(Function)
+    )
+    expect(releaseSubjectPortLeases).toHaveBeenCalledWith({
+      kind: "desktop-session",
+      key: active.id,
+    })
+    expect(releaseSubjectPortLeases).toHaveBeenCalledWith({
+      kind: "desktop-session",
+      key: trashed.id,
+    })
+    expect(await getSession(active.id)).toBeUndefined()
+    expect(await getSession(trashed.id)).toBeUndefined()
+  })
+
+  it("retains the session when port-lease release fails so permanent deletion can retry", async () => {
+    jest.mocked(isTauri).mockReturnValue(true)
+    const row = await createSession({ title: "Retry release" })
+    const error = new Error("host unavailable")
+    jest.mocked(releaseSubjectPortLeases).mockRejectedValueOnce(error)
+    await expect(bulkDeleteSessions([row.id])).rejects.toBe(error)
+    expect(await getSession(row.id)).toBeDefined()
+    await bulkDeleteSessions([row.id])
+    expect(await getSession(row.id)).toBeUndefined()
+  })
+
+  it("does not release host leases in web mode or when archiving a session", async () => {
+    const web = await createSession({ title: "Web session" })
+    await bulkDeleteSessions([web.id])
+    expect(releaseSubjectPortLeases).not.toHaveBeenCalled()
+    jest.mocked(isTauri).mockReturnValue(true)
+    const archived = await createSession({ title: "Archived session" })
+    await archiveSession(archived.id)
+    expect(releaseSubjectPortLeases).not.toHaveBeenCalled()
+    expect(await getSession(archived.id)).toBeDefined()
+  })
+
   async function seedOwnedState(sessionId: string, hashes: string[]) {
     const db = getDb()
     await db.messages.put({

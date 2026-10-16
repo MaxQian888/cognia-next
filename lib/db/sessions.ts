@@ -27,6 +27,7 @@ import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { stampOrganizationalWrite } from "./session-row-stamps"
 import { surfaceBindingKey } from "@/lib/context-workbench/resource-session"
 import { readVerifiedSessionListRows } from "./session-list"
+import { isTauri } from "@/lib/platform/detect"
 
 export interface SessionPersistenceScope {
   db: ReturnType<typeof getDb>
@@ -1108,6 +1109,25 @@ export async function bulkDeleteSessions(
   scope?.assertActive()
   await cleanupManagedExternalAgentSessions(cleanupRows, scope)
   scope?.assertActive()
+  // Desktop folder deletion only moves files into .trash; there is no trash
+  // purge operation. Permanent conversation deletion is the subject's final
+  // release boundary, including sessions converted into projects. Release
+  // before dropping the row so a host failure remains retryable.
+  if (isTauri()) {
+    const [{ releaseSubjectPortLeases }, { runWorkspaceUserAction }] = await Promise.all([
+      import("@/lib/task-workspace/client"),
+      import("@/lib/task-workspace/user-action"),
+    ])
+    for (const row of cleanupRows) {
+      if (!row) continue
+      scope?.assertActive()
+      await runWorkspaceUserAction("task_workspace_port_lease_subject_release", () => {
+        scope?.assertActive()
+        return releaseSubjectPortLeases({ kind: "desktop-session", key: row.id })
+      })
+    }
+    scope?.assertActive()
+  }
   let deletedIds: string[] = []
   let scheduledTaskIds: string[] = []
   const orphanCandidates = new Set<string>()

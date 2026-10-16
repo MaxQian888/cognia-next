@@ -25,6 +25,7 @@ use cognia_task_workspace::{
     UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome,
     WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
     WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision,
+    ExternalPortSubjectKind, WorkspacePortLease, WorkspacePortLeaseList,
     WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
@@ -900,6 +901,126 @@ pub fn task_workspace_policy_set(
     policy: WorkspaceLifecyclePolicy,
 ) -> Result<WorkspaceLifecyclePolicy, String> {
     service()?.set_workspace_lifecycle_policy(policy)
+}
+
+fn port_namespace(namespace: &Option<String>) -> &str {
+    namespace
+        .as_deref()
+        .unwrap_or(cognia_task_workspace::HOST_LOOPBACK_NAMESPACE)
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_port_lease_get(
+    workspace_id: String,
+    namespace: Option<String>,
+) -> Result<Option<WorkspacePortLease>, String> {
+    service()?
+        .read_workspace_port_lease(&workspace_id, port_namespace(&namespace))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_port_lease_ensure(
+    workspace_id: String,
+    namespace: Option<String>,
+) -> Result<WorkspacePortLease, String> {
+    service()?
+        .ensure_workspace_port_lease(&workspace_id, port_namespace(&namespace))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_port_lease_resolve(
+    cwd: String,
+    workspace_id: Option<String>,
+    namespace: Option<String>,
+) -> Result<Option<WorkspacePortLease>, String> {
+    service()?
+        .resolve_workspace_port_lease(
+            port_namespace(&namespace),
+            workspace_id.as_deref(),
+            Path::new(&cwd),
+            false,
+        )
+        .map_err(|error| error.to_string())
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_port_lease_resolve_ensure(
+    cwd: String,
+    workspace_id: Option<String>,
+    namespace: Option<String>,
+) -> Result<Option<WorkspacePortLease>, String> {
+    service()?
+        .resolve_workspace_port_lease(
+            port_namespace(&namespace),
+            workspace_id.as_deref(),
+            Path::new(&cwd),
+            true,
+        )
+        .map_err(|error| error.to_string())
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_port_lease_subject_ensure(
+    kind: ExternalPortSubjectKind,
+    key: String,
+    root: String,
+    namespace: Option<String>,
+) -> Result<WorkspacePortLease, String> {
+    service()?
+        .ensure_subject_port_lease(
+            port_namespace(&namespace),
+            kind.into(),
+            &key,
+            Path::new(&root),
+        )
+        .map_err(|error| error.to_string())
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_port_lease_subject_get(
+    kind: ExternalPortSubjectKind,
+    key: String,
+    namespace: Option<String>,
+) -> Result<Vec<WorkspacePortLease>, String> {
+    service()?
+        .read_subject_port_leases(port_namespace(&namespace), kind.into(), &key)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_port_lease_subject_release(
+    kind: ExternalPortSubjectKind,
+    key: String,
+    namespace: Option<String>,
+    lease_id: Option<String>,
+) -> Result<(), String> {
+    service()?
+        .release_subject_port_lease_reference(
+            port_namespace(&namespace),
+            kind.into(),
+            &key,
+            lease_id.as_deref(),
+        )
+        .map_err(|error| error.to_string())
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_port_lease_release(
+    workspace_id: String,
+    namespace: Option<String>,
+) -> Result<(), String> {
+    service()?
+        .release_archived_workspace_port_lease(&workspace_id, port_namespace(&namespace))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub fn task_workspace_port_lease_list() -> Result<WorkspacePortLeaseList, String> {
+    service()?
+        .list_workspace_port_leases()
+        .map_err(|error| error.to_string())
 }
 
 #[cfg_attr(feature = "tauri-host", tauri::command)]
@@ -1898,6 +2019,28 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn port_subject_commands_reject_registry_and_default_to_host_namespace() {
+        assert!(serde_json::from_str::<super::ExternalPortSubjectKind>("\"registry\"").is_err());
+        assert_eq!(
+            super::port_namespace(&None),
+            cognia_task_workspace::HOST_LOOPBACK_NAMESPACE
+        );
+        assert_eq!(
+            super::port_namespace(&Some("remote:test".into())),
+            "remote:test"
+        );
+        let message = cognia_task_workspace::PortLeaseError::Exhausted {
+            start: 41000,
+            end: 48999,
+            block_size: 10,
+        }
+        .to_string();
+        for field in ["portRangeStart", "portRangeEnd", "portBlockSize"] {
+            assert!(message.contains(field));
+        }
+    }
+
     #[test]
     fn a_remote_source_without_a_token_uses_the_one_stored_for_its_host() {
         use cognia_secrets::host_secrets::{self, HostSecretKind};

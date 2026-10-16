@@ -69528,6 +69528,75 @@
           "pinned": {
             "type": "boolean"
           },
+          "portLease": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "projectId": {
             "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
             "type": [
@@ -69795,6 +69864,75 @@
           "pinned": {
             "type": "boolean"
           },
+          "portLease": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "projectId": {
             "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
             "type": [
@@ -70061,6 +70199,75 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "portLease": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "projectId": {
             "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
@@ -70358,6 +70565,75 @@
             },
             "pinned": {
               "type": "boolean"
+            },
+            "portLease": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "basePort": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "canonicalRoot": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "leaseId": {
+                      "type": "string"
+                    },
+                    "namespaceKey": {
+                      "type": "string"
+                    },
+                    "portCount": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "registryWorkspaceId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "subjectKey": {
+                      "type": "string"
+                    },
+                    "subjectKind": {
+                      "enum": [
+                        "registry",
+                        "desktop-session",
+                        "project-root"
+                      ],
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "int64",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "basePort",
+                    "canonicalRoot",
+                    "createdAt",
+                    "leaseId",
+                    "namespaceKey",
+                    "portCount",
+                    "registryWorkspaceId",
+                    "subjectKey",
+                    "subjectKind",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "projectId": {
               "description": "Owning Workspace, so the inventory can be scoped to one project instead\nof only ever being shown machine-wide. `None` for a directory found on\ndisk that no project claims.",
@@ -76272,6 +76548,75 @@
           "pinned": {
             "type": "boolean"
           },
+          "portLease": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "projectId": {
             "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
             "type": [
@@ -76533,6 +76878,75 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "portLease": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "projectId": {
             "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
@@ -76830,6 +77244,75 @@
               "pinned": {
                 "type": "boolean"
               },
+              "portLease": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "basePort": {
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "canonicalRoot": {
+                        "type": "string"
+                      },
+                      "createdAt": {
+                        "format": "int64",
+                        "type": "integer"
+                      },
+                      "leaseId": {
+                        "type": "string"
+                      },
+                      "namespaceKey": {
+                        "type": "string"
+                      },
+                      "portCount": {
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "registryWorkspaceId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "subjectKey": {
+                        "type": "string"
+                      },
+                      "subjectKind": {
+                        "enum": [
+                          "registry",
+                          "desktop-session",
+                          "project-root"
+                        ],
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "format": "int64",
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "basePort",
+                      "canonicalRoot",
+                      "createdAt",
+                      "leaseId",
+                      "namespaceKey",
+                      "portCount",
+                      "registryWorkspaceId",
+                      "subjectKey",
+                      "subjectKind",
+                      "updatedAt"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "projectId": {
                 "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
                 "type": [
@@ -77089,6 +77572,75 @@
             },
             "pinned": {
               "type": "boolean"
+            },
+            "portLease": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "basePort": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "canonicalRoot": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "leaseId": {
+                      "type": "string"
+                    },
+                    "namespaceKey": {
+                      "type": "string"
+                    },
+                    "portCount": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "registryWorkspaceId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "subjectKey": {
+                      "type": "string"
+                    },
+                    "subjectKind": {
+                      "enum": [
+                        "registry",
+                        "desktop-session",
+                        "project-root"
+                      ],
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "int64",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "basePort",
+                    "canonicalRoot",
+                    "createdAt",
+                    "leaseId",
+                    "namespaceKey",
+                    "portCount",
+                    "registryWorkspaceId",
+                    "subjectKey",
+                    "subjectKind",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "projectId": {
               "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
@@ -77353,6 +77905,75 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "portLease": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "projectId": {
             "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
@@ -77621,6 +78242,75 @@
           "pinned": {
             "type": "boolean"
           },
+          "portLease": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "projectId": {
             "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
             "type": [
@@ -77883,6 +78573,75 @@
           "pinned": {
             "type": "boolean"
           },
+          "portLease": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "projectId": {
             "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
             "type": [
@@ -78044,7 +78803,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "additionalProperties": false,
-        "description": "Retention policy inputs. All three knobs are user-adjustable in settings.",
+        "description": "Retention and new-lease port allocation settings. Existing leases keep their numbers.",
         "properties": {
           "activeDirectoryCap": {
             "format": "uint32",
@@ -78053,6 +78812,24 @@
           },
           "blobBudgetBytes": {
             "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "portBlockSize": {
+            "default": 10,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "portRangeEnd": {
+            "default": 48999,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "portRangeStart": {
+            "default": 41000,
+            "format": "uint32",
             "minimum": 0,
             "type": "integer"
           },
@@ -78065,6 +78842,9 @@
         "required": [
           "activeDirectoryCap",
           "blobBudgetBytes",
+          "portBlockSize",
+          "portRangeEnd",
+          "portRangeStart",
           "snapshotRetentionDays"
         ],
         "type": "object"
@@ -78101,7 +78881,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "additionalProperties": false,
-        "description": "Retention policy inputs. All three knobs are user-adjustable in settings.",
+        "description": "Retention and new-lease port allocation settings. Existing leases keep their numbers.",
         "properties": {
           "activeDirectoryCap": {
             "format": "uint32",
@@ -78110,6 +78890,24 @@
           },
           "blobBudgetBytes": {
             "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "portBlockSize": {
+            "default": 10,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "portRangeEnd": {
+            "default": 48999,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "portRangeStart": {
+            "default": 41000,
+            "format": "uint32",
             "minimum": 0,
             "type": "integer"
           },
@@ -78122,9 +78920,884 @@
         "required": [
           "activeDirectoryCap",
           "blobBudgetBytes",
+          "portBlockSize",
+          "portRangeEnd",
+          "portRangeStart",
           "snapshotRetentionDays"
         ],
         "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_port_lease_ensure",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "task_workspace_port_lease_ensure (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "workspaceId"
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "basePort": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "canonicalRoot": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "leaseId": {
+            "type": "string"
+          },
+          "namespaceKey": {
+            "type": "string"
+          },
+          "portCount": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "registryWorkspaceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subjectKey": {
+            "type": "string"
+          },
+          "subjectKind": {
+            "enum": [
+              "registry",
+              "desktop-session",
+              "project-root"
+            ],
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "basePort",
+          "canonicalRoot",
+          "createdAt",
+          "leaseId",
+          "namespaceKey",
+          "portCount",
+          "registryWorkspaceId",
+          "subjectKey",
+          "subjectKind",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_port_lease_get",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_port_lease_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "workspaceId"
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "basePort": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "canonicalRoot": {
+                "type": "string"
+              },
+              "createdAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "leaseId": {
+                "type": "string"
+              },
+              "namespaceKey": {
+                "type": "string"
+              },
+              "portCount": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "registryWorkspaceId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "subjectKey": {
+                "type": "string"
+              },
+              "subjectKind": {
+                "enum": [
+                  "registry",
+                  "desktop-session",
+                  "project-root"
+                ],
+                "type": "string"
+              },
+              "updatedAt": {
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "basePort",
+              "canonicalRoot",
+              "createdAt",
+              "leaseId",
+              "namespaceKey",
+              "portCount",
+              "registryWorkspaceId",
+              "subjectKey",
+              "subjectKind",
+              "updatedAt"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_port_lease_list",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_port_lease_list (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "duplicateRoot",
+                    "overlap",
+                    "outOfRange",
+                    "ambiguousRegistryLink",
+                    "unresolvedRegistryRoot",
+                    "registryRootMismatch"
+                  ],
+                  "type": "string"
+                },
+                "leaseIds": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "detail",
+                "kind",
+                "leaseIds"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "leases": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "lease": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "basePort": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "canonicalRoot": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "leaseId": {
+                      "type": "string"
+                    },
+                    "namespaceKey": {
+                      "type": "string"
+                    },
+                    "portCount": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "registryWorkspaceId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "subjectKey": {
+                      "type": "string"
+                    },
+                    "subjectKind": {
+                      "enum": [
+                        "registry",
+                        "desktop-session",
+                        "project-root"
+                      ],
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "int64",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "basePort",
+                    "canonicalRoot",
+                    "createdAt",
+                    "leaseId",
+                    "namespaceKey",
+                    "portCount",
+                    "registryWorkspaceId",
+                    "subjectKey",
+                    "subjectKind",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                "occupancyError": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "occupiedPorts": {
+                  "description": "None when the host cannot inspect this network namespace.",
+                  "items": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                },
+                "subjects": {
+                  "items": {
+                    "additionalProperties": false,
+                    "description": "Every owner of a physical-root lease, including aliases.",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "registry",
+                          "desktop-session",
+                          "project-root"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "kind"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "lease",
+                "occupancyError",
+                "occupiedPorts",
+                "subjects"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "diagnostics",
+          "leases"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_port_lease_release",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_port_lease_release (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "workspaceId"
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_port_lease_resolve",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_port_lease_resolve (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "cwd"
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "basePort": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "canonicalRoot": {
+                "type": "string"
+              },
+              "createdAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "leaseId": {
+                "type": "string"
+              },
+              "namespaceKey": {
+                "type": "string"
+              },
+              "portCount": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "registryWorkspaceId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "subjectKey": {
+                "type": "string"
+              },
+              "subjectKind": {
+                "enum": [
+                  "registry",
+                  "desktop-session",
+                  "project-root"
+                ],
+                "type": "string"
+              },
+              "updatedAt": {
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "basePort",
+              "canonicalRoot",
+              "createdAt",
+              "leaseId",
+              "namespaceKey",
+              "portCount",
+              "registryWorkspaceId",
+              "subjectKey",
+              "subjectKind",
+              "updatedAt"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_port_lease_resolve_ensure",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "task_workspace_port_lease_resolve_ensure (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "cwd"
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "basePort": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "canonicalRoot": {
+                "type": "string"
+              },
+              "createdAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "leaseId": {
+                "type": "string"
+              },
+              "namespaceKey": {
+                "type": "string"
+              },
+              "portCount": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "registryWorkspaceId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "subjectKey": {
+                "type": "string"
+              },
+              "subjectKind": {
+                "enum": [
+                  "registry",
+                  "desktop-session",
+                  "project-root"
+                ],
+                "type": "string"
+              },
+              "updatedAt": {
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "basePort",
+              "canonicalRoot",
+              "createdAt",
+              "leaseId",
+              "namespaceKey",
+              "portCount",
+              "registryWorkspaceId",
+              "subjectKey",
+              "subjectKind",
+              "updatedAt"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_port_lease_subject_ensure",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "task_workspace_port_lease_subject_ensure (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "desktop-session",
+              "project-root"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "root": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "key",
+          "root"
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "basePort": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "canonicalRoot": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "leaseId": {
+            "type": "string"
+          },
+          "namespaceKey": {
+            "type": "string"
+          },
+          "portCount": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "registryWorkspaceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subjectKey": {
+            "type": "string"
+          },
+          "subjectKind": {
+            "enum": [
+              "registry",
+              "desktop-session",
+              "project-root"
+            ],
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "basePort",
+          "canonicalRoot",
+          "createdAt",
+          "leaseId",
+          "namespaceKey",
+          "portCount",
+          "registryWorkspaceId",
+          "subjectKey",
+          "subjectKind",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_port_lease_subject_get",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_port_lease_subject_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "desktop-session",
+              "project-root"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "key"
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "basePort": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "canonicalRoot": {
+              "type": "string"
+            },
+            "createdAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "leaseId": {
+              "type": "string"
+            },
+            "namespaceKey": {
+              "type": "string"
+            },
+            "portCount": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "registryWorkspaceId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subjectKey": {
+              "type": "string"
+            },
+            "subjectKind": {
+              "enum": [
+                "registry",
+                "desktop-session",
+                "project-root"
+              ],
+              "type": "string"
+            },
+            "updatedAt": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "basePort",
+            "canonicalRoot",
+            "createdAt",
+            "leaseId",
+            "namespaceKey",
+            "portCount",
+            "registryWorkspaceId",
+            "subjectKey",
+            "subjectKind",
+            "updatedAt"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_port_lease_subject_release",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_port_lease_subject_release (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "desktop-session",
+              "project-root"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "leaseId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "key"
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -88065,5 +89738,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "9ba773f01c12922bd59dd54b57ca93f277456933e594cbb6a7e632b3e1a53444"
+  "catalogHash": "c611f7145f4f40eed692b5b0971a1bdcb3a57fe09cf76bae542d7223297c1ae6"
 }

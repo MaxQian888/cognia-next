@@ -5,7 +5,47 @@ import type {
   ResourceTrackingPolicy,
   TaskResourceManifest,
   WorkspaceEnvironmentSummary,
+  WorkspacePortLeaseList,
+  ExternalPortSubjectKind,
 } from "./types"
+
+describe("workspace port lease contract", () => {
+  it("represents shared subjects and unavailable namespace occupancy separately", () => {
+    const report = {
+      leases: [
+        {
+          lease: {
+            leaseId: "lease-1",
+            namespaceKey: "container:one",
+            subjectKind: "project-root",
+            subjectKey: "project-1",
+            canonicalRoot: "/repo",
+            registryWorkspaceId: null,
+            basePort: 41000,
+            portCount: 10,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          subjects: [
+            { kind: "project-root", key: "project-1" },
+            { kind: "registry", key: "ws-1" },
+          ],
+          occupiedPorts: null,
+          occupancyError: null,
+        },
+      ],
+      diagnostics: [
+        { kind: "outOfRange", leaseIds: ["lease-1"], detail: "outside current policy" },
+      ],
+    } satisfies WorkspacePortLeaseList
+    const external: ExternalPortSubjectKind = "desktop-session"
+    // @ts-expect-error Registry subjects must use the workspace-id commands.
+    const invalidExternal: ExternalPortSubjectKind = "registry"
+    expect(report.leases[0].occupiedPorts).toBeNull()
+    expect(report.leases[0].subjects).toHaveLength(2)
+    expect(external).not.toBe(invalidExternal)
+  })
+})
 
 describe("bundle handoff undo conflict contract", () => {
   it("requires a path and reason for each host-reported conflict", () => {

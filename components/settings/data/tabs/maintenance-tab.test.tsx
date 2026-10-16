@@ -63,6 +63,9 @@ beforeEach(() => {
     activeDirectoryCap: 25,
     snapshotRetentionDays: 14,
     blobBudgetBytes: 2_000_000_000,
+    portRangeStart: 42000,
+    portRangeEnd: 45999,
+    portBlockSize: 20,
   })
   setWorkspaceLifecyclePolicyMock.mockReset().mockImplementation(async (policy) => policy)
   runWorkspaceUserActionMock.mockClear()
@@ -204,7 +207,7 @@ describe("<MaintenanceTab /> worktree lifecycle policy", () => {
     expect(screen.getByTestId("workspace-lifecycle-blobBudgetBytes")).toHaveValue(2_000_000_000)
   })
 
-  it("saves an edited policy through the approval wrapper", async () => {
+  it("preserves the host port allocation policy when saving edited lifecycle fields", async () => {
     render(<MaintenanceTab />)
     await screen.findByTestId("workspace-lifecycle-policy")
 
@@ -218,6 +221,9 @@ describe("<MaintenanceTab /> worktree lifecycle policy", () => {
       activeDirectoryCap: 40,
       snapshotRetentionDays: 14,
       blobBudgetBytes: 2_000_000_000,
+      portRangeStart: 42000,
+      portRangeEnd: 45999,
+      portBlockSize: 20,
     })
     expect(runWorkspaceUserActionMock).toHaveBeenCalledWith(
       "task_workspace_policy_set",

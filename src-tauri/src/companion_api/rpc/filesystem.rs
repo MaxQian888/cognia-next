@@ -36,6 +36,15 @@ pub(super) const COMMANDS: &[&str] = &[
     "task_workspace_reconcile",
     "task_workspace_policy_get",
     "task_workspace_policy_set",
+    "task_workspace_port_lease_get",
+    "task_workspace_port_lease_ensure",
+    "task_workspace_port_lease_resolve",
+    "task_workspace_port_lease_resolve_ensure",
+    "task_workspace_port_lease_subject_ensure",
+    "task_workspace_port_lease_subject_get",
+    "task_workspace_port_lease_subject_release",
+    "task_workspace_port_lease_release",
+    "task_workspace_port_lease_list",
     "task_workspace_maintenance_run",
     "task_workspace_maintenance_events",
     "task_workspace_managed_pin",
@@ -615,6 +624,76 @@ pub(super) async fn dispatch(
                 required(&args, "policy")?;
             crate::task_workspace::service()
                 .and_then(|service| service.set_workspace_lifecycle_policy(policy))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_port_lease_get" => {
+            let workspace_id: String = required(&args, "workspaceId")?;
+            let namespace: Option<String> = optional(&args, "namespace")?;
+            crate::task_workspace::task_workspace_port_lease_get(workspace_id, namespace)
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_port_lease_ensure" => {
+            let workspace_id: String = required(&args, "workspaceId")?;
+            let namespace: Option<String> = optional(&args, "namespace")?;
+            crate::task_workspace::task_workspace_port_lease_ensure(workspace_id, namespace)
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_port_lease_resolve" => {
+            let cwd: String = required(&args, "cwd")?;
+            let workspace_id: Option<String> = optional(&args, "workspaceId")?;
+            let namespace: Option<String> = optional(&args, "namespace")?;
+            crate::task_workspace::task_workspace_port_lease_resolve(cwd, workspace_id, namespace)
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_port_lease_resolve_ensure" => {
+            let cwd: String = required(&args, "cwd")?;
+            let workspace_id: Option<String> = optional(&args, "workspaceId")?;
+            let namespace: Option<String> = optional(&args, "namespace")?;
+            crate::task_workspace::task_workspace_port_lease_resolve_ensure(cwd, workspace_id, namespace)
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_port_lease_subject_ensure" => {
+            let kind: cognia_task_workspace::ExternalPortSubjectKind = required(&args, "kind")?;
+            let key: String = required(&args, "key")?;
+            let root: String = required(&args, "root")?;
+            let namespace: Option<String> = optional(&args, "namespace")?;
+            crate::task_workspace::task_workspace_port_lease_subject_ensure(kind, key, root, namespace)
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_port_lease_subject_get" => {
+            let kind: cognia_task_workspace::ExternalPortSubjectKind = required(&args, "kind")?;
+            let key: String = required(&args, "key")?;
+            let namespace: Option<String> = optional(&args, "namespace")?;
+            crate::task_workspace::task_workspace_port_lease_subject_get(kind, key, namespace)
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_port_lease_subject_release" => {
+            let kind: cognia_task_workspace::ExternalPortSubjectKind = required(&args, "kind")?;
+            let key: String = required(&args, "key")?;
+            let namespace: Option<String> = optional(&args, "namespace")?;
+            let lease_id: Option<String> = optional(&args, "leaseId")?;
+            crate::task_workspace::task_workspace_port_lease_subject_release(
+                kind, key, namespace, lease_id,
+            )
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_port_lease_release" => {
+            let workspace_id: String = required(&args, "workspaceId")?;
+            let namespace: Option<String> = optional(&args, "namespace")?;
+            crate::task_workspace::task_workspace_port_lease_release(workspace_id, namespace)
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_port_lease_list" => {
+            crate::task_workspace::task_workspace_port_lease_list()
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
@@ -1525,6 +1604,15 @@ mod tests {
             "task_workspace_reconcile",
             "task_workspace_policy_get",
             "task_workspace_policy_set",
+            "task_workspace_port_lease_get",
+            "task_workspace_port_lease_ensure",
+            "task_workspace_port_lease_resolve",
+            "task_workspace_port_lease_resolve_ensure",
+            "task_workspace_port_lease_subject_ensure",
+            "task_workspace_port_lease_subject_get",
+            "task_workspace_port_lease_subject_release",
+            "task_workspace_port_lease_release",
+            "task_workspace_port_lease_list",
             "task_workspace_maintenance_run",
             "task_workspace_maintenance_events",
             "task_workspace_managed_archive",

@@ -23,6 +23,23 @@ pub enum PortSubjectKind {
     ProjectRoot,
 }
 
+/// Public subject commands cannot bypass registry lifecycle guards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExternalPortSubjectKind {
+    DesktopSession,
+    ProjectRoot,
+}
+
+impl From<ExternalPortSubjectKind> for PortSubjectKind {
+    fn from(kind: ExternalPortSubjectKind) -> Self {
+        match kind {
+            ExternalPortSubjectKind::DesktopSession => Self::DesktopSession,
+            ExternalPortSubjectKind::ProjectRoot => Self::ProjectRoot,
+        }
+    }
+}
+
 impl PortSubjectKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -103,6 +120,34 @@ pub struct PortLeaseDiagnostic {
     pub kind: PortLeaseDiagnosticKind,
     pub lease_ids: Vec<String>,
     pub detail: String,
+}
+
+/// Every owner of a physical-root lease, including aliases.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct PortLeaseSubject {
+    pub kind: PortSubjectKind,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct WorkspacePortLeaseStatus {
+    pub lease: WorkspacePortLease,
+    pub subjects: Vec<PortLeaseSubject>,
+    /// None when the host cannot inspect this network namespace.
+    pub occupied_ports: Option<Vec<u32>>,
+    pub occupancy_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct WorkspacePortLeaseList {
+    pub leases: Vec<WorkspacePortLeaseStatus>,
+    pub diagnostics: Vec<PortLeaseDiagnostic>,
 }
 
 pub fn port_lease_env(lease: &WorkspacePortLease) -> BTreeMap<String, String> {
@@ -544,14 +589,27 @@ pub(crate) fn release_subject_in_transaction(
     kind: PortSubjectKind,
     key: &str,
 ) -> Result<(), PortLeaseError> {
-    if let Some(namespace) = namespace {
+    release_subject_reference_in_transaction(connection, namespace, kind, key, None)
+}
+
+pub(crate) fn release_subject_reference_in_transaction(
+    connection: &Connection,
+    namespace: Option<&str>,
+    kind: PortSubjectKind,
+    key: &str,
+    lease_id: Option<&str>,
+) -> Result<(), PortLeaseError> {
+    if let Some(namespace) = namespace.filter(|_| lease_id.is_none()) {
         // No FK to the block: this decision survives its final owner's release.
         // Namespace-less calls remove the registry row itself, not an idle lease.
         connection.execute("INSERT OR IGNORE INTO workspace_port_released_subjects (namespace_key, subject_kind, subject_key) VALUES (?1,?2,?3)", params![namespace, kind.as_str(), key])?;
     }
     let ids: Vec<String> = {
-        let mut statement = connection.prepare("SELECT lease_id FROM workspace_port_subjects WHERE subject_kind=?1 AND subject_key=?2 AND lease_id IN (SELECT lease_id FROM workspace_port_leases WHERE ?3 IS NULL OR namespace_key=?3)")?;
-        let rows = statement.query_map(params![kind.as_str(), key, namespace], |row| row.get(0))?;
+        let mut statement = connection.prepare("SELECT lease_id FROM workspace_port_subjects WHERE subject_kind=?1 AND subject_key=?2 AND (?4 IS NULL OR lease_id=?4) AND lease_id IN (SELECT lease_id FROM workspace_port_leases WHERE ?3 IS NULL OR namespace_key=?3)")?;
+        let rows = statement.query_map(
+            params![kind.as_str(), key, namespace, lease_id],
+            |row| row.get(0),
+        )?;
         rows.collect::<Result<_, _>>()?
     };
     for id in ids {
@@ -613,9 +671,71 @@ pub(crate) fn resolve_external(
 pub(crate) fn reconcile(
     store: &crate::store::WorkspaceStore,
 ) -> Result<Vec<PortLeaseDiagnostic>, PortLeaseError> {
-    // The registry snapshot and reference repair must share the write lock:
-    // a second process may register another alias as soon as it is released.
+    // The registry snapshot and reference repair share the write lock.
     let tx = Transaction::new_unchecked(&store.connection, TransactionBehavior::Immediate)?;
+    let diagnostics = inspect(store, &tx, true)?;
+    tx.commit()?;
+    Ok(diagnostics)
+}
+
+/// Read a consistent ledger snapshot. Occupancy is advisory and never repairs links.
+pub(crate) fn list_status(
+    store: &crate::store::WorkspaceStore,
+) -> Result<WorkspacePortLeaseList, PortLeaseError> {
+    list_status_with(store, &mut occupied_ports)
+}
+
+fn list_status_with(
+    store: &crate::store::WorkspaceStore,
+    probe: &mut impl FnMut(&WorkspacePortLease) -> Result<Vec<u32>, PortLeaseError>,
+) -> Result<WorkspacePortLeaseList, PortLeaseError> {
+    let tx = Transaction::new_unchecked(&store.connection, TransactionBehavior::Deferred)?;
+    let diagnostics = inspect(store, &tx, false)?;
+    let mut leases = Vec::new();
+    for lease in list(&tx)? {
+        let mut statement = tx.prepare("SELECT subject_kind, subject_key FROM workspace_port_subjects WHERE lease_id=?1 ORDER BY subject_kind, subject_key")?;
+        let subjects = statement
+            .query_map([&lease.lease_id], |row| {
+                let kind: String = row.get(0)?;
+                let kind = match kind.as_str() {
+                    "registry" => PortSubjectKind::Registry,
+                    "desktop-session" => PortSubjectKind::DesktopSession,
+                    "project-root" => PortSubjectKind::ProjectRoot,
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                };
+                Ok(PortLeaseSubject {
+                    kind,
+                    key: row.get(1)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let (occupied_ports, occupancy_error) = if lease.namespace_key == HOST_LOOPBACK_NAMESPACE {
+            match probe(&lease) {
+                Ok(ports) => (Some(ports), None),
+                Err(error) => (None, Some(error.to_string())),
+            }
+        } else {
+            (None, None)
+        };
+        leases.push(WorkspacePortLeaseStatus {
+            lease,
+            subjects,
+            occupied_ports,
+            occupancy_error,
+        });
+    }
+    tx.commit()?;
+    Ok(WorkspacePortLeaseList {
+        leases,
+        diagnostics,
+    })
+}
+
+fn inspect(
+    store: &crate::store::WorkspaceStore,
+    tx: &Transaction<'_>,
+    repair: bool,
+) -> Result<Vec<PortLeaseDiagnostic>, PortLeaseError> {
     let records = store.list_workspaces().map_err(PortLeaseError::Store)?;
     let policy = store
         .get_workspace_lifecycle_policy()
@@ -697,20 +817,22 @@ pub(crate) fn reconcile(
                     .min_by_key(|record| &record.workspace_id)
                     .copied()
             });
-        if let Some(record) = selected {
-            tx.execute("UPDATE workspace_port_leases SET registry_workspace_id=?2, subject_key=CASE WHEN subject_kind='registry' THEN ?2 ELSE subject_key END WHERE lease_id=?1", params![lease.lease_id, record.workspace_id])?;
-            tx.execute(
-                "DELETE FROM workspace_port_subjects WHERE lease_id=?1 AND subject_kind='registry' AND subject_key NOT IN (SELECT workspace_id FROM workspace_registry)",
-                [&lease.lease_id],
-            )?;
-            for record in &matches {
-                tx.execute("INSERT OR IGNORE INTO workspace_port_subjects (lease_id,subject_kind,subject_key) VALUES (?1,'registry',?2)", params![lease.lease_id, record.workspace_id])?;
+        if repair {
+            if let Some(record) = selected {
+                tx.execute("UPDATE workspace_port_leases SET registry_workspace_id=?2, subject_key=CASE WHEN subject_kind='registry' THEN ?2 ELSE subject_key END WHERE lease_id=?1", params![lease.lease_id, record.workspace_id])?;
+                tx.execute(
+                    "DELETE FROM workspace_port_subjects WHERE lease_id=?1 AND subject_kind='registry' AND subject_key NOT IN (SELECT workspace_id FROM workspace_registry)",
+                    [&lease.lease_id],
+                )?;
+                for record in &matches {
+                    tx.execute("INSERT OR IGNORE INTO workspace_port_subjects (lease_id,subject_kind,subject_key) VALUES (?1,'registry',?2)", params![lease.lease_id, record.workspace_id])?;
+                }
+            } else if lease.registry_workspace_id.is_some() {
+                tx.execute(
+                    "UPDATE workspace_port_leases SET registry_workspace_id=NULL WHERE lease_id=?1",
+                    [&lease.lease_id],
+                )?;
             }
-        } else if lease.registry_workspace_id.is_some() {
-            tx.execute(
-                "UPDATE workspace_port_leases SET registry_workspace_id=NULL WHERE lease_id=?1",
-                [&lease.lease_id],
-            )?;
         }
         if lease.base_port < policy.port_range_start
             || lease.base_port + lease.port_count - 1 > policy.port_range_end
@@ -751,7 +873,6 @@ pub(crate) fn reconcile(
             }
         }
     }
-    tx.commit()?;
     Ok(diagnostics)
 }
 
@@ -780,6 +901,102 @@ mod tests {
             policy,
             1,
         )
+    }
+
+    #[test]
+    fn port_targeted_release_does_not_tombstone_remaining_subject_roots() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+        let old = allocate(&store, "remote:targeted", "/old", Default::default()).unwrap();
+        let new = ensure(
+            &store.connection,
+            "remote:targeted",
+            LeaseSubject {
+                kind: PortSubjectKind::ProjectRoot,
+                key: "/old",
+                root: "/new",
+                registry_id: None,
+            },
+            Default::default(),
+            2,
+        )
+        .unwrap();
+        let tx = Transaction::new_unchecked(&store.connection, TransactionBehavior::Immediate).unwrap();
+        release_subject_reference_in_transaction(
+            &tx,
+            Some("remote:targeted"),
+            PortSubjectKind::ProjectRoot,
+            "/old",
+            Some(&old.lease_id),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            read_subject(
+                &store.connection,
+                "remote:targeted",
+                PortSubjectKind::ProjectRoot,
+                "/old"
+            )
+            .unwrap(),
+            vec![new]
+        );
+        let count: u64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM workspace_port_released_subjects",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn port_list_reports_subjects_and_diagnostics_without_mutation_or_remote_probes() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+        let lease = allocate(&store, "remote:list", "/a", Default::default()).unwrap();
+        store.connection.execute("INSERT INTO workspace_port_subjects (lease_id,subject_kind,subject_key) VALUES (?1,'desktop-session','session')", [&lease.lease_id]).unwrap();
+        store.connection.execute("UPDATE workspace_port_leases SET base_port=1024 WHERE lease_id=?1", [&lease.lease_id]).unwrap();
+        let before = list(&store.connection).unwrap();
+        store.connection.execute_batch("PRAGMA query_only=ON").unwrap();
+        let report = list_status_with(&store, &mut |_| {
+            panic!("remote namespaces cannot be probed")
+        })
+        .unwrap();
+        assert_eq!(list(&store.connection).unwrap(), before);
+        assert_eq!(report.leases.len(), 1);
+        assert_eq!(report.leases[0].subjects.len(), 2);
+        assert_eq!(report.leases[0].occupied_ports, None);
+        assert_eq!(report.leases[0].occupancy_error, None);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == PortLeaseDiagnosticKind::OutOfRange));
+        store.connection.execute_batch("PRAGMA query_only=OFF").unwrap();
+        store
+            .connection
+            .execute(
+                "UPDATE workspace_port_leases SET namespace_key=?1",
+                [HOST_LOOPBACK_NAMESPACE],
+            )
+            .unwrap();
+        let report = list_status_with(&store, &mut |_| Ok(vec![1024, 1026])).unwrap();
+        assert_eq!(report.leases[0].occupied_ports, Some(vec![1024, 1026]));
+        let report = list_status_with(&store, &mut |_| {
+            Err(PortLeaseError::Probe {
+                port: 1024,
+                message: "denied".into(),
+            })
+        })
+        .unwrap();
+        assert_eq!(report.leases[0].occupied_ports, None);
+        assert_eq!(
+            report.leases[0].occupancy_error.as_deref(),
+            Some("probe port 1024: denied")
+        );
+        assert_eq!(list(&store.connection).unwrap()[0].base_port, 1024);
     }
 
     #[test]

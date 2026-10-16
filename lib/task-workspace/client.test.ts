@@ -102,6 +102,105 @@ import {
   taskIdForMessage,
 } from "./client"
 
+describe("workspace port lease wire contracts", () => {
+  beforeEach(() => call.mockReset())
+
+  const cases: Array<[string, () => Promise<unknown>, Record<string, unknown>?]> = [
+    ["get", () => workspaceClient.getWorkspacePortLease("ws"), { workspaceId: "ws" }],
+    [
+      "ensure",
+      () => workspaceClient.ensureWorkspacePortLease("ws", "container:one"),
+      { workspaceId: "ws", namespace: "container:one" },
+    ],
+    ["resolve", () => workspaceClient.resolveWorkspacePortLease("/repo/src"), { cwd: "/repo/src" }],
+    [
+      "resolve_ensure",
+      () => workspaceClient.resolveWorkspacePortLeaseEnsure("/repo/src", "ws", "remote:one"),
+      { cwd: "/repo/src", workspaceId: "ws", namespace: "remote:one" },
+    ],
+    [
+      "subject_ensure",
+      () =>
+        workspaceClient.ensureSubjectPortLease({
+          kind: "desktop-session",
+          key: "s",
+          root: "/scratch",
+        }),
+      { kind: "desktop-session", key: "s", root: "/scratch" },
+    ],
+    [
+      "subject_get",
+      () =>
+        workspaceClient.getSubjectPortLeases({
+          kind: "project-root",
+          key: "p",
+          namespace: "host-loopback",
+        }),
+      { kind: "project-root", key: "p", namespace: "host-loopback" },
+    ],
+    [
+      "subject_release",
+      () => workspaceClient.releaseSubjectPortLeases({ kind: "desktop-session", key: "s" }),
+      { kind: "desktop-session", key: "s" },
+    ],
+    [
+      "subject_release",
+      () =>
+        workspaceClient.releaseSubjectPortLeases({
+          kind: "desktop-session",
+          key: "s",
+          leaseId: "old-root-lease",
+          namespace: "host-loopback",
+        }),
+      { kind: "desktop-session", key: "s", leaseId: "old-root-lease", namespace: "host-loopback" },
+    ],
+    [
+      "release",
+      () => workspaceClient.releaseWorkspacePortLease("ws", "host-loopback"),
+      { workspaceId: "ws", namespace: "host-loopback" },
+    ],
+    ["list", () => workspaceClient.listWorkspacePortLeases(), undefined],
+  ]
+
+  it.each(cases)(
+    "forwards %s through the shared transport without changing the result",
+    async (suffix, invoke, args) => {
+      const result = { hostResponse: suffix }
+      call.mockResolvedValue(result)
+      await expect(invoke()).resolves.toBe(result)
+      expect(call.mock.calls).toEqual([
+        args
+          ? [`task_workspace_port_lease_${suffix}`, args]
+          : [`task_workspace_port_lease_${suffix}`],
+      ])
+    }
+  )
+
+  it.each(cases)(
+    "surfaces %s failures as typed errors with the host message and cause",
+    async (suffix, invoke) => {
+      const cause =
+        "no available port block: adjust portRangeStart (41000), portRangeEnd (48999), or portBlockSize (10)"
+      call.mockRejectedValue(cause)
+      await expect(invoke()).rejects.toMatchObject({
+        name: "WorkspacePortLeaseError",
+        command: `task_workspace_port_lease_${suffix}`,
+        message: cause,
+        cause,
+      })
+    }
+  )
+
+  it("returns a missing read as null without allocating", async () => {
+    call.mockResolvedValue(null)
+    await expect(workspaceClient.getWorkspacePortLease("unallocated")).resolves.toBeNull()
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(call).toHaveBeenCalledWith("task_workspace_port_lease_get", {
+      workspaceId: "unallocated",
+    })
+  })
+})
+
 describe("task resource transfer wire contracts", () => {
   beforeEach(() => call.mockReset())
 
@@ -683,7 +782,14 @@ describe("task workspace client", () => {
   })
 
   it("exposes Registry inventory and lifecycle policy through the shared transport", async () => {
-    const policy = { activeDirectoryCap: 15, snapshotRetentionDays: 30, blobBudgetBytes: 1 << 30 }
+    const policy = {
+      activeDirectoryCap: 15,
+      snapshotRetentionDays: 30,
+      blobBudgetBytes: 1 << 30,
+      portRangeStart: 41000,
+      portRangeEnd: 48999,
+      portBlockSize: 10,
+    }
     call
       .mockResolvedValueOnce([{ workspaceId: "ws-1" }])
       .mockResolvedValueOnce([{ bundleId: "bundle-1" }])

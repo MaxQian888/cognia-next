@@ -33,6 +33,7 @@ mod watcher;
 mod worker_cli;
 
 pub use ports::{
+    ExternalPortSubjectKind, PortLeaseSubject, WorkspacePortLeaseList, WorkspacePortLeaseStatus,
     occupied_ports, port_lease_env, PortLeaseDiagnostic, PortLeaseDiagnosticKind, PortLeaseError,
     PortSubjectKind, WorkspacePortLease, HOST_LOOPBACK_NAMESPACE,
 };

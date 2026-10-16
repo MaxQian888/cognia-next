@@ -158965,6 +158965,55 @@ paths:
                     type: string
                   pinned:
                     type: boolean
+                  portLease:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          basePort:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          canonicalRoot:
+                            type: string
+                          createdAt:
+                            format: int64
+                            type: integer
+                          leaseId:
+                            type: string
+                          namespaceKey:
+                            type: string
+                          portCount:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          registryWorkspaceId:
+                            type:
+                              - string
+                              - "null"
+                          subjectKey:
+                            type: string
+                          subjectKind:
+                            enum:
+                              - registry
+                              - desktop-session
+                              - project-root
+                            type: string
+                          updatedAt:
+                            format: int64
+                            type: integer
+                        required:
+                          - basePort
+                          - canonicalRoot
+                          - createdAt
+                          - leaseId
+                          - namespaceKey
+                          - portCount
+                          - registryWorkspaceId
+                          - subjectKey
+                          - subjectKind
+                          - updatedAt
+                        type: object
+                      - type: "null"
                   projectId:
                     description: |-
                       Owning Workspace (the frontend `Project.id`), when it is known.
@@ -159344,6 +159393,55 @@ paths:
                     type: string
                   pinned:
                     type: boolean
+                  portLease:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          basePort:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          canonicalRoot:
+                            type: string
+                          createdAt:
+                            format: int64
+                            type: integer
+                          leaseId:
+                            type: string
+                          namespaceKey:
+                            type: string
+                          portCount:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          registryWorkspaceId:
+                            type:
+                              - string
+                              - "null"
+                          subjectKey:
+                            type: string
+                          subjectKind:
+                            enum:
+                              - registry
+                              - desktop-session
+                              - project-root
+                            type: string
+                          updatedAt:
+                            format: int64
+                            type: integer
+                        required:
+                          - basePort
+                          - canonicalRoot
+                          - createdAt
+                          - leaseId
+                          - namespaceKey
+                          - portCount
+                          - registryWorkspaceId
+                          - subjectKey
+                          - subjectKind
+                          - updatedAt
+                        type: object
+                      - type: "null"
                   projectId:
                     description: |-
                       Owning Workspace (the frontend `Project.id`), when it is known.
@@ -159723,6 +159821,55 @@ paths:
                     type: string
                   pinned:
                     type: boolean
+                  portLease:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          basePort:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          canonicalRoot:
+                            type: string
+                          createdAt:
+                            format: int64
+                            type: integer
+                          leaseId:
+                            type: string
+                          namespaceKey:
+                            type: string
+                          portCount:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          registryWorkspaceId:
+                            type:
+                              - string
+                              - "null"
+                          subjectKey:
+                            type: string
+                          subjectKind:
+                            enum:
+                              - registry
+                              - desktop-session
+                              - project-root
+                            type: string
+                          updatedAt:
+                            format: int64
+                            type: integer
+                        required:
+                          - basePort
+                          - canonicalRoot
+                          - createdAt
+                          - leaseId
+                          - namespaceKey
+                          - portCount
+                          - registryWorkspaceId
+                          - subjectKey
+                          - subjectKind
+                          - updatedAt
+                        type: object
+                      - type: "null"
                   projectId:
                     description: |-
                       Owning Workspace (the frontend `Project.id`), when it is known.
@@ -160134,6 +160281,55 @@ paths:
                       type: string
                     pinned:
                       type: boolean
+                    portLease:
+                      anyOf:
+                        - additionalProperties: false
+                          properties:
+                            basePort:
+                              format: uint32
+                              minimum: 0
+                              type: integer
+                            canonicalRoot:
+                              type: string
+                            createdAt:
+                              format: int64
+                              type: integer
+                            leaseId:
+                              type: string
+                            namespaceKey:
+                              type: string
+                            portCount:
+                              format: uint32
+                              minimum: 0
+                              type: integer
+                            registryWorkspaceId:
+                              type:
+                                - string
+                                - "null"
+                            subjectKey:
+                              type: string
+                            subjectKind:
+                              enum:
+                                - registry
+                                - desktop-session
+                                - project-root
+                              type: string
+                            updatedAt:
+                              format: int64
+                              type: integer
+                          required:
+                            - basePort
+                            - canonicalRoot
+                            - createdAt
+                            - leaseId
+                            - namespaceKey
+                            - portCount
+                            - registryWorkspaceId
+                            - subjectKey
+                            - subjectKind
+                            - updatedAt
+                          type: object
+                        - type: "null"
                     projectId:
                       description: |-
                         Owning Workspace, so the inventory can be scoped to one project instead
@@ -167856,6 +168052,55 @@ paths:
                     type: string
                   pinned:
                     type: boolean
+                  portLease:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          basePort:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          canonicalRoot:
+                            type: string
+                          createdAt:
+                            format: int64
+                            type: integer
+                          leaseId:
+                            type: string
+                          namespaceKey:
+                            type: string
+                          portCount:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          registryWorkspaceId:
+                            type:
+                              - string
+                              - "null"
+                          subjectKey:
+                            type: string
+                          subjectKind:
+                            enum:
+                              - registry
+                              - desktop-session
+                              - project-root
+                            type: string
+                          updatedAt:
+                            format: int64
+                            type: integer
+                        required:
+                          - basePort
+                          - canonicalRoot
+                          - createdAt
+                          - leaseId
+                          - namespaceKey
+                          - portCount
+                          - registryWorkspaceId
+                          - subjectKey
+                          - subjectKind
+                          - updatedAt
+                        type: object
+                      - type: "null"
                   projectId:
                     description: |-
                       Owning Workspace (the frontend `Project.id`), when it is known.
@@ -168231,6 +168476,55 @@ paths:
                     type: string
                   pinned:
                     type: boolean
+                  portLease:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          basePort:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          canonicalRoot:
+                            type: string
+                          createdAt:
+                            format: int64
+                            type: integer
+                          leaseId:
+                            type: string
+                          namespaceKey:
+                            type: string
+                          portCount:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          registryWorkspaceId:
+                            type:
+                              - string
+                              - "null"
+                          subjectKey:
+                            type: string
+                          subjectKind:
+                            enum:
+                              - registry
+                              - desktop-session
+                              - project-root
+                            type: string
+                          updatedAt:
+                            format: int64
+                            type: integer
+                        required:
+                          - basePort
+                          - canonicalRoot
+                          - createdAt
+                          - leaseId
+                          - namespaceKey
+                          - portCount
+                          - registryWorkspaceId
+                          - subjectKey
+                          - subjectKind
+                          - updatedAt
+                        type: object
+                      - type: "null"
                   projectId:
                     description: |-
                       Owning Workspace (the frontend `Project.id`), when it is known.
@@ -168774,6 +169068,55 @@ paths:
                         type: string
                       pinned:
                         type: boolean
+                      portLease:
+                        anyOf:
+                          - additionalProperties: false
+                            properties:
+                              basePort:
+                                format: uint32
+                                minimum: 0
+                                type: integer
+                              canonicalRoot:
+                                type: string
+                              createdAt:
+                                format: int64
+                                type: integer
+                              leaseId:
+                                type: string
+                              namespaceKey:
+                                type: string
+                              portCount:
+                                format: uint32
+                                minimum: 0
+                                type: integer
+                              registryWorkspaceId:
+                                type:
+                                  - string
+                                  - "null"
+                              subjectKey:
+                                type: string
+                              subjectKind:
+                                enum:
+                                  - registry
+                                  - desktop-session
+                                  - project-root
+                                type: string
+                              updatedAt:
+                                format: int64
+                                type: integer
+                            required:
+                              - basePort
+                              - canonicalRoot
+                              - createdAt
+                              - leaseId
+                              - namespaceKey
+                              - portCount
+                              - registryWorkspaceId
+                              - subjectKey
+                              - subjectKind
+                              - updatedAt
+                            type: object
+                          - type: "null"
                       projectId:
                         description: |-
                           Owning Workspace (the frontend `Project.id`), when it is known.
@@ -169144,6 +169487,55 @@ paths:
                       type: string
                     pinned:
                       type: boolean
+                    portLease:
+                      anyOf:
+                        - additionalProperties: false
+                          properties:
+                            basePort:
+                              format: uint32
+                              minimum: 0
+                              type: integer
+                            canonicalRoot:
+                              type: string
+                            createdAt:
+                              format: int64
+                              type: integer
+                            leaseId:
+                              type: string
+                            namespaceKey:
+                              type: string
+                            portCount:
+                              format: uint32
+                              minimum: 0
+                              type: integer
+                            registryWorkspaceId:
+                              type:
+                                - string
+                                - "null"
+                            subjectKey:
+                              type: string
+                            subjectKind:
+                              enum:
+                                - registry
+                                - desktop-session
+                                - project-root
+                              type: string
+                            updatedAt:
+                              format: int64
+                              type: integer
+                          required:
+                            - basePort
+                            - canonicalRoot
+                            - createdAt
+                            - leaseId
+                            - namespaceKey
+                            - portCount
+                            - registryWorkspaceId
+                            - subjectKey
+                            - subjectKind
+                            - updatedAt
+                          type: object
+                        - type: "null"
                     projectId:
                       description: |-
                         Owning Workspace (the frontend `Project.id`), when it is known.
@@ -169520,6 +169912,55 @@ paths:
                     type: string
                   pinned:
                     type: boolean
+                  portLease:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          basePort:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          canonicalRoot:
+                            type: string
+                          createdAt:
+                            format: int64
+                            type: integer
+                          leaseId:
+                            type: string
+                          namespaceKey:
+                            type: string
+                          portCount:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          registryWorkspaceId:
+                            type:
+                              - string
+                              - "null"
+                          subjectKey:
+                            type: string
+                          subjectKind:
+                            enum:
+                              - registry
+                              - desktop-session
+                              - project-root
+                            type: string
+                          updatedAt:
+                            format: int64
+                            type: integer
+                        required:
+                          - basePort
+                          - canonicalRoot
+                          - createdAt
+                          - leaseId
+                          - namespaceKey
+                          - portCount
+                          - registryWorkspaceId
+                          - subjectKey
+                          - subjectKind
+                          - updatedAt
+                        type: object
+                      - type: "null"
                   projectId:
                     description: |-
                       Owning Workspace (the frontend `Project.id`), when it is known.
@@ -169899,6 +170340,55 @@ paths:
                     type: string
                   pinned:
                     type: boolean
+                  portLease:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          basePort:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          canonicalRoot:
+                            type: string
+                          createdAt:
+                            format: int64
+                            type: integer
+                          leaseId:
+                            type: string
+                          namespaceKey:
+                            type: string
+                          portCount:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          registryWorkspaceId:
+                            type:
+                              - string
+                              - "null"
+                          subjectKey:
+                            type: string
+                          subjectKind:
+                            enum:
+                              - registry
+                              - desktop-session
+                              - project-root
+                            type: string
+                          updatedAt:
+                            format: int64
+                            type: integer
+                        required:
+                          - basePort
+                          - canonicalRoot
+                          - createdAt
+                          - leaseId
+                          - namespaceKey
+                          - portCount
+                          - registryWorkspaceId
+                          - subjectKey
+                          - subjectKind
+                          - updatedAt
+                        type: object
+                      - type: "null"
                   projectId:
                     description: |-
                       Owning Workspace (the frontend `Project.id`), when it is known.
@@ -170274,6 +170764,55 @@ paths:
                     type: string
                   pinned:
                     type: boolean
+                  portLease:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          basePort:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          canonicalRoot:
+                            type: string
+                          createdAt:
+                            format: int64
+                            type: integer
+                          leaseId:
+                            type: string
+                          namespaceKey:
+                            type: string
+                          portCount:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          registryWorkspaceId:
+                            type:
+                              - string
+                              - "null"
+                          subjectKey:
+                            type: string
+                          subjectKind:
+                            enum:
+                              - registry
+                              - desktop-session
+                              - project-root
+                            type: string
+                          updatedAt:
+                            format: int64
+                            type: integer
+                        required:
+                          - basePort
+                          - canonicalRoot
+                          - createdAt
+                          - leaseId
+                          - namespaceKey
+                          - portCount
+                          - registryWorkspaceId
+                          - subjectKey
+                          - subjectKind
+                          - updatedAt
+                        type: object
+                      - type: "null"
                   projectId:
                     description: |-
                       Owning Workspace (the frontend `Project.id`), when it is known.
@@ -170711,7 +171250,7 @@ paths:
             application/json:
               schema:
                 additionalProperties: false
-                description: Retention policy inputs. All three knobs are user-adjustable in settings.
+                description: Retention and new-lease port allocation settings. Existing leases keep their numbers.
                 properties:
                   activeDirectoryCap:
                     format: uint32
@@ -170721,6 +171260,21 @@ paths:
                     format: uint64
                     minimum: 0
                     type: integer
+                  portBlockSize:
+                    default: 10
+                    format: uint32
+                    minimum: 0
+                    type: integer
+                  portRangeEnd:
+                    default: 48999
+                    format: uint32
+                    minimum: 0
+                    type: integer
+                  portRangeStart:
+                    default: 41000
+                    format: uint32
+                    minimum: 0
+                    type: integer
                   snapshotRetentionDays:
                     format: uint32
                     minimum: 0
@@ -170728,6 +171282,9 @@ paths:
                 required:
                   - activeDirectoryCap
                   - blobBudgetBytes
+                  - portBlockSize
+                  - portRangeEnd
+                  - portRangeStart
                   - snapshotRetentionDays
                 type: object
         "202":
@@ -170900,7 +171457,7 @@ paths:
             application/json:
               schema:
                 additionalProperties: false
-                description: Retention policy inputs. All three knobs are user-adjustable in settings.
+                description: Retention and new-lease port allocation settings. Existing leases keep their numbers.
                 properties:
                   activeDirectoryCap:
                     format: uint32
@@ -170910,6 +171467,21 @@ paths:
                     format: uint64
                     minimum: 0
                     type: integer
+                  portBlockSize:
+                    default: 10
+                    format: uint32
+                    minimum: 0
+                    type: integer
+                  portRangeEnd:
+                    default: 48999
+                    format: uint32
+                    minimum: 0
+                    type: integer
+                  portRangeStart:
+                    default: 41000
+                    format: uint32
+                    minimum: 0
+                    type: integer
                   snapshotRetentionDays:
                     format: uint32
                     minimum: 0
@@ -170917,8 +171489,1951 @@ paths:
                 required:
                   - activeDirectoryCap
                   - blobBudgetBytes
+                  - portBlockSize
+                  - portRangeEnd
+                  - portRangeStart
                   - snapshotRetentionDays
                 type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_port_lease_ensure:
+    post:
+      operationId: internalRpcTaskWorkspacePortLeaseEnsure
+      tags:
+        - headless-rpc
+      summary: task_workspace_port_lease_ensure (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workspaceId:
+                  type: string
+                namespace:
+                  type: string
+              additionalProperties: false
+              required:
+                - workspaceId
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  basePort:
+                    format: uint32
+                    minimum: 0
+                    type: integer
+                  canonicalRoot:
+                    type: string
+                  createdAt:
+                    format: int64
+                    type: integer
+                  leaseId:
+                    type: string
+                  namespaceKey:
+                    type: string
+                  portCount:
+                    format: uint32
+                    minimum: 0
+                    type: integer
+                  registryWorkspaceId:
+                    type:
+                      - string
+                      - "null"
+                  subjectKey:
+                    type: string
+                  subjectKind:
+                    enum:
+                      - registry
+                      - desktop-session
+                      - project-root
+                    type: string
+                  updatedAt:
+                    format: int64
+                    type: integer
+                required:
+                  - basePort
+                  - canonicalRoot
+                  - createdAt
+                  - leaseId
+                  - namespaceKey
+                  - portCount
+                  - registryWorkspaceId
+                  - subjectKey
+                  - subjectKind
+                  - updatedAt
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_port_lease_get:
+    post:
+      operationId: internalRpcTaskWorkspacePortLeaseGet
+      tags:
+        - headless-rpc
+      summary: task_workspace_port_lease_get (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workspaceId:
+                  type: string
+                namespace:
+                  type: string
+              additionalProperties: false
+              required:
+                - workspaceId
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - additionalProperties: false
+                    properties:
+                      basePort:
+                        format: uint32
+                        minimum: 0
+                        type: integer
+                      canonicalRoot:
+                        type: string
+                      createdAt:
+                        format: int64
+                        type: integer
+                      leaseId:
+                        type: string
+                      namespaceKey:
+                        type: string
+                      portCount:
+                        format: uint32
+                        minimum: 0
+                        type: integer
+                      registryWorkspaceId:
+                        type:
+                          - string
+                          - "null"
+                      subjectKey:
+                        type: string
+                      subjectKind:
+                        enum:
+                          - registry
+                          - desktop-session
+                          - project-root
+                        type: string
+                      updatedAt:
+                        format: int64
+                        type: integer
+                    required:
+                      - basePort
+                      - canonicalRoot
+                      - createdAt
+                      - leaseId
+                      - namespaceKey
+                      - portCount
+                      - registryWorkspaceId
+                      - subjectKey
+                      - subjectKind
+                      - updatedAt
+                    type: object
+                  - type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_port_lease_list:
+    post:
+      operationId: internalRpcTaskWorkspacePortLeaseList
+      tags:
+        - headless-rpc
+      summary: task_workspace_port_lease_list (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  diagnostics:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        detail:
+                          type: string
+                        kind:
+                          enum:
+                            - duplicateRoot
+                            - overlap
+                            - outOfRange
+                            - ambiguousRegistryLink
+                            - unresolvedRegistryRoot
+                            - registryRootMismatch
+                          type: string
+                        leaseIds:
+                          items:
+                            type: string
+                          type: array
+                      required:
+                        - detail
+                        - kind
+                        - leaseIds
+                      type: object
+                    type: array
+                  leases:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        lease:
+                          additionalProperties: false
+                          properties:
+                            basePort:
+                              format: uint32
+                              minimum: 0
+                              type: integer
+                            canonicalRoot:
+                              type: string
+                            createdAt:
+                              format: int64
+                              type: integer
+                            leaseId:
+                              type: string
+                            namespaceKey:
+                              type: string
+                            portCount:
+                              format: uint32
+                              minimum: 0
+                              type: integer
+                            registryWorkspaceId:
+                              type:
+                                - string
+                                - "null"
+                            subjectKey:
+                              type: string
+                            subjectKind:
+                              enum:
+                                - registry
+                                - desktop-session
+                                - project-root
+                              type: string
+                            updatedAt:
+                              format: int64
+                              type: integer
+                          required:
+                            - basePort
+                            - canonicalRoot
+                            - createdAt
+                            - leaseId
+                            - namespaceKey
+                            - portCount
+                            - registryWorkspaceId
+                            - subjectKey
+                            - subjectKind
+                            - updatedAt
+                          type: object
+                        occupancyError:
+                          type:
+                            - string
+                            - "null"
+                        occupiedPorts:
+                          description: None when the host cannot inspect this network namespace.
+                          items:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          type:
+                            - array
+                            - "null"
+                        subjects:
+                          items:
+                            additionalProperties: false
+                            description: Every owner of a physical-root lease, including aliases.
+                            properties:
+                              key:
+                                type: string
+                              kind:
+                                enum:
+                                  - registry
+                                  - desktop-session
+                                  - project-root
+                                type: string
+                            required:
+                              - key
+                              - kind
+                            type: object
+                          type: array
+                      required:
+                        - lease
+                        - occupancyError
+                        - occupiedPorts
+                        - subjects
+                      type: object
+                    type: array
+                required:
+                  - diagnostics
+                  - leases
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_port_lease_release:
+    post:
+      operationId: internalRpcTaskWorkspacePortLeaseRelease
+      tags:
+        - headless-rpc
+      summary: task_workspace_port_lease_release (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workspaceId:
+                  type: string
+                namespace:
+                  type: string
+              additionalProperties: false
+              required:
+                - workspaceId
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_port_lease_resolve:
+    post:
+      operationId: internalRpcTaskWorkspacePortLeaseResolve
+      tags:
+        - headless-rpc
+      summary: task_workspace_port_lease_resolve (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cwd:
+                  type: string
+                workspaceId:
+                  type: string
+                namespace:
+                  type: string
+              additionalProperties: false
+              required:
+                - cwd
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - additionalProperties: false
+                    properties:
+                      basePort:
+                        format: uint32
+                        minimum: 0
+                        type: integer
+                      canonicalRoot:
+                        type: string
+                      createdAt:
+                        format: int64
+                        type: integer
+                      leaseId:
+                        type: string
+                      namespaceKey:
+                        type: string
+                      portCount:
+                        format: uint32
+                        minimum: 0
+                        type: integer
+                      registryWorkspaceId:
+                        type:
+                          - string
+                          - "null"
+                      subjectKey:
+                        type: string
+                      subjectKind:
+                        enum:
+                          - registry
+                          - desktop-session
+                          - project-root
+                        type: string
+                      updatedAt:
+                        format: int64
+                        type: integer
+                    required:
+                      - basePort
+                      - canonicalRoot
+                      - createdAt
+                      - leaseId
+                      - namespaceKey
+                      - portCount
+                      - registryWorkspaceId
+                      - subjectKey
+                      - subjectKind
+                      - updatedAt
+                    type: object
+                  - type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_port_lease_resolve_ensure:
+    post:
+      operationId: internalRpcTaskWorkspacePortLeaseResolveEnsure
+      tags:
+        - headless-rpc
+      summary: task_workspace_port_lease_resolve_ensure (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cwd:
+                  type: string
+                workspaceId:
+                  type: string
+                namespace:
+                  type: string
+              additionalProperties: false
+              required:
+                - cwd
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - additionalProperties: false
+                    properties:
+                      basePort:
+                        format: uint32
+                        minimum: 0
+                        type: integer
+                      canonicalRoot:
+                        type: string
+                      createdAt:
+                        format: int64
+                        type: integer
+                      leaseId:
+                        type: string
+                      namespaceKey:
+                        type: string
+                      portCount:
+                        format: uint32
+                        minimum: 0
+                        type: integer
+                      registryWorkspaceId:
+                        type:
+                          - string
+                          - "null"
+                      subjectKey:
+                        type: string
+                      subjectKind:
+                        enum:
+                          - registry
+                          - desktop-session
+                          - project-root
+                        type: string
+                      updatedAt:
+                        format: int64
+                        type: integer
+                    required:
+                      - basePort
+                      - canonicalRoot
+                      - createdAt
+                      - leaseId
+                      - namespaceKey
+                      - portCount
+                      - registryWorkspaceId
+                      - subjectKey
+                      - subjectKind
+                      - updatedAt
+                    type: object
+                  - type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_port_lease_subject_ensure:
+    post:
+      operationId: internalRpcTaskWorkspacePortLeaseSubjectEnsure
+      tags:
+        - headless-rpc
+      summary: task_workspace_port_lease_subject_ensure (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - desktop-session
+                    - project-root
+                key:
+                  type: string
+                root:
+                  type: string
+                namespace:
+                  type: string
+              additionalProperties: false
+              required:
+                - kind
+                - key
+                - root
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  basePort:
+                    format: uint32
+                    minimum: 0
+                    type: integer
+                  canonicalRoot:
+                    type: string
+                  createdAt:
+                    format: int64
+                    type: integer
+                  leaseId:
+                    type: string
+                  namespaceKey:
+                    type: string
+                  portCount:
+                    format: uint32
+                    minimum: 0
+                    type: integer
+                  registryWorkspaceId:
+                    type:
+                      - string
+                      - "null"
+                  subjectKey:
+                    type: string
+                  subjectKind:
+                    enum:
+                      - registry
+                      - desktop-session
+                      - project-root
+                    type: string
+                  updatedAt:
+                    format: int64
+                    type: integer
+                required:
+                  - basePort
+                  - canonicalRoot
+                  - createdAt
+                  - leaseId
+                  - namespaceKey
+                  - portCount
+                  - registryWorkspaceId
+                  - subjectKey
+                  - subjectKind
+                  - updatedAt
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_port_lease_subject_get:
+    post:
+      operationId: internalRpcTaskWorkspacePortLeaseSubjectGet
+      tags:
+        - headless-rpc
+      summary: task_workspace_port_lease_subject_get (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - desktop-session
+                    - project-root
+                key:
+                  type: string
+                namespace:
+                  type: string
+              additionalProperties: false
+              required:
+                - kind
+                - key
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                items:
+                  additionalProperties: false
+                  properties:
+                    basePort:
+                      format: uint32
+                      minimum: 0
+                      type: integer
+                    canonicalRoot:
+                      type: string
+                    createdAt:
+                      format: int64
+                      type: integer
+                    leaseId:
+                      type: string
+                    namespaceKey:
+                      type: string
+                    portCount:
+                      format: uint32
+                      minimum: 0
+                      type: integer
+                    registryWorkspaceId:
+                      type:
+                        - string
+                        - "null"
+                    subjectKey:
+                      type: string
+                    subjectKind:
+                      enum:
+                        - registry
+                        - desktop-session
+                        - project-root
+                      type: string
+                    updatedAt:
+                      format: int64
+                      type: integer
+                  required:
+                    - basePort
+                    - canonicalRoot
+                    - createdAt
+                    - leaseId
+                    - namespaceKey
+                    - portCount
+                    - registryWorkspaceId
+                    - subjectKey
+                    - subjectKind
+                    - updatedAt
+                  type: object
+                type: array
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_port_lease_subject_release:
+    post:
+      operationId: internalRpcTaskWorkspacePortLeaseSubjectRelease
+      tags:
+        - headless-rpc
+      summary: task_workspace_port_lease_subject_release (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - desktop-session
+                    - project-root
+                key:
+                  type: string
+                namespace:
+                  type: string
+                leaseId:
+                  type: string
+              additionalProperties: false
+              required:
+                - kind
+                - key
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.
           content:
@@ -192250,6 +194765,15 @@ components:
           - task_workspace_pin
           - task_workspace_policy_get
           - task_workspace_policy_set
+          - task_workspace_port_lease_ensure
+          - task_workspace_port_lease_get
+          - task_workspace_port_lease_list
+          - task_workspace_port_lease_release
+          - task_workspace_port_lease_resolve
+          - task_workspace_port_lease_resolve_ensure
+          - task_workspace_port_lease_subject_ensure
+          - task_workspace_port_lease_subject_get
+          - task_workspace_port_lease_subject_release
           - task_workspace_project_source_ensure
           - task_workspace_prune
           - task_workspace_read_resource_capture
@@ -192607,10 +195131,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 873
-  generatedRequestSchemaCount: 873
+  internalCommandCount: 882
+  generatedRequestSchemaCount: 882
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 873
+  contractRequestSchemaCount: 882
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 873
+  generatedResponseSchemaCount: 882
   loopbackOnly: true

@@ -61,6 +61,9 @@ import type {
   WorkspaceMaintenanceResult,
   WorkspaceEnvironmentSummary,
   WorkspaceReconcileOutcome,
+  WorkspacePortLease,
+  WorkspacePortLeaseList,
+  ExternalPortSubjectKind,
 } from "./types"
 
 export const TASK_WORKSPACE_RESOURCE_EVENT = "task-workspace://resources-changed"
@@ -773,6 +776,103 @@ export function getBundleHandoffUndoOutcome(
 
 export function getWorkspaceLifecyclePolicy(): Promise<WorkspaceLifecyclePolicy> {
   return transport.call("task_workspace_policy_get")
+}
+
+/** Preserve the host's actionable error while giving callers a typed failure. */
+export class WorkspacePortLeaseError extends Error {
+  constructor(
+    readonly command: string,
+    cause: unknown
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = "WorkspacePortLeaseError"
+  }
+}
+
+async function portLeaseCall<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await transport.call<T>(command, args)
+  } catch (cause) {
+    throw new WorkspacePortLeaseError(command, cause)
+  }
+}
+
+export function getWorkspacePortLease(
+  workspaceId: string,
+  namespace?: string
+): Promise<WorkspacePortLease | null> {
+  return portLeaseCall("task_workspace_port_lease_get", {
+    workspaceId,
+    ...(namespace === undefined ? {} : { namespace }),
+  })
+}
+
+export function ensureWorkspacePortLease(
+  workspaceId: string,
+  namespace?: string
+): Promise<WorkspacePortLease> {
+  return portLeaseCall("task_workspace_port_lease_ensure", {
+    workspaceId,
+    ...(namespace === undefined ? {} : { namespace }),
+  })
+}
+
+export function resolveWorkspacePortLease(
+  cwd: string,
+  workspaceId?: string,
+  namespace?: string
+): Promise<WorkspacePortLease | null> {
+  return portLeaseCall("task_workspace_port_lease_resolve", {
+    cwd,
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+    ...(namespace === undefined ? {} : { namespace }),
+  })
+}
+
+export function resolveWorkspacePortLeaseEnsure(
+  cwd: string,
+  workspaceId?: string,
+  namespace?: string
+): Promise<WorkspacePortLease | null> {
+  return portLeaseCall("task_workspace_port_lease_resolve_ensure", {
+    cwd,
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+    ...(namespace === undefined ? {} : { namespace }),
+  })
+}
+
+export interface PortLeaseSubjectInput {
+  kind: ExternalPortSubjectKind
+  key: string
+  namespace?: string
+}
+
+export function ensureSubjectPortLease(
+  input: PortLeaseSubjectInput & { root: string }
+): Promise<WorkspacePortLease> {
+  return portLeaseCall("task_workspace_port_lease_subject_ensure", { ...input })
+}
+
+export function getSubjectPortLeases(input: PortLeaseSubjectInput): Promise<WorkspacePortLease[]> {
+  return portLeaseCall("task_workspace_port_lease_subject_get", { ...input })
+}
+
+/** Omit leaseId for permanent subject deletion; supply it to detach one root. */
+export function releaseSubjectPortLeases(
+  input: PortLeaseSubjectInput & { leaseId?: string }
+): Promise<void> {
+  return portLeaseCall("task_workspace_port_lease_subject_release", { ...input })
+}
+
+export function releaseWorkspacePortLease(workspaceId: string, namespace?: string): Promise<void> {
+  return portLeaseCall("task_workspace_port_lease_release", {
+    workspaceId,
+    ...(namespace === undefined ? {} : { namespace }),
+  })
+}
+
+export function listWorkspacePortLeases(): Promise<WorkspacePortLeaseList> {
+  return portLeaseCall("task_workspace_port_lease_list")
 }
 
 export function setWorkspaceLifecyclePolicy(

@@ -2,6 +2,10 @@ const platformMock = jest.fn(() => "macos")
 jest.mock("@tauri-apps/plugin-os", () => ({ platform: () => platformMock() }))
 
 let tauri = true
+const ensureExecutionPortLease = jest.fn()
+jest.mock("@/lib/task-workspace/execution-port-lease", () => ({
+  ensureExecutionPortLease: (...args: unknown[]) => ensureExecutionPortLease(...args),
+}))
 const callMock = jest.fn()
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => tauri,
@@ -52,6 +56,7 @@ const environment: ProjectEnvironment = {
 }
 
 beforeEach(() => {
+  ensureExecutionPortLease.mockReset().mockResolvedValue(null)
   tauri = true
   callMock.mockReset().mockResolvedValue({
     stdout: "ok",
@@ -76,6 +81,13 @@ it("keeps host script selection and keyring values inside the execution host", a
   })
 
   expect(result).toEqual(expect.objectContaining({ success: true, bypassed: false }))
+  expect(ensureExecutionPortLease).toHaveBeenCalledWith({
+    cwd: "/worktree",
+    projectId: environment.projectId,
+  })
+  expect(ensureExecutionPortLease.mock.invocationCallOrder[0]).toBeLessThan(
+    callMock.mock.invocationCallOrder[0]
+  )
   expect(callMock).toHaveBeenCalledWith("project_environment_execute", {
     script: { default: "install", byOs: { macos: "pnpm install" } },
     cwd: "/worktree",
@@ -89,6 +101,42 @@ it("keeps host script selection and keyring values inside the execution host", a
     expect.objectContaining({ status: "succeeded", executionRoot: "/worktree" }),
     expect.any(Number)
   )
+})
+
+it("returns lease allocation errors without bypassing or executing setup", async () => {
+  const error = new Error("portRangeStart/portRangeEnd/portBlockSize exhausted")
+  ensureExecutionPortLease.mockRejectedValueOnce(error)
+  await expect(
+    executeProjectEnvironment({
+      environment,
+      executionRoot: "/repo",
+      scope: "local",
+      surface: "interactive",
+      bypassOnFailure: true,
+    })
+  ).resolves.toEqual({ success: false, bypassed: false, error: error.message })
+  expect(callMock).not.toHaveBeenCalled()
+  expect(updateInitializationMock).toHaveBeenLastCalledWith(
+    environment.id,
+    expect.objectContaining({ status: "failed", error: error.message }),
+    expect.any(Number)
+  )
+})
+
+it("returns lease allocation errors for actions without changing setup initialization", async () => {
+  const error = new Error("portRangeStart exhausted")
+  ensureExecutionPortLease.mockRejectedValueOnce(error)
+  await expect(
+    executeProjectEnvironment({
+      environment,
+      executionRoot: "/repo",
+      scope: "local",
+      surface: "interactive",
+      actionId: "test",
+    })
+  ).resolves.toEqual({ success: false, bypassed: false, error: error.message })
+  expect(callMock).not.toHaveBeenCalled()
+  expect(updateInitializationMock).not.toHaveBeenCalled()
 })
 
 it("allows only interactive setup failures to be bypassed", async () => {
@@ -286,21 +334,29 @@ describe("concurrent setups in one root", () => {
 
   function deferredHostCall() {
     let finish: (value: unknown) => void = () => undefined
+    let enter!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
     callMock.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           finish = resolve
+          enter()
         })
     )
-    return (exitCode: number) =>
-      finish({ stdout: "", stderr: "", exit_code: exitCode, timed_out: false })
+    return {
+      entered,
+      finish: (exitCode: number) =>
+        finish({ stdout: "", stderr: "", exit_code: exitCode, timed_out: false }),
+    }
   }
 
   it("joins an identical setup already in flight instead of running it twice", async () => {
-    const finish = deferredHostCall()
+    const { finish, entered } = deferredHostCall()
     const first = executeProjectEnvironment(input)
     const second = executeProjectEnvironment(input)
-    await Promise.resolve()
+    await entered
     finish(0)
 
     await expect(first).resolves.toEqual(expect.objectContaining({ success: true }))
@@ -314,10 +370,10 @@ describe("concurrent setups in one root", () => {
   })
 
   it("makes its own attempt after an in-flight setup fails", async () => {
-    const finish = deferredHostCall()
+    const { finish, entered } = deferredHostCall()
     const first = executeProjectEnvironment(input)
     const second = executeProjectEnvironment(input)
-    await Promise.resolve()
+    await entered
     finish(1)
 
     await expect(first).resolves.toEqual(expect.objectContaining({ success: false }))
@@ -326,13 +382,13 @@ describe("concurrent setups in one root", () => {
   })
 
   it("waits for, but does not join, a setup with a different definition", async () => {
-    const finish = deferredHostCall()
+    const { finish, entered } = deferredHostCall()
     const first = executeProjectEnvironment(input)
     const second = executeProjectEnvironment({
       ...input,
       environment: { ...environment, variables: { NODE_ENV: "test" } },
     })
-    await Promise.resolve()
+    await entered
     expect(callMock).toHaveBeenCalledTimes(1)
     finish(0)
 
@@ -343,7 +399,7 @@ describe("concurrent setups in one root", () => {
   })
 
   it("does not serialize setups in different roots", async () => {
-    const finish = deferredHostCall()
+    const { finish } = deferredHostCall()
     const first = executeProjectEnvironment(input)
     const other = executeProjectEnvironment({ ...input, executionRoot: "/other" })
 

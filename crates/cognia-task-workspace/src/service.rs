@@ -3077,6 +3077,18 @@ impl TaskWorkspaceService {
         kind: crate::PortSubjectKind,
         key: &str,
     ) -> Result<(), crate::PortLeaseError> {
+        self.release_subject_port_lease_reference(namespace, kind, key, None)
+    }
+
+    /// Release one recorded root reference, or all roots when no lease is selected.
+    /// Matching is ledger-based so an offline or trashed directory can be released.
+    pub fn release_subject_port_lease_reference(
+        &self,
+        namespace: &str,
+        kind: crate::PortSubjectKind,
+        key: &str,
+        lease_id: Option<&str>,
+    ) -> Result<(), crate::PortLeaseError> {
         if kind == crate::PortSubjectKind::Registry {
             return Err(crate::PortLeaseError::InvalidSubject(
                 "registry subjects must use release_archived_workspace_port_lease".into(),
@@ -3088,7 +3100,13 @@ impl TaskWorkspaceService {
             rusqlite::TransactionBehavior::Immediate,
         )
         .map_err(crate::PortLeaseError::from)?;
-        crate::ports::release_subject_in_transaction(&tx, Some(namespace), kind, key)?;
+        crate::ports::release_subject_reference_in_transaction(
+            &tx,
+            Some(namespace),
+            kind,
+            key,
+            lease_id,
+        )?;
         tx.commit().map_err(crate::PortLeaseError::from)
     }
 
@@ -3165,6 +3183,13 @@ impl TaskWorkspaceService {
             namespace,
             &cwd,
         ))
+    }
+
+    /// Report the current ledger and diagnostics without repairing or allocating.
+    pub fn list_workspace_port_leases(
+        &self,
+    ) -> Result<crate::WorkspacePortLeaseList, crate::PortLeaseError> {
+        crate::ports::list_status(&self.store.lock())
     }
 
     pub fn reconcile_workspace_port_leases(
@@ -6922,6 +6947,131 @@ mod tests {
         time::Duration,
     };
     use tempfile::TempDir;
+
+    #[test]
+    fn port_targeted_subject_release_retains_new_root_and_shared_owners() {
+        let data = TempDir::new().unwrap();
+        let old_root = TempDir::new().unwrap();
+        let new_root = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let ns = "remote:move";
+        let kind = crate::PortSubjectKind::DesktopSession;
+        let old = service
+            .ensure_subject_port_lease(ns, kind, "session", old_root.path())
+            .unwrap();
+        let shared = service
+            .ensure_subject_port_lease(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                "project",
+                old_root.path(),
+            )
+            .unwrap();
+        let new = service
+            .ensure_subject_port_lease(ns, kind, "session", new_root.path())
+            .unwrap();
+        assert_ne!(old.lease_id, new.lease_id);
+        assert_eq!(
+            service
+                .ensure_subject_port_lease(ns, kind, "session", old_root.path())
+                .unwrap(),
+            old
+        );
+        assert_eq!(
+            service
+                .read_subject_port_leases(ns, kind, "session")
+                .unwrap()
+                .len(),
+            2
+        );
+        // Wrong namespace, owner, kind or missing reference must never release a peer.
+        for (namespace, subject_kind, key, id) in [
+            ("remote:other", kind, "session", old.lease_id.as_str()),
+            (ns, kind, "other", old.lease_id.as_str()),
+            (
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                "session",
+                old.lease_id.as_str(),
+            ),
+            (ns, kind, "session", "missing"),
+        ] {
+            service
+                .release_subject_port_lease_reference(namespace, subject_kind, key, Some(id))
+                .unwrap();
+        }
+        assert_eq!(
+            service
+                .read_subject_port_leases(ns, kind, "session")
+                .unwrap()
+                .len(),
+            2
+        );
+        // Removing the directory does not prevent ledger-based cleanup.
+        old_root.close().unwrap();
+        for _ in 0..2 {
+            service
+                .release_subject_port_lease_reference(ns, kind, "session", Some(&old.lease_id))
+                .unwrap();
+        }
+        assert_eq!(
+            service
+                .read_subject_port_leases(ns, kind, "session")
+                .unwrap(),
+            vec![new.clone()]
+        );
+        let retained = service
+            .read_subject_port_leases(ns, crate::PortSubjectKind::ProjectRoot, "project")
+            .unwrap();
+        assert_eq!(retained[0].lease_id, shared.lease_id);
+        assert_eq!(retained[0].base_port, shared.base_port);
+        service
+            .release_subject_port_lease_reference(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                "project",
+                Some(&old.lease_id),
+            )
+            .unwrap();
+        assert_eq!(
+            service.list_workspace_port_leases().unwrap().leases.len(),
+            1
+        );
+        service
+            .release_subject_port_leases(ns, kind, "session")
+            .unwrap();
+        assert!(service
+            .list_workspace_port_leases()
+            .unwrap()
+            .leases
+            .is_empty());
+    }
+
+    #[test]
+    fn port_list_is_read_only_and_reports_all_subjects() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        assert!(service
+            .list_workspace_port_leases()
+            .unwrap()
+            .leases
+            .is_empty());
+        let lease = service
+            .ensure_subject_port_lease(
+                "remote:list",
+                crate::PortSubjectKind::ProjectRoot,
+                "p",
+                root.path(),
+            )
+            .unwrap();
+        let report = service.list_workspace_port_leases().unwrap();
+        assert_eq!(report.leases.len(), 1);
+        assert_eq!(report.leases[0].lease, lease);
+        assert_eq!(report.leases[0].subjects[0].key, "p");
+        assert_eq!(report.leases[0].occupied_ports, None);
+        assert!(report.diagnostics.is_empty());
+    }
 
     #[test]
     fn port_subject_aliases_share_one_block_and_release_only_their_reference() {

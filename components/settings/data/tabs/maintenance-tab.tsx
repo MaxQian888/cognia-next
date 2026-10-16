@@ -96,10 +96,12 @@ export function MaintenanceTab() {
  * (`service.rs::set_workspace_lifecycle_policy`), so refusing it here is the
  * difference between a disabled Save and a raw Rust error string.
  */
+type EditableLifecycleField = "activeDirectoryCap" | "snapshotRetentionDays" | "blobBudgetBytes"
+
 function WorkspaceLifecyclePolicyBlock() {
   const t = useTranslations("settings.data.workspaceLifecycle")
   const [policy, setPolicy] = useState<WorkspaceLifecyclePolicy | null>(null)
-  const [draft, setDraft] = useState<Record<keyof WorkspaceLifecyclePolicy, string> | null>(null)
+  const [draft, setDraft] = useState<Record<EditableLifecycleField, string> | null>(null)
   const [unavailable, setUnavailable] = useState(false)
   const [saved, setSaved] = useState(false)
   const { error, setError, run, busy } = useWorkspaceActionController()
@@ -139,15 +141,15 @@ function WorkspaceLifecyclePolicyBlock() {
   const dirty =
     policy !== null &&
     parsed !== null &&
-    (Object.keys(parsed) as (keyof WorkspaceLifecyclePolicy)[]).some(
-      (key) => parsed[key] !== policy[key]
-    )
+    (Object.keys(parsed) as EditableLifecycleField[]).some((key) => parsed[key] !== policy[key])
 
   const save = async () => {
-    if (!valid || !parsed) return
+    if (!valid || !parsed || !policy) return
     setSaved(false)
     const next = await run("workspace-lifecycle-policy", () =>
-      runWorkspaceUserAction("task_workspace_policy_set", () => setWorkspaceLifecyclePolicy(parsed))
+      runWorkspaceUserAction("task_workspace_policy_set", () =>
+        setWorkspaceLifecyclePolicy({ ...policy, ...parsed })
+      )
     )
     if (!next) return
     setPolicy(next)
@@ -156,7 +158,7 @@ function WorkspaceLifecyclePolicyBlock() {
 
   if (unavailable || !draft) return null
 
-  const field = (key: keyof WorkspaceLifecyclePolicy) => (
+  const field = (key: EditableLifecycleField) => (
     <div className="grid gap-1.5">
       <Label className="text-xs" htmlFor={`workspace-lifecycle-${key}`}>
         {t(`fields.${key}`)}

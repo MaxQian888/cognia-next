@@ -63,6 +63,43 @@ beforeEach(() => {
 })
 
 describe("runWorkspaceUserAction", () => {
+  it.each([
+    "task_workspace_port_lease_ensure",
+    "task_workspace_port_lease_resolve_ensure",
+    "task_workspace_port_lease_subject_ensure",
+  ])("runs %s on a paired client with workspace.write and no admin lease", async (command) => {
+    snapshotMock.mockReturnValue(
+      companionSnapshot({
+        operations: [command],
+        grants: ["workspace.write"],
+      })
+    )
+    const args = { workspaceId: "w1" }
+    callMock.mockResolvedValue("lease")
+
+    await expect(
+      runWorkspaceUserAction(command, () => approvalAwareTransport.call(command, args))
+    ).resolves.toBe("lease")
+
+    expect(issueLeaseMock).not.toHaveBeenCalled()
+    expect(callMock).toHaveBeenCalledWith(command, args)
+  })
+
+  it.each(["task_workspace_port_lease_release", "task_workspace_port_lease_subject_release"])(
+    "keeps %s interactive",
+    async (command) => {
+      snapshotMock.mockReturnValue(
+        companionSnapshot({
+          operations: [command, "host_admin_lease_issue"],
+        })
+      )
+      const args = { kind: "desktop-session", key: "s1", leaseId: "lease1" }
+      await runWorkspaceUserAction(command, () => approvalAwareTransport.call(command, args))
+      expect(issueLeaseMock).toHaveBeenCalledWith([command], 120)
+      expect(callMock).toHaveBeenCalledWith(command, { ...args, adminLease: "lease-token" })
+    }
+  )
+
   it("runs a native-host action without minting a lease", async () => {
     snapshotMock.mockReturnValue(NATIVE_HOST_SNAPSHOT)
     const op = jest.fn().mockResolvedValue("done")

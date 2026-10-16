@@ -42,6 +42,7 @@ import {
 import type { ProjectRemovalMode } from "@/lib/db/project-scope"
 import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 import { rebindWorkspaceSchedules } from "@/lib/workspace/rebind-workspace-schedules"
+import { releaseProjectPortLeases } from "@/lib/task-workspace/execution-port-lease"
 
 export interface CreateProjectOptions {
   /**
@@ -295,7 +296,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (get().projects.find((item) => item.id === id) !== project) {
           throw new Error("Workspace changed during deletion; retry deletion")
         }
+        await releaseProjectPortLeases(id)
+        if (get().projects.find((item) => item.id === id) !== project) {
+          throw new Error("Workspace changed during deletion; retry deletion")
+        }
         await deleteProjectRow(id)
+      } else {
+        await releaseProjectPortLeases(id)
+        if (get().projects.find((item) => item.id === id) !== project) {
+          throw new Error("Workspace changed during deletion; retry deletion")
+        }
       }
       const previouslyActive = get().activeProjectId === id
       const nextActiveId = previouslyActive ? (fallback?.id ?? null) : get().activeProjectId

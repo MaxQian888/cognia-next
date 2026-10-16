@@ -17800,6 +17800,168 @@
       },
       "additionalProperties": false
     },
+    "task_workspace_port_lease_ensure": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "task_workspace_port_lease_get": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "task_workspace_port_lease_list": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "task_workspace_port_lease_release": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "task_workspace_port_lease_resolve": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cwd"
+      ]
+    },
+    "task_workspace_port_lease_resolve_ensure": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cwd"
+      ]
+    },
+    "task_workspace_port_lease_subject_ensure": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "desktop-session",
+            "project-root"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key",
+        "root"
+      ]
+    },
+    "task_workspace_port_lease_subject_get": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "desktop-session",
+            "project-root"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key"
+      ]
+    },
+    "task_workspace_port_lease_subject_release": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "desktop-session",
+            "project-root"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "leaseId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key"
+      ]
+    },
     "task_workspace_project_source_ensure": {
       "description": "Where a project's work runs on an always-on host: one of its own folders when one exists here, else a clone of its repository made with the git credential a paired device stored for that host (cognia_task_workspace::EnsureProjectSource, ADR-0224 A11). Service plane only: it clones with a stored credential.",
       "type": "object",

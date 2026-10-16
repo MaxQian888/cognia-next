@@ -39,6 +39,7 @@ import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { resolvePanelRoot } from "@/lib/workspace/panel-follow"
 import { useChatStore } from "@/stores/chat/chat-store"
 import type { SessionExecutionContext } from "@/types/execution-context"
+import { ensureExecutionPortLease } from "@/lib/task-workspace/execution-port-lease"
 
 /**
  * The focused conversation's durable execution binding.
@@ -103,12 +104,12 @@ export async function spawnDefaultTerminal(
   const projectState = useProjectStore.getState()
   const projectId = opts.projectId !== undefined ? opts.projectId : projectState.activeProjectId
   const project = projectId ? (projectState.projects.find((p) => p.id === projectId) ?? null) : null
+  const sessionId =
+    opts.sessionId !== undefined ? opts.sessionId : useChatStore.getState().activeSessionId
   const executionContext =
     opts.sessionExecutionContext !== undefined
       ? opts.sessionExecutionContext
-      : await loadSessionExecutionContext(
-          opts.sessionId !== undefined ? opts.sessionId : useChatStore.getState().activeSessionId
-        )
+      : await loadSessionExecutionContext(sessionId)
   // One rule for every panel that operates on a directory. A terminal always
   // FOLLOWS — it is never pinnable — so a stale pin can never point a shell at
   // a tree the agent is not working in.
@@ -138,6 +139,21 @@ export async function spawnDefaultTerminal(
     const profile = findProfile(terminal.profiles, profileId)
     const fields = profile ? profileToSpawnFields(profile) : null
     if (fields) {
+      const cwd =
+        opts.cwdOverride?.trim() ||
+        (followed.source === "execution" ? followed.root : undefined) ||
+        fields.cwd
+      try {
+        await ensureExecutionPortLease({
+          cwd,
+          project: project ?? undefined,
+          projectId,
+          sessionId,
+          executionContext,
+        })
+      } catch (error) {
+        return { kind: "error", message: error instanceof Error ? error.message : String(error) }
+      }
       return spawnFromDock({
         req: {
           ...fields,
@@ -145,11 +161,7 @@ export async function spawnDefaultTerminal(
           // root outranks it for the same reason it outranks the project's:
           // the profile describes a habit, the execution root describes where
           // this work is happening.
-          ...(opts.cwdOverride?.trim()
-            ? { cwd: opts.cwdOverride.trim() }
-            : followed.source === "execution" && followed.root
-              ? { cwd: followed.root }
-              : {}),
+          cwd,
           profileId,
           rows,
           cols,
@@ -179,17 +191,29 @@ export async function spawnDefaultTerminal(
           hostDefaultShell,
         })
 
+  const cwd =
+    opts.cwdOverride?.trim() ||
+    (followed.source === "execution" ? (followed.root ?? undefined) : undefined) ||
+    project?.terminalConfig?.cwd?.trim() ||
+    followed.root ||
+    undefined
+  try {
+    await ensureExecutionPortLease({
+      cwd,
+      project: project ?? undefined,
+      projectId,
+      sessionId,
+      executionContext,
+    })
+  } catch (error) {
+    return { kind: "error", message: error instanceof Error ? error.message : String(error) }
+  }
   return spawnFromDock({
     req: {
       shell,
       rows,
       cols,
-      cwd:
-        opts.cwdOverride?.trim() ||
-        (followed.source === "execution" ? (followed.root ?? undefined) : undefined) ||
-        project?.terminalConfig?.cwd?.trim() ||
-        followed.root ||
-        undefined,
+      cwd,
       env: project?.terminalConfig?.env,
       projectId: projectId ?? undefined,
       enableShellIntegration: true,

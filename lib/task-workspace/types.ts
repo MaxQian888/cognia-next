@@ -51,6 +51,7 @@ export type ManagedWorkspaceState =
   "provisioning" | "active" | "archived" | "conflict" | "restorable" | "removing" | "removed"
 
 export interface ManagedWorkspaceRecord {
+  portLease?: WorkspacePortLease
   workspaceId: string
   environmentKind: WorkspaceEnvironmentKind
   ownerType: WorkspaceOwnerType
@@ -229,6 +230,56 @@ export interface WorkspaceLifecyclePolicy {
   activeDirectoryCap: number
   snapshotRetentionDays: number
   blobBudgetBytes: number
+  portRangeStart: number
+  portRangeEnd: number
+  portBlockSize: number
+}
+
+export type PortSubjectKind = "registry" | "desktop-session" | "project-root"
+export type ExternalPortSubjectKind = Exclude<PortSubjectKind, "registry">
+
+/** Host-owned allocation; observing a projection never creates a lease. */
+export interface WorkspacePortLease {
+  leaseId: string
+  namespaceKey: string
+  subjectKind: PortSubjectKind
+  subjectKey: string
+  canonicalRoot: string
+  registryWorkspaceId: string | null
+  basePort: number
+  portCount: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PortLeaseSubject {
+  kind: PortSubjectKind
+  key: string
+}
+
+export interface PortLeaseDiagnostic {
+  kind:
+    | "duplicateRoot"
+    | "overlap"
+    | "outOfRange"
+    | "ambiguousRegistryLink"
+    | "unresolvedRegistryRoot"
+    | "registryRootMismatch"
+  leaseIds: string[]
+  detail: string
+}
+
+export interface WorkspacePortLeaseStatus {
+  lease: WorkspacePortLease
+  subjects: PortLeaseSubject[]
+  /** Null means this host cannot probe the namespace or the probe failed. */
+  occupiedPorts: number[] | null
+  occupancyError: string | null
+}
+
+export interface WorkspacePortLeaseList {
+  leases: WorkspacePortLeaseStatus[]
+  diagnostics: PortLeaseDiagnostic[]
 }
 
 export interface WorkspaceMaintenanceRequest {
@@ -282,6 +333,7 @@ export type WorkspaceEnvironmentAction =
 
 /** Canonical host-owned projection of Git worktrees and Registry environments. */
 export interface WorkspaceEnvironmentSummary {
+  portLease?: WorkspacePortLease
   environmentId: string
   workspaceId: string | null
   /**

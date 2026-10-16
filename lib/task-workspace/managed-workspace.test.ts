@@ -1,10 +1,14 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 jest.mock("./client", () => ({
+  WorkspacePortLeaseError: jest.requireActual("./client").WorkspacePortLeaseError,
   ensureSessionScratchWorkspaceBundle: jest.fn(),
   archiveManagedWorkspace: jest.fn(),
   getWorkspaceBundle: jest.fn(),
   listWorkspaceBundles: jest.fn(),
   getManagedWorkspace: jest.fn(),
+  ensureSubjectPortLease: jest.fn(),
+  getSubjectPortLeases: jest.fn(),
+  releaseSubjectPortLeases: jest.fn(),
 }))
 jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
   getRuntimeSnapshot: jest.fn(() => ({ target: null })),
@@ -31,15 +35,17 @@ import {
   portableExecutionContext,
   rebindManagedWorkspace,
   restoreManagedWorkspace,
+  ManagedWorkspacePortLeaseCleanupError,
 } from "./managed-workspace"
 import type { SessionScratchWorkspaceDeps } from "./managed-workspace"
-import type { WorkspaceBundle } from "./types"
+import type { WorkspaceBundle, WorkspacePortLease } from "./types"
 import {
   archiveManagedWorkspace,
   ensureSessionScratchWorkspaceBundle,
   getWorkspaceBundle,
   listWorkspaceBundles,
   getManagedWorkspace,
+  WorkspacePortLeaseError,
 } from "./client"
 import { getSession } from "@/lib/db/sessions"
 import { isHeadlessHost } from "@/lib/platform/detect"
@@ -63,16 +69,36 @@ function fixture() {
   const directories = new Set<string>(["/data"])
   const files = new Map<string, Uint8Array>()
   const updates: unknown[] = []
+  const leases = new Map<string, WorkspacePortLease>()
+  const aliases = new Map<string, string>()
+  const references = new Map<string, Set<string>>()
+  const projects = new Map<string, { id: string; rootDir: string }>()
+  type Subject = { kind: "desktop-session" | "project-root"; key: string }
+  const subjectId = ({ kind, key }: Subject) => `${kind}:${key}`
+  const release = (subject: Subject & { leaseId?: string }) => {
+    for (const [root, lease] of leases) {
+      if (subject.leaseId && lease.leaseId !== subject.leaseId) continue
+      const owners = references.get(lease.leaseId)!
+      owners.delete(subjectId(subject))
+      if (owners.size === 0) {
+        references.delete(lease.leaseId)
+        leases.delete(root)
+      }
+    }
+  }
+  let leaseSequence = 0
   const deps = {
+    isTauri: () => true,
     now: () => 20,
     managedBaseRoot: async () => "/data/managed-workspaces",
     getSession: async () => row,
-    updateSession: async (_id: string, patch: Partial<ChatSession>) => {
+    updateSession: jest.fn(async (_id: string, patch: Partial<ChatSession>) => {
       updates.push(patch)
       row = { ...row, ...patch }
-    },
+    }),
     exists: async (path: string) => directories.has(path) || files.has(path),
     mkdir: async (path: string) => void directories.add(path),
+    remove: jest.fn(async (path: string) => void directories.delete(path)),
     rename: async (from: string, to: string) => {
       if (!directories.delete(from)) throw new Error("missing source")
       directories.add(to)
@@ -103,15 +129,54 @@ function fixture() {
     },
     readFile: async (path: string) => files.get(path)!,
     writeFile: async (path: string, bytes: Uint8Array) => void files.set(path, bytes),
-    registerAllowedRoot: async () => undefined,
-    createProject: (rootDir: string) => ({ id: "project-new", rootDir }),
+    registerAllowedRoot: jest.fn(async (_path: string) => undefined),
+    createProject: jest.fn((rootDir: string) => {
+      const project = { id: "project-new", rootDir }
+      projects.set(project.id, project)
+      return project
+    }),
+    deleteProject: jest.fn(async (key: string) => {
+      release({ kind: "project-root", key })
+      projects.delete(key)
+    }),
     addSessionToProject: jest.fn(),
+    ensureSubjectPortLease: jest.fn(async ({ root, ...subject }: Subject & { root: string }) => {
+      root = aliases.get(root) ?? root
+      let lease = leases.get(root)
+      if (!lease) {
+        lease = {
+          leaseId: `lease-${++leaseSequence}`,
+          namespaceKey: "host-loopback",
+          subjectKind: subject.kind,
+          subjectKey: subject.key,
+          canonicalRoot: root,
+          registryWorkspaceId: null,
+          basePort: 41000 + (leaseSequence - 1) * 10,
+          portCount: 10,
+          createdAt: 20,
+          updatedAt: 20,
+        }
+        leases.set(root, lease)
+        references.set(lease.leaseId, new Set())
+      }
+      references.get(lease.leaseId)!.add(subjectId(subject))
+      return lease
+    }),
+    getSubjectPortLeases: jest.fn(async (subject: Subject) =>
+      [...leases.values()].filter((lease) => references.get(lease.leaseId)?.has(subjectId(subject)))
+    ),
+    releaseSubjectPortLeases: jest.fn(async (subject: Subject & { leaseId?: string }) =>
+      release(subject)
+    ),
   }
   return {
     deps,
     directories,
     files,
     updates,
+    leases,
+    aliases,
+    projects,
     get row() {
       return row
     },
@@ -135,6 +200,18 @@ describe("managed workspace lifecycle", () => {
     )
     expect(context.projectRoot).toBe(context.managedWorkspace?.localRoot)
     expect(fx.directories).toContain(context.projectRoot)
+    expect(runWorkspaceUserAction).toHaveBeenCalledWith(
+      "task_workspace_port_lease_subject_ensure",
+      expect.any(Function)
+    )
+    expect(fx.deps.ensureSubjectPortLease).toHaveBeenCalledWith({
+      kind: "desktop-session",
+      key: "session-1",
+      root: context.projectRoot,
+    })
+    expect(fx.deps.ensureSubjectPortLease.mock.invocationCallOrder[0]).toBeLessThan(
+      fx.deps.registerAllowedRoot.mock.invocationCallOrder[0]
+    )
   })
 
   it("strips device paths from portable sync and marks the receiver missing", () => {
@@ -162,7 +239,10 @@ describe("managed workspace lifecycle", () => {
   it("deletes recoverably and restores the same workspace identity", async () => {
     const fx = fixture()
     await materializeManagedWorkspace("session-1", fx.deps)
+    const originalLease = [...fx.leases.values()][0]
     const deleted = await deleteManagedWorkspace("session-1", fx.deps)
+    expect(fx.deps.releaseSubjectPortLeases).not.toHaveBeenCalled()
+    expect([...fx.leases.values()]).toEqual([originalLease])
     expect(deleted.managedWorkspace).toEqual(
       expect.objectContaining({ availability: "deleted", deletedAt: 20 })
     )
@@ -174,6 +254,233 @@ describe("managed workspace lifecycle", () => {
     expect(restored.managedWorkspace).toEqual(
       expect.objectContaining({ availability: "available" })
     )
+    expect(fx.deps.ensureSubjectPortLease).toHaveBeenCalledTimes(2)
+    expect([...fx.leases.values()]).toEqual([originalLease])
+  })
+
+  it("ensures a lease for an already materialized session", async () => {
+    const fx = fixture()
+    await materializeManagedWorkspace("session-1", fx.deps)
+    fx.leases.clear()
+    await materializeManagedWorkspace("session-1", fx.deps)
+    expect(fx.deps.ensureSubjectPortLease).toHaveBeenCalledTimes(2)
+    expect(fx.leases.size).toBe(1)
+  })
+
+  it("moves the subject on rebind and restores rebound folders at their original root", async () => {
+    const fx = fixture()
+    const original = await materializeManagedWorkspace("session-1", fx.deps)
+    const originalLease = fx.leases.get(original.projectRoot)!
+    fx.directories.add("/rebound")
+    await rebindManagedWorkspace("session-1", "/rebound", fx.deps)
+    expect(fx.deps.releaseSubjectPortLeases).toHaveBeenCalledWith({
+      kind: "desktop-session",
+      key: "session-1",
+      leaseId: originalLease.leaseId,
+    })
+    expect(fx.leases.has(original.projectRoot)).toBe(false)
+    const reboundLease = fx.leases.get("/rebound")
+    expect(reboundLease).toBeDefined()
+    expect(fx.deps.releaseSubjectPortLeases.mock.invocationCallOrder[0]).toBeGreaterThan(
+      fx.deps.ensureSubjectPortLease.mock.invocationCallOrder[1]
+    )
+    expect(fx.deps.releaseSubjectPortLeases.mock.invocationCallOrder[0]).toBeGreaterThan(
+      fx.deps.updateSession.mock.invocationCallOrder[1]
+    )
+    await deleteManagedWorkspace("session-1", fx.deps)
+    await restoreManagedWorkspace("session-1", fx.deps)
+    expect(fx.row.executionContext?.projectRoot).toBe("/rebound")
+    expect(fx.leases.get("/rebound")).toEqual(reboundLease)
+    expect(fx.deps.releaseSubjectPortLeases).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not register or retain a newly-created folder when ensure fails", async () => {
+    const fx = fixture()
+    const error = new WorkspacePortLeaseError(
+      "task_workspace_port_lease_subject_ensure",
+      "no available port block: portRangeStart/portRangeEnd/portBlockSize"
+    )
+    fx.deps.ensureSubjectPortLease.mockRejectedValueOnce(error)
+    await expect(materializeManagedWorkspace("session-1", fx.deps)).rejects.toBe(error)
+    expect(fx.deps.registerAllowedRoot).not.toHaveBeenCalled()
+    expect(fx.updates).toEqual([])
+    expect(fx.directories).not.toContain("/data/managed-workspaces/managed-workspace_session-1")
+    expect(fx.leases.size).toBe(0)
+  })
+
+  it("keeps the same lease when rebinding through a physical-directory alias", async () => {
+    const fx = fixture()
+    const original = await materializeManagedWorkspace("session-1", fx.deps)
+    const lease = fx.leases.get(original.projectRoot)
+    fx.directories.add("/alias")
+    fx.aliases.set("/alias", original.projectRoot)
+    await rebindManagedWorkspace("session-1", "/alias", fx.deps)
+    expect(fx.deps.releaseSubjectPortLeases).not.toHaveBeenCalled()
+    expect([...fx.leases.values()]).toEqual([lease])
+    expect(fx.row.executionContext?.projectRoot).toBe("/alias")
+  })
+
+  it("moves a retained subject even when portable session metadata lost its local root", async () => {
+    const fx = fixture()
+    const original = await materializeManagedWorkspace("session-1", fx.deps)
+    await fx.deps.updateSession("session-1", {
+      executionContext: portableExecutionContext(original),
+    })
+    fx.directories.add("/rebound")
+    await rebindManagedWorkspace("session-1", "/rebound", fx.deps)
+    expect(fx.deps.releaseSubjectPortLeases).toHaveBeenCalledTimes(1)
+    expect(fx.leases.has(original.projectRoot)).toBe(false)
+    expect(fx.leases.has("/rebound")).toBe(true)
+  })
+
+  it("keeps pre-existing folder data when materialization ensure fails", async () => {
+    const fx = fixture()
+    const root = "/data/managed-workspaces/managed-workspace_session-1"
+    fx.directories.add(root)
+    fx.deps.ensureSubjectPortLease.mockRejectedValueOnce(new Error("lease unavailable"))
+    await expect(materializeManagedWorkspace("session-1", fx.deps)).rejects.toThrow(
+      "lease unavailable"
+    )
+    expect(fx.directories).toContain(root)
+    expect(fx.deps.remove).not.toHaveBeenCalled()
+  })
+
+  it("releases a newly ensured lease and removes the folder if persistence fails", async () => {
+    const fx = fixture()
+    fx.deps.updateSession.mockRejectedValueOnce(new Error("write failed"))
+    await expect(materializeManagedWorkspace("session-1", fx.deps)).rejects.toThrow("write failed")
+    expect(fx.leases.size).toBe(0)
+    expect(fx.directories).not.toContain("/data/managed-workspaces/managed-workspace_session-1")
+  })
+
+  it("keeps the old lease and numbers untouched when rebind allocation fails", async () => {
+    const fx = fixture()
+    const original = await materializeManagedWorkspace("session-1", fx.deps)
+    const originalLease = fx.leases.get(original.projectRoot)
+    fx.directories.add("/rebound")
+    const error = new WorkspacePortLeaseError(
+      "task_workspace_port_lease_subject_ensure",
+      "allocation failed"
+    )
+    fx.deps.ensureSubjectPortLease.mockRejectedValueOnce(error)
+    await expect(rebindManagedWorkspace("session-1", "/rebound", fx.deps)).rejects.toBe(error)
+    expect(fx.leases.has(original.projectRoot)).toBe(true)
+    expect(fx.leases.has("/rebound")).toBe(false)
+    expect(fx.leases.get(original.projectRoot)).toEqual(originalLease)
+    expect(fx.deps.releaseSubjectPortLeases).not.toHaveBeenCalled()
+    expect(fx.row.executionContext?.projectRoot).toBe(original.projectRoot)
+  })
+
+  it("releases only the new reference if saving a rebind fails", async () => {
+    const fx = fixture()
+    const original = await materializeManagedWorkspace("session-1", fx.deps)
+    const originalLease = fx.leases.get(original.projectRoot)!
+    fx.directories.add("/rebound")
+    fx.deps.updateSession.mockRejectedValueOnce(new Error("write failed"))
+    await expect(rebindManagedWorkspace("session-1", "/rebound", fx.deps)).rejects.toThrow(
+      "write failed"
+    )
+    expect([...fx.leases.values()]).toEqual([originalLease])
+    expect(fx.row.executionContext?.projectRoot).toBe(original.projectRoot)
+    expect(fx.deps.releaseSubjectPortLeases).toHaveBeenCalledWith({
+      kind: "desktop-session",
+      key: "session-1",
+      leaseId: "lease-2",
+    })
+    expect(fx.deps.releaseSubjectPortLeases).not.toHaveBeenCalledWith(
+      expect.objectContaining({ leaseId: originalLease.leaseId })
+    )
+  })
+
+  it("reports post-commit cleanup failure without undoing a saved rebind", async () => {
+    const fx = fixture()
+    await materializeManagedWorkspace("session-1", fx.deps)
+    fx.directories.add("/rebound")
+    fx.deps.releaseSubjectPortLeases.mockRejectedValueOnce(new Error("cleanup unavailable"))
+    await expect(rebindManagedWorkspace("session-1", "/rebound", fx.deps)).rejects.toMatchObject({
+      name: "ManagedWorkspacePortLeaseCleanupError",
+      committed: true,
+      sessionId: "session-1",
+      leaseIds: ["lease-1"],
+    })
+    expect(fx.row.executionContext?.projectRoot).toBe("/rebound")
+    expect(fx.leases.get("/rebound")?.basePort).toBe(41010)
+    await materializeManagedWorkspace("session-1", fx.deps)
+    expect([...fx.leases.keys()]).toEqual(["/rebound"])
+    expect(fx.leases.get("/rebound")?.basePort).toBe(41010)
+  })
+
+  it.each(["materialize", "restore"] as const)(
+    "keeps the committed %s folder if removing a stale reference fails",
+    async (operation) => {
+      const fx = fixture()
+      let trashRoot: string | undefined
+      if (operation === "restore") {
+        await materializeManagedWorkspace("session-1", fx.deps)
+        trashRoot = (await deleteManagedWorkspace("session-1", fx.deps)).managedWorkspace
+          ?.deletedRoot
+      }
+      await fx.deps.ensureSubjectPortLease({
+        kind: "desktop-session",
+        key: "session-1",
+        root: "/stale",
+      })
+      fx.deps.releaseSubjectPortLeases.mockRejectedValueOnce(new Error("cleanup unavailable"))
+      const run = operation === "restore" ? restoreManagedWorkspace : materializeManagedWorkspace
+      await expect(run("session-1", fx.deps)).rejects.toBeInstanceOf(
+        ManagedWorkspacePortLeaseCleanupError
+      )
+      const savedRoot = fx.row.executionContext?.managedWorkspace?.localRoot
+      expect(fx.row.executionContext?.managedWorkspace?.availability).toBe("available")
+      expect(fx.directories.has(savedRoot!)).toBe(true)
+      if (trashRoot) expect(fx.directories.has(trashRoot)).toBe(false)
+      expect(fx.deps.remove).not.toHaveBeenCalled()
+    }
+  )
+
+  it("returns a failed restore to trash and keeps its existing lease", async () => {
+    const fx = fixture()
+    await materializeManagedWorkspace("session-1", fx.deps)
+    const lease = [...fx.leases.values()][0]
+    const deleted = await deleteManagedWorkspace("session-1", fx.deps)
+    const error = new WorkspacePortLeaseError(
+      "task_workspace_port_lease_subject_ensure",
+      "host unavailable"
+    )
+    fx.deps.ensureSubjectPortLease.mockRejectedValueOnce(error)
+    await expect(restoreManagedWorkspace("session-1", fx.deps)).rejects.toBe(error)
+    expect(fx.directories).toContain(deleted.managedWorkspace?.deletedRoot)
+    expect(fx.directories).not.toContain(lease.canonicalRoot)
+    expect(fx.row.executionContext?.managedWorkspace?.availability).toBe("deleted")
+    expect([...fx.leases.values()]).toEqual([lease])
+  })
+
+  it("does not call host lease commands without desktop capability", async () => {
+    const fx = fixture()
+    fx.deps.isTauri = () => false
+    await materializeManagedWorkspace("session-1", fx.deps)
+    await deleteManagedWorkspace("session-1", fx.deps)
+    await restoreManagedWorkspace("session-1", fx.deps)
+    expect(fx.deps.getSubjectPortLeases).not.toHaveBeenCalled()
+    expect(fx.deps.ensureSubjectPortLease).not.toHaveBeenCalled()
+    expect(fx.deps.releaseSubjectPortLeases).not.toHaveBeenCalled()
+  })
+
+  it("recovers legacy deleted rebound folders from their retained physical-root lease", async () => {
+    const fx = fixture()
+    fx.directories.add("/legacy-rebound")
+    await rebindManagedWorkspace("session-1", "/legacy-rebound", fx.deps)
+    const lease = fx.leases.get("/legacy-rebound")
+    const deleted = await deleteManagedWorkspace("session-1", fx.deps)
+    await fx.deps.updateSession("session-1", {
+      executionContext: {
+        ...deleted,
+        managedWorkspace: { ...deleted.managedWorkspace!, localRoot: undefined },
+      },
+    })
+    await restoreManagedWorkspace("session-1", fx.deps)
+    expect(fx.row.executionContext?.projectRoot).toBe("/legacy-rebound")
+    expect(fx.leases.get("/legacy-rebound")).toEqual(lease)
   })
 
   it("round-trips nested files through a bounded portable archive", async () => {
@@ -209,7 +516,39 @@ describe("managed workspace lifecycle", () => {
     )
     expect(fx.deps.addSessionToProject).toHaveBeenCalledWith("project-new", "session-1")
     expect(fx.row.projectId).toBe("project-new")
+    expect(
+      await fx.deps.getSubjectPortLeases({ kind: "project-root", key: "project-new" })
+    ).toEqual(await fx.deps.getSubjectPortLeases({ kind: "desktop-session", key: "session-1" }))
+    expect(fx.deps.ensureSubjectPortLease.mock.invocationCallOrder[1]).toBeLessThan(
+      fx.deps.updateSession.mock.invocationCallOrder[1]
+    )
   })
+
+  it.each(["ensure", "persist"])(
+    "rolls back the new project if conversion %s fails",
+    async (failure) => {
+      const fx = fixture()
+      const original = await materializeManagedWorkspace("session-1", fx.deps)
+      const lease = fx.leases.get(original.projectRoot)
+      const error = new WorkspacePortLeaseError(
+        "task_workspace_port_lease_subject_ensure",
+        "conversion failed"
+      )
+      if (failure === "ensure") fx.deps.ensureSubjectPortLease.mockRejectedValueOnce(error)
+      else fx.deps.updateSession.mockRejectedValueOnce(error)
+      await expect(convertManagedWorkspaceToProject("session-1", "Project", fx.deps)).rejects.toBe(
+        error
+      )
+      expect(fx.projects.size).toBe(0)
+      expect(fx.deps.deleteProject).toHaveBeenCalledWith("project-new")
+      expect(fx.deps.addSessionToProject).not.toHaveBeenCalled()
+      expect(fx.row.executionContext).toEqual(original)
+      expect([...fx.leases.values()]).toEqual([lease])
+      expect(
+        await fx.deps.getSubjectPortLeases({ kind: "project-root", key: "project-new" })
+      ).toEqual([])
+    }
+  )
 
   it("rejects traversal and oversized archives before writing", async () => {
     const fx = fixture()
