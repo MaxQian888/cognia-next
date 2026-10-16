@@ -13341,6 +13341,201 @@
       "outputTyped": true
     },
     {
+      "name": "companion_browser_extension_call",
+      "category": "system",
+      "resource": "companion",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_browser_extension_call (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "example": {}
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "device_id"
+                ]
+              },
+              {
+                "required": [
+                  "deviceId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The answer of one browser operation, defined per operation by the extension's agent protocol (browser-extension/src/lib/agent/protocol.ts) and parsed by lib/browser/extension-engine.ts: a snapshot, an action result, a tab list, or nothing. The Host relays it unread over the device socket.",
+        "x-cognia-schema-owner": "companion"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_browser_extension_notify",
+      "category": "system",
+      "resource": "companion",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_browser_extension_notify (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "device_id"
+                ]
+              },
+              {
+                "required": [
+                  "deviceId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_browser_extension_status",
+      "category": "system",
+      "resource": "companion",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "companion_browser_extension_status (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "device_id"
+                ]
+              },
+              {
+                "required": [
+                  "deviceId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "cognia_companion::ws_browser_companion::BrowserDeviceStatus",
+        "required": [
+          "connected",
+          "driveAllowed"
+        ],
+        "properties": {
+          "connected": {
+            "type": "boolean"
+          },
+          "driveAllowed": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "companion_can_control",
       "category": "system",
       "resource": "companion",
@@ -87870,5 +88065,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "89cec7fd1f1b6a70a251001b2141fe4fba27088da30acf4e5d4d700dfb1d06e5"
+  "catalogHash": "9ba773f01c12922bd59dd54b57ca93f277456933e594cbb6a7e632b3e1a53444"
 }

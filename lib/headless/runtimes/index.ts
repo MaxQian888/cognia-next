@@ -158,13 +158,6 @@
  *   local Chromium runtime, both re-emitted by Tauri) into the renderer's Dexie
  *   history (ADR-0201). Only the desktop app hosts those browsers; a headless
  *   host has neither the Tauri event source nor a browser to download from.
- * - `browser-companion-agent-initializer` — rebinds `browser-agent`
- *   conversations to their paired browsers and hints browsers when their
- *   submissions move, both through the `companion_browser_extension_*` Tauri
- *   commands over the device socket (ADR-0228 §5–§6). A headless host serves
- *   that socket too, but no RPC arm reaches those commands from the brain
- *   (`unexposed-gap` in protocol/headless-command-dispositions.json), so every
- *   bind and hint would fail there.
  * - `dock-pages-lifecycle-initializer` — mirrors the shared local-Chromium
  *   session's pages into the desktop chat dock's page tabs and closes a
  *   conversation's pages when the renderer switches away from it (ADR-0214).
@@ -210,6 +203,7 @@ import "./plan-notification"
 import "./room-runner"
 import "./sftp-transfer-pump"
 import "./file-share-host-sync"
+import "./browser-companion-agent"
 import "./bots"
 import "./router-fusion"
 import "./account-sync"

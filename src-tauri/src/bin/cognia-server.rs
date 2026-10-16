@@ -411,6 +411,12 @@ enum DevicesCommand {
         /// symlinks.
         #[arg(long = "ssh-files")]
         ssh_files: bool,
+        /// Let agents act in this paired browser through the Cognia
+        /// extension (ADR-0228 `browser.drive`). Browsers only: it is what
+        /// makes the extension offer "Act in this browser", and every page
+        /// action is still checked against it at send time.
+        #[arg(long = "browser-drive")]
+        browser_drive: bool,
         /// Defaults to the tenant this host is bound to.
         #[arg(long)]
         tenant_id: Option<String>,
@@ -426,6 +432,8 @@ enum DevicesCommand {
         terminal: bool,
         #[arg(long = "ssh-files")]
         ssh_files: bool,
+        #[arg(long = "browser-drive")]
+        browser_drive: bool,
         /// Defaults to the tenant this host is bound to.
         #[arg(long)]
         tenant_id: Option<String>,
@@ -1261,11 +1269,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Selected capabilities, or an error when the operator named none — silently
 /// doing nothing would read as success and leave them believing a device is
 /// granted.
+///
+/// `browser_drive` is not a [`GrantKind`] — it belongs to a browser's own
+/// capability class, not to the owner-device grants — so it only counts
+/// towards "named at least one" and is applied by the caller.
 fn selected_kinds(
     control: bool,
     agent_control: bool,
     terminal: bool,
     ssh_files: bool,
+    browser_drive: bool,
 ) -> Result<Vec<GrantKind>, String> {
     let mut kinds = Vec::new();
     if control {
@@ -1280,8 +1293,11 @@ fn selected_kinds(
     if ssh_files {
         kinds.push(GrantKind::SshFiles);
     }
-    if kinds.is_empty() {
-        return Err("pass --control, --agent-control, --terminal, and/or --ssh-files".to_string());
+    if kinds.is_empty() && !browser_drive {
+        return Err(
+            "pass --control, --agent-control, --terminal, --ssh-files, and/or --browser-drive"
+                .to_string(),
+        );
     }
     Ok(kinds)
 }
@@ -1493,6 +1509,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
             agent_control,
             terminal,
             ssh_files,
+            browser_drive,
             tenant_id,
         } => {
             let tenant_id = resolve_tenant(tenant_id);
@@ -1501,7 +1518,8 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                 .ok_or("device is unknown or revoked")?
                 .into_iter()
                 .collect::<std::collections::BTreeSet<_>>();
-            for kind in selected_kinds(control, agent_control, terminal, ssh_files)? {
+            let kinds = selected_kinds(control, agent_control, terminal, ssh_files, browser_drive)?;
+            for kind in kinds {
                 let before = capabilities.len();
                 capabilities.extend(
                     grant_kind_capabilities(kind)
@@ -1516,6 +1534,15 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                         "already granted"
                     },
                     kind.as_str()
+                );
+            }
+            // The store refuses `browser.drive` for anything but a browser
+            // (its capability class), so naming it for a phone fails whole.
+            if browser_drive {
+                let granted = capabilities.insert(BROWSER_DRIVE.to_string());
+                println!(
+                    "{} browser-drive for {device_id}",
+                    if granted { "granted" } else { "already granted" }
                 );
             }
             security.replace_device_capabilities(
@@ -1533,6 +1560,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
             agent_control,
             terminal,
             ssh_files,
+            browser_drive,
             tenant_id,
         } => {
             let tenant_id = resolve_tenant(tenant_id);
@@ -1541,7 +1569,8 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                 .ok_or("device is unknown or revoked")?
                 .into_iter()
                 .collect::<std::collections::BTreeSet<_>>();
-            for kind in selected_kinds(control, agent_control, terminal, ssh_files)? {
+            let kinds = selected_kinds(control, agent_control, terminal, ssh_files, browser_drive)?;
+            for kind in kinds {
                 let mut changed = false;
                 for capability in grant_kind_capabilities(kind) {
                     // Do not short-circuit: revoking a grant kind must remove
@@ -1558,6 +1587,13 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                     kind.as_str()
                 );
             }
+            if browser_drive {
+                let revoked = capabilities.remove(BROWSER_DRIVE);
+                println!(
+                    "{} browser-drive for {device_id}",
+                    if revoked { "revoked" } else { "was not granted" }
+                );
+            }
             security.replace_device_capabilities(
                 &tenant_id,
                 "local-cli-trust-root",
@@ -1569,6 +1605,10 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
         }
     }
 }
+
+/// The capability `--browser-drive` grants: the one the device socket checks
+/// before every page action (ADR-0228 §5).
+const BROWSER_DRIVE: &str = app_lib::companion_api::ws_browser_companion::DRIVE_CAPABILITY;
 
 /// Delegates to the shared mapping so this CLI and the desktop paired-devices
 /// toggles cannot grant different capability sets for the same named grant.
@@ -3639,6 +3679,39 @@ mod tests {
             .expect("grant on an owner device");
         assert!(store
             .has_capability("tenant-a", "owner-a", "terminal.open")
+            .unwrap());
+
+        // `--browser-drive` is the one grant a browser may take: it is how a
+        // headless operator lets agents act in that browser (ADR-0228).
+        devices(&["grant", "browser-a", "--browser-drive", "--tenant-id", "tenant-a"])
+            .await
+            .expect("browser-drive on a browser");
+        assert_eq!(
+            class(),
+            vec!["browser.drive", "browser.read-own", "browser.submit"]
+        );
+        devices(&["grant", "browser-a", "--browser-drive", "--tenant-id", "tenant-a"])
+            .await
+            .expect("granting again is a no-op, not an error");
+        devices(&["revoke", "browser-a", "--browser-drive", "--tenant-id", "tenant-a"])
+            .await
+            .expect("revoke browser-drive");
+        assert_eq!(class(), vec!["browser.read-own", "browser.submit"]);
+
+        // A phone cannot be made drivable as a browser: `browser.drive` is
+        // no capability an owner device's set may name.
+        let error = devices(&["grant", "owner-a", "--browser-drive", "--tenant-id", "tenant-a"])
+            .await
+            .expect_err("browser-drive on an owner device");
+        assert!(
+            matches!(
+                error.downcast_ref::<SecurityStoreError>(),
+                Some(SecurityStoreError::InvalidCapabilities)
+            ),
+            "{error}"
+        );
+        assert!(!store
+            .has_capability("tenant-a", "owner-a", "browser.drive")
             .unwrap());
 
         install_security_store(None);

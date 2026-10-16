@@ -1,4 +1,9 @@
 /** @jest-environment jsdom */
+const mockCallBrowserSocket = jest.fn()
+jest.mock("@/lib/browser-companion/host-transport", () => ({
+  callBrowserSocket: (input: unknown) => mockCallBrowserSocket(input),
+}))
+
 import { BrowserSessionError } from "@/lib/browser/session-types"
 
 import {
@@ -8,6 +13,7 @@ import {
   bindExtensionSession,
   extensionBindingFor,
   extensionEngineFor,
+  hostFileReader,
   mediaTypeForPath,
   resetExtensionBindings,
   unbindExtensionSession,
@@ -162,5 +168,38 @@ describe("conversation bindings", () => {
     bindExtensionSession("session-1", { deviceId: "browser-a" })
     const engine = extensionEngineFor("session-1")
     expect(engine.deviceId).toBe("browser-a")
+  })
+})
+
+describe("the engine's Host defaults", () => {
+  it("sends operations to this Host's own server unless a transport is injected", async () => {
+    mockCallBrowserSocket.mockResolvedValue({ url: "https://example.com/" })
+    bindExtensionSession("session-host", { deviceId: "browser-h" })
+    const engine = extensionEngineFor("session-host")
+    await engine.navigate("https://example.com/")
+    expect(mockCallBrowserSocket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceId: "browser-h",
+        operation: "navigate",
+        args: expect.objectContaining({ session: "session-host", url: "https://example.com/" }),
+      })
+    )
+  })
+
+  it("reads upload paths straight from disk outside the desktop shell", async () => {
+    const { mkdtemp, writeFile, rm } = await import("node:fs/promises")
+    const { join } = await import("node:path")
+    const { tmpdir } = await import("node:os")
+    const dir = await mkdtemp(join(tmpdir(), "extension-engine-"))
+    try {
+      const path = join(dir, "note.txt")
+      await writeFile(path, "hello from the Host")
+      const bytes = await hostFileReader(path)
+      expect(bytes).toBeInstanceOf(Uint8Array)
+      expect(new TextDecoder().decode(bytes)).toBe("hello from the Host")
+      await expect(hostFileReader(join(dir, "missing.txt"))).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

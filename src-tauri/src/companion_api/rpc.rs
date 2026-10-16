@@ -421,6 +421,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "external_agent_run_turn",
     "external_agent_session_query",
     "external_agent_session_mutate",
+    // ADR-0228 — the brain's view of a paired browser's device socket.
+    // Service scope only (SERVICE_ONLY_COMMANDS).
+    "companion_browser_extension_status",
+    "companion_browser_extension_call",
+    "companion_browser_extension_notify",
     // ADR-0059 R11 — headless external-agent execution plane. Service-scope
     // only (SERVICE_ONLY_COMMANDS) + SpawnPolicy allowlist + audit trail;
     // a public device principal can never reach these.
@@ -2710,6 +2715,11 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     // runtime. The only host-secret command that returns values, so no
     // device plane may reach it; devices see names via `host_secret_list`.
     "host_provider_credentials_load",
+    // ADR-0228 — the brain asking after, driving and hinting a paired
+    // browser. A device never drives another device's browser.
+    "companion_browser_extension_status",
+    "companion_browser_extension_call",
+    "companion_browser_extension_notify",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =

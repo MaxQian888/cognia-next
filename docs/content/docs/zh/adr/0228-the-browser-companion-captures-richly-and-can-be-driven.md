@@ -91,7 +91,7 @@ Host 以自己的 `host:browser-companion` 调用方把字节暂存在现有会�
 因此被远程关闭的无界面 Host 无需重启即停止接受提交和套接字票据。
 
 驱动是第三项类能力 **`browser.drive`**。它属于浏览器类（因此存储的类约束允许它），但**不会**在注册时授予：
-由 Owner 在设置里按浏览器打开。Host 只在发送时向持有该能力的设备连接发送操作帧。
+由 Owner 在设置里按浏览器打开（无界面 Host 上用 `cognia-server devices grant --browser-drive`，见 §9）。Host 只在发送时向持有该能力的设备连接发送操作帧。
 
 ### 6. 扩展是第五个 `BrowserEngine` 后端
 
@@ -121,6 +121,23 @@ Host 以自己的 `host:browser-companion` 调用方把字节暂存在现有会�
 
 未发送的捕获及其指令保存在 `chrome.storage.session`：只在内存中，浏览器退出即清除，不写入配置文件。
 公开的配对记录、外观、偏好、保存的提示词和站点决定存于 `chrome.storage.local`；捕获内容永不写入。
+
+### 9. 无界面 Host 同样提供代理模式
+
+`cognia-server` 提供同一个设备套接字，而该 Host 的对话在它的 brain 里运行，所以代理模式是 Host 的属性，而不是桌面端独有。
+brain 通过自己服务器的服务平面访问套接字：`companion_browser_extension_status`、`_call` 和 `_notify` 是
+`target: service` 命令（`rpc/service_plane.rs`），任何已配对设备都无法借此驱动另一台设备的浏览器；`call` 仍对每个操作检查
+`browser.drive` 和 Browser Access 开关。被拒绝的操作保留原错误码（`browser_drive_forbidden`、`browser_extension_offline` 等），
+并附带说明责任方的状态码：请求本身（400）、Owner 的授权（403）、浏览器连接（503，可重试）、超时（504）或页面本身（422）。
+
+负责重新绑定代理对话、提示浏览器的同一个 Host 运行时，在 brain 中以 `browser-companion-agent` 运行
+（`lib/headless/runtimes/browser-companion-agent.ts`）。它和引擎都经由 `lib/browser-companion/host-transport.ts` 访问套接字：
+桌面端走 Tauri IPC，即使窗口正在操作远程 Host 也总是询问本机服务器；brain 中走已安装的服务平面传输。代理上传到页面的文件在两者上都从
+Host 自己的磁盘读取。已绑定浏览器的对话会先路由到扩展，再考虑 Host 配置，因为无界面配置原本会把浏览器工具交给远程浏览器。
+
+无界面 Host 的运维者用 `cognia-server devices grant <browser-id> --browser-drive` 授予驱动权限（用 `revoke` 收回）；
+存储仍拒绝把 `browser.drive` 授予浏览器以外的设备。列出已配对浏览器和修改授权仍是桌面端命令：在无界面 Host 上由
+`cognia-server devices grants`、`GET /api/devices` 和 `PUT /api/devices/{id}/capabilities` 覆盖。
 
 ## 后果
 

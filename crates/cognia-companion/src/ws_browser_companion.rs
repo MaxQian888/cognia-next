@@ -773,6 +773,64 @@ pub async fn companion_browser_extension_notify(device_id: String) -> Result<(),
     Ok(())
 }
 
+// ── The brain's three on the companion RPC plane ─────────────────────────
+//
+// A headless Host serves this socket too, and its brain reaches the Host only
+// over RPC: `rpc/service_plane.rs` answers status, call and notify for the
+// service principal alone. These adapters keep those arms thin and answer in
+// the RPC envelope, so the brain sees the same codes the desktop gets over IPC.
+
+type RpcFailure = (StatusCode, axum::Json<super::rpc_error::RpcError>);
+
+/// One browser's connection and drive status, for the brain.
+pub fn rpc_device_status(device_id: &str) -> BrowserDeviceStatus {
+    device_status(&paired_tenant(), device_id)
+}
+
+/// Run one operation in a paired browser, for the brain.
+pub async fn rpc_call(
+    device_id: &str,
+    operation: &str,
+    args: Value,
+    timeout_ms: Option<u64>,
+) -> Result<Value, RpcFailure> {
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000));
+    call(&paired_tenant(), device_id, operation, args, timeout)
+        .await
+        .map_err(operation_error_response)
+}
+
+/// Hint a browser that its submissions changed, for the brain.
+pub fn rpc_notify_status(device_id: &str) {
+    notify_status(&paired_tenant(), device_id);
+}
+
+/// A failed operation in the RPC envelope. The code is kept as is — the
+/// engine (`lib/browser/extension-engine.ts`) maps it to the same error the
+/// desktop raises from IPC — and the status says whose problem it is: the
+/// request, the Owner's grant, the browser's connection, or the page.
+pub fn operation_error_response(error: OperationError) -> RpcFailure {
+    let (status, retryable) = match error.code.as_str() {
+        "browser_operation_unknown" => (StatusCode::BAD_REQUEST, false),
+        "browser_operation_too_large" => (StatusCode::PAYLOAD_TOO_LARGE, false),
+        "browser_drive_forbidden" | "browser_submissions_disabled" => {
+            (StatusCode::FORBIDDEN, false)
+        }
+        "browser_extension_offline"
+        | "browser_extension_disconnected"
+        | "browser_extension_backpressure" => (StatusCode::SERVICE_UNAVAILABLE, true),
+        "browser_operation_timeout" => (StatusCode::GATEWAY_TIMEOUT, true),
+        // Anything else is the extension's own answer about the page: the
+        // operation reached it and was refused there.
+        _ => (StatusCode::UNPROCESSABLE_ENTITY, false),
+    };
+    let body = super::rpc_error::RpcError::new(error.code, error.message);
+    (
+        status,
+        axum::Json(if retryable { body.retryable() } else { body }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -896,6 +954,115 @@ mod tests {
             _ => panic!("expected a result"),
         }
         assert!(serde_json::from_str::<Inbound>(r#"{"t":"exec","cmd":"x"}"#).is_err());
+    }
+
+    /// Holds the process-global store lock and leaves no store installed on
+    /// the way out, so suites asserting its absence are not made flaky.
+    struct StoreScope(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+    impl Drop for StoreScope {
+        fn drop(&mut self) {
+            super::super::security_store::install_security_store(None);
+        }
+    }
+
+    fn store_with_browser(
+        tenant: &str,
+        device: &str,
+    ) -> (StoreScope, Arc<super::super::security_store::SecurityStore>) {
+        let scope = StoreScope(super::super::security_store::test_guard());
+        let store = super::super::security_store::SecurityStore::in_memory().expect("store");
+        let challenge = store.issue_challenge(tenant, 100, 600).expect("challenge");
+        let enrollment = store
+            .create_browser_enrollment(tenant, "trust-root", 100, 600)
+            .expect("enrollment");
+        store
+            .register_browser_device(
+                tenant,
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                device,
+                "Chrome",
+                "pem",
+                &format!("thumb-{device}"),
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                100,
+            )
+            .expect("register browser");
+        super::super::security_store::install_security_store(Some(store.clone()));
+        (scope, store)
+    }
+
+    #[test]
+    fn drive_is_granted_and_revoked_without_touching_the_other_grants() {
+        let (_scope, store) = store_with_browser("tenant-d", "browser-d");
+        let snapshot = || store.capability_snapshot("tenant-d", "browser-d").unwrap().unwrap();
+        let before = snapshot();
+        assert!(!before.iter().any(|c| c == DRIVE_CAPABILITY));
+
+        set_drive_allowed("tenant-d", "browser-d", true).expect("grant");
+        let granted = snapshot();
+        assert!(granted.iter().any(|c| c == DRIVE_CAPABILITY));
+        assert!(before.iter().all(|c| granted.contains(c)));
+
+        set_drive_allowed("tenant-d", "browser-d", false).expect("revoke");
+        let mut revoked = snapshot();
+        let mut expected = before.clone();
+        revoked.sort();
+        expected.sort();
+        assert_eq!(revoked, expected);
+
+        assert!(set_drive_allowed("tenant-d", " ", true).is_err());
+        let unknown = set_drive_allowed("tenant-d", "browser-unknown", true).unwrap_err();
+        assert!(unknown.contains("unknown or revoked"), "{unknown}");
+    }
+
+    #[test]
+    fn a_failed_operation_keeps_its_code_and_says_whose_problem_it_is() {
+        let cases = [
+            ("browser_operation_unknown", StatusCode::BAD_REQUEST, false),
+            ("browser_operation_too_large", StatusCode::PAYLOAD_TOO_LARGE, false),
+            ("browser_drive_forbidden", StatusCode::FORBIDDEN, false),
+            ("browser_submissions_disabled", StatusCode::FORBIDDEN, false),
+            ("browser_extension_offline", StatusCode::SERVICE_UNAVAILABLE, true),
+            ("browser_extension_disconnected", StatusCode::SERVICE_UNAVAILABLE, true),
+            ("browser_extension_backpressure", StatusCode::SERVICE_UNAVAILABLE, true),
+            ("browser_operation_timeout", StatusCode::GATEWAY_TIMEOUT, true),
+            // The extension's own refusal about the page.
+            ("browser_ref_not_found", StatusCode::UNPROCESSABLE_ENTITY, false),
+        ];
+        for (code, status, retryable) in cases {
+            let (got, body) = operation_error_response(OperationError::new(code, "why"));
+            assert_eq!(got, status, "{code}");
+            assert_eq!(body.code, code);
+            assert_eq!(body.message, "why");
+            assert_eq!(body.retryable, retryable, "{code}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_rpc_call_refuses_an_undriveable_browser_in_the_rpc_envelope() {
+        // No browser here holds `browser.drive` (and Browser Access may be off
+        // in this process): either way the refusal is the Owner's to lift.
+        let (status, body) =
+            rpc_call("browser-without-drive", "snapshot", Value::Null, Some(1_000))
+                .await
+                .unwrap_err();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(
+            ["browser_drive_forbidden", "browser_submissions_disabled"]
+                .contains(&body.code.as_str()),
+            "{}",
+            body.code
+        );
+        let (status, body) = rpc_call("browser-x", "run_shell", Value::Null, None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (status, body.code.as_str()),
+            (StatusCode::BAD_REQUEST, "browser_operation_unknown")
+        );
     }
 
     #[test]

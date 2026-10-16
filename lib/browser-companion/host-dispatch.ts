@@ -28,7 +28,6 @@ import {
   extensionBindingFor,
   unbindExtensionSession,
 } from "@/lib/browser/extension-engine"
-import { isTauri } from "@/lib/tauri"
 import { listExecutionRuns } from "@/lib/db/execution-runs"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { getSettings } from "@/lib/db/settings"
@@ -46,6 +45,11 @@ import {
   writeBrowserAttachmentChunk,
 } from "./attachments"
 import { AGENT_BINDING_RECONCILE_MS, reconcileAgentBindings } from "./agent-bindings"
+import {
+  browserSocketStatus,
+  hostServesBrowserSockets,
+  notifyBrowserSocket,
+} from "./host-transport"
 import { BROWSER_AGENT_TARGET_ID, listDeliveryTargets } from "./targets"
 import { startBrowserStatusNotifier } from "./status-notifier"
 import { browserStatusForAgentTask, browserStatusForIssue, browserStatusForRun } from "./run-status"
@@ -134,9 +138,10 @@ export function createBrowserCompanionDeps(
     },
     enqueueMessage: (input) => enqueueOnHostAuthority(payload, resolveHostState, input),
     resolveAttachments: resolveBrowserAttachments,
-    // Only the desktop shell can reach a browser's device socket; elsewhere the
-    // Host neither advertises nor offers agent mode.
-    ...(isTauri()
+    // Only a Host that serves the device socket — the desktop, or the headless
+    // brain beside its server — can drive a browser; elsewhere it neither
+    // advertises nor offers agent mode.
+    ...(hostServesBrowserSockets()
       ? {
           driveStatus: hostDriveStatus,
           bindBrowserAgent: ({ sessionId, deviceId, tabId }: BindBrowserAgentInput) =>
@@ -524,7 +529,7 @@ function targetDeps() {
     listIssueProjects: hostIssueBoards,
     listTaskAgents: hostTaskAgents,
     existingSessionIds: hostExistingSessionIds,
-    ...(isTauri() ? { driveStatus: hostDriveStatus } : {}),
+    ...(hostServesBrowserSockets() ? { driveStatus: hostDriveStatus } : {}),
   }
 }
 
@@ -544,11 +549,7 @@ async function hostDriveStatus(
   deviceId: string
 ): Promise<{ allowed: boolean; connected: boolean }> {
   try {
-    const { invoke } = await import("@tauri-apps/api/core")
-    const status = await invoke<{ connected: boolean; driveAllowed: boolean }>(
-      "companion_browser_extension_status",
-      { deviceId }
-    )
+    const status = await browserSocketStatus(deviceId)
     return { allowed: status.driveAllowed === true, connected: status.connected === true }
   } catch {
     return { allowed: false, connected: false }
@@ -556,8 +557,10 @@ async function hostDriveStatus(
 }
 
 /**
- * Start the desktop half of ADR-0228: rebind agent conversations to their
+ * Start the Host half of ADR-0228: rebind agent conversations to their
  * browsers and hint browsers when their submissions move. Returns the teardown.
+ * Mounted by the desktop's `BrowserCompanionAgentInitializer` and, on a
+ * headless Host, by the brain's `browser-companion-agent` runtime.
  */
 export async function startBrowserCompanionAgentRuntime(): Promise<() => void> {
   // Bindings follow the Owner's grant: restored on start for every browser
@@ -572,11 +575,7 @@ export async function startBrowserCompanionAgentRuntime(): Promise<() => void> {
       unbind: unbindExtensionSession,
     }).catch(() => undefined)
   await reconcile()
-  const [{ liveQuery }, { getDb }, { invoke }] = await Promise.all([
-    import("dexie"),
-    import("@/lib/db/schema"),
-    import("@tauri-apps/api/core"),
-  ])
+  const [{ liveQuery }, { getDb }] = await Promise.all([import("dexie"), import("@/lib/db/schema")])
   const reconcileTimer = setInterval(() => void reconcile(), AGENT_BINDING_RECONCILE_MS)
   const stop = startBrowserStatusNotifier({
     observe: (read, onResult) => {
@@ -592,9 +591,7 @@ export async function startBrowserCompanionAgentRuntime(): Promise<() => void> {
       }
       return statuses
     },
-    notify: async (deviceId) => {
-      await invoke("companion_browser_extension_notify", { deviceId })
-    },
+    notify: notifyBrowserSocket,
   })
   return () => {
     clearInterval(reconcileTimer)

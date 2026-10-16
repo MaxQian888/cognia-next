@@ -1,6 +1,10 @@
 use super::*;
 
 pub(super) const COMMANDS: &[&str] = &[
+    // ADR-0228 — the brain asking after, driving and hinting a paired browser.
+    "companion_browser_extension_status",
+    "companion_browser_extension_call",
+    "companion_browser_extension_notify",
     "spawn_external_agent",
     "send_to_external_agent",
     "kill_external_agent",
@@ -217,6 +221,36 @@ pub(super) async fn dispatch(
         }
     }
     let result = match name {
+        // ── Browser device socket (ADR-0228 §5–§6) ───────────────────────────
+        // The brain's agent-mode gate, `ExtensionBrowserEngine` and status
+        // notifier. Service scope only: a paired device never drives another
+        // device's browser. `browser.drive` and the Browser Access switch are
+        // checked again inside `call` for every operation.
+        "companion_browser_extension_status" => {
+            let browser: String = required_aliased(&args, "device_id", "deviceId")?;
+            to_json(crate::companion_api::ws_browser_companion::rpc_device_status(&browser))
+        }
+
+        "companion_browser_extension_call" => {
+            let browser: String = required_aliased(&args, "device_id", "deviceId")?;
+            let operation: String = required(&args, "operation")?;
+            let operation_args: Option<Value> = optional(&args, "args")?;
+            let timeout_ms: Option<u64> = optional_aliased(&args, "timeout_ms", "timeoutMs")?;
+            crate::companion_api::ws_browser_companion::rpc_call(
+                &browser,
+                &operation,
+                operation_args.unwrap_or_else(|| Value::Object(Default::default())),
+                timeout_ms,
+            )
+            .await
+        }
+
+        "companion_browser_extension_notify" => {
+            let browser: String = required_aliased(&args, "device_id", "deviceId")?;
+            crate::companion_api::ws_browser_companion::rpc_notify_status(&browser);
+            Ok(Value::Null)
+        }
+
         // ── Headless external-agent execution plane (ADR-0059 R11) ───────────
         // Service-scope only (gated above + in rpc_handler); every decision
         // is written to the audit log. The spawn request must clear the

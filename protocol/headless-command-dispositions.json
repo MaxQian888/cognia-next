@@ -39,6 +39,7 @@
       "disposition": "covered-by-headless",
       "reason": "The operator-facing capability already exists through the canonical Headless control plane or standard Headless configuration; exposing the desktop IPC command would duplicate that surface. Every command in this group names the covering surface in commandReasons — a claim with no named cover is not a disposition, it is a guess.",
       "commands": [
+        "companion_browser_extension_list",
         "companion_browser_extension_set_drive",
         "companion_create_worker_enrollment",
         "companion_forget_device",
@@ -120,8 +121,9 @@
         "scheduler_run_task_now": "The operator-facing half is reachable remotely as scheduled_task_run_now — an allowlisted bridge command in KNOWN_COMMANDS routed to the Node brain (src-tauri/src/companion_api/rpc/data_sync.rs:78). This Tauri command is the OS-integration half of the same subsystem: it takes State<'_, SchedulerState>, managed only by the desktop builder at src-tauri/src/lib.rs:548.",
         "scheduler_update_task": "The operator-facing half is reachable remotely as scheduled_task_update — an allowlisted bridge command in KNOWN_COMMANDS routed to the Node brain (src-tauri/src/companion_api/rpc/data_sync.rs:78). This Tauri command is the OS-integration half of the same subsystem: it takes State<'_, SchedulerState>, managed only by the desktop builder at src-tauri/src/lib.rs:548.",
         "scheduler_validate_task": "Negotiates the host machine's own OS scheduler (Task Scheduler / launchd / cron) through State<'_, SchedulerState>, managed only by the desktop builder at src-tauri/src/lib.rs:548. There is no remote equivalent because there is nothing remote to answer it: the alarm daemon, its privilege level, and the elevation prompt all belong to the machine the desktop app runs on.",
-        "companion_browser_extension_set_drive": "Covered by PUT /api/devices/{device_id}/capabilities (crates/cognia-companion/src/api.rs replace_device_capabilities_handler): `ws_browser_companion::set_drive_allowed` is the same capability_snapshot + retain/push of `browser.drive` + replace_device_capabilities sequence, fixed to the local trust root. An owner shell on a Headless Host replaces the browser's capability set through that route.",
         "companion_forget_device": "Covered by the owner route POST /api/devices/{device_id}/forget (crates/cognia-companion/src/server.rs, api.rs forget_device_handler), which runs the same `device_lifecycle::forget` with the owner's identity on any Host, headless included; remote shells reach it through lib/devices/lifecycle-http.ts, exactly as revoke/suspend/resume do.",
+        "companion_browser_extension_list": "Covered by `cognia-server devices grants` and GET /api/devices (crates/cognia-companion/src/api.rs devices_handler): both list every paired browser of the Host with its capability set, so which browsers exist and which hold `browser.drive` is answered on a headless Host. What only this command adds is the live-socket decoration the desktop's paired-browsers card draws; the brain asks a single browser's live state through `companion_browser_extension_status` on the service plane.",
+        "companion_browser_extension_set_drive": "Covered by `cognia-server devices grant|revoke <id> --browser-drive` (src-tauri/src/bin/cognia-server.rs), which adds or removes `browser.drive` in the browser's capability snapshot as the other grant flags do, and by PUT /api/devices/{device_id}/capabilities (crates/cognia-companion/src/api.rs replace_device_capabilities_handler) for an owner device. Both end in replace_device_capabilities with `browser.drive` added or removed and the rest of the browser's grants kept.",
         "companion_create_worker_enrollment": "Covered by the `fleet_worker_enrollment_create` RPC arm (companion_api/rpc/diagnostics.rs:110), which mints the same enrollment through security_store::create_worker_enrollment with the same 10-minute TTL. The Tauri variant additionally derives baseUrl and TLS fingerprint from local tunnel/LAN state; a remote caller already knows how it reached the host and supplies those itself.",
         "companion_list_workers": "Covered by `fleet_worker_list` (companion_api/rpc/diagnostics.rs:138) — the same list_worker_devices + worker_device_summaries pair, plus an owner check the Tauri arm does not perform. The renderer already treats them as one capability with two bindings (lib/fleet/execution-workers.ts:47).",
         "companion_set_worker": "Covered by `fleet_worker_set` (companion_api/rpc/diagnostics.rs:153) and by PUT /api/devices/{device_id}/capabilities (companion_api/api.rs:309); all three funnel into replace_device_capabilities with the identical agent.worker retain/push sequence.",
@@ -1018,22 +1020,6 @@
         "chat_copilot_reveal": "Controls the local chat-copilot Tauri window, geometry, visibility, or clipboard (src-tauri/src/chat_copilot/mod.rs); no remote UI surface exists.",
         "chat_copilot_resize": "Controls the local chat-copilot Tauri window, geometry, visibility, or clipboard (src-tauri/src/chat_copilot/mod.rs); no remote UI surface exists.",
         "chat_copilot_copy": "Controls the local chat-copilot Tauri window, geometry, visibility, or clipboard (src-tauri/src/chat_copilot/mod.rs); no remote UI surface exists."
-      }
-    },
-    {
-      "disposition": "unexposed-gap",
-      "reason": "The browser device socket (`/ws/browser-companion`, crates/cognia-companion/src/ws_browser_companion.rs) is served by every Host, cognia-server included, but these commands reach its connection registry only as desktop Tauri commands. No companion RPC arm exposes them, so the headless brain cannot list paired browsers' live connections, run a browser operation, or hint a browser — ADR-0228 agent mode and status hints therefore work on the desktop Host only. This is a known gap, not a decision; the pattern to follow is `companion_browser_access_get` / `companion_browser_access_set`, which reach the same Host state through host-admin arms in src-tauri/src/companion_api/rpc/host_admin.rs.",
-      "commands": [
-        "companion_browser_extension_call",
-        "companion_browser_extension_list",
-        "companion_browser_extension_notify",
-        "companion_browser_extension_status"
-      ],
-      "commandReasons": {
-        "companion_browser_extension_call": "Runs one operation in a paired browser over its device socket — the transport of lib/browser/extension-engine.ts. A brain-side engine would need this as an arm; the extension already serves the operation to any Host it is paired with.",
-        "companion_browser_extension_list": "Joins list_browser_devices with the live connection registry. GET /api/devices returns the device rows but not whether a socket is connected or which tabs it reports.",
-        "companion_browser_extension_notify": "Sends the status hint frame to a browser when one of its submissions moves (lib/browser-companion/status-notifier.ts). Without it a headless Host's browsers still learn the state by polling, just later.",
-        "companion_browser_extension_status": "Reports one browser's live connection and `browser.drive` state from the connection registry; the drive half is readable from GET /api/devices, the connection half is not."
       }
     }
   ]

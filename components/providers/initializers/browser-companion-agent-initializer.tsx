@@ -10,8 +10,9 @@
  * - a paired browser is hinted on its device socket when one of its
  *   submissions changes state, so its badge and notifications are prompt.
  *
- * Only the desktop shell can reach a browser's device socket, so nothing is
- * wired elsewhere. Renders nothing; mounted once in
+ * The desktop half: a headless Host starts the same runtime in its brain
+ * (`lib/headless/runtimes/browser-companion-agent.ts`), and no other shell
+ * serves a device socket. Renders nothing; mounted once in
  * `components/runtime/app-runtime.tsx`.
  */
 

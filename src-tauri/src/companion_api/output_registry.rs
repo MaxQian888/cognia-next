@@ -477,6 +477,9 @@ mod tests {
         ("thread_handoff_status", OutputShape::Declared(RootType::NullableObject)),
 
         // ── service_plane (rpc/service_plane.rs) ─────────────────────────────
+        ("companion_browser_extension_status", OutputShape::Declared(RootType::Object)),
+        ("companion_browser_extension_call", OutputShape::Opaque(RootType::Any)),
+        ("companion_browser_extension_notify", OutputShape::Scalar(ScalarShape::Null)),
         ("spawn_external_agent", OutputShape::Scalar(ScalarShape::Text)),
         ("send_to_external_agent", OutputShape::Scalar(ScalarShape::Null)),
         ("kill_external_agent", OutputShape::Scalar(ScalarShape::Null)),
@@ -1041,7 +1044,13 @@ mod tests {
     // there would make every new command fight this file for a reason that has
     // nothing to do with the command. `Opaque` is the one worth refusing,
     // because it is where an arm escapes having a shape at all.
-    const OPAQUE_CEILING: usize = 158;
+    //
+    // Raised once, 158 → 159, for `companion_browser_extension_call` (ADR-0228
+    // §9): it relays one browser operation's answer from the extension unread,
+    // and that answer is defined per operation by the extension's agent
+    // protocol. Pinning it here would refuse real browser results the moment
+    // the two drift; the engine that reads it owns the shape.
+    const OPAQUE_CEILING: usize = 159;
     const DERIVED_FLOOR: usize = 70;
 
     // ── Reading a JSON Schema down to what a client can break on ────────────

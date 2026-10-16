@@ -844,6 +844,18 @@ const schemas = {
     eventSource: z.string().optional(),
     data: z.record(z.string(), z.unknown()).optional(),
   }),
+  // ADR-0228 — the brain's view of a paired browser's device socket
+  // (`rpc/service_plane.rs`). `operation` is checked against the socket's own
+  // vocabulary on the Host, so it is not restated here; `args` is that
+  // operation's argument object, relayed to the extension unread.
+  companion_browser_extension_status: z.object({ deviceId: z.string().min(1) }),
+  companion_browser_extension_call: z.object({
+    deviceId: z.string().min(1),
+    operation: z.string().min(1),
+    args: z.record(z.string(), z.unknown()).optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  }),
+  companion_browser_extension_notify: z.object({ deviceId: z.string().min(1) }),
 }
 
 function withoutDialect(schema) {

@@ -133,7 +133,8 @@ restart.
 
 Driving is a third class capability, **`browser.drive`**. It joins the browser
 class (so the store's class confinement admits it) but is **not** granted at
-enrollment: the Owner turns it on per browser in Settings. The Host only sends
+enrollment: the Owner turns it on per browser in Settings (on a headless Host,
+with `cognia-server devices grant --browser-drive`, §9). The Host only sends
 operation frames to a connection whose device holds it at send time.
 
 ### 6. The extension is a fifth `BrowserEngine` backend
@@ -180,6 +181,38 @@ An unsent capture and its instruction are kept in `chrome.storage.session`:
 memory only, cleared when the browser exits, never written to the profile. The
 public pairing record, appearance, preferences, saved prompts and the site
 decisions live in `chrome.storage.local`; captured content never does.
+
+### 9. A headless Host offers agent mode too
+
+`cognia-server` serves the same device socket, and its brain is where that
+Host's conversations run, so agent mode is a Host property rather than a
+desktop one. The brain reaches the socket over its own server's service plane:
+`companion_browser_extension_status`, `_call` and `_notify` are
+`target: service` commands (`rpc/service_plane.rs`), so no paired device can
+drive another device's browser through them, and `call` still checks
+`browser.drive` and the Browser Access switch for every operation. A refused
+operation keeps its code (`browser_drive_forbidden`, `browser_extension_offline`,
+…) and travels with a status that says whose problem it is: the request (400),
+the Owner's grant (403), the browser's connection (503, retryable), a timeout
+(504) or the page itself (422).
+
+The same Host runtime that rebinds agent conversations and hints browsers runs
+in the brain as `browser-companion-agent`
+(`lib/headless/runtimes/browser-companion-agent.ts`). It and the engine reach
+the socket through `lib/browser-companion/host-transport.ts`: Tauri IPC on the
+desktop, which always asks its own server even while the window drives a
+remote Host, and the installed service-plane transport in the brain. A file
+the agent uploads into a page is read from the Host's own disk on either. A
+conversation bound to a browser is routed to the extension before the host
+profile is considered, because a headless profile otherwise sends browser
+tools to the remote browser.
+
+A headless operator grants driving with
+`cognia-server devices grant <browser-id> --browser-drive` (and takes it back
+with `revoke`); the store still refuses `browser.drive` for anything but a
+browser. Listing paired browsers and changing the grant stay desktop commands:
+`cognia-server devices grants`, `GET /api/devices` and
+`PUT /api/devices/{id}/capabilities` cover them on a headless Host.
 
 ## Consequences
 

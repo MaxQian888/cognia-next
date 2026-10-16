@@ -265,3 +265,37 @@ describe("createBrowserCompanionDeps", () => {
     expect(await deps.latestAnswer(sessionId)).toEqual({ text: "the durable answer", at: 1 })
   })
 })
+
+describe("agent mode on each kind of Host", () => {
+  const marker = globalThis as Record<string, unknown>
+  afterEach(() => {
+    delete marker.__COGNIA_HEADLESS__
+  })
+
+  const deps = () =>
+    createBrowserCompanionDeps({}, async () => {
+      throw new Error("unused")
+    })
+
+  it("is neither advertised nor offered where no device socket is served", () => {
+    const created = deps()
+    expect(created.driveStatus).toBeUndefined()
+    expect(created.bindBrowserAgent).toBeUndefined()
+  })
+
+  it("is offered by a headless Host, whose brain reaches the socket over its service plane", () => {
+    marker.__COGNIA_HEADLESS__ = true
+    const created = deps()
+    expect(typeof created.driveStatus).toBe("function")
+    expect(typeof created.bindBrowserAgent).toBe("function")
+  })
+
+  it('answers "not drivable" when the Host cannot be asked, rather than guessing', async () => {
+    marker.__COGNIA_HEADLESS__ = true
+    // No companion server answers in this test process.
+    await expect(deps().driveStatus?.("browser-a")).resolves.toEqual({
+      allowed: false,
+      connected: false,
+    })
+  })
+})

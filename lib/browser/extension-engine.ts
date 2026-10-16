@@ -21,6 +21,8 @@
  */
 import type { Screenshot } from "@/lib/automation/types"
 import { emitAgentActivity } from "@/lib/browser/agent-activity"
+import { callBrowserSocket } from "@/lib/browser-companion/host-transport"
+import { isTauri } from "@/lib/platform/detect"
 import type { BrowserExtension } from "@/lib/browser/extensions-client"
 import type {
   BrowserActionResult,
@@ -73,7 +75,7 @@ export type ExtensionTransport = (input: {
   timeoutMs: number
 }) => Promise<unknown>
 
-/** Reads one file the agent asked to upload. Only the desktop runtime has one. */
+/** Reads one file the agent asked to upload, from the Host's own disk. */
 export type ExtensionFileReader = (path: string) => Promise<Uint8Array>
 
 export interface ExtensionBinding {
@@ -203,8 +205,8 @@ export class ExtensionBrowserEngine implements BrowserEngine {
   private readonly readFile: ExtensionFileReader
 
   constructor(private readonly options: ExtensionEngineOptions) {
-    this.transport = options.transport ?? tauriExtensionTransport
-    this.readFile = options.readFile ?? tauriFileReader
+    this.transport = options.transport ?? hostExtensionTransport
+    this.readFile = options.readFile ?? hostFileReader
   }
 
   get deviceId(): string {
@@ -429,19 +431,24 @@ function waitBudget(options?: { timeoutMs?: number }): number {
   return requested + WAIT_SLACK_MS
 }
 
-const tauriExtensionTransport: ExtensionTransport = async (input) => {
-  const { invoke } = await import("@tauri-apps/api/core")
-  return invoke("companion_browser_extension_call", {
-    deviceId: input.deviceId,
-    operation: input.operation,
-    args: input.args,
-    timeoutMs: input.timeoutMs,
-  })
-}
+/**
+ * This Host's own server: Tauri IPC on the desktop, the service plane in the
+ * headless brain (`lib/browser-companion/host-transport.ts`).
+ */
+const hostExtensionTransport: ExtensionTransport = (input) => callBrowserSocket(input)
 
-const tauriFileReader: ExtensionFileReader = async (path) => {
-  const { readFile } = await import("@tauri-apps/plugin-fs")
-  return readFile(path)
+/**
+ * Reads a file the agent names on this Host: through the desktop's fs plugin,
+ * or straight from disk in the headless brain, which is a Node process on the
+ * machine the paths belong to.
+ */
+export const hostFileReader: ExtensionFileReader = async (path) => {
+  if (isTauri()) {
+    const { readFile } = await import("@tauri-apps/plugin-fs")
+    return readFile(path)
+  }
+  const { readFile } = await import("node:fs/promises")
+  return new Uint8Array(await readFile(path))
 }
 
 // ── Conversation bindings ───────────────────────────────────────────────────

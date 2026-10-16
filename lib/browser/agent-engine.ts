@@ -1153,13 +1153,15 @@ export function routeEngine(url: string, context: EngineRoutingContext = {}): En
       break
   }
 
-  if (profile === "cloud-companion" || profile === "mobile-companion" || profile === "headless") {
-    return remoteRoute()
-  }
   // A conversation the user started from the extension's "let Cognia act in
   // this browser" acts there, whatever the URL: that is what they asked for.
+  // Checked before the host profile: a headless Host serves the extension's
+  // device socket too, and only a Host ever binds a conversation to a browser.
   if (extensionBindingFor(context.chatSessionId)) {
     return extensionRoute(tier, context.chatSessionId)
+  }
+  if (profile === "cloud-companion" || profile === "mobile-companion" || profile === "headless") {
+    return remoteRoute()
   }
   // The user chose their own Chrome in the pane: drive what they see.
   if (paneLocalEngine) return userChromeRoute(tier)

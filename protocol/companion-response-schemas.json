@@ -5012,6 +5012,24 @@
       },
       "additionalProperties": false
     },
+    "BrowserDeviceStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia_companion::ws_browser_companion::BrowserDeviceStatus",
+      "required": ["connected", "driveAllowed"],
+      "properties": {
+        "connected": {
+          "type": "boolean"
+        },
+        "driveAllowed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BrowserExtensionOperationResult": {
+      "type": ["object", "array", "string", "number", "boolean", "null"],
+      "x-cognia-opaque-reason": "The answer of one browser operation, defined per operation by the extension's agent protocol (browser-extension/src/lib/agent/protocol.ts) and parsed by lib/browser/extension-engine.ts: a snapshot, an action result, a tab list, or nothing. The Host relays it unread over the device socket."
+    },
     "PushConfigStatus": {
       "type": "object",
       "x-cognia-wire-source": "companion_api::commands::PushConfigStatus",
@@ -13027,6 +13045,15 @@
     },
     "companion_browser_access_set": {
       "$ref": "#/$defs/BrowserAccessSummary"
+    },
+    "companion_browser_extension_status": {
+      "$ref": "#/$defs/BrowserDeviceStatus"
+    },
+    "companion_browser_extension_call": {
+      "$ref": "#/$defs/BrowserExtensionOperationResult"
+    },
+    "companion_browser_extension_notify": {
+      "$ref": "#/$defs/NullResult"
     },
     "companion_push_status": {
       "$ref": "#/$defs/PushConfigStatus"

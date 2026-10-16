@@ -90,6 +90,7 @@ import {
   resetEmbeddedSnapshotCache,
 } from "@/lib/browser/agent-engine"
 import { setActivePaneRect } from "@/lib/browser/pane-rect"
+import { bindExtensionSession, resetExtensionBindings } from "@/lib/browser/extension-engine"
 
 const mockClient = browserClient as unknown as Record<string, jest.Mock>
 
@@ -147,6 +148,28 @@ describe("routeEngine", () => {
     expect(
       routeEngine("http://localhost:3000", { hostProfile: "desktop", domainAuthorized: true })
     ).toMatchObject({ backend: "local-chromium" })
+  })
+
+  it("acts in the paired browser for a bound conversation, on a headless Host too", () => {
+    // A headless Host serves the extension's device socket, so a conversation
+    // a browser started in agent mode must not be sent to the remote browser
+    // just because the brain's profile is `headless`.
+    const remote = new EmbeddedEngine()
+    configureRemoteBrowserEngine(remote, { enabled: true, healthy: true })
+    bindExtensionSession("chat-bound", { deviceId: "browser-a" })
+    try {
+      for (const hostProfile of ["headless", "desktop"] as const) {
+        expect(
+          routeEngine("https://example.com/", { hostProfile, chatSessionId: "chat-bound" })
+        ).toMatchObject({ backend: "extension", untrusted: true })
+      }
+      // An unbound conversation on the same Host keeps the remote browser.
+      expect(
+        routeEngine("https://example.com/", { hostProfile: "headless", chatSessionId: "other" })
+      ).toMatchObject({ backend: "remote-chromium" })
+    } finally {
+      resetExtensionBindings()
+    }
   })
 
   it("falls back to the best desktop engine for an authorized public URL instead of throwing", () => {
