@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   CheckIcon,
@@ -35,6 +35,7 @@ import type {
   ContextCommentResourceRef,
 } from "@/types/context-comment"
 import { isContextCommentAnchorStale } from "@/types/context-comment"
+import type { ProjectFileAnchorResolution } from "@/lib/context-workbench/project-file-comment-anchors"
 import { commentAnchorLabel } from "@/lib/artifacts/format-selection-context"
 
 export interface ContextCommentsPanelProps {
@@ -55,10 +56,16 @@ export interface ContextCommentsPanelProps {
    * The panel is resource-agnostic, so it cannot know how to move an anchor
    * itself. A Canvas document with a live shared document passes one backed by
    * its CRDT, and the comment's line range follows the text instead of naming
-   * where it used to be. Everything else omits it and the stored anchor is
-   * displayed as written.
+   * where it used to be. Project files can return an asynchronous resolution
+   * with a moved/orphaned state. Other hosts display the stored anchor as written.
    */
-  resolveAnchor?: (anchor: ContextCommentAnchor) => ContextCommentAnchor
+  resolveAnchor?: (
+    anchor: ContextCommentAnchor,
+    commentId?: string
+  ) => ContextCommentAnchor | ProjectFileAnchorResolution | Promise<ProjectFileAnchorResolution>
+  /** Capture the exact current buffer before an asynchronous comment write. */
+  createAnchor?: () => Promise<ContextCommentAnchor>
+  onRevealAnchor?: (anchor: ContextCommentAnchor) => void
 }
 
 export function ContextCommentsPanel({
@@ -69,6 +76,8 @@ export function ContextCommentsPanel({
   currentUserName,
   resourceTitle,
   resolveAnchor,
+  createAnchor,
+  onRevealAnchor,
 }: ContextCommentsPanelProps) {
   const t = useTranslations("contextWorkbench.commentsPanel")
   const authorName = currentUserName ?? t("you")
@@ -78,20 +87,75 @@ export function ContextCommentsPanel({
     [resource.kind, resource.id],
     []
   )
-  // Resolved for display only. The stored anchor is left alone, so a device
-  // that cannot resolve one still reads what was written rather than a range
-  // some other device computed.
-  const comments = useMemo(
+  // Keep synchronous Canvas resolution synchronous and authoritative. Project
+  // hashes resolve asynchronously; obsolete completions cannot replace a newer view.
+  const pending = useMemo(
     () =>
-      resolveAnchor
-        ? storedComments.map((comment) => ({
-            ...comment,
-            anchor: resolveAnchor(comment.anchor),
-          }))
-        : storedComments,
+      storedComments.map((comment) => ({
+        comment,
+        result: resolveAnchor?.(comment.anchor, comment.id) ?? comment.anchor,
+      })),
     [storedComments, resolveAnchor]
   )
+  const [completed, setCompleted] = useState<{
+    source: typeof pending
+    results: Map<string, ProjectFileAnchorResolution | null>
+  } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const asynchronous = pending.flatMap(({ comment, result }) =>
+      result instanceof Promise ? [{ comment, result }] : []
+    )
+    if (asynchronous.length) {
+      void Promise.all(
+        asynchronous.map(async ({ comment, result }) => {
+          try {
+            return [comment.id, await result] as const
+          } catch {
+            return [comment.id, null] as const
+          }
+        })
+      ).then((results) => {
+        if (!cancelled) setCompleted({ source: pending, results: new Map(results) })
+      })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [pending])
+  const comments = useMemo(
+    () =>
+      pending.map(({ comment, result }) => {
+        const resolved =
+          result instanceof Promise
+            ? completed?.source === pending
+              ? completed.results.get(comment.id)
+              : undefined
+            : result
+        if (resolved && "kind" in resolved) return { ...comment, anchor: resolved }
+        const resolution = resolved ?? undefined
+        return {
+          ...comment,
+          resolution,
+          resolutionError: resolved === null,
+          anchor:
+            resolution?.start !== undefined &&
+            resolution.end !== undefined &&
+            comment.anchor.kind === "text-range"
+              ? {
+                  ...comment.anchor,
+                  start: resolution.start,
+                  end: resolution.end,
+                  lineRange: resolution.lineRange,
+                }
+              : comment.anchor,
+        }
+      }),
+    [pending, completed]
+  )
   const [draft, setDraft] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState(false)
   const [showResolved, setShowResolved] = useState(false)
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
   const [replyDraft, setReplyDraft] = useState("")
@@ -106,7 +170,7 @@ export function ContextCommentsPanel({
     [comments, showResolved]
   )
   const repliesByParent = useMemo(() => {
-    const grouped = new Map<string, ContextComment[]>()
+    const grouped = new Map<string, (typeof comments)[number][]>()
     for (const comment of comments) {
       if (!comment.parentId) continue
       grouped.set(comment.parentId, [...(grouped.get(comment.parentId) ?? []), comment])
@@ -116,15 +180,24 @@ export function ContextCommentsPanel({
 
   const submitComment = async () => {
     const content = draft.trim()
-    if (!content) return
-    await addContextComment({
-      resource,
-      anchor: { ...anchor, revision },
-      authorId: currentUserId,
-      authorName,
-      content,
-    })
-    setDraft("")
+    if (!content || submitting) return
+    setSubmitting(true)
+    setSubmitError(false)
+    try {
+      const capturedAnchor = createAnchor ? await createAnchor() : { ...anchor, revision }
+      await addContextComment({
+        resource,
+        anchor: capturedAnchor,
+        authorId: currentUserId,
+        authorName,
+        content,
+      })
+      setDraft((current) => (current === draft ? "" : current))
+    } catch {
+      setSubmitError(true)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const submitReply = async (parentId: string) => {
@@ -155,8 +228,20 @@ export function ContextCommentsPanel({
     else await addContextCommentReaction(comment.id, emoji, currentUserId)
   }
 
-  const renderComment = (comment: ContextComment, reply = false) => {
-    const stale = isContextCommentAnchorStale(comment, revision)
+  const renderComment = (comment: (typeof comments)[number], reply = false) => {
+    const resolution = "resolution" in comment ? comment.resolution : undefined
+    const resolutionError = "resolutionError" in comment && comment.resolutionError
+    const stale = resolution
+      ? resolution.status === "legacy-stale"
+      : isContextCommentAnchorStale(comment, revision)
+    const orphaned = resolution?.status === "orphaned"
+    const location = comment.anchor.kind === "text-range" ? comment.anchor.lineRange : undefined
+    const canReveal =
+      !stale &&
+      !orphaned &&
+      !resolutionError &&
+      location &&
+      (resolution?.status === "resolved" || resolution?.status === "moved")
     const isAuthor = comment.authorId === currentUserId
     const editing = editingId === comment.id
     return (
@@ -169,6 +254,32 @@ export function ContextCommentsPanel({
           {stale ? <Badge variant="outline">{t("stale")}</Badge> : null}
           {comment.resolvedAt ? <Badge variant="secondary">{t("resolved")}</Badge> : null}
         </div>
+        {resolutionError ? (
+          <p className="mt-2 text-xs text-muted-foreground">{t("anchorUnavailable")}</p>
+        ) : null}
+        {orphaned ? (
+          <div className="mt-2 space-y-1 text-sm">
+            <p className="text-muted-foreground">{t("anchorRemoved")}</p>
+            {comment.anchor.kind === "text-range" && comment.anchor.quotedText !== undefined ? (
+              <blockquote className="max-h-32 overflow-auto whitespace-pre-wrap border-l-2 pl-2">
+                {comment.anchor.quotedText}
+              </blockquote>
+            ) : null}
+          </div>
+        ) : null}
+        {canReveal ? (
+          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+            {resolution?.status === "moved" ? <span>{t("anchorMoved")}</span> : null}
+            <button
+              type="button"
+              className="hover:underline"
+              disabled={!onRevealAnchor}
+              onClick={() => onRevealAnchor?.(comment.anchor)}
+            >
+              {t("anchorLocation", { start: location.startLine, end: location.endLine })}
+            </button>
+          </div>
+        ) : null}
         {editing ? (
           <div className="mt-2 space-y-2">
             <Textarea value={editDraft} onChange={(event) => setEditDraft(event.target.value)} />
@@ -282,12 +393,21 @@ export function ContextCommentsPanel({
           <Button size="sm" variant="ghost" onClick={() => setShowResolved((value) => !value)}>
             {showResolved ? t("hideResolved") : t("showResolved")}
           </Button>
-          <Button size="sm" disabled={!draft.trim()} onClick={() => void submitComment()}>
+          <Button
+            size="sm"
+            disabled={!draft.trim() || submitting}
+            onClick={() => void submitComment()}
+          >
             <MessageSquareIcon className="size-4" />
             {t("add")}
           </Button>
         </div>
       </div>
+      {submitError ? (
+        <p role="alert" className="px-3 text-sm text-destructive">
+          {t("commentSaveFailed")}
+        </p>
+      ) : null}
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-3 p-3">
           {roots.length === 0 ? (

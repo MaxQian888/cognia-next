@@ -82,6 +82,11 @@
   },
   "comments": "Comments",
   "commentsPanel": {
+    "anchorMoved": "Moved",
+    "anchorRemoved": "The text this comment pointed at was removed.",
+    "anchorLocation": "Lines {start}–{end}",
+    "anchorUnavailable": "Could not locate this comment in the current text.",
+    "commentSaveFailed": "Could not save the comment. Please try again.",
     "add": "Add comment",
     "cancel": "Cancel",
     "delete": "Delete",

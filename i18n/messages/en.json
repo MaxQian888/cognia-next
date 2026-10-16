@@ -12393,7 +12393,12 @@
     "comments": "Comments",
     "commentsPanel": {
       "add": "Add comment",
+      "anchorLocation": "Lines {start}–{end}",
+      "anchorMoved": "Moved",
+      "anchorRemoved": "The text this comment pointed at was removed.",
+      "anchorUnavailable": "Could not locate this comment in the current text.",
       "cancel": "Cancel",
+      "commentSaveFailed": "Could not save the comment. Please try again.",
       "delete": "Delete",
       "edit": "Edit",
       "empty": "No comments yet.",

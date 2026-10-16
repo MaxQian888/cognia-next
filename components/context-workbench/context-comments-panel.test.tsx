@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ContextComment } from "@/types/context-comment"
 import { useChatStore } from "@/stores/chat"
@@ -47,6 +47,11 @@ const messages = {
       sendToChatAria: "Add {author}'s comment to the next message",
       showResolved: "Show resolved",
       stale: "Outdated anchor",
+      anchorMoved: "Moved",
+      anchorRemoved: "The text this comment pointed at was removed.",
+      anchorLocation: "Lines {start}–{end}",
+      anchorUnavailable: "Could not locate this comment in the current text.",
+      commentSaveFailed: "Could not save the comment. Please try again.",
       toggleReaction: "Toggle {emoji} reaction",
       you: "You",
     },
@@ -72,12 +77,14 @@ describe("ContextCommentsPanel", () => {
     useChatStore.getState().clearContextSelections()
   })
 
-  it("creates a revision-bound resource comment", () => {
+  it("creates a revision-bound resource comment", async () => {
     renderPanel()
     fireEvent.change(screen.getByRole("textbox", { name: "Write a comment" }), {
       target: { value: "Review this workflow" },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
+    })
     expect(addContextComment).toHaveBeenCalledWith(
       expect.objectContaining({
         resource: { kind: "workflow", id: "workflow-1" },
@@ -115,7 +122,8 @@ describe("ContextCommentsPanel", () => {
     renderPanel({ resolveAnchor })
 
     expect(resolveAnchor).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "text-range", start: 6, end: 11 })
+      expect.objectContaining({ kind: "text-range", start: 6, end: 11 }),
+      "comment-1"
     )
     // The stored row is untouched: a device that cannot resolve an anchor
     // still reads what was written.
@@ -238,5 +246,155 @@ describe("ContextCommentsPanel", () => {
       expect(staged.kind).toBe("comment")
       expect(staged.kind === "comment" && staged.anchorLabel).toBeUndefined()
     })
+  })
+})
+
+describe("project anchor display", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    comments = [
+      {
+        id: "project-comment",
+        resourceKind: "project-file",
+        resourceId: "file",
+        authorId: "local-user",
+        authorName: "You",
+        content: "Keep this readable",
+        createdAt: new Date(),
+        reactions: [],
+        anchor: {
+          kind: "text-range",
+          start: 0,
+          end: 8,
+          revision: "old",
+          anchorVersion: 1,
+          quotedText: "original",
+        },
+      },
+    ]
+  })
+
+  it.each(["resolved", "moved"] as const)(
+    "shows %s locations and reveals the computed range",
+    async (status) => {
+      const onRevealAnchor = jest.fn()
+      renderPanel({
+        onRevealAnchor,
+        resolveAnchor: async () => ({
+          status,
+          start: 20,
+          end: 28,
+          method: "diff",
+          confidence: 1,
+          lineRange: { startLine: 4, startColumn: 2, endLine: 5, endColumn: 1 },
+        }),
+      })
+      fireEvent.click(await screen.findByRole("button", { name: "Lines 4–5" }))
+      expect(onRevealAnchor).toHaveBeenCalledWith(expect.objectContaining({ start: 20, end: 28 }))
+      expect(screen.queryByText("Outdated anchor")).not.toBeInTheDocument()
+      expect(Boolean(screen.queryByText("Moved"))).toBe(status === "moved")
+      expect(comments[0].anchor).toMatchObject({ start: 0, end: 8 })
+    }
+  )
+
+  it("keeps orphaned comments readable with the original quote and no location action", async () => {
+    renderPanel({
+      resolveAnchor: async () => ({ status: "orphaned", method: "none", confidence: 0 }),
+    })
+    expect(await screen.findByText("The text this comment pointed at was removed.")).toBeVisible()
+    expect(screen.getByText("original")).toBeVisible()
+    expect(screen.getByText("Keep this readable")).toBeVisible()
+    expect(screen.queryByRole("button", { name: /Lines/ })).not.toBeInTheDocument()
+    expect(screen.queryByText("Outdated anchor")).not.toBeInTheDocument()
+  })
+
+  it("preserves Canvas CRDT precedence even alongside versioned quote fields", () => {
+    const anchor = {
+      ...comments[0].anchor,
+      kind: "text-range" as const,
+      start: 0,
+      end: 8,
+      crdt: { anchor: "relative-start", head: "relative-end" },
+    }
+    comments[0] = { ...comments[0], resourceKind: "canvas-document", anchor }
+    renderPanel({
+      resolveAnchor: () => ({
+        ...anchor,
+        start: 30,
+        end: 38,
+        lineRange: { startLine: 6, startColumn: 1, endLine: 6, endColumn: 9 },
+      }),
+    })
+    fireEvent.click(screen.getByTestId("context-comment-to-chat"))
+    const staged = useChatStore.getState().contextSelections.at(-1)
+    expect(staged).toMatchObject({ anchorLabel: "line 6" })
+    expect(screen.queryByText("Outdated anchor")).not.toBeInTheDocument()
+    expect(screen.queryByText("Moved")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("The text this comment pointed at was removed.")
+    ).not.toBeInTheDocument()
+  })
+
+  it("ignores a resolution completed after the current buffer changed", async () => {
+    let finish!: (
+      value: import("@/lib/context-workbench/project-file-comment-anchors").ProjectFileAnchorResolution
+    ) => void
+    const old = () =>
+      new Promise<
+        import("@/lib/context-workbench/project-file-comment-anchors").ProjectFileAnchorResolution
+      >((resolve) => {
+        finish = resolve
+      })
+    const view = renderPanel({ resolveAnchor: old })
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextCommentsPanel
+          resource={{ kind: "project-file", id: "file" }}
+          revision="r3"
+          resolveAnchor={() => ({ status: "orphaned", method: "none", confidence: 0 })}
+        />
+      </NextIntlClientProvider>
+    )
+    await act(async () => {
+      finish({
+        status: "moved",
+        start: 20,
+        end: 28,
+        method: "diff",
+        confidence: 1,
+        lineRange: { startLine: 4, startColumn: 1, endLine: 4, endColumn: 9 },
+      })
+    })
+    expect(screen.getByText("The text this comment pointed at was removed.")).toBeVisible()
+    expect(screen.queryByRole("button", { name: /Lines/ })).not.toBeInTheDocument()
+  })
+
+  it("reports resolution errors without claiming text was removed", async () => {
+    renderPanel({
+      resolveAnchor: async () => {
+        throw new Error("crypto unavailable")
+      },
+    })
+    expect(
+      await screen.findByText("Could not locate this comment in the current text.")
+    ).toBeVisible()
+    expect(
+      screen.queryByText("The text this comment pointed at was removed.")
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps the draft when asynchronous anchor capture fails", async () => {
+    renderPanel({
+      createAnchor: async () => {
+        throw new Error("crypto unavailable")
+      },
+    })
+    fireEvent.change(screen.getByRole("textbox", { name: "Write a comment" }), {
+      target: { value: "unsaved comment" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not save the comment")
+    expect(screen.getByRole("textbox", { name: "Write a comment" })).toHaveValue("unsaved comment")
+    expect(addContextComment).not.toHaveBeenCalled()
   })
 })

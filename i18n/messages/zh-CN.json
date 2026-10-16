@@ -12393,7 +12393,12 @@
     "comments": "评论",
     "commentsPanel": {
       "add": "添加评论",
+      "anchorLocation": "第 {start}–{end} 行",
+      "anchorMoved": "已移动",
+      "anchorRemoved": "这条评论指向的文本已被移除。",
+      "anchorUnavailable": "无法在当前文本中定位这条评论。",
       "cancel": "取消",
+      "commentSaveFailed": "无法保存评论，请重试。",
       "delete": "删除",
       "edit": "编辑",
       "empty": "暂无评论。",

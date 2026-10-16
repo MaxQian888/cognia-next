@@ -25,7 +25,22 @@ export type ContextCommentAnchor =
       end: number
       lineRange?: LineRange
       revision?: string
+      /** Version of the project-file quote/context anchoring payload. */
+      anchorVersion?: 1
+      /** Original selection, capped at 8 Ki UTF-16 code units. */
       quotedText?: string
+      /** Whether quotedText contains the entire selection. */
+      quoteComplete?: boolean
+      /** Length of the entire original selection in UTF-16 code units. */
+      quoteLength?: number
+      /** SHA-256 of the entire original selection encoded as UTF-8. */
+      quoteSha256?: string
+      /** Up to 128 UTF-16 code units immediately before the selection. */
+      prefixContext?: string
+      /** Up to 128 UTF-16 code units immediately after the selection. */
+      suffixContext?: string
+      /** SHA-256 of the exact UTF-8 draft at creation, never a dirty buffer's disk hash. */
+      baseContentSha256?: string
       /**
        * The same range named inside the CRDT, which moves with the text.
        *
@@ -69,9 +84,9 @@ export interface ContextCommentRow extends Omit<
 /**
  * Whether a comment's anchor can still be trusted to point at what it meant.
  *
- * A revision mismatch is the only signal an absolute offset has: anybody
- * typing anywhere in the document invalidates every offset in it, so the whole
- * thread is greyed out and the author has to go and find the line again.
+ * Legacy absolute offsets use revision mismatch conservatively. Version 1
+ * project-file anchors instead use their content/quote resolver's outcome:
+ * an edit can move a range without removing the text it points at.
  *
  * A CRDT anchor has no such problem. It names the characters rather than their
  * index, so it survives edits above it and concurrent edits by other people,
@@ -83,6 +98,10 @@ export function isContextCommentAnchorStale(
   comment: Pick<ContextComment, "anchor">,
   currentRevision: string
 ): boolean {
-  if (comment.anchor.kind === "text-range" && comment.anchor.crdt) return false
+  if (
+    comment.anchor.kind === "text-range" &&
+    (comment.anchor.crdt || comment.anchor.anchorVersion === 1)
+  )
+    return false
   return Boolean(comment.anchor.revision && comment.anchor.revision !== currentRevision)
 }

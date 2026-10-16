@@ -84,6 +84,29 @@ describe("resolve", () => {
     expect(text!.toString().slice(10, 15)).toBe("world")
   })
 
+  it("keeps CRDT positions authoritative when project quote metadata is also present", () => {
+    const { result: encoder } = renderHook(() => useCanvasCommentAnchors("doc-1"))
+    const anchor: ContextCommentAnchor = {
+      kind: "text-range",
+      start: 6,
+      end: 11,
+      revision: "old",
+      anchorVersion: 1,
+      quotedText: "different quote",
+      baseContentSha256: "different hash",
+      crdt: encoder.current.encode(6, 11),
+    }
+    text!.insert(0, "new\n")
+    const { result } = renderHook(() => useCanvasCommentAnchors("doc-1"))
+    expect(result.current.resolve(anchor)).toMatchObject({
+      start: 10,
+      end: 15,
+      lineRange: { startLine: 2, startColumn: 7, endLine: 2, endColumn: 12 },
+    })
+    text!.delete(10, 5)
+    expect(result.current.resolve(anchor)).toBe(anchor)
+  })
+
   it("recomputes the line range that the comment UI shows", () => {
     const anchor = anchorFor(6, 11)
     text!.insert(0, "a new first line\n")

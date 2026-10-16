@@ -1,5 +1,12 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
+const mockAddComment = jest.fn(async (..._args: unknown[]) => undefined)
+const mockComments: import("@/types/context-comment").ContextComment[] = []
+jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mockComments }))
+jest.mock("@/lib/db/context-comments", () => ({
+  addContextComment: (...args: unknown[]) => mockAddComment(...args),
+  listContextCommentsForResource: jest.fn(),
+}))
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("./project-file-review-panel", () => ({
   ProjectFileReviewPanel: () => <div>proposal-review-panel</div>,
@@ -27,6 +34,9 @@ import {
   getProjectFileResourceKey,
   proposeProjectFileUpdate,
 } from "@/lib/context-workbench/project-file-proposals"
+import { sha256String } from "@/lib/ocr/hash"
+import { PROJECT_EDITOR_GOTO_EVENT } from "./editor-events"
+import { createProjectFileAnchor } from "@/lib/context-workbench/project-file-comment-anchors"
 import { EDITOR_TITLE_ROW_CLASS } from "./editor-chrome"
 
 function file(overrides: Partial<OpenFile> = {}): OpenFile {
@@ -63,6 +73,8 @@ function renderWorkbench(overrides: Partial<Parameters<typeof ProjectContextWork
 
 describe("ProjectContextWorkbench", () => {
   beforeEach(() => {
+    mockAddComment.mockClear()
+    mockComments.splice(0)
     // The store persists the user's rail/tabs preference; these assertions are
     // written against the rail's button-per-activity navigation.
     useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
@@ -261,5 +273,129 @@ describe("ProjectContextWorkbench", () => {
       })
     ).not.toThrow()
     expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+  })
+})
+
+describe("project comment anchor production", () => {
+  beforeEach(() => {
+    mockAddComment.mockClear()
+    mockComments.splice(0)
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
+  })
+
+  it.each([false, true])("captures the exact selection from a dirty=%s draft", async (dirty) => {
+    const saved = "saved content"
+    const draft = dirty ? "draft 🙂 target\r\nlast" : saved
+    const diskHash = await sha256String(saved)
+    renderWorkbench({
+      file: file({ savedContent: saved, draftContent: draft, baseSha256: diskHash }),
+      selection: { kind: "text", start: 0, end: draft.length },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "projectEditor.workbench.comments" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "placeholder" }), {
+      target: { value: "review selection" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "add" }))
+    await waitFor(() => expect(mockAddComment).toHaveBeenCalledTimes(1))
+    const expected = await sha256String(draft)
+    expect(mockAddComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        anchor: expect.objectContaining({
+          kind: "text-range",
+          anchorVersion: 1,
+          start: 0,
+          end: draft.length,
+          quotedText: draft,
+          quoteComplete: true,
+          quoteLength: draft.length,
+          quoteSha256: expected,
+          baseContentSha256: expected,
+          revision: expected,
+          prefixContext: "",
+          suffixContext: "",
+          lineRange: dirty
+            ? { startLine: 1, startColumn: 1, endLine: 2, endColumn: 5 }
+            : { startLine: 1, startColumn: 1, endLine: 1, endColumn: 14 },
+        }),
+      })
+    )
+    if (dirty) expect(expected).not.toBe(diskHash)
+  })
+
+  it("keeps the captured buffer while a new draft arrives and preserves identity across saves", async () => {
+    const saved = "target"
+    const baseSha256 = await sha256String(saved)
+    const { props, rerender } = renderWorkbench({
+      file: file({ savedContent: saved, draftContent: saved, baseSha256 }),
+      selection: { kind: "text", start: 0, end: 6 },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "projectEditor.workbench.comments" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "placeholder" }), {
+      target: { value: "before save" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "add" }))
+    rerender(
+      <ProjectContextWorkbench
+        {...props}
+        file={file({ savedContent: saved, draftContent: "edited target", baseSha256 })}
+      />
+    )
+    await waitFor(() => expect(mockAddComment).toHaveBeenCalledTimes(1))
+    expect(mockAddComment.mock.calls[0][0]).toMatchObject({
+      anchor: { quotedText: saved, baseContentSha256: baseSha256 },
+    })
+    rerender(
+      <ProjectContextWorkbench
+        {...props}
+        file={file({
+          savedContent: saved,
+          draftContent: saved,
+          baseSha256,
+          draftVersion: 8,
+          mtime: 99,
+        })}
+      />
+    )
+    fireEvent.change(screen.getByRole("textbox", { name: "placeholder" }), {
+      target: { value: "after save" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "add" }))
+    await waitFor(() => expect(mockAddComment).toHaveBeenCalledTimes(2))
+    expect(mockAddComment.mock.calls[1][0]).toMatchObject({ anchor: { revision: baseSha256 } })
+  })
+
+  it("maps a saved-base anchor through draft edits and uses the existing editor goto seam", async () => {
+    const saved = "before\ntarget\nafter"
+    const baseSha256 = await sha256String(saved)
+    mockComments.push({
+      id: "c1",
+      resourceKind: "project-file",
+      resourceId: "file",
+      authorId: "local-user",
+      authorName: "You",
+      content: "comment",
+      createdAt: new Date(),
+      reactions: [],
+      anchor: await createProjectFileAnchor(saved, 7, 13),
+    })
+    const goto = jest.fn()
+    window.addEventListener(PROJECT_EDITOR_GOTO_EVENT, goto)
+    const { rerender, props } = renderWorkbench({
+      file: file({ savedContent: saved, draftContent: "new\n" + saved, baseSha256 }),
+    })
+    fireEvent.click(screen.getByRole("button", { name: "projectEditor.workbench.comments" }))
+    fireEvent.click(await screen.findByRole("button", { name: "anchorLocation" }))
+    expect(screen.getByText("anchorMoved")).toBeVisible()
+    expect(goto.mock.calls[0][0].detail).toEqual({ relPath: "src/index.ts", line: 3, column: 1 })
+    rerender(
+      <ProjectContextWorkbench
+        {...props}
+        file={file({ savedContent: saved, draftContent: "before\n\nafter", baseSha256 })}
+      />
+    )
+    expect(await screen.findByText("anchorRemoved")).toBeVisible()
+    expect(screen.getByText("target")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "anchorLocation" })).not.toBeInTheDocument()
+    window.removeEventListener(PROJECT_EDITOR_GOTO_EVENT, goto)
   })
 })

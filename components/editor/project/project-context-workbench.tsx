@@ -1,6 +1,14 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react"
 import {
   BotIcon,
   FileSearchIcon,
@@ -38,6 +46,14 @@ import {
   resolveContextCapabilities,
 } from "@/lib/context-workbench/capabilities"
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
+import { sha256String } from "@/lib/ocr/hash"
+import {
+  createProjectFileAnchor,
+  resolveProjectFileAnchor,
+  type ProjectFileAnchorResolution,
+} from "@/lib/context-workbench/project-file-comment-anchors"
+import type { ContextCommentAnchor } from "@/types/context-comment"
+import { armProjectEditorGoto, PROJECT_EDITOR_GOTO_EVENT } from "./editor-events"
 import { EDITOR_TITLE_ROW_CLASS } from "./editor-chrome"
 
 function contentToken(content: string | undefined | null): string {
@@ -406,19 +422,11 @@ function ProjectContextWorkbenchHost({
         appliesTo: appliesToProjectFile,
         getBadge: () => unresolvedCommentCount,
         renderer: () => (
-          <ContextCommentsPanel
-            resource={{ kind: "project-file", id: resourceKey, projectId: scopeKey }}
-            revision={fileBaseToken(file)}
-            anchor={
-              selection
-                ? {
-                    kind: "text-range",
-                    start: selection.start,
-                    end: selection.end,
-                    revision: fileBaseToken(file),
-                  }
-                : undefined
-            }
+          <ProjectFileCommentsPanel
+            resourceKey={resourceKey}
+            scopeKey={scopeKey}
+            file={file}
+            selection={selection}
           />
         ),
       },
@@ -522,6 +530,101 @@ function ProjectContextWorkbenchHost({
       // The host's resizable panel draws the divider; a second border beside
       // it would read as a double rule.
       className="w-full border-l-0"
+    />
+  )
+}
+
+/** Owns asynchronous hashes without delaying the editor or the Canvas path. */
+function ProjectFileCommentsPanel({
+  resourceKey,
+  scopeKey,
+  file,
+  selection,
+}: {
+  resourceKey: string
+  scopeKey: string
+  file: OpenFile
+  selection?: TextSelectionCoordinates
+}) {
+  const text = file.draftContent ?? ""
+  const clean = text === file.savedContent
+  const hashPromise = useMemo(
+    () => (clean && file.baseSha256 ? Promise.resolve(file.baseSha256) : sha256String(text)),
+    [clean, file.baseSha256, text]
+  )
+  const [identity, setIdentity] = useState<{ text: string; hash: string } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void hashPromise
+      .then((hash) => {
+        if (!cancelled) setIdentity({ text, hash })
+      })
+      .catch(() => {
+        /* Creation and resolution expose hashing failures in the panel. */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [hashPromise, text])
+  const revision = identity?.text === text ? identity.hash : ""
+  const createAnchor = useCallback(async (): Promise<ContextCommentAnchor> => {
+    // These values belong to this render: typing while WebCrypto is in flight
+    // must not combine a new selection with an older buffer's hash.
+    const hash = await hashPromise
+    return selection
+      ? createProjectFileAnchor(text, selection.start, selection.end, hash)
+      : { kind: "resource", revision: hash }
+  }, [hashPromise, selection, text])
+  const resolutionCache = useRef<{
+    hash: string
+    results: Map<string, Promise<ProjectFileAnchorResolution>>
+  } | null>(null)
+  const resolveAnchor = useCallback(
+    (anchor: ContextCommentAnchor, commentId?: string) => {
+      if (anchor.kind !== "text-range" || anchor.crdt) return anchor
+      return hashPromise.then((hash) => {
+        // Cache by comment ID and content hash, including across byte-identical
+        // saves. Keep only one content generation to bound memory while typing.
+        if (resolutionCache.current?.hash !== hash) {
+          resolutionCache.current = { hash, results: new Map() }
+        }
+        const cache = resolutionCache.current.results
+        const key = commentId ?? JSON.stringify(anchor)
+        let result = cache.get(key)
+        if (!result) {
+          result = resolveProjectFileAnchor(anchor, text, {
+            currentContentSha256: hash,
+            currentRevision: hash,
+            baseText:
+              !clean && file.baseSha256 === anchor.baseContentSha256
+                ? file.savedContent
+                : undefined,
+          })
+          cache.set(key, result)
+        }
+        return result
+      })
+    },
+    [hashPromise, text, clean, file.baseSha256, file.savedContent]
+  )
+
+  return (
+    <ContextCommentsPanel
+      resource={{ kind: "project-file", id: resourceKey, projectId: scopeKey }}
+      resourceTitle={file.relPath}
+      revision={revision}
+      createAnchor={createAnchor}
+      resolveAnchor={resolveAnchor}
+      onRevealAnchor={(anchor) => {
+        if (anchor.kind !== "text-range" || !anchor.lineRange) return
+        const detail = {
+          relPath: file.relPath,
+          line: anchor.lineRange.startLine,
+          column: anchor.lineRange.startColumn,
+        }
+        armProjectEditorGoto(detail)
+        window.dispatchEvent(new CustomEvent(PROJECT_EDITOR_GOTO_EVENT, { detail }))
+      }}
     />
   )
 }
