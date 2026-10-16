@@ -377,6 +377,30 @@ fn smoke_error_label(code: &str) -> &str {
     }
 }
 
+// Revocation and restart probes must not accidentally pass because the lease
+// naturally expired. Keep its original monotonic deadline across the negative
+// operation; never refresh or modify it after the event being tested.
+async fn smoke_live_lease_deadline(
+    service: &ManagedDesktopService,
+    p: &ManagedDesktopPrincipal,
+    desktop: &ManagedDesktop,
+    lease: &ManagedControlLease,
+) -> Result<Instant> {
+    let slot = service.control_slot(&desktop.id, desktop.generation).await;
+    let mut control = slot.lock().await;
+    control.require_lease(p, &lease.token, lease.fence)?;
+    Ok(control.lease.as_ref().expect("validated lease").deadline)
+}
+
+fn require_smoke_before_deadline(deadline: Instant) -> Result<()> {
+    if Instant::now() >= deadline {
+        return Err(refused(
+            "managed_desktop_control_smoke_lease_expiry_confounded",
+        ));
+    }
+    Ok(())
+}
+
 async fn control_smoke_steps(
     host: &dyn ManagedDesktopSmokeHost,
     p: &ManagedDesktopPrincipal,
@@ -546,6 +570,7 @@ async fn control_smoke_steps(
         let transfer_frame = service
             .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
             .await?;
+        let released_deadline = smoke_live_lease_deadline(&service, p, &desktop, &lease).await?;
         stage = "human_release_transfer_release";
         service
             .control_release(
@@ -593,17 +618,34 @@ async fn control_smoke_steps(
             .await,
             "managed_desktop_control_stale_frame",
         )?;
+        require_smoke_before_deadline(released_deadline)?;
         assertions.old_token_and_frame_rejected = true;
         stage = "transferred_positive_fresh_input";
         let (second_lease, _) =
             fresh_smoke_input(&service, &second, &desktop, &second_lease, &authority).await?;
         assertions.human_release_transfer = true;
-        stage = "principal_revocation";
-        // A fresh frame distinguishes epoch revocation from frame expiry.
+        stage = "principal_revocation_renew";
+        let second_lease = service
+            .control_renew_inner(
+                &second,
+                &desktop.id,
+                desktop.generation,
+                &second_lease.token,
+                second_lease.fence,
+                &authority,
+                true,
+            )
+            .await?;
+        stage = "principal_revocation_capture";
+        // A fresh frame and live lease distinguish epoch revocation from expiry.
         let second_frame = service
             .control_frame_inner(&second, &desktop.id, desktop.generation, &authority, true)
             .await?;
+        stage = "principal_revocation_active_lease";
+        let revoked_deadline =
+            smoke_live_lease_deadline(&service, &second, &desktop, &second_lease).await?;
         let sent = authority.admitted.load(Ordering::SeqCst);
+        stage = "principal_revocation_denial";
         service.revoke_control_principal(&second.principal_id).await;
         require_smoke_error(
             smoke_input(
@@ -617,6 +659,7 @@ async fn control_smoke_steps(
             .await,
             "managed_desktop_control_lease_expired",
         )?;
+        require_smoke_before_deadline(revoked_deadline)?;
         authority.require_no_sends_since(sent)?;
         assertions.principal_revocation_rejected = true;
         stage = "live_authority_revocation";
@@ -626,11 +669,13 @@ async fn control_smoke_steps(
         let frame = service
             .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
             .await?;
+        let authority_deadline = smoke_live_lease_deadline(&service, p, &desktop, &lease).await?;
         authority.active.store(false, Ordering::SeqCst);
         require_smoke_error(
             smoke_input(&service, p, &desktop, &lease, &frame, &authority).await,
             "managed_desktop_forbidden",
         )?;
+        require_smoke_before_deadline(authority_deadline)?;
         authority.require_no_sends_since(sent)?;
         assertions.live_authority_revocation_rejected = true;
         stage = "lease_expiry";
@@ -656,6 +701,8 @@ async fn control_smoke_steps(
         let old_frame = service
             .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
             .await?;
+        let reopened_deadline =
+            smoke_live_lease_deadline(&service, p, &desktop, &old_lease).await?;
         // Closing the service drops its actual WebSocket senders and journal lock.
         // This is a service reopen, not an operating-system/process restart claim.
         drop(service);
@@ -664,6 +711,7 @@ async fn control_smoke_steps(
             smoke_input(&service, p, &desktop, &old_lease, &old_frame, &authority).await,
             "managed_desktop_control_lease_expired",
         )?;
+        require_smoke_before_deadline(reopened_deadline)?;
         let lease = service
             .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
             .await?;
@@ -1744,6 +1792,40 @@ mod tests {
             "managed_desktop_control_smoke_required"
         );
         assert_eq!(f.input_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn principal_revocation_rejects_input_before_original_lease_deadline() {
+        let f = wire_fixture().await;
+        let (service, p, row) = (&f.domain.service, &f.domain.p, &f.row);
+        let authority = NativeSmokeAuthority::new(p);
+        let lease = service
+            .control_acquire_inner(p, &row.id, row.generation, true, &authority, true)
+            .await
+            .unwrap();
+        let frame = service
+            .control_frame_inner(p, &row.id, row.generation, &authority, true)
+            .await
+            .unwrap();
+        let deadline = smoke_live_lease_deadline(service, p, row, &lease)
+            .await
+            .unwrap();
+        service.revoke_control_principal(&p.principal_id).await;
+        assert_eq!(
+            smoke_input(service, p, row, &lease, &frame, &authority)
+                .await
+                .unwrap_err()
+                .code,
+            "managed_desktop_control_lease_expired"
+        );
+        require_smoke_before_deadline(deadline).unwrap();
+        assert_eq!(f.input_count.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            require_smoke_before_deadline(Instant::now() - Duration::from_millis(1))
+                .unwrap_err()
+                .code,
+            "managed_desktop_control_smoke_lease_expiry_confounded"
+        );
     }
 
     #[tokio::test]
