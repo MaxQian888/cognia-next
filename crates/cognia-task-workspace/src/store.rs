@@ -15,7 +15,7 @@ use std::{
 use uuid::Uuid;
 
 pub struct WorkspaceStore {
-    connection: Connection,
+    pub(crate) connection: Connection,
     blob_dir: PathBuf,
     max_blob_bytes: u64,
     /// The last compressed blob decoded for a ranged read, so reading one a
@@ -113,6 +113,7 @@ impl WorkspaceStore {
         };
         store.apply_registry_migration()?;
         store.apply_changeset_migration()?;
+        store.apply_provenance_migration()?;
         Ok(store)
     }
 
@@ -1362,7 +1363,25 @@ impl WorkspaceStore {
     }
 
     pub fn prune_unreferenced_blobs(&mut self) -> Result<(u64, u64), String> {
+        // Releasing task/undo roots also makes their historical versions eligible.
+        self.provenance().compact_provenance(crate::provenance::CompactionLimits::default())
+            .map_err(|error| format!("compact provenance before blob prune: {error}"))?;
+        self.prune_unreferenced_blobs_after_scan(|| {})
+    }
+
+    fn prune_unreferenced_blobs_after_scan(&mut self, after_scan: impl FnOnce()) -> Result<(u64, u64), String> {
+        // Pin writers and reference scanning must share one write lock through deletion.
+        let transaction = self.connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| format!("begin blob prune: {error}"))?;
         let mut referenced = HashSet::new();
+        {
+            let mut pins = transaction.prepare("SELECT hash FROM provenance_blob_pins")
+                .map_err(|error| format!("prepare provenance pins: {error}"))?;
+            for hash in pins.query_map([], |row| row.get::<_, String>(0))
+                .map_err(|error| format!("query provenance pins: {error}"))? {
+                referenced.insert(hash.map_err(|error| error.to_string())?);
+            }
+        }
         for table_column in [
             "task_runs:payload",
             "task_runs:baseline",
@@ -1373,8 +1392,7 @@ impl WorkspaceStore {
         ] {
             let (table, column) = table_column.split_once(':').expect("static table column");
             let sql = format!("SELECT {column} FROM {table}");
-            let mut statement = self
-                .connection
+            let mut statement = transaction
                 .prepare(&sql)
                 .map_err(|error| format!("prepare blob reference scan: {error}"))?;
             let rows = statement
@@ -1388,8 +1406,7 @@ impl WorkspaceStore {
             }
         }
 
-        let mut statement = self
-            .connection
+        let mut statement = transaction
             .prepare("SELECT hash,rel_path,stored_size FROM task_blobs")
             .map_err(|error| format!("prepare blobs for prune: {error}"))?;
         let rows = statement
@@ -1410,6 +1427,7 @@ impl WorkspaceStore {
             .collect::<Result<Vec<_>, String>>()?;
         drop(statement);
 
+        after_scan();
         let mut tombstones = Vec::with_capacity(stale.len());
         for (hash, rel_path, _) in &stale {
             let source = self.blob_dir.join(rel_path);
@@ -1423,13 +1441,6 @@ impl WorkspaceStore {
             tombstones.push((source, tombstone));
         }
 
-        let transaction = match self.connection.transaction() {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                restore_tombstones(&tombstones);
-                return Err(format!("begin blob prune: {error}"));
-            }
-        };
         let mut reclaimed = 0_u64;
         for (hash, _, stored_size) in &stale {
             if let Err(error) = transaction.execute("DELETE FROM task_blobs WHERE hash=?1", [hash])
@@ -2492,6 +2503,32 @@ mod tests {
             created_at: 100,
             updated_at: 100,
         }
+    }
+
+    #[test]
+    fn provenance_gc_serializes_new_pins_across_connections() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut gc = WorkspaceStore::open(dir.path(), 1 << 20).unwrap();
+        let mut writer = WorkspaceStore::open(dir.path(), 1 << 20).unwrap();
+        writer.connection.busy_timeout(std::time::Duration::ZERO).unwrap();
+        gc.put_blob("race", b"bytes", 1).unwrap();
+        let root = writer.provenance().register_root("principal", "host", "/race", "working-tree", None).unwrap();
+        let intent = crate::provenance::MutationIntent {
+            root_id: root.root_id, operation_key: "race-op".into(), kind: "apply".into(),
+            manifest: serde_json::json!({}), selection: serde_json::json!([]), blob_refs: vec!["race".into()], created_at: 1,
+        };
+        let removed = gc.prune_unreferenced_blobs_after_scan(|| {
+            let error = writer.provenance().prepare_mutation(&intent).unwrap_err();
+            assert!(matches!(error, crate::provenance::ProvenanceError::Database(rusqlite::Error::SqliteFailure(ref error, _)) if error.code == rusqlite::ErrorCode::DatabaseBusy));
+        }).unwrap();
+        assert_eq!(removed.0, 1);
+        // Once GC releases the lock, a pin cannot be published for the deleted blob.
+        assert!(writer.provenance().prepare_mutation(&intent).is_err());
+        assert!(writer.provenance().mutation("race-op").unwrap().is_none());
+        writer.put_blob("race", b"bytes", 2).unwrap();
+        writer.provenance().prepare_mutation(&intent).unwrap();
+        assert_eq!(gc.prune_unreferenced_blobs().unwrap().0, 0);
+        assert_eq!(gc.get_blob("race", 3).unwrap(), b"bytes");
     }
 
     #[test]

@@ -115,28 +115,15 @@ pub fn apply(
     }
 
     patch.reversible = persist_plan_blobs(store, &plans, options.now, options.allow_irreversible)?;
-    commit_plans(workspace_root, &plans)?;
-    patch.applied_files = plans
-        .iter()
-        .map(|plan| AppliedFile {
-            path: plan.path.clone(),
-            before_apply_hash: plan.before.as_ref().map(|entry| hash(&entry.bytes)),
-            after_apply_hash: plan.after.as_ref().map(|entry| hash(&entry.bytes)),
-            before_kind: plan.before.as_ref().map(|entry| entry.kind),
-            after_kind: plan.after.as_ref().map(|entry| entry.kind),
-            before_mode: plan.before.as_ref().and_then(|entry| entry.mode),
-            after_mode: plan.after.as_ref().and_then(|entry| entry.mode),
-            binary: plan
-                .after
-                .as_ref()
-                .or(plan.before.as_ref())
-                .is_some_and(|entry| detect_binary(&entry.bytes)),
-        })
-        .collect();
-    patch.applied_selection = selection.to_vec();
-    patch.applied_selection_known = true;
-    patch.state = PatchState::Applied;
-    patch.applied_revision = Some(options.revision);
+    let mut captured_patch = patch.clone();
+    fill_applied_patch(&mut captured_patch, &plans, selection, options.revision);
+    let capture = prepare_capture(workspace_root, scratch_root, store, &captured_patch, &plans, selection, options.revision, options.now, "apply");
+    if let Err(error) = commit_plans(workspace_root, &plans) {
+        finish_failed_capture(store, capture.as_deref(), &error);
+        return Err(error);
+    }
+    *patch = captured_patch;
+    finish_capture(store, capture.as_deref());
     Ok(ApplyOutcome {
         state: PatchState::Applied,
         revision: options.revision,
@@ -264,8 +251,15 @@ pub fn undo(
             conflicts,
         });
     }
-    commit_plans(workspace_root, &plans)?;
+    let mut captured_patch = patch.clone();
+    captured_patch.state = PatchState::Reverted;
+    let capture = prepare_capture(workspace_root, scratch_root, store, &captured_patch, &plans, &patch.applied_selection, revision, now, "undo");
+    if let Err(error) = commit_plans(workspace_root, &plans) {
+        finish_failed_capture(store, capture.as_deref(), &error);
+        return Err(error);
+    }
     patch.state = PatchState::Reverted;
+    finish_capture(store, capture.as_deref());
     Ok(ApplyOutcome {
         state: PatchState::Reverted,
         revision,
@@ -351,28 +345,15 @@ pub fn force_apply(
         });
     }
     patch.reversible = persist_plan_blobs(store, &plans, options.now, options.allow_irreversible)?;
-    commit_plans(workspace_root, &plans)?;
-    patch.applied_files = plans
-        .iter()
-        .map(|plan| AppliedFile {
-            path: plan.path.clone(),
-            before_apply_hash: plan.before.as_ref().map(|entry| hash(&entry.bytes)),
-            after_apply_hash: plan.after.as_ref().map(|entry| hash(&entry.bytes)),
-            before_kind: plan.before.as_ref().map(|entry| entry.kind),
-            after_kind: plan.after.as_ref().map(|entry| entry.kind),
-            before_mode: plan.before.as_ref().and_then(|entry| entry.mode),
-            after_mode: plan.after.as_ref().and_then(|entry| entry.mode),
-            binary: plan
-                .after
-                .as_ref()
-                .or(plan.before.as_ref())
-                .is_some_and(|entry| detect_binary(&entry.bytes)),
-        })
-        .collect();
-    patch.applied_selection = selection.to_vec();
-    patch.applied_selection_known = true;
-    patch.state = PatchState::Applied;
-    patch.applied_revision = Some(options.revision);
+    let mut captured_patch = patch.clone();
+    fill_applied_patch(&mut captured_patch, &plans, selection, options.revision);
+    let capture = prepare_capture(workspace_root, scratch_root, store, &captured_patch, &plans, selection, options.revision, options.now, "force");
+    if let Err(error) = commit_plans(workspace_root, &plans) {
+        finish_failed_capture(store, capture.as_deref(), &error);
+        return Err(error);
+    }
+    *patch = captured_patch;
+    finish_capture(store, capture.as_deref());
     Ok(ApplyOutcome {
         state: PatchState::Applied,
         revision: options.revision,
@@ -401,6 +382,105 @@ fn persist_plan_blobs(
         }
     }
     Ok(reversible)
+}
+
+fn fill_applied_patch(patch: &mut PatchSet, plans: &[PlannedWrite], selection: &[PatchSelection], revision: u64) {
+    patch.applied_files = plans.iter().map(|plan| AppliedFile {
+        path: plan.path.clone(), before_apply_hash: plan.before.as_ref().map(|v| hash(&v.bytes)),
+        after_apply_hash: plan.after.as_ref().map(|v| hash(&v.bytes)), before_kind: plan.before.as_ref().map(|v| v.kind),
+        after_kind: plan.after.as_ref().map(|v| v.kind), before_mode: plan.before.as_ref().and_then(|v| v.mode),
+        after_mode: plan.after.as_ref().and_then(|v| v.mode), binary: plan.after.as_ref().or(plan.before.as_ref()).is_some_and(|v| detect_binary(&v.bytes)),
+    }).collect();
+    patch.applied_selection = selection.to_vec();
+    patch.applied_selection_known = true;
+    patch.state = PatchState::Applied;
+    patch.applied_revision = Some(revision);
+}
+
+fn finish_capture(store: &mut WorkspaceStore, key: Option<&str>) {
+    if let Some(key) = key {
+        if let Err(error) = crate::provenance::capture::record_applied_patch(store, key) {
+            crate::provenance::capture::warn_gap(store, key, &error);
+        }
+    }
+}
+
+fn finish_failed_capture(store: &mut WorkspaceStore, key: Option<&str>, error: &str) {
+    if let Some(key) = key {
+        crate::provenance::capture::warn_gap(store, key, error);
+        // A reported write failure may have attempted compensation. Never turn
+        // its residual bytes into an adoption on a later recovery pass.
+        let _ = store.provenance().abort_mutation(key, false);
+    }
+}
+
+fn prepare_capture(root_path: &Path, scratch: &Path, store: &mut WorkspaceStore, patch: &PatchSet,
+    plans: &[PlannedWrite], selection: &[PatchSelection], revision: u64, now: i64, kind: &str) -> Option<String> {
+    use crate::provenance::{capture, content_hash, AdoptionState, MappingEvidence};
+    let selection_hash = content_hash(serde_json::to_string(selection).unwrap_or_default().as_bytes());
+    let key = format!("{kind}:{}:{}:{revision}:{selection_hash}", patch.run_id, patch.created_at);
+    let mut attempt = || -> Result<String, String> {
+        let root = capture::working_root(store, root_path)?;
+        let source = capture::run_source(store, &root, patch, None)?;
+        let unknown = capture::unknown_source(store, &root)?;
+        let inverse = if kind == "undo" { capture::applied_intent(store, patch, &root.root_id)? } else { None };
+        let mut paths = Vec::new();
+        for plan in plans {
+            // A rename is one identity transition, not a delete plus a new file.
+            let rename = if kind == "undo" {
+                patch.files.iter().find(|f| f.old_path.as_deref() == Some(&plan.path) && f.kind == ChangeKind::Renamed)
+            } else {
+                patch.files.iter().find(|f| f.path == plan.path && f.kind == ChangeKind::Renamed)
+            };
+            let old_path = rename.map(|f| if kind == "undo" { f.path.clone() } else { f.old_path.clone().unwrap_or_default() });
+            if plan.after.is_none() && patch.files.iter().any(|f| f.kind == ChangeKind::Renamed &&
+                (if kind == "undo" { f.path == plan.path } else { f.old_path.as_deref() == Some(&plan.path) })) { continue; }
+            let before = old_path.as_ref().and_then(|old| plans.iter().find(|p| &p.path == old)).unwrap_or(plan).before.as_ref().map(|v| v.bytes.clone());
+            let after = plan.after.as_ref().map(|v| v.bytes.clone());
+            let current = before.as_deref().unwrap_or_default();
+            let actual = after.as_deref().unwrap_or_default();
+            let segments = if kind == "undo" {
+                let intent = inverse.as_ref().ok_or("missing persisted inverse provenance")?;
+                let current_segments = capture::map_before(store, &root, old_path.as_deref().unwrap_or(&plan.path), current, now)?;
+                capture::undo_map(store, intent, &plan.path, current, &current_segments, actual, &unknown, now)?
+            } else {
+                let file = patch.files.iter().find(|f| f.path == plan.path).ok_or("missing captured patch file")?;
+                let baseline = file.before_hash.as_ref().map(|h| store.get_blob(h, now)).transpose()?.unwrap_or_default();
+                let output = file.after_hash.as_ref().map(|h| store.get_blob(h, now)).transpose()?;
+                let receipt = store.provenance().matching_tool_mutation_receipt(&patch.run_id, &file.path,
+                    file.before_hash.as_ref().map(|_| content_hash(&baseline)).as_deref(), output.as_ref().map(|b| content_hash(b)).as_deref()).map_err(|e| e.to_string())?;
+                let line_source = capture::run_source(store, &root, patch, receipt.as_ref().map(|r| r.tool_call_id.as_str()))?;
+                let current_segments = capture::map_before(store, &root, old_path.as_deref().unwrap_or(&plan.path), current, now)?;
+                let ids = selection.iter().find(|s| s.path == file.path).map(|s| s.hunk_ids.as_slice()).unwrap_or_default();
+                let patches = if file.hunks.is_empty() && !file.binary {
+                    vec![unified_diff(scratch, &file.path, &baseline, output.as_deref().unwrap_or_default())?]
+                } else {
+                    file.hunks.iter().filter(|h| ids.is_empty() || ids.contains(&h.id)).map(|h|
+                        store.get_blob(&h.forward_patch_hash, now).and_then(|b| String::from_utf8(b).map_err(|e| e.to_string()))).collect::<Result<Vec<_>, _>>()?
+                };
+                if after.is_none() {
+                    vec![]
+                } else if file.binary && actual != current {
+                    vec![crate::line_map::Segment { start_line: 1, end_line: 2, provenance_id: line_source, mapping_evidence: MappingEvidence::Exact }]
+                } else {
+                    crate::line_map::map_selected_hunks(&baseline, &patches.iter().map(String::as_str).collect::<Vec<_>>(), current, actual, &current_segments, &line_source, &unknown).map_err(|e| e.to_string())?.segments
+                }
+            };
+            paths.push(capture::CapturePath { path: plan.path.clone(), old_path, before, after, segments: Some(segments) });
+        }
+        let mut adoptions = capture::adoption_units(patch, &source, selection, if kind == "undo" { AdoptionState::Reverted } else { AdoptionState::Applied });
+        if kind == "undo" {
+            // Excluded units were never applied and must not acquire reverted events.
+            let originally = capture::adoption_units(patch, &source, selection, AdoptionState::Applied);
+            adoptions.retain(|a| originally.iter().any(|o| o.unit_key == a.unit_key && o.state != AdoptionState::Discarded));
+        }
+        capture::prepare(store, &root, &key, kind, &paths, &adoptions,
+            capture::Verification::Disk { root: root.canonical_root.clone() }, Some(patch), now)
+    };
+    match attempt() {
+        Ok(key) => Some(key),
+        Err(error) => { capture::warn_gap(store, &key, &error); None }
+    }
 }
 
 pub fn keep_current(patch: &mut PatchSet, revision: u64) -> Result<ApplyOutcome, String> {
@@ -1056,6 +1136,28 @@ fn create_symlink(path: &Path, bytes: &[u8]) -> Result<(), String> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn provenance_apply_failed_compensation_never_adopts_residual_output() {
+        use crate::provenance::{capture, MutationCommitState};
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let mut store = WorkspaceStore::open(data.path(), 1024 * 1024).unwrap();
+        let root = capture::working_root(&mut store, workspace.path()).unwrap();
+        let key = capture::prepare(&mut store, &root, "failed-apply", "apply", &[capture::CapturePath {
+            path: "result".into(), old_path: None, before: None,
+            after: Some(b"residual agent output\n".to_vec()), segments: None,
+        }], &[], capture::Verification::Disk { root: root.canonical_root.clone() }, None, 1).unwrap();
+        // A failed compensation can leave bytes matching the desired result;
+        // those bytes alone do not turn a failed operation into an adoption.
+        fs::write(workspace.path().join("result"), b"residual agent output\n").unwrap();
+        finish_failed_capture(&mut store, Some(&key), "injected compensation failure");
+        capture::reconcile(&mut store).unwrap();
+        assert_eq!(store.provenance().mutation(&key).unwrap().unwrap().state, MutationCommitState::Aborted);
+        assert!(store.provenance().current_version(&root.root_id, "result").unwrap().is_none());
+        let gaps: i64 = store.connection.query_row("SELECT count(*) FROM provenance_capture_gaps WHERE completeness='gap'", [], |r| r.get(0)).unwrap();
+        assert_eq!(gaps, 1);
+    }
 
     /// [ACC:DEL-05] A patch entry that reaches through a symlinked directory
     /// out of the workspace is refused at the filesystem layer — before the

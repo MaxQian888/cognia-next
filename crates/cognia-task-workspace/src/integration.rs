@@ -1535,7 +1535,169 @@ fn move_target(
     ))
 }
 
+fn integration_provenance_key(run: &IntegrationRun, root_id: &str, rollback: bool) -> String {
+    if rollback {
+        if let Some(transition) = run.op_log.last() {
+            return format!("integration:{}:rollback:{}:{}:{root_id}", run.integration_id, transition.old_sha, transition.new_sha);
+        }
+    }
+    format!("integration:{}:publish:{root_id}", run.integration_id)
+}
+
 impl TaskWorkspaceService {
+    /// Capture both the ref stream and, only when it exists, the checked-out
+    /// working tree. Preparing twice is safe during publication recovery.
+    fn prepare_integration_provenance(&self, run: &IntegrationRun, result: &str, rollback: bool) -> Result<Vec<String>, String> {
+        use crate::{changeset::{provenance_changeset_source, provenance_changeset_stream,
+            provenance_copy_map, provenance_git_bytes, provenance_version_map},
+            line_map, provenance::{capture, AdoptionInput, AdoptionState, MappingEvidence, ProvenanceOrigin}};
+        let transition = run.op_log.last().ok_or("missing integration publication intent")?;
+        let repo = Path::new(&run.repo_common_dir);
+        let files = crate::changeset::diff_files(repo, &transition.old_sha, result).map_err(|error| error.to_string())?;
+        let mut destinations = vec![(run.repo_common_dir.clone(), format!("target-ref:{}", run.target_ref),
+            capture::Verification::GitRef { repo: run.repo_common_dir.clone(), reference: run.target_ref.clone(), expected_sha: result.into() })];
+        let short = run.target_ref.strip_prefix("refs/heads/").unwrap_or(&run.target_ref);
+        for checkout in read_git_worktree_inventory(repo).map_err(|error| error.to_string())?
+            .into_iter().filter(|row| row.branch.as_deref() == Some(short)) {
+            let canonical = fs::canonicalize(&checkout.path).map_err(|error| error.to_string())?.to_string_lossy().into_owned();
+            destinations.push((canonical.clone(), "working-tree".into(), capture::Verification::Disk { root: canonical }));
+        }
+        let mut keys = Vec::new();
+        let mut store = self.store.lock();
+        for (canonical, stream, verification) in destinations {
+            let root = store.provenance().register_root("local", "local", &canonical, &stream, Some(&run.repo_common_dir))
+                .map_err(|error| error.to_string())?;
+            let key = integration_provenance_key(run, &root.root_id, rollback);
+            if store.provenance().mutation(&key).map_err(|error| error.to_string())?.is_some() {
+                keys.push(key);
+                continue;
+            }
+            let mut paths = Vec::new();
+            let mut adoptions = Vec::new();
+            let mut unknown_source = None;
+            for item in run.items.iter().filter(|item| is_merged(item)) {
+                let record = store.get_changeset(&item.changeset_id)?.ok_or("missing integration changeset")?;
+                let source = provenance_changeset_source(&mut store, &root, &record, false)?;
+                if unknown_source.is_none() { unknown_source = Some(provenance_changeset_source(&mut store, &root, &record, true)?); }
+                for file in &record.files {
+                    if rollback && file.excluded { continue; }
+                    adoptions.push(AdoptionInput { provenance_id: source.clone(), unit_key: format!("changeset:{}:file:{}", record.changeset_id, file.path),
+                        state: if file.excluded { AdoptionState::Discarded } else if rollback { AdoptionState::Reverted } else { AdoptionState::Applied },
+                        details: serde_json::json!({"integrationId": run.integration_id, "headSha": record.head_sha}) });
+                }
+            }
+            if rollback {
+                let publication_key = integration_provenance_key(run, &root.root_id, false);
+                let committed = store.provenance().mutation(&publication_key).map_err(|error| error.to_string())?
+                    .is_some_and(|mutation| mutation.state == crate::provenance::MutationCommitState::Committed);
+                if let Some(intent) = store.provenance().mutation_intent(&publication_key).map_err(|error| error.to_string())?.filter(|_| committed) {
+                    let published: Vec<AdoptionInput> = serde_json::from_value(intent.manifest.get("adoptions").cloned().unwrap_or_else(|| serde_json::json!([])))
+                        .map_err(|error| error.to_string())?;
+                    for mut adoption in published.into_iter().filter(|adoption| matches!(adoption.state, AdoptionState::Applied | AdoptionState::Partial)) {
+                        if !adoptions.iter().any(|existing| existing.provenance_id == adoption.provenance_id && existing.unit_key == adoption.unit_key) {
+                            adoption.state = AdoptionState::Reverted;
+                            adoptions.push(adoption);
+                        }
+                    }
+                }
+            }
+            for file in &files {
+                let old_path = file.old_path.as_deref().unwrap_or(&file.path);
+                let before = provenance_git_bytes(repo, &transition.old_sha, old_path)?;
+                let after = provenance_git_bytes(repo, result, &file.path)?;
+                let segments = if file.binary || after.is_none() { None } else {
+                    let after_bytes = after.as_deref().unwrap_or_default();
+                    let before_bytes = before.as_deref().unwrap_or_default();
+                    let before_map = capture::map_before(&mut store, &root, old_path, before_bytes, now_ms())?;
+                    // The shared mapper supplies explicit unknown origins for any
+                    // independently introduced lines. Never borrow the latest run.
+                    let unknown = unknown_source.clone().ok_or("integration has no provenance source")?;
+                    let actual_ops = line_map::diff_lines(before_bytes, after_bytes).map_err(|error| error.to_string())?;
+                    let mut map = line_map::carry_forward(&before_map, &actual_ops,
+                        |_| (unknown.clone(), MappingEvidence::Unknown)).map_err(|error| error.to_string())?;
+                    if rollback {
+                        let publication_key = integration_provenance_key(run, &root.root_id, false);
+                        if let Some(intent) = store.provenance().mutation_intent(&publication_key).map_err(|error| error.to_string())? {
+                            map = capture::undo_map(&mut store, &intent, old_path, before_bytes, &before_map, after_bytes, &unknown, now_ms())?;
+                        }
+                    } else {
+                        let count = line_map::split_lines(after_bytes).map_err(|error| error.to_string())?.len();
+                        let mut inserted = vec![false; count];
+                        for operation in &actual_ops {
+                            if let line_map::LineOp::Insert { new_range } = operation {
+                                inserted[new_range.start - 1..new_range.end - 1].fill(true);
+                            }
+                        }
+                        let mut candidates: Vec<Option<(String, MappingEvidence)>> = vec![None; count];
+                        let mut ambiguous = vec![false; count];
+                        for item in run.items.iter().filter(|item| is_merged(item)) {
+                            let record = store.get_changeset(&item.changeset_id)?.ok_or("missing integration changeset")?;
+                            let Some(snapshot_root) = store.provenance().lookup_root("local", "local", &record.execution_root, &provenance_changeset_stream(&record))
+                                .map_err(|error| error.to_string())? else { continue };
+                            let Some((version, snapshot_map)) = provenance_version_map(&mut store, &snapshot_root, &file.path)? else { continue };
+                            let Some(blob) = version.blob_ref else { continue };
+                            let snapshot_bytes = store.get_blob(&blob, now_ms())?;
+                            let copied = provenance_copy_map(&mut store, &snapshot_root, &root, snapshot_map)?;
+                            let projected = line_map::carry_forward(&copied, &line_map::diff_lines(&snapshot_bytes, after_bytes).map_err(|error| error.to_string())?,
+                                |_| (unknown.clone(), MappingEvidence::Unknown)).map_err(|error| error.to_string())?;
+                            for segment in projected {
+                                let Some(source) = store.provenance().source(&root.root_id, &segment.provenance_id).map_err(|error| error.to_string())? else { continue };
+                                if source.origin != ProvenanceOrigin::Agent || segment.mapping_evidence == MappingEvidence::Unknown { continue; }
+                                for index in segment.start_line - 1..segment.end_line - 1 {
+                                    let next = (segment.provenance_id.clone(), segment.mapping_evidence);
+                                    if candidates[index].as_ref().is_some_and(|previous| previous.0 != next.0) { ambiguous[index] = true; }
+                                    candidates[index] = Some(next);
+                                }
+                            }
+                        }
+                        let mut expanded: Vec<line_map::Segment> = Vec::new();
+                        let mut adopted_sources = BTreeSet::new();
+                        for segment in map {
+                            let source = store.provenance().source(&root.root_id, &segment.provenance_id).map_err(|error| error.to_string())?;
+                            for line in segment.start_line..segment.end_line {
+                                let candidate = (inserted[line - 1] && !ambiguous[line - 1] && source.as_ref().is_none_or(|source| source.origin == ProvenanceOrigin::Unknown))
+                                    .then(|| candidates[line - 1].clone()).flatten();
+                                if let Some((source, _)) = candidate.as_ref() { adopted_sources.insert(source.clone()); }
+                                let (provenance_id, mapping_evidence) = candidate.unwrap_or_else(|| (segment.provenance_id.clone(), segment.mapping_evidence));
+                                if let Some(previous) = expanded.last_mut().filter(|previous|
+                                    previous.end_line == line && previous.provenance_id == provenance_id && previous.mapping_evidence == mapping_evidence) {
+                                    previous.end_line = line + 1;
+                                } else {
+                                    expanded.push(line_map::Segment { start_line: line, end_line: line + 1, provenance_id, mapping_evidence });
+                                }
+                            }
+                        }
+                        for source in adopted_sources {
+                            adoptions.push(AdoptionInput { provenance_id: source, unit_key: format!("file:{}", file.path), state: AdoptionState::Applied,
+                                details: serde_json::json!({"integrationId": run.integration_id}) });
+                        }
+                        map = expanded;
+                    }
+                    Some(map)
+                };
+                paths.push(capture::CapturePath { path: file.path.clone(), old_path: file.old_path.clone(), before, after, segments });
+            }
+            capture::prepare(&mut store, &root, &key, if rollback { "integrationRollback" } else { "integrationPublish" },
+                &paths, &adoptions, verification, None, now_ms())?;
+            keys.push(key);
+        }
+        Ok(keys)
+    }
+
+    fn finish_integration_provenance(&self, run: &IntegrationRun, result: &str, rollback: bool) {
+        match self.prepare_integration_provenance(run, result, rollback) {
+            Ok(keys) => {
+                let mut store = self.store.lock();
+                for key in keys {
+                    if let Err(error) = crate::provenance::capture::record_applied_patch(&mut store, &key) {
+                        crate::provenance::capture::warn_gap(&mut store, &key, &error);
+                    }
+                }
+            }
+            Err(error) => crate::provenance::capture::warn_gap(&mut self.store.lock(), &format!("integration:{}:recovery", run.integration_id), &error),
+        }
+    }
+
     fn finish_integration_publication(
         &self,
         run: &mut IntegrationRun,
@@ -1578,7 +1740,9 @@ impl TaskWorkspaceService {
             run.result_sha = Some(result.into());
         }
         run.error = None;
-        self.save_progress(run, &previous, &updates)
+        self.save_progress(run, &previous, &updates)?;
+        self.finish_integration_provenance(run, result, rollback);
+        Ok(())
     }
 
     fn mark_integration_stale(
@@ -1677,6 +1841,9 @@ impl TaskWorkspaceService {
                 at: now_ms(),
             });
             self.save_progress(&mut run, &previous, &[])?;
+            if let Err(error) = self.prepare_integration_provenance(&run, candidate_sha, false) {
+                crate::provenance::capture::warn_gap(&mut self.store.lock(), &format!("integration:{}:prepare", run.integration_id), &error);
+            }
             if let Err(error) = move_target(
                 &root,
                 &run.target_ref,
@@ -1802,6 +1969,9 @@ impl TaskWorkspaceService {
                 at: now_ms(),
             });
             self.save_progress(&mut run, &previous, &[])?;
+            if let Err(error) = self.prepare_integration_provenance(&run, &candidate, true) {
+                crate::provenance::capture::warn_gap(&mut self.store.lock(), &format!("integration:{}:rollback", run.integration_id), &error);
+            }
             if let Err(error) = move_target(&root, &run.target_ref, &expected, &candidate, id, swap)
             {
                 let previous = run.clone();
@@ -2620,6 +2790,154 @@ mod tests {
             self.service =
                 TaskWorkspaceService::open(ServiceConfig::new(self.data.clone())).unwrap();
         }
+    }
+
+    #[test]
+    fn integration_provenance_keeps_ref_and_checkout_streams_distinct() {
+        use crate::provenance::{self, OriginEvidence, ProvenanceOrigin};
+        for checked_out in [true, false] {
+            let fixture = Fixture::new();
+            let changeset = fixture.capture("provenance", &[("left.txt", "agent left\n")]);
+            let prepared = fixture.prepare(&[&changeset]);
+            if !checked_out { git(&fixture.source, &["checkout", "--detach"]); }
+            let published = fixture.publish(&prepared);
+            let mut store = fixture.service.store.lock();
+            let root = store.provenance().lookup_root("local", "local", &published.repo_common_dir, "target-ref:refs/heads/main").unwrap().unwrap();
+            let (version, segments) = crate::changeset::provenance_version_map(&mut store, &root, "left.txt").unwrap().unwrap();
+            assert_eq!(version.content_hash, provenance::content_hash(b"agent left\n"));
+            let source = store.provenance().source(&root.root_id, &segments[0].provenance_id).unwrap().unwrap();
+            assert_eq!(source.origin, ProvenanceOrigin::Agent);
+            assert_eq!(source.evidence, OriginEvidence::Inferred);
+            assert_eq!(source.run_id, None);
+            assert_eq!(source.tool_call_id, None);
+            let checkout = store.provenance().lookup_root("local", "local", &fixture.source.to_string_lossy(), "working-tree").unwrap();
+            assert_eq!(checkout.is_some(), checked_out);
+            assert_eq!(fs::read(fixture.source.join("left.txt")).unwrap(),
+                if checked_out { b"agent left\n".as_slice() } else { b"left base\n".as_slice() });
+        }
+    }
+
+    #[test]
+    fn integration_provenance_rollback_restores_origins_and_adoption() {
+        use crate::provenance::{self, AdoptionState, ProvenanceOrigin};
+        let fixture = Fixture::new();
+        let changeset = fixture.capture("provenance-rollback", &[("left.txt", "agent left\n"), (".env", "excluded fixture\n")]);
+        assert!(changeset.files.iter().any(|file| file.path == ".env" && file.excluded));
+        let published = fixture.publish(&fixture.prepare(&[&changeset]));
+        let introduced_source = {
+            let mut store = fixture.service.store.lock();
+            let root = store.provenance().lookup_root("local", "local", &published.repo_common_dir, "target-ref:refs/heads/main").unwrap().unwrap();
+            let (_, segments) = crate::changeset::provenance_version_map(&mut store, &root, "left.txt").unwrap().unwrap();
+            segments[0].provenance_id.clone()
+        };
+        let rolled_back = fixture.service.rollback_integration(&published.integration_id).unwrap();
+        let mut store = fixture.service.store.lock();
+        let root = store.provenance().lookup_root("local", "local", &published.repo_common_dir, "target-ref:refs/heads/main").unwrap().unwrap();
+        let (version, segments) = crate::changeset::provenance_version_map(&mut store, &root, "left.txt").unwrap().unwrap();
+        assert_eq!(version.content_hash, provenance::content_hash(b"left base\n"));
+        let source = store.provenance().source(&root.root_id, &segments[0].provenance_id).unwrap().unwrap();
+        assert_eq!(source.origin, ProvenanceOrigin::Unknown);
+        let key = integration_provenance_key(&rolled_back, &root.root_id, true);
+        assert_eq!(store.provenance().mutation(&key).unwrap().unwrap().state, provenance::MutationCommitState::Committed);
+        let source_id = crate::changeset::provenance_changeset_source(&mut store, &root, &changeset, false).unwrap();
+        let events = store.provenance().adoption_history(&root.root_id, &source_id, None, 100).unwrap();
+        assert!(events.items.iter().any(|event| event.adoption.state == AdoptionState::Reverted));
+        let excluded: Vec<_> = events.items.iter().filter(|event| event.adoption.unit_key.ends_with("file:.env")).collect();
+        assert_eq!(excluded.len(), 1);
+        assert_eq!(excluded[0].adoption.state, AdoptionState::Discarded);
+        assert!(!fixture.source.join(".env").exists());
+        let source_events = store.provenance().adoption_history(&root.root_id, &introduced_source, None, 100).unwrap();
+        assert!(source_events.items.iter().any(|event| event.adoption.state == AdoptionState::Applied));
+        assert!(source_events.items.iter().any(|event| event.adoption.state == AdoptionState::Reverted));
+    }
+
+    #[test]
+    fn integration_provenance_rollback_preserves_a_later_publication_origin() {
+        use crate::provenance::AdoptionState;
+        let fixture = Fixture::new();
+        let lines: Vec<_> = (1..=20).map(|line| format!("line-{line}\n")).collect();
+        fixture.commit_target("shared.txt", &lines.concat());
+        let mut a_lines = lines.clone();
+        a_lines[1] = "agent-a\n".into();
+        let a = fixture.capture("rollback-a", &[("shared.txt", &a_lines.concat())]);
+        let published_a = fixture.publish(&fixture.prepare(&[&a]));
+        let mut b_lines = a_lines;
+        b_lines[17] = "agent-b\n".into();
+        let b = fixture.capture("rollback-b", &[("shared.txt", &b_lines.concat())]);
+        let published_b = fixture.publish(&fixture.prepare(&[&b]));
+        let roots_and_sources = {
+            let mut store = fixture.service.store.lock();
+            [(&published_b.repo_common_dir, "target-ref:refs/heads/main"), (&fixture.source.to_string_lossy().into_owned(), "working-tree")]
+                .into_iter().map(|(canonical, stream)| {
+                    let root = store.provenance().lookup_root("local", "local", canonical, stream).unwrap().unwrap();
+                    let (_, segments) = crate::changeset::provenance_version_map(&mut store, &root, "shared.txt").unwrap().unwrap();
+                    let segment = segments.iter().find(|segment| segment.start_line <= 18 && segment.end_line > 18).unwrap();
+                    (root, segment.provenance_id.clone(), segment.mapping_evidence)
+                }).collect::<Vec<_>>()
+        };
+        fixture.service.rollback_integration(&published_a.integration_id).unwrap();
+        b_lines[1] = lines[1].clone();
+        assert_eq!(fs::read_to_string(fixture.source.join("shared.txt")).unwrap(), b_lines.concat());
+        let mut store = fixture.service.store.lock();
+        for (root, source, evidence) in roots_and_sources {
+            let (_, segments) = crate::changeset::provenance_version_map(&mut store, &root, "shared.txt").unwrap().unwrap();
+            let retained = segments.iter().find(|segment| segment.start_line <= 18 && segment.end_line > 18).unwrap();
+            assert_eq!(retained.provenance_id, source);
+            assert_eq!(retained.mapping_evidence, evidence);
+            let events = store.provenance().adoption_history(&root.root_id, &source, None, 100).unwrap();
+            assert!(events.items.iter().any(|event| event.adoption.state == AdoptionState::Applied));
+            assert!(!events.items.iter().any(|event| event.adoption.state == AdoptionState::Reverted));
+        }
+    }
+
+    #[test]
+    fn integration_provenance_records_rename_edit_and_delete() {
+        use crate::provenance::{self, ProvenanceOrigin};
+        let fixture = Fixture::new();
+        let workspace = fixture.workspace("provenance-rename-delete");
+        let execution = Path::new(&workspace.execution_root);
+        fs::rename(execution.join("left.txt"), execution.join("renamed.txt")).unwrap();
+        fs::write(execution.join("renamed.txt"), "left base\nagent\n").unwrap();
+        fs::remove_file(execution.join("right.txt")).unwrap();
+        let changeset = fixture.capture_workspace(&workspace, "rename-delete");
+        let published = fixture.publish(&fixture.prepare(&[&changeset]));
+        let mut store = fixture.service.store.lock();
+        let root = store.provenance().lookup_root("local", "local", &published.repo_common_dir, "target-ref:refs/heads/main").unwrap().unwrap();
+        let (version, segments) = crate::changeset::provenance_version_map(&mut store, &root, "renamed.txt").unwrap().unwrap();
+        assert_eq!(version.content_hash, provenance::content_hash(b"left base\nagent\n"));
+        let introduced = segments.iter().find(|segment| segment.start_line <= 2 && segment.end_line > 2).unwrap();
+        assert_eq!(store.provenance().source(&root.root_id, &introduced.provenance_id).unwrap().unwrap().origin, ProvenanceOrigin::Agent);
+        assert!(store.provenance().resolve_path(&root.root_id, "right.txt").unwrap().is_none());
+        let deleted: i64 = store.connection.query_row("SELECT COUNT(DISTINCT r.resource_id) FROM resource_identity r JOIN path_history p ON p.resource_id=r.resource_id WHERE r.root_id=?1 AND p.relative_path='right.txt' AND r.identity_state='deleted'", [&root.root_id], |row| row.get(0)).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(store.provenance().resolve_path(&root.root_id, "left.txt").unwrap().is_none());
+        drop(store);
+        fixture.service.rollback_integration(&published.integration_id).unwrap();
+        assert_eq!(fs::read(fixture.source.join("left.txt")).unwrap(), b"left base\n");
+        assert_eq!(fs::read(fixture.source.join("right.txt")).unwrap(), b"right base\n");
+    }
+
+    #[test]
+    fn integration_provenance_recovers_a_prepared_publication_after_ref_write() {
+        use crate::provenance::{self, MutationCommitState};
+        let mut fixture = Fixture::new();
+        let changeset = fixture.capture("provenance-crash", &[("left.txt", "agent crash\n")]);
+        let prepared = fixture.prepare(&[&changeset]);
+        let mut crashed = prepared.clone();
+        let candidate = prepared.candidate_sha.as_ref().unwrap();
+        crashed.state = IntegrationState::Publishing;
+        crashed.op_log.push(RefTransition { ref_name: crashed.target_ref.clone(), old_sha: crashed.expected_old_sha.clone(),
+            new_sha: candidate.clone(), reason: "publish".into(), at: now_ms() });
+        fixture.service.store.lock().save_integration(&crashed, Some(&prepared), &[], None).unwrap();
+        let keys = fixture.service.prepare_integration_provenance(&crashed, candidate, false).unwrap();
+        move_target(Path::new(&crashed.repo_common_dir), &crashed.target_ref, &crashed.expected_old_sha, candidate, &crashed.integration_id, false).unwrap();
+        for key in &keys { assert_eq!(fixture.service.store.lock().provenance().mutation(key).unwrap().unwrap().state, MutationCommitState::Prepared); }
+        fixture.reopen();
+        let mut store = fixture.service.store.lock();
+        for key in &keys { assert_eq!(store.provenance().mutation(key).unwrap().unwrap().state, MutationCommitState::Committed); }
+        let root = store.provenance().lookup_root("local", "local", &crashed.repo_common_dir, "target-ref:refs/heads/main").unwrap().unwrap();
+        let version = store.provenance().current_version(&root.root_id, "left.txt").unwrap().unwrap();
+        assert_eq!(version.content_hash, provenance::content_hash(b"agent crash\n"));
     }
 
     fn candidate_file(run: &IntegrationRun, path: &str) -> String {

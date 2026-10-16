@@ -12,6 +12,8 @@ mod confine;
 mod integration;
 mod integration_lock;
 mod ledger;
+pub mod line_map;
+pub mod provenance;
 mod lifecycle;
 mod project_source;
 mod registry;

@@ -389,7 +389,7 @@ fn parse_name_status(statuses: &[u8]) -> Result<BTreeMap<String, ChangesetFile>,
     Ok(files)
 }
 
-fn diff_files(root: &Path, base: &str, head: &str) -> Result<Vec<ChangesetFile>, ChangesetError> {
+pub(crate) fn diff_files(root: &Path, base: &str, head: &str) -> Result<Vec<ChangesetFile>, ChangesetError> {
     let statuses = checked_output(
         git_output(
             root,
@@ -964,6 +964,168 @@ fn capture_changeset_with_overlay(
     })
 }
 
+/// Read immutable Git bytes, keeping absence distinct from an empty file.
+pub(crate) fn provenance_git_bytes(root: &Path, revision: &str, path: &str) -> Result<Option<Vec<u8>>, String> {
+    let repo = git2::Repository::open(root).map_err(|error| error.to_string())?;
+    let commit = repo.find_commit(git2::Oid::from_str(revision).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    let tree = commit.tree().map_err(|error| error.to_string())?;
+    let entry = match tree.get_path(Path::new(path)) {
+        Ok(entry) => entry,
+        Err(error) if error.code() == git2::ErrorCode::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    let blob = repo.find_blob(entry.id()).map_err(|error| error.to_string())?;
+    Ok(Some(blob.content().to_vec()))
+}
+
+pub(crate) fn provenance_changeset_stream(record: &AgentChangeset) -> String {
+    format!("changeset:{}:{}", record.changeset_id, record.head_sha)
+}
+
+pub(crate) fn provenance_changeset_source(
+    store: &mut WorkspaceStore,
+    root: &crate::provenance::ProvenanceRoot,
+    record: &AgentChangeset,
+    unknown: bool,
+) -> Result<String, String> {
+    use crate::provenance::{OriginEvidence, ProvenanceOrigin, ProvenanceSource};
+    let id = format!("changeset:{}:{}:{}:{}", record.changeset_id, record.head_sha, root.root_id, unknown);
+    // A changeset is cumulative. Its latest run is context, never proof that
+    // that run introduced every changed line in the snapshot.
+    store.provenance().upsert_source(&ProvenanceSource {
+        provenance_id: id.clone(), root_id: root.root_id.clone(),
+        origin: if unknown { ProvenanceOrigin::Unknown } else { ProvenanceOrigin::Agent },
+        session_id: record.session_id.clone(), turn_id: None, task_id: None,
+        run_id: None, agent_id: None, execution_run_id: None, trace_id: None,
+        assistant_message_id: None, tool_call_id: None, event_id: None,
+        evidence: OriginEvidence::Inferred, created_at: record.created_at,
+        details: serde_json::json!({"changesetId": record.changeset_id, "headSha": record.head_sha}),
+    }).map_err(|error| error.to_string())?;
+    Ok(id)
+}
+
+pub(crate) fn provenance_copy_map(
+    store: &mut WorkspaceStore,
+    from: &crate::provenance::ProvenanceRoot,
+    to: &crate::provenance::ProvenanceRoot,
+    segments: Vec<crate::line_map::Segment>,
+) -> Result<Vec<crate::line_map::Segment>, String> {
+    let mut output = Vec::with_capacity(segments.len());
+    for mut segment in segments {
+        let mut source = store.provenance().source(&from.root_id, &segment.provenance_id)
+            .map_err(|error| error.to_string())?.ok_or("missing frozen provenance source")?;
+        let original = source.details.get("originalSourceId").and_then(serde_json::Value::as_str)
+            .unwrap_or(&source.provenance_id).to_string();
+        source.root_id = to.root_id.clone();
+        source.provenance_id = format!("{original}@{}", to.root_id);
+        if !source.details.is_object() {
+            source.details = serde_json::json!({"originalDetails": source.details});
+        }
+        source.details["originalSourceId"] = serde_json::Value::String(original);
+        store.provenance().upsert_source(&source).map_err(|error| error.to_string())?;
+        segment.provenance_id = source.provenance_id;
+        output.push(segment);
+    }
+    Ok(output)
+}
+
+pub(crate) fn provenance_version_map(
+    store: &mut WorkspaceStore,
+    root: &crate::provenance::ProvenanceRoot,
+    path: &str,
+) -> Result<Option<(crate::provenance::ResourceVersion, Vec<crate::line_map::Segment>)>, String> {
+    let Some(version) = store.provenance().current_version(&root.root_id, path)
+        .map_err(|error| error.to_string())? else { return Ok(None) };
+    let mut segments = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = store.provenance().segments(&root.root_id, &version.version_id,
+            1..version.line_count + 1, cursor.as_ref(), crate::provenance::MAX_SEGMENTS_PER_QUERY)
+            .map_err(|error| error.to_string())?;
+        segments.extend(page.items);
+        cursor = page.next_cursor;
+        if cursor.is_none() { break; }
+    }
+    Ok(Some((version, segments)))
+}
+
+fn freeze_changeset_provenance(store: &mut WorkspaceStore, record: &AgentChangeset) -> Result<(), String> {
+    use crate::{line_map, provenance::{self, capture, AdoptionInput, AdoptionState, MappingEvidence}};
+    let root = store.provenance().register_root("local", "local", &record.execution_root,
+        &provenance_changeset_stream(record), Some(&record.repo_common_dir))
+        .map_err(|error| error.to_string())?;
+    let operation_key = format!("changeset:{}:{}", record.changeset_id, record.head_sha);
+    if store.provenance().mutation(&operation_key).map_err(|error| error.to_string())?
+        .is_some_and(|mutation| mutation.state == provenance::MutationCommitState::Committed) { return Ok(()); }
+    let source = provenance_changeset_source(store, &root, record, false)?;
+    let unknown = provenance_changeset_source(store, &root, record, true)?;
+    let canonical_execution = std::fs::canonicalize(&record.execution_root).map_err(|error| error.to_string())?.to_string_lossy().into_owned();
+    let execution = store.provenance().lookup_root("local", "local", &canonical_execution, "working-tree")
+        .map_err(|error| error.to_string())?
+        .or(store.provenance().lookup_root("local", "local", &record.execution_root, "working-tree")
+            .map_err(|error| error.to_string())?);
+    let mut paths = Vec::new();
+    let mut adoptions = Vec::new();
+    for file in record.files.iter().filter(|file| file.excluded) {
+        adoptions.push(AdoptionInput { provenance_id: source.clone(), unit_key: format!("file:{}", file.path),
+            state: AdoptionState::Discarded, details: serde_json::json!({"changesetId": record.changeset_id}) });
+    }
+    for file in record.files.iter().filter(|file| !file.excluded) {
+        let before = provenance_git_bytes(Path::new(&record.repo_common_dir), &record.base_sha,
+            file.old_path.as_deref().unwrap_or(&file.path))?;
+        let after = provenance_git_bytes(Path::new(&record.repo_common_dir), &record.head_sha, &file.path)?;
+        let segments = if file.binary { None } else if let Some(after) = after.as_ref() {
+            let old = before.as_deref().unwrap_or_default();
+            let count = line_map::split_lines(old).map_err(|error| error.to_string())?.len();
+            let baseline = if count == 0 { Vec::new() } else { vec![line_map::Segment {
+                start_line: 1, end_line: count + 1, provenance_id: unknown.clone(), mapping_evidence: MappingEvidence::Unknown,
+            }] };
+            let mut map = line_map::carry_forward(&baseline, &line_map::diff_lines(old, after)
+                .map_err(|error| error.to_string())?, |_| (source.clone(), MappingEvidence::Inferred))
+                .map_err(|error| error.to_string())?;
+            if let Some(execution) = execution.as_ref() {
+                if let Some((version, existing)) = provenance_version_map(store, execution, &file.path)? {
+                    let copied = provenance_copy_map(store, execution, &root, existing)?;
+                    if version.content_hash == provenance::content_hash(after) {
+                        map = copied;
+                    } else if let Some(blob) = version.blob_ref {
+                        let observed = store.get_blob(&blob, now_ms())?;
+                        let carried = line_map::carry_forward(&copied, &line_map::diff_lines(&observed, after)
+                            .map_err(|error| error.to_string())?, |_| (unknown.clone(), MappingEvidence::Unknown))
+                            .map_err(|error| error.to_string())?;
+                        let mut combined: Vec<line_map::Segment> = Vec::new();
+                        for segment in &map {
+                            for line in segment.start_line..segment.end_line {
+                                let index = carried.partition_point(|candidate| candidate.end_line <= line);
+                                let preserved = carried.get(index).filter(|candidate| candidate.start_line <= line
+                                    && candidate.provenance_id != unknown);
+                                let origin = preserved.unwrap_or(segment);
+                                if let Some(previous) = combined.last_mut().filter(|previous| previous.end_line == line
+                                    && previous.provenance_id == origin.provenance_id && previous.mapping_evidence == origin.mapping_evidence) {
+                                    previous.end_line = line + 1;
+                                } else {
+                                    combined.push(line_map::Segment { start_line: line, end_line: line + 1,
+                                        provenance_id: origin.provenance_id.clone(), mapping_evidence: origin.mapping_evidence });
+                                }
+                            }
+                        }
+                        map = combined;
+                    }
+                }
+            }
+            Some(map)
+        } else { Some(Vec::new()) };
+        paths.push(capture::CapturePath { path: file.path.clone(), old_path: None,
+            before: None, after, segments });
+        adoptions.push(AdoptionInput { provenance_id: source.clone(), unit_key: format!("file:{}", file.path),
+            state: AdoptionState::Pending, details: serde_json::json!({"changesetId": record.changeset_id}) });
+    }
+    capture::prepare(store, &root, &operation_key, "changesetSnapshot", &paths, &adoptions,
+        capture::Verification::GitRef { repo: record.repo_common_dir.clone(), reference: record.change_ref.clone(), expected_sha: record.head_sha.clone() }, None, now_ms())?;
+    capture::record_applied_patch(store, &operation_key)
+}
+
 fn trailer_value(value: &str) -> String {
     value.replace(['\n', '\r'], " ")
 }
@@ -1202,6 +1364,9 @@ impl crate::TaskWorkspaceService {
             if old.version != record.version {
                 store.update_changeset(&record, old.version)?;
             }
+            if let Err(error) = freeze_changeset_provenance(&mut store, &record) {
+                crate::provenance::capture::warn_gap(&mut store, &format!("changeset:{}:{}", record.changeset_id, record.head_sha), &error);
+            }
             return Ok(record);
         }
         let root = Path::new(&record.repo_common_dir);
@@ -1232,6 +1397,9 @@ impl crate::TaskWorkspaceService {
                 )));
             }
             return Err(error);
+        }
+        if let Err(error) = freeze_changeset_provenance(&mut store, &record) {
+            crate::provenance::capture::warn_gap(&mut store, &format!("changeset:{}:{}", record.changeset_id, record.head_sha), &error);
         }
         Ok(record)
     }
@@ -2697,7 +2865,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_changeset_links_the_latest_workspace_run_and_its_session() {
+    fn capture_changeset_provenance_does_not_attribute_cumulative_content_to_latest_run() {
         let fixture = Fixture::new();
         for (id, created_at) in [("latest", 20), ("older", 10)] {
             fixture
@@ -2760,6 +2928,50 @@ mod tests {
         .unwrap();
         assert!(message.contains("Cognia-Agent: agent-latest"));
         assert!(message.contains("Cognia-Task: latest"));
+        let mut store = fixture.service.store.lock();
+        let root = store.provenance().lookup_root("local", "local", &record.execution_root, &provenance_changeset_stream(&record)).unwrap().unwrap();
+        let (_, segments) = provenance_version_map(&mut store, &root, "one.txt").unwrap().unwrap();
+        assert!(!segments.is_empty());
+        for segment in segments {
+            let source = store.provenance().source(&root.root_id, &segment.provenance_id).unwrap().unwrap();
+            assert_eq!(source.run_id, None);
+            assert_eq!(source.tool_call_id, None);
+            assert_eq!(source.evidence, crate::provenance::OriginEvidence::Inferred);
+        }
+    }
+
+    #[test]
+    fn capture_changeset_provenance_freezes_multiple_prior_execution_origins() {
+        use crate::{line_map::Segment, provenance::{self, capture, MappingEvidence, OriginEvidence, ProvenanceOrigin, ProvenanceSource}};
+        let fixture = Fixture::new();
+        fs::write(fixture.root().join("one.txt"), "earlier\nlater\n").unwrap();
+        {
+            let mut store = fixture.service.store.lock();
+            let root = store.provenance().register_root("local", "local", &fixture.workspace.execution_root, "working-tree", None).unwrap();
+            let mut segments = Vec::new();
+            for (index, run) in ["earlier-run", "later-run"].iter().enumerate() {
+                let id = format!("source:{run}");
+                store.provenance().upsert_source(&ProvenanceSource {
+                    provenance_id: id.clone(), root_id: root.root_id.clone(), origin: ProvenanceOrigin::Agent,
+                    session_id: Some("session".into()), turn_id: None, task_id: None, run_id: Some((*run).into()),
+                    agent_id: None, execution_run_id: None, trace_id: None, assistant_message_id: None,
+                    tool_call_id: None, event_id: None, evidence: OriginEvidence::Inferred, created_at: 1,
+                    details: if index == 0 { serde_json::Value::Null } else { serde_json::json!({}) },
+                }).unwrap();
+                segments.push(Segment { start_line: index + 1, end_line: index + 2, provenance_id: id, mapping_evidence: MappingEvidence::Exact });
+            }
+            capture::prepare(&mut store, &root, "seed-execution", "snapshot", &[capture::CapturePath {
+                path: "one.txt".into(), old_path: None, before: None, after: Some(b"earlier\nlater\n".to_vec()), segments: Some(segments),
+            }], &[], capture::Verification::Disk { root: fixture.workspace.execution_root.clone() }, None, 1).unwrap();
+            capture::record_applied_patch(&mut store, "seed-execution").unwrap();
+        }
+        let record = fixture.capture();
+        let mut store = fixture.service.store.lock();
+        let root = store.provenance().lookup_root("local", "local", &record.execution_root, &provenance_changeset_stream(&record)).unwrap().unwrap();
+        let (version, segments) = provenance_version_map(&mut store, &root, "one.txt").unwrap().unwrap();
+        assert_eq!(version.content_hash, provenance::content_hash(b"earlier\nlater\n"));
+        let origins: Vec<_> = segments.iter().map(|segment| store.provenance().source(&root.root_id, &segment.provenance_id).unwrap().unwrap().run_id.unwrap()).collect();
+        assert_eq!(origins, ["earlier-run", "later-run"]);
     }
 
     #[test]

@@ -383,6 +383,13 @@ impl TaskWorkspaceService {
                     .map(|(id, error)| format!("changeset {id} pin not repaired: {error}")),
             )
             .collect();
+        if let Err(error) = crate::provenance::capture::reconcile(&mut service.store.lock()) {
+            eprintln!("provenance boot reconciliation failed: {error}");
+            service
+                .open_recovery_failures
+                .lock()
+                .push(format!("provenance mutations not reconciled: {error}"));
+        }
         service.reconcile_known_worktrees()?;
         Ok(service)
     }
@@ -3718,6 +3725,18 @@ impl TaskWorkspaceService {
             now,
         )?;
         store.put_patch_set(&patch)?;
+        if let Err(error) = crate::provenance::capture::record_pending(
+            &mut store,
+            &patch,
+            Path::new(&task.workspace_root),
+            now,
+        ) {
+            crate::provenance::capture::warn_gap(
+                &mut store,
+                &format!("pending:{}:{}", patch.run_id, patch.created_at),
+                &error,
+            );
+        }
         append_missing_reconcile_events(&mut store, &run, &changes, now)?;
         store.reconcile_resource_events(&run.run_id)?;
         store.put_run(&run, &baseline)?;
@@ -3863,6 +3882,21 @@ impl TaskWorkspaceService {
         kind: ResourceEventKind,
         tool_call_id: Option<&str>,
     ) -> Result<ResourceEvent, String> {
+        self.record_tool_event_with_receipt(run_id, path, old_path, kind, tool_call_id, None)
+    }
+
+    /// Tool evidence remains a causal hint unless a trusted host supplies the
+    /// actual before/after hashes. Model-authored event arguments alone cannot
+    /// establish a precise line-to-tool link.
+    pub fn record_tool_event_with_receipt(
+        &self,
+        run_id: &str,
+        path: &str,
+        old_path: Option<&str>,
+        kind: ResourceEventKind,
+        tool_call_id: Option<&str>,
+        receipt: Option<&crate::provenance::ToolMutationReceipt>,
+    ) -> Result<ResourceEvent, String> {
         if !matches!(
             kind,
             ResourceEventKind::Created
@@ -3875,6 +3909,14 @@ impl TaskWorkspaceService {
         validate_event_relative_path(path)?;
         if let Some(old_path) = old_path {
             validate_event_relative_path(old_path)?;
+        }
+        if let Some(receipt) = receipt {
+            if receipt.run_id != run_id
+                || receipt.path != path
+                || Some(receipt.tool_call_id.as_str()) != tool_call_id
+            {
+                return Err("tool mutation receipt does not match its resource event".into());
+            }
         }
         let run = self
             .store
@@ -3892,7 +3934,50 @@ impl TaskWorkspaceService {
         event.tool_call_id = tool_call_id.map(str::to_string);
         let mut events = vec![event];
         self.store.lock().append_resource_events(&mut events)?;
+        if let Some(receipt) = receipt {
+            if let Err(error) = self.record_tool_mutation_receipt(
+                run_id,
+                &receipt.tool_call_id,
+                receipt.ordinal,
+                path,
+                receipt.before_hash.as_deref(),
+                receipt.after_hash.as_deref(),
+            ) {
+                // Receipt storage is an optional provenance channel. Keep the
+                // existing event observable even if this channel is unavailable.
+                eprintln!("provenance tool receipt capture failed: {error}");
+            }
+        }
         Ok(events.remove(0))
+    }
+
+    /// Trusted host receipt channel. Hashes describe bytes observed around the
+    /// tool mutation, with `None` representing an absent path (create/delete).
+    pub fn record_tool_mutation_receipt(
+        &self,
+        run_id: &str,
+        tool_call_id: &str,
+        ordinal: u64,
+        path: &str,
+        before_hash: Option<&str>,
+        after_hash: Option<&str>,
+    ) -> Result<(), String> {
+        validate_event_relative_path(path)?;
+        let mut store = self.store.lock();
+        store
+            .get_run::<WorkspaceSnapshot>(run_id)?
+            .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+        store
+            .provenance()
+            .record_tool_mutation_receipt(
+                run_id,
+                tool_call_id,
+                ordinal,
+                path,
+                before_hash,
+                after_hash,
+            )
+            .map_err(|error| error.to_string())
     }
 
     pub fn get_resource_summary(&self, run_id: &str) -> Result<TaskResourceSummary, String> {
@@ -4374,7 +4459,21 @@ impl TaskWorkspaceService {
                 },
             )?,
             crate::ConflictResolution::KeepCurrent => {
-                ledger::keep_current(&mut patch, next_revision)?
+                let outcome = ledger::keep_current(&mut patch, next_revision)?;
+                if let Err(error) = crate::provenance::capture::discard(
+                    &mut store,
+                    &patch,
+                    Path::new(&task.workspace_root),
+                    next_revision,
+                    now,
+                ) {
+                    crate::provenance::capture::warn_gap(
+                        &mut store,
+                        &format!("discard:{}:{}:{next_revision}", patch.run_id, patch.created_at),
+                        &error,
+                    );
+                }
+                outcome
             }
             crate::ConflictResolution::RetryMerge => unreachable!(),
         };
@@ -8503,6 +8602,10 @@ mod tests {
             fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
             "one\nagent two\nuser three\n"
         );
+        let sources = provenance_line_sources(&service, workspace.path(), "story.txt");
+        assert_eq!(sources[1].run_id.as_deref(), Some("run-merge"));
+        assert_eq!(sources[0].origin, crate::provenance::ProvenanceOrigin::Unknown);
+        assert_eq!(sources[2].origin, crate::provenance::ProvenanceOrigin::Unknown);
 
         let undone = service.undo_patch_set("run-merge").unwrap();
         assert_eq!(undone.state, crate::PatchState::Reverted);
@@ -8510,6 +8613,8 @@ mod tests {
             fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
             "one\ntwo\nuser three\n"
         );
+        assert!(provenance_line_sources(&service, workspace.path(), "story.txt")
+            .iter().all(|source| source.run_id.is_none()));
     }
 
     fn settle_git(root: &Path, args: &[&str]) -> String {
@@ -8887,11 +8992,14 @@ mod tests {
             fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
             "one\nagent\n"
         );
+        assert_eq!(provenance_line_sources(&service, workspace.path(), "story.txt")[1].run_id.as_deref(), Some("run-conflict"));
         service.undo_patch_set("run-conflict").unwrap();
         assert_eq!(
             fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
             "one\nuser\n"
         );
+        assert!(provenance_line_sources(&service, workspace.path(), "story.txt")
+            .iter().all(|source| source.run_id.is_none()));
     }
 
     #[test]
@@ -8987,45 +9095,58 @@ mod tests {
 
     #[test]
     fn applies_only_the_selected_text_hunk() {
-        let data = TempDir::new().unwrap();
-        let workspace = TempDir::new().unwrap();
-        let baseline = (1..=24)
-            .map(|line| format!("line {line}\n"))
-            .collect::<String>();
-        fs::write(workspace.path().join("many.txt"), &baseline).unwrap();
-        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
-        let run = service
-            .begin_run(input(&workspace, "task-hunks", "run-hunks"))
-            .unwrap();
-        let changed = baseline
-            .replace("line 2\n", "agent line 2\n")
-            .replace("line 22\n", "agent line 22\n");
-        fs::write(Path::new(&run.execution_root).join("many.txt"), changed).unwrap();
-        service.settle_run("run-hunks").unwrap();
+        for selected_hunk in [0, 1] {
+            let data = TempDir::new().unwrap();
+            let workspace = TempDir::new().unwrap();
+            let baseline = (1..=24)
+                .map(|line| format!("line {line}\n"))
+                .collect::<String>();
+            fs::write(workspace.path().join("many.txt"), &baseline).unwrap();
+            let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            let run = service
+                .begin_run(input(&workspace, "task-hunks", "run-hunks"))
+                .unwrap();
+            // The first hunk changes line count. Selecting only the second
+            // must not use the offset of that unselected earlier insertion.
+            let changed = baseline
+                .replace("line 2\n", "agent line 2\nextra agent line\n")
+                .replace("line 22\n", "agent line 22\n");
+            fs::write(Path::new(&run.execution_root).join("many.txt"), changed).unwrap();
+            service.settle_run("run-hunks").unwrap();
 
-        let patch = service.get_patch_set("run-hunks").unwrap().unwrap();
-        assert_eq!(patch.files[0].hunks.len(), 2);
-        assert_eq!(patch.files[0].hunks[0].additions, 1);
-        assert_eq!(patch.files[0].hunks[0].deletions, 1);
-        let first_hunk = patch.files[0].hunks[0].id.clone();
-        let outcome = service
-            .apply_patch_set(
-                "run-hunks",
-                &[crate::PatchSelection {
-                    path: "many.txt".into(),
-                    hunk_ids: vec![first_hunk],
-                }],
-            )
-            .unwrap();
-        assert_eq!(outcome.state, crate::PatchState::Applied);
-        let applied = fs::read_to_string(workspace.path().join("many.txt")).unwrap();
-        assert!(applied.contains("agent line 2\n"));
-        assert!(applied.contains("line 22\n"));
-        assert!(!applied.contains("agent line 22\n"));
-        let applied_patch = service.get_patch_set("run-hunks").unwrap().unwrap();
-        assert!(applied_patch.applied_selection_known);
-        assert_eq!(applied_patch.applied_selection.len(), 1);
-        assert_eq!(applied_patch.applied_selection[0].hunk_ids.len(), 1);
+            let patch = service.get_patch_set("run-hunks").unwrap().unwrap();
+            assert_eq!(patch.files[0].hunks.len(), 2);
+            assert_eq!(patch.files[0].hunks[0].additions, 2);
+            assert_eq!(patch.files[0].hunks[0].deletions, 1);
+            let hunk_id = patch.files[0].hunks[selected_hunk].id.clone();
+            let outcome = service
+                .apply_patch_set(
+                    "run-hunks",
+                    &[crate::PatchSelection {
+                        path: "many.txt".into(),
+                        hunk_ids: vec![hunk_id],
+                    }],
+                )
+                .unwrap();
+            assert_eq!(outcome.state, crate::PatchState::Applied);
+            let applied = fs::read_to_string(workspace.path().join("many.txt")).unwrap();
+            let expected = if selected_hunk == 0 {
+                baseline.replace("line 2\n", "agent line 2\nextra agent line\n")
+            } else {
+                baseline.replace("line 22\n", "agent line 22\n")
+            };
+            assert_eq!(applied, expected);
+            let applied_patch = service.get_patch_set("run-hunks").unwrap().unwrap();
+            assert!(applied_patch.applied_selection_known);
+            assert_eq!(applied_patch.applied_selection.len(), 1);
+            assert_eq!(applied_patch.applied_selection[0].hunk_ids.len(), 1);
+            let sources = provenance_line_sources(&service, workspace.path(), "many.txt");
+            for (index, source) in sources.iter().enumerate() {
+                let selected = if selected_hunk == 0 { index == 1 || index == 2 } else { index == 21 };
+                assert_eq!(source.run_id.as_deref(), selected.then_some("run-hunks"), "hunk {selected_hunk}, line {}", index + 1);
+            }
+            assert_eq!(provenance_adoption_states(&service, "run-hunks"), vec!["applied", "discarded", "partial", "pending"]);
+        }
     }
 
     #[test]
@@ -9128,12 +9249,440 @@ mod tests {
         assert!(service.get_task("task-prune").unwrap().is_some());
 
         service.apply_patch_set("run-prune", &[]).unwrap();
+        // Provenance pins intentionally retain the applied transition bodies;
+        // pruning must still collect unrelated, unreferenced blobs.
+        service.store.lock().put_blob("unreferenced-prune-blob", b"unused", now_ms()).unwrap();
         let pruned = service.prune().unwrap();
         assert_eq!(pruned.removed_task_ids, vec!["task-prune"]);
         assert!(pruned.removed_blob_count > 0);
         assert!(pruned.reclaimed_bytes > 0);
         assert!(service.get_task("task-prune").unwrap().is_none());
         assert!(!Path::new(&run.execution_root).exists());
+    }
+
+    #[test]
+    fn provenance_survives_real_service_task_prune() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let mut config = ServiceConfig::new(data.path().into());
+        config.retention = Duration::ZERO;
+        let service = TaskWorkspaceService::open(config).unwrap();
+        let mut request = input(&workspace, "task-provenance", "run-provenance");
+        request.session_id = "session".into();
+        service.begin_run(request).unwrap();
+        service.settle_run("run-provenance").unwrap();
+        service.apply_patch_set("run-provenance", &[]).unwrap();
+        let (root, resource, version) = crate::provenance::tests::seed_at_root(&mut service.store.lock(), workspace.path().to_str().unwrap());
+
+        let pruned = service.prune().unwrap();
+        assert_eq!(pruned.removed_task_ids, vec!["task-provenance"]);
+        assert!(service.get_task("task-provenance").unwrap().is_none());
+        assert!(service.list_runs("task-provenance").unwrap().is_empty());
+        let mut store = service.store.lock();
+        let provenance = store.provenance();
+        assert_eq!(provenance.current_version(&root, "notes.txt").unwrap().unwrap().version_id, version.version_id);
+        assert_eq!(provenance.segments(&root, &version.version_id, 1..2, None, 100).unwrap().items, version.segments);
+        assert_eq!(provenance.source(&root, "source").unwrap().unwrap().assistant_message_id.as_deref(), Some("message"));
+        assert_eq!(provenance.path_history(&root, &resource, None, 100).unwrap().items.len(), 1);
+        assert_eq!(provenance.adoption_history(&root, "source", None, 100).unwrap().items.len(), 1);
+        assert_eq!(store.get_blob("provenance-body", 2).unwrap(), b"agent line\n");
+    }
+
+    fn provenance_line_sources(
+        service: &TaskWorkspaceService,
+        root: &Path,
+        path: &str,
+    ) -> Vec<crate::provenance::ProvenanceSource> {
+        let mut store = service.store.lock();
+        let root_id: String = store.connection.query_row(
+            "SELECT root_id FROM provenance_roots WHERE canonical_root=?1 AND stream_key='working-tree'",
+            [fs::canonicalize(root).unwrap().to_str().unwrap()],
+            |row| row.get(0),
+        ).unwrap();
+        let provenance = store.provenance();
+        let version = provenance.current_version(&root_id, path).unwrap().unwrap();
+        provenance.segments(&root_id, &version.version_id, 1..version.line_count + 1, None, 2_000)
+            .unwrap().items.into_iter().flat_map(|segment| {
+                let source = provenance.source(&root_id, &segment.provenance_id).unwrap().unwrap();
+                (segment.start_line..segment.end_line).map(move |_| source.clone())
+            }).collect()
+    }
+
+    fn provenance_adoption_states(
+        service: &TaskWorkspaceService,
+        run_id: &str,
+    ) -> Vec<String> {
+        let store = service.store.lock();
+        let mut query = store.connection.prepare(
+            "SELECT DISTINCT e.state FROM provenance_adoption_events e JOIN provenance_sources s ON s.provenance_id=e.provenance_id WHERE s.run_id=?1 ORDER BY e.state",
+        ).unwrap();
+        query.query_map([run_id], |row| row.get(0)).unwrap()
+            .collect::<Result<Vec<_>, _>>().unwrap()
+    }
+
+    #[test]
+    fn provenance_tool_receipts_capture_sources_that_survive_task_prune() {
+        for receipt_tool in [None, Some("trusted-tool"), Some("inferred")] {
+            let with_receipt = receipt_tool.is_some();
+            let tool = receipt_tool.unwrap_or("trusted-tool");
+            let data = TempDir::new().unwrap();
+            let workspace = TempDir::new().unwrap();
+            fs::write(workspace.path().join("result.txt"), "before\n").unwrap();
+            let mut config = ServiceConfig::new(data.path().into());
+            config.retention = Duration::ZERO;
+            let service = TaskWorkspaceService::open(config).unwrap();
+            let mut request = input(&workspace, "task-receipt", "run-receipt");
+            request.session_id = "receipt-session".into();
+            request.execution_run_id = Some("execution".into());
+            request.trace_id = Some("trace".into());
+            request.turn_id = Some("turn".into());
+            request.attempt_id = Some("attempt".into());
+            let run = service.begin_run(request).unwrap();
+            fs::write(Path::new(&run.execution_root).join("result.txt"), "after\n").unwrap();
+            let receipt = crate::provenance::ToolMutationReceipt {
+                run_id: run.run_id.clone(),
+                tool_call_id: tool.into(),
+                ordinal: 1,
+                path: "result.txt".into(),
+                before_hash: Some(crate::provenance::content_hash(b"before\n")),
+                after_hash: Some(crate::provenance::content_hash(b"after\n")),
+            };
+            service.record_tool_event_with_receipt(
+                &run.run_id, "result.txt", None, ResourceEventKind::Modified,
+                Some(tool), with_receipt.then_some(&receipt),
+            ).unwrap();
+            service.settle_run(&run.run_id).unwrap();
+            assert!(provenance_adoption_states(&service, &run.run_id).contains(&"pending".into()));
+            service.apply_patch_set(&run.run_id, &[]).unwrap();
+            let before_prune = provenance_line_sources(&service, workspace.path(), "result.txt");
+            assert_eq!(before_prune.len(), 1);
+            let source = &before_prune[0];
+            assert_eq!(source.run_id.as_deref(), Some(run.run_id.as_str()));
+            assert_eq!(source.task_id.as_deref(), Some("task-receipt"));
+            assert_eq!(source.session_id.as_deref(), Some("receipt-session"));
+            assert_eq!(source.agent_id.as_deref(), Some(run.agent_id.as_str()));
+            assert_eq!(source.execution_run_id.as_deref(), Some("execution"));
+            assert_eq!(source.trace_id.as_deref(), Some("trace"));
+            assert_eq!(source.turn_id.as_deref(), Some("turn"));
+            assert_eq!(source.details["agentKind"].as_str(), Some(run.agent_kind.as_str()));
+            assert_eq!(source.details["attemptId"].as_str(), Some("attempt"));
+            assert_eq!(source.tool_call_id.as_deref(), with_receipt.then_some(tool));
+            assert_eq!(source.evidence, if with_receipt {
+                crate::provenance::OriginEvidence::ConfirmedReceipt
+            } else {
+                crate::provenance::OriginEvidence::Inferred
+            });
+            let pruned = service.prune().unwrap();
+            assert_eq!(pruned.removed_task_ids, vec!["task-receipt"]);
+            assert!(service.get_task("task-receipt").unwrap().is_none());
+            assert_eq!(provenance_line_sources(&service, workspace.path(), "result.txt"), before_prune);
+        }
+    }
+
+    #[test]
+    fn provenance_keep_current_discards_without_claiming_a_file_write() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("story.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service.begin_run(input(&workspace, "task-discard", "run-discard")).unwrap();
+        fs::write(Path::new(&run.execution_root).join("story.txt"), "agent\n").unwrap();
+        fs::write(workspace.path().join("story.txt"), "human\n").unwrap();
+        service.settle_run(&run.run_id).unwrap();
+        assert_eq!(service.apply_patch_set(&run.run_id, &[]).unwrap().state, crate::PatchState::Conflict);
+        assert_eq!(provenance_adoption_states(&service, &run.run_id), vec!["pending"]);
+        let versions_before: i64 = service.store.lock().connection.query_row(
+            "SELECT COUNT(*) FROM resource_versions", [], |row| row.get(0),
+        ).unwrap();
+        service.resolve_conflict(&run.run_id, &[], crate::ConflictResolution::KeepCurrent).unwrap();
+        assert_eq!(fs::read(workspace.path().join("story.txt")).unwrap(), b"human\n");
+        assert_eq!(provenance_adoption_states(&service, &run.run_id), vec!["discarded", "pending"]);
+        let versions_after: i64 = service.store.lock().connection.query_row(
+            "SELECT COUNT(*) FROM resource_versions", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(versions_before, versions_after);
+    }
+
+    #[test]
+    fn provenance_receipt_channel_rejects_unknown_runs_and_event_mismatch() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let hash = crate::provenance::content_hash(b"body\n");
+        assert!(service.record_tool_mutation_receipt(
+            "missing", "tool", 1, "result.txt", None, Some(&hash),
+        ).unwrap_err().contains("unknown task run"));
+        let run = service.begin_run(input(&workspace, "task-validation", "run-validation")).unwrap();
+        assert!(service.record_tool_mutation_receipt(
+            &run.run_id, "tool", 1, "../escape", None, Some(&hash),
+        ).is_err());
+        let receipt = crate::provenance::ToolMutationReceipt {
+            run_id: run.run_id.clone(), tool_call_id: "another-tool".into(), ordinal: 1,
+            path: "result.txt".into(), before_hash: None, after_hash: Some(hash.clone()),
+        };
+        assert!(service.record_tool_event_with_receipt(
+            &run.run_id, "result.txt", None, ResourceEventKind::Created, Some("tool"), Some(&receipt),
+        ).unwrap_err().contains("does not match"));
+        service.record_tool_mutation_receipt(&run.run_id, "tool", 1, "result.txt", None, Some(&hash)).unwrap();
+        assert_eq!(service.store.lock().provenance().matching_tool_mutation_receipt(
+            &run.run_id, "result.txt", None, Some(&hash),
+        ).unwrap().unwrap().tool_call_id, "tool");
+    }
+
+    #[test]
+    fn provenance_capture_failure_does_not_fail_apply() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("story.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service.begin_run(input(&workspace, "task-gap", "run-gap")).unwrap();
+        fs::write(Path::new(&run.execution_root).join("story.txt"), "agent\n").unwrap();
+        service.settle_run(&run.run_id).unwrap();
+        service.store.lock().connection.execute_batch(
+            "CREATE TRIGGER fail_provenance_version BEFORE INSERT ON resource_versions BEGIN SELECT RAISE(FAIL, 'injected provenance capture failure'); END;",
+        ).unwrap();
+        let outcome = service.apply_patch_set(&run.run_id, &[]).unwrap();
+        assert_eq!(outcome.state, crate::PatchState::Applied);
+        assert_eq!(fs::read(workspace.path().join("story.txt")).unwrap(), b"agent\n");
+        assert_eq!(service.get_patch_set(&run.run_id).unwrap().unwrap().state, crate::PatchState::Applied);
+        let gaps: i64 = service.store.lock().connection.query_row(
+            "SELECT COUNT(*) FROM provenance_mutations WHERE commit_state='reconcile_required'", [], |row| row.get(0),
+        ).unwrap();
+        assert!(gaps > 0);
+        let recorded_gaps: i64 = service.store.lock().connection.query_row(
+            "SELECT COUNT(*) FROM provenance_capture_gaps WHERE completeness='gap'", [], |row| row.get(0),
+        ).unwrap();
+        assert!(recorded_gaps > 0);
+    }
+
+    #[test]
+    fn provenance_recovery_preserves_pinned_task_metadata_at_the_same_revision() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("story.txt"), "before\n").unwrap();
+        let mut config = ServiceConfig::new(data.path().into());
+        config.retention = Duration::ZERO;
+        let service = TaskWorkspaceService::open(config).unwrap();
+        let run = service.begin_run(input(&workspace, "task-recovery-pin", "run-recovery-pin")).unwrap();
+        fs::write(Path::new(&run.execution_root).join("story.txt"), "agent\n").unwrap();
+        service.settle_run(&run.run_id).unwrap();
+        service.store.lock().connection.execute_batch(
+            "CREATE TRIGGER fail_provenance_version BEFORE INSERT ON resource_versions BEGIN SELECT RAISE(FAIL, 'injected provenance capture failure'); END;",
+        ).unwrap();
+        assert_eq!(service.apply_patch_set(&run.run_id, &[]).unwrap().state, crate::PatchState::Applied);
+        let applied = service.get_task(&run.task_id).unwrap().unwrap();
+        let mut pinned = service.set_task_pinned(&run.task_id, true).unwrap();
+        assert_eq!(pinned.revision, applied.revision);
+        // An expired pinned task must remain retained; this independently
+        // updated expiry must not be replaced by the prepared task snapshot.
+        pinned.expires_at = 1;
+        service.store.lock().put_task(&pinned).unwrap();
+        service.store.lock().connection.execute(
+            "UPDATE task_workspaces SET payload=json_set(payload,'$.independentMetadata','keep task') WHERE task_id=?1", [&run.task_id],
+        ).unwrap();
+        service.store.lock().connection.execute(
+            "UPDATE task_patch_sets SET payload=json_set(payload,'$.independentMetadata','keep patch') WHERE run_id=?1", [&run.run_id],
+        ).unwrap();
+        service.store.lock().connection.execute_batch("DROP TRIGGER fail_provenance_version").unwrap();
+        drop(service);
+
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let recovered = reopened.get_task(&run.task_id).unwrap().unwrap();
+        assert_eq!(recovered, pinned);
+        for (table, key_column, key, expected) in [
+            ("task_workspaces", "task_id", &run.task_id, "keep task"),
+            ("task_patch_sets", "run_id", &run.run_id, "keep patch"),
+        ] {
+            let metadata: String = reopened.store.lock().connection.query_row(
+                &format!("SELECT json_extract(payload,'$.independentMetadata') FROM {table} WHERE {key_column}=?1"), [key], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(metadata, expected);
+        }
+        assert_eq!(provenance_line_sources(&reopened, workspace.path(), "story.txt")[0].run_id.as_deref(), Some(run.run_id.as_str()));
+        assert!(reopened.prune().unwrap().removed_task_ids.is_empty());
+        assert!(reopened.get_task(&run.task_id).unwrap().unwrap().pinned);
+    }
+
+    #[test]
+    fn provenance_runtime_retention_bounds_pins_and_keeps_an_old_patch_undoable() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let mut lines: Vec<_> = (1..=20).map(|n| format!("line {n}\n")).collect();
+        fs::write(workspace.path().join("story.txt"), lines.concat()).unwrap();
+        let mut config = ServiceConfig::new(data.path().into());
+        config.retention = Duration::ZERO;
+        let service = TaskWorkspaceService::open(config).unwrap();
+        let seed = service.begin_run(input(&workspace, "task-history-seed", "run-history-seed")).unwrap();
+        lines[1] = "earlier agent origin\n".into();
+        fs::write(Path::new(&seed.execution_root).join("story.txt"), lines.concat()).unwrap();
+        service.settle_run(&seed.run_id).unwrap();
+        service.apply_patch_set(&seed.run_id, &[]).unwrap();
+        service.prune().unwrap();
+
+        let a = service.begin_run(input(&workspace, "task-history-a", "run-history-a")).unwrap();
+        lines[1] = "agent A\n".into();
+        fs::write(Path::new(&a.execution_root).join("story.txt"), lines.concat()).unwrap();
+        service.settle_run(&a.run_id).unwrap();
+        service.apply_patch_set(&a.run_id, &[]).unwrap();
+        service.set_task_pinned(&a.task_id, true).unwrap();
+        for n in 0..35 {
+            let task = format!("task-history-{n}");
+            let run = service.begin_run(input(&workspace, &task, &format!("run-history-{n}"))).unwrap();
+            lines[17] = format!("later agent {n}\n");
+            fs::write(Path::new(&run.execution_root).join("story.txt"), lines.concat()).unwrap();
+            service.settle_run(&run.run_id).unwrap();
+            service.apply_patch_set(&run.run_id, &[]).unwrap();
+            let pruned = service.prune().unwrap();
+            assert!(pruned.removed_task_ids.contains(&task));
+        }
+        {
+            let store = service.store.lock();
+            let versions: usize = store.connection.query_row("SELECT COUNT(*) FROM resource_versions", [], |r| r.get(0)).unwrap();
+            let pins: usize = store.connection.query_row("SELECT COUNT(*) FROM provenance_blob_pins", [], |r| r.get(0)).unwrap();
+            assert_eq!(versions, crate::provenance::RETAINED_VERSIONS + 1, "only the still-reversible old patch exceeds ordinary retention");
+            assert!(pins <= 2 * (crate::provenance::RETAINED_VERSIONS + 1));
+        }
+        assert_eq!(provenance_line_sources(&service, workspace.path(), "story.txt")[17].run_id.as_deref(), Some("run-history-34"));
+        assert_eq!(service.undo_patch_set(&a.run_id).unwrap().state, crate::PatchState::Reverted);
+        lines[1] = "earlier agent origin\n".into();
+        assert_eq!(fs::read_to_string(workspace.path().join("story.txt")).unwrap(), lines.concat());
+        let sources = provenance_line_sources(&service, workspace.path(), "story.txt");
+        assert_eq!(sources[1].run_id.as_deref(), Some("run-history-seed"));
+        assert_eq!(sources[17].run_id.as_deref(), Some("run-history-34"));
+        let versions: usize = service.store.lock().connection.query_row("SELECT COUNT(*) FROM resource_versions", [], |r| r.get(0)).unwrap();
+        assert_eq!(versions, crate::provenance::RETAINED_VERSIONS);
+    }
+
+    #[test]
+    fn provenance_undo_restores_prior_run_origins_and_keeps_later_human_lines_unknown() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("story.txt"), "one\nbase two\ntail\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let first = service.begin_run(input(&workspace, "task-origin-one", "run-origin-one")).unwrap();
+        fs::write(Path::new(&first.execution_root).join("story.txt"), "one\nfirst agent\ntail\n").unwrap();
+        service.settle_run(&first.run_id).unwrap();
+        service.apply_patch_set(&first.run_id, &[]).unwrap();
+        let original_sources = provenance_line_sources(&service, workspace.path(), "story.txt");
+        assert_eq!(original_sources[1].run_id.as_deref(), Some(first.run_id.as_str()));
+        let second = service.begin_run(input(&workspace, "task-origin-two", "run-origin-two")).unwrap();
+        fs::write(Path::new(&second.execution_root).join("story.txt"), "one\nsecond agent\ntail\n").unwrap();
+        service.settle_run(&second.run_id).unwrap();
+        service.apply_patch_set(&second.run_id, &[]).unwrap();
+        assert_eq!(provenance_line_sources(&service, workspace.path(), "story.txt")[1].run_id.as_deref(), Some(second.run_id.as_str()));
+        fs::write(workspace.path().join("story.txt"), "one\nhuman conflict\ntail\n").unwrap();
+        assert_eq!(service.undo_patch_set(&second.run_id).unwrap().state, crate::PatchState::Conflict);
+        assert!(!provenance_adoption_states(&service, &second.run_id).contains(&"reverted".into()));
+        fs::write(workspace.path().join("story.txt"), "one\nsecond agent\ntail\nhuman later\n").unwrap();
+        assert_eq!(service.undo_patch_set(&second.run_id).unwrap().state, crate::PatchState::Reverted);
+        assert_eq!(fs::read(workspace.path().join("story.txt")).unwrap(), b"one\nfirst agent\ntail\nhuman later\n");
+        let restored = provenance_line_sources(&service, workspace.path(), "story.txt");
+        assert_eq!(&restored[..3], original_sources.as_slice());
+        assert_eq!(restored[3].origin, crate::provenance::ProvenanceOrigin::Unknown);
+        assert!(provenance_adoption_states(&service, &second.run_id).contains(&"reverted".into()));
+    }
+
+    #[test]
+    fn provenance_rename_with_edit_and_delete_retains_identity_history() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let first = service.begin_run(input(&workspace, "task-create", "run-create")).unwrap();
+        fs::write(Path::new(&first.execution_root).join("old.txt"), "original agent\nstable\n").unwrap();
+        service.settle_run(&first.run_id).unwrap();
+        service.apply_patch_set(&first.run_id, &[]).unwrap();
+        let root = crate::provenance::capture::working_root(&mut service.store.lock(), workspace.path()).unwrap();
+        let original = service.store.lock().provenance().resolve_path(&root.root_id, "old.txt").unwrap().unwrap();
+        let rename = service.begin_run(input(&workspace, "task-rename", "run-rename")).unwrap();
+        fs::rename(Path::new(&rename.execution_root).join("old.txt"), Path::new(&rename.execution_root).join("new.txt")).unwrap();
+        fs::write(Path::new(&rename.execution_root).join("new.txt"), "renamed agent\nstable\n").unwrap();
+        service.settle_run(&rename.run_id).unwrap();
+        // Snapshot reconcile recognizes byte-identical renames only. Supply
+        // the explicit rename patch a trusted producer can persist, leaving
+        // resource-index reconciliation semantics unchanged.
+        let mut patch = service.get_patch_set(&rename.run_id).unwrap().unwrap();
+        let deleted = patch.files.iter().find(|file| file.path == "old.txt").unwrap().clone();
+        let mut renamed = patch.files.iter().find(|file| file.path == "new.txt").unwrap().clone();
+        renamed.kind = ChangeKind::Renamed;
+        renamed.old_path = Some("old.txt".into());
+        renamed.before_hash = deleted.before_hash;
+        renamed.before_mode = deleted.before_mode;
+        renamed.hunks.clear();
+        patch.files = vec![renamed];
+        service.store.lock().put_patch_set(&patch).unwrap();
+        service.apply_patch_set(&rename.run_id, &[]).unwrap();
+        let renamed = service.store.lock().provenance().resolve_path(&root.root_id, "new.txt").unwrap().unwrap();
+        assert_eq!(renamed.resource_id, original.resource_id);
+        let renamed_sources = provenance_line_sources(&service, workspace.path(), "new.txt");
+        assert_eq!(renamed_sources[0].run_id.as_deref(), Some(rename.run_id.as_str()));
+        assert_eq!(renamed_sources[1].run_id.as_deref(), Some(first.run_id.as_str()));
+
+        let edit = service.begin_run(input(&workspace, "task-edit-renamed", "run-edit-renamed")).unwrap();
+        fs::write(Path::new(&edit.execution_root).join("new.txt"), "edited agent\nstable\n").unwrap();
+        service.settle_run(&edit.run_id).unwrap();
+        service.apply_patch_set(&edit.run_id, &[]).unwrap();
+        let sources = provenance_line_sources(&service, workspace.path(), "new.txt");
+        assert_eq!(sources[0].run_id.as_deref(), Some(edit.run_id.as_str()));
+        assert_eq!(sources[1].run_id.as_deref(), Some(first.run_id.as_str()));
+
+        let delete = service.begin_run(input(&workspace, "task-delete", "run-delete")).unwrap();
+        fs::remove_file(Path::new(&delete.execution_root).join("new.txt")).unwrap();
+        service.settle_run(&delete.run_id).unwrap();
+        service.apply_patch_set(&delete.run_id, &[]).unwrap();
+        assert!(!workspace.path().join("new.txt").exists());
+        let mut store = service.store.lock();
+        let provenance = store.provenance();
+        assert!(provenance.resolve_path(&root.root_id, "new.txt").unwrap().is_none());
+        let history = provenance.path_history(&root.root_id, original.resource_id.as_deref().unwrap(), None, 100).unwrap().items;
+        let deleted = history.iter().find(|entry| entry.state == crate::provenance::IdentityState::Deleted).unwrap();
+        assert_eq!(deleted.resource_id, original.resource_id);
+        assert!(history.iter().any(|entry| entry.relative_path == "old.txt"));
+        assert!(history.iter().any(|entry| entry.relative_path == "new.txt"));
+        drop(store);
+        assert!(provenance_adoption_states(&service, &delete.run_id).contains(&"applied".into()));
+    }
+
+    #[test]
+    fn provenance_boot_reconciles_a_prepared_file_write_without_in_memory_state() {
+        use crate::provenance::{capture, AdoptionState, MappingEvidence, MutationCommitState};
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("story.txt"), "before\n").unwrap();
+        {
+            let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            let run = service.begin_run(input(&workspace, "task-crash-provenance", "run-crash-provenance")).unwrap();
+            fs::write(Path::new(&run.execution_root).join("story.txt"), "agent\n").unwrap();
+            service.settle_run(&run.run_id).unwrap();
+            let mut patch = service.get_patch_set(&run.run_id).unwrap().unwrap();
+            patch.state = crate::PatchState::Applied;
+            patch.applied_revision = Some(service.get_task(&patch.task_id).unwrap().unwrap().revision + 1);
+            let mut store = service.store.lock();
+            let root = capture::working_root(&mut store, workspace.path()).unwrap();
+            let source = capture::run_source(&mut store, &root, &patch, None).unwrap();
+            let adoptions = capture::adoption_units(&patch, &source, &[], AdoptionState::Applied);
+            capture::prepare(
+                &mut store, &root, "service-crash-after-write", "apply",
+                &[capture::CapturePath {
+                    path: "story.txt".into(), old_path: None,
+                    before: Some(b"before\n".to_vec()), after: Some(b"agent\n".to_vec()),
+                    segments: Some(vec![crate::line_map::Segment {
+                        start_line: 1, end_line: 2, provenance_id: source,
+                        mapping_evidence: MappingEvidence::Exact,
+                    }]),
+                }],
+                &adoptions, capture::Verification::Disk { root: root.canonical_root.clone() }, Some(&patch), now_ms(),
+            ).unwrap();
+            fs::write(workspace.path().join("story.txt"), "agent\n").unwrap();
+            assert_eq!(store.provenance().mutation("service-crash-after-write").unwrap().unwrap().state, MutationCommitState::Prepared);
+        }
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        assert_eq!(reopened.store.lock().provenance().mutation("service-crash-after-write").unwrap().unwrap().state, MutationCommitState::Committed);
+        assert_eq!(provenance_line_sources(&reopened, workspace.path(), "story.txt")[0].run_id.as_deref(), Some("run-crash-provenance"));
+        assert_eq!(reopened.get_patch_set("run-crash-provenance").unwrap().unwrap().state, crate::PatchState::Applied);
+        drop(reopened);
+        let again = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let versions: i64 = again.store.lock().connection.query_row("SELECT COUNT(*) FROM resource_versions", [], |row| row.get(0)).unwrap();
+        assert_eq!(versions, 1);
     }
 
     #[test]
@@ -10611,6 +11160,106 @@ mod tests {
     }
 
     #[test]
+    fn provenance_bundle_apply_failure_compensates_prior_root_and_restores_its_sources() {
+        struct FailSecondApply<'a> {
+            inner: ServiceBundleApplier<'a>,
+            trace: std::cell::RefCell<Vec<String>>,
+        }
+
+        impl crate::BundleApplier for FailSecondApply<'_> {
+            fn precheck(&self, step: &crate::ApplyStep) -> Result<(), Vec<crate::PatchConflict>> {
+                self.trace.borrow_mut().push(format!("precheck:{}", step.step_index));
+                crate::BundleApplier::precheck(&self.inner, step)
+            }
+
+            fn apply(&self, step: &crate::ApplyStep) -> Result<(), Vec<crate::PatchConflict>> {
+                self.trace.borrow_mut().push(format!("apply:{}", step.step_index));
+                if step.step_index == 1 {
+                    return Err(vec![crate::PatchConflict {
+                        path: "result.txt".into(),
+                        reason: "injected second root apply failure".into(),
+                    }]);
+                }
+                crate::BundleApplier::apply(&self.inner, step)
+            }
+
+            fn compensate(&self, step: &crate::ApplyStep) -> Result<(), Vec<crate::PatchConflict>> {
+                self.trace.borrow_mut().push(format!("compensate:{}", step.step_index));
+                crate::BundleApplier::compensate(&self.inner, step)
+            }
+        }
+
+        let data = TempDir::new().unwrap();
+        let primary = TempDir::new().unwrap();
+        let additional = TempDir::new().unwrap();
+        fs::write(primary.path().join("result.txt"), "original\n").unwrap();
+        fs::write(additional.path().join("result.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let prior = service.begin_run(input(&primary, "task-prior-bundle", "run-prior-bundle")).unwrap();
+        fs::write(Path::new(&prior.execution_root).join("result.txt"), "before\n").unwrap();
+        service.settle_run(&prior.run_id).unwrap();
+        service.apply_patch_set(&prior.run_id, &[]).unwrap();
+        let prior_sources = provenance_line_sources(&service, primary.path(), "result.txt");
+        assert_eq!(prior_sources[0].run_id.as_deref(), Some(prior.run_id.as_str()));
+
+        let bundle = service.acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+            requested_name: None,
+            provisioning: None,
+            project_id: None,
+            owner_type: WorkspaceOwnerType::Session,
+            owner_ref: Some("session-1".into()),
+            environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+            base: WorkspaceBaseSpec::WorkingState,
+            roots: vec![
+                crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: primary.path().to_string_lossy().into_owned(),
+                },
+                crate::WorkspaceBundleRootInput {
+                    logical_root_id: "additional".into(),
+                    role: crate::WorkspaceRootRole::Additional,
+                    source_root: additional.path().to_string_lossy().into_owned(),
+                },
+            ],
+        }).unwrap();
+        let turn = service.begin_workspace_bundle_turn(&bundle.bundle_id, crate::BeginWorkspaceBundleTurn {
+            primary_logical_root_id: "primary".into(),
+            run: input(&primary, "task-mid-apply", "run-mid-apply"),
+        }).unwrap();
+        for lease in &turn.runs {
+            fs::write(Path::new(&lease.run.execution_root).join("result.txt"), "after\n").unwrap();
+        }
+        service.settle_workspace_bundle_turn(&turn.bundle_turn_id, RunState::Ready).unwrap();
+        let steps = ["primary", "additional"].iter().enumerate().map(|(step_index, logical)| {
+            let lease = turn.runs.iter().find(|lease| lease.logical_root_ids.iter().any(|id| id.as_str() == *logical)).unwrap();
+            crate::ApplyStep {
+                step_index,
+                workspace_id: lease.workspace_id.clone(),
+                alias_path: lease.run.execution_root.clone(),
+                patch: service.get_patch_set(&lease.run.run_id).unwrap().unwrap(),
+            }
+        }).collect::<Vec<_>>();
+        let plan = crate::BundleApplyPlan { bundle_id: bundle.bundle_id, steps };
+        let applier = FailSecondApply {
+            inner: ServiceBundleApplier { service: &service, selections: HashMap::new(), allow_irreversible: false },
+            trace: std::cell::RefCell::new(Vec::new()),
+        };
+        let outcome = crate::execute_bundle_apply(&plan, &applier);
+        assert_eq!(outcome.state, WorkspaceState::Active);
+        assert_eq!(outcome.rolled_back, vec![plan.steps[0].workspace_id.clone()]);
+        assert_eq!(outcome.conflicts[0].reason, "injected second root apply failure");
+        assert_eq!(*applier.trace.borrow(), vec!["precheck:0", "precheck:1", "apply:0", "apply:1", "compensate:0"]);
+        assert_eq!(fs::read(primary.path().join("result.txt")).unwrap(), b"before\n");
+        assert_eq!(fs::read(additional.path().join("result.txt")).unwrap(), b"before\n");
+        assert_eq!(provenance_line_sources(&service, primary.path(), "result.txt"), prior_sources);
+        assert_eq!(provenance_adoption_states(&service, &plan.steps[0].patch.run_id), vec!["applied", "pending", "reverted"]);
+        assert_eq!(provenance_adoption_states(&service, &plan.steps[1].patch.run_id), vec!["pending"]);
+        assert_eq!(service.get_patch_set(&plan.steps[0].patch.run_id).unwrap().unwrap().state, crate::PatchState::Reverted);
+        assert_eq!(service.get_patch_set(&plan.steps[1].patch.run_id).unwrap().unwrap().state, crate::PatchState::Ready);
+    }
+
+    #[test]
     fn bundle_handoff_applies_every_physical_root_as_one_service_operation() {
         let data = TempDir::new().unwrap();
         let primary = TempDir::new().unwrap();
@@ -10700,6 +11349,13 @@ mod tests {
             "after\n"
         );
 
+        let primary_run_id = &turn.runs.iter()
+            .find(|lease| lease.logical_root_ids.contains(&"primary".into())).unwrap().run.run_id;
+        let additional_run_id = &turn.runs.iter()
+            .find(|lease| lease.logical_root_ids.contains(&"additional".into())).unwrap().run.run_id;
+        assert_eq!(provenance_line_sources(&service, primary.path(), "primary.txt")[0].run_id.as_deref(), Some(primary_run_id.as_str()));
+        assert_eq!(provenance_line_sources(&service, additional.path(), "additional.txt")[0].run_id.as_deref(), Some(additional_run_id.as_str()));
+
         fs::write(primary.path().join("primary.txt"), "user change\n").unwrap();
         let compensated = service
             .undo_workspace_bundle_handoff(&bundle.bundle_id, &turn.bundle_turn_id)
@@ -10716,6 +11372,9 @@ mod tests {
             fs::read_to_string(additional.path().join("additional.txt")).unwrap(),
             "after\n"
         );
+        assert_eq!(provenance_line_sources(&service, additional.path(), "additional.txt")[0].run_id.as_deref(), Some(additional_run_id.as_str()));
+        assert!(provenance_adoption_states(&service, additional_run_id).contains(&"reverted".into()));
+        assert!(!provenance_adoption_states(&service, primary_run_id).contains(&"reverted".into()));
 
         fs::write(primary.path().join("primary.txt"), "after\n").unwrap();
         let undone = service
@@ -10733,6 +11392,8 @@ mod tests {
             fs::read_to_string(additional.path().join("additional.txt")).unwrap(),
             "before\n"
         );
+        assert_ne!(provenance_line_sources(&service, primary.path(), "primary.txt")[0].run_id.as_deref(), Some(primary_run_id.as_str()));
+        assert_ne!(provenance_line_sources(&service, additional.path(), "additional.txt")[0].run_id.as_deref(), Some(additional_run_id.as_str()));
         assert_eq!(
             service
                 .get_bundle_handoff_undo_outcome(&turn.bundle_turn_id)
