@@ -395,6 +395,12 @@ fn navigation_errors(value: &serde_json::Value, target: &str) -> io::Result<Vec<
 fn browser(url: &str, label: &str) -> io::Result<(ProcessSnapshot, i32, String, Vec<i32>)> {
     let log = format!("/tmp/cognia-p4-{label}.netlog");
     let output = format!("/tmp/cognia-p4-{label}.html");
+    // Fresh release-owned diagnostic paths: never reuse a workload-created
+    // Chromium profile or permit default /tmp files outside the observed scope.
+    let profile = format!("/tmp/cognia-p4-{label}-profile");
+    let temporary = format!("/tmp/cognia-p4-{label}-temporary");
+    fs::create_dir(&profile)?;
+    fs::create_dir(&temporary)?;
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -416,7 +422,8 @@ fn browser(url: &str, label: &str) -> io::Result<(ProcessSnapshot, i32, String, 
             "--dump-dom",
         ])
         .arg(format!("--log-net-log={log}"))
-        .arg(format!("--user-data-dir=/tmp/cognia-p4-{label}-profile"))
+        .arg(format!("--user-data-dir={profile}"))
+        .env("TMPDIR", &temporary)
         .arg(url)
         .stdin(Stdio::null())
         .stdout(file)
