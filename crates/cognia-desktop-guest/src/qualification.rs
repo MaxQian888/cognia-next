@@ -320,8 +320,9 @@ fn reject_tampered_probe(
 impl WorkloadQualificationReport {
     pub fn validate(&self) -> Result<(), &'static str> {
         use crate::observation::ObservationPhase;
-        let fail = "managed_desktop_qualification_invalid";
-        self.desktop.validate(1000)?;
+        self.desktop
+            .validate(1000)
+            .map_err(|_| "validation_desktop")?;
         let root_uid = self
             .negative_control
             .status
@@ -338,11 +339,16 @@ impl WorkloadQualificationReport {
                 .validate(1000, &self.desktop.namespaces)
                 .is_ok()
         {
-            return Err(fail);
+            return Err("validation_negative_control");
         }
-        reject_tampered_probe(&self.desktop_probe.acceptance, &self.desktop.namespaces)?;
-        self.acceptance_admission.validate(1000)?;
-        self.importer_admission.validate(1001)?;
+        reject_tampered_probe(&self.desktop_probe.acceptance, &self.desktop.namespaces)
+            .map_err(|_| "validation_tamper_control")?;
+        self.acceptance_admission
+            .validate(1000)
+            .map_err(|_| "validation_acceptance_admission")?;
+        self.importer_admission
+            .validate(1001)
+            .map_err(|_| "validation_importer_admission")?;
         if self.report_version != PROBE_VERSION
             || self.boundary_generation != self.desktop.boundary_generation
             || self.desktop.phase != ObservationPhase::DesktopLive
@@ -359,24 +365,29 @@ impl WorkloadQualificationReport {
                 self.importer_admission.namespaces.get(*n) == self.desktop.namespaces.get(*n)
             })
         {
-            return Err(fail);
+            return Err("validation_binding");
         }
         self.desktop_probe
             .acceptance
-            .validate(1000, &self.desktop.namespaces)?;
+            .validate(1000, &self.desktop.namespaces)
+            .map_err(|_| "validation_acceptance_probe")?;
         self.desktop_probe
             .terminal
-            .validate(1000, &self.desktop.namespaces)?;
+            .validate(1000, &self.desktop.namespaces)
+            .map_err(|_| "validation_terminal_probe")?;
         self.desktop_probe
             .browser
             .process
-            .validate(1000, &self.desktop.namespaces)?;
+            .validate(1000, &self.desktop.namespaces)
+            .map_err(|_| "validation_browser_process")?;
         self.importer_probe
             .importer
-            .validate(1001, &self.importer_admission.namespaces)?;
+            .validate(1001, &self.importer_admission.namespaces)
+            .map_err(|_| "validation_importer_probe")?;
         self.importer_probe
             .git
-            .validate(1001, &self.importer_admission.namespaces)?;
+            .validate(1001, &self.importer_admission.namespaces)
+            .map_err(|_| "validation_git_process")?;
         if !self
             .desktop_probe
             .acceptance
@@ -420,7 +431,10 @@ impl WorkloadQualificationReport {
                 .browser
                 .hostname_net_errors
                 .contains(&-105)
-            || self.desktop_probe.acceptance.process.pid == self.desktop_probe.terminal.process.pid
+        {
+            return Err("validation_browser");
+        }
+        if self.desktop_probe.acceptance.process.pid == self.desktop_probe.terminal.process.pid
             || self.desktop_probe.detached_pid == 0
             || self.detached_outer_pid <= 1
             || !self
@@ -437,7 +451,7 @@ impl WorkloadQualificationReport {
                 .contains_key(&self.desktop.namespace_init_pid)
             || !self.surviving_processes.is_empty()
         {
-            return Err(fail);
+            return Err("validation_teardown");
         }
         Ok(())
     }

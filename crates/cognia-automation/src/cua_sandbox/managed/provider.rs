@@ -335,9 +335,21 @@ impl ManagedDesktopProvider for E2bDesktopProvider {
         secrets: &DesktopSecrets,
     ) -> Result<cognia_desktop_guest::observation::ProcessBoundaryReport> {
         let request = bootstrap_request(record, secrets)?;
+        let started = std::time::Instant::now();
         let bytes = cognia_e2b::envd::observe_desktop_boundary(&request)
             .await
-            .map_err(|_| refused("managed_desktop_boundary_unavailable"))?;
+            .map_err(|error| {
+                if record.smoke {
+                    let class = match error {
+                        cognia_e2b::envd::EnvdError::Unauthorized(_) => "unauthorized",
+                        cognia_e2b::envd::EnvdError::Transport(_) => "transport_or_timeout",
+                        cognia_e2b::envd::EnvdError::Rpc(_) => "rpc",
+                        cognia_e2b::envd::EnvdError::Protocol(_) => "protocol",
+                    };
+                    eprintln!("Native boundary observation failed: class={class} elapsed_ms={}", started.elapsed().as_millis());
+                }
+                refused("managed_desktop_boundary_unavailable")
+            })?;
         let report: cognia_desktop_guest::observation::ProcessBoundaryReport =
             serde_json::from_slice(&bytes)
                 .map_err(|_| refused("managed_desktop_boundary_invalid"))?;

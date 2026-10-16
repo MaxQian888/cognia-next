@@ -247,7 +247,7 @@ fn smoke_driver_failure(error: &crate::automation::types::AutomationError) -> &'
 }
 
 /// Native operator entry, deliberately absent from all RPC/agent registries.
-/// Creates one explicitly quoted 120s resource and measures the control path.
+/// Creates one explicitly quoted 240s resource and measures the control path.
 /// The receipt cannot be installed from caller-provided success booleans.
 pub async fn run_control_qualification_smoke(
     host: &dyn ManagedDesktopSmokeHost,
@@ -398,13 +398,17 @@ async fn control_smoke_steps(
                 return Err(refused("managed_desktop_unqualified"));
             }
         }
-        let request = smoke::authorized_request(
+        // Native smoke reached the transfer checks at 87s, before its remaining
+        // real 15s lease-expiry wait, reconnect and compound-input checks. Quote
+        // four minutes for this diagnostic only; frame/lease TTLs are unchanged.
+        let request = smoke::authorized_request_with_lifetime(
             host,
             &service,
             p,
             config_id,
             AuthorizationPurpose::Smoke,
             source,
+            240,
         )
         .await?;
         stage = "invalidate_previous_qualification";
@@ -494,13 +498,10 @@ async fn control_smoke_steps(
         let stale = service
             .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
             .await?;
-        tokio::time::sleep(Duration::from_millis(FRAME_MS as u64 + 100)).await;
-        require_smoke_error(
-            smoke_input(&service, p, &desktop, &lease, &stale, &authority).await,
-            "managed_desktop_control_stale_frame",
-        )?;
-        assertions.expired_frame_rejected = true;
-        stage = "human_release_transfer";
+        stage = "frame_expiry_renew_after_capture";
+        // Capture itself may take several seconds. Renew the existing lease
+        // after it, preserving the frame's original five-second deadline, so
+        // this probe isolates frame expiry from unrelated lease expiry.
         let lease = service
             .control_renew_inner(
                 p,
@@ -512,9 +513,40 @@ async fn control_smoke_steps(
                 true,
             )
             .await?;
+        let sent = authority.admitted.load(Ordering::SeqCst);
+        stage = "frame_expiry_wait";
+        tokio::time::sleep(Duration::from_millis(FRAME_MS as u64 + 100)).await;
+        stage = "frame_expiry_active_lease";
+        service
+            .control_slot(&desktop.id, desktop.generation)
+            .await
+            .lock()
+            .await
+            .require_lease(p, &lease.token, lease.fence)?;
+        stage = "frame_expiry_denial";
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &lease, &stale, &authority).await,
+            "managed_desktop_control_stale_frame",
+        )?;
+        authority.require_no_sends_since(sent)?;
+        assertions.expired_frame_rejected = true;
+        stage = "human_release_transfer_renew";
+        let lease = service
+            .control_renew_inner(
+                p,
+                &desktop.id,
+                desktop.generation,
+                &lease.token,
+                lease.fence,
+                &authority,
+                true,
+            )
+            .await?;
+        stage = "human_release_transfer_capture";
         let transfer_frame = service
             .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
             .await?;
+        stage = "human_release_transfer_release";
         service
             .control_release(
                 p,
@@ -525,6 +557,7 @@ async fn control_smoke_steps(
                 &authority,
             )
             .await?;
+        stage = "human_release_transfer_acquire";
         let second_lease = service
             .control_acquire_inner(
                 &second,
@@ -535,6 +568,7 @@ async fn control_smoke_steps(
                 true,
             )
             .await?;
+        stage = "human_release_transfer_fence";
         if second_lease.fence <= lease.fence || second_lease.token == lease.token {
             return Err(refused("managed_desktop_control_smoke_failed"));
         }
@@ -1710,6 +1744,61 @@ mod tests {
             "managed_desktop_control_smoke_required"
         );
         assert_eq!(f.input_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn renewal_preserves_frame_expiry_and_keeps_lease_valid_for_stale_frame_denial() {
+        let f = wire_fixture().await;
+        let (service, p, row) = (&f.domain.service, &f.domain.p, &f.row);
+        let authority = NativeSmokeAuthority::new(p);
+        let lease = service
+            .control_acquire_inner(p, &row.id, row.generation, true, &authority, true)
+            .await
+            .unwrap();
+        let frame = service
+            .control_frame_inner(p, &row.id, row.generation, &authority, true)
+            .await
+            .unwrap();
+        let slot = service.control_slot(&row.id, row.generation).await;
+        let frame_deadline = slot.lock().await.frames[&p.principal_id][0].deadline;
+        let renewed = service
+            .control_renew_inner(
+                p,
+                &row.id,
+                row.generation,
+                &lease.token,
+                lease.fence,
+                &authority,
+                true,
+            )
+            .await
+            .unwrap();
+        {
+            let mut control = slot.lock().await;
+            assert_eq!(control.frames[&p.principal_id][0].deadline, frame_deadline);
+            assert_eq!(renewed.token, lease.token);
+            assert_eq!(renewed.fence, lease.fence);
+            control
+                .require_lease(p, &renewed.token, renewed.fence)
+                .unwrap();
+            // Simulate only the frame elapsing; the smoke uses a real 5.1s wait.
+            control.frames.get_mut(&p.principal_id).unwrap()[0].deadline =
+                Instant::now() - Duration::from_millis(1);
+        }
+        assert_eq!(
+            smoke_input(service, p, row, &renewed, &frame, &authority)
+                .await
+                .unwrap_err()
+                .code,
+            "managed_desktop_control_stale_frame"
+        );
+        slot.lock()
+            .await
+            .require_lease(p, &renewed.token, renewed.fence)
+            .unwrap();
+        assert_eq!(f.input_count.load(Ordering::SeqCst), 0);
+        assert_eq!(FRAME_MS, 5_000);
+        assert_eq!(LEASE_MS, 15_000);
     }
 
     #[tokio::test]

@@ -19,7 +19,7 @@ const RESULT: &str = "/run/cognia-desktop/qualification.json";
 const FAILURE: &str = "/run/cognia-desktop/qualification.failed";
 const LIMIT: u64 = 128 * 1024;
 static STAGE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-const ACCEPTANCE_STAGES: [&str; 21] = [
+const ACCEPTANCE_STAGES: &[&str] = &[
     "acceptance_prepare",
     "acceptance_spawn",
     "acceptance_admission_wait",
@@ -41,6 +41,58 @@ const ACCEPTANCE_STAGES: [&str; 21] = [
     "payload_browser_hostname",
     "payload_descendant",
     "payload_serialization",
+    "importer_prepare",
+    "importer_spawn",
+    "importer_init",
+    "importer_admission",
+    "importer_boundary_report",
+    "importer_release",
+    "importer_wait",
+    "importer_deadline",
+    "importer_teardown",
+    "importer_output",
+    "importer_exited",
+    "importer_identity",
+    "importer_git_spawn",
+    "importer_git_observe",
+    "importer_git_write",
+    "importer_git_wait",
+    "importer_serialization",
+    "payload_terminal_display",
+    "payload_terminal_pty",
+    "payload_terminal_exec",
+    "payload_terminal_font",
+    "importer_probe_snapshot",
+    "importer_probe_sockets",
+    "importer_probe_dns_spawn",
+    "importer_probe_dns_deadline",
+    "importer_probe_dns_channel",
+    "importer_probe_helpers",
+    "payload_acceptance_snapshot",
+    "payload_acceptance_sockets",
+    "payload_acceptance_dns_spawn",
+    "payload_acceptance_dns_deadline",
+    "payload_acceptance_dns_channel",
+    "payload_acceptance_helpers",
+    "payload_terminal_snapshot",
+    "payload_terminal_sockets",
+    "payload_terminal_dns_spawn",
+    "payload_terminal_dns_deadline",
+    "payload_terminal_dns_channel",
+    "payload_terminal_helpers",
+    "validation_desktop",
+    "validation_negative_control",
+    "validation_tamper_control",
+    "validation_acceptance_admission",
+    "validation_importer_admission",
+    "validation_binding",
+    "validation_acceptance_probe",
+    "validation_terminal_probe",
+    "validation_browser_process",
+    "validation_importer_probe",
+    "validation_git_process",
+    "validation_browser",
+    "validation_teardown",
 ];
 pub(crate) fn acceptance_stage(value: &str) {
     if let Some(index) = ACCEPTANCE_STAGES.iter().position(|name| *name == value) {
@@ -255,6 +307,7 @@ fn importer(
     ImporterProbe,
     BTreeMap<u32, u64>,
 )> {
+    acceptance_stage("importer_prepare");
     let operation = uuid::Uuid::new_v4().to_string();
     let root = Path::new(promotion::IMPORTS);
     promotion::directory(root, 0o711, 0, 0, false)?;
@@ -268,11 +321,14 @@ fn importer(
         let (mut info, write) = UnixStream::pair()?;
         let mut command =
             ImportLaunch::prepare(&operation, &input, &output, write.as_fd())?.command()?;
+        acceptance_stage("importer_spawn");
         let mut process = Process(command.spawn()?);
         drop(command);
         drop(write);
+        acceptance_stage("importer_init");
         let init = crate::supervisor::init_pid(&mut info, &mut process.0)?;
         let until = Instant::now() + Duration::from_secs(10);
+        acceptance_stage("importer_admission");
         let observed = loop {
             if let Ok(value) = boundary::observe_importer(process.0.id(), init) {
                 break value;
@@ -282,6 +338,7 @@ fn importer(
             }
             std::thread::sleep(Duration::from_millis(10));
         };
+        acceptance_stage("importer_boundary_report");
         let report = boundary::report(&observed, observed.workload_pid, 1001, generation)?;
         let mut pids = boundary::descendants(process.0.id())?;
         pids.insert(process.0.id());
@@ -289,30 +346,32 @@ fn importer(
             .into_iter()
             .map(|pid| Ok((pid, boundary::start_time(pid)?)))
             .collect::<io::Result<BTreeMap<_, _>>>()?;
+        acceptance_stage("importer_release");
         process
             .0
             .stdin
             .take()
             .ok_or_else(refused)?
             .write_all(b"Q")?;
+        acceptance_stage("importer_wait");
         let until = Instant::now() + Duration::from_secs(25);
-        loop {
+        let status = loop {
             if let Some(status) = process.0.try_wait()? {
-                if !status.success() {
-                    return Err(refused());
-                }
-                break;
+                break status;
             }
             if Instant::now() >= until {
+                acceptance_stage("importer_deadline");
                 return Err(refused());
             }
             std::thread::sleep(Duration::from_millis(20));
-        }
+        };
+        acceptance_stage("importer_teardown");
         for (pid, start) in &terminated {
             if boundary::start_time(*pid).ok() == Some(*start) {
                 return Err(refused());
             }
         }
+        acceptance_stage("importer_output");
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
@@ -326,6 +385,20 @@ fn importer(
             .take(32769)
             .read_to_end(&mut bytes)?;
         if bytes.len() > 32768 {
+            return Err(refused());
+        }
+        // Failure payload is read only after exit and the same protected path,
+        // owner/type/link/size checks as success. It can never qualify a run.
+        if let Ok(failure) = serde_json::from_slice::<crate::probe::DiagnosticFailure>(&bytes) {
+            if crate::probe::valid_failure(&failure.diagnostic_failure)
+                && failure.diagnostic_failure.starts_with("importer_")
+            {
+                acceptance_stage(&failure.diagnostic_failure);
+            }
+            return Err(refused());
+        }
+        if !status.success() {
+            acceptance_stage("importer_exited");
             return Err(refused());
         }
         let probe: ImporterProbe = serde_json::from_slice(&bytes).map_err(|_| refused())?;
@@ -467,7 +540,8 @@ fn collect() -> io::Result<WorkloadQualificationReport> {
         ingress_errno,
     };
     stage(6);
-    if report.validate().is_err() {
+    if let Err(category) = report.validate() {
+        acceptance_stage(category);
         // Failed evidence remains root-only for diagnosis. FAILURE prevents the
         // result command from returning it as a qualification result.
         protected_write(RESULT, &serde_json::to_vec(&report).map_err(|_| refused())?)?;
@@ -478,6 +552,18 @@ fn collect() -> io::Result<WorkloadQualificationReport> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn diagnostic_stage_catalog_is_unique_and_bounded() {
+        let unique: std::collections::BTreeSet<_> = ACCEPTANCE_STAGES.iter().collect();
+        assert_eq!(unique.len(), ACCEPTANCE_STAGES.len());
+        assert!(ACCEPTANCE_STAGES.len() + 10 < u8::MAX as usize);
+        assert!(ACCEPTANCE_STAGES.iter().all(|stage| stage.len() <= 64
+            && stage
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte == b'_')));
+        assert!(ACCEPTANCE_STAGES.contains(&"importer_probe_dns_deadline"));
+        assert!(ACCEPTANCE_STAGES.contains(&"validation_importer_probe"));
+    }
     #[test]
     fn fixed_result_paths_are_outside_workload_mounts() {
         for path in [CLAIM, RESULT, FAILURE] {

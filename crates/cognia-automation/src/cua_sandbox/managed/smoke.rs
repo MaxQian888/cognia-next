@@ -108,7 +108,19 @@ pub(super) async fn authorized_request(
 ) -> Result<CreateManagedDesktop> {
     // Provisioning, ingress readiness and the bounded negative-egress probe
     // consume the same deadline; 60s could expire before those checks finish.
-    let quote = service.quote(p, config_id, 120).await?;
+    authorized_request_with_lifetime(host, service, p, config_id, purpose, source, 120).await
+}
+
+pub(super) async fn authorized_request_with_lifetime(
+    host: &dyn ManagedDesktopSmokeHost,
+    service: &ManagedDesktopService,
+    p: &ManagedDesktopPrincipal,
+    config_id: &str,
+    purpose: AuthorizationPurpose,
+    source: &str,
+    lifetime_seconds: u64,
+) -> Result<CreateManagedDesktop> {
+    let quote = service.quote(p, config_id, lifetime_seconds).await?;
     host.approve_quote(&quote, purpose.clone()).await?;
     let authorization = service
         .authorize(p, config_id, &quote.id, purpose, Some(source.into()))
@@ -170,7 +182,9 @@ async fn run_steps(
         source,
     )
     .await?;
-    service.invalidate_native_qualification(p, config_id, NativeQualificationKind::Lifecycle).await?;
+    service
+        .invalidate_native_qualification(p, config_id, NativeQualificationKind::Lifecycle)
+        .await?;
     let first = service.create_smoke(p, request).await?;
     let first = wait_ready(&service, p, first, wait).await?;
     let first_record = service.scoped(p, &first.id, first.generation).await?;
@@ -254,12 +268,18 @@ async fn run_steps(
     let second = service.create_smoke(p, request).await?;
     let second = wait_ready(&service, p, second, wait).await?;
     let second_record = service.scoped(p, &second.id, second.generation).await?;
-    let second_resource = second_record.resource_id.as_deref()
+    let second_resource = second_record
+        .resource_id
+        .as_deref()
         .ok_or_else(|| refused("managed_desktop_smoke_missing_resource"))?;
-    let second_deadline = provider.inspect(&config, &key, second_resource).await?
+    let second_deadline = provider
+        .inspect(&config, &key, second_resource)
+        .await?
         .and_then(|resource| resource.deadline_at)
         .ok_or_else(|| refused("managed_desktop_delete_retry_unproven"))?;
-    provider.retry_delete_succeeded.store(false, Ordering::SeqCst);
+    provider
+        .retry_delete_succeeded
+        .store(false, Ordering::SeqCst);
     provider.fail.store(true, Ordering::SeqCst);
     let pending = service.delete(p, &second.id, second.generation).await?;
     if pending.state != ManagedDesktopState::DestroyRetrying || pending.cleanup_attempts != 1 {
@@ -361,7 +381,11 @@ impl ManagedDesktopProvider for FailOneDelete {
     async fn verify_release(&self, c: &ManagedDesktopConfig) -> Result<()> {
         self.inner.verify_release(c).await
     }
-    async fn verify_smoke_egress(&self, r: &DesktopRecord, s: &DesktopSecrets) -> Result<cognia_e2b::envd::EgressProbeReport> {
+    async fn verify_smoke_egress(
+        &self,
+        r: &DesktopRecord,
+        s: &DesktopSecrets,
+    ) -> Result<cognia_e2b::envd::EgressProbeReport> {
         self.inner.verify_smoke_egress(r, s).await
     }
     async fn observe_boundary(

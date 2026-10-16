@@ -21,7 +21,34 @@ fn phase(stage: u8) {
 pub(crate) struct DiagnosticFailure {
     pub diagnostic_failure: String,
 }
+const BASIC_FAILURES: [&str; 6] = [
+    "snapshot",
+    "sockets",
+    "dns_spawn",
+    "dns_deadline",
+    "dns_channel",
+    "helpers",
+];
+fn diagnostic_error(name: &'static str) -> io::Error {
+    io::Error::other(name)
+}
+fn contextual_failure(context: &str, error: &io::Error) -> Option<String> {
+    let name = error.to_string();
+    BASIC_FAILURES
+        .contains(&name.as_str())
+        .then(|| format!("{context}_{name}"))
+}
 pub(crate) fn valid_failure(value: &str) -> bool {
+    if ["importer_probe", "payload_acceptance", "payload_terminal"]
+        .iter()
+        .any(|prefix| {
+            value
+                .strip_prefix(&format!("{prefix}_"))
+                .is_some_and(|suffix| BASIC_FAILURES.contains(&suffix))
+        })
+    {
+        return true;
+    }
     matches!(
         value,
         "payload_identity"
@@ -33,6 +60,16 @@ pub(crate) fn valid_failure(value: &str) -> bool {
             | "payload_terminal_exited"
             | "payload_terminal_deadline"
             | "payload_terminal_probe"
+            | "payload_terminal_display"
+            | "payload_terminal_pty"
+            | "payload_terminal_exec"
+            | "payload_terminal_font"
+            | "importer_identity"
+            | "importer_git_spawn"
+            | "importer_git_observe"
+            | "importer_git_write"
+            | "importer_git_wait"
+            | "importer_serialization"
             | "payload_browser_local"
             | "payload_browser_metadata"
             | "payload_browser_redirect"
@@ -57,6 +94,16 @@ fn failure_stage() -> &'static str {
         12 => "payload_terminal_exited",
         13 => "payload_terminal_deadline",
         14 => "payload_terminal_probe",
+        15 => "payload_terminal_display",
+        16 => "payload_terminal_pty",
+        17 => "payload_terminal_exec",
+        18 => "payload_terminal_font",
+        30 => "importer_identity",
+        31 => "importer_git_spawn",
+        32 => "importer_git_observe",
+        33 => "importer_git_write",
+        34 => "importer_git_wait",
+        35 => "importer_serialization",
         _ => "payload_identity",
     }
 }
@@ -247,9 +294,72 @@ fn sockets() -> io::Result<Vec<SocketAttempt>> {
     }
     Ok(attempts)
 }
+fn hostname_attempts() -> io::Result<Vec<ErrorObservation>> {
+    // Both real libc lookups share a deadline. In particular musl need not
+    // honor glibc RES_OPTIONS, and a timeout is never a synthetic DNS denial.
+    hostname_attempts_with(resolve_hostname, Duration::from_secs(12))
+}
+fn resolve_hostname(name: &str) -> i32 {
+    let name_c = std::ffi::CString::new(name).expect("fixed hostname");
+    let mut address = std::ptr::null_mut();
+    let code = unsafe {
+        libc::getaddrinfo(
+            name_c.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            &mut address,
+        )
+    };
+    if !address.is_null() {
+        unsafe { libc::freeaddrinfo(address) };
+    }
+    code
+}
+fn hostname_attempts_with(
+    resolve: fn(&str) -> i32,
+    timeout: Duration,
+) -> io::Result<Vec<ErrorObservation>> {
+    let names = ["example.com", "metadata.google.internal"];
+    let (send, receive) = std::sync::mpsc::sync_channel(2);
+    for (index, name) in names.into_iter().enumerate() {
+        let send = send.clone();
+        std::thread::Builder::new()
+            .spawn(move || {
+                let code = resolve(name);
+                let _ = send.send((index, code));
+            })
+            .map_err(|_| diagnostic_error("dns_spawn"))?;
+    }
+    drop(send);
+    let until = Instant::now() + timeout;
+    let mut codes = [None; 2];
+    for _ in 0..2 {
+        let (index, code) = receive
+            .recv_timeout(until.saturating_duration_since(Instant::now()))
+            .map_err(|error| {
+                diagnostic_error(match error {
+                    std::sync::mpsc::RecvTimeoutError::Timeout => "dns_deadline",
+                    std::sync::mpsc::RecvTimeoutError::Disconnected => "dns_channel",
+                })
+            })?;
+        codes[index] = Some(code);
+    }
+    names
+        .into_iter()
+        .zip(codes)
+        .map(|(name, code)| {
+            let code = code.ok_or_else(|| diagnostic_error("dns_channel"))?;
+            Ok(ErrorObservation {
+                operation: name.into(),
+                result: code,
+                errno: code,
+            })
+        })
+        .collect()
+}
 pub(crate) fn basic() -> io::Result<ProbeRun> {
-    let process = snapshot(std::process::id())?;
-    let sockets = sockets()?;
+    let process = snapshot(std::process::id()).map_err(|_| diagnostic_error("snapshot"))?;
+    let sockets = sockets().map_err(|_| diagnostic_error("sockets"))?;
     let mut paths = Vec::new();
     for path in HIDDEN_PATHS {
         let name = std::ffi::CString::new(path).map_err(|_| refused())?;
@@ -270,36 +380,7 @@ pub(crate) fn basic() -> io::Result<ProbeRun> {
     let a = syscall_result("unshareUser", unshare);
     let uid = unsafe { libc::setuid(0) };
     let b = syscall_result("setuidRoot", uid);
-    let mut hostnames = Vec::new();
-    for name in ["example.com", "metadata.google.internal"] {
-        // A resolver stall is diagnostic failure, never a fabricated DNS denial.
-        // The fixed child exits on timeout; no resolver thread survives its run.
-        let (send, receive) = std::sync::mpsc::sync_channel(1);
-        std::thread::spawn(move || {
-            let name_c = std::ffi::CString::new(name).expect("fixed hostname");
-            let mut address = std::ptr::null_mut();
-            let code = unsafe {
-                libc::getaddrinfo(
-                    name_c.as_ptr(),
-                    std::ptr::null(),
-                    std::ptr::null(),
-                    &mut address,
-                )
-            };
-            if !address.is_null() {
-                unsafe { libc::freeaddrinfo(address) };
-            }
-            let _ = send.send(code);
-        });
-        let code = receive
-            .recv_timeout(Duration::from_secs(2))
-            .map_err(|_| refused())?;
-        hostnames.push(ErrorObservation {
-            operation: name.into(),
-            result: code,
-            errno: code,
-        });
-    }
+    let hostnames = hostname_attempts()?;
     let mut local_helpers = Vec::new();
     for target in ["127.0.0.1:49983", "127.0.0.1:8000"] {
         let (result, errno) = match std::net::TcpStream::connect_timeout(
@@ -331,11 +412,49 @@ fn write_json(value: &impl serde::Serialize) -> io::Result<()> {
     }
     io::stdout().write_all(&bytes)
 }
+fn terminal_exit_category(bytes: &[u8]) -> u8 {
+    let text = String::from_utf8_lossy(bytes).to_ascii_lowercase();
+    if text.contains("can't open display") || text.contains("cannot open display") {
+        15
+    } else if text.contains("pty") || text.contains("/dev/pts") {
+        16
+    } else if text.contains("execvp")
+        || text.contains("cannot execute")
+        || text.contains("can't exec")
+    {
+        17
+    } else if text.contains("font") {
+        18
+    } else {
+        12
+    }
+}
 fn terminal() -> io::Result<ProbeRun> {
     use std::os::unix::net::UnixListener;
     let path = "/tmp/cognia-p4-terminal.sock";
     let listener = UnixListener::bind(path)?;
     listener.set_nonblocking(true)?;
+    let diagnostic_fd = unsafe {
+        libc::memfd_create(
+            c"cognia-terminal-stderr".as_ptr(),
+            libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING,
+        )
+    };
+    if diagnostic_fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let diagnostic = unsafe { File::from_raw_fd(diagnostic_fd) };
+    diagnostic.set_len(4096)?;
+    if unsafe {
+        libc::fcntl(
+            diagnostic.as_raw_fd(),
+            libc::F_ADD_SEALS,
+            libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL,
+        )
+    } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
     let mut command = Command::new("/usr/bin/xterm");
     command
         .args([
@@ -345,13 +464,13 @@ fn terminal() -> io::Result<ProbeRun> {
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(diagnostic.try_clone()?);
     phase(2);
     let mut child = command.spawn()?;
     phase(3);
     let started = Instant::now();
     let until = started + Duration::from_secs(10);
-    let report_deadline = started + Duration::from_secs(14);
+    let report_deadline = started + Duration::from_secs(24);
     let result = (|| loop {
         match listener.accept() {
             Ok((mut socket, _)) => {
@@ -411,9 +530,10 @@ fn terminal() -> io::Result<ProbeRun> {
                         return Err(refused());
                     }
                 }
-                if serde_json::from_slice::<DiagnosticFailure>(&bytes)
-                    .is_ok_and(|failure| failure.diagnostic_failure == "payload_terminal_probe")
-                {
+                if let Ok(failure) = serde_json::from_slice::<DiagnosticFailure>(&bytes) {
+                    if valid_failure(&failure.diagnostic_failure) {
+                        return Err(io::Error::other(failure.diagnostic_failure));
+                    }
                     phase(14);
                     return Err(refused());
                 }
@@ -430,7 +550,10 @@ fn terminal() -> io::Result<ProbeRun> {
             Err(e) => return Err(e),
         }
         if child.try_wait()?.is_some() {
-            phase(12);
+            use std::os::unix::fs::FileExt;
+            let mut bytes = [0; 4096];
+            let length = diagnostic.read_at(&mut bytes, 0).unwrap_or(0);
+            phase(terminal_exit_category(&bytes[..length]));
             return Err(refused());
         }
         if Instant::now() >= until {
@@ -513,7 +636,7 @@ fn browser(url: &str, label: &str) -> io::Result<(ProcessSnapshot, i32, String, 
             "--disable-background-networking",
             "--disable-component-update",
             "--disable-features=HttpsUpgrades",
-            "--timeout=4000",
+            "--timeout=6000",
             "--dump-dom",
         ])
         .arg(format!("--log-net-log={log}"))
@@ -532,7 +655,7 @@ fn browser(url: &str, label: &str) -> io::Result<(ProcessSnapshot, i32, String, 
         });
     }
     let mut child = command.spawn()?;
-    let until = Instant::now() + Duration::from_secs(6);
+    let until = Instant::now() + Duration::from_secs(12);
     let mut observed = None;
     let result = (|| {
         let code = loop {
@@ -613,16 +736,27 @@ fn browser_runs() -> io::Result<BrowserRun> {
         }
     });
     let result = (|| {
+        let runs = std::thread::scope(|scope| {
+            let local = scope.spawn(|| browser("http://127.0.0.1:18765/", "local"));
+            let direct = scope.spawn(|| browser("http://169.254.169.254/", "metadata"));
+            let redirect = scope.spawn(|| browser("http://127.0.0.1:18765/redirect", "redirect"));
+            let hostname = scope.spawn(|| browser("http://example.com/", "hostname"));
+            [
+                local.join(),
+                direct.join(),
+                redirect.join(),
+                hostname.join(),
+            ]
+        });
+        let [local, direct, redirect, hostname] = runs;
         phase(6);
-        let (process, exit, html, _) = browser("http://127.0.0.1:18765/", "local")?;
+        let (process, exit, html, _) = local.map_err(|_| refused())??;
         phase(7);
-        let (_, direct, _, metadata_navigation_net_errors) =
-            browser("http://169.254.169.254/", "metadata")?;
+        let (_, direct, _, metadata_navigation_net_errors) = direct.map_err(|_| refused())??;
         phase(8);
-        let (_, redirect, _, redirect_net_errors) =
-            browser("http://127.0.0.1:18765/redirect", "redirect")?;
+        let (_, redirect, _, redirect_net_errors) = redirect.map_err(|_| refused())??;
         phase(9);
-        let (_, hostname, _, hostname_net_errors) = browser("http://example.com/", "hostname")?;
+        let (_, hostname, _, hostname_net_errors) = hostname.map_err(|_| refused())??;
         if direct != 0 || redirect != 0 || hostname != 0 {
             return Err(refused());
         }
@@ -648,7 +782,12 @@ pub(crate) fn desktop() -> io::Result<DesktopProbe> {
         return Err(refused());
     }
     phase(1);
-    let acceptance = basic()?;
+    let acceptance = basic().map_err(|error| {
+        io::Error::other(
+            contextual_failure("payload_acceptance", &error)
+                .unwrap_or_else(|| "payload_acceptance".into()),
+        )
+    })?;
     phase(2);
     let terminal = terminal()?;
     phase(6);
@@ -705,10 +844,17 @@ pub(crate) fn desktop() -> io::Result<DesktopProbe> {
     })
 }
 pub(crate) fn importer() -> io::Result<ImporterProbe> {
+    phase(30);
     if unsafe { libc::getuid() } != 1001 {
         return Err(refused());
     }
-    let importer = basic()?;
+    let importer = basic().map_err(|error| {
+        io::Error::other(
+            contextual_failure("importer_probe", &error)
+                .unwrap_or_else(|| "importer_identity".into()),
+        )
+    })?;
+    phase(31);
     let mut child = Command::new("/usr/bin/git")
         .args([
             "-c",
@@ -728,6 +874,7 @@ pub(crate) fn importer() -> io::Result<ImporterProbe> {
         .stderr(Stdio::null())
         .spawn()?;
     let result = (|| {
+        phase(32);
         let until = Instant::now() + Duration::from_secs(3);
         let git = loop {
             if let Ok(s) = snapshot(child.id()) {
@@ -740,11 +887,13 @@ pub(crate) fn importer() -> io::Result<ImporterProbe> {
             }
             std::thread::sleep(Duration::from_millis(10));
         };
+        phase(33);
         child
             .stdin
             .take()
             .ok_or_else(refused)?
             .write_all(b"cognia-fixed-qualification\n")?;
+        phase(34);
         let status = child.wait()?;
         Ok(ImporterProbe {
             importer,
@@ -764,8 +913,9 @@ fn terminal_payload(path: &str, probe: impl FnOnce() -> io::Result<ProbeRun>) ->
     let result = probe();
     let bytes = match &result {
         Ok(report) => serde_json::to_vec(report),
-        Err(_) => serde_json::to_vec(&DiagnosticFailure {
-            diagnostic_failure: "payload_terminal_probe".into(),
+        Err(error) => serde_json::to_vec(&DiagnosticFailure {
+            diagnostic_failure: contextual_failure("payload_terminal", error)
+                .unwrap_or_else(|| "payload_terminal_probe".into()),
         }),
     }
     .map_err(|_| refused())?;
@@ -775,6 +925,15 @@ fn terminal_payload(path: &str, probe: impl FnOnce() -> io::Result<ProbeRun>) ->
     std::thread::sleep(Duration::from_secs(2));
     result.map(|_| ())
 }
+fn write_failure(error: &io::Error) {
+    let name = error.to_string();
+    let diagnostic_failure = if valid_failure(&name) {
+        name
+    } else {
+        failure_stage().into()
+    };
+    let _ = write_json(&DiagnosticFailure { diagnostic_failure });
+}
 pub(crate) fn child(mode: &str) -> io::Result<()> {
     match mode {
         "qualification-workload" => {
@@ -782,15 +941,21 @@ pub(crate) fn child(mode: &str) -> io::Result<()> {
                 phase(11);
                 write_json(&report)
             });
-            if result.is_err() {
-                // Never emit raw stderr, process environments or arbitrary paths.
-                let _ = write_json(&DiagnosticFailure {
-                    diagnostic_failure: failure_stage().into(),
-                });
+            if let Err(error) = &result {
+                write_failure(error);
             }
             result
         }
-        "qualification-importer" => write_json(&importer()?),
+        "qualification-importer" => {
+            let result = importer().and_then(|report| {
+                phase(35);
+                write_json(&report)
+            });
+            if let Err(error) = &result {
+                write_failure(error);
+            }
+            result
+        }
         "qualification-terminal" => {
             if unsafe { libc::getuid() } != 1000 {
                 return Err(refused());
@@ -841,6 +1006,52 @@ mod tests {
         .is_err());
         thread.join().unwrap();
         fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn resolver_preserves_raw_outcomes_and_timeout_is_not_dns_denial() {
+        fn raw(name: &str) -> i32 {
+            if name == "example.com" {
+                -3
+            } else {
+                0
+            }
+        }
+        let observations = hostname_attempts_with(raw, Duration::from_secs(1)).unwrap();
+        assert_eq!(observations[0].operation, "example.com");
+        assert_eq!(observations[0].result, -3);
+        // A successfully resolved address must remain a success observation;
+        // the separate security validator rejects it rather than rewriting it.
+        assert_eq!(observations[1].result, 0);
+        fn slow(_: &str) -> i32 {
+            std::thread::sleep(Duration::from_millis(30));
+            -3
+        }
+        let error = hostname_attempts_with(slow, Duration::from_millis(1)).unwrap_err();
+        assert_eq!(
+            contextual_failure("importer_probe", &error).as_deref(),
+            Some("importer_probe_dns_deadline")
+        );
+    }
+    #[test]
+    fn diagnostic_failure_classes_are_fixed_and_do_not_include_stderr() {
+        for (raw, stage) in [
+            (b"Xt error: Can't open display: :99".as_slice(), 15),
+            (b"unable to open /dev/pts/1".as_slice(), 16),
+            (b"execvp failed".as_slice(), 17),
+            (b"cannot load font".as_slice(), 18),
+            (b"unclassified arbitrary text".as_slice(), 12),
+        ] {
+            assert_eq!(terminal_exit_category(raw), stage);
+        }
+        for prefix in ["importer_probe", "payload_acceptance", "payload_terminal"] {
+            for suffix in BASIC_FAILURES {
+                assert!(valid_failure(&format!("{prefix}_{suffix}")));
+            }
+        }
+        assert!(!valid_failure(
+            "importer_probe_dns_deadline: arbitrary stderr"
+        ));
+        assert!(!valid_failure("arbitrary_probe_dns_deadline"));
     }
     #[test]
     fn browser_error_requires_same_url_source_and_no_response() {
