@@ -936,6 +936,16 @@ fn write_failure(error: &io::Error) {
 }
 pub(crate) fn child(mode: &str) -> io::Result<()> {
     match mode {
+        "qualification-negative-wait" => {
+            if unsafe { libc::getuid() } != 1001 || unsafe { libc::geteuid() } != 1001 {
+                return Err(refused());
+            }
+            // Wait only: no bytes are parsed, no source/program is opened and
+            // no syscall escape is attempted by the deliberately weak profile.
+            let mut byte = [0];
+            let _ = io::stdin().read(&mut byte);
+            Err(refused())
+        }
         "qualification-workload" => {
             let result = desktop().and_then(|report| {
                 phase(11);

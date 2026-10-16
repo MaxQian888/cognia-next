@@ -35,6 +35,7 @@ fn main() {
                 "qualification-workload",
                 "qualification-terminal",
                 "qualification-importer",
+                "qualification-negative-wait",
             ]
             .contains(&operation.as_str()) =>
         {

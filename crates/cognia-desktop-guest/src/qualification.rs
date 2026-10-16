@@ -4,7 +4,7 @@ use crate::observation::{ProcessBoundaryReport, NAMESPACES};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const PROBE_VERSION: u32 = 1;
+pub const PROBE_VERSION: u32 = 2;
 pub const TARGETS: [&str; 15] = [
     "1.1.1.1",
     "10.0.0.1",
@@ -92,6 +92,72 @@ pub struct ImporterProbe {
     pub git: ProcessSnapshot,
     pub git_exit_code: i32,
 }
+/// Actual root-observed intentionally incomplete launch, not mutated evidence.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WeakenedLaunchEvidence {
+    pub profile: String,
+    pub executable: String,
+    pub admission: ProcessBoundaryReport,
+    pub terminated_processes: BTreeMap<u32, u64>,
+    pub surviving_processes: BTreeMap<u32, u64>,
+}
+impl WeakenedLaunchEvidence {
+    pub fn validate(&self, desktop: &ProcessBoundaryReport) -> Result<(), &'static str> {
+        let fail = "validation_weakened_launch";
+        if self.profile != "importer-without-seccomp-v1"
+            || self.executable != "/usr/local/bin/cognia-desktop-guest"
+            || self.admission.boundary_generation != desktop.boundary_generation
+            || self.admission.provider_namespaces != desktop.provider_namespaces
+            || self.admission.phase != crate::observation::ObservationPhase::ImporterAdmission
+            || NAMESPACES
+                .iter()
+                .any(|name| self.admission.namespaces.get(*name) == desktop.namespaces.get(*name))
+            || self.admission.validate(1001).is_ok()
+            || self.terminated_processes.len() < 2
+            || self.terminated_processes.len() > 256
+            || self
+                .terminated_processes
+                .iter()
+                .any(|(pid, start)| *pid <= 1 || *start == 0)
+            || self
+                .terminated_processes
+                .get(&self.admission.namespace_init_pid)
+                != Some(&self.admission.namespace_init_start_time)
+            || self.terminated_processes.get(&self.admission.workload_pid)
+                != Some(&self.admission.workload_start_time)
+            || !self.surviving_processes.is_empty()
+        {
+            return Err(fail);
+        }
+        let seccomp: Vec<_> = self
+            .admission
+            .status
+            .lines()
+            .filter_map(|line| line.strip_prefix("Seccomp:"))
+            .collect();
+        if seccomp.len() != 1 || seccomp[0].trim() != "0" {
+            return Err(fail);
+        }
+        // The actual observation must fail the normal contract specifically
+        // because the filter is absent. This verification copy is not evidence
+        // of a real filtered process and is never returned as admission.
+        let mut complete = self.admission.clone();
+        complete.status = complete
+            .status
+            .lines()
+            .map(|line| {
+                if line.starts_with("Seccomp:") {
+                    "Seccomp:2"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        complete.validate(1001).map_err(|_| fail)
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkloadQualificationReport {
@@ -99,6 +165,7 @@ pub struct WorkloadQualificationReport {
     pub boundary_generation: String,
     /// Actual provider-root collector context; must fail workload admission.
     pub negative_control: ProcessSnapshot,
+    pub weakened_launch: WeakenedLaunchEvidence,
     pub desktop: ProcessBoundaryReport,
     pub acceptance_admission: ProcessBoundaryReport,
     pub importer_admission: ProcessBoundaryReport,
@@ -341,6 +408,7 @@ impl WorkloadQualificationReport {
         {
             return Err("validation_negative_control");
         }
+        self.weakened_launch.validate(&self.desktop)?;
         reject_tampered_probe(&self.desktop_probe.acceptance, &self.desktop.namespaces)
             .map_err(|_| "validation_tamper_control")?;
         self.acceptance_admission
@@ -471,6 +539,67 @@ mod tests {
             .map(|n| (n.into(), format!("{n}:[42]")))
             .collect();
         ProbeRun{ process:ProcessSnapshot{pid:5,start_time:9,executable:"/usr/local/bin/cognia-desktop-guest".into(),status:"Uid:1000 1000 1000 1000\nGid:1000 1000 1000 1000\nGroups:\nCapInh:0\nCapPrm:0\nCapEff:0\nCapBnd:0\nCapAmb:0\nNoNewPrivs:1\nSeccomp:2".into(),namespaces,descriptors:(0..=2).map(|fd|(fd,crate::observation::DescriptorObservation{target:"/dev/null".into(),flags:0,socket_scope:None})).collect()}, sockets:TARGETS.into_iter().flat_map(|target|[("tcp",80),("tcp",443),("udp",443)].into_iter().map(move|(transport,port)|SocketAttempt{target:target.into(),transport:transport.into(),port,result:-1,errno:101})).collect(), escapes:vec![ErrorObservation{operation:"unshareUser".into(),result:-1,errno:1},ErrorObservation{operation:"setuidRoot".into(),result:-1,errno:22}], paths:HIDDEN_PATHS.into_iter().map(|operation|ErrorObservation{operation:operation.into(),result:-1,errno:2}).collect(), hostnames:["example.com","metadata.google.internal"].into_iter().map(|operation|ErrorObservation{operation:operation.into(),result:-3,errno:-3}).collect(),local_helpers:["127.0.0.1:49983","127.0.0.1:8000"].into_iter().map(|operation|ErrorObservation{operation:operation.into(),result:-1,errno:111}).collect() }
+    }
+    #[test]
+    fn weakened_launch_requires_actual_missing_filter_and_otherwise_complete_boundary() {
+        use crate::observation::{ObservationPhase, ISOLATION_REVISION, REPORT_VERSION};
+        let process = valid_probe().process;
+        let mut admission = ProcessBoundaryReport {
+            report_version: REPORT_VERSION,
+            phase: ObservationPhase::ImporterAdmission,
+            workload_isolation_revision: ISOLATION_REVISION,
+            boundary_generation: "6a370d8e-2d69-40fb-9586-786b7424365a".into(),
+            namespace_init_pid: 20,
+            namespace_init_start_time: 1,
+            workload_pid: 21,
+            workload_start_time: 2,
+            namespaces: process.namespaces.clone(),
+            provider_namespaces: NAMESPACES
+                .into_iter()
+                .map(|name| (name.into(), format!("{name}:[1]")))
+                .collect(),
+            status: process
+                .status
+                .replace("1000", "1001")
+                .replace("Seccomp:2", "Seccomp:0"),
+            network_devices: "header\nheader\n lo: 0\n".into(),
+            ipv4_routes: "header\n".into(),
+            ipv6_routes: String::new(),
+            descriptors: process.descriptors,
+        };
+        admission.descriptors.get_mut(&0).unwrap().target = "pipe:[42]".into();
+        let mut desktop = admission.clone();
+        desktop.namespaces = NAMESPACES
+            .into_iter()
+            .map(|name| (name.into(), format!("{name}:[3]")))
+            .collect();
+        let good = WeakenedLaunchEvidence {
+            profile: "importer-without-seccomp-v1".into(),
+            executable: "/usr/local/bin/cognia-desktop-guest".into(),
+            admission,
+            terminated_processes: [(20, 1), (21, 2)].into(),
+            surviving_processes: BTreeMap::new(),
+        };
+        assert!(good.admission.validate(1001).is_err());
+        assert!(good.validate(&desktop).is_ok());
+        let mut bad = good.clone();
+        bad.admission.status = bad.admission.status.replace("Seccomp:0", "Seccomp:2");
+        assert!(bad.validate(&desktop).is_err()); // inherited filter cannot masquerade as a weak launch
+        let mut bad = good.clone();
+        bad.admission.status = bad.admission.status.replace("CapEff:0", "CapEff:1");
+        assert!(bad.validate(&desktop).is_err());
+        let mut bad = good.clone();
+        bad.admission.ipv4_routes.push_str("unexpected route\n");
+        assert!(bad.validate(&desktop).is_err());
+        let mut bad = good.clone();
+        bad.surviving_processes.insert(21, 2);
+        assert!(bad.validate(&desktop).is_err());
+        let mut bad = good.clone();
+        bad.terminated_processes.insert(21, 3);
+        assert!(bad.validate(&desktop).is_err());
+        let mut bad = good.clone();
+        bad.admission.boundary_generation = uuid::Uuid::new_v4().to_string();
+        assert!(bad.validate(&desktop).is_err());
     }
     #[test]
     fn deliberately_weakened_profile_cannot_qualify() {

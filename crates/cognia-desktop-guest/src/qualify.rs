@@ -93,6 +93,12 @@ const ACCEPTANCE_STAGES: &[&str] = &[
     "validation_git_process",
     "validation_browser",
     "validation_teardown",
+    "negative_prepare",
+    "negative_spawn",
+    "negative_observe",
+    "negative_rejection",
+    "negative_teardown",
+    "validation_weakened_launch",
 ];
 pub(crate) fn acceptance_stage(value: &str) {
     if let Some(index) = ACCEPTANCE_STAGES.iter().position(|name| *name == value) {
@@ -407,6 +413,142 @@ fn importer(
     let _ = fs::remove_dir_all(&staging);
     outcome
 }
+fn weakened_launch(
+    desktop: &cognia_desktop_guest::observation::ProcessBoundaryReport,
+) -> io::Result<WeakenedLaunchEvidence> {
+    use cognia_desktop_guest::observation::{
+        ObservationPhase, ProcessBoundaryReport, ISOLATION_REVISION, NAMESPACES, REPORT_VERSION,
+    };
+    acceptance_stage("negative_prepare");
+    let operation = uuid::Uuid::new_v4().to_string();
+    let root = Path::new(promotion::IMPORTS);
+    promotion::directory(root, 0o711, 0, 0, false)?;
+    let staging = root.join(&operation);
+    promotion::directory(&staging, 0o711, 0, 0, true)?;
+    let input = staging.join("input");
+    let output = staging.join("output");
+    promotion::directory(&input, 0o750, 0, 1001, true)?;
+    promotion::directory(&output, 0o700, 1001, 1001, true)?;
+    let outcome = (|| {
+        let (mut info, write) = UnixStream::pair()?;
+        let mut command = ImportLaunch::prepare(&operation, &input, &output, write.as_fd())?
+            .qualification_without_seccomp_command()?;
+        acceptance_stage("negative_spawn");
+        let mut process = Process(command.spawn()?);
+        drop(command);
+        drop(write);
+        let init = crate::supervisor::init_pid(&mut info, &mut process.0)?;
+        let init_start = boundary::start_time(init)?;
+        acceptance_stage("negative_observe");
+        let until = Instant::now() + Duration::from_secs(5);
+        let (workload, observed) = loop {
+            let mut candidates = boundary::descendants(init)?;
+            candidates.insert(init);
+            let value = candidates.into_iter().find_map(|pid| {
+                (fs::read(format!("/proc/{pid}/cmdline")).ok()?.as_slice()
+                    == b"/usr/local/bin/cognia-desktop-guest\0qualification-negative-wait\0")
+                    .then(|| crate::probe::snapshot(pid).ok())
+                    .flatten()
+                    .map(|report| (pid, report))
+            });
+            if let Some(value) = value {
+                break value;
+            }
+            if process.0.try_wait()?.is_some() || Instant::now() >= until {
+                return Err(refused());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        if !boundary::descendants(process.0.id())?.contains(&init)
+            || boundary::start_time(init)? != init_start
+            || NAMESPACES.iter().any(|name| {
+                boundary::namespace(init, name).ok().as_ref() != observed.namespaces.get(*name)
+            })
+        {
+            return Err(refused());
+        }
+        let read = |suffix: &str, limit: usize| -> io::Result<String> {
+            let mut file = std::fs::File::open(format!("/proc/{workload}/{suffix}"))?;
+            let mut bytes = String::new();
+            Read::by_ref(&mut file)
+                .take(limit as u64 + 1)
+                .read_to_string(&mut bytes)?;
+            if bytes.len() > limit {
+                return Err(refused());
+            }
+            Ok(bytes)
+        };
+        let admission = ProcessBoundaryReport {
+            report_version: REPORT_VERSION,
+            phase: ObservationPhase::ImporterAdmission,
+            workload_isolation_revision: ISOLATION_REVISION,
+            boundary_generation: desktop.boundary_generation.clone(),
+            namespace_init_pid: init,
+            namespace_init_start_time: init_start,
+            workload_pid: workload,
+            workload_start_time: observed.start_time,
+            namespaces: observed.namespaces,
+            provider_namespaces: desktop.provider_namespaces.clone(),
+            status: observed.status,
+            network_devices: read("net/dev", 4096)?,
+            ipv4_routes: read("net/route", 4096)?,
+            ipv6_routes: read("net/ipv6_route", 8192)?,
+            descriptors: observed.descriptors,
+        };
+        let mut pids = boundary::descendants(process.0.id())?;
+        pids.insert(process.0.id());
+        let terminated_processes = pids
+            .into_iter()
+            .map(|pid| Ok((pid, boundary::start_time(pid)?)))
+            .collect::<io::Result<BTreeMap<_, _>>>()?;
+        if boundary::start_time(workload)? != admission.workload_start_time {
+            return Err(refused());
+        }
+        acceptance_stage("negative_rejection");
+        let mut evidence = WeakenedLaunchEvidence {
+            profile: "importer-without-seccomp-v1".into(),
+            executable: observed.executable,
+            admission,
+            terminated_processes,
+            surviving_processes: BTreeMap::new(),
+        };
+        // Reject inherited provider filters that make this an undemonstrated
+        // negative control. Never grant a capability or weaken networking.
+        evidence.validate(desktop).map_err(|_| refused())?;
+        acceptance_stage("negative_teardown");
+        if boundary::start_time(init)? != init_start
+            || unsafe { libc::kill(init as i32, libc::SIGKILL) } != 0
+        {
+            return Err(refused());
+        }
+        let until = Instant::now() + Duration::from_secs(3);
+        while process.0.try_wait()?.is_none() {
+            if Instant::now() >= until {
+                return Err(refused());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        loop {
+            evidence.surviving_processes = evidence
+                .terminated_processes
+                .iter()
+                .filter(|(pid, start)| boundary::start_time(**pid).ok() == Some(**start))
+                .map(|(pid, start)| (*pid, *start))
+                .collect();
+            if evidence.surviving_processes.is_empty() {
+                break;
+            }
+            if Instant::now() >= until {
+                return Err(refused());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        evidence.validate(desktop).map_err(|_| refused())?;
+        Ok(evidence)
+    })();
+    let _ = fs::remove_dir_all(&staging);
+    outcome
+}
 fn supervisor(init: u32) -> io::Result<(u32, u64, OwnedFd)> {
     let mut pid = init;
     for _ in 0..8 {
@@ -441,6 +583,7 @@ fn collect() -> io::Result<WorkloadQualificationReport> {
     }
     let desktop = boundary::report(&live, live.workload_pid, 1000, &live.generation)?;
     let negative_control = crate::probe::snapshot(std::process::id())?;
+    let weakened_launch = weakened_launch(&desktop)?;
     let (supervisor_pid, supervisor_start_time, supervisor_fd) =
         supervisor(live.namespace_init_pid)?;
     stage(2);
@@ -527,6 +670,7 @@ fn collect() -> io::Result<WorkloadQualificationReport> {
         report_version: PROBE_VERSION,
         boundary_generation: live.generation.clone(),
         negative_control,
+        weakened_launch,
         desktop,
         acceptance_admission,
         importer_admission,
