@@ -125,6 +125,30 @@ wire 名是 `<resource>[.<sub>...].<verb>`。每段是小写 snake_case。动词
 
 其余 `protocol/*.json` 仍带 `schemaVersion: 1` 作为文件格式标记。由重新生成它们的那一批分别收编进 `contractVersion`。
 
+### 已完成幂等回执的保留期限（2026-10-16）
+
+`cognia-companion-security` 的持久化 `idempotency_records` 用于请求重试。
+成功和失败回执（包括 JSON 结果或错误）在完成后保留 **24 小时**，以 Unix 秒
+`updated_at` 为准，重放不会延长期限。没有回执的记录无论多旧都保留，继续以同一
+operation id 返回 `Accepted`，避免执行中的写操作被再次执行。
+
+`lib/tauri/transport-companion.ts` 在 HTTP/RTC 回退时共用同一 key 和截止时间，
+最多进行三次 HTTP 尝试、一次认证刷新和三轮额外配额重试。HTTP 退避上限为 2 秒，
+`Retry-After` 上限为 30 秒，配额等待上限为 5 秒。`transportCommandTimeoutMs`
+通常为 30 秒，目前最长为 65 分钟。完成后的 24 小时覆盖这些重试，并为重连留出余量。
+自行提供持久化 key 的调用者不能依赖超过此窗口的重放：记录删除后，同一 key 可以
+启动新操作，operation 查询也不再返回原回执。
+
+桌面（`companion-security.sqlite`）和 headless（`cognia-server.sqlite`）共用
+`cognia-companion::server::spawn_server` 的 TLS 服务生命周期，在启动时和每分钟
+清理一次。现有 ticket/challenge 只在使用时校验过期，并无可复用的定期存储清理循环。
+清理运行在 blocking worker，失败记日志并于下次 tick 重试，服务退出后不再调度新的清理；已开始的 blocking worker 可以完成当前清理。
+已完成记录的 `updated_at` 部分索引避免每分钟扫描执行中的记录；严格截止条件保留
+恰好完成 24 小时的回执。
+
+此清理只移除在线幂等账本中的回执，保留 run 和审计历史。SQLite 可复用释放的页，
+不保证文件立即缩小，也不代表安全擦除 WAL 或备份中的副本。
+
 ## 后果
 
 - 知道一条命令的读者就知道其他每一条怎么拼。破坏语法的新命令先在 `pnpm audit:command-grammar` 失败，而不是先到评审人那里。

@@ -128,6 +128,39 @@ The work lands in six batches, each independently committable and gate-green.
 
 The rest of the `protocol/*.json` files still carry `schemaVersion: 1` as a file-format marker. Each is retired into `contractVersion` by the batch that regenerates it.
 
+### Completed idempotency receipt retention (2026-10-16)
+
+The durable `idempotency_records` ledger in `cognia-companion-security` is a
+retry cache. Successful and failed receipts, including their JSON result or
+error, are retained for **24 hours after completion** (`updated_at`, in Unix
+seconds). Replays do not extend that window. Records without a receipt remain
+in progress regardless of age and continue returning `Accepted` with the same
+operation id; retention must never make an in-flight mutation execute twice.
+
+`lib/tauri/transport-companion.ts` reuses one key and one deadline across
+HTTP/RTC fallback, up to three HTTP attempts, one authentication refresh, and
+three extra quota rounds. HTTP backoff is capped at 2 seconds, `Retry-After` at
+30 seconds, and quota waits at 5 seconds. `transportCommandTimeoutMs` normally
+allows 30 seconds; its longest current deadline is 65 minutes. A 24-hour window
+after completion covers these retries with substantial reconnect margin. A
+caller supplying a durable key must not rely on receipt replay beyond this
+window: after removal, that key can start a new operation and operation lookup
+no longer returns its receipt.
+
+The shared TLS server lifecycle in `cognia-companion::server::spawn_server`
+runs the sweep at startup and every minute on both desktop
+(`companion-security.sqlite`) and headless (`cognia-server.sqlite`) Hosts.
+There was no periodic ticket/challenge store-cleanup loop to extend; their
+expiry is enforced on use. The sweep runs on a blocking worker, logs failures
+and retries next tick. Server exit stops new sweeps; an already-running blocking
+worker may finish its current sweep. An index over completed
+records' `updated_at` avoids scanning in-progress records on every tick.
+Deletion uses a strict cutoff, preserving a receipt exactly 24 hours old.
+
+This removes receipt bodies from the live ledger, leaving run and audit
+history unchanged. SQLite can reuse the freed pages; this does not promise
+immediate database-file shrinkage or secure erasure of WAL/backup copies.
+
 ## Consequences
 
 - A reader who knows one command knows how every other one is spelled. A new command that breaks the grammar fails `pnpm audit:command-grammar` before it fails a reviewer.

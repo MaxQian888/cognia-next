@@ -10,6 +10,11 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::Arc;
 
+/// Retry receipts outlive the client's longest RPC deadline (65 minutes).
+/// Age from completion, not creation, so long-running operations get the
+/// same replay window. See ADR-0175.
+const IDEMPOTENCY_RETENTION_SECS: i64 = 24 * 60 * 60;
+
 #[derive(Debug, thiserror::Error)]
 pub enum SecurityStoreError {
     #[error("security database error: {0}")]
@@ -1533,6 +1538,19 @@ impl SecurityStore {
         } else {
             Err(SecurityStoreError::InvalidPolicy)
         }
+    }
+
+    /// Remove terminal receipts older than the retry window. A missing receipt
+    /// means `InProgress` to `begin_idempotent_operation`, regardless of age.
+    pub fn purge_completed_idempotency_records(
+        &self,
+        now: i64,
+    ) -> Result<usize, SecurityStoreError> {
+        Ok(self.conn.lock().execute(
+            "DELETE FROM idempotency_records
+             WHERE receipt_json IS NOT NULL AND updated_at < ?1",
+            [now.saturating_sub(IDEMPOTENCY_RETENTION_SECS)],
+        )?)
     }
 
     pub fn begin_idempotent_operation(
@@ -3644,6 +3662,8 @@ CREATE INDEX IF NOT EXISTS idx_host_policies_authorization
     ON host_policies(tenant_id, capability, revoked_at, expires_at);
 CREATE INDEX IF NOT EXISTS idx_idempotency_operation
     ON idempotency_records(tenant_id, device_id, operation_id);
+CREATE INDEX IF NOT EXISTS idx_idempotency_completed_updated
+    ON idempotency_records(updated_at) WHERE receipt_json IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_runs_tenant_device_created
     ON runs(tenant_id, device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_run_events_tenant_run ON run_events(tenant_id, run_id, seq);
@@ -4148,6 +4168,7 @@ CREATE TABLE devices (
             ("capability_grants", "idx_capability_grants_active"),
             ("host_policies", "idx_host_policies_authorization"),
             ("idempotency_records", "idx_idempotency_operation"),
+            ("idempotency_records", "idx_idempotency_completed_updated"),
             ("runs", "idx_runs_tenant_device_created"),
             ("audit_events", "idx_audit_tenant_created"),
         ] {
@@ -6196,6 +6217,169 @@ CREATE TABLE devices (
         assert!(!store
             .has_capability("tenant-a", "owner-a", "workspace.write")
             .unwrap());
+    }
+
+    #[test]
+    fn idempotency_retention_removes_old_completed_receipts() {
+        let store = SecurityStore::in_memory().unwrap();
+        for succeeded in [true, false] {
+            let key = format!("key-{succeeded}");
+            let operation_id = completed_operation(&store, &key, 100, 200, succeeded);
+            assert_eq!(
+                store
+                    .purge_completed_idempotency_records(200 + 86_401)
+                    .unwrap(),
+                1
+            );
+            assert!(store
+                .operation("tenant-a", "device-a", &operation_id)
+                .unwrap()
+                .is_none());
+            assert!(matches!(
+                store
+                    .begin_idempotent_operation(
+                        "tenant-a",
+                        "device-a",
+                        "host-a",
+                        &key,
+                        "hash-a",
+                        200 + 86_401
+                    )
+                    .unwrap(),
+                IdempotencyDecision::Started { .. }
+            ));
+        }
+        assert_eq!(
+            store
+                .purge_completed_idempotency_records(200 + 86_401)
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn idempotency_retention_preserves_old_in_progress_operations() {
+        let store = SecurityStore::in_memory().unwrap();
+        let IdempotencyDecision::Started { operation_id } = store
+            .begin_idempotent_operation("tenant-a", "device-a", "host-a", "key-a", "hash-a", 100)
+            .unwrap()
+        else {
+            panic!("expected a new operation")
+        };
+        assert_eq!(
+            store
+                .purge_completed_idempotency_records(100 + 86_401)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .begin_idempotent_operation(
+                    "tenant-a",
+                    "device-a",
+                    "host-a",
+                    "key-a",
+                    "hash-a",
+                    100 + 86_401
+                )
+                .unwrap(),
+            IdempotencyDecision::InProgress {
+                operation_id: operation_id.clone()
+            }
+        );
+        // The preserved operation can still finish after a sweep.
+        store
+            .mark_operation_running("tenant-a", &operation_id, 100 + 86_401)
+            .unwrap();
+        store
+            .complete_idempotent_operation(
+                "tenant-a",
+                "device-a",
+                "key-a",
+                "{}",
+                true,
+                100 + 86_402,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn idempotency_retention_ages_from_completion_and_keeps_the_boundary() {
+        let store = SecurityStore::in_memory().unwrap();
+        let completed_at = 100 + 2 * 86_400;
+        let operation_id = completed_operation(&store, "key-a", 100, completed_at, true);
+        for now in [completed_at + 1, completed_at + 86_400] {
+            assert_eq!(store.purge_completed_idempotency_records(now).unwrap(), 0);
+            assert!(store
+                .operation("tenant-a", "device-a", &operation_id)
+                .unwrap()
+                .is_some());
+        }
+        assert_eq!(
+            store
+                .purge_completed_idempotency_records(completed_at + 86_401)
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn idempotency_retention_preserves_replay_and_payload_conflicts_within_window() {
+        let store = SecurityStore::in_memory().unwrap();
+        let operation_id = completed_operation(&store, "key-a", 100, 200, true);
+        let now = 200 + 86_399;
+        store.purge_completed_idempotency_records(now).unwrap();
+        assert_eq!(
+            store
+                .begin_idempotent_operation(
+                    "tenant-a", "device-a", "host-b", "key-a", "hash-a", now
+                )
+                .unwrap(),
+            IdempotencyDecision::Completed {
+                operation_id,
+                receipt_json: r#"{"httpStatus":200,"body":{"ok":true}}"#.into(),
+            }
+        );
+        assert!(matches!(
+            store.begin_idempotent_operation(
+                "tenant-a",
+                "device-a",
+                "host-a",
+                "key-a",
+                "different",
+                now
+            ),
+            Err(SecurityStoreError::IdempotencyConflict)
+        ));
+    }
+
+    fn completed_operation(
+        store: &SecurityStore,
+        key: &str,
+        created_at: i64,
+        completed_at: i64,
+        succeeded: bool,
+    ) -> String {
+        let IdempotencyDecision::Started { operation_id } = store
+            .begin_idempotent_operation("tenant-a", "device-a", "host-a", key, "hash-a", created_at)
+            .unwrap()
+        else {
+            panic!("expected a new operation")
+        };
+        store
+            .mark_operation_running("tenant-a", &operation_id, created_at)
+            .unwrap();
+        store
+            .complete_idempotent_operation(
+                "tenant-a",
+                "device-a",
+                key,
+                r#"{"httpStatus":200,"body":{"ok":true}}"#,
+                succeeded,
+                completed_at,
+            )
+            .unwrap();
+        operation_id
     }
 
     #[test]

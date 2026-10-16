@@ -130,6 +130,7 @@ async fn harden_internal_response(request: Request, next: Next) -> Response {
 // is the path the app, `fleet` and the headless binary name it by.
 pub use cognia_companion_connectivity::DEFAULT_PORT;
 const MAX_DRAIN_DURATION: Duration = Duration::from_secs(300);
+const SECURITY_STORE_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60);
 static DRAINING: AtomicBool = AtomicBool::new(false);
 static WRITES_PAUSED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_MUTATIONS: AtomicUsize = AtomicUsize::new(0);
@@ -308,13 +309,17 @@ pub async fn spawn_server(
                 return;
             }
         };
-        let result = server
-            .handle(serve_handle)
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-            .await;
-
-        if let Err(e) = result {
-            log::warn!("companion-api server exited with error: {e}");
+        // Both desktop and headless Hosts enter here. Keep maintenance tied to
+        // this listener's lifetime, including graceful shutdown and failures.
+        tokio::select! {
+            result = server
+                .handle(serve_handle)
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>()) => {
+                if let Err(e) = result {
+                    log::warn!("companion-api server exited with error: {e}");
+                }
+            }
+            () = maintain_security_store() => {}
         }
         let _ = terminated_tx.send(true);
     });
@@ -324,6 +329,28 @@ pub async fn spawn_server(
         shutdown: tx,
         terminated: terminated_rx,
     })
+}
+
+/// The first tick sweeps immediately; subsequent ticks cover long-lived Hosts.
+async fn maintain_security_store() {
+    let mut interval = tokio::time::interval(SECURITY_STORE_MAINTENANCE_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        let Some(store) = super::security_store::security_store() else {
+            continue;
+        };
+        // SQLite and its connection mutex must not block the server executor.
+        match tokio::task::spawn_blocking(move || {
+            store.purge_completed_idempotency_records(super::security_store::unix_time_secs())
+        })
+        .await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => log::warn!("companion idempotency retention failed: {error}"),
+            Err(error) => log::warn!("companion idempotency retention worker failed: {error}"),
+        }
+    }
 }
 
 /// Spawn the **plaintext, loopback-only** browser listener.
@@ -1064,6 +1091,81 @@ mod tests {
         fn drop(&mut self) {
             set_draining_for_test(false);
         }
+    }
+
+    #[tokio::test]
+    async fn security_store_retention_runs_at_startup_periodically_and_stops_with_server() {
+        use crate::security_store::{self, IdempotencyDecision, SecurityStore};
+
+        let _lifecycle = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _store_guard = security_store::test_guard();
+        let _draining = DrainingReset;
+        let store = SecurityStore::in_memory().unwrap();
+        security_store::install_security_store(Some(store.clone()));
+        struct StoreReset;
+        impl Drop for StoreReset {
+            fn drop(&mut self) {
+                security_store::install_security_store(None);
+            }
+        }
+        let _reset = StoreReset;
+        let complete = |key: &str| {
+            let IdempotencyDecision::Started { operation_id } = store
+                .begin_idempotent_operation("tenant-a", "device-a", "host-a", key, "hash", 100)
+                .unwrap()
+            else {
+                panic!("expected a new operation")
+            };
+            store
+                .mark_operation_running("tenant-a", &operation_id, 100)
+                .unwrap();
+            store
+                .complete_idempotent_operation("tenant-a", "device-a", key, "{}", true, 101)
+                .unwrap();
+            operation_id
+        };
+        async fn wait_for_removal(store: &SecurityStore, operation_id: &str) {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while store
+                    .operation("tenant-a", "device-a", operation_id)
+                    .unwrap()
+                    .is_some()
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("server must sweep completed receipts");
+        }
+
+        let first = complete("before-start");
+        let dir = TempDir::new().unwrap();
+        let tls = tls::ensure_certificate(dir.path()).unwrap();
+        let mut handle = spawn_server(0, true, tls, test_state()).await.unwrap();
+        wait_for_removal(&store, &first).await;
+
+        let second = complete("after-start");
+        tokio::time::pause();
+        tokio::time::advance(SECURITY_STORE_MAINTENANCE_INTERVAL).await;
+        tokio::time::resume();
+        wait_for_removal(&store, &second).await;
+
+        handle.shutdown.send(()).unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            handle.terminated.wait_for(|done| *done),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let after_shutdown = complete("after-shutdown");
+        tokio::time::pause();
+        tokio::time::advance(SECURITY_STORE_MAINTENANCE_INTERVAL * 2).await;
+        tokio::time::resume();
+        assert!(store
+            .operation("tenant-a", "device-a", &after_shutdown)
+            .unwrap()
+            .is_some());
     }
 
     /// The peer address the make-service inserts for every real connection.
