@@ -79,8 +79,9 @@ Host 提供且仅提供以下键：
 | Sidecar Bash 前台/后台、共享 exec/spawn、terminal REPL、advanced shell、process lifecycle、LSP 与搜索 | `sidecar/src/platform/process/exec.ts` 及其调用方；`crates/cognia-companion-rpc/src/sidecar_runtime.rs` 中的 `workspace.portEnv` |
 | CLI external agent、ACP PTY 与 OS sandbox | `cli/src/runtime/workspace-port-env.ts`、`external/{node-backend,pty-terminals}.ts`、`sandbox/os-sandbox-exec.ts` |
 | Host 后台任务 | `crates/cognia-jobs/src/supervisor.rs` |
+| Pro IDE（code-server）桌面与 headless | `crates/cognia-codeserver/src/{process,remote}.rs` |
 
-Pro IDE 的桌面与 headless 子进程启动集成是 `crates/cognia-codeserver/src/{process,remote}.rs` 中的独立改动，由 ADR-0088 记录，不属于上述已提交第一至第三阶段的证据。其契约是让子终端与任务继承工作区环境，同时让 code-server 自身的基础设施监听端口独立于开发服务器端口块。
+Pro IDE 在获取编辑器操作锁之前解析租约，因此基于 SQLite 的查询不会在该锁内执行。code-server 自身的监听端口仍由独立的 `--bind-addr` 决定；只有子进程环境（其终端与任务会继承）携带工作区端口块。
 
 ### 6. Runtime placement 复用号码，不自动转发主机端口
 

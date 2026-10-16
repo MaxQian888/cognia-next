@@ -154,12 +154,12 @@ The committed phase 3 spawn map is:
 | Sidecar Bash foreground/background, shared exec/spawn, terminal REPL, advanced shell, process lifecycle, LSP and search | `sidecar/src/platform/process/exec.ts` and its callers; `workspace.portEnv` in `crates/cognia-companion-rpc/src/sidecar_runtime.rs` |
 | CLI external agents, ACP PTY and OS sandbox | `cli/src/runtime/workspace-port-env.ts`, `external/{node-backend,pty-terminals}.ts`, `sandbox/os-sandbox-exec.ts` |
 | Host background jobs | `crates/cognia-jobs/src/supervisor.rs` |
+| Pro IDE (code-server), desktop and headless | `crates/cognia-codeserver/src/{process,remote}.rs` |
 
-Pro IDE's desktop and headless child-spawn integration is a separate change in
-`crates/cognia-codeserver/src/{process,remote}.rs`, tracked by ADR-0088; it is not
-part of the committed phase 1–3 evidence above. Its contract is to pass the
-workspace environment to child terminals and tasks while keeping code-server's
-own infrastructure listener independent of the development-server block.
+Pro IDE resolves the lease before it takes the editor operation lock, so the
+SQLite-backed lookup never runs under that lock. code-server's own listener keeps
+its independent `--bind-addr` port; only the child process environment, which its
+terminals and tasks inherit, carries the workspace block.
 
 ### 6. Runtime placement reuses the numbers, not host port forwarding
 
