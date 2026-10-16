@@ -174,7 +174,7 @@ async fn run_steps(
     let first = wait_ready(&service, p, first, wait).await?;
     let first_record = service.scoped(p, &first.id, first.generation).await?;
     let endpoint = service.secrets.desktop(&first.id).await?;
-    provider
+    let provider_root_observation = provider
         .verify_smoke_egress(&first_record, &endpoint)
         .await?;
     let key = service.secrets.provider_key(&first_record.config).await?;
@@ -293,6 +293,10 @@ async fn run_steps(
         return Err(refused("managed_desktop_delete_retry_unproven"));
     }
     let receipt = QualificationReceipt {
+        evidence_version: 2,
+        workload_evidence: None,
+        private_egress_probe_no_response: provider_root_observation.all_no_response(),
+        provider_root_observation: Some(provider_root_observation),
         binding_digest: config.binding_digest(),
         template: identity,
         observed_at: service.now().await,
@@ -305,7 +309,6 @@ async fn run_steps(
         protocol_verified: true,
         restart_deadline_verified: true,
         delete_retry_verified: true,
-        private_egress_probe_no_response: true,
         egress_policy_verified: true,
     };
     service
@@ -357,8 +360,15 @@ impl ManagedDesktopProvider for FailOneDelete {
     async fn verify_release(&self, c: &ManagedDesktopConfig) -> Result<()> {
         self.inner.verify_release(c).await
     }
-    async fn verify_smoke_egress(&self, r: &DesktopRecord, s: &DesktopSecrets) -> Result<()> {
+    async fn verify_smoke_egress(&self, r: &DesktopRecord, s: &DesktopSecrets) -> Result<cognia_e2b::envd::EgressProbeReport> {
         self.inner.verify_smoke_egress(r, s).await
+    }
+    async fn observe_boundary(
+        &self,
+        r: &DesktopRecord,
+        s: &DesktopSecrets,
+    ) -> Result<cognia_desktop_guest::observation::ProcessBoundaryReport> {
+        self.inner.observe_boundary(r, s).await
     }
     async fn register_template(
         &self,

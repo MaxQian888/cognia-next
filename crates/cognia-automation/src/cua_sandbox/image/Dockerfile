@@ -40,7 +40,7 @@ RUN chmod 0755 /usr/local/bin/cognia-desktop
 
 LABEL org.opencontainers.image.title="Cognia Linux Desktop" \
       cognia.cua.protocol="computer-server-0.3.46" \
-      cognia.cua.recipe="5"
+      cognia.cua.recipe="6"
 EXPOSE 8000
 WORKDIR /home/cua
 ENTRYPOINT ["/usr/local/bin/cognia-desktop"]

@@ -345,6 +345,14 @@ pub struct TemplateRecord {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QualificationReceipt {
+    /// Missing on legacy receipts. Historical evidence never upgrades itself.
+    #[serde(default)]
+    pub evidence_version: u32,
+    #[serde(default)]
+    pub workload_evidence: Option<WorkloadQualificationEvidence>,
+    /// Diagnostic from trusted provider initialization scope, never workload proof.
+    #[serde(default)]
+    pub provider_root_observation: Option<cognia_e2b::envd::EgressProbeReport>,
     pub binding_digest: String,
     pub template: TemplateIdentity,
     pub observed_at: i64,
@@ -360,6 +368,60 @@ pub struct QualificationReceipt {
     pub private_egress_probe_no_response: bool,
     pub egress_policy_verified: bool,
 }
+
+/// Host-owned association between immutable provider/configuration identity and
+/// the generation independently observed over authenticated provider control.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostBoundaryBinding {
+    pub binding_digest: String,
+    pub owner_principal_id: String,
+    pub host_id: String,
+    pub desktop_id: String,
+    pub desktop_generation: u64,
+    pub resource_id: String,
+    pub template: TemplateIdentity,
+    pub observed_at: i64,
+    pub observation: cognia_desktop_guest::observation::ProcessBoundaryReport,
+}
+impl HostBoundaryBinding {
+    pub fn matches_record(&self, row: &DesktopRecord) -> bool {
+        self.binding_digest == row.config.binding_digest()
+            && self.owner_principal_id == row.config.owner_principal_id
+            && self.host_id == row.config.host_id
+            && self.desktop_id == row.desktop.id
+            && self.desktop_generation == row.desktop.generation
+            && Some(self.resource_id.as_str()) == row.resource_id.as_deref()
+            && self.template == row.template
+            && self.observation.phase == cognia_desktop_guest::observation::ObservationPhase::DesktopLive
+            && self.observation.validate(1000).is_ok()
+    }
+    pub fn same_generation(&self, other: &Self) -> bool {
+        self.binding_digest == other.binding_digest
+            && self.owner_principal_id == other.owner_principal_id
+            && self.host_id == other.host_id
+            && self.desktop_id == other.desktop_id
+            && self.desktop_generation == other.desktop_generation
+            && self.resource_id == other.resource_id
+            && self.template == other.template
+            && self.observation.same_boundary(&other.observation)
+    }
+}
+
+/// Full qualification is produced only by the native P4 runner. P3 lifecycle
+/// observations and native handoff diagnostics never populate this receipt.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkloadQualificationEvidence {
+    pub workload_isolation_revision: u32,
+    pub enforcement: String,
+    pub boundaries: Vec<HostBoundaryBinding>,
+    pub launch_paths_verified: Vec<String>,
+    pub workload_egress_verified: bool,
+    pub escape_resistance_verified: bool,
+    pub native_handoff_receipt_sha256: Vec<String>,
+}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -513,6 +575,8 @@ pub struct ManagedDesktopConfigSummary {
     pub can_prepare_template: bool,
     pub can_create: bool,
     pub gui_qualified: bool,
+    pub qualification_evidence_version: Option<u32>,
+    pub workload_isolation_revision: Option<u32>,
     pub isolation_tier: IsolationTier,
     pub egress_tier: EgressTier,
     pub egress_enforcement: String,

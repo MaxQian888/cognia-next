@@ -611,7 +611,12 @@ pub async fn start_protected(
     bootstrap: &DesktopBootstrap,
     spec: &StartSpec,
 ) -> Result<ProcessStream, EnvdError> {
-    start_with_traffic(&bootstrap.endpoint()?, spec, Some(&bootstrap.traffic_access_token)).await
+    start_with_traffic(
+        &bootstrap.endpoint()?,
+        spec,
+        Some(&bootstrap.traffic_access_token),
+    )
+    .await
 }
 
 /// Starts the pinned image's entrypoint once, after the Host durably records the
@@ -676,6 +681,74 @@ async fn start_desktop_at(
         )),
         Err(_) => Err(EnvdError::Transport(
             "desktop bootstrap acknowledgement timed out".into(),
+        )),
+    }
+}
+
+/// Execute the immutable root observer, never a caller-provided script or PID.
+/// The caller independently parses and validates the bounded versioned report.
+pub async fn observe_desktop_boundary(bootstrap: &DesktopBootstrap) -> Result<Vec<u8>, EnvdError> {
+    let endpoint = bootstrap.endpoint()?;
+    observe_desktop_boundary_at(bootstrap, &endpoint, Duration::from_secs(35)).await
+}
+
+async fn observe_desktop_boundary_at(
+    bootstrap: &DesktopBootstrap,
+    endpoint: &EnvdEndpoint,
+    deadline: Duration,
+) -> Result<Vec<u8>, EnvdError> {
+    let spec = StartSpec {
+        cmd: "/usr/local/bin/cognia-desktop-guest".into(),
+        args: vec!["observe".into()],
+        envs: BTreeMap::new(),
+        cwd: None,
+        stdin: false,
+    };
+    let result = tokio::time::timeout(deadline, async {
+        let mut stream =
+            start_with_traffic(endpoint, &spec, Some(&bootstrap.traffic_access_token)).await?;
+        let mut stdout = Vec::new();
+        let mut total = 0usize;
+        let mut started = false;
+        loop {
+            match stream.next_event().await? {
+                Some(ProcessEvent::Start { pid }) if pid > 0 && !started => started = true,
+                Some(ProcessEvent::Stdout(bytes)) if started => {
+                    total = total.saturating_add(bytes.len());
+                    if total > 32768 {
+                        return Err(EnvdError::Protocol("boundary report exceeded bound".into()));
+                    }
+                    stdout.extend_from_slice(&bytes);
+                }
+                Some(ProcessEvent::Stderr(bytes)) if started => {
+                    total = total.saturating_add(bytes.len());
+                    if total > 32768 {
+                        return Err(EnvdError::Protocol("boundary report exceeded bound".into()));
+                    }
+                }
+                Some(ProcessEvent::Keepalive) => (),
+                Some(ProcessEvent::End(status))
+                    if started && status.code() == Some(0) && !stdout.is_empty() =>
+                {
+                    return Ok(stdout)
+                }
+                _ => {
+                    return Err(EnvdError::Protocol(
+                        "boundary report did not complete".into(),
+                    ))
+                }
+            }
+        }
+    })
+    .await;
+    match result {
+        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Err(EnvdError::Unauthorized(_))) => Err(EnvdError::Unauthorized(
+            "boundary observation refused".into(),
+        )),
+        Ok(Err(_)) => Err(EnvdError::Protocol("boundary observation failed".into())),
+        Err(_) => Err(EnvdError::Transport(
+            "boundary observation timed out".into(),
         )),
     }
 }
@@ -964,7 +1037,12 @@ mod tests {
             let recorded = recorded.clone();
             let body = body.clone();
             async move {
-                assert!(matches!(request.uri().path(), "/process.Process/Start" | "/process.Process/SendInput" | "/process.Process/CloseStdin"));
+                assert!(matches!(
+                    request.uri().path(),
+                    "/process.Process/Start"
+                        | "/process.Process/SendInput"
+                        | "/process.Process/CloseStdin"
+                ));
                 let headers = request.headers().clone();
                 let bytes = to_bytes(request.into_body(), 65536).await.unwrap();
                 recorded.lock().unwrap().push((headers, bytes.to_vec()));
@@ -1029,8 +1107,11 @@ mod tests {
     #[tokio::test]
     async fn protected_process_input_keeps_edge_and_envd_credentials_on_every_chunk() {
         let fixture = bootstrap_fixture(
-            200, encode_envelope(br#"{"event":{"start":{"pid":42}}}"#), Duration::ZERO,
-        ).await;
+            200,
+            encode_envelope(br#"{"event":{"start":{"pid":42}}}"#),
+            Duration::ZERO,
+        )
+        .await;
         // Use the same private constructor state as for_desktop, with a local
         // fixture endpoint; public for_desktop still validates provider domains.
         let mut input = ProcessInput::new(fixture.endpoint.clone(), 42).unwrap();
@@ -1130,5 +1211,47 @@ mod tests {
                     .unwrap_err();
             assert!(!error.to_string().contains("secret"));
         }
+    }
+    #[tokio::test]
+    async fn boundary_observation_is_fixed_bounded_and_does_not_forward_secrets() {
+        let fixture = bootstrap_fixture(200, probe_frames(b"{}"), Duration::ZERO).await;
+        assert_eq!(
+            observe_desktop_boundary_at(&bootstrap(), &fixture.endpoint, Duration::from_secs(1))
+                .await
+                .unwrap(),
+            b"{}"
+        );
+        let request = fixture.requests.lock().unwrap()[0].clone();
+        let mut decoder = EnvelopeDecoder::default();
+        decoder.push(&request.1);
+        let Frame::Message(payload) = decoder.next_frame().unwrap().unwrap() else {
+            panic!("not message")
+        };
+        let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(
+            value["process"]["cmd"],
+            "/usr/local/bin/cognia-desktop-guest"
+        );
+        assert_eq!(value["process"]["args"], json!(["observe"]));
+        assert_eq!(value["process"]["envs"], json!({}));
+        assert_eq!(value["stdin"], false);
+        assert!(!String::from_utf8(payload).unwrap().contains("secret"));
+        for output in [Vec::new(), vec![b'x'; 32769]] {
+            let fixture = bootstrap_fixture(200, probe_frames(&output), Duration::ZERO).await;
+            assert!(observe_desktop_boundary_at(
+                &bootstrap(),
+                &fixture.endpoint,
+                Duration::from_secs(1)
+            )
+            .await
+            .is_err());
+        }
+        let fixture = bootstrap_fixture(401, b"envd-secret".to_vec(), Duration::ZERO).await;
+        let error =
+            observe_desktop_boundary_at(&bootstrap(), &fixture.endpoint, Duration::from_secs(1))
+                .await
+                .unwrap_err();
+        assert!(matches!(error, EnvdError::Unauthorized(_)));
+        assert!(!error.to_string().contains("secret"));
     }
 }

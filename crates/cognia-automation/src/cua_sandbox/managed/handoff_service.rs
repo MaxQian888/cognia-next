@@ -27,6 +27,7 @@ impl ManagedDesktopService {
         budget: &HandoffBudget, source_current: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> Result<InstalledHandoff> {
         let row = self.handoff_target(p, desktop, operation_id).await?;
+        self.validate_live_boundary(p, desktop).await?;
         let check = source_current.clone();
         if !tokio::task::spawn_blocking(move || check()).await.unwrap_or(false) { return Err(refused("managed_desktop_handoff_source_unavailable")); }
         let secret = self.secrets.desktop(&desktop.id).await?;
@@ -70,7 +71,13 @@ impl ManagedDesktopService {
             Ok(installed) => {
                 let check = source_current.clone();
                 if tokio::task::spawn_blocking(move || check()).await.unwrap_or(false)
-                    && self.handoff_target(p, desktop, operation_id).await.is_ok() { Ok(installed) }
+                    && self.handoff_target(p, desktop, operation_id).await.is_ok() {
+                    match self.validate_live_boundary(p, desktop).await {
+                        Ok(binding) => handoff::validate_installed_boundary(&installed, &binding.observation)
+                            .map(|()| installed).map_err(|_| refused("managed_desktop_boundary_mismatch")),
+                        Err(error) => Err(error),
+                    }
+                }
                 else { Err(refused("managed_desktop_handoff_source_unavailable")) }
             }
             Err(error) => Err(error),

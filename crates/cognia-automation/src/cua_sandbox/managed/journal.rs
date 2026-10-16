@@ -21,6 +21,11 @@ pub struct ManagedDesktopJournal {
     pub authorizations: BTreeMap<String, DesktopAuthorization>,
     pub templates: BTreeMap<String, TemplateRecord>,
     pub qualifications: BTreeMap<String, QualificationReceipt>,
+    /// Partial v2 lifecycle evidence is retained without enabling production.
+    #[serde(default)]
+    pub lifecycle_diagnostics: BTreeMap<String, QualificationReceipt>,
+    #[serde(default)]
+    pub workload_boundaries: BTreeMap<String, HostBoundaryBinding>,
     pub desktops: BTreeMap<String, DesktopRecord>,
     #[serde(default)]
     pub control_quarantines: std::collections::BTreeSet<String>,
@@ -213,6 +218,13 @@ mod tests {
         state.revision = 5;
         store.save(&state).unwrap();
         assert_eq!(store.load("host").unwrap().revision, 5);
+        let mut legacy = serde_json::to_value(&state).unwrap();
+        legacy.as_object_mut().unwrap().remove("workloadBoundaries");
+        legacy.as_object_mut().unwrap().remove("lifecycleDiagnostics");
+        write_json(&tmp.path().join("managed-desktops-journal.json"), &legacy).unwrap();
+        let restored = store.load("host").unwrap();
+        assert!(restored.workload_boundaries.is_empty());
+        assert!(restored.lifecycle_diagnostics.is_empty());
         assert!(store.load("other").is_err());
         fs::write(tmp.path().join("managed-desktops-journal.json"), b"partial").unwrap();
         assert!(store.load("host").is_err());

@@ -23,7 +23,7 @@ test("release uses the published immutable digest and contains no runtime token"
   assert.equal(release.image, `${imageRepository}@${digest}`)
   assert.equal(release.imageDigest, digest)
   assert.equal(release.architecture, "linux/amd64")
-  assert.equal(release.recipeRevision, "5")
+  assert.equal(release.recipeRevision, "6")
   assert.equal(release.protocol, "computer-server-0.3.46")
   assert.equal(release.serverVersion, "0.3.46")
   assert.equal(release.startCommand, "sleep infinity")
@@ -58,6 +58,13 @@ test("unpublished tags, malformed digests and repository substitutions refuse", 
 
 test("the actual pinned image and guest health agree with the release manifest", () => {
   verifyImageSources(ROOT)
+  const host = readFileSync(
+    resolve(ROOT, "crates/cognia-companion-rpc/src/managed_desktop_release.rs"),
+    "utf8"
+  )
+  const release = createManagedDesktopRelease({ imageRepository, digest })
+  assert.ok(host.includes(`pub const RECIPE: &str = "${release.recipeRevision}";`))
+  assert.ok(host.includes(`pub const PROTOCOL: &str = "${release.protocol}";`))
 })
 
 test("recipe drift and mutable base prevent publication of a stale manifest", () => {
@@ -70,7 +77,7 @@ test("recipe drift and mutable base prevent publication of a stale manifest", ()
     writeFileSync(join(context, "server.py"), server)
     writeFileSync(
       join(context, "Dockerfile"),
-      dockerfile.replace('cognia.cua.recipe="5"', 'cognia.cua.recipe="6"')
+      dockerfile.replace('cognia.cua.recipe="6"', 'cognia.cua.recipe="7"')
     )
     assert.throws(() => verifyImageSources(root), /identity/)
     writeFileSync(join(context, "Dockerfile"), dockerfile.replace(/@sha256:[0-9a-f]{64}/, ""))
@@ -78,7 +85,7 @@ test("recipe drift and mutable base prevent publication of a stale manifest", ()
     writeFileSync(join(context, "Dockerfile"), dockerfile)
     writeFileSync(
       join(context, "server.py"),
-      server.replace('"recipeRevision": "5"', '"recipeRevision": "6"')
+      server.replace('"recipeRevision": "6"', '"recipeRevision": "7"')
     )
     assert.throws(() => verifyImageSources(root), /health identity/)
   } finally {

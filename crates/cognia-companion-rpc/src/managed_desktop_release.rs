@@ -17,7 +17,7 @@ use cognia_environment::{
 
 pub const RELEASE_FILE: &str = "managed-desktop-release.json";
 pub const PROTOCOL: &str = "computer-server-0.3.46";
-pub const RECIPE: &str = "3";
+pub const RECIPE: &str = "6";
 
 /// No embedded digest is guessed before the image has actually been published.
 /// An absent release leaves provisioning dormant and cleanup operational.
@@ -155,7 +155,7 @@ mod tests {
             image: format!("ghcr.io/cognia/desktop@sha256:{}", "a".repeat(64)),
             image_digest: format!("sha256:{}", "a".repeat(64)),
             architecture: "linux/amd64".into(),
-            recipe_revision: "3".into(),
+            recipe_revision: RECIPE.into(),
             protocol: PROTOCOL.into(),
             server_version: "0.3.46".into(),
             start_command: "true".into(),

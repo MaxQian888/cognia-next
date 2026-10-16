@@ -101,7 +101,7 @@ pub(crate) fn forward() -> io::Result<()> {
     socket.shutdown(Shutdown::Write)?;
     let bytes = protocol::read_line(&mut socket, protocol::RECEIPT_LIMIT, deadline)?;
     let receipt: Receipt = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-    if receipt.receipt_version != 2
+    if receipt.receipt_version != 3
         || receipt.operation_id != request.operation_id
         || receipt.manifest_digest != request.manifest_digest
         || receipt.commit != manifest.commit
@@ -125,6 +125,7 @@ struct Pending {
     buffer: Vec<u8>,
     request: Option<Request>,
     prepared: bool,
+    importer_boundary: Option<cognia_desktop_guest::observation::ProcessBoundaryReport>,
     eof: bool,
     deadline: Instant,
 }
@@ -216,6 +217,7 @@ impl Control {
                     buffer: Vec::new(),
                     request: None,
                     prepared: false,
+                    importer_boundary: None,
                     eof: false,
                     deadline: Instant::now() + Duration::from_secs(30),
                 });
@@ -264,7 +266,12 @@ impl Control {
                     // One byte on a fresh socket cannot fill its send buffer.
                     pending.report.write_all(b"G")?;
                 }
-                Report::Prepared if pending.request.is_some() && !pending.prepared => {
+                Report::Prepared(mut evidence)
+                    if pending.request.is_some() && !pending.prepared =>
+                {
+                    evidence.boundary_generation = boundary.generation.clone();
+                    evidence.validate(1001).map_err(|_| invalid())?;
+                    pending.importer_boundary = Some(evidence);
                     pending.prepared = true
                 }
                 _ => return Err(invalid()),
@@ -287,16 +294,21 @@ impl Control {
         if !boundary::still_current(boundary) {
             return Err(invalid());
         }
-        if let Some(launch) = &request.launch {
-            self.jobs.push(acceptance::spawn(
+        let acceptance_boundary = if let Some(launch) = &request.launch {
+            let job = acceptance::spawn(
                 boundary,
                 &request.operation_id,
                 &launch.script,
                 pending.deadline,
-            )?);
-        }
+            )?;
+            let evidence = job.boundary_report.clone().ok_or_else(invalid)?;
+            self.jobs.push(job);
+            Some(evidence)
+        } else {
+            None
+        };
         let receipt = Receipt {
-            receipt_version: 2,
+            receipt_version: 3,
             boundary_generation: boundary.generation.clone(),
             operation_id: request.operation_id.clone(),
             commit: manifest.commit,
@@ -306,6 +318,8 @@ impl Control {
             source_bytes: manifest.source_bytes,
             workspace: format!("/workspace/{}/workspace", request.operation_id),
             launched: request.launch.is_some(),
+            importer_boundary: pending.importer_boundary.take().ok_or_else(invalid)?,
+            acceptance_boundary,
         };
         promotion::store_receipt(request, &receipt)?;
         timeout(&pending.client, pending.deadline)?;
@@ -369,7 +383,7 @@ fn run_import(
     input: &std::path::Path,
     output: &std::path::Path,
     deadline: Instant,
-) -> io::Result<()> {
+) -> io::Result<cognia_desktop_guest::observation::ProcessBoundaryReport> {
     let (mut info, write) = UnixStream::pair()?;
     let mut command =
         ImportLaunch::prepare(&request.operation_id, input, output, write.as_fd())?.command()?;
@@ -387,6 +401,12 @@ fn run_import(
         }
         thread::sleep(Duration::from_millis(20));
     };
+    let evidence = boundary::report(
+        &observed,
+        observed.workload_pid,
+        1001,
+        &request.operation_id,
+    )?;
     let mut admission = process.0.stdin.take().ok_or_else(invalid)?;
     admission.write_all(b"G")?;
     drop(admission);
@@ -410,7 +430,7 @@ fn run_import(
         }
         thread::sleep(Duration::from_millis(10));
     }
-    Ok(())
+    Ok(evidence)
 }
 pub(crate) fn worker() -> io::Result<()> {
     root_identity()?;
@@ -469,10 +489,14 @@ pub(crate) fn worker() -> io::Result<()> {
     if protocol::read_some(&mut socket, &mut admission, deadline)? != 0 {
         return Err(invalid());
     }
-    run_import(&request, &input, &output, deadline)?;
+    let evidence = run_import(&request, &input, &output, deadline)?;
     promotion::promote(&request, &manifest, &output, deadline)?;
     promotion::finish_staging(&request)?;
-    protocol::write_json(&mut report, &Report::Prepared, protocol::REPORT_LIMIT)
+    protocol::write_json(
+        &mut report,
+        &Report::Prepared(evidence),
+        protocol::REPORT_LIMIT,
+    )
 }
 
 #[cfg(test)]

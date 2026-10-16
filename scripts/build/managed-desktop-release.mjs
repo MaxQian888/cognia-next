@@ -11,7 +11,7 @@ const IMAGE_CONTEXT = "crates/cognia-automation/src/cua_sandbox/image"
 
 export const RELEASE_IDENTITY = Object.freeze({
   architecture: "linux/amd64",
-  recipeRevision: "5",
+  recipeRevision: "6",
   protocol: "computer-server-0.3.46",
   serverVersion: "0.3.46",
   // Template snapshots must never contain a runtime guest token. The Host

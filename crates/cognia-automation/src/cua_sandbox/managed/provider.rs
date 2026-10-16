@@ -145,7 +145,12 @@ pub trait ManagedDesktopProvider: Send + Sync {
         &self,
         record: &DesktopRecord,
         secrets: &DesktopSecrets,
-    ) -> Result<()>;
+    ) -> Result<cognia_e2b::envd::EgressProbeReport>;
+    async fn observe_boundary(
+        &self,
+        record: &DesktopRecord,
+        secrets: &DesktopSecrets,
+    ) -> Result<cognia_desktop_guest::observation::ProcessBoundaryReport>;
     async fn register_template(
         &self,
         config: &ManagedDesktopConfig,
@@ -294,7 +299,7 @@ impl ManagedDesktopProvider for E2bDesktopProvider {
         &self,
         record: &DesktopRecord,
         secrets: &DesktopSecrets,
-    ) -> Result<()> {
+    ) -> Result<cognia_e2b::envd::EgressProbeReport> {
         if record.config.egress != DesktopEgress::Off {
             return Err(refused("managed_desktop_egress_smoke_unsupported"));
         }
@@ -313,10 +318,28 @@ impl ManagedDesktopProvider for E2bDesktopProvider {
             })?;
         // The report accepts only the fixed target names and booleans.
         eprintln!("smoke egress: observations={:?}", evidence.observations);
-        if !evidence.all_no_response() {
-            return Err(refused("managed_desktop_egress_probe_failed"));
+        // Trusted provider initialization may reach MMDS. Preserve this separately
+        // from mandatory workload-origin denial; never turn it into workload proof.
+        Ok(evidence)
+    }
+
+    async fn observe_boundary(
+        &self,
+        record: &DesktopRecord,
+        secrets: &DesktopSecrets,
+    ) -> Result<cognia_desktop_guest::observation::ProcessBoundaryReport> {
+        let request = bootstrap_request(record, secrets)?;
+        let bytes = cognia_e2b::envd::observe_desktop_boundary(&request)
+            .await
+            .map_err(|_| refused("managed_desktop_boundary_unavailable"))?;
+        let report: cognia_desktop_guest::observation::ProcessBoundaryReport =
+            serde_json::from_slice(&bytes)
+                .map_err(|_| refused("managed_desktop_boundary_invalid"))?;
+        report.validate(1000).map_err(refused)?;
+        if report.phase != cognia_desktop_guest::observation::ObservationPhase::DesktopLive {
+            return Err(refused("managed_desktop_boundary_invalid"));
         }
-        Ok(())
+        Ok(report)
     }
 
     async fn register_template(

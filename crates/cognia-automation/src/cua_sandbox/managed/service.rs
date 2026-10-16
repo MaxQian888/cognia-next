@@ -233,6 +233,8 @@ impl ManagedDesktopService {
                                         && d.desktop.state == ManagedDesktopState::Destroyed
                                 })
                         }),
+                    qualification_evidence_version: qualified.then_some(2),
+                    workload_isolation_revision: qualified.then_some(1),
                     isolation_tier: IsolationTier::Vm,
                     egress_tier: match &c.egress {
                         DesktopEgress::Off => EgressTier::Off,
@@ -240,7 +242,7 @@ impl ManagedDesktopService {
                         DesktopEgress::Allowlist(_) => EgressTier::Allowlist,
                     },
                     egress_enforcement: if qualified {
-                        "provider-enforced"
+                        "provider-and-guest-kernel"
                     } else {
                         "unverified"
                     }
@@ -763,6 +765,80 @@ impl ManagedDesktopService {
         }
         Ok(row)
     }
+    /// Re-observe the native boundary before handoff/control. This cannot bind
+    /// an already-running legacy journal row to a replacement guest generation.
+    pub async fn validate_live_boundary(
+        &self,
+        p: &ManagedDesktopPrincipal,
+        desktop: &ManagedDesktop,
+    ) -> Result<HostBoundaryBinding> {
+        let row = self.scoped(p, &desktop.id, desktop.generation).await?;
+        if row.delete_requested || row.desktop.state != ManagedDesktopState::Running
+            || row.expired(self.now().await) {
+            return Err(refused("managed_desktop_boundary_unavailable"));
+        }
+        let result = async {
+            let current = self.config(p, &row.config.id).await?;
+            self.admission(&current, self.now().await)?;
+            if current.binding_digest() != row.config.binding_digest() {
+                return Err(refused("managed_desktop_boundary_identity_mismatch"));
+            }
+            let secrets = self.secrets.desktop(&desktop.id).await?;
+            self.observe_bound_boundary(&row, &secrets, false).await
+        }.await;
+        match result {
+            Ok(binding) => Ok(binding),
+            Err(error) => {
+                self.mark_cleanup(&desktop.id, &error).await?;
+                self.retry_cleanup(&desktop.id, &error).await?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn observe_bound_boundary(
+        &self,
+        row: &DesktopRecord,
+        secrets: &DesktopSecrets,
+        allow_initial_binding: bool,
+    ) -> Result<HostBoundaryBinding> {
+        self.release(&row.config)?;
+        let admission = self.lifecycle_admission(&row.config, Arc::new(|| true), self.now().await);
+        admission()?;
+        let observation = self.provider.observe_boundary(row, secrets).await?;
+        observation.validate(1000)
+            .map_err(|_| refused("managed_desktop_boundary_invalid"))?;
+        if observation.phase != cognia_desktop_guest::observation::ObservationPhase::DesktopLive {
+            return Err(refused("managed_desktop_boundary_invalid"));
+        }
+        let binding = HostBoundaryBinding {
+            binding_digest: row.config.binding_digest(),
+            owner_principal_id: row.config.owner_principal_id.clone(),
+            host_id: row.config.host_id.clone(),
+            desktop_id: row.desktop.id.clone(),
+            desktop_generation: row.desktop.generation,
+            resource_id: row.resource_id.clone()
+                .ok_or_else(|| refused("managed_desktop_boundary_identity_mismatch"))?,
+            template: row.template.clone(),
+            observed_at: self.now().await,
+            observation,
+        };
+        self.transaction_admitted(admission, |state, now| {
+            let current = state.desktops.get(&row.desktop.id)
+                .ok_or_else(|| refused("managed_desktop_not_found"))?;
+            if current.delete_requested || current.expired(now) || !binding.matches_record(current) {
+                return Err(refused("managed_desktop_boundary_identity_mismatch"));
+            }
+            match state.workload_boundaries.get(&row.desktop.id) {
+                Some(pinned) if pinned.matches_record(current) && pinned.same_generation(&binding) => {},
+                None if allow_initial_binding => {},
+                _ => return Err(refused("managed_desktop_boundary_generation_mismatch")),
+            }
+            state.workload_boundaries.insert(row.desktop.id.clone(), binding.clone());
+            Ok(binding.clone())
+        }).await
+    }
+
     pub async fn connect(
         &self,
         p: &ManagedDesktopPrincipal,
@@ -1034,6 +1110,10 @@ impl ManagedDesktopService {
             })
             .await?;
         }
+        if let Err(e) = self.observe_bound_boundary(&row, &secret, !row.bootstrap_started).await {
+            self.mark_cleanup(id, &e).await?;
+            return self.retry_cleanup(id, &e).await;
+        }
         if let Err(e) = self.provider.health(&row, &secret).await {
             if !e.retryable {
                 self.mark_cleanup(id, &e).await?;
@@ -1123,10 +1203,12 @@ impl ManagedDesktopService {
             {
                 return Err(refused("managed_desktop_qualification_invalid"));
             }
-            s.qualifications.insert(digest.clone(), receipt.clone());
-            if !qualified(s, &digest, &receipt.template) {
+            if !lifecycle_receipt_valid(s, &receipt, &digest, &receipt.template) {
                 return Err(refused("managed_desktop_qualification_invalid"));
             }
+            // P3 records what actually ran. Lifecycle-only evidence cannot
+            // enable production or masquerade as all-launch-path qualification.
+            s.lifecycle_diagnostics.insert(digest, receipt);
             Ok(())
         })
         .await
@@ -1188,31 +1270,70 @@ fn latest_template<'a>(s: &'a ManagedDesktopJournal, digest: &str) -> Option<&'a
         .filter(|t| t.binding_digest == digest)
         .max_by_key(|t| t.created_at)
 }
+fn lifecycle_receipt_valid(
+    s: &ManagedDesktopJournal,
+    q: &QualificationReceipt,
+    digest: &str,
+    template: &TemplateIdentity,
+) -> bool {
+    q.evidence_version == 2
+        && q.binding_digest == digest
+        && q.template == *template
+        && q.native_expiry_killed
+        && q.no_auto_resume
+        && q.ingress_denied
+        && q.guest_auth_denied
+        && q.decoded_frame_verified
+        && q.protocol_verified
+        && q.restart_deadline_verified
+        && q.delete_retry_verified
+        && q.egress_policy_verified
+        && q.smoke_desktop_ids.len() >= 2
+        && q.smoke_desktop_ids.iter().collect::<std::collections::BTreeSet<_>>().len()
+            == q.smoke_desktop_ids.len()
+        && q.smoke_desktop_ids.iter().all(|id| {
+            s.desktops.get(id).is_some_and(|r| {
+                r.smoke
+                    && r.config.binding_digest() == digest
+                    && r.template == *template
+                    && r.desktop.state == ManagedDesktopState::Destroyed
+                    && s.workload_boundaries.get(id).is_some_and(|b| b.matches_record(r))
+            })
+        })
+}
+fn lifecycle_diagnostic_valid(s: &ManagedDesktopJournal, digest: &str, template: &TemplateIdentity) -> bool {
+    s.lifecycle_diagnostics.get(digest)
+        .is_some_and(|q| lifecycle_receipt_valid(s, q, digest, template))
+}
 fn qualified(s: &ManagedDesktopJournal, digest: &str, template: &TemplateIdentity) -> bool {
     s.qualifications.get(digest).is_some_and(|q| {
-        q.binding_digest == digest
-            && q.template == *template
-            && q.native_expiry_killed
-            && q.no_auto_resume
-            && q.ingress_denied
-            && q.guest_auth_denied
-            && q.decoded_frame_verified
-            && q.protocol_verified
-            && q.restart_deadline_verified
-            && q.delete_retry_verified
-            && q.private_egress_probe_no_response
-            && q.egress_policy_verified
-            && !q.smoke_desktop_ids.is_empty()
-            && q.smoke_desktop_ids.iter().all(|id| {
-                s.desktops.get(id).is_some_and(|r| {
-                    r.smoke
-                        && r.config.binding_digest() == digest
-                        && r.template == *template
-                        && r.desktop.state == ManagedDesktopState::Destroyed
-                })
+        lifecycle_receipt_valid(s, q, digest, template)
+            && q.workload_evidence.as_ref().is_some_and(|e| {
+                e.workload_isolation_revision == 1
+                    && e.enforcement == "provider-and-guest-kernel"
+                    && e.launch_paths_verified == ["desktop", "importer", "acceptance"]
+                    && e.workload_egress_verified
+                    && e.escape_resistance_verified
+                    && e.native_handoff_receipt_sha256.len() == 2
+                    && e.native_handoff_receipt_sha256.iter().all(|v| {
+                        v.len() == 64 && v.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                    })
+                    && e.native_handoff_receipt_sha256[0] != e.native_handoff_receipt_sha256[1]
+                    && !e.boundaries.is_empty()
+                    && e.boundaries.iter().all(|binding| {
+                        s.desktops.get(&binding.desktop_id).is_some_and(|row| {
+                            row.smoke && row.desktop.state == ManagedDesktopState::Destroyed
+                                && row.config.binding_digest() == digest
+                                && row.template == *template
+                                && binding.matches_record(row)
+                                && s.workload_boundaries.get(&binding.desktop_id)
+                                    .is_some_and(|pinned| pinned.same_generation(binding))
+                        })
+                    })
             })
     })
 }
+
 fn operation_id(p: &ManagedDesktopPrincipal, input: &CreateManagedDesktop, kind: &str) -> String {
     use sha2::{Digest, Sha256};
     hex::encode(Sha256::digest(
@@ -1315,6 +1436,7 @@ pub(super) mod tests {
         fail_delete: AtomicBool,
         bad_policy: AtomicBool,
         lose_bootstrap: AtomicBool,
+        boundary_fault: AtomicUsize,
         auto_expire: AtomicBool,
         lifetime_cap_ms: AtomicI64,
         now: AtomicI64,
@@ -1345,6 +1467,7 @@ pub(super) mod tests {
                 fail_delete: AtomicBool::new(false),
                 bad_policy: AtomicBool::new(false),
                 lose_bootstrap: AtomicBool::new(false),
+                boundary_fault: AtomicUsize::new(0),
                 auto_expire: AtomicBool::new(false),
                 lifetime_cap_ms: AtomicI64::new(i64::MAX),
                 now: AtomicI64::new(1000),
@@ -1360,8 +1483,31 @@ pub(super) mod tests {
             if let Some(gate) = gate { gate.pause().await; }
             Ok(())
         }
-        async fn verify_smoke_egress(&self, _: &DesktopRecord, _: &DesktopSecrets) -> Result<()> {
-            Ok(())
+        async fn verify_smoke_egress(&self, _: &DesktopRecord, _: &DesktopSecrets) -> Result<cognia_e2b::envd::EgressProbeReport> {
+            Ok(cognia_e2b::envd::EgressProbeReport { observations: ["publicIp", "publicDns", "private10", "private172", "private192", "carrierPrivate", "linkLocal", "metadata", "publicIpv6", "metadataIpv6"].into_iter().map(|target| (target.into(), target == "metadata")).collect() })
+        }
+        async fn observe_boundary(&self, _: &DesktopRecord, _: &DesktopSecrets) -> Result<cognia_desktop_guest::observation::ProcessBoundaryReport> {
+            use cognia_desktop_guest::observation::{ProcessBoundaryReport, DescriptorObservation, NAMESPACES};
+            let mut report = ProcessBoundaryReport {
+                report_version: 1, workload_isolation_revision: 1,
+                phase: cognia_desktop_guest::observation::ObservationPhase::DesktopLive,
+                boundary_generation: "6a370d8e-2d69-40fb-9586-786b7424365a".into(),
+                namespace_init_pid: 20, namespace_init_start_time: 1,
+                workload_pid: 21, workload_start_time: 2,
+                namespaces: NAMESPACES.into_iter().map(|n| (n.into(), format!("{n}:[2]"))).collect(),
+                provider_namespaces: NAMESPACES.into_iter().map(|n| (n.into(), format!("{n}:[1]"))).collect(),
+                status: "Uid:1000 1000 1000 1000\nGid:1000 1000 1000 1000\nGroups:\nCapInh:0\nCapPrm:0\nCapEff:0\nCapBnd:0\nCapAmb:0\nNoNewPrivs:1\nSeccomp:2\n".into(),
+                network_devices: "header\nheader\n lo: 0\n".into(),
+                ipv4_routes: "header\n".into(), ipv6_routes: String::new(),
+                descriptors: (0..=2).map(|fd| (fd, DescriptorObservation {target: "/dev/null".into(), flags: 0, socket_scope: None})).collect(),
+            };
+            match self.boundary_fault.load(Ordering::SeqCst) {
+                1 => report.boundary_generation = Uuid::new_v4().to_string(),
+                2 => report.status = report.status.replace("CapBnd:0", "CapBnd:1"),
+                3 => return Err(refused("managed_desktop_boundary_unavailable")),
+                _ => {},
+            }
+            Ok(report)
         }
         async fn register_template(
             &self,
@@ -2051,7 +2197,53 @@ pub(super) mod tests {
         }
     }
     #[tokio::test]
-    async fn native_smoke_qualifies_only_after_actual_restart_expiry_and_delete_retry() {
+    async fn live_boundary_changes_and_missing_observation_quarantine_then_destroy() {
+        for fault in [1, 2, 3] {
+            let f = Fixture::new();
+            f.prepare().await;
+            let desktop = f.smoke("boundary").await;
+            assert_eq!(desktop.state, ManagedDesktopState::Running);
+            let original = f.service.validate_live_boundary(&f.p, &desktop).await.unwrap();
+            f.provider.boundary_fault.store(fault, Ordering::SeqCst);
+            assert!(f.service.validate_live_boundary(&f.p, &desktop).await.is_err());
+            let row = f.service.scoped(&f.p, &desktop.id, desktop.generation).await.unwrap();
+            assert!(row.delete_requested);
+            assert_eq!(row.desktop.state, ManagedDesktopState::DestroyRetrying);
+            assert!(f.service.state.lock().await.workload_boundaries[&desktop.id].same_generation(&original));
+            let deleted = f.service.connect(&f.p, &desktop.id, desktop.generation).await.unwrap();
+            assert_eq!(deleted.state, ManagedDesktopState::Destroyed);
+            assert!(f.provider.resources.lock().await.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn reconnect_cannot_rebind_legacy_or_replayed_desktop_identity() {
+        for fault in [0, 1, 2, 3, 4] {
+            let f = Fixture::new();
+            f.prepare().await;
+            let desktop = f.smoke("replay").await;
+            f.service.transaction(|state, _| {
+                if fault == 0 {
+                    state.workload_boundaries.remove(&desktop.id);
+                } else {
+                    let binding = state.workload_boundaries.get_mut(&desktop.id).unwrap();
+                    match fault {
+                        1 => binding.owner_principal_id = "other".into(),
+                        2 => binding.host_id = "other".into(),
+                        3 => binding.desktop_generation += 1,
+                        _ => binding.template.build_id = Uuid::new_v4().to_string(),
+                    }
+                }
+                Ok(())
+            }).await.unwrap();
+            let connected = f.service.connect(&f.p, &desktop.id, desktop.generation).await.unwrap();
+            assert_eq!(connected.state, ManagedDesktopState::DestroyRetrying);
+            assert!(f.service.scoped(&f.p, &desktop.id, desktop.generation).await.unwrap().delete_requested);
+        }
+    }
+
+    #[tokio::test]
+    async fn native_lifecycle_smoke_retains_diagnostics_without_production_qualification() {
         let Fixture {
             directory,
             provider,
@@ -2084,7 +2276,27 @@ pub(super) mod tests {
         assert!(provider.resources.lock().await.is_empty());
         assert_eq!(host.approved.load(Ordering::SeqCst), 3);
         let service = host.open(provider.clone()).unwrap();
-        assert!(service.list_configs(&p).await.unwrap()[0].can_create);
+        assert!(!service.list_configs(&p).await.unwrap()[0].can_create);
+        let state = service.state.lock().await;
+        assert!(state.qualifications.is_empty());
+        assert_eq!(state.lifecycle_diagnostics.len(), 1);
+        assert_eq!(receipt.evidence_version, 2);
+        assert!(receipt.workload_evidence.is_none());
+        assert!(!receipt.private_egress_probe_no_response);
+        assert_eq!(receipt.provider_root_observation.as_ref().unwrap().observations["metadata"], true);
+        // Even historically successful v1 booleans never qualify the new profile.
+        let mut legacy = serde_json::to_value(&receipt).unwrap();
+        legacy.as_object_mut().unwrap().remove("evidenceVersion");
+        legacy.as_object_mut().unwrap().remove("workloadEvidence");
+        legacy.as_object_mut().unwrap().remove("providerRootObservation");
+        let legacy: QualificationReceipt = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.evidence_version, 0);
+        let mut replay = state.clone();
+        let digest = receipt.binding_digest.clone();
+        replay.qualifications.insert(digest.clone(), legacy);
+        assert!(!qualified(&replay, &digest, &receipt.template));
+        replay.qualifications.insert(digest.clone(), receipt.clone());
+        assert!(!qualified(&replay, &digest, &receipt.template));
     }
     #[tokio::test]
     async fn native_smoke_rejects_expiry_without_a_successful_delete_retry() {

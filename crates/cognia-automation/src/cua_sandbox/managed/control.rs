@@ -179,7 +179,7 @@ pub async fn run_control_qualification_smoke(
         let state = service.state.lock().await;
         if !latest_template(&state, &digest)
             .and_then(|t| t.identity.as_ref())
-            .is_some_and(|t| qualified(&state, &digest, t))
+            .is_some_and(|t| lifecycle_diagnostic_valid(&state, &digest, t))
         {
             return Err(refused("managed_desktop_unqualified"));
         }
@@ -463,6 +463,8 @@ impl ManagedDesktopService {
         if self.state.lock().await.control_quarantines.contains(id) {
             return Err(refused("managed_desktop_control_quarantined"));
         }
+        // Boundary identity is a live admission check, including reused clients.
+        self.validate_live_boundary(p, &row.desktop).await?;
         // Recheck authentication after asynchronous configuration/storage work.
         authority.revalidate(p).await?;
         Ok(row)

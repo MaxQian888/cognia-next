@@ -89,6 +89,7 @@ pub(crate) struct AcceptanceJob {
     helper: Child,
     pins: PinnedDesktop,
     deadline: Instant,
+    pub(crate) boundary_report: Option<cognia_desktop_guest::observation::ProcessBoundaryReport>,
 }
 
 impl AcceptanceJob {
@@ -211,6 +212,7 @@ pub(crate) fn spawn(
         helper: child,
         pins,
         deadline,
+        boundary_report: None,
     };
     let spec = LaunchSpec {
         generation: boundary.generation.clone(),
@@ -223,6 +225,7 @@ pub(crate) fn spawn(
     control.read_exact(&mut bytes)?;
     let pid = u32::from_be_bytes(bytes);
     validate_child(job.helper.id(), pid, boundary, operation)?;
+    job.boundary_report = Some(boundary::report(boundary, pid, 1000, &boundary.generation)?);
     if !alive(job.pins.init.as_fd())?
         || !boundary::still_current(boundary)
         || Instant::now() >= deadline

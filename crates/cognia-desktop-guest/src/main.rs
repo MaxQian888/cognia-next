@@ -22,6 +22,7 @@ fn main() {
             let result = supervisor::run();
             (result, supervisor::failure_stage())
         }
+        [operation] if operation == "observe" => (boundary::print_live_report(), "observation"),
         [operation] if operation == "relay" => (relay::run(), "relay"),
         [operation] if operation == "handoff" => (control::forward(), "handoff"),
         [operation] if operation == "handoff-worker" => (control::worker(), "handoff_worker"),

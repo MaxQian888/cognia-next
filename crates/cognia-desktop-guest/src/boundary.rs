@@ -1,12 +1,15 @@
 //! Root-side observations, never workload-supplied health claims.
 
-use serde::Serialize;
+use cognia_desktop_guest::observation::{
+    DescriptorObservation, ProcessBoundaryReport, ISOLATION_REVISION, REPORT_VERSION,
+};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Boundary {
     pub generation: String,
     pub isolation_revision: u32,
@@ -221,6 +224,204 @@ pub(crate) fn still_current(boundary: &Boundary) -> bool {
         && boundary.namespaces.iter().all(|(name, expected)| {
             namespace(boundary.workload_pid, name).as_ref().ok() == Some(expected)
         })
+}
+
+/// Capture kernel evidence while the immutable launch is held at its admission barrier.
+/// This report is not populated from workload stdout or a guest health endpoint.
+pub(crate) fn report(
+    boundary: &Boundary,
+    pid: u32,
+    uid: u32,
+    generation: &str,
+) -> io::Result<ProcessBoundaryReport> {
+    use std::io::Read;
+    let bounded = |path: String, limit: u64| -> io::Result<String> {
+        let mut bytes = Vec::new();
+        fs::File::open(path)?
+            .take(limit + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > limit {
+            return Err(invalid());
+        }
+        String::from_utf8(bytes).map_err(|_| invalid())
+    };
+    let started = start_time(pid)?;
+    let raw_status = bounded(format!("/proc/{pid}/status"), 16384)?;
+    let keys = [
+        "Uid",
+        "Gid",
+        "Groups",
+        "CapInh",
+        "CapPrm",
+        "CapEff",
+        "CapBnd",
+        "CapAmb",
+        "NoNewPrivs",
+        "Seccomp",
+    ];
+    let status = raw_status
+        .lines()
+        .filter(|line| {
+            line.split_once(':')
+                .is_some_and(|(name, _)| keys.contains(&name))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut namespaces = BTreeMap::new();
+    let mut provider_namespaces = BTreeMap::new();
+    for name in cognia_desktop_guest::observation::NAMESPACES {
+        let identity = namespace(pid, name)?;
+        if boundary.namespaces.get(name) != Some(&identity) {
+            return Err(invalid());
+        }
+        namespaces.insert(name.into(), identity);
+        provider_namespaces.insert(name.into(), namespace(std::process::id(), name)?);
+    }
+    let mut socket_inodes = BTreeSet::new();
+    for table in ["tcp", "tcp6", "udp", "udp6", "unix"] {
+        let contents = bounded(format!("/proc/{pid}/net/{table}"), 256 * 1024)?;
+        for line in contents.lines().skip(1) {
+            if let Some(inode) = line
+                .split_whitespace()
+                .nth(if table == "unix" { 6 } else { 9 })
+            {
+                socket_inodes.insert(format!("socket:[{inode}]"));
+            }
+        }
+    }
+    let ingress = bounded("/proc/self/net/unix".into(), 256 * 1024)?
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            (fields.len() == 8 && fields[7] == crate::relay::SOCKET)
+                .then(|| format!("socket:[{}]", fields[6]))
+        })
+        .collect::<BTreeSet<_>>();
+    let mut descriptors = BTreeMap::new();
+    for entry in fs::read_dir(format!("/proc/{pid}/fd"))? {
+        let entry = entry?;
+        let fd: u32 = entry
+            .file_name()
+            .to_str()
+            .ok_or_else(invalid)?
+            .parse()
+            .map_err(|_| invalid())?;
+        let target = fs::read_link(entry.path())?
+            .to_str()
+            .ok_or_else(invalid)?
+            .to_owned();
+        let fdinfo = bounded(format!("/proc/{pid}/fdinfo/{fd}"), 4096)?;
+        let flags = fdinfo
+            .lines()
+            .find_map(|line| line.strip_prefix("flags:"))
+            .and_then(|v| u64::from_str_radix(v.trim(), 8).ok())
+            .ok_or_else(invalid)?;
+        let socket_scope = if target.starts_with("socket:[") {
+            if socket_inodes.contains(&target) {
+                Some("workload".into())
+            } else if ingress.contains(&target) && uid == 1000 {
+                Some("gui-ingress".into())
+            } else {
+                return Err(invalid());
+            }
+        } else {
+            None
+        };
+        descriptors.insert(
+            fd,
+            DescriptorObservation {
+                target,
+                flags,
+                socket_scope,
+            },
+        );
+        if descriptors.len() > 128 {
+            return Err(invalid());
+        }
+    }
+    let report = ProcessBoundaryReport {
+        report_version: REPORT_VERSION,
+        phase: if uid == 1001 {
+            cognia_desktop_guest::observation::ObservationPhase::ImporterAdmission
+        } else if pid == boundary.workload_pid {
+            cognia_desktop_guest::observation::ObservationPhase::DesktopLive
+        } else {
+            cognia_desktop_guest::observation::ObservationPhase::AcceptanceAdmission
+        },
+        workload_isolation_revision: ISOLATION_REVISION,
+        boundary_generation: generation.into(),
+        namespace_init_pid: boundary.namespace_init_pid,
+        namespace_init_start_time: boundary.namespace_init_start_time,
+        workload_pid: pid,
+        workload_start_time: started,
+        namespaces,
+        provider_namespaces,
+        status,
+        network_devices: bounded(format!("/proc/{pid}/net/dev"), 4096)?,
+        ipv4_routes: bounded(format!("/proc/{pid}/net/route"), 4096)?,
+        ipv6_routes: bounded(format!("/proc/{pid}/net/ipv6_route"), 8192)?,
+        descriptors,
+    };
+    report.validate(uid).map_err(|_| invalid())?;
+    if start_time(pid)? != started || !still_current(boundary) {
+        return Err(invalid());
+    }
+    Ok(report)
+}
+
+/// Fixed root-only observer; no project path, PID, command or destination input.
+pub(crate) fn print_live_report() -> io::Result<()> {
+    use std::io::{Read, Write};
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    if unsafe { libc::geteuid() } != 0 || unsafe { libc::getuid() } != 0 {
+        return Err(invalid());
+    }
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(25);
+    loop {
+        let attempt = (|| -> io::Result<ProcessBoundaryReport> {
+            let parent = fs::symlink_metadata("/run/cognia-desktop")?;
+            if !parent.is_dir() || parent.uid() != 0 || parent.mode() & 0o022 != 0 {
+                return Err(invalid());
+            }
+            let mut file = fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+                .open("/run/cognia-desktop/state.json")?;
+            let meta = file.metadata()?;
+            if !meta.is_file()
+                || meta.uid() != 0
+                || meta.nlink() != 1
+                || meta.mode() & 0o7777 != 0o600
+                || meta.len() > 16384
+            {
+                return Err(invalid());
+            }
+            let mut bytes = Vec::new();
+            Read::by_ref(&mut file)
+                .take(16385)
+                .read_to_end(&mut bytes)?;
+            let boundary: Boundary = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+            if boundary.isolation_revision != ISOLATION_REVISION || !still_current(&boundary) {
+                return Err(invalid());
+            }
+            report(&boundary, boundary.workload_pid, 1000, &boundary.generation)
+        })();
+        match attempt {
+            Ok(report) => {
+                let bytes = serde_json::to_vec(&report).map_err(|_| invalid())?;
+                if bytes.len() > 32768 {
+                    return Err(invalid());
+                }
+                std::io::stdout().write_all(&bytes)?;
+                return Ok(());
+            }
+            Err(_) if std::time::Instant::now() < until => {
+                std::thread::sleep(std::time::Duration::from_millis(100))
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 #[cfg(test)]

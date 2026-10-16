@@ -128,6 +128,7 @@ pub async fn run(
         }
     }) };
     let budget = HandoffBudget { deadline_at_ms: chrono::Utc::now().timestamp_millis().saturating_add(10 * 60 * 1000), cancel:cancelled };
+    let mut native_receipt = None;
     let outcome: Result<()> = async {
         let upstream = url::Url::parse(&source.repository_url).map_err(|_| refused("managed_desktop_handoff_source_unavailable"))?;
         let credential = if let Some(reference) = source.credential_ref.clone().filter(|value| value.starts_with("git-helper:")) {
@@ -159,8 +160,16 @@ pub async fn run(
         budget.check().map_err(|_| refused("managed_desktop_handoff_deadline"))?;
         let authorization = service.authorize(p, config_id, &quote.id, AuthorizationPurpose::Smoke, Some(format!("handoff:{}",input.operation_id))).await?;
         row.state = "creating".into(); row.cleanup_pending = true; persist_async(&report, &row).await?;
-        let desktop = service.create_smoke(p, CreateManagedDesktop { provider_config_id:config_id.into(), quote_id:quote.id, authorization_id:authorization.id, idempotency_key:input.operation_id.clone() }).await?;
+        let mut desktop = service.create_smoke(p, CreateManagedDesktop { provider_config_id:config_id.into(), quote_id:quote.id, authorization_id:authorization.id, idempotency_key:input.operation_id.clone() }).await?;
         row.desktop_id = Some(desktop.id.clone()); row.desktop_generation = Some(desktop.generation);
+        while desktop.state == ManagedDesktopState::Creating {
+            budget.check().map_err(|_| refused("managed_desktop_handoff_deadline"))?;
+            if chrono::Utc::now().timestamp_millis() >= desktop.deadline_at {
+                return Err(refused("managed_desktop_handoff_deadline"));
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            desktop = service.connect(p, &desktop.id, desktop.generation).await?;
+        }
         row.deadline_at = Some(desktop.deadline_at);
         row.manifest_digest = Some(manifest_digest(&row)?);
         row.state = "transferring".into(); persist_async(&report, &row).await?;
@@ -178,7 +187,20 @@ pub async fn run(
         };
         evidence_write(&directory, p, move |s,owner,host| s.register(owner,host,binding).map(|_| ())).await?;
         let launch = handoff::parse_launch(&input.request.argv).map_err(|_| refused("managed_desktop_handoff_invalid_launch"))?;
-        service.install_handoff_smoke(p, &desktop, &prepared, &input.operation_id, launch.as_ref(), &budget, check.clone()).await?;
+        let installed = service.install_handoff_smoke(p, &desktop, &prepared, &input.operation_id, launch.as_ref(), &budget, check.clone()).await?;
+        // Reopen the same exclusive Host journal before reconnecting. This
+        // proves persisted generation admission rather than a cloned cache.
+        drop(service);
+        let service = host.open(host.provider())?;
+        let reconnected = service.connect(p, &desktop.id, desktop.generation).await?;
+        if reconnected.state != ManagedDesktopState::Running || reconnected.deadline_at != desktop.deadline_at {
+            return Err(refused("managed_desktop_handoff_reconnect_failed"));
+        }
+        let boundary = service.validate_live_boundary(p, &reconnected).await?;
+        handoff::validate_installed_boundary(&installed, &boundary.observation)
+            .map_err(|_| refused("managed_desktop_boundary_mismatch"))?;
+        native_receipt = Some(serde_json::json!({"evidenceVersion":2,"mode":input.request.mode,
+            "hostBoundary":boundary,"installed":installed,"restartReconnectVerified":true}));
         let screenshot = service.capture_handoff_smoke(p, &desktop, &input.operation_id).await?;
         let current = check.clone();
         if !tokio::task::spawn_blocking(move || current()).await.unwrap_or(false) { return Err(refused("managed_desktop_handoff_source_unavailable")); }
@@ -193,7 +215,13 @@ pub async fn run(
     }.await;
     let _ = cancel.send(true);
     if outcome.is_err() { row.state = "failed".into(); }
-    let diagnostic = finish_diagnostic(&report, &mut row, outcome, service.cleanup_handoff_smoke(p, &input.operation_id)).await;
+    let cleanup = async {
+        // A failed reopen must still persist cleanupPending below. Never
+        // short-circuit the durable outcome after a billed create.
+        let service = host.open(host.provider())?;
+        service.cleanup_handoff_smoke(p, &input.operation_id).await
+    };
+    let diagnostic = finish_diagnostic(&report, &mut row, outcome, cleanup).await;
     if row.manifest_digest.is_some() {
         let id = row.id.clone(); let pending = row.cleanup_pending;
         let reason = if diagnostic.is_ok() { "diagnostic_no_agent_verdict" } else { "diagnostic_incomplete" };
@@ -204,7 +232,7 @@ pub async fn run(
     }
     diagnostic?;
     // A human-operated smoke is not an agent verdict or human acceptance approval.
-    Ok(serde_json::json!({"childRunId":row.id,"parentRunId":row.parent_run_id,"deliveryId":row.delivery_id,"commit":row.commit,"manifestDigest":row.manifest_digest,"state":row.state,"cleanupPending":row.cleanup_pending,"executionEnabled":false}))
+    Ok(serde_json::json!({"childRunId":row.id,"parentRunId":row.parent_run_id,"deliveryId":row.delivery_id,"commit":row.commit,"manifestDigest":row.manifest_digest,"state":row.state,"cleanupPending":row.cleanup_pending,"executionEnabled":false,"nativeHandoffEvidence":native_receipt}))
 }
 
 async fn evidence_write(directory: &Path, p: &ManagedDesktopPrincipal,

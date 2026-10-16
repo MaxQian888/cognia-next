@@ -319,6 +319,26 @@ jobs:
           df -h /
           cargo check --locked -p cognia-automation --no-default-features --lib
 
+  desktop-native-operator:
+    name: Native managed desktop operator (no Rust tests)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build native Host operator
+        env:
+          CARGO_INCREMENTAL: 0
+          CARGO_PROFILE_DEV_DEBUG: 0
+        run: |
+          df -h /
+          cargo build --locked -p cognia-companion-rpc --bin managed-desktop-operator
+      - uses: actions/upload-artifact@v7
+        with:
+          name: managed-desktop-operator-macos
+          path: target/debug/managed-desktop-operator
+          if-no-files-found: error
+          retention-days: 7
+
   # ADR-0183: build and smoke each architecture natively, once. PRs load the
   # result locally; publishing runs stage untagged digests and smoke those exact
   # images. Release tags are assembled only after BOTH native smoke jobs pass.

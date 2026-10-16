@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) const HEADER_LIMIT: usize = 128 * 1024;
 pub(crate) const REPORT_LIMIT: usize = 512 * 1024;
-pub(crate) const RECEIPT_LIMIT: usize = 16 * 1024;
+pub(crate) const RECEIPT_LIMIT: usize = 64 * 1024;
 pub(crate) const BUNDLE_LIMIT: u64 = 512 * 1024 * 1024;
 pub(crate) const ACCEPTANCE_LIMIT: u64 = 32 * 1024 * 1024;
 pub(crate) fn invalid() -> io::Error {
@@ -58,7 +58,7 @@ pub(crate) struct Manifest {
 )]
 pub(crate) enum Report {
     Header(Request),
-    Prepared,
+    Prepared(cognia_desktop_guest::observation::ProcessBoundaryReport),
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -73,6 +73,8 @@ pub(crate) struct Receipt {
     pub source_bytes: u64,
     pub workspace: String,
     pub launched: bool,
+    pub importer_boundary: cognia_desktop_guest::observation::ProcessBoundaryReport,
+    pub acceptance_boundary: Option<cognia_desktop_guest::observation::ProcessBoundaryReport>,
 }
 
 pub(crate) fn canonical_uuid(value: &str) -> bool {

@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use cognia_e2b::envd::{DesktopBootstrap, ProcessEvent, ProcessInput, StartSpec};
 use cognia_desktop_guest::source_tree::{self, SourceTreeBuilder, SourceTreeEntry, SourceTreeProof};
+use cognia_desktop_guest::observation::{ObservationPhase, ProcessBoundaryReport};
 use cognia_exec_sandbox::proc_group::{apply_process_group, kill_process_group};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -136,6 +137,8 @@ pub struct InstalledHandoff {
     pub manifest_digest: String,
     pub workspace: String,
     pub launched: bool,
+    pub importer_boundary: ProcessBoundaryReport,
+    pub acceptance_boundary: Option<ProcessBoundaryReport>,
 }
 fn hash(bytes: &[u8]) -> String { hex::encode(Sha256::digest(bytes)) }
 fn object_id(value: &str) -> bool {
@@ -624,12 +627,12 @@ pub async fn install_on_desktop(
                 match stream.next_event().await.map_err(|_| "managed_handoff_guest_unavailable")? {
                     Some(ProcessEvent::Stdout(bytes)) => {
                         output_bytes += bytes.len();
-                        if output_bytes > 16 * 1024 { return Err("managed_handoff_guest_output_limit".into()); }
+                        if output_bytes > 64 * 1024 { return Err("managed_handoff_guest_output_limit".into()); }
                         stdout.extend_from_slice(&bytes);
                     }
                     Some(ProcessEvent::Stderr(bytes)) => {
                         output_bytes += bytes.len();
-                        if output_bytes > 16 * 1024 { return Err("managed_handoff_guest_output_limit".into()); }
+                        if output_bytes > 64 * 1024 { return Err("managed_handoff_guest_output_limit".into()); }
                     }
                     Some(ProcessEvent::Keepalive) => (),
                     Some(ProcessEvent::End(status)) if status.code() == Some(0) => break,
@@ -646,7 +649,7 @@ pub async fn install_on_desktop(
 }
 
 fn validate_receipt(installed: &InstalledHandoff, operation_id: &str, manifest: &TransferManifest, digest: &str, launched: bool) -> Result<()> {
-    if installed.receipt_version != 2
+    if installed.receipt_version != 3
         || uuid::Uuid::parse_str(&installed.boundary_generation).map(|id| !id.is_nil() && id.to_string() == installed.boundary_generation).ok() != Some(true)
         || installed.source_tree_sha256 != manifest.source_tree_sha256
         || installed.source_file_count != manifest.source_file_count
@@ -656,6 +659,43 @@ fn validate_receipt(installed: &InstalledHandoff, operation_id: &str, manifest: 
         || installed.workspace != format!("/workspace/{operation_id}/workspace")
         || installed.launched != launched
     { return Err("managed_handoff_guest_protocol".into()); }
+    installed.importer_boundary.validate(1001).map_err(str::to_owned)?;
+    if installed.importer_boundary.boundary_generation != installed.boundary_generation
+        || installed.acceptance_boundary.is_some() != launched {
+        return Err("managed_handoff_guest_protocol".into());
+    }
+    if let Some(acceptance) = &installed.acceptance_boundary {
+        acceptance.validate(1000).map_err(str::to_owned)?;
+        if acceptance.phase != ObservationPhase::AcceptanceAdmission
+            || acceptance.boundary_generation != installed.boundary_generation {
+            return Err("managed_handoff_guest_protocol".into());
+        }
+    }
+    Ok(())
+}
+
+/// Correlate protected admission observations with the independently observed
+/// live desktop, not just the generation echoed in the handoff response.
+pub fn validate_installed_boundary(installed: &InstalledHandoff, desktop: &ProcessBoundaryReport) -> Result<()> {
+    desktop.validate(1000).map_err(str::to_owned)?;
+    installed.importer_boundary.validate(1001).map_err(str::to_owned)?;
+    if desktop.phase != ObservationPhase::DesktopLive
+        || installed.boundary_generation != desktop.boundary_generation
+        || installed.importer_boundary.provider_namespaces != desktop.provider_namespaces
+        || desktop.namespaces.iter().any(|(name, ns)| installed.importer_boundary.namespaces.get(name) == Some(ns)) {
+        return Err("managed_handoff_boundary_mismatch".into());
+    }
+    if let Some(acceptance) = &installed.acceptance_boundary {
+        acceptance.validate(1000).map_err(str::to_owned)?;
+        if acceptance.phase != ObservationPhase::AcceptanceAdmission
+            || acceptance.boundary_generation != desktop.boundary_generation
+            || acceptance.namespaces != desktop.namespaces
+            || acceptance.provider_namespaces != desktop.provider_namespaces
+            || acceptance.namespace_init_pid != desktop.namespace_init_pid
+            || acceptance.namespace_init_start_time != desktop.namespace_init_start_time {
+            return Err("managed_handoff_boundary_mismatch".into());
+        }
+    }
     Ok(())
 }
 
@@ -825,14 +865,16 @@ mod tests {
         let manifest = TransferManifest { version: 2, commit: "a".repeat(40), bundle_bytes: 1,
             bundle_sha256: "b".repeat(64), source_tree_sha256: "c".repeat(64), source_file_count: 2,
             source_bytes: 16, files: vec![] };
-        let receipt = serde_json::json!({ "receiptVersion": 2, "boundaryGeneration": uuid::Uuid::new_v4().to_string(),
+        let generation = uuid::Uuid::new_v4().to_string();
+        let receipt = serde_json::json!({ "receiptVersion": 3, "boundaryGeneration": generation,
             "operationId": operation, "commit": manifest.commit, "manifestDigest": "d".repeat(64),
             "sourceTreeSha256": manifest.source_tree_sha256, "sourceFileCount": 2, "sourceBytes": 16,
-            "workspace": format!("/workspace/{operation}/workspace"), "launched": false });
+            "workspace": format!("/workspace/{operation}/workspace"), "launched": false,
+            "importerBoundary":boundary_fixture(&generation, 1001, 3), "acceptanceBoundary":null });
         let valid: InstalledHandoff = serde_json::from_value(receipt.clone()).unwrap();
         assert!(validate_receipt(&valid, &operation, &manifest, &"d".repeat(64), false).is_ok());
         for (key, value) in [
-            ("receiptVersion", serde_json::json!(1)), ("boundaryGeneration", serde_json::json!(uuid::Uuid::nil().to_string())),
+            ("receiptVersion", serde_json::json!(2)), ("boundaryGeneration", serde_json::json!(uuid::Uuid::nil().to_string())),
             ("sourceTreeSha256", serde_json::json!("f".repeat(64))), ("sourceFileCount", serde_json::json!(3)),
             ("sourceBytes", serde_json::json!(17)), ("workspace", serde_json::json!("/tmp/workspace")),
             ("launched", serde_json::json!(true)), ("commit", serde_json::json!("e".repeat(40))),
@@ -840,6 +882,42 @@ mod tests {
             let mut changed = receipt.clone(); changed[key] = value;
             let changed: InstalledHandoff = serde_json::from_value(changed).unwrap();
             assert!(validate_receipt(&changed, &operation, &manifest, &"d".repeat(64), false).is_err(), "{key}");
+        }
+        let mut installed: InstalledHandoff = serde_json::from_value(receipt).unwrap();
+        let desktop = boundary_fixture(&generation, 1000, 2);
+        assert!(validate_installed_boundary(&installed, &desktop).is_ok());
+        installed.importer_boundary.namespaces = desktop.namespaces.clone();
+        assert!(validate_installed_boundary(&installed, &desktop).is_err());
+        installed.importer_boundary = boundary_fixture(&generation, 1001, 3);
+        let mut acceptance = desktop.clone();
+        acceptance.phase = ObservationPhase::AcceptanceAdmission;
+        for fd in [3,4] {
+            acceptance.descriptors.insert(fd, cognia_desktop_guest::observation::DescriptorObservation {
+                target:format!("pipe:[{fd}]"),flags:0o2000000,socket_scope:None,
+            });
+        }
+        installed.acceptance_boundary = Some(acceptance.clone());
+        installed.launched = true;
+        assert!(validate_receipt(&installed, &operation, &manifest, &"d".repeat(64), true).is_ok());
+        assert!(validate_installed_boundary(&installed, &desktop).is_ok());
+        installed.acceptance_boundary.as_mut().unwrap().namespaces.insert("net".into(), "net:[44]".into());
+        assert!(validate_installed_boundary(&installed, &desktop).is_err());
+        installed.acceptance_boundary = Some(acceptance);
+        installed.acceptance_boundary.as_mut().unwrap().status = desktop.status.replace("NoNewPrivs:1", "NoNewPrivs:0");
+        assert!(validate_receipt(&installed, &operation, &manifest, &"d".repeat(64), true).is_err());
+    }
+
+    fn boundary_fixture(generation: &str, uid: u32, inode: u64) -> ProcessBoundaryReport {
+        use cognia_desktop_guest::observation::{DescriptorObservation, NAMESPACES};
+        ProcessBoundaryReport {
+            report_version:1, workload_isolation_revision:1, boundary_generation:generation.into(),
+            phase:if uid == 1001 {ObservationPhase::ImporterAdmission} else {ObservationPhase::DesktopLive},
+            namespace_init_pid:20, namespace_init_start_time:1, workload_pid:21, workload_start_time:2,
+            namespaces:NAMESPACES.into_iter().map(|name|(name.into(),format!("{name}:[{inode}]"))).collect(),
+            provider_namespaces:NAMESPACES.into_iter().map(|name|(name.into(),format!("{name}:[1]"))).collect(),
+            status:format!("Uid:{uid} {uid} {uid} {uid}\nGid:{uid} {uid} {uid} {uid}\nGroups:\nCapInh:0\nCapPrm:0\nCapEff:0\nCapBnd:0\nCapAmb:0\nNoNewPrivs:1\nSeccomp:2\n"),
+            network_devices:"header\nheader\n lo: 0\n".into(), ipv4_routes:"header\n".into(), ipv6_routes:String::new(),
+            descriptors:(0..=2).map(|fd|(fd,DescriptorObservation{target:if uid == 1001 && fd == 0 {"pipe:[5]".into()} else {"/dev/null".into()},flags:0,socket_scope:None})).collect(),
         }
     }
 
