@@ -499,6 +499,11 @@ pub async fn run(
         stage = "compound_admission_revocation";
         let (lease, frame) =
             renewed_frame(&service, &paired, &desktop, &lease, &authority, &permit).await?;
+        let compound_started = tokio::time::Instant::now();
+        let compound_started_at = chrono::Utc::now().timestamp_millis();
+        let frame_budget_ms = frame.expires_at.saturating_sub(compound_started_at);
+        let lease_budget_ms = lease.expires_at.saturating_sub(compound_started_at);
+        let desktop_budget_ms = desktop.deadline_at.saturating_sub(compound_started_at);
         let result = execute_input_inner(
             &service,
             &paired,
@@ -510,6 +515,11 @@ pub async fn run(
         .await;
         evidence.compound_admitted_commands = compound.load(Ordering::SeqCst);
         evidence.compound_denied_commands = compound_denied.load(Ordering::SeqCst);
+        let compound_result_code = result.as_ref().err()
+            .map(|error| diagnostic_error_code(&error.code)).unwrap_or("success");
+        eprintln!("Native authority compound result: code={compound_result_code} elapsed_ms={} frame_budget_ms={frame_budget_ms} lease_budget_ms={lease_budget_ms} desktop_budget_ms={desktop_budget_ms} admitted_commands={} denied_commands={}",
+            compound_started.elapsed().as_millis(), evidence.compound_admitted_commands,
+            evidence.compound_denied_commands);
         evidence.compound_revocation_second_send_blocked = result
             .is_err_and(|error| error.code == "managed_desktop_control_quarantined")
             && evidence.compound_admitted_commands == 1
@@ -577,6 +587,38 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_scroll_and_typing_share_the_real_consent_policy() {
+        for (action, point) in [
+            (
+                UiAction::TypeText {
+                    text: "fixture".into(),
+                },
+                None,
+            ),
+            (
+                UiAction::Scroll {
+                    opts: Default::default(),
+                },
+                Some(Point { x: 20, y: 20 }),
+            ),
+        ] {
+            let runtime = runtime(Arc::new(|_, _| {}));
+            let command = input_command(&action).unwrap();
+            let guard = InputPolicyGuard::new(&runtime, command, point, &action);
+            assert!(guard.required_consent);
+            guard.check().unwrap();
+            runtime
+                .enforcement
+                .gate
+                .update(|settings| settings.enabled = false);
+            assert_eq!(
+                guard.check().unwrap_err().code,
+                "managed_desktop_control_policy_denied"
+            );
+        }
+    }
+
     #[test]
     fn diagnostic_codes_exclude_secrets_and_unbounded_messages() {
         assert_eq!(
