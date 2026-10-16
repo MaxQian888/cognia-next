@@ -12,6 +12,29 @@ pub use cognia_exec_sandbox::*;
 
 use cognia_exec_sandbox::types::SandboxHealth;
 
+#[cfg(any(feature = "tauri-host", test))]
+async fn with_workspace_env<F>(
+    mut command: types::SandboxCommand,
+    resolve: impl FnOnce(cognia_core::workspace_env::WorkspaceEnvQuery) -> F,
+) -> Result<types::SandboxCommand, String>
+where
+    F: std::future::Future<
+        Output = Result<Option<std::collections::BTreeMap<String, String>>, String>,
+    >,
+{
+    let environment = resolve(cognia_core::workspace_env::WorkspaceEnvQuery {
+        cwd: command.cwd.clone(),
+        workspace_id: None,
+        namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+    })
+    .await
+    .map_err(|error| format!("sandbox workspace environment: {error}"))?;
+    if let Some(environment) = environment {
+        command.env.extend(environment);
+    }
+    Ok(command)
+}
+
 /// Tauri-exposed read-only diagnostic. The Settings → Sandbox tab
 /// (Phase 7) polls this to drive the status badge ("Active" / "Setup
 /// required" / "Unavailable") and the "Retry setup" button visibility.
@@ -226,6 +249,11 @@ pub async fn sandbox_exec(
         }
     };
 
+    let command = with_workspace_env(
+        command,
+        cognia_core::workspace_env::resolve_workspace_env_async,
+    )
+    .await?;
     let outcome = run_confined(command, policy).await;
     let entry = match &outcome {
         Ok(result) => AuditEntry {
@@ -286,6 +314,59 @@ pub async fn sandbox_exec(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn sandbox_workspace_env_is_trusted_and_failure_refuses_the_command() {
+        use std::collections::BTreeMap;
+        let command = types::SandboxCommand {
+            argv: vec!["env".into()],
+            cwd: std::env::temp_dir(),
+            env: BTreeMap::from([("PORT".into(), "3000".into())]),
+            stdin: None,
+            timeout: std::time::Duration::from_secs(1),
+        };
+        let trusted = BTreeMap::from([
+            ("PORT".into(), "41000".into()),
+            ("COGNIA_PORT".into(), "41000".into()),
+            ("COGNIA_PORT_COUNT".into(), "10".into()),
+        ]);
+        let prepared = with_workspace_env(command.clone(), |query| {
+            assert_eq!(query.cwd, command.cwd);
+            assert_eq!(
+                query.namespace,
+                cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE
+            );
+            let trusted = trusted.clone();
+            async move {
+                tokio::task::yield_now().await;
+                Ok(Some(trusted))
+            }
+        })
+        .await
+        .unwrap();
+        // Inspect the final environment passed to the sandbox backend.
+        assert_eq!(prepared.env, trusted);
+        assert_eq!(
+            with_workspace_env(command.clone(), |_| async { Ok(None) })
+                .await
+                .unwrap()
+                .env,
+            command.env
+        );
+        let mut no_env = command.clone();
+        no_env.env.clear();
+        assert!(with_workspace_env(no_env, |_| async { Ok(None) })
+            .await
+            .unwrap()
+            .env
+            .is_empty());
+        assert!(
+            with_workspace_env(command, |_| async { Err("port range exhausted".into()) })
+                .await
+                .unwrap_err()
+                .contains("port range exhausted")
+        );
+    }
 
     #[tokio::test]
     async fn sandbox_health_probe_reports_a_known_backend_id() {

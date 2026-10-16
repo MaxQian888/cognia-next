@@ -1,4 +1,8 @@
-import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../../platform/process/exec.ts"
+import {
+  sandboxedProcessTarget,
+  sandboxedProcessEnv,
+  resolveProcessPortEnv,
+} from "../../../platform/process/exec.ts"
 import type { ProcessSandboxScope } from "../../../platform/process/exec.ts"
 // terminal-repl-tool — agent-facing interactive REPL MCP tool.
 //
@@ -345,7 +349,12 @@ async function execSpawn(args: ToolArgs<typeof spawnShape>, extra: unknown = {})
       cols: args.cols,
       rows: args.rows,
       cwd: args.cwd,
-      env: sandboxedProcessEnv(process.env, ctx.builtinProcessSandbox, args.env),
+      env: sandboxedProcessEnv(
+        process.env,
+        ctx.builtinProcessSandbox,
+        args.env,
+        await resolveProcessPortEnv(args.cwd)
+      ),
     })
   } catch (err) {
     return toolError(

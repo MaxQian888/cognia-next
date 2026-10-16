@@ -19,7 +19,11 @@ import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 
-import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../platform/process/exec.ts"
+import {
+  sandboxedProcessTarget,
+  sandboxedProcessEnv,
+  resolveProcessPortEnv,
+} from "../../platform/process/exec.ts"
 import type { ProcessSandboxScope } from "../../platform/process/exec.ts"
 import { buildServers, serversForFile } from "./servers.ts"
 import type { LspInstallSpec, ServerInfo } from "./servers.ts"
@@ -160,6 +164,7 @@ export function createLspResolver(args: LspResolverOptions): LspResolver {
     const serverId = serverIdFor(server, root)
     if (servers.has(serverId)) return serverId
     if (failedServers.has(serverId)) return null
+    const portEnv = await resolveProcessPortEnv(root)
     const spawn = server.resolveCommand(root, { cwd })
     const resolved = await ensureCommand(spawn.command, { serverId, root, install: server.install })
     if (!resolved) {
@@ -180,9 +185,12 @@ export function createLspResolver(args: LspResolverOptions): LspResolver {
         serverId,
         command: target.command,
         args: target.args,
-        env: args.builtinProcessSandbox
-          ? sandboxedProcessEnv(process.env, args.builtinProcessSandbox, spawn.env)
-          : spawn.env,
+        env: sandboxedProcessEnv(
+          args.builtinProcessSandbox ? process.env : {},
+          args.builtinProcessSandbox,
+          spawn.env,
+          portEnv
+        ),
         ...(args.builtinProcessSandbox ? { inheritEnv: false } : {}),
         cwd: root,
         transport: "stdio",

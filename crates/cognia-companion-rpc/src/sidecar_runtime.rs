@@ -151,6 +151,13 @@ pub async fn inject_runtime_env(cmd: &mut Command) {
 }
 
 pub async fn dispatch_runtime_rpc(method: &str, params: &Value) -> Result<Value, String> {
+    if method == "workspace.portEnv" {
+        return workspace_port_env(
+            params,
+            cognia_core::workspace_env::resolve_workspace_env_async,
+        )
+        .await;
+    }
     // Private child IPC only: no companion RPC or renderer command dispatches
     // these methods. The trusted tool-host manager supplies its own listener.
     if method.starts_with("sandbox.toolHost.") {
@@ -165,6 +172,34 @@ pub async fn dispatch_runtime_rpc(method: &str, params: &Value) -> Result<Value,
     } else {
         cognia_jobs::host::dispatch_host_rpc(method, params).await
     }
+}
+
+async fn workspace_port_env<F>(
+    params: &Value,
+    resolve: impl FnOnce(cognia_core::workspace_env::WorkspaceEnvQuery) -> F,
+) -> Result<Value, String>
+where
+    F: std::future::Future<
+        Output = Result<Option<cognia_core::workspace_env::WorkspaceEnv>, String>,
+    >,
+{
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        cwd: PathBuf,
+    }
+    let request: Request = serde_json::from_value(params.clone())
+        .map_err(|error| format!("Invalid workspace.portEnv request: {error}"))?;
+    if !request.cwd.is_absolute() {
+        return Err("workspace.portEnv cwd must be absolute".into());
+    }
+    let env = resolve(cognia_core::workspace_env::WorkspaceEnvQuery {
+        cwd: request.cwd,
+        workspace_id: None,
+        namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+    })
+    .await?;
+    serde_json::to_value(env).map_err(|error| error.to_string())
 }
 
 async fn dispatch_tool_host_bridge(method: &str, params: &Value) -> Result<Value, String> {
@@ -258,6 +293,104 @@ mod tests {
 
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn workspace_port_env_uses_host_namespace_and_preserves_provider_results() {
+        let cwd = std::env::temp_dir();
+        let params = json!({ "cwd": cwd });
+        let env = cognia_core::workspace_env::WorkspaceEnv::from([
+            ("COGNIA_PORT".into(), "41000".into()),
+            ("COGNIA_PORT_COUNT".into(), "10".into()),
+            ("PORT".into(), "41000".into()),
+        ]);
+        let provider_env = env.clone();
+        let actual = workspace_port_env(&params, |query| async move {
+            assert_eq!(query.cwd, cwd);
+            assert_eq!(query.workspace_id, None);
+            assert_eq!(query.namespace, "host-loopback");
+            Ok(Some(provider_env))
+        })
+        .await
+        .unwrap();
+        assert_eq!(actual, json!(env));
+        assert_eq!(
+            workspace_port_env(&params, |_| async { Ok(None) })
+                .await
+                .unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            workspace_port_env(&params, |_| async {
+                Err("portRangeStart/portRangeEnd exhausted".into())
+            })
+            .await,
+            Err("portRangeStart/portRangeEnd exhausted".into())
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn workspace_port_env_keeps_serving_while_provider_blocks() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc, Mutex,
+        };
+
+        let root = tempfile::tempdir().unwrap();
+        let cwd = root.path().to_path_buf();
+        let provider_cwd = cwd.clone();
+        let started = Arc::new(AtomicBool::new(false));
+        let provider_started = started.clone();
+        let (progress_tx, progress_rx) = mpsc::channel();
+        let progress_rx = Mutex::new(progress_rx);
+        cognia_core::workspace_env::set_workspace_env_provider(Arc::new(move |query| {
+            // This is the only provider installation in this test binary. Its
+            // unique path keeps unrelated RPC tests outside the blocking case.
+            if query.cwd != provider_cwd {
+                return Ok(None);
+            }
+            provider_started.store(true, Ordering::Release);
+            progress_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .map_err(|_| "RPC runtime worker was blocked".to_string())?;
+            Ok(Some(cognia_core::workspace_env::WorkspaceEnv::from([(
+                "PORT".into(),
+                "41000".into(),
+            )])))
+        }))
+        .unwrap();
+
+        let progress = tokio::spawn(async move {
+            while !started.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+            let error = dispatch_runtime_rpc("workspace.portEnv", &json!({"cwd": "relative"}))
+                .await
+                .unwrap_err();
+            assert!(error.contains("cwd must be absolute"));
+            progress_tx.send(()).unwrap();
+        });
+        let result = dispatch_runtime_rpc("workspace.portEnv", &json!({ "cwd": cwd }))
+            .await
+            .unwrap();
+        assert_eq!(result, json!({"PORT": "41000"}));
+        progress.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn workspace_port_env_routes_before_jobs_and_rejects_untrusted_identity() {
+        for params in [
+            json!({}),
+            json!({ "cwd": "relative" }),
+            json!({ "cwd": std::env::temp_dir(), "namespace": "runtime:forged" }),
+        ] {
+            let error = dispatch_runtime_rpc("workspace.portEnv", &params)
+                .await
+                .unwrap_err();
+            assert!(error.contains("workspace.portEnv"), "{error}");
+        }
+    }
 
     #[tokio::test]
     async fn inject_provider_env_prefers_oauth_and_strips_api_key() {

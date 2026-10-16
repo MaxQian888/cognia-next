@@ -362,6 +362,11 @@ jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: (...args: unknown[]) => resolveSendOptionsMock(...(args as [])),
 }))
 
+const ensureExecutionPortLeaseMock = jest.fn()
+jest.mock("@/lib/task-workspace/execution-port-lease", () => ({
+  ensureExecutionPortLease: (input: unknown) => ensureExecutionPortLeaseMock(input),
+}))
+
 const openWorkspaceBundleTurnLeaseMock = jest.fn()
 jest.mock("@/lib/task-workspace/run-lease", () => ({
   openWorkspaceBundleTurnLease: (...args: unknown[]) => openWorkspaceBundleTurnLeaseMock(...args),
@@ -1097,6 +1102,7 @@ beforeEach(() => {
   clearBranchSeedMock.mockReset().mockResolvedValue(undefined)
   freezeImportedSessionMock.mockReset().mockResolvedValue(undefined)
   resolveSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet", systemPrompt: "sys" })
+  ensureExecutionPortLeaseMock.mockReset().mockResolvedValue(null)
   openWorkspaceBundleTurnLeaseMock.mockReset().mockResolvedValue(null)
   ensureSessionExecutionBundleMock
     .mockReset()
@@ -1629,6 +1635,225 @@ describe("useClaudeChat — actions", () => {
     expect(chatState.sessions["sess-1"]?.messages).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: "u1" })])
     )
+  })
+
+  describe("final execution port lease admission", () => {
+    const localContext = {
+      location: "local",
+      projectId: "project-1",
+      projectRoot: "/repo",
+      taskWorkspace: { taskId: "task-workspace:sess-1" },
+      lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
+    }
+
+    it.each([true, false])(
+      "admits the final local cwd once before launch (prebuilt=%s)",
+      async (prebuilt) => {
+        getSessionMock.mockResolvedValue({
+          id: "sess-1",
+          projectId: "project-1",
+          executionContext: localContext,
+        })
+        const options = { model: "sonnet", cwd: "/stale-options-cwd" }
+        resolveSendOptionsMock.mockResolvedValue(options)
+        let release!: () => void
+        ensureExecutionPortLeaseMock.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              release = resolve
+            })
+        )
+        const { result } = renderHook(() => useClaudeChat())
+        await flush()
+        let sending!: Promise<unknown>
+        await act(async () => {
+          sending = result.current.send("hello", prebuilt ? options : undefined)
+          await flush()
+        })
+        expect(ensureExecutionPortLeaseMock).toHaveBeenCalledTimes(1)
+        expect(ensureExecutionPortLeaseMock).toHaveBeenCalledWith({
+          cwd: "/repo",
+          sessionId: "sess-1",
+          projectId: "project-1",
+          executionContext: localContext,
+        })
+        expect(resolveSendOptionsMock).toHaveBeenCalledTimes(prebuilt ? 0 : 1)
+        expect(sendPromptMock).not.toHaveBeenCalled()
+        expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+        await act(async () => {
+          release()
+          await sending
+        })
+        expect(sendPromptMock).toHaveBeenCalledWith(
+          "sess-1",
+          expect.anything(),
+          expect.objectContaining({ cwd: "/repo" }),
+          { transcriptRuntime: "prepared" }
+        )
+        expect(ensureExecutionPortLeaseMock).toHaveBeenCalledTimes(1)
+      }
+    )
+
+    it("admits the task lease's final alias, after the managed bundle's initial alias", async () => {
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        projectId: "project-1",
+        executionContext: { ...localContext, location: "managedWorktree" },
+      })
+      openWorkspaceBundleTurnLeaseMock.mockResolvedValue({
+        bundleTurnId: "turn-1",
+        run: { runId: "run-1", executionRoot: "/physical/workspace-1" },
+        primaryAlias: "/final/alias",
+        additionalAliases: [],
+      })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("hello", { model: "sonnet", cwd: "/stale" })
+      })
+      expect(ensureExecutionPortLeaseMock).toHaveBeenCalledTimes(1)
+      expect(ensureExecutionPortLeaseMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: "/final/alias",
+          sessionId: "sess-1",
+          projectId: "project-1",
+          executionContext: expect.objectContaining({
+            execution: expect.objectContaining({ bundleId: "bundle-1" }),
+          }),
+        })
+      )
+      expect(openWorkspaceBundleTurnLeaseMock.mock.invocationCallOrder[0]).toBeLessThan(
+        ensureExecutionPortLeaseMock.mock.invocationCallOrder[0]
+      )
+      expect(ensureExecutionPortLeaseMock.mock.invocationCallOrder[0]).toBeLessThan(
+        sendPromptMock.mock.invocationCallOrder[0]
+      )
+    })
+
+    it.each(["builtin", "external"])(
+      "refuses %s launch visibly and settles acquired resources on port allocation failure",
+      async (runtime) => {
+        const workspace = await import("@/lib/task-workspace/client")
+        const adoption = await import("@/lib/code-adoption/client")
+        const { startCodeAdoptionTracker } = await import("@/lib/code-adoption/turn-tracker")
+        const { finishDirectChatExecutionRun } = await import("@/lib/execution/direct-chat-run")
+        const settle = jest.mocked(workspace.settleTaskWorkspaceTurn).mockResolvedValue(null)
+        const end = jest.mocked(adoption.endCodeAdoptionTurn).mockResolvedValue(null)
+        const consume = jest
+          .mocked(adoption.consumeCodeAdoptionTrackingAttempt)
+          .mockReturnValue(undefined)
+        getSessionMock.mockResolvedValue({
+          id: "sess-1",
+          projectId: "project-1",
+          executionContext: { ...localContext, location: "managedWorktree" },
+        })
+        openWorkspaceBundleTurnLeaseMock.mockResolvedValue({
+          bundleTurnId: "turn-1",
+          run: { runId: "run-1", executionRoot: "/physical/workspace-1" },
+          primaryAlias: "/managed/sess-1",
+          additionalAliases: [],
+        })
+        if (runtime === "external") {
+          useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+        } else {
+          acceptChatTurnMock.mockResolvedValue({ submissionId: "submission-1" })
+          claimChatTurnForDispatchMock.mockResolvedValue("claimed")
+        }
+        const reason = "portRangeStart/portRangeEnd/portBlockSize exhausted"
+        ensureExecutionPortLeaseMock.mockRejectedValueOnce(new Error(reason))
+        const oldSetStatus = chatState.setSessionStatus.getMockImplementation()!
+        chatState.setSessionStatus.mockImplementation((id: string, status: string) => {
+          const before = { sessions: { [id]: { ...chatState.sessions[id] } } }
+          oldSetStatus(id, status)
+          for (const sub of [...subscribers]) {
+            ;(sub as (state: unknown, previous: unknown) => void)(chatState, before)
+          }
+        })
+        const stop = startCodeAdoptionTracker()
+        try {
+          const { result } = renderHook(() => useClaudeChat())
+          await flush()
+          await act(async () => {
+            await result.current.send("hello", { model: "sonnet", cwd: "/stale" })
+          })
+          await flush()
+          expect(openWorkspaceBundleTurnLeaseMock).toHaveBeenCalledTimes(1)
+          expect(ensureExecutionPortLeaseMock).toHaveBeenCalledTimes(1)
+          expect(sendPromptMock).not.toHaveBeenCalled()
+          expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+          expect(executeProjectEnvironmentMock).not.toHaveBeenCalled()
+          expect(chatState.errorMessage).toBe(reason)
+          expect(chatState.status).toBe("error")
+          expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+            "sess-1",
+            expect.objectContaining({ message: reason })
+          )
+          expect(finishDirectChatExecutionRun).toHaveBeenCalledWith("sess-1", "failed")
+          expect(settle).toHaveBeenCalledTimes(1)
+          expect(settle).toHaveBeenCalledWith("sess-1", undefined, "ready")
+          expect(settleChatTurnForSessionMock).toHaveBeenCalledWith("sess-1", {
+            outcome: "failed",
+            errorCode: "workspace_port_lease_unavailable",
+          })
+          expect(releaseSkillLoadContextMock).toHaveBeenCalledWith("sess-1")
+          if (runtime === "builtin") {
+            expect(startLeaseHeartbeatMock).toHaveBeenCalledTimes(1)
+            expect(stopLeaseHeartbeatMock).toHaveBeenCalledTimes(1)
+          }
+        } finally {
+          stop()
+          chatState.setSessionStatus.mockImplementation(oldSetStatus)
+          const realWorkspace = jest.requireActual("@/lib/task-workspace/client")
+          const realAdoption = jest.requireActual("@/lib/code-adoption/client")
+          settle.mockReset().mockImplementation(realWorkspace.settleTaskWorkspaceTurn)
+          end.mockReset().mockImplementation(realAdoption.endCodeAdoptionTurn)
+          consume.mockReset().mockImplementation(realAdoption.consumeCodeAdoptionTrackingAttempt)
+        }
+      }
+    )
+
+    it.each(["standalone", "zero-tool", "host-owned"])(
+      "skips admission for %s turns",
+      async (mode) => {
+        if (mode === "standalone") standaloneFlag.value = true
+        if (mode === "host-owned") {
+          useAgentRuntimeStore.setState({
+            runtimeRef: {
+              kind: "host",
+              configId: "agent-1",
+              revision: "rev-1",
+              lifecycleGeneration: 1,
+              name: "Agent",
+            },
+          })
+        }
+        const { result } = renderHook(() => useClaudeChat())
+        await flush()
+        await act(async () => {
+          await result.current.send("hello", {
+            model: "sonnet",
+            ...(mode === "zero-tool" ? { toolSurface: "none" as const } : {}),
+          })
+        })
+        expect(ensureExecutionPortLeaseMock).not.toHaveBeenCalled()
+      }
+    )
+
+    it("keeps web execution a no-op at the port service boundary", async () => {
+      isTauriMock.mockReturnValue(false)
+      const actual = jest.requireActual<typeof import("@/lib/task-workspace/execution-port-lease")>(
+        "@/lib/task-workspace/execution-port-lease"
+      )
+      ensureExecutionPortLeaseMock.mockImplementationOnce(actual.ensureExecutionPortLease)
+      getSessionMock.mockResolvedValue({ id: "sess-1", executionContext: localContext })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("hello", { model: "sonnet", cwd: "/stale" })
+      })
+      expect(sendPromptMock).toHaveBeenCalled()
+      expect(chatState.errorMessage).toBeNull()
+    })
   })
 
   it("reuses the persisted managed-worktree binding and redirects the turn", async () => {

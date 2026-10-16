@@ -26,6 +26,7 @@ struct SpawnPayload {
     profile_id: String,
     request: Option<SpawnRequest>,
     ssh_request: Option<SshSpawnRequest>,
+    workspace_env: Option<crate::session::WorkspaceEnvResolution>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,7 +83,13 @@ impl From<PathInjectionPayload> for PathInjection {
 /// The bridge reuses an already-running host, which may be an older binary
 /// installed as a login service — clients check this list before sending a
 /// command that an older host would reject as an unknown frame kind.
-const PROTOCOL_FEATURES: &[&str] = &["pathInjection", "flowControl", "history", "sshForwarding"];
+const PROTOCOL_FEATURES: &[&str] = &[
+    "pathInjection",
+    "flowControl",
+    "history",
+    "sshForwarding",
+    "workspaceEnvBridge",
+];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -307,6 +314,7 @@ pub async fn serve_host_stream<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let workspace_env_bridge = identity.workspace_env_bridge && !identity.local;
     let mut client = host.connect(identity).map_err(|error| error.to_string())?;
     loop {
         tokio::select! {
@@ -314,13 +322,11 @@ where
                 let Some(frame) = incoming? else {
                     return Ok(());
                 };
-                let response = dispatch_command(
-                    &host,
-                    &client.connection_id,
-                    frame,
-                    &script_dir,
-                    &known_hosts_path,
-                ).await;
+                let response = if workspace_env_bridge && frame.kind == FrameKind::Spawn {
+                    dispatch_workspace_spawn(&mut stream, &host, &client.connection_id, frame, &script_dir, &known_hosts_path).await
+                } else {
+                    dispatch_command(&host, &client.connection_id, frame, &script_dir, &known_hosts_path).await
+                };
                 match response {
                     Ok(frames) => {
                         for frame in frames {
@@ -340,6 +346,96 @@ where
             }
         }
     }
+}
+
+/// Resolve a pinned profile through the owning native app immediately before
+/// spawn. The socket identity negotiated this exchange before any renderer
+/// frames arrive; only the native proxy ever sees these two internal kinds.
+async fn dispatch_workspace_spawn<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: &mut S,
+    host: &TerminalHost,
+    connection_id: &str,
+    frame: TerminalFrame,
+    script_dir: &Path,
+    known_hosts_path: &Path,
+) -> Result<Vec<TerminalFrame>, (u64, Uuid, HostError)> {
+    let sequence = frame.sequence;
+    let session_id = frame.session_id;
+    let failure = |error| (sequence, session_id, error);
+    let payload = parse_json::<SpawnPayload>(&frame.payload).map_err(failure)?;
+    if payload.request.is_some() || payload.ssh_request.is_some() || payload.workspace_env.is_some()
+    {
+        return dispatch_command(host, connection_id, frame, script_dir, known_hosts_path).await;
+    }
+    let Some(mut request) = host
+        .workspace_spawn_request(connection_id, &payload.profile_id)
+        .map_err(failure)?
+    else {
+        return dispatch_command(host, connection_id, frame, script_dir, known_hosts_path).await;
+    };
+    let correlation = Uuid::new_v4();
+    let query = json_frame(
+        FrameKind::WorkspaceEnvQuery,
+        correlation,
+        sequence,
+        &request,
+    )
+    .map_err(|error| failure(HostError::InvalidRequest(error)))?;
+    write_frame(stream, &query)
+        .await
+        .map_err(|error| failure(HostError::Process(error)))?;
+    let reply = tokio::time::timeout(crate::host_client::REQUEST_TIMEOUT, read_frame(stream))
+        .await
+        .map_err(|_| {
+            failure(HostError::Process(
+                "workspace environment bridge timed out".into(),
+            ))
+        })?
+        .map_err(|error| failure(HostError::Process(error)))?
+        .ok_or_else(|| {
+            failure(HostError::Process(
+                "workspace environment bridge disconnected".into(),
+            ))
+        })?;
+    if reply.kind != FrameKind::WorkspaceEnvResult
+        || reply.sequence != sequence
+        || reply.session_id != correlation
+    {
+        return Err(failure(HostError::PermissionDenied));
+    }
+    let resolved =
+        parse_json::<Result<crate::session::WorkspaceEnvResolution, String>>(&reply.payload)
+            .map_err(failure)?
+            .map_err(|reason| failure(HostError::Process(reason)))?;
+    resolved
+        .apply(&mut request)
+        .map_err(|reason| failure(HostError::Process(reason)))?;
+    let spawn_host = host.clone();
+    let spawn_connection = connection_id.to_owned();
+    let spawn_scripts = script_dir.to_owned();
+    let session = tokio::task::spawn_blocking(move || {
+        spawn_host.spawn_resolved_remote_profile(
+            &spawn_connection,
+            payload.profile_id,
+            request,
+            &spawn_scripts,
+        )
+    })
+    .await
+    .map_err(|error| {
+        failure(HostError::Process(format!(
+            "terminal spawn task failed: {error}"
+        )))
+    })?
+    .map_err(failure)?;
+    let response = json_frame(
+        FrameKind::SessionSnapshot,
+        Uuid::parse_str(&session.id).unwrap_or(Uuid::nil()),
+        sequence,
+        &session,
+    )
+    .map_err(|reason| failure(HostError::InvalidRequest(reason)))?;
+    Ok(vec![response])
 }
 
 async fn dispatch_command(
@@ -426,7 +522,24 @@ async fn dispatch_command(
         FrameKind::Spawn => match parse_json::<SpawnPayload>(&frame.payload) {
             Ok(payload) => match (payload.request, payload.ssh_request) {
                 (Some(request), None) => {
-                    host.spawn_local(connection_id, payload.profile_id, request, script_dir)
+                    let host = host.clone();
+                    let connection_id = connection_id.to_owned();
+                    let script_dir = script_dir.to_owned();
+                    tokio::task::spawn_blocking(move || {
+                        host.spawn_local_with_workspace_env(
+                            &connection_id,
+                            payload.profile_id,
+                            request,
+                            &script_dir,
+                            payload.workspace_env,
+                        )
+                    })
+                    .await
+                    .unwrap_or_else(|error| {
+                        Err(HostError::Process(format!(
+                            "terminal spawn task failed: {error}"
+                        )))
+                    })
                 }
                 (None, Some(request)) => {
                     match host.sync_ssh_profile(connection_id, payload.profile_id.clone(), request)
@@ -443,6 +556,7 @@ async fn dispatch_command(
                         Err(error) => Err(error),
                     }
                 }
+                (None, None) if payload.workspace_env.is_some() => Err(HostError::PermissionDenied),
                 (None, None) => {
                     host.spawn_synchronized_profile(
                         connection_id,
@@ -1124,7 +1238,13 @@ mod tests {
         assert_eq!(ack["ok"], true);
         assert_eq!(
             ack["protocolFeatures"],
-            serde_json::json!(["pathInjection", "flowControl", "history", "sshForwarding"])
+            serde_json::json!([
+                "pathInjection",
+                "flowControl",
+                "history",
+                "sshForwarding",
+                "workspaceEnvBridge"
+            ])
         );
 
         let applied = observed.path_injection();

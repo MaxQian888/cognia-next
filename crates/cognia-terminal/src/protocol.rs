@@ -82,6 +82,11 @@ pub enum FrameKind {
     SftpControl = 26,
     /// Host to client response to [`FrameKind::SftpControl`]. Never pushed.
     SftpSnapshot = 27,
+    /// Native-only, negotiated in the authenticated socket handshake. Never
+    /// forwarded to renderers: asks the owning app to resolve a pinned profile.
+    WorkspaceEnvQuery = 28,
+    /// Correlated native answer carrying only the trusted port layer or error.
+    WorkspaceEnvResult = 29,
 }
 
 impl TryFrom<u8> for FrameKind {
@@ -116,6 +121,8 @@ impl TryFrom<u8> for FrameKind {
             25 => Self::SshForwardSnapshot,
             26 => Self::SftpControl,
             27 => Self::SftpSnapshot,
+            28 => Self::WorkspaceEnvQuery,
+            29 => Self::WorkspaceEnvResult,
             other => return Err(ProtocolError::UnknownFrameKind(other)),
         })
     }
@@ -312,7 +319,7 @@ mod tests {
         assert_eq!(TerminalFrame::decode(&bytes).unwrap(), frame);
     }
 
-    /// Every discriminant in 1..=27 must survive the `u8` round trip, and the
+    /// Every discriminant in 1..=29 must survive the `u8` round trip, and the
     /// first unassigned value must be rejected rather than silently accepted —
     /// `decode` relies on this to reject a frame from a newer peer.
     #[test]
@@ -323,8 +330,8 @@ mod tests {
             assert_eq!(kind as u8, value);
         }
         assert_eq!(
-            FrameKind::try_from(28),
-            Err(ProtocolError::UnknownFrameKind(28))
+            FrameKind::try_from(30),
+            Err(ProtocolError::UnknownFrameKind(30))
         );
         assert_eq!(
             FrameKind::try_from(0),
@@ -340,6 +347,8 @@ mod tests {
         assert_eq!(FrameKind::Hello as u8, 1);
         assert_eq!(FrameKind::List as u8, 2);
         assert_eq!(FrameKind::Spawn as u8, 3);
+        assert_eq!(FrameKind::WorkspaceEnvQuery as u8, 28);
+        assert_eq!(FrameKind::WorkspaceEnvResult as u8, 29);
         assert_eq!(FrameKind::Attach as u8, 4);
         assert_eq!(FrameKind::Detach as u8, 5);
         assert_eq!(FrameKind::TakeControl as u8, 6);

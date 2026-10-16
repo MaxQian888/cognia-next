@@ -401,6 +401,7 @@ impl DockerSandboxBackend {
         let auth = self.admission.registry_auth(&bundle.registry)?;
         for install in stage.installs() {
             let spec = RunnerSpec {
+                workspace_env: BTreeMap::new(),
                 name: sanitize_container_name(&format!("stage-{volume}-{}", install[2])),
                 image: bundle.canonical(),
                 // The bundle image's own entrypoint is the supervisor.
@@ -541,6 +542,7 @@ impl DockerSandboxBackend {
         }
 
         let spec = RunnerSpec {
+            workspace_env: BTreeMap::new(),
             name: sanitize_container_name(&format!("probe-{}", digest12(&image_digest))),
             image: image.clone(),
             entrypoint: Some(vec![format!("{INJECTION_ROOT}/bin/cognia-sandboxd")]),
@@ -1089,6 +1091,21 @@ fn runtime_config(
     )
 }
 
+/// Resolve only from the original host identity, never the container mount.
+async fn workspace_port_env(cwd: &str) -> Result<BTreeMap<String, String>, SandboxSpawnError> {
+    use cognia_core::workspace_env::{
+        resolve_workspace_env_async, WorkspaceEnvQuery, HOST_LOOPBACK_NAMESPACE,
+    };
+    resolve_workspace_env_async(WorkspaceEnvQuery {
+        cwd: cwd.into(),
+        workspace_id: None,
+        namespace: HOST_LOOPBACK_NAMESPACE.into(),
+    })
+    .await
+    .map(|env| env.unwrap_or_default())
+    .map_err(|reason| SandboxSpawnError::refused("sandbox_workspace_port_lease_failed", reason))
+}
+
 /// [`runtime_config`] for a command whose environment is `spawn_env`.
 fn runtime_config_with_env(
     spec: &EnvironmentSpec,
@@ -1326,6 +1343,38 @@ impl DockerSandboxBackend {
         .await
     }
 
+    /// Reuse the original host lease inside the runtime network namespace.
+    /// Lease values still participate in persistent runtime compatibility.
+    async fn configure_workspace_ports(
+        &self,
+        spec: &mut RunnerSpec,
+        host_cwd: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        let workspace_env = workspace_port_env(host_cwd).await?;
+        let entries = spec
+            .env
+            .iter()
+            .filter_map(|entry| entry.split_once('='))
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect();
+        let mut runtime = cognia_sandboxd::env::decode_runtime_config_env(&entries)
+            .map_err(|error| {
+                SandboxSpawnError::refused("sandbox_runtime_config_invalid", error.to_string())
+            })?
+            .ok_or_else(|| {
+                SandboxSpawnError::refused(
+                    "sandbox_runtime_config_invalid",
+                    "missing runtime configuration",
+                )
+            })?;
+        runtime.workspace_env = workspace_env.clone();
+        spec.workspace_env = workspace_env;
+        spec.env = encode_runtime_config_env(&runtime).map_err(|error| {
+            SandboxSpawnError::refused("sandbox_runtime_config_invalid", error.to_string())
+        })?;
+        Ok(())
+    }
+
     /// The container for a prepared start: `init-agent` switches to the
     /// target user and runs `tail` (everything after `--`).
     fn local_runner_spec(
@@ -1355,6 +1404,7 @@ impl DockerSandboxBackend {
 
         let size_class = &admitted.admission.size_class;
         Ok(RunnerSpec {
+            workspace_env: BTreeMap::new(),
             name: sanitize_container_name(id),
             image: self.admission.runtime_image(&admitted.spec)?,
             entrypoint: Some(vec![format!("{INJECTION_ROOT}/bin/cognia-sandboxd")]),
@@ -1527,7 +1577,8 @@ impl DockerSandboxBackend {
         )];
         tail.extend(invocation.args.iter().cloned());
         let env = container_env(&prepared.admitted.spec, &config)?;
-        let spec = self.local_runner_spec(&id, &prepared, libc_volume, env, tail)?;
+        let mut spec = self.local_runner_spec(&id, &prepared, libc_volume, env, tail)?;
+        self.configure_workspace_ports(&mut spec, &cwd).await?;
         let auth = prepared.auth.clone();
         let LocalPrepared {
             admitted,
@@ -1822,6 +1873,7 @@ impl ExecBackend for DockerSandboxBackend {
             persistent::control(
                 &self.api,
                 cognia_external_agent::container_backend::RunnerExecSpec {
+                    workspace_env: BTreeMap::new(),
                     container_id: location.container.clone(),
                     command,
                     env: vec![],
@@ -1917,7 +1969,7 @@ impl ExecBackend for DockerSandboxBackend {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use cognia_environment::catalog::{OfferedBundle, SizeClass};
     use cognia_environment::policy::Admission;
@@ -1942,6 +1994,167 @@ mod tests {
     const BUNDLE_DIGEST: &str =
         "sha256:2222222222222222222222222222222222222222222222222222222222222222";
     const CWD: &str = "/srv/workspaces/ws-1";
+
+    pub(super) const PORT_CWD: &str = "/srv/workspaces/port-lease-fixture";
+
+    pub(super) fn install_port_provider() {
+        static INSTALLED: std::sync::Once = std::sync::Once::new();
+        INSTALLED.call_once(|| {
+            cognia_core::workspace_env::set_workspace_env_provider(Arc::new(|query| {
+                if query
+                    .cwd
+                    .to_string_lossy()
+                    .contains("cognia-real-pool-port-fixture-")
+                {
+                    return cognia_task_workspace_host::workspace_env::resolve_workspace_env(query);
+                }
+                if query.cwd == Path::new("/srv/workspaces/port-lease-error") {
+                    return Err("port range exhausted".into());
+                }
+                if query.cwd != Path::new(PORT_CWD) {
+                    return Ok(None);
+                }
+                assert_eq!(
+                    query.namespace,
+                    cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE
+                );
+                Ok(Some(BTreeMap::from([
+                    ("COGNIA_PORT".into(), "41000".into()),
+                    ("COGNIA_PORT_COUNT".into(), "10".into()),
+                    ("PORT".into(), "41000".into()),
+                ])))
+            }))
+            .unwrap();
+        });
+    }
+
+    pub(crate) fn real_workspace_env_fixture(
+        kind: &str,
+    ) -> (tempfile::TempDir, BTreeMap<String, String>) {
+        static STORE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        STORE.get_or_init(|| {
+            let store = tempfile::tempdir().unwrap();
+            cognia_task_workspace_host::host_surface::install(store.path().to_path_buf()).unwrap();
+            store
+        });
+        install_port_provider();
+        let root = tempfile::Builder::new()
+            .prefix("cognia-real-pool-port-fixture-")
+            .tempdir()
+            .unwrap();
+        cognia_task_workspace_host::host_surface::task_workspace_port_lease_subject_ensure(
+            serde_json::from_value(serde_json::json!(kind)).unwrap(),
+            root.path().to_string_lossy().into_owned(),
+            root.path().to_string_lossy().into_owned(),
+            None,
+        )
+        .unwrap();
+        let env = cognia_task_workspace_host::workspace_env::resolve_workspace_env(
+            cognia_core::workspace_env::WorkspaceEnvQuery {
+                cwd: root.path().to_path_buf(),
+                workspace_id: None,
+                namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+            },
+        )
+        .unwrap()
+        .unwrap();
+        (root, env)
+    }
+
+    #[tokio::test]
+    async fn real_provider_frontend_leases_reach_pool_boot_and_exec_unchanged() {
+        for kind in ["project-root", "desktop-session"] {
+            let (cwd, expected) = real_workspace_env_fixture(kind);
+            let mut environment = spec(EgressTier::Off, None);
+            environment.lifecycle = SandboxLifecycleKind::Persistent;
+            let harness = Harness::new(
+                admitted(environment.clone(), IsolationTier::Container),
+                report(vec![command("kiro-cli", None)], Vec::new()),
+                0,
+            );
+            let mut config = spawn_config("real-port-agent", "kiro-cli", &[], &environment);
+            config.cwd = Some(cwd.path().to_string_lossy().into_owned());
+            config.env.insert("PORT".into(), "9999".into());
+            harness.spawn(config).await.unwrap();
+            {
+                let specs = harness.specs();
+                let boot = specs.iter().find(|spec| spec.cmd[0] == "serve").unwrap();
+                assert_eq!(boot.workspace_env, expected);
+                assert_eq!(decode_agent_environment(&boot.env).workspace_env, expected);
+                let execs = harness.api.runtime_execs.lock();
+                let exec = execs
+                    .iter()
+                    .find(|e| e.command.iter().any(|arg| arg == "connect-agent"))
+                    .unwrap();
+                assert_eq!(exec.workspace_env, expected);
+                assert_eq!(decode_agent_environment(&exec.env).workspace_env, expected);
+            }
+            harness.backend.kill("real-port-agent").await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_ports_reach_persistent_boot_and_exec_as_a_trusted_layer() {
+        install_port_provider();
+        let mut environment = spec(EgressTier::Off, None);
+        environment.lifecycle = SandboxLifecycleKind::Persistent;
+        let harness = Harness::new(
+            admitted(environment.clone(), IsolationTier::Container),
+            report(vec![command("kiro-cli", None)], Vec::new()),
+            0,
+        );
+        let mut config = spawn_config("trusted-port-agent", "kiro-cli", &[], &environment);
+        config.cwd = Some(PORT_CWD.into());
+        config.env.insert("PORT".into(), "9999".into());
+        harness.spawn(config).await.unwrap();
+        let specs = harness.specs();
+        let boot_spec = specs.iter().find(|s| s.cmd[0] == "serve").unwrap();
+        let boot = decode_agent_environment(&boot_spec.env);
+        assert!(boot.spawn_env.is_empty());
+        assert_eq!(boot.workspace_env["PORT"], "41000");
+        assert_eq!(boot_spec.workspace_env, boot.workspace_env);
+        let execs = harness.api.runtime_execs.lock();
+        let exec = execs
+            .iter()
+            .find(|e| e.command.iter().any(|arg| arg == "connect-agent"))
+            .unwrap();
+        let runtime = decode_agent_environment(&exec.env);
+        assert_eq!(runtime.spawn_env["PORT"], "9999");
+        assert_eq!(runtime.workspace_env, boot.workspace_env);
+        assert_eq!(exec.workspace_env, boot.workspace_env);
+        drop(execs);
+        harness.backend.kill("trusted-port-agent").await.unwrap();
+        let before = harness
+            .specs()
+            .iter()
+            .filter(|s| s.cmd[0] == "serve")
+            .count();
+        let mut refused = spawn_config("refused-port-agent", "kiro-cli", &[], &environment);
+        refused.cwd = Some("/srv/workspaces/port-lease-error".into());
+        let error = harness.spawn(refused).await.unwrap_err();
+        assert!(format!("{error:?}").contains("port range exhausted"));
+        assert_eq!(
+            harness
+                .specs()
+                .iter()
+                .filter(|s| s.cmd[0] == "serve")
+                .count(),
+            before
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_port_resolution_none_and_error_are_distinct() {
+        install_port_provider();
+        assert!(workspace_port_env("/srv/workspaces/no-lease")
+            .await
+            .unwrap()
+            .is_empty());
+        let err = workspace_port_env("/srv/workspaces/port-lease-error")
+            .await
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("port range exhausted"));
+    }
 
     /// Scripted admission: the driver's tests are about containers, and
     /// admission has its own tests in `cognia-environment`.

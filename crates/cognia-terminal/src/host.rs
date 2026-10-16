@@ -101,6 +101,8 @@ pub struct ClientIdentity {
     pub device_id: Option<String>,
     pub local: bool,
     pub allow_remote_terminal: bool,
+    /// Set only in the authenticated owner-socket handshake by the native proxy.
+    pub workspace_env_bridge: bool,
 }
 
 impl ClientIdentity {
@@ -110,6 +112,7 @@ impl ClientIdentity {
             device_id: None,
             local: true,
             allow_remote_terminal: true,
+            workspace_env_bridge: false,
         }
     }
 
@@ -123,6 +126,7 @@ impl ClientIdentity {
             device_id: Some(device_id.into()),
             local: false,
             allow_remote_terminal,
+            workspace_env_bridge: false,
         }
     }
 }
@@ -705,6 +709,17 @@ impl TerminalHost {
         request: SpawnRequest,
         script_dir: &Path,
     ) -> Result<HostSessionInfo, HostError> {
+        self.spawn_local_with_workspace_env(connection_id, profile_id, request, script_dir, None)
+    }
+
+    pub(crate) fn spawn_local_with_workspace_env(
+        &self,
+        connection_id: &str,
+        profile_id: String,
+        mut request: SpawnRequest,
+        script_dir: &Path,
+        workspace_env: Option<crate::session::WorkspaceEnvResolution>,
+    ) -> Result<HostSessionInfo, HostError> {
         let connection = parse_connection_id(connection_id)?;
         let identity = self.identity(connection)?;
         if !identity.local {
@@ -713,8 +728,20 @@ impl TerminalHost {
         if profile_id.trim().is_empty() {
             return Err(HostError::InvalidRequest("profileId is required".into()));
         }
+        // Store the profile's original env, never an execution-time lease.
         self.sync_profile(connection_id, profile_id.clone(), request.clone())?;
-        self.spawn_request(connection, identity, profile_id, request, script_dir)
+        let workspace_resolved = workspace_env.is_some();
+        if let Some(env) = workspace_env {
+            env.apply(&mut request).map_err(HostError::Process)?;
+        }
+        self.spawn_request(
+            connection,
+            identity,
+            profile_id,
+            request,
+            script_dir,
+            workspace_resolved,
+        )
     }
 
     pub fn sync_profile(
@@ -878,6 +905,45 @@ impl TerminalHost {
         state.profiles.get(profile_id).cloned()
     }
 
+    pub(crate) fn workspace_spawn_request(
+        &self,
+        connection_id: &str,
+        profile_id: &str,
+    ) -> Result<Option<SpawnRequest>, HostError> {
+        let identity = self.identity(parse_connection_id(connection_id)?)?;
+        if !identity.workspace_env_bridge || identity.local {
+            return Err(HostError::PermissionDenied);
+        }
+        if self
+            .inner
+            .state
+            .lock()
+            .ssh_profiles
+            .contains_key(profile_id)
+        {
+            return Ok(None);
+        }
+        self.resolve_profile(&identity, profile_id)
+            .map(Some)
+            .ok_or_else(|| HostError::InvalidRequest("unknown terminal profile".into()))
+    }
+
+    pub(crate) fn spawn_resolved_remote_profile(
+        &self,
+        connection_id: &str,
+        profile_id: String,
+        mut request: SpawnRequest,
+        script_dir: &Path,
+    ) -> Result<HostSessionInfo, HostError> {
+        let connection = parse_connection_id(connection_id)?;
+        let identity = self.identity(connection)?;
+        if !identity.workspace_env_bridge || identity.local {
+            return Err(HostError::PermissionDenied);
+        }
+        request.origin = SessionOrigin::Remote;
+        self.spawn_request(connection, identity, profile_id, request, script_dir, true)
+    }
+
     /// Spawn a host-synchronized local PTY or SSH profile. Remote callers can
     /// only select the stable identifier; credentials and connection metadata
     /// remain inside the host process.
@@ -898,7 +964,14 @@ impl TerminalHost {
             .get(&profile_id)
             .cloned();
         let Some(request) = ssh_request else {
-            return self.spawn_profile(connection_id, profile_id, script_dir);
+            let host = self.clone();
+            let connection_id = connection_id.to_owned();
+            let script_dir = script_dir.to_owned();
+            return tokio::task::spawn_blocking(move || {
+                host.spawn_profile(&connection_id, profile_id, &script_dir)
+            })
+            .await
+            .map_err(|error| HostError::Process(format!("terminal spawn task failed: {error}")))?;
         };
         self.check_spawn_limit(&identity)?;
         let request = narrow_ssh_request_for(&identity, request);
@@ -964,7 +1037,7 @@ impl TerminalHost {
         if !identity.local {
             request.origin = SessionOrigin::Remote;
         }
-        self.spawn_request(connection, identity, profile_id, request, script_dir)
+        self.spawn_request(connection, identity, profile_id, request, script_dir, false)
     }
 
     fn spawn_request(
@@ -974,6 +1047,7 @@ impl TerminalHost {
         profile_id: String,
         request: SpawnRequest,
         script_dir: &Path,
+        workspace_resolved: bool,
     ) -> Result<HostSessionInfo, HostError> {
         self.check_spawn_limit(&identity)?;
 
@@ -995,7 +1069,12 @@ impl TerminalHost {
         let shell = request.shell.clone();
         let sandboxed = request.sandboxed;
         let capabilities = IntegrationCapabilities::local_pty(request.enable_shell_integration);
-        let process = spawn_session_with_identity(
+        let spawn = if workspace_resolved {
+            super::session::spawn_session_with_resolved_identity
+        } else {
+            spawn_session_with_identity
+        };
+        let process = spawn(
             request,
             script_dir,
             &path,

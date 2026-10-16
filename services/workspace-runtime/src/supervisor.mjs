@@ -23,6 +23,9 @@ const INHERITED_AGENT_ENV_KEYS = [
   "XDG_CONFIG_HOME",
   "XDG_CACHE_HOME",
   "XDG_DATA_HOME",
+  "COGNIA_PORT",
+  "COGNIA_PORT_COUNT",
+  "PORT",
 ]
 
 function agentBaseEnv(hostEnv) {

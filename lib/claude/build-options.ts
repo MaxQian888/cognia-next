@@ -2663,6 +2663,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   }
   if (cwd) opts.cwd = cwd
 
+  // Port leases belong to execution admission, after the caller has bound its
+  // final cwd. Resolving options also serves read-only diagnostics/previews.
+
   // --- Project instruction files (CLAUDE.md / AGENTS.md / AGENT.md) --------
   // Discover on-disk instruction files across the active workspace's roots
   // (layered up-tree walk + @import expansion) and the `.cognia/agents/*.md`

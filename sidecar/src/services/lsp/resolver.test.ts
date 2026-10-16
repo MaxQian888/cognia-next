@@ -253,3 +253,54 @@ test("project LSP commands are sandboxed with a clean environment", async () => 
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("LSP child receives its root lease after configured env and refuses host errors", async () => {
+  const { withProcessSandbox } = await import("../../platform/process/exec.ts")
+  const { root, file } = tsProject()
+  const trusted = { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }
+  try {
+    for (const sandbox of [undefined, { launcher: process.execPath, writableRoots: [root] }]) {
+      const service = makeFakeService()
+      const resolver = createLspResolver({
+        service,
+        cwd: root,
+        servers: TS_SERVERS.map((server) => ({ ...server, env: { PORT: "9999" } })),
+        ensureCommand: (command) => command,
+        builtinProcessSandbox: sandbox,
+      })
+      await withProcessSandbox(sandbox, root, () => resolver.touchFile(file), {
+        hostRpc: {
+          async call(method, params) {
+            assert.equal(method, "workspace.portEnv")
+            assert.deepEqual(params, { cwd: fs.realpathSync(root) })
+            return trusted
+          },
+        },
+      })
+      for (const [key, value] of Object.entries(trusted))
+        assert.equal(service.calls.start[0]!.env![key], value)
+      await resolver.dispose()
+    }
+    const service = makeFakeService()
+    const resolver = createLspResolver({
+      service,
+      cwd: root,
+      servers: TS_SERVERS,
+      ensureCommand: (command) => command,
+    })
+    await assert.rejects(
+      withProcessSandbox(undefined, root, () => resolver.touchFile(file), {
+        hostRpc: {
+          call: async () => {
+            throw new Error("lease exhausted")
+          },
+        },
+      }),
+      /lease exhausted/
+    )
+    assert.equal(service.calls.start.length, 0)
+    await resolver.dispose()
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})

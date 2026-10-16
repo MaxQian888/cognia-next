@@ -63,3 +63,34 @@ test("runRipgrep finds matches in a fixture dir (when rg available)", async (t) 
     __resetRgCache()
   }
 })
+
+test("ripgrep awaits final-cwd ports and refuses a host error before spawning", async () => {
+  const { withProcessSandbox } = await import("../../../platform/process/exec.ts")
+  const result = await withProcessSandbox(
+    undefined,
+    process.cwd(),
+    () =>
+      runRipgrep(["-e", "process.stdout.write(process.env.PORT)"], { rgPath: process.execPath }),
+    {
+      hostRpc: {
+        call: async () => ({ COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }),
+      },
+    }
+  )
+  assert.equal(result.stdout, "41000")
+  await assert.rejects(
+    withProcessSandbox(
+      undefined,
+      process.cwd(),
+      () => runRipgrep([], { rgPath: process.execPath }),
+      {
+        hostRpc: {
+          call: async () => {
+            throw new Error("lease exhausted")
+          },
+        },
+      }
+    ),
+    /lease exhausted/
+  )
+})

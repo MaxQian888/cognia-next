@@ -190,7 +190,10 @@ describe("deleteProject dispatch", () => {
     useProjectStore.getState().archiveProject(project.id)
     expect(releaseProjectPortLeases).not.toHaveBeenCalled()
     await useProjectStore.getState().deleteProject(project.id)
-    expect(releaseProjectPortLeases).toHaveBeenCalledWith(project.id)
+    expect(releaseProjectPortLeases).toHaveBeenCalledWith(project.id, undefined, {
+      ...project,
+      isArchived: true,
+    })
   })
 
   it("keeps the project when lease release fails", async () => {

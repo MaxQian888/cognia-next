@@ -335,6 +335,8 @@ pub struct RunnerSpec {
     pub cmd: Vec<String>,
     /// `KEY=VALUE`, sorted for determinism.
     pub env: Vec<String>,
+    /// Trusted lease resolved from the original host cwd, applied after env.
+    pub workspace_env: BTreeMap<String, String>,
     pub working_dir: String,
     /// The workspace at [`WORKSPACE_TARGET`]. Every agent runner has one; only
     /// the bundle staging containers of a sandbox run without.
@@ -622,6 +624,8 @@ pub struct RunnerExecSpec {
     pub container_id: String,
     pub command: Vec<String>,
     pub env: Vec<String>,
+    /// Trusted lease resolved from the original host cwd, applied after env.
+    pub workspace_env: BTreeMap<String, String>,
     pub working_dir: String,
 }
 
@@ -1382,6 +1386,16 @@ impl ExecBackend for ContainerBackend {
             .ok_or_else(|| "container exec mode requires a workspace cwd".to_string())?;
         let mount = self.resolve_mount(&cwd)?;
 
+        let workspace_env = cognia_core::workspace_env::resolve_workspace_env_async(
+            cognia_core::workspace_env::WorkspaceEnvQuery {
+                cwd: PathBuf::from(&cwd),
+                workspace_id: None,
+                namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+            },
+        )
+        .await
+        .map_err(|reason| format!("container workspace environment: {reason}"))?
+        .unwrap_or_default();
         let mut env: Vec<String> = config.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
         env.sort();
 
@@ -1394,6 +1408,7 @@ impl ExecBackend for ContainerBackend {
             image: self.config.image.clone(),
             cmd,
             env,
+            workspace_env,
             working_dir: WORKSPACE_TARGET.to_string(),
             mount: Some(mount),
             seccomp_json: self.config.seccomp_json.clone(),
@@ -1736,7 +1751,7 @@ pub mod bollard_api {
             image: Some(spec.image.clone()),
             entrypoint: spec.entrypoint.clone(),
             cmd: Some(spec.cmd.clone()),
-            env: Some(spec.env.clone()),
+            env: Some(merge_runner_workspace_env(&spec.env, &spec.workspace_env)),
             user: spec.user.clone(),
             working_dir: Some(spec.working_dir.clone()),
             // Ownership travels ON the container. Everything else about
@@ -1837,7 +1852,7 @@ pub mod bollard_api {
                         tty: Some(false),
                         privileged: Some(false),
                         user: Some("0".to_string()),
-                        env: Some(spec.env),
+                        env: Some(merge_runner_workspace_env(&spec.env, &spec.workspace_env)),
                         cmd: Some(spec.command),
                         working_dir: Some(spec.working_dir),
                         ..Default::default()
@@ -2263,6 +2278,7 @@ pub mod bollard_api {
                 name: "n".into(),
                 image: "i".into(),
                 cmd: vec![],
+                workspace_env: BTreeMap::new(),
                 env: vec![],
                 working_dir: WORKSPACE_TARGET.into(),
                 mount,
@@ -2864,6 +2880,86 @@ pub mod test_support {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn container_workspace_env_is_resolved_before_cwd_mapping() {
+        for kind in ["some", "none", "error"] {
+            let cwd = crate::workspace_env_fixture(kind);
+            let api = FakeContainerApi::new();
+            let backend = ContainerBackend::new(api.clone(), test_config(None));
+            let mut config = spawn_config("workspace-port-agent");
+            config.cwd = Some(cwd.path().to_string_lossy().into_owned());
+            config.env.insert("PORT".into(), "user-port".into());
+            let result =
+                spawn_with_events(backend.as_ref(), RecordingAgentEmitter::new(), config).await;
+            if kind == "error" {
+                assert!(result.unwrap_err().contains("fixture port range exhausted"));
+                assert!(api.specs.lock().is_empty());
+                continue;
+            }
+            result.unwrap();
+            {
+                let specs = api.specs.lock();
+                let spec = &specs[0];
+                assert_eq!(spec.working_dir, "/workspace");
+                let final_env = merge_runner_workspace_env(&spec.env, &spec.workspace_env);
+                if kind == "some" {
+                    for entry in ["PORT=41000", "COGNIA_PORT=41000", "COGNIA_PORT_COUNT=10"] {
+                        assert!(
+                            final_env.iter().any(|actual| actual == entry),
+                            "{final_env:?}"
+                        );
+                    }
+                    assert!(!final_env.contains(&"PORT=user-port".into()));
+                } else {
+                    assert!(final_env.contains(&"PORT=user-port".into()));
+                    assert!(spec.workspace_env.is_empty());
+                }
+            }
+            backend.kill("workspace-port-agent").await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn real_provider_frontend_leases_reach_container_spawn_unchanged() {
+        for kind in ["project-root", "desktop-session"] {
+            let (cwd, expected) = crate::real_workspace_env_fixture(kind);
+            let api = FakeContainerApi::new();
+            let backend = ContainerBackend::new(api.clone(), test_config(None));
+            let mut config = spawn_config("real-port-agent");
+            config.cwd = Some(cwd.path().to_string_lossy().into_owned());
+            config.env.insert("PORT".into(), "user-port".into());
+            spawn_with_events(backend.as_ref(), RecordingAgentEmitter::new(), config)
+                .await
+                .unwrap();
+            {
+                let specs = api.specs.lock();
+                assert_eq!(specs[0].working_dir, "/workspace");
+                assert_eq!(specs[0].workspace_env, expected);
+                let env = merge_runner_workspace_env(&specs[0].env, &specs[0].workspace_env);
+                for (key, value) in &expected {
+                    assert!(env.contains(&format!("{key}={value}")));
+                }
+                assert!(!env.contains(&"PORT=user-port".to_string()));
+            }
+            backend.kill("real-port-agent").await.unwrap();
+        }
+    }
+
+    #[test]
+    fn runner_exec_workspace_overlay_is_last_without_duplicate_keys() {
+        let spec = RunnerExecSpec {
+            container_id: "runtime".into(),
+            command: vec!["env".into()],
+            working_dir: "/workspace".into(),
+            env: vec!["PORT=user-port".into(), "TOKEN=secret".into()],
+            workspace_env: BTreeMap::from([("PORT".into(), "41000".into())]),
+        };
+        assert_eq!(
+            merge_runner_workspace_env(&spec.env, &spec.workspace_env),
+            vec!["TOKEN=secret", "PORT=41000"]
+        );
+    }
+
     use super::runner_network_mode;
 
     #[test]
@@ -4237,6 +4333,7 @@ mod docker_integration {
             image: std::env::var(RUNNER_IMAGE_ENV)
                 .expect("set an already-present COGNIA_RUNNER_IMAGE"),
             cmd: vec!["/bin/sh".into(), "-c".into(), "cat".into()],
+            workspace_env: BTreeMap::new(),
             env: vec![],
             working_dir: WORKSPACE_TARGET.into(),
             // Lifecycle checks do not require host files; this also runs
@@ -4327,4 +4424,23 @@ mod docker_integration {
         .expect("adopted exit cleanup");
         assert!(registry.list().is_empty());
     }
+}
+
+/// Docker and Kubernetes both receive one final value per key.
+pub(crate) fn merge_runner_workspace_env(
+    env: &[String],
+    workspace_env: &BTreeMap<String, String>,
+) -> Vec<String> {
+    env.iter()
+        .filter(|entry| {
+            let key = entry.split_once('=').map_or(entry.as_str(), |(key, _)| key);
+            !workspace_env.contains_key(key)
+        })
+        .cloned()
+        .chain(
+            workspace_env
+                .iter()
+                .map(|(key, value)| format!("{key}={value}")),
+        )
+        .collect()
 }

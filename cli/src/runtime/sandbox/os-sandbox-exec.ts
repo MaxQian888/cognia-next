@@ -21,6 +21,7 @@
  */
 
 import { spawn } from "node:child_process"
+import { resolveWorkspacePortEnv } from "../workspace-port-env"
 
 import type { OsSandboxExecutor } from "@/lib/sandbox/os-exec-bridge"
 import type { CodeSandboxStatus } from "@/lib/ai/code-mode/sandbox-status"
@@ -267,6 +268,7 @@ export function createNodeOsSandboxExecutor(
   return {
     async execute(payload: MicrovmExecPayload): Promise<MicrovmResult> {
       if (!binary) throw new Error(sandboxExecUnavailableMessage(devCheckout))
+      const workspaceEnv = await resolveWorkspacePortEnv(payload.command.cwd)
       // `timeout` is seconds and 0 means "no deadline", which the Rust side
       // honours deliberately. Mirroring it keeps a long build from being killed
       // by the supervisor when the policy said not to kill it.
@@ -284,6 +286,7 @@ export function createNodeOsSandboxExecutor(
             env: {
               ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
               ...payload.command.env,
+              ...workspaceEnv,
             },
           },
         }),

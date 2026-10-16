@@ -600,7 +600,7 @@ fn state_from_wire(value: &str) -> ExternalAgentProcessState {
 impl ExecBackend for WorkspaceRuntimeBackend {
     async fn spawn(
         &self,
-        config: ExternalAgentSpawnConfig,
+        mut config: ExternalAgentSpawnConfig,
         sink: Arc<dyn ExternalAgentEventSink>,
     ) -> Result<String, String> {
         if self.agents.lock().contains_key(&config.id) {
@@ -611,6 +611,19 @@ impl ExecBackend for WorkspaceRuntimeBackend {
             .as_deref()
             .ok_or_else(|| "workspace runtime requires a workspace cwd".to_string())?;
         let (workspace_id, runtime_cwd) = self.workspace_and_runtime_cwd(cwd)?;
+        if let Some(env) = cognia_core::workspace_env::resolve_workspace_env_async(
+            cognia_core::workspace_env::WorkspaceEnvQuery {
+                cwd: PathBuf::from(cwd),
+                // This routing id is not necessarily a registry UUID.
+                workspace_id: None,
+                namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+            },
+        )
+        .await
+        .map_err(|reason| format!("workspace runtime environment: {reason}"))?
+        {
+            config.env.extend(env);
+        }
         let endpoint = self.endpoint(&workspace_id).await?;
         self.client
             .control(
@@ -909,6 +922,70 @@ pub fn wrap_with_workspace_runtime_from_env(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn workspace_env_uses_original_host_cwd_and_host_namespace() {
+        for kind in ["some", "none", "error"] {
+            let root = crate::workspace_env_fixture(kind);
+            let locator = Arc::new(FakeLocator::default());
+            let client = Arc::new(FakeClient::default());
+            let backend =
+                WorkspaceRuntimeBackend::new(locator, client.clone(), root.path().to_path_buf());
+            let cwd = root.path().join("workspace-1/subdir");
+            let mut request = config("port-agent", cwd.to_str().unwrap());
+            request.env.insert("PORT".into(), "user-port".into());
+            let result = backend.spawn(request, Arc::new(Sink)).await;
+            if kind == "error" {
+                assert!(result.unwrap_err().contains("fixture port range exhausted"));
+                assert!(client.calls.lock().is_empty());
+                continue;
+            }
+            result.unwrap();
+            {
+                let calls = client.calls.lock();
+                let payload = &calls.iter().find(|call| call.1 == "agent.spawn").unwrap().2;
+                assert_eq!(payload["cwd"], "/workspace/subdir");
+                assert_eq!(
+                    payload["env"]["PORT"],
+                    if kind == "some" { "41000" } else { "user-port" }
+                );
+                if kind == "some" {
+                    assert_eq!(payload["env"]["COGNIA_PORT"], "41000");
+                    assert_eq!(payload["env"]["COGNIA_PORT_COUNT"], "10");
+                } else {
+                    assert!(payload["env"].get("COGNIA_PORT").is_none());
+                }
+            }
+            backend.kill("port-agent").await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn real_provider_frontend_leases_reach_workspace_runtime_unchanged() {
+        for kind in ["project-root", "desktop-session"] {
+            let (root, expected) = crate::real_workspace_env_fixture(kind);
+            let cwd = root.path().join("workspace-1/subdir");
+            std::fs::create_dir_all(&cwd).unwrap();
+            let client = Arc::new(FakeClient::default());
+            let backend = WorkspaceRuntimeBackend::new(
+                Arc::new(FakeLocator::default()),
+                client.clone(),
+                root.path().to_path_buf(),
+            );
+            let mut request = config("real-port-agent", cwd.to_str().unwrap());
+            request.env.insert("PORT".into(), "user-port".into());
+            backend.spawn(request, Arc::new(Sink)).await.unwrap();
+            {
+                let calls = client.calls.lock();
+                let payload = &calls.iter().find(|call| call.1 == "agent.spawn").unwrap().2;
+                assert_eq!(payload["cwd"], "/workspace/subdir");
+                for (key, value) in expected {
+                    assert_eq!(payload["env"][key], value);
+                }
+            }
+            backend.kill("real-port-agent").await.unwrap();
+        }
+    }
+
     use super::*;
     use crate::process::{ExternalAgentEventSink, ExternalAgentSpawnConfig};
     use async_trait::async_trait;

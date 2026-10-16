@@ -21,6 +21,7 @@ import {
   execFileAsync,
   sandboxedProcessTarget,
   sandboxedProcessEnv,
+  resolveProcessPortEnv,
 } from "../../../platform/process/exec.ts"
 import { headTruncate } from "../../../shared/text/truncate.ts"
 
@@ -92,6 +93,12 @@ async function execShellExecuteAdvanced(
       return toolError(`cwd is not a directory: ${args.cwd}`, "shell_execute_advanced")
     }
 
+    const env = sandboxedProcessEnv(
+      process.env,
+      ctx.builtinProcessSandbox,
+      {},
+      await resolveProcessPortEnv(args.cwd)
+    )
     const target = sandboxedProcessTarget(
       args.command,
       args.args,
@@ -108,9 +115,7 @@ async function execShellExecuteAdvanced(
     try {
       const result = await execFileAsync(target.command, target.args, {
         cwd: args.cwd,
-        ...(ctx.builtinProcessSandbox
-          ? { env: sandboxedProcessEnv(process.env, ctx.builtinProcessSandbox) }
-          : {}),
+        env,
         timeout: timeoutMs,
         maxBuffer: MAX_CAPTURE_BYTES,
         windowsHide: true,

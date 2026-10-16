@@ -177,6 +177,9 @@ fn bot_environment(
             matches!(
                 key.as_str(),
                 "PATH"
+                    | "COGNIA_PORT"
+                    | "COGNIA_PORT_COUNT"
+                    | "PORT"
                     | "HOME"
                     | "USER"
                     | "LOGNAME"
@@ -234,6 +237,20 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bot_environment_keeps_exact_workspace_port_keys() {
+        let env = bot_environment([
+            ("COGNIA_PORT".into(), "41000".into()),
+            ("COGNIA_PORT_COUNT".into(), "10".into()),
+            ("PORT".into(), "41000".into()),
+            ("COGNIA_UNREVIEWED".into(), "secret".into()),
+        ]);
+        assert_eq!(env["PORT"], "41000");
+        assert_eq!(env["COGNIA_PORT"], "41000");
+        assert_eq!(env["COGNIA_PORT_COUNT"], "10");
+        assert!(!env.contains_key("COGNIA_UNREVIEWED"));
+    }
+
     use super::*;
 
     #[test]

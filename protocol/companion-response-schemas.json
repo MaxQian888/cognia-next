@@ -13045,7 +13045,10 @@
         "outOfRange",
         "ambiguousRegistryLink",
         "unresolvedRegistryRoot",
-        "registryRootMismatch"
+        "registryRootMismatch",
+        "missingRoot",
+        "discoveryRejected",
+        "discoveryFailed"
       ],
       "type": "string"
     },

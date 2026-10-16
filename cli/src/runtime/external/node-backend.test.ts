@@ -3,6 +3,9 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { resolveWorkspacePortEnv } from "../workspace-port-env"
+
+jest.mock("../workspace-port-env", () => ({ resolveWorkspacePortEnv: jest.fn(async () => ({})) }))
 
 import {
   buildExternalAgentChildEnv,
@@ -84,6 +87,77 @@ describe("CLI spawn allowlist", () => {
 })
 
 describe("NodeExternalAgentBackend", () => {
+  it.each([false, true])(
+    "applies trusted ports after filters and launcher overrides (Bot %s)",
+    async (bot) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-port-env-"))
+      const cwd = fs.realpathSync(root)
+      const trusted = { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }
+      jest.mocked(resolveWorkspacePortEnv).mockResolvedValueOnce(trusted)
+      const backend = new NodeExternalAgentBackend({
+        workspacesRoot: root,
+        resolveLaunch: async () => ({
+          command: process.execPath,
+          args: [
+            "-e",
+            "console.log(JSON.stringify(Object.fromEntries(['COGNIA_PORT','COGNIA_PORT_COUNT','PORT'].map(k => [k,process.env[k]]))))",
+          ],
+          env: { COGNIA_PORT: "1", COGNIA_PORT_COUNT: "2", PORT: "3" },
+        }),
+      })
+      const output = nextEvent<{ data: string }>(backend, "external-agent://stdout")
+      const exited = nextEvent(backend, "external-agent://exit")
+      try {
+        await backend.invoke("spawn_external_agent", {
+          config: {
+            id: "port-env",
+            command: "codex",
+            cwd,
+            env: {
+              PORT: "9999",
+              ...(bot
+                ? { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: path.join(root, "state") }
+                : {}),
+            },
+          },
+        })
+        expect(JSON.parse((await output).data)).toEqual(trusted)
+        expect(resolveWorkspacePortEnv).toHaveBeenCalledWith(cwd)
+        await exited
+      } finally {
+        await backend
+          .invoke("kill_external_agent", { agentId: "port-env" })
+          .catch((error: Error) => {
+            if (!error.message.includes("agent not running")) throw error
+          })
+        fs.rmSync(root, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it("refuses the child before Starting when the host cannot allocate ports", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-port-error-"))
+    jest
+      .mocked(resolveWorkspacePortEnv)
+      .mockRejectedValueOnce(new Error("workspace port range exhausted"))
+    const backend = new NodeExternalAgentBackend({
+      workspacesRoot: root,
+      resolveLaunch: async () => ({ command: "must-not-spawn", args: [] }),
+    })
+    const starting = jest.fn()
+    backend.listen("external-agent://spawn", starting)
+    try {
+      await expect(
+        backend.invoke("spawn_external_agent", {
+          config: { id: "port-error", command: "codex", cwd: root },
+        })
+      ).rejects.toThrow("workspace port range exhausted")
+      expect(starting).not.toHaveBeenCalled()
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("does not inherit Kimi host model credentials into an isolated Bot", () => {
     const env = buildExternalAgentChildEnv(
       { NODE_ENV: "test", KIMI_MODEL_API_KEY: "ambient-host-key", KIMI_CODE_HOME: "/host/kimi" },
@@ -795,6 +869,36 @@ describe("isDshLauncherInvocation", () => {
 
   afterEach(() => {
     fs.rmSync(dataRoot, { recursive: true, force: true })
+  })
+
+  it("injects trusted ports after the DSH-specific env filter", async () => {
+    const trusted = { COGNIA_PORT: "41040", COGNIA_PORT_COUNT: "10", PORT: "41040" }
+    jest.mocked(resolveWorkspacePortEnv).mockResolvedValueOnce(trusted)
+    fs.writeFileSync(
+      launcher,
+      "console.log(JSON.stringify(Object.fromEntries(['COGNIA_PORT','COGNIA_PORT_COUNT','PORT'].map(k => [k,process.env[k]]))))"
+    )
+    const backend = new NodeExternalAgentBackend({
+      workspacesRoot,
+      resolveLaunch: async (config) => ({
+        command: config.command,
+        args: config.args ?? [],
+        env: { PORT: "2" },
+      }),
+    })
+    const output = nextEvent<{ data: string }>(backend, "external-agent://stdout")
+    const exited = nextEvent(backend, "external-agent://exit")
+    await backend.invoke("spawn_external_agent", {
+      config: {
+        id: "dsh-ports",
+        command: process.execPath,
+        args: [launcher, composition],
+        cwd: workspacesRoot,
+        env: { PORT: "1", COGNIA_PORT: "1", COGNIA_PORT_COUNT: "1" },
+      },
+    })
+    expect(JSON.parse((await output).data)).toEqual(trusted)
+    await exited
   })
 
   it("admits the canonical host Node path only with a managed composition", async () => {

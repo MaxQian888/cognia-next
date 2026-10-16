@@ -177,8 +177,9 @@ pub fn runner_pod_manifest(spec: &RunnerSpec, opts: &KubeRunnerOptions) -> Resul
         None => return Err("a kubernetes runner pod needs a workspace mount".to_string()),
     };
 
-    let env: Vec<Value> = spec
-        .env
+    let merged_env =
+        super::container_backend::merge_runner_workspace_env(&spec.env, &spec.workspace_env);
+    let env: Vec<Value> = merged_env
         .iter()
         .map(|kv| {
             let (name, value) = kv.split_once('=').unwrap_or((kv.as_str(), ""));
@@ -633,6 +634,7 @@ mod tests {
             name: "cognia-agent-A_1".into(),
             image: "ghcr.io/example/cognia-runner:test".into(),
             cmd: vec!["claude-code-acp".into(), "--stdio".into()],
+            workspace_env: Default::default(),
             env: vec!["A_KEY=1".into(), "FLAG".into()],
             working_dir: WORKSPACE_TARGET.into(),
             mount: Some(mount),

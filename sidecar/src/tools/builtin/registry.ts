@@ -185,6 +185,6 @@ export function collectCogniaToolDefs(context: CollectToolDefsOptions = {}): Too
 
   // Presentation runs over the confined surface so generated code cannot reach
   // disabled tools or bypass the same confinement as native tool calls.
-  const confined = wrapDefsWithConfinement(tools, builtinProcessSandbox, cwd)
+  const confined = wrapDefsWithConfinement(tools, builtinProcessSandbox, cwd, context)
   return [...applyToolPresentation(confined, toolPresentation)]
 }

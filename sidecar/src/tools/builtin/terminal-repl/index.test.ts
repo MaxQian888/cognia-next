@@ -475,3 +475,34 @@ test("read-only installations expose a repair instruction", (t) => {
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("REPL trusted ports override model env and host errors refuse PTY creation", async () => {
+  const { withProcessSandbox } = await import("../../../platform/process/exec.ts")
+  const fake = makeFakePty()
+  __setNodePtyForTesting(fake)
+  const trusted = { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }
+  const args = {
+    agentId: "ports",
+    shell: "/bin/sh",
+    cwd: tmpdir,
+    cols: 80,
+    rows: 24,
+    env: { COGNIA_PORT: "9999", COGNIA_PORT_COUNT: "1", PORT: "9999" },
+  }
+  const result = await withProcessSandbox(undefined, tmpdir, () => execSpawn(args), {
+    hostRpc: { call: async () => trusted },
+  })
+  assert.equal(result.isError, undefined)
+  for (const [key, value] of Object.entries(trusted))
+    assert.equal(fake.__ptys[0]!.opts.env![key], value)
+  const refused = await withProcessSandbox(undefined, tmpdir, () => execSpawn(args), {
+    hostRpc: {
+      call: async () => {
+        throw new Error("lease exhausted")
+      },
+    },
+  })
+  assert.equal(refused.isError, true)
+  assert.match(firstText(refused), /lease exhausted/)
+  assert.equal(fake.__ptys.length, 1)
+})

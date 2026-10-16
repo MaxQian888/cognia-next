@@ -34,6 +34,7 @@ workspace-runtime-exec = ["dep:reqwest", "dep:cognia-net"]
 test-support = []
 
 [dependencies]
+cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
 cognia-sandboxd = { path = "../cognia-sandboxd", default-features = false }
 cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
 tauri = { workspace = true, optional = true }
@@ -63,6 +64,7 @@ reqwest = { workspace = true, features = ["json", "rustls-no-provider"], optiona
 cognia-net = { path = "../cognia-net", optional = true }
 
 [dev-dependencies]
+cognia-task-workspace-host = { path = "../cognia-task-workspace-host" }
 # Pins TASK_WORKSPACE_EXECUTION_ROOT_ENV to the service that reads it.
 cognia-task-workspace = { path = "../cognia-task-workspace" }
 

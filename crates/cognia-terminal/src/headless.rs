@@ -608,14 +608,18 @@ pub async fn terminal_headless_exec<R: Runtime>(
     sandboxed: Option<bool>,
 ) -> Result<HeadlessExecResult, String> {
     let (script_dir, path) = resolve_dirs(&app);
-    let session = spawn_headless(
-        shell,
-        cwd,
-        env.unwrap_or_default(),
-        &script_dir,
-        &path,
-        sandboxed.unwrap_or(false),
-    )?;
+    let session = tokio::task::spawn_blocking(move || {
+        spawn_headless(
+            shell,
+            cwd,
+            env.unwrap_or_default(),
+            &script_dir,
+            &path,
+            sandboxed.unwrap_or(false),
+        )
+    })
+    .await
+    .map_err(|error| format!("terminal headless spawn task failed: {error}"))??;
     let result = session.run(&command, timeout_ms).await;
     session.kill();
     result
@@ -679,6 +683,51 @@ pub fn terminal_headless_kill(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn workspace_env_reaches_the_headless_pty() {
+        for kind in ["some", "none"] {
+            let cwd = crate::workspace_env_fixture(kind);
+            let session = spawn_headless(
+                Some(test_shell()),
+                Some(cwd.path().to_string_lossy().into_owned()),
+                HashMap::from([("PORT".into(), "user-port".into())]),
+                &script_dir(),
+                &super::super::session::PathInjection::default(),
+                false,
+            )
+            .unwrap();
+            let result = session.run(
+                r#"printf '%s:%s:%s\n' "${COGNIA_PORT-unset}" "${COGNIA_PORT_COUNT-unset}" "$PORT""#,
+                Some(60_000),
+            ).await.unwrap();
+            session.kill();
+            assert!(
+                !result.timed_out,
+                "workspace env command timed out: {result:?}"
+            );
+            let expected = if kind == "some" {
+                "41000:10:41000"
+            } else {
+                "unset:unset:user-port"
+            };
+            assert!(result.output.contains(expected), "{result:?}");
+        }
+        let failed = crate::workspace_env_fixture("error");
+        let result = spawn_headless(
+            Some(test_shell()),
+            Some(failed.path().to_string_lossy().into_owned()),
+            HashMap::new(),
+            &script_dir(),
+            &super::super::session::PathInjection::default(),
+            false,
+        );
+        assert!(result
+            .err()
+            .unwrap()
+            .contains("fixture port range exhausted"));
+    }
+
     use super::*;
 
     fn script_dir() -> PathBuf {

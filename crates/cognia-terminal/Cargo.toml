@@ -28,6 +28,7 @@ default = []
 tauri-host = ["dep:tauri"]
 
 [dependencies]
+cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
 # Sandbox launch policy (bwrap/sandbox-exec prefixes, dangerous-env filter).
 cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
 # SSH credentials are resolved inside the native process so passwords and

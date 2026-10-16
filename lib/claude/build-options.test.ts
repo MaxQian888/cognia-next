@@ -251,6 +251,10 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => false),
 }))
 
+jest.mock("@/lib/task-workspace/execution-port-lease", () => ({
+  ensureExecutionPortLease: jest.fn(),
+}))
+
 jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
   isNativeMobile: jest.fn(() => false),
@@ -268,6 +272,7 @@ jest.mock("@/lib/support-agent/context", () => {
 })
 
 import { isTauri } from "@/lib/tauri"
+import { ensureExecutionPortLease } from "@/lib/task-workspace/execution-port-lease"
 import { isNativeMobile } from "@/lib/platform/detect"
 import { createManagedWorkspaceContext } from "@/lib/task-workspace/managed-workspace"
 import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
@@ -401,6 +406,7 @@ const toolNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string
 
 beforeEach(() => {
   jest.clearAllMocks()
+  jest.mocked(ensureExecutionPortLease).mockReset().mockResolvedValue(null)
   // Sane defaults so the function doesn't error when a test forgets to set
   // an expectation.
   mListSkills.mockResolvedValue([])
@@ -3186,6 +3192,24 @@ describe("resolveSendOptions — referencedPaths", () => {
     const opts = await resolveSendOptions({ referencedPaths: [] })
     expect(opts.additionalDirectories).toBeUndefined()
   })
+})
+
+describe("resolveSendOptions — workspace port lease admission", () => {
+  it.each([undefined, "codex"])(
+    "resolves %s options without allocating ports for previews or a pending turn",
+    async (externalRuntimeId) => {
+      const project = makeProject([{ path: "/repo", isPrimary: true }])
+      const session = makeSession({
+        id: "lease-session",
+        projectId: project.id,
+        workingDir: "/repo/package",
+      })
+      jest.mocked(ensureExecutionPortLease).mockRejectedValue(new Error("port range exhausted"))
+      const opts = await resolveSendOptions({ session, activeProject: project, externalRuntimeId })
+      expect(opts.cwd).toBe("/repo/package")
+      expect(ensureExecutionPortLease).not.toHaveBeenCalled()
+    }
+  )
 })
 
 describe("resolveSendOptions — cwd / permissionMode", () => {

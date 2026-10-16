@@ -76,3 +76,11 @@ test("finds the staged binary beside chunks without consulting cwd", async () =>
 test("resolves the npm binary from the installed platform dependency", () => {
   assert.ok(npmBinaryPath(), "sidecar @ast-grep/cli optional platform package must be installed")
 })
+
+test("ast-grep detection remains awaitable within a standalone process scope", async () => {
+  const { withProcessSandbox } = await import("../../../platform/process/exec.ts")
+  __resetAstGrepCache()
+  const result = await withProcessSandbox(undefined, process.cwd(), () => detectAstGrep())
+  assert.ok(result === null || typeof result === "string")
+  __resetAstGrepCache()
+})

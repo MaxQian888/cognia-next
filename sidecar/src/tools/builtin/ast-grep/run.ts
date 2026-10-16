@@ -161,24 +161,22 @@ export async function runSg(options: SgRunOptions, opts: SgExecOptions = {}): Pr
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const spawnImpl = opts.spawnImpl ?? spawn
 
-  return new Promise<SgResult>((resolve) => {
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawnImpl(bin, args, {
-        cwd: opts.cwd,
-        signal: opts.signal,
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      })
-    } catch (err) {
-      resolve({
-        matches: [],
-        totalMatches: 0,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      return
+  let child: Awaited<ReturnType<typeof spawn>>
+  try {
+    child = await spawnImpl(bin, args, {
+      cwd: opts.cwd,
+      signal: opts.signal,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+  } catch (err) {
+    return {
+      matches: [],
+      totalMatches: 0,
+      error: err instanceof Error ? err.message : String(err),
     }
-
+  }
+  return new Promise<SgResult>((resolve) => {
     let out = ""
     let err = ""
     let truncated = false

@@ -24,7 +24,7 @@ pub(super) enum RuntimePurpose {
     TaskShell,
 }
 
-fn runtime_key(
+pub(super) fn runtime_key(
     spec: &RunnerSpec,
     environment: &EnvironmentSpec,
     purpose: RuntimePurpose,
@@ -38,6 +38,7 @@ fn runtime_key(
     stable.name.clear();
     stable.cmd.clear();
     stable.env.clear();
+    // workspace_env remains: a lease change requires a different running instance.
     stable.labels.clear();
     let identity = match purpose {
         // Unchanged since agent runtimes were introduced: a new spelling
@@ -59,6 +60,7 @@ pub(super) fn sha256_hex(bytes: &[u8]) -> String {
 
 pub(super) fn exec_spec(container_id: &str, args: &[&str]) -> RunnerExecSpec {
     RunnerExecSpec {
+        workspace_env: BTreeMap::new(),
         container_id: container_id.into(),
         command: std::iter::once(format!("{INJECTION_ROOT}/bin/cognia-sandboxd"))
             .chain(args.iter().map(|arg| (*arg).to_string()))
@@ -264,6 +266,7 @@ impl DockerSandboxBackend {
             .position(|arg| arg == "--")
             .ok_or_else(|| fault("missing agent invocation"))?;
         let invocation = spec.cmd[command_start + 1..].to_vec();
+        let workspace_env = spec.workspace_env.clone();
         let acquired = self
             .acquire_runtime(spec, auth, environment, RuntimePurpose::Agent)
             .await?;
@@ -284,7 +287,10 @@ impl DockerSandboxBackend {
             ],
         );
         request.command.extend(invocation);
-        let mut runtime = runtime_config(environment, config)?;
+        let mut runtime =
+            runtime_config_with_env(environment, config.env.clone().into_iter().collect())?;
+        runtime.workspace_env = workspace_env.clone();
+        request.workspace_env = workspace_env;
         runtime.lifecycle_phases = vec![LifecyclePhase::PostAttach];
         request.env =
             encode_runtime_config_env(&runtime).map_err(|error| fault(error.to_string()))?;
@@ -324,6 +330,7 @@ impl DockerSandboxBackend {
             .position(|arg| arg == "--")
             .ok_or_else(|| fault("missing agent invocation"))?;
         let mut boot = runtime_config_with_env(environment, BTreeMap::new())?;
+        boot.workspace_env = spec.workspace_env.clone();
         // Task leases are never baked into a retained container or replayed on
         // restart. Lifecycle preparation uses only the approved project env.
         boot.lifecycle_phases
@@ -536,6 +543,65 @@ mod tests {
             runtime_key(&changed, &environment, RuntimePurpose::Agent),
             expected
         );
+        let without_lease = changed.clone();
+        changed.workspace_env.insert("PORT".into(), "41000".into());
+        assert_ne!(
+            runtime_key(&changed, &environment, RuntimePurpose::Agent),
+            expected
+        );
+        let lease_key = runtime_key(&changed, &environment, RuntimePurpose::Agent);
+        changed.workspace_env.insert("PORT".into(), "42000".into());
+        assert_ne!(
+            runtime_key(&changed, &environment, RuntimePurpose::Agent),
+            lease_key
+        );
+        let first = tokio::time::timeout(
+            Duration::from_secs(5),
+            harness.backend.acquire_runtime(
+                changed.clone(),
+                None,
+                &environment,
+                RuntimePurpose::Agent,
+            ),
+        )
+        .await
+        .expect("first runtime acquisition must complete")
+        .unwrap();
+        let first_id = first.container_id.clone();
+        drop(first);
+        let reused = tokio::time::timeout(
+            Duration::from_secs(5),
+            harness.backend.acquire_runtime(
+                changed.clone(),
+                None,
+                &environment,
+                RuntimePurpose::Agent,
+            ),
+        )
+        .await
+        .expect("matching runtime acquisition must complete")
+        .unwrap();
+        assert_eq!(first_id, reused.container_id);
+        drop(reused);
+        changed.workspace_env.insert("PORT".into(), "43000".into());
+        let replaced = tokio::time::timeout(
+            Duration::from_secs(5),
+            harness.backend.acquire_runtime(
+                changed.clone(),
+                None,
+                &environment,
+                RuntimePurpose::Agent,
+            ),
+        )
+        .await
+        .expect("changed-lease runtime acquisition must complete")
+        .unwrap();
+        assert_ne!(
+            first_id, replaced.container_id,
+            "a runtime booted with different ports cannot be reused"
+        );
+        drop(replaced);
+        changed = without_lease;
         // A task shell never resolves to an agent's runtime for the same spec.
         assert_ne!(
             runtime_key(&changed, &environment, RuntimePurpose::TaskShell),

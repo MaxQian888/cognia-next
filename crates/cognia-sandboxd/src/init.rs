@@ -205,6 +205,9 @@ pub fn run_with_runtime(
     options.argv = argv.into_iter().map(OsString::from).collect();
 
     if let Some(runtime) = runtime {
+        // Reapply after gateway initialization so lifecycle and agent commands
+        // share the host-authoritative lease, regardless of task setup.
+        options.env.extend(runtime.workspace_env.clone());
         for phase in &runtime.lifecycle_phases {
             if let Some(command) = runtime.lifecycle_commands.get(*phase) {
                 let commands = lifecycle_tasks(command);
@@ -674,6 +677,44 @@ mod tests {
         RuntimeCommand::Shell {
             command: command.into(),
         }
+    }
+
+    #[test]
+    fn trusted_ports_reach_lifecycle_and_agent_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        let command =
+            "printf '%s:%s:%s,' \"$COGNIA_PORT\" \"$COGNIA_PORT_COUNT\" \"$PORT\" >> \"$ORDER\"";
+        let config = RuntimeConfigV1 {
+            workspace_env: BTreeMap::from([
+                ("COGNIA_PORT".into(), "41000".into()),
+                ("COGNIA_PORT_COUNT".into(), "10".into()),
+                ("PORT".into(), "41000".into()),
+            ]),
+            lifecycle_phases: vec![
+                LifecyclePhase::OnCreate,
+                LifecyclePhase::PostStart,
+                LifecyclePhase::PostAttach,
+            ],
+            lifecycle_commands: RuntimeLifecycleCommands {
+                on_create: Some(shell(command)),
+                post_start: Some(shell(command)),
+                post_attach: Some(shell(command)),
+                ..RuntimeLifecycleCommands::default()
+            },
+            ..RuntimeConfigV1::default()
+        };
+        let output = fixture_command(dir.path(), &config, command)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("order")).unwrap(),
+            "41000:10:41000,".repeat(4)
+        );
     }
 
     #[test]

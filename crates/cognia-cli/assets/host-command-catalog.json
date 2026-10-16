@@ -79241,7 +79241,10 @@
                     "outOfRange",
                     "ambiguousRegistryLink",
                     "unresolvedRegistryRoot",
-                    "registryRootMismatch"
+                    "registryRootMismatch",
+                    "missingRoot",
+                    "discoveryRejected",
+                    "discoveryFailed"
                   ],
                   "type": "string"
                 },
@@ -89821,5 +89824,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "66de1cdd87fa279c0204464c7452f98d80bef7a7a41301eb1e0c087f4fe66d3d"
+  "catalogHash": "119292edf0b45e65d435b2adfaa2586ca6a07a42d15ebe2c2136072b66881cbf"
 }

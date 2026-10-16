@@ -1,6 +1,9 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { resolveWorkspacePortEnv } from "../workspace-port-env"
+
+jest.mock("../workspace-port-env", () => ({ resolveWorkspacePortEnv: jest.fn(async () => ({})) }))
 
 import type { MicrovmExecPayload } from "@cognia/plugin-sdk/api/sandbox"
 
@@ -159,10 +162,37 @@ describe("createNodeOsSandboxExecutor without a helper binary", () => {
 })
 
 describe("createNodeOsSandboxExecutor", () => {
+  it("sends trusted ports after caller env for the final sandbox cwd", async () => {
+    const { spawn, last } = fakeSpawn()
+    const trusted = { COGNIA_PORT: "41030", COGNIA_PORT_COUNT: "10", PORT: "41030" }
+    jest.mocked(resolveWorkspacePortEnv).mockResolvedValueOnce(trusted)
+    const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
+    const request = payload()
+    request.command.cwd = "/work/nested"
+    request.command.env = { COGNIA_PORT: "1", COGNIA_PORT_COUNT: "2", PORT: "3", KEEP: "yes" }
+    const promise = executor.execute(request)
+    await Promise.resolve()
+    const sent = JSON.parse(last().stdinChunks.join(""))
+    expect(sent.command.env).toMatchObject({ ...trusted, KEEP: "yes" })
+    expect(resolveWorkspacePortEnv).toHaveBeenCalledWith("/work/nested")
+    last().emitStdout(OK_ENVELOPE)
+    last().close(0)
+    await expect(promise).resolves.toMatchObject({ exit_code: 0 })
+  })
+
+  it("refuses before spawning the sandbox helper on a host error", async () => {
+    const { spawn, calls } = fakeSpawn()
+    jest.mocked(resolveWorkspacePortEnv).mockRejectedValueOnce(new Error("port range exhausted"))
+    const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
+    await expect(executor.execute(payload())).rejects.toThrow("port range exhausted")
+    expect(calls).toEqual([])
+  })
+
   it("sends the payload on stdin and returns the result", async () => {
     const { spawn, calls, last } = fakeSpawn()
     const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
     const promise = executor.execute(payload())
+    await Promise.resolve()
     last().emitStdout(OK_ENVELOPE)
     last().close(0)
     await expect(promise).resolves.toEqual({
@@ -186,6 +216,7 @@ describe("createNodeOsSandboxExecutor", () => {
     const { spawn, last } = fakeSpawn()
     const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
     const promise = executor.execute(payload())
+    await Promise.resolve()
     last().emitStdout(
       JSON.stringify({ ok: false, error: { kind: "invalid_policy", reason: "no writable dir" } })
     )
@@ -197,6 +228,7 @@ describe("createNodeOsSandboxExecutor", () => {
     const { spawn, last } = fakeSpawn()
     const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
     const promise = executor.execute(payload())
+    await Promise.resolve()
     last().emitStderr("boom")
     last().close(2)
     await expect(promise).rejects.toThrow(/returned no response: boom/)
@@ -206,6 +238,7 @@ describe("createNodeOsSandboxExecutor", () => {
     const { spawn, last } = fakeSpawn()
     const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
     const promise = executor.execute(payload())
+    await Promise.resolve()
     last().emitStdout("not json")
     last().close(0)
     await expect(promise).rejects.toThrow(/unparseable/)
@@ -215,6 +248,7 @@ describe("createNodeOsSandboxExecutor", () => {
     const { spawn, last } = fakeSpawn()
     const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
     const promise = executor.execute(payload())
+    await Promise.resolve()
     last().fail(new Error("ENOENT"))
     await expect(promise).rejects.toThrow(/failed to start cognia-sandbox-exec: ENOENT/)
   })
@@ -223,6 +257,7 @@ describe("createNodeOsSandboxExecutor", () => {
     const { spawn, last } = fakeSpawn()
     const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
     const promise = executor.execute(payload())
+    await Promise.resolve()
     last().emitStdout("x".repeat(MAX_ENVELOPE_BYTES + 1))
     last().close(null)
     await expect(promise).rejects.toThrow(/more than \d+ bytes/)
@@ -239,6 +274,7 @@ describe("createNodeOsSandboxExecutor", () => {
         supervisorGraceMs: 1_000,
       })
       const promise = executor.execute(payload(2))
+      await Promise.resolve()
       const assertion = expect(promise).rejects.toThrow(/did not answer within 3000ms/)
       jest.advanceTimersByTime(3_001)
       await assertion
@@ -261,6 +297,7 @@ describe("createNodeOsSandboxExecutor", () => {
       // the policy deliberately left unbounded would be the supervisor
       // overriding the policy.
       const promise = executor.execute(payload(0))
+      await Promise.resolve()
       jest.advanceTimersByTime(600_000)
       expect(last().killed).toEqual([])
       last().emitStdout(OK_ENVELOPE)
@@ -315,6 +352,7 @@ describe("createNodeOsSandboxExecutor", () => {
     const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
     const first = executor.execute(payload())
     const second = executor.execute(payload())
+    await Promise.resolve()
     children[1].emitStdout(
       JSON.stringify({
         ok: true,

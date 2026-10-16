@@ -169,3 +169,23 @@ test("shell_execute_advanced exports a tool definition with the expected shape",
   assert.equal(shellExecuteAdvancedTool.name, "shell_execute_advanced")
   assert.match(shellExecuteAdvancedTool.description, /HIGH-RISK/)
 })
+
+test("advanced shell receives trusted ports and refuses lease errors", async () => {
+  const { withProcessSandbox } = await import("../../../platform/process/exec.ts")
+  const args = { command: "node", args: ["-p", "process.env.PORT"], cwd: TMP, timeoutMs: 5000 }
+  const result = await withProcessSandbox(undefined, TMP, () => execShellExecuteAdvanced(args), {
+    hostRpc: {
+      call: async () => ({ COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }),
+    },
+  })
+  assert.equal(decode(result).stdout.trim(), "41000")
+  const refused = await withProcessSandbox(undefined, TMP, () => execShellExecuteAdvanced(args), {
+    hostRpc: {
+      call: async () => {
+        throw new Error("lease exhausted")
+      },
+    },
+  })
+  assert.equal(refused.isError, true)
+  assert.match(firstText(refused), /lease exhausted/)
+})

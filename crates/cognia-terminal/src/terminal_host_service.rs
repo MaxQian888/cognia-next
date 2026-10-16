@@ -696,6 +696,8 @@ async fn authenticate_server<S: AsyncRead + Unpin>(
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SerializableClientIdentity {
+    #[serde(default)]
+    workspace_env_bridge: bool,
     client_id: String,
     device_id: Option<String>,
     local: bool,
@@ -705,6 +707,7 @@ struct SerializableClientIdentity {
 impl From<&ClientIdentity> for SerializableClientIdentity {
     fn from(value: &ClientIdentity) -> Self {
         Self {
+            workspace_env_bridge: value.workspace_env_bridge,
             client_id: value.client_id.clone(),
             device_id: value.device_id.clone(),
             local: value.local,
@@ -730,11 +733,10 @@ impl TryFrom<SerializableClientIdentity> for ClientIdentity {
             .device_id
             .filter(|value| !value.trim().is_empty() && value.len() <= 128)
             .ok_or_else(|| "remote terminal clients require a device id".to_string())?;
-        Ok(ClientIdentity::remote(
-            value.client_id,
-            device_id,
-            value.allow_remote_terminal,
-        ))
+        let mut identity =
+            ClientIdentity::remote(value.client_id, device_id, value.allow_remote_terminal);
+        identity.workspace_env_bridge = value.workspace_env_bridge;
+        Ok(identity)
     }
 }
 
@@ -1348,14 +1350,18 @@ mod tests {
             Path::new("/Applications/Cognia.app/Contents/MacOS/cognia-server"),
             "/tmp/cognia & terminal.sock",
         );
-        let plist =
-            cognia_host_service::render_launchd_plist(&spec, cognia_host_service::ServiceScope::User);
+        let plist = cognia_host_service::render_launchd_plist(
+            &spec,
+            cognia_host_service::ServiceScope::User,
+        );
         assert!(plist.contains("<string>com.cognia.terminal-host</string>"));
         assert!(plist.contains("<string>desktop-host</string>"));
         assert!(plist.contains("<string>/tmp/cognia &amp; terminal.sock</string>"));
         assert!(!plist.contains("UserName"));
-        let unit =
-            cognia_host_service::render_systemd_unit(&spec, cognia_host_service::ServiceScope::User);
+        let unit = cognia_host_service::render_systemd_unit(
+            &spec,
+            cognia_host_service::ServiceScope::User,
+        );
         assert!(unit.contains("Description=Cognia durable terminal host"));
         assert!(unit.contains("\"desktop-host\" \"--endpoint\" \"/tmp/cognia & terminal.sock\""));
         assert!(unit.contains("Restart=on-failure"));
@@ -1507,6 +1513,7 @@ mod tests {
     #[test]
     fn serialized_remote_identity_requires_a_device_id() {
         let invalid = SerializableClientIdentity {
+            workspace_env_bridge: false,
             client_id: "client-a".into(),
             device_id: None,
             local: false,
@@ -1514,6 +1521,7 @@ mod tests {
         };
         assert!(ClientIdentity::try_from(invalid).is_err());
         let valid = SerializableClientIdentity {
+            workspace_env_bridge: true,
             client_id: "client-a".into(),
             device_id: Some("device-a".into()),
             local: false,
@@ -1522,6 +1530,7 @@ mod tests {
         let identity = ClientIdentity::try_from(valid).unwrap();
         assert_eq!(identity.device_id.as_deref(), Some("device-a"));
         assert!(!identity.local);
+        assert!(identity.workspace_env_bridge);
     }
 
     #[test]

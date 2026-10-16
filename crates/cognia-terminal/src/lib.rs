@@ -65,3 +65,30 @@ pub mod terminal_host_service;
 pub use replay::ReplayBuffer;
 #[allow(unused_imports)]
 pub use session::{PtySession, SessionOrigin, SpawnRequest, TerminalEvent, TerminalSessionInfo};
+
+#[cfg(test)]
+pub(crate) fn workspace_env_fixture(kind: &str) -> tempfile::TempDir {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        cognia_core::workspace_env::set_workspace_env_provider(std::sync::Arc::new(|query| {
+            let path = query.cwd.to_string_lossy();
+            if path.contains("cognia-port-fixture-error-") {
+                return Err("fixture port range exhausted".into());
+            }
+            if !path.contains("cognia-port-fixture-some-") {
+                return Ok(None);
+            }
+            let base = "41000";
+            Ok(Some(std::collections::BTreeMap::from([
+                ("PORT".into(), base.into()),
+                ("COGNIA_PORT".into(), base.into()),
+                ("COGNIA_PORT_COUNT".into(), "10".into()),
+            ])))
+        }))
+        .expect("install fixture provider once");
+    });
+    tempfile::Builder::new()
+        .prefix(&format!("cognia-port-fixture-{kind}-"))
+        .tempdir()
+        .unwrap()
+}

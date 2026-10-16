@@ -464,6 +464,9 @@ impl ExternalAgentProcessManager {
                         | "DEEPSEEK_BASE_URL"
                         | "COGNIA_GATEWAY_TASK_CONFIG"
                         | "COGNIA_GATEWAY_TOKEN"
+                        | "COGNIA_PORT"
+                        | "COGNIA_PORT_COUNT"
+                        | "PORT"
                 ) || key.starts_with("COGNIA_DSH_")
             });
             config.env.insert("HOME".to_string(), runtime_home);
@@ -489,6 +492,9 @@ impl ExternalAgentProcessManager {
         for (key, value) in &config.env {
             cmd.env(key, value);
         }
+        // Resolve after all request filtering, including the env_clear gateway
+        // and DSH paths. Allocation failure refuses the process creation.
+        apply_workspace_command_env(&mut cmd, config.cwd.as_deref()).await?;
         if config.env.contains_key("COGNIA_DSH_RUNTIME_HOME") {
             // The child gets the key; retained process metadata must not.
             config.env.remove("DEEPSEEK_API_KEY");
@@ -808,6 +814,76 @@ fn configure_kimi_environment(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn workspace_env_is_last_in_inherited_and_dsh_processes() {
+        for isolated in [false, true] {
+            for kind in ["some", "none", "error"] {
+                let cwd = crate::workspace_env_fixture(kind);
+                let manager = ExternalAgentProcessManager::new();
+                let sink = Arc::new(CollectorSink::default());
+                let mut config = echo_config("port-env");
+                config.command = "/usr/bin/env".into();
+                config.args.clear();
+                config.cwd = Some(cwd.path().to_string_lossy().into_owned());
+                config.env.insert("PORT".into(), "user-port".into());
+                if isolated {
+                    config.env.insert(
+                        "COGNIA_DSH_RUNTIME_HOME".into(),
+                        cwd.path().to_string_lossy().into_owned(),
+                    );
+                }
+                let result = manager.spawn(config, sink.clone()).await;
+                if kind == "error" {
+                    assert!(result.unwrap_err().contains("fixture port range exhausted"));
+                    assert!(manager.list().await.is_empty());
+                    continue;
+                }
+                result.unwrap();
+                for _ in 0..200 {
+                    if sink.exited.lock().unwrap().is_some() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                let output = sink.stdout.lock().unwrap();
+                if kind == "some" {
+                    for line in ["PORT=41000", "COGNIA_PORT=41000", "COGNIA_PORT_COUNT=10"] {
+                        assert!(
+                            output.iter().any(|actual| actual == line),
+                            "missing trusted port entry {line}"
+                        );
+                    }
+                    assert!(!output.iter().any(|line| line == "PORT=user-port"));
+                } else {
+                    assert!(output.iter().any(|line| line == "PORT=user-port"));
+                    assert!(!output.iter().any(|line| line.starts_with("COGNIA_PORT=")));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn workspace_env_applies_after_cleared_gateway_environment() {
+        let mut command = Command::new("fixture");
+        command.env_clear().env("PORT", "user-port");
+        apply_resolved_workspace_command_env(
+            &mut command,
+            Ok(Some(std::collections::BTreeMap::from([
+                ("PORT".into(), "41000".into()),
+                ("COGNIA_PORT".into(), "41000".into()),
+                ("COGNIA_PORT_COUNT".into(), "10".into()),
+            ]))),
+        )
+        .unwrap();
+        let env: std::collections::BTreeMap<_, _> = command.as_std().get_envs().collect();
+        assert_eq!(
+            env[std::ffi::OsStr::new("PORT")],
+            Some(std::ffi::OsStr::new("41000"))
+        );
+        assert_eq!(env.len(), 3);
+    }
+
     #[test]
     fn kimi_environment_filters_ambient_identity_hooks_and_bot_credentials() {
         for bot in [false, true] {
@@ -1474,4 +1550,35 @@ mod tests {
         mgr.kill_all().await.expect("cleanup");
         assert!(mgr.list().await.is_empty());
     }
+}
+
+/// Final local spawn overlay shared with ACP terminal creation.
+pub(crate) async fn apply_workspace_command_env(
+    command: &mut tokio::process::Command,
+    cwd: Option<&str>,
+) -> Result<(), String> {
+    let cwd = cwd
+        .map(std::path::PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)
+        .map_err(|reason| format!("agent workspace cwd: {reason}"))?;
+    let env = cognia_core::workspace_env::resolve_workspace_env_async(
+        cognia_core::workspace_env::WorkspaceEnvQuery {
+            cwd,
+            workspace_id: None,
+            namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+        },
+    )
+    .await;
+    apply_resolved_workspace_command_env(command, env)
+}
+
+fn apply_resolved_workspace_command_env(
+    command: &mut tokio::process::Command,
+    env: Result<Option<std::collections::BTreeMap<String, String>>, String>,
+) -> Result<(), String> {
+    if let Some(env) = env.map_err(|reason| format!("agent workspace environment: {reason}"))? {
+        command.envs(env);
+    }
+    Ok(())
 }

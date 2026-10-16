@@ -158,6 +158,25 @@ pub async fn terminal_exec_inner(
         }
     }
 
+    let workspace_cwd = cwd
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)
+        .map_err(|reason| format!("terminal workspace cwd: {reason}"))?;
+    if let Some(env) = cognia_core::workspace_env::resolve_workspace_env_async(
+        cognia_core::workspace_env::WorkspaceEnvQuery {
+            cwd: workspace_cwd,
+            workspace_id: None,
+            namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+        },
+    )
+    .await
+    .map_err(|reason| format!("terminal workspace environment: {reason}"))?
+    {
+        cmd.envs(env);
+    }
+
     let mut child = cmd.spawn().map_err(|e| format!("spawn '{command}': {e}"))?;
 
     if let Some(data) = stdin_data {
@@ -278,6 +297,41 @@ pub fn resolve_shell_mode(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn workspace_env_is_final_and_failure_refuses_exec() {
+        for kind in ["some", "none", "error"] {
+            let cwd = crate::workspace_env_fixture(kind);
+            let result = terminal_exec_inner(
+                Some(cwd.path().to_string_lossy().into_owned()),
+                "/usr/bin/env".into(),
+                vec![],
+                Some(HashMap::from([("PORT".into(), "user-port".into())])),
+                None,
+                None,
+            )
+            .await;
+            if kind == "error" {
+                assert!(result.unwrap_err().contains("fixture port range exhausted"));
+            } else {
+                let result = result.unwrap();
+                assert_eq!(result.exit_code, Some(0));
+                if kind == "some" {
+                    for line in ["PORT=41000", "COGNIA_PORT=41000", "COGNIA_PORT_COUNT=10"] {
+                        assert!(
+                            result.stdout.lines().any(|actual| actual == line),
+                            "missing trusted port entry {line}"
+                        );
+                    }
+                    assert!(!result.stdout.contains("user-port"));
+                } else {
+                    assert!(result.stdout.contains("PORT=user-port"));
+                    assert!(!result.stdout.contains("COGNIA_PORT="));
+                }
+            }
+        }
+    }
+
     use super::*;
 
     fn echo() -> (String, Vec<String>) {

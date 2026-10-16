@@ -204,7 +204,7 @@ fn bootstrap_executable(
         .find_map(|candidate| candidate.canonicalize().ok().filter(|path| path.is_file()))
 }
 
-async fn execute_on_host(
+async fn execute_on_host<F, R>(
     script: EnvironmentScript,
     cwd: String,
     variables: BTreeMap<String, String>,
@@ -212,7 +212,18 @@ async fn execute_on_host(
     policy: Option<EnvironmentPolicy>,
     timeout_secs: Option<u64>,
     host: ExecutionHost,
-) -> Result<ShellResult, String> {
+    resolve_workspace_env: impl FnOnce(cognia_core::workspace_env::WorkspaceEnvQuery) -> R,
+    run_sandbox: impl FnOnce(SandboxCommand, SandboxPolicy) -> F,
+) -> Result<ShellResult, String>
+where
+    R: std::future::Future<Output = Result<Option<BTreeMap<String, String>>, String>>,
+    F: std::future::Future<
+        Output = Result<
+            cognia_exec_sandbox::types::SandboxResult,
+            cognia_exec_sandbox::types::SandboxError,
+        >,
+    >,
+{
     let script = script.resolve_for(std::env::consts::OS);
     if script.is_empty() {
         return Err(format!(
@@ -259,6 +270,17 @@ async fn execute_on_host(
             bootstrap_search_path(inherited).to_string_lossy().into(),
         );
     }
+    // Resolve after renderer variables and keyring values, before either spawn path.
+    if let Some(trusted) = resolve_workspace_env(cognia_core::workspace_env::WorkspaceEnvQuery {
+        cwd: PathBuf::from(&cwd),
+        workspace_id: None,
+        namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+    })
+    .await
+    .map_err(|error| format!("project environment workspace ports: {error}"))?
+    {
+        environment.extend(trusted);
+    }
     let effective = effective_policy(policy, host);
     let mut result = if !effective.require_sandbox {
         tokio::task::spawn_blocking(move || {
@@ -296,7 +318,7 @@ async fn execute_on_host(
             max_memory_mb: 2048,
             max_processes: cognia_exec_sandbox::policy::BASH_DEFAULT_MAX_PROCESSES,
         };
-        match cognia_exec_sandbox::run_confined(command, sandbox_policy).await {
+        match run_sandbox(command, sandbox_policy).await {
             Ok(result) => ShellResult {
                 stdout: result.stdout,
                 stderr: result.stderr,
@@ -341,6 +363,8 @@ pub async fn project_environment_execute(
         policy,
         timeout_secs,
         ExecutionHost::Local,
+        cognia_core::workspace_env::resolve_workspace_env_async,
+        cognia_exec_sandbox::run_confined,
     )
     .await
 }
@@ -361,6 +385,8 @@ pub async fn project_environment_execute_cloud(
         policy,
         timeout_secs,
         ExecutionHost::Cloud,
+        cognia_core::workspace_env::resolve_workspace_env_async,
+        cognia_exec_sandbox::run_confined,
     )
     .await
 }
@@ -368,6 +394,156 @@ pub async fn project_environment_execute_cloud(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn workspace_ports() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("PORT".into(), "41000".into()),
+            ("COGNIA_PORT".into(), "41000".into()),
+            ("COGNIA_PORT_COUNT".into(), "10".into()),
+        ])
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn plain_setup_receives_trusted_ports_and_refuses_resolution_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = execute_on_host(
+            EnvironmentScript::Legacy(
+                "printf '%s:%s:%s' \"$PORT\" \"$COGNIA_PORT\" \"$COGNIA_PORT_COUNT\"".into(),
+            ),
+            dir.path().to_string_lossy().into(),
+            BTreeMap::from([("PORT".into(), "3000".into())]),
+            vec![],
+            None,
+            Some(5),
+            ExecutionHost::Local,
+            |query| {
+                assert_eq!(query.cwd, dir.path());
+                assert_eq!(
+                    query.namespace,
+                    cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE
+                );
+                async {
+                    tokio::task::yield_now().await;
+                    Ok(Some(workspace_ports()))
+                }
+            },
+            cognia_exec_sandbox::run_confined,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(result.stdout, "41000:41000:10");
+
+        // No lease leaves the actual child environment unchanged, including
+        // any explicitly requested PORT and the host's ambient values.
+        for requested_port in [None, Some("3000")] {
+            let variables = requested_port
+                .map(|port| BTreeMap::from([("PORT".into(), port.into())]))
+                .unwrap_or_default();
+            let result = execute_on_host(
+                EnvironmentScript::Legacy(
+                    "printf '%s:%s:%s' \"${PORT-unset}\" \"${COGNIA_PORT-unset}\" \"${COGNIA_PORT_COUNT-unset}\"".into(),
+                ),
+                dir.path().to_string_lossy().into(),
+                variables,
+                vec![],
+                None,
+                Some(5),
+                ExecutionHost::Local,
+                |_| async { Ok(None) },
+                cognia_exec_sandbox::run_confined,
+            )
+            .await
+            .unwrap();
+            let ambient = |name| std::env::var(name).unwrap_or_else(|_| "unset".into());
+            assert_eq!(result.exit_code, Some(0));
+            assert_eq!(
+                result.stdout,
+                format!(
+                    "{}:{}:{}",
+                    requested_port
+                        .map(str::to_string)
+                        .unwrap_or_else(|| ambient("PORT")),
+                    ambient("COGNIA_PORT"),
+                    ambient("COGNIA_PORT_COUNT"),
+                )
+            );
+        }
+
+        let error = execute_on_host(
+            EnvironmentScript::Legacy("touch should-not-spawn".into()),
+            dir.path().to_string_lossy().into(),
+            BTreeMap::new(),
+            vec![],
+            None,
+            Some(5),
+            ExecutionHost::Local,
+            |_| async { Err("port range exhausted".into()) },
+            cognia_exec_sandbox::run_confined,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("port range exhausted"));
+        assert!(!dir.path().join("should-not-spawn").exists());
+    }
+
+    #[tokio::test]
+    async fn sandbox_setup_receives_trusted_ports_or_no_overlay_and_refuses_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        for resolution in [
+            Ok(Some(workspace_ports())),
+            Ok(None),
+            Err("store unavailable".into()),
+        ] {
+            let expected = resolution.clone();
+            let captured = std::sync::Mutex::new(None);
+            let result = execute_on_host(
+                EnvironmentScript::Legacy("env".into()),
+                dir.path().to_string_lossy().into(),
+                if matches!(resolution, Ok(Some(_))) {
+                    BTreeMap::from([("PORT".into(), "3000".into())])
+                } else {
+                    BTreeMap::new()
+                },
+                vec![],
+                None,
+                Some(5),
+                ExecutionHost::Cloud,
+                |_| async { resolution },
+                |command, _policy| {
+                    *captured.lock().unwrap() = Some(command);
+                    std::future::ready(Ok(cognia_exec_sandbox::types::SandboxResult {
+                        exit_code: 0,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        duration: Duration::ZERO,
+                        timed_out: false,
+                        stdout_truncated: false,
+                        stderr_truncated: false,
+                    }))
+                },
+            )
+            .await;
+            let command = captured.into_inner().unwrap();
+            match expected {
+                Ok(Some(environment)) => {
+                    result.unwrap();
+                    let command = command.unwrap();
+                    assert_eq!(command.cwd, dir.path());
+                    assert_eq!(command.env, environment);
+                }
+                Ok(None) => {
+                    result.unwrap();
+                    assert!(command.unwrap().env.is_empty());
+                }
+                Err(reason) => {
+                    assert!(result.unwrap_err().contains(&reason));
+                    assert!(command.is_none());
+                }
+            }
+        }
+    }
 
     #[test]
     fn bootstrap_sandbox_resolves_only_the_selected_executable() {

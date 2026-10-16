@@ -90,3 +90,35 @@ test("supervisor rejects a workspace symlink that escapes the mounted root", asy
     /outside workspace/
   )
 })
+
+for (const inherited of [false, true]) {
+  test(`supervisor carries ${inherited ? "inherited" : "explicit"} workspace ports to a real child`, async () => {
+    const events = []
+    let finish
+    const exited = new Promise((resolve) => {
+      finish = resolve
+    })
+    const ports = { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }
+    const supervisor = new AgentSupervisor({
+      hostEnv: inherited ? ports : { PORT: "1" },
+      onEvent: (event) => {
+        events.push(event)
+        if (event.type === "exit") finish()
+      },
+    })
+    await supervisor.spawn({
+      id: "ports",
+      command: process.execPath,
+      args: ["-e", "process.stdout.write(JSON.stringify(process.env))"],
+      env: inherited ? {} : ports,
+    })
+    await exited
+    const actual = JSON.parse(
+      events
+        .filter((e) => e.type === "stdout")
+        .map((e) => e.data)
+        .join("")
+    )
+    for (const [key, value] of Object.entries(ports)) assert.equal(actual[key], value)
+  })
+}

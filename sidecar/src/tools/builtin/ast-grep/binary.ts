@@ -111,9 +111,10 @@ export function stagedBinaryPath(moduleUrl = import.meta.url, executablePath = p
  * @param {string} name
  * @returns {Promise<string | null>}
  */
-function pathLookup(name: string): Promise<string | null> {
+async function pathLookup(name: string): Promise<string | null> {
   const [cmd, args]: [string, string[]] =
     process.platform === "win32" ? ["where", [name]] : ["sh", ["-c", `command -v ${name}`]]
+  const child = await spawn(cmd, args, { windowsHide: true })
   return new Promise<string | null>((resolve) => {
     let settled = false
     const finish = (val: string | null) => {
@@ -121,12 +122,6 @@ function pathLookup(name: string): Promise<string | null> {
         settled = true
         resolve(val)
       }
-    }
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn(cmd, args, { windowsHide: true })
-    } catch {
-      return finish(null)
     }
     let out = ""
     const timer = setTimeout(() => {

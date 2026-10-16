@@ -279,6 +279,8 @@ impl AcpTerminalManager {
             }
         }
 
+        super::process::apply_workspace_command_env(&mut cmd, cwd).await?;
+
         // Set environment to prevent interactive prompts
         #[cfg(windows)]
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
@@ -538,6 +540,59 @@ impl AcpTerminalManager {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn acp_terminal_workspace_env_is_last_and_errors_refuse_spawn() {
+        for kind in ["some", "none", "error"] {
+            let cwd = crate::workspace_env_fixture(kind);
+            let manager = AcpTerminalManager::new();
+            let env = HashMap::from([("PORT".into(), "user-port".into())]);
+            let result = manager
+                .create(
+                    "session",
+                    "/usr/bin/env",
+                    &[],
+                    cwd.path().to_str(),
+                    Some(&env),
+                    None,
+                )
+                .await;
+            if kind == "error" {
+                assert!(result.unwrap_err().contains("fixture port range exhausted"));
+                assert!(manager.list().await.is_empty());
+                continue;
+            }
+            let id = result.unwrap();
+            manager.wait_for_exit(&id, Some(5)).await.unwrap();
+            let mut output = manager.get_output(&id, None).await.unwrap();
+            for _ in 0..200 {
+                let expected = if kind == "some" {
+                    "PORT=41000"
+                } else {
+                    "PORT=user-port"
+                };
+                if output.0.lines().any(|line| line == expected) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                output = manager.get_output(&id, None).await.unwrap();
+            }
+            if kind == "some" {
+                assert!(
+                    output.0.contains("COGNIA_PORT=41000"),
+                    "missing trusted COGNIA_PORT"
+                );
+                assert!(output.0.contains("COGNIA_PORT_COUNT=10"));
+                assert!(output.0.lines().any(|line| line == "PORT=41000"));
+                assert!(!output.0.contains("PORT=user-port"));
+            } else {
+                assert!(output.0.contains("PORT=user-port"));
+                assert!(!output.0.contains("COGNIA_PORT="));
+            }
+            manager.release(&id).await.unwrap();
+        }
+    }
+
     use super::*;
 
     // ---- truncate_output_tail: byte-limit / char-boundary handling --------

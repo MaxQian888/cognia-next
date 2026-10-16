@@ -2,7 +2,18 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import type { ExecFileException } from "node:child_process"
 
-import { execFileAsync, runCapped } from "./exec.ts"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { once } from "node:events"
+import {
+  execFileAsync,
+  runCapped,
+  withProcessSandbox,
+  resolveProcessPortEnv,
+  sandboxedProcessEnv,
+  spawnInProcessSandbox,
+} from "./exec.ts"
 
 test("execFileAsync resolves with stdout for a successful run", async () => {
   const { stdout } = await execFileAsync("node", ["-e", "process.stdout.write('hi')"])
@@ -105,4 +116,117 @@ test("sandbox process environment strips ambient credentials and injected loader
     { DYLD_INSERT_LIBRARIES: "evil", NODE_OPTIONS: "--require evil", CUSTOM_BUILD_MODE: "debug" }
   )
   assert.deepEqual(env, { PATH: "/bin", PNPM_HOME: "/tools", CUSTOM_BUILD_MODE: "debug" })
+})
+
+const trustedPorts = { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }
+
+test("trusted ports win after user overrides with and without sandbox filtering", () => {
+  for (const scope of [undefined, {}]) {
+    const result = sandboxedProcessEnv(
+      { PORT: "1111" },
+      scope,
+      { PORT: "2222", COGNIA_PORT: "2222" },
+      trustedPorts
+    )
+    assert.deepEqual(result, trustedPorts)
+  }
+})
+
+test("port resolution caches canonical cwd per call and isolates concurrent sessions", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "port-env-"))
+  const other = path.join(root, "other")
+  const alias = path.join(root, "alias")
+  fs.mkdirSync(other)
+  fs.symlinkSync(other, alias, "dir")
+  const calls: unknown[] = []
+  const hostRpc = {
+    async call(method: string, params: unknown) {
+      calls.push([method, params])
+      return trustedPorts
+    },
+  }
+  try {
+    await withProcessSandbox(
+      undefined,
+      root,
+      async () => {
+        await Promise.all([resolveProcessPortEnv(), resolveProcessPortEnv(root)])
+        await resolveProcessPortEnv(other)
+        await resolveProcessPortEnv(alias)
+        assert.equal(calls.length, 2)
+      },
+      { hostRpc, sessionId: "one" }
+    )
+    await withProcessSandbox(undefined, root, () => resolveProcessPortEnv(), {
+      hostRpc,
+      sessionId: "one",
+    })
+    assert.equal(calls.length, 3, "a new tool call receives a fresh cache")
+    const results = await Promise.all(
+      ["41000", "42000"].map((port) =>
+        withProcessSandbox(
+          undefined,
+          root,
+          async () => {
+            await new Promise((resolve) => setImmediate(resolve))
+            return resolveProcessPortEnv()
+          },
+          { sessionId: port, hostRpc: { call: async () => ({ ...trustedPorts, PORT: port }) } }
+        )
+      )
+    )
+    assert.deepEqual(
+      results.map((value) => value.PORT),
+      ["41000", "42000"]
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("shared exec and streaming spawn apply trusted ports to the actual cwd", async () => {
+  const script =
+    "process.stdout.write([process.env.COGNIA_PORT,process.env.COGNIA_PORT_COUNT,process.env.PORT].join(','))"
+  await withProcessSandbox(
+    undefined,
+    process.cwd(),
+    async () => {
+      const { stdout } = await execFileAsync(process.execPath, ["-e", script], {
+        env: { PORT: "3333" },
+      })
+      assert.equal(String(stdout), "41000,10,41000")
+      const child = await spawnInProcessSandbox(process.execPath, ["-e", script], {
+        env: { PORT: "3333" },
+      })
+      let output = ""
+      child.stdout!.on("data", (chunk) => {
+        output += String(chunk)
+      })
+      await once(child, "close")
+      assert.equal(output, "41000,10,41000")
+    },
+    { hostRpc: { call: async () => trustedPorts }, sessionId: "shared" }
+  )
+})
+
+test("host resolution errors refuse both shared spawn paths and standalone is a no-op", async () => {
+  assert.deepEqual(await resolveProcessPortEnv("/a/path/that/does/not/exist"), {})
+  await withProcessSandbox(
+    undefined,
+    process.cwd(),
+    async () => {
+      await assert.rejects(
+        execFileAsync(process.execPath, ["-e", "throw Error('spawned')"]),
+        /port range exhausted/
+      )
+      await assert.rejects(spawnInProcessSandbox(process.execPath, []), /port range exhausted/)
+    },
+    {
+      hostRpc: {
+        call: async () => {
+          throw new Error("port range exhausted")
+        },
+      },
+    }
+  )
 })

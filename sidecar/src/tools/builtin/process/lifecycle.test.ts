@@ -17,7 +17,13 @@ interface StartPayload {
 
 interface SupervisorCall {
   method: string
-  req?: { shell: string; shellArgs: string[]; cwd?: string; detach?: boolean }
+  req?: {
+    shell: string
+    shellArgs: string[]
+    cwd?: string
+    detach?: boolean
+    env?: Record<string, string>
+  }
   pid?: number
 }
 
@@ -195,4 +201,57 @@ test("start_process wraps supervised argv and refuses a missing sandbox", async 
   })
   assert.equal(result.isError, true)
   assert.equal(calls.length, 1)
+})
+
+test("start_process passes trusted ports to capture and supervised detached spawns", async () => {
+  const { withProcessSandbox } = await import("../../../platform/process/exec.ts")
+  const { bgShells, calls } = fakeSupervisor()
+  const trusted = { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }
+  await withProcessSandbox(
+    undefined,
+    process.cwd(),
+    async () => {
+      const args = {
+        program: "node",
+        args: ["-e", "console.log(process.env.PORT)"],
+        detached: false,
+        timeoutSecs: 10,
+      }
+      const result = await execStartProcess(args, { bgShells })
+      assert.match(firstText(result), /41000/)
+      await execStartProcess({ ...args, detached: true }, { bgShells })
+      for (const [key, value] of Object.entries(trusted))
+        assert.equal(calls[0]!.req!.env![key], value)
+    },
+    { hostRpc: { call: async () => trusted } }
+  )
+})
+
+test("start_process fails before its supervisor when host lease resolution fails", async () => {
+  const { withProcessSandbox } = await import("../../../platform/process/exec.ts")
+  const { bgShells, calls } = fakeSupervisor()
+  const result = await withProcessSandbox(
+    undefined,
+    process.cwd(),
+    () =>
+      execStartProcess(
+        {
+          program: "node",
+          args: [],
+          detached: true,
+          timeoutSecs: 10,
+        },
+        { bgShells }
+      ),
+    {
+      hostRpc: {
+        call: async () => {
+          throw new Error("lease exhausted")
+        },
+      },
+    }
+  )
+  assert.equal(result.isError, true)
+  assert.match(firstText(result), /lease exhausted/)
+  assert.equal(calls.length, 0)
 })

@@ -307,13 +307,252 @@ where
 /// adapter such as the Companion WebSocket route.
 pub async fn connect_terminal_host_client(
     resource_dir: Option<&Path>,
-    identity: ClientIdentity,
+    mut identity: ClientIdentity,
 ) -> Result<BoxedTerminalHostIo, String> {
+    let bridge_workspace_env = !identity.local;
+    identity.workspace_env_bridge = bridge_workspace_env;
     let endpoint = default_terminal_host_endpoint();
-    connect_or_spawn_terminal_host(&endpoint, terminal_resources(resource_dir), || {
-        try_connect_terminal_host_as(&endpoint, identity.clone())
-    })
-    .await
+    let stream =
+        connect_or_spawn_terminal_host(&endpoint, terminal_resources(resource_dir), || {
+            try_connect_terminal_host_as(&endpoint, identity.clone())
+        })
+        .await?;
+    if bridge_workspace_env {
+        remote_workspace_bridge(stream).await
+    } else {
+        Ok(stream)
+    }
+}
+
+async fn remote_workspace_bridge(
+    mut stream: BoxedTerminalHostIo,
+) -> Result<BoxedTerminalHostIo, String> {
+    let hello = request_over_host_stream(
+        &mut stream,
+        TerminalFrame::command(FrameKind::Hello, Uuid::nil(), 0, b"{}".to_vec()),
+    )
+    .await?;
+    let ack: serde_json::Value =
+        serde_json::from_slice(&hello.payload).map_err(|error| error.to_string())?;
+    let supported = ack["protocolFeatures"].as_array().is_some_and(|features| {
+        features
+            .iter()
+            .any(|feature| feature == "workspaceEnvBridge")
+    });
+    if supported {
+        Ok(workspace_env_bridge(stream))
+    } else {
+        Ok(legacy_workspace_env_bridge(stream))
+    }
+}
+
+/// Old hosts expose no profile cwd or immutable profile revision. A remote
+/// profile-only spawn cannot be resolved safely, even with a native mirror:
+/// another native process may have replaced the profile. Existing sessions
+/// remain accessible; only new remote spawns require a host restart.
+fn legacy_workspace_env_bridge(host: BoxedTerminalHostIo) -> BoxedTerminalHostIo {
+    let (client, bridge) = tokio::io::duplex(crate::protocol::MAX_FRAME_PAYLOAD * 2);
+    tokio::spawn(async move {
+        let (mut client_reader, client_writer) = tokio::io::split(bridge);
+        let (mut host_reader, mut host_writer) = tokio::io::split(host);
+        let client_writer = std::sync::Arc::new(tokio::sync::Mutex::new(client_writer));
+        let outgoing_client = client_writer.clone();
+        let mut outgoing = tokio::spawn(async move {
+            while let Ok(Some(frame)) = read_frame(&mut client_reader).await {
+                let error = match frame.kind {
+                    FrameKind::Spawn => Some("terminal host cannot resolve the remote profile's workspace environment; restart the desktop host"),
+                    FrameKind::WorkspaceEnvQuery | FrameKind::WorkspaceEnvResult => Some("native workspace environment frames are not renderer commands"),
+                    _ => None,
+                };
+                if let Some(message) = error {
+                    let Ok(error) = bridge_error(&frame, message) else {
+                        break;
+                    };
+                    if write_frame(&mut *outgoing_client.lock().await, &error)
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                } else if write_frame(&mut host_writer, &frame).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let mut incoming = tokio::spawn(async move {
+            while let Ok(Some(frame)) = read_frame(&mut host_reader).await {
+                if write_frame(&mut *client_writer.lock().await, &frame)
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        tokio::select! {
+            _ = &mut outgoing => { incoming.abort(); let _ = incoming.await; }
+            _ = &mut incoming => { outgoing.abort(); let _ = outgoing.await; }
+        }
+    });
+    Box::pin(client)
+}
+
+/// Local callers own the complete request, so unlike legacy remote profiles
+/// their cwd can be resolved before deciding whether the host capability is
+/// needed. The returned payload is the actual Spawn wire request.
+#[cfg(any(test, feature = "tauri-host"))]
+pub(crate) async fn local_spawn_payload(
+    request: crate::session::SpawnRequest,
+    profile_id: String,
+    supports_workspace_env: bool,
+) -> Result<serde_json::Value, String> {
+    let workspace_env = crate::session::resolve_workspace_env_for_request_async(&request).await?;
+    if workspace_env.env.is_some() && !supports_workspace_env {
+        return Err(
+            "terminal host lacks the workspace environment bridge; restart the desktop host".into(),
+        );
+    }
+    Ok(
+        serde_json::json!({"profileId": profile_id, "request": request, "workspaceEnv": workspace_env}),
+    )
+}
+
+/// Keep the existing byte-stream API for WS/RTC adapters. Internal lease
+/// queries terminate here and never reach the renderer. One spawn exchange
+/// is in flight at a time so its answer cannot be interleaved with user input.
+fn workspace_env_bridge(host: BoxedTerminalHostIo) -> BoxedTerminalHostIo {
+    workspace_env_bridge_with_resolver(host, crate::session::resolve_workspace_env_for_request)
+}
+
+fn workspace_env_bridge_with_resolver<F>(
+    host: BoxedTerminalHostIo,
+    resolve: F,
+) -> BoxedTerminalHostIo
+where
+    F: Fn(&crate::session::SpawnRequest) -> Result<crate::session::WorkspaceEnvResolution, String>
+        + Send
+        + Sync
+        + 'static,
+{
+    use std::sync::Arc;
+    use tokio::sync::{watch, Mutex};
+    let (client, bridge) = tokio::io::duplex(crate::protocol::MAX_FRAME_PAYLOAD * 2);
+    let (mut client_reader, client_writer) = tokio::io::split(bridge);
+    let (mut host_reader, host_writer) = tokio::io::split(host);
+    let client_writer = Arc::new(Mutex::new(client_writer));
+    let host_writer = Arc::new(Mutex::new(host_writer));
+    let (pending, mut pending_changed) = watch::channel(None::<u64>);
+    let pending = Arc::new(pending);
+    let resolve = Arc::new(resolve);
+    tokio::spawn(async move {
+        let (frames, mut received) = tokio::sync::mpsc::channel(256);
+        // Read EOF even while allocation is pending, so disconnect cancels
+        // the native response before desktop-host can create a child.
+        let mut reader = tokio::spawn(async move {
+            loop {
+                let Some(frame) = read_frame(&mut client_reader).await? else {
+                    return Ok::<(), String>(());
+                };
+                frames
+                    .try_send(frame)
+                    .map_err(|_| "terminal bridge input queue overflowed".to_string())?;
+            }
+        });
+        let outgoing_host = host_writer.clone();
+        let outgoing_client = client_writer.clone();
+        let outgoing_pending = pending.clone();
+        let mut outgoing = tokio::spawn(async move {
+            loop {
+                let Some(frame) = received.recv().await else {
+                    return Ok::<(), String>(());
+                };
+                if matches!(
+                    frame.kind,
+                    FrameKind::WorkspaceEnvQuery | FrameKind::WorkspaceEnvResult
+                ) {
+                    let error = bridge_error(
+                        &frame,
+                        "native workspace environment frames are not renderer commands",
+                    )?;
+                    write_frame(&mut *outgoing_client.lock().await, &error).await?;
+                    continue;
+                }
+                let spawn = frame.kind == FrameKind::Spawn;
+                if spawn {
+                    outgoing_pending.send_replace(Some(frame.sequence));
+                }
+                write_frame(&mut *outgoing_host.lock().await, &frame).await?;
+                if spawn {
+                    while pending_changed.borrow_and_update().is_some() {
+                        pending_changed
+                            .changed()
+                            .await
+                            .map_err(|_| "workspace bridge closed".to_string())?;
+                    }
+                }
+            }
+        });
+        let mut incoming = tokio::spawn(async move {
+            loop {
+                let Some(frame) = read_frame(&mut host_reader).await? else {
+                    return Ok::<(), String>(());
+                };
+                if frame.kind == FrameKind::WorkspaceEnvQuery {
+                    if *pending.borrow() != Some(frame.sequence) {
+                        return Err("unexpected workspace environment query".into());
+                    }
+                    let resolved = match serde_json::from_slice::<crate::session::SpawnRequest>(
+                        &frame.payload,
+                    ) {
+                        Ok(request) => {
+                            let resolve = resolve.clone();
+                            tokio::task::spawn_blocking(move || resolve(&request))
+                                .await
+                                .map_err(|error| {
+                                    format!("workspace resolver task failed: {error}")
+                                })?
+                        }
+                        Err(error) => Err(format!("workspace profile is invalid: {error}")),
+                    };
+                    let response = TerminalFrame::command(
+                        FrameKind::WorkspaceEnvResult,
+                        frame.session_id,
+                        frame.sequence,
+                        serde_json::to_vec(&resolved).map_err(|error| error.to_string())?,
+                    );
+                    write_frame(&mut *host_writer.lock().await, &response).await?;
+                    continue;
+                }
+                if frame.kind == FrameKind::WorkspaceEnvResult {
+                    return Err("unexpected workspace environment result".into());
+                }
+                if matches!(frame.kind, FrameKind::SessionSnapshot | FrameKind::Error)
+                    && *pending.borrow() == Some(frame.sequence)
+                {
+                    pending.send_replace(None);
+                }
+                write_frame(&mut *client_writer.lock().await, &frame).await?;
+            }
+        });
+        tokio::select! {
+            _ = &mut reader => { outgoing.abort(); incoming.abort(); let _ = outgoing.await; let _ = incoming.await; }
+            _ = &mut outgoing => { reader.abort(); incoming.abort(); let _ = reader.await; let _ = incoming.await; }
+            _ = &mut incoming => { reader.abort(); outgoing.abort(); let _ = reader.await; let _ = outgoing.await; }
+        }
+    });
+    Box::pin(client)
+}
+
+fn bridge_error(frame: &TerminalFrame, message: &str) -> Result<TerminalFrame, String> {
+    Ok(TerminalFrame::command(
+        FrameKind::Error,
+        frame.session_id,
+        frame.sequence,
+        serde_json::to_vec(
+            &serde_json::json!({"code": TerminalErrorCode::PermissionDenied, "message": message}),
+        )
+        .map_err(|error| error.to_string())?,
+    ))
 }
 
 async fn request_over_host_stream(
@@ -653,6 +892,373 @@ fn dev_workspace_root() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn old_host_keeps_existing_sessions_and_refuses_unresolvable_remote_spawns() {
+        let host_id = Uuid::new_v4().to_string();
+        let (native, mut server) = tokio::io::duplex(65536);
+        let (sent, mut observed) = tokio::sync::mpsc::unbounded_channel();
+        let server_host = host_id.clone();
+        let host_task = tokio::spawn(async move {
+            let hello = read_frame(&mut server).await.unwrap().unwrap();
+            assert_eq!(hello.kind, FrameKind::Hello);
+            write_frame(
+                &mut server,
+                &TerminalFrame::command(
+                    FrameKind::Ack,
+                    Uuid::nil(),
+                    hello.sequence,
+                    serde_json::to_vec(&serde_json::json!({"ok":true,"hostId":server_host}))
+                        .unwrap(),
+                ),
+            )
+            .await
+            .unwrap();
+            while let Some(frame) = read_frame(&mut server).await.unwrap() {
+                sent.send(frame.kind).unwrap();
+                let kind = match frame.kind {
+                    FrameKind::List => FrameKind::HostSnapshot,
+                    FrameKind::Spawn => FrameKind::SessionSnapshot,
+                    _ => FrameKind::Ack,
+                };
+                write_frame(
+                    &mut server,
+                    &TerminalFrame::command(kind, frame.session_id, frame.sequence, b"{}".to_vec()),
+                )
+                .await
+                .unwrap();
+            }
+        });
+        let mut client = remote_workspace_bridge(Box::pin(native)).await.unwrap();
+        for (sequence, kind) in [
+            (1, FrameKind::List),
+            (2, FrameKind::Attach),
+            (3, FrameKind::Kill),
+        ] {
+            request_over_host_stream(
+                &mut client,
+                TerminalFrame::command(kind, Uuid::nil(), sequence, b"{}".to_vec()),
+            )
+            .await
+            .unwrap();
+            assert_eq!(observed.recv().await, Some(kind));
+        }
+        let error = request_over_host_stream(
+            &mut client,
+            TerminalFrame::command(
+                FrameKind::Spawn,
+                Uuid::nil(),
+                4,
+                serde_json::to_vec(&serde_json::json!({"profileId":"default"})).unwrap(),
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("restart the desktop host"), "{error}");
+        assert!(
+            observed.try_recv().is_err(),
+            "refused spawn reached the old host"
+        );
+        drop(client);
+        host_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn old_host_local_spawn_resolves_request_before_capability_gate() {
+        for kind in ["none", "some", "error"] {
+            let cwd = crate::workspace_env_fixture(kind);
+            let request: crate::session::SpawnRequest = serde_json::from_value(serde_json::json!({
+                "shell":"/bin/sh", "cwd":cwd.path(), "env":{"PORT":"user"}, "rows":24,"cols":80
+            }))
+            .unwrap();
+            let result = local_spawn_payload(request.clone(), "default".into(), false).await;
+            match kind {
+                "none" => {
+                    let payload = result.unwrap();
+                    assert_eq!(payload["request"]["cwd"], cwd.path().to_str().unwrap());
+                    assert_eq!(payload["request"]["env"]["PORT"], "user");
+                    assert!(payload["workspaceEnv"]["env"].is_null());
+                    assert_eq!(payload["profileId"], "default");
+                }
+                "some" => {
+                    assert!(result.unwrap_err().contains("restart the desktop host"));
+                    let payload = local_spawn_payload(request, "default".into(), true)
+                        .await
+                        .unwrap();
+                    assert_eq!(payload["workspaceEnv"]["env"]["PORT"], "41000");
+                    assert_eq!(payload["workspaceEnv"]["env"]["COGNIA_PORT"], "41000");
+                    assert_eq!(payload["workspaceEnv"]["env"]["COGNIA_PORT_COUNT"], "10");
+                }
+                "error" => assert!(result.unwrap_err().contains("fixture port range exhausted")),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn workspace_bridge_host(root: &Path) -> (crate::host::TerminalHost, crate::host::HostClient) {
+        let host = crate::host::TerminalHost::new("workspace-test", Default::default()).unwrap();
+        let local = host.connect(ClientIdentity::local("seed")).unwrap();
+        let request = serde_json::from_value(serde_json::json!({
+            "shell": "/bin/sh", "args": ["-c", r#"printf '%s:%s:%s\n' "${COGNIA_PORT-unset}" "${COGNIA_PORT_COUNT-unset}" "$PORT" > observed"#],
+            "cwd": root, "env": {"PORT": "user-port"}, "rows": 24, "cols": 80,
+            "enableShellIntegration": false, "forceUtf8": false
+        })).unwrap();
+        host.sync_profile(&local.connection_id, "default".into(), request)
+            .unwrap();
+        (host, local)
+    }
+
+    #[cfg(unix)]
+    fn workspace_bridge_identity() -> ClientIdentity {
+        let mut identity = ClientIdentity::remote("native-proxy", "device", true);
+        identity.workspace_env_bridge = true;
+        identity
+    }
+
+    #[cfg(unix)]
+    async fn workspace_bridge_reply(
+        stream: &mut BoxedTerminalHostIo,
+        sequence: u64,
+    ) -> TerminalFrame {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let frame = read_frame(stream)
+                    .await
+                    .unwrap()
+                    .expect("bridge stays open");
+                assert!(!matches!(
+                    frame.kind,
+                    FrameKind::WorkspaceEnvQuery | FrameKind::WorkspaceEnvResult
+                ));
+                if frame.sequence == sequence
+                    && matches!(frame.kind, FrameKind::SessionSnapshot | FrameKind::Error)
+                {
+                    return frame;
+                }
+            }
+        })
+        .await
+        .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn workspace_env_bridge_resolves_each_remote_spawn_without_stale_profile_env() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let (host, local) = workspace_bridge_host(root.path());
+        let (native, server) = tokio::io::duplex(128 * 1024);
+        let serve = tokio::spawn(crate::host_wire::serve_host_stream(
+            server,
+            host.clone(),
+            workspace_bridge_identity(),
+            root.path().into(),
+            root.path().join("known_hosts"),
+        ));
+        let mode = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mode_in = mode.clone();
+        let calls_in = calls.clone();
+        let expected_cwd = root.path().to_string_lossy().into_owned();
+        let mut client = workspace_env_bridge_with_resolver(Box::pin(native), move |request| {
+            calls_in.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(request.cwd.as_deref(), Some(expected_cwd.as_str()));
+            assert_eq!(
+                request.env["PORT"], "user-port",
+                "trusted lease must never overwrite stored profile"
+            );
+            assert!(!request.env.contains_key("COGNIA_PORT"));
+            match mode_in.load(Ordering::SeqCst) {
+                0 => Ok(crate::session::WorkspaceEnvResolution {
+                    cwd: request.cwd.clone(),
+                    env: Some(std::collections::BTreeMap::from([
+                        ("PORT".into(), "41000".into()),
+                        ("COGNIA_PORT".into(), "41000".into()),
+                        ("COGNIA_PORT_COUNT".into(), "10".into()),
+                    ])),
+                }),
+                1 => Ok(crate::session::WorkspaceEnvResolution {
+                    cwd: None,
+                    env: None,
+                }),
+                _ => Err("port range exhausted at execution".into()),
+            }
+        });
+        // Paired clients cannot inject the internal native response kind.
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::WorkspaceEnvResult,
+                Uuid::new_v4(),
+                7,
+                b"{}".to_vec(),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            workspace_bridge_reply(&mut client, 7).await.kind,
+            FrameKind::Error
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        for value in 0..3 {
+            mode.store(value, Ordering::SeqCst);
+            let _ = std::fs::remove_file(root.path().join("observed"));
+            let sequence = value as u64 + 10;
+            write_frame(
+                &mut client,
+                &TerminalFrame::command(
+                    FrameKind::Spawn,
+                    Uuid::nil(),
+                    sequence,
+                    br#"{"profileId":"default"}"#.to_vec(),
+                ),
+            )
+            .await
+            .unwrap();
+            let response = workspace_bridge_reply(&mut client, sequence).await;
+            if value == 2 {
+                assert_eq!(response.kind, FrameKind::Error);
+                assert!(String::from_utf8_lossy(&response.payload)
+                    .contains("port range exhausted at execution"));
+                assert!(!root.path().join("observed").exists());
+            } else {
+                assert_eq!(response.kind, FrameKind::SessionSnapshot);
+                let expected = if value == 0 {
+                    "41000:10:41000"
+                } else {
+                    "unset:unset:user-port"
+                };
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        if std::fs::read_to_string(root.path().join("observed"))
+                            .is_ok_and(|value| value.trim() == expected)
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+            }
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert_eq!(host.list(&local.connection_id).unwrap().len(), 2);
+        drop(client);
+        let _ = tokio::time::timeout(Duration::from_secs(2), serve)
+            .await
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn workspace_env_bridge_disconnect_cancels_pending_resolution() {
+        use std::sync::{mpsc, Arc, Mutex};
+        let root = tempfile::tempdir().unwrap();
+        let (host, local) = workspace_bridge_host(root.path());
+        let (native, server) = tokio::io::duplex(128 * 1024);
+        let serve = tokio::spawn(crate::host_wire::serve_host_stream(
+            server,
+            host.clone(),
+            workspace_bridge_identity(),
+            root.path().into(),
+            root.path().join("known_hosts"),
+        ));
+        let (started, mut begun) = tokio::sync::mpsc::unbounded_channel();
+        let (release, wait) = mpsc::channel();
+        let wait = Arc::new(Mutex::new(wait));
+        let mut client = workspace_env_bridge_with_resolver(Box::pin(native), move |_| {
+            started.send(()).unwrap();
+            let _ = wait.lock().unwrap().recv_timeout(Duration::from_secs(5));
+            Ok(crate::session::WorkspaceEnvResolution {
+                cwd: None,
+                env: None,
+            })
+        });
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::Spawn,
+                Uuid::nil(),
+                1,
+                br#"{"profileId":"default"}"#.to_vec(),
+            ),
+        )
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), begun.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        drop(client);
+        let stopped = tokio::time::timeout(Duration::from_secs(2), serve).await;
+        let _ = release.send(());
+        assert!(
+            stopped.is_ok(),
+            "disconnect must close host stream before resolution returns"
+        );
+        assert!(host.list(&local.connection_id).unwrap().is_empty());
+        assert!(!root.path().join("observed").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn workspace_env_bridge_rejects_stale_or_forged_correlation() {
+        for wrong_sequence in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let (host, local) = workspace_bridge_host(root.path());
+            let (mut native, server) = tokio::io::duplex(128 * 1024);
+            let serve = tokio::spawn(crate::host_wire::serve_host_stream(
+                server,
+                host.clone(),
+                workspace_bridge_identity(),
+                root.path().into(),
+                root.path().join("known_hosts"),
+            ));
+            write_frame(
+                &mut native,
+                &TerminalFrame::command(
+                    FrameKind::Spawn,
+                    Uuid::nil(),
+                    1,
+                    br#"{"profileId":"default"}"#.to_vec(),
+                ),
+            )
+            .await
+            .unwrap();
+            let query = read_frame(&mut native).await.unwrap().unwrap();
+            assert_eq!(query.kind, FrameKind::WorkspaceEnvQuery);
+            let response = TerminalFrame::command(
+                FrameKind::WorkspaceEnvResult,
+                if wrong_sequence {
+                    query.session_id
+                } else {
+                    Uuid::new_v4()
+                },
+                if wrong_sequence { 2 } else { query.sequence },
+                serde_json::to_vec(&Ok::<_, String>(crate::session::WorkspaceEnvResolution {
+                    cwd: None,
+                    env: None,
+                }))
+                .unwrap(),
+            );
+            write_frame(&mut native, &response).await.unwrap();
+            assert_eq!(
+                read_frame(&mut native).await.unwrap().unwrap().kind,
+                FrameKind::Error
+            );
+            assert!(host.list(&local.connection_id).unwrap().is_empty());
+            drop(native);
+            let _ = tokio::time::timeout(Duration::from_secs(2), serve)
+                .await
+                .unwrap();
+        }
+    }
     use super::*;
 
     #[test]

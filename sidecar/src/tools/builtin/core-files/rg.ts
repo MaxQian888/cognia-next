@@ -25,9 +25,10 @@ export function __resetRgCache(): void {
  * probe stalled the whole sidecar on the first search of a session (a synchronous
  * subprocess with a 5s ceiling); this awaits an async `spawn` instead.
  */
-function pathLookup(): Promise<string | null> {
+async function pathLookup(): Promise<string | null> {
   const [cmd, args]: [string, string[]] =
     process.platform === "win32" ? ["where", ["rg"]] : ["sh", ["-c", "command -v rg"]]
+  const child = await spawn(cmd, args, { windowsHide: true })
   return new Promise<string | null>((resolve) => {
     let settled = false
     const finish = (val: string | null) => {
@@ -35,12 +36,6 @@ function pathLookup(): Promise<string | null> {
         settled = true
         resolve(val)
       }
-    }
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn(cmd, args, { windowsHide: true })
-    } catch {
-      return finish(null)
     }
     let out = ""
     const timer = setTimeout(() => {
@@ -159,13 +154,14 @@ export async function runRipgrep(
   if (!bin) throw new Error("ripgrep is not available")
   const maxBuffer = opts.maxBuffer ?? 10 * 1024 * 1024 // 10 MB of output is plenty
 
+  const child = await spawn(bin, rgArgs, {
+    cwd: opts.cwd,
+    signal: opts.signal,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+
   return new Promise<{ stdout: string; code: number; truncated: boolean }>((resolve, reject) => {
-    const child = spawn(bin, rgArgs, {
-      cwd: opts.cwd,
-      signal: opts.signal,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    })
     let out = ""
     let truncated = false
     let settled = false

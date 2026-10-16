@@ -108,6 +108,103 @@ pub struct SpawnRequest {
     pub sandbox_network: Option<bool>,
 }
 
+/// Resolve on the owning host before crossing the desktop-host IPC boundary.
+/// The terminal host receives only the resulting environment, never a store handle.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct WorkspaceEnvResolution {
+    pub cwd: Option<String>,
+    pub env: Option<std::collections::BTreeMap<String, String>>,
+}
+
+impl WorkspaceEnvResolution {
+    pub(crate) fn apply(self, req: &mut SpawnRequest) -> Result<(), String> {
+        if let Some(env) = self.env {
+            if env
+                .keys()
+                .any(|key| !cognia_core::workspace_env::WORKSPACE_ENV_KEYS.contains(&key.as_str()))
+            {
+                return Err("terminal workspace environment contains an unsupported key".into());
+            }
+            if let Some(cwd) = self.cwd {
+                req.cwd = Some(cwd);
+            }
+            req.env.extend(env);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn apply_workspace_env(req: &mut SpawnRequest) -> Result<(), String> {
+    resolve_workspace_env_for_request(req)?.apply(req)
+}
+
+fn workspace_env_query(
+    req: &SpawnRequest,
+) -> Result<cognia_core::workspace_env::WorkspaceEnvQuery, String> {
+    let cwd = req
+        .cwd
+        .as_deref()
+        .filter(|cwd| Path::new(cwd).is_dir())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            // portable-pty uses the child's HOME on Unix and USERPROFILE on
+            // Windows when cwd is absent or is not a directory.
+            let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+            req.env
+                .get(key)
+                .map(std::path::PathBuf::from)
+                .or_else(|| std::env::var_os(key).map(std::path::PathBuf::from))
+                .filter(|path| !cfg!(windows) || path.is_dir())
+        })
+        .or_else(|| {
+            if cfg!(windows) {
+                std::env::current_dir().ok()
+            } else {
+                dirs::home_dir()
+            }
+        })
+        .ok_or_else(|| "terminal workspace environment: cannot resolve cwd".to_string())?;
+    let cwd = if cwd.is_relative() {
+        std::env::current_dir()
+            .map_err(|reason| format!("terminal workspace cwd: {reason}"))?
+            .join(cwd)
+    } else {
+        cwd
+    };
+    Ok(cognia_core::workspace_env::WorkspaceEnvQuery {
+        cwd,
+        workspace_id: None,
+        namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+    })
+}
+
+pub(crate) fn resolve_workspace_env_for_request(
+    req: &SpawnRequest,
+) -> Result<WorkspaceEnvResolution, String> {
+    let query = workspace_env_query(req)?;
+    let cwd = query.cwd.clone();
+    let env = cognia_core::workspace_env::resolve_workspace_env(query)
+        .map_err(|reason| format!("terminal workspace environment: {reason}"))?;
+    Ok(WorkspaceEnvResolution {
+        cwd: env.as_ref().map(|_| cwd.to_string_lossy().into_owned()),
+        env,
+    })
+}
+
+pub(crate) async fn resolve_workspace_env_for_request_async(
+    req: &SpawnRequest,
+) -> Result<WorkspaceEnvResolution, String> {
+    let query = workspace_env_query(req)?;
+    let cwd = query.cwd.clone();
+    let env = cognia_core::workspace_env::resolve_workspace_env_async(query)
+        .await
+        .map_err(|reason| format!("terminal workspace environment: {reason}"))?;
+    Ok(WorkspaceEnvResolution {
+        cwd: env.as_ref().map(|_| cwd.to_string_lossy().into_owned()),
+        env,
+    })
+}
+
 fn default_true() -> bool {
     true
 }
@@ -531,10 +628,31 @@ pub fn spawn_session_with_identity(
     sink: EventSink,
     channel_slot: DeskChannel,
 ) -> Result<PtySession, String> {
+    let mut req = req;
+    apply_workspace_env(&mut req)?;
+    spawn_session_with_resolved_identity(
+        req,
+        script_dir,
+        path,
+        session_id,
+        replay,
+        sink,
+        channel_slot,
+    )
+}
+
+pub(crate) fn spawn_session_with_resolved_identity(
+    mut req: SpawnRequest,
+    script_dir: &Path,
+    path: &PathInjection,
+    session_id: String,
+    replay: Arc<ReplayBuffer>,
+    sink: EventSink,
+    channel_slot: DeskChannel,
+) -> Result<PtySession, String> {
     if Uuid::parse_str(&session_id).is_err() {
         return Err("terminal session id must be a UUID".to_string());
     }
-    let mut req = req;
     // Resolve the shell binary up front so a missing `pwsh.exe` (PowerShell 7
     // not installed) transparently falls back to Windows PowerShell rather
     // than surfacing a cryptic `spawn_command failed`.
@@ -602,6 +720,11 @@ pub fn spawn_session_with_identity(
     }
     for (k, v) in &setup.env_overrides {
         cmd.env(k, v);
+    }
+    for key in cognia_core::workspace_env::WORKSPACE_ENV_KEYS {
+        if let Some(value) = req.env.get(key) {
+            cmd.env(key, value);
+        }
     }
     // Weave app-shipped / downloaded tool directories into PATH so `cognia`
     // is runnable from the terminal. Read the builder's *base* PATH (which
@@ -990,6 +1113,93 @@ impl Drop for PtySession {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn workspace_env_is_final_at_real_pty_spawn() {
+        for kind in ["some", "none", "error"] {
+            let cwd = crate::workspace_env_fixture(kind);
+            let mut req = sandbox_req(false);
+            req.shell = "/usr/bin/env".into();
+            req.args.clear();
+            req.cwd = Some(cwd.path().to_string_lossy().into_owned());
+            req.enable_shell_integration = false;
+            req.env.insert("PORT".into(), "user-port".into());
+            let (channel, captured) = capture_channel();
+            let result =
+                spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel);
+            if kind == "error" {
+                assert!(result
+                    .err()
+                    .unwrap()
+                    .contains("fixture port range exhausted"));
+                assert!(captured.lock().unwrap().is_empty());
+                continue;
+            }
+            let session = result.unwrap();
+            let expected = if kind == "some" {
+                "PORT=41000"
+            } else {
+                "PORT=user-port"
+            };
+            let mut output = String::new();
+            for _ in 0..200 {
+                output = captured
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|event| match event {
+                        TerminalEvent::Data { bytes } => {
+                            Some(String::from_utf8_lossy(bytes).into_owned())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if output.lines().any(|line| line == expected) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let _ = session.kill();
+            assert!(output.lines().any(|line| line == expected), "{output}");
+            if kind == "some" {
+                assert!(output.lines().any(|line| line == "COGNIA_PORT=41000"));
+                assert!(output.lines().any(|line| line == "COGNIA_PORT_COUNT=10"));
+                assert!(!output.contains("user-port"));
+            } else {
+                assert!(!output.contains("COGNIA_PORT="));
+            }
+        }
+    }
+
+    #[test]
+    fn workspace_env_survives_sandbox_scrub_and_bridge_serialization() {
+        for kind in ["some", "none", "error"] {
+            let cwd = crate::workspace_env_fixture(kind);
+            let mut request = sandbox_req(true);
+            request.cwd = Some(cwd.path().to_string_lossy().into_owned());
+            request.env.insert("PORT".into(), "user-port".into());
+            let result = apply_workspace_env(&mut request);
+            if kind == "error" {
+                assert!(result.unwrap_err().contains("fixture port range exhausted"));
+                continue;
+            }
+            result.unwrap();
+            let forwarded: SpawnRequest =
+                serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+            let env: HashMap<_, _> = sandbox_scrub_env(true, &forwarded.env)
+                .into_iter()
+                .collect();
+            assert_eq!(
+                env.get(&"PORT".to_string()).map(|v| v.as_str()),
+                Some(if kind == "some" { "41000" } else { "user-port" })
+            );
+            assert_eq!(
+                forwarded.env.contains_key("COGNIA_PORT_COUNT"),
+                kind == "some"
+            );
+        }
+    }
+
     use super::*;
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex2;

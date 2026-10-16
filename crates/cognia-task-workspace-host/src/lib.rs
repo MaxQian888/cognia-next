@@ -8,3 +8,4 @@
 //! `#[tauri::command]` at a crate root collides with its own macro namespace.
 
 pub mod host_surface;
+pub mod workspace_env;

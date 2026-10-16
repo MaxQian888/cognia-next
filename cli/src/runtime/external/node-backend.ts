@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events"
 import fs from "node:fs"
 import path from "node:path"
 import readline from "node:readline"
+import { resolveWorkspacePortEnv } from "../workspace-port-env"
 import { deleteGatewayTask, gatewayRuntimeEnvironment, prepareGatewayTask } from "./gateway-task"
 import { devinOwnedConfigRoot, prepareDevinMcpConfig } from "./devin-mcp-config"
 import {
@@ -620,11 +621,13 @@ export class NodeExternalAgentBackend {
     config = prepared.config
     let stateIsolation: StateIsolationPlan | null
     let launch: ExternalAgentLaunch
+    let workspaceEnv: Record<string, string>
     try {
       // Resolved before the launcher so the Kimi / Cline / Qoder rebasing
       // reads the isolated home from the config env.
       ;({ config, plan: stateIsolation } = applyStateIsolation(config, this.stateIsolationHost))
       launch = await this.resolveLaunch(config, { stateIsolation })
+      workspaceEnv = await resolveWorkspacePortEnv(cwd)
     } catch (error) {
       cleanup()
       throw error
@@ -654,6 +657,7 @@ export class NodeExternalAgentBackend {
     // install root (Homebrew, ~/.cargo/bin, a native installer's dir) would be
     // reported present yet fail to spawn.
     env.PATH = resolveAgentSearchPath()
+    Object.assign(env, workspaceEnv)
     let child: ChildProcessWithoutNullStreams
     try {
       child = spawn(launch.command, launch.args, {

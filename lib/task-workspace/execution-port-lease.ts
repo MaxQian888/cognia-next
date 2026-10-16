@@ -101,9 +101,24 @@ export async function ensureExecutionPortLease(
 /** Archive retains the subject; only permanent project deletion calls this. */
 export async function releaseProjectPortLeases(
   projectId: string,
-  namespace?: string
+  namespace?: string,
+  project?: ExecutionPortLeaseInput["project"]
 ): Promise<void> {
   if (!isTauri()) return
+  // Only the project's explicit roots may release host-derived subjects.
+  // A discovered ancestor checkout can also serve unrelated subdirectory projects.
+  const roots = new Set(
+    project
+      ? allRootPaths({
+          roots: project.roots ?? rootsFromLegacy(project.rootDir, project.additionalDirs),
+        })
+      : []
+  )
+  for (const root of roots) {
+    await runWorkspaceUserAction("task_workspace_port_lease_subject_release", () =>
+      releaseSubjectPortLeases({ kind: "project-root", key: `root:${root}`, namespace })
+    )
+  }
   await runWorkspaceUserAction("task_workspace_port_lease_subject_release", () =>
     releaseSubjectPortLeases({ kind: "project-root", key: projectId, namespace })
   )

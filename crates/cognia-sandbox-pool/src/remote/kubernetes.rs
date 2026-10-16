@@ -1292,7 +1292,16 @@ pub fn exec_invocation(spec: &RunnerExecSpec) -> Result<(Vec<String>, Vec<u8>), 
         return Err("exec needs a command".into());
     }
     let frame = encode_frame(&ExecEnvFrame {
-        env: spec.env.clone(),
+        env: spec
+            .env
+            .iter()
+            .cloned()
+            .chain(
+                spec.workspace_env
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}")),
+            )
+            .collect(),
         cwd: Some(spec.working_dir.clone()).filter(|dir| !dir.is_empty()),
     })
     .map_err(|error| format!("exec environment is invalid: {error}"))?;
@@ -1845,6 +1854,7 @@ impl KubernetesProvider {
     ) -> Result<(Option<i64>, String), String> {
         let mut running = self
             .exec_runtime(RunnerExecSpec {
+                workspace_env: BTreeMap::new(),
                 container_id: instance.to_string(),
                 command,
                 env: Vec::new(),
@@ -3378,8 +3388,68 @@ mod tests {
     // -- exec plumbing -------------------------------------------------------
 
     #[test]
+    fn exec_frame_applies_trusted_workspace_ports_last() {
+        let spec = RunnerExecSpec {
+            container_id: NAME.into(),
+            command: vec!["env".into()],
+            env: vec!["PORT=9999".into()],
+            workspace_env: BTreeMap::from([
+                ("COGNIA_PORT".into(), "41000".into()),
+                ("COGNIA_PORT_COUNT".into(), "10".into()),
+                ("PORT".into(), "41000".into()),
+            ]),
+            working_dir: "/workspace".into(),
+        };
+        let (_, frame) = exec_invocation(&spec).unwrap();
+        let decoded = cognia_sandboxd::exec_env::read_frame(&mut frame.as_slice()).unwrap();
+        let env: BTreeMap<_, _> = decoded
+            .env
+            .iter()
+            .map(|entry| entry.split_once('=').unwrap())
+            .collect();
+        assert_eq!(env["PORT"], "41000");
+        assert_eq!(env["COGNIA_PORT"], "41000");
+        assert_eq!(env["COGNIA_PORT_COUNT"], "10");
+    }
+
+    #[tokio::test]
+    async fn real_provider_frontend_leases_reach_kubernetes_exec_unchanged() {
+        for kind in ["project-root", "desktop-session"] {
+            let (cwd, expected) = crate::docker::tests::real_workspace_env_fixture(kind);
+            let workspace_env = cognia_core::workspace_env::resolve_workspace_env_async(
+                cognia_core::workspace_env::WorkspaceEnvQuery {
+                    cwd: cwd.path().to_path_buf(),
+                    workspace_id: None,
+                    namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let spec = RunnerExecSpec {
+                container_id: NAME.into(),
+                command: vec!["env".into()],
+                env: vec!["PORT=9999".into()],
+                workspace_env,
+                working_dir: "/workspace".into(),
+            };
+            let (_, frame) = exec_invocation(&spec).unwrap();
+            let decoded = cognia_sandboxd::exec_env::read_frame(&mut frame.as_slice()).unwrap();
+            let env: BTreeMap<_, _> = decoded
+                .env
+                .iter()
+                .map(|entry| entry.split_once('=').unwrap())
+                .collect();
+            for (key, value) in &expected {
+                assert_eq!(env[key.as_str()], value);
+            }
+        }
+    }
+
+    #[test]
     fn every_exec_goes_through_exec_env_with_a_frame() {
         let spec = RunnerExecSpec {
+            workspace_env: BTreeMap::new(),
             container_id: NAME.into(),
             command: vec!["git".into(), "status".into()],
             env: vec!["GIT_TERMINAL_PROMPT=0".into()],
@@ -4302,6 +4372,7 @@ users:
             .await
             .is_err());
         let spec = RunnerSpec {
+            workspace_env: BTreeMap::new(),
             name: "x".into(),
             image: "x".into(),
             cmd: Vec::new(),

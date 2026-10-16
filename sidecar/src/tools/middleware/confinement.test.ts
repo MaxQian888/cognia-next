@@ -5,7 +5,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { wrapDefsWithConfinement } from "./confinement.ts"
-import { firstText } from "../../../test-support/tool-result.ts"
+import { firstText, asCallable } from "../../../test-support/tool-result.ts"
 import type { CallableTool } from "../../../test-support/tool-result.ts"
 import type { ToolDefinition } from "../kernel/define.ts"
 
@@ -50,3 +50,33 @@ test("a call inside the writable roots reaches the body with its arguments and c
 })
 
 test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }))
+
+test("unsandboxed tools retain their host port scope and failures become tool errors", async () => {
+  const { resolveProcessPortEnv } = await import("../../platform/process/exec.ts")
+  const defs = [
+    {
+      name: "probe",
+      handler: async () => {
+        const env = await resolveProcessPortEnv()
+        return { content: [{ type: "text" as const, text: env.PORT! }] }
+      },
+    },
+  ]
+  const [probe] = wrapDefsWithConfinement(defs, undefined, ROOT, {
+    sessionId: "unsandboxed",
+    hostRpc: {
+      call: async () => ({ PORT: "41000", COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10" }),
+    },
+  })
+  assert.equal(firstText(await asCallable(probe!).handler({})), "41000")
+  const [refused] = wrapDefsWithConfinement(defs, undefined, ROOT, {
+    hostRpc: {
+      call: async () => {
+        throw new Error("lease exhausted")
+      },
+    },
+  })
+  const result = await asCallable(refused!).handler({})
+  assert.equal(result.isError, true)
+  assert.match(firstText(result), /lease exhausted/)
+})

@@ -2351,6 +2351,7 @@ async fn run_serve(
     app_lib::configure_agent_session_store_path(agent_session_store_path(&data_dir));
     app_lib::task_workspace::install(data_dir.clone())
         .map_err(|error| format!("task workspace: {error}"))?;
+    cognia_task_workspace_host::workspace_env::install_workspace_env_provider()?;
     app_lib::task_workspace::start_workspace_maintenance();
     // The headless host serves the same sidecar `host_rpc` protocol as the
     // desktop. Install the shared Rust supervisor before the sidecar can

@@ -1107,7 +1107,11 @@ impl SandboxDockerApi for E2bProvider {
         let start = StartSpec {
             cmd: cmd.clone(),
             args: args.to_vec(),
-            envs: parse_env(&spec.env)?,
+            envs: {
+                let mut env = parse_env(&spec.env)?;
+                env.extend(spec.workspace_env.clone());
+                env
+            },
             cwd: (!spec.working_dir.is_empty()).then(|| spec.working_dir.clone()),
             stdin: true,
         };
@@ -1713,9 +1717,14 @@ mod tests {
         let (provider, domains) = provider(&fake);
         let running = provider
             .exec_runtime(RunnerExecSpec {
+                workspace_env: BTreeMap::from([
+                    ("PORT".into(), "41000".into()),
+                    ("COGNIA_PORT".into(), "41000".into()),
+                    ("COGNIA_PORT_COUNT".into(), "10".into()),
+                ]),
                 container_id: id.clone(),
                 command: vec!["/cognia/bin/cognia-sandboxd".into(), "health".into()],
-                env: vec!["A=1".into()],
+                env: vec!["A=1".into(), "PORT=9999".into()],
                 working_dir: "/".into(),
             })
             .await
@@ -1733,7 +1742,7 @@ mod tests {
                 "process": {
                     "cmd": "/cognia/bin/cognia-sandboxd",
                     "args": ["health"],
-                    "envs": { "A": "1" },
+                    "envs": { "A": "1", "PORT": "41000", "COGNIA_PORT": "41000", "COGNIA_PORT_COUNT": "10" },
                     "cwd": "/",
                 },
                 "stdin": true,
@@ -1747,6 +1756,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn real_provider_frontend_leases_reach_e2b_exec_unchanged() {
+        for kind in ["project-root", "desktop-session"] {
+            let (cwd, expected) = crate::docker::tests::real_workspace_env_fixture(kind);
+            let workspace_env = cognia_core::workspace_env::resolve_workspace_env_async(
+                cognia_core::workspace_env::WorkspaceEnvQuery {
+                    cwd: cwd.path().to_path_buf(),
+                    workspace_id: None,
+                    namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let fake = FakeE2b::start().await;
+            let id = fake.add_sandbox("running", BTreeMap::new());
+            fake.script(
+                "env",
+                ProcessScript::Fixed {
+                    frames: vec![ScriptFrame::End {
+                        code: 0,
+                        status: "".into(),
+                    }],
+                    chunk: 1,
+                },
+            );
+            let (provider, _) = provider(&fake);
+            let running = provider
+                .exec_runtime(RunnerExecSpec {
+                    container_id: id,
+                    command: vec!["env".into()],
+                    env: vec!["PORT=9999".into()],
+                    workspace_env,
+                    working_dir: "/workspace".into(),
+                })
+                .await
+                .unwrap();
+            collect(running).await;
+            let start = fake.last_request("/process.Process/Start").envelope_json();
+            for (key, value) in expected {
+                assert_eq!(start["process"]["envs"][key], value);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn stdin_is_written_in_order_and_closed_when_dropped() {
         let fake = FakeE2b::start().await;
         let id = fake.add_sandbox("running", BTreeMap::new());
@@ -1754,6 +1808,7 @@ mod tests {
         let (provider, _) = provider(&fake);
         let running = provider
             .exec_runtime(RunnerExecSpec {
+                workspace_env: BTreeMap::new(),
                 container_id: id.clone(),
                 command: vec![
                     "/cognia/bin/cognia-sandboxd".into(),
@@ -1806,6 +1861,7 @@ mod tests {
         let (provider, _) = provider(&fake);
         let running = provider
             .exec_runtime(RunnerExecSpec {
+                workspace_env: BTreeMap::new(),
                 container_id: id,
                 command: vec!["/x".into()],
                 env: Vec::new(),
@@ -1823,6 +1879,7 @@ mod tests {
         let fake = FakeE2b::start().await;
         let (provider, _) = provider(&fake);
         let spec = |id: &str, command: Vec<String>| RunnerExecSpec {
+            workspace_env: BTreeMap::new(),
             container_id: id.into(),
             command,
             env: Vec::new(),
@@ -2010,6 +2067,7 @@ mod tests {
         // The resumed connection is the one exec uses.
         let running = provider
             .exec_runtime(RunnerExecSpec {
+                workspace_env: BTreeMap::new(),
                 container_id: id.clone(),
                 command: vec!["true".into()],
                 env: Vec::new(),
@@ -2048,6 +2106,7 @@ mod tests {
         fake.hide_token(&id);
         let running = provider
             .exec_runtime(RunnerExecSpec {
+                workspace_env: BTreeMap::new(),
                 container_id: id.clone(),
                 command: vec!["true".into()],
                 env: Vec::new(),
@@ -2073,6 +2132,7 @@ mod tests {
         let (provider, _) = provider(&fake);
         assert!(matches!(
             ContainerApi::run(&provider, RunnerSpec {
+                workspace_env: BTreeMap::new(),
                 name: "x".into(),
                 image: "x".into(),
                 cmd: Vec::new(),

@@ -255,6 +255,7 @@ impl DockerSandboxBackend {
                 super::persistent::control(
                     &self.api,
                     RunnerExecSpec {
+                        workspace_env: BTreeMap::new(),
                         container_id: scope.container_id,
                         command: vec![
                             format!("{INJECTION_ROOT}/bin/cognia-sandboxd"),
@@ -373,6 +374,7 @@ impl DockerSandboxBackend {
         let running = tokio::time::timeout(
             Duration::from_secs(10),
             self.api.exec_runtime(RunnerExecSpec {
+                workspace_env: BTreeMap::new(),
                 container_id: scope.container_id.clone(),
                 command: {
                     let mut command = vec![

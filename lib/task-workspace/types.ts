@@ -265,6 +265,9 @@ export interface PortLeaseDiagnostic {
     | "ambiguousRegistryLink"
     | "unresolvedRegistryRoot"
     | "registryRootMismatch"
+    | "missingRoot"
+    | "discoveryRejected"
+    | "discoveryFailed"
   leaseIds: string[]
   detail: string
 }

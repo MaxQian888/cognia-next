@@ -296,13 +296,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (get().projects.find((item) => item.id === id) !== project) {
           throw new Error("Workspace changed during deletion; retry deletion")
         }
-        await releaseProjectPortLeases(id)
+        await releaseProjectPortLeases(id, undefined, project)
         if (get().projects.find((item) => item.id === id) !== project) {
           throw new Error("Workspace changed during deletion; retry deletion")
         }
         await deleteProjectRow(id)
       } else {
-        await releaseProjectPortLeases(id)
+        await releaseProjectPortLeases(id, undefined, project)
         if (get().projects.find((item) => item.id === id) !== project) {
           throw new Error("Workspace changed during deletion; retry deletion")
         }

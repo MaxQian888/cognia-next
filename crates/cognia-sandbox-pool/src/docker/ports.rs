@@ -273,6 +273,7 @@ impl SandboxRuntimeControl for DockerSandboxBackend {
         let mut running = self
             .api
             .exec_runtime(RunnerExecSpec {
+                workspace_env: BTreeMap::new(),
                 container_id: container_id.into(),
                 command,
                 env: Vec::new(),

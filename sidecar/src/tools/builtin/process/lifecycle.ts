@@ -19,6 +19,7 @@ import {
   execFileAsync,
   sandboxedProcessTarget,
   sandboxedProcessEnv,
+  resolveProcessPortEnv,
 } from "../../../platform/process/exec.ts"
 import { headTruncate } from "../../../shared/text/truncate.ts"
 import type { ProcessSandboxScope } from "../../../platform/process/exec.ts"
@@ -80,6 +81,12 @@ async function execStartProcess(
       return toolError(`program not on allowlist: ${args.program}`)
     }
     const cwd = args.cwd ?? ctx.cwd
+    const env = sandboxedProcessEnv(
+      process.env,
+      ctx.builtinProcessSandbox,
+      {},
+      await resolveProcessPortEnv(cwd)
+    )
     const target = sandboxedProcessTarget(args.program, args.args, cwd, ctx.builtinProcessSandbox)
     if (args.detached) {
       // Preferred path: a supervised background job. `detached` here means
@@ -92,9 +99,7 @@ async function execStartProcess(
           shellArgs: target.args,
           cwd,
           label: args.program,
-          ...(ctx.builtinProcessSandbox
-            ? { env: sandboxedProcessEnv(process.env, ctx.builtinProcessSandbox) }
-            : {}),
+          env,
         })
         // Record the pid here too. This is the path that actually runs in every
         // production wiring (`collectCogniaToolDefs` always supplies bgShells),
@@ -118,7 +123,8 @@ async function execStartProcess(
         return toolError("Background process supervisor is unavailable", "start_process")
       const { spawn } = await import("node:child_process")
       const child = spawn(args.program, args.args, {
-        cwd: args.cwd,
+        cwd,
+        env,
         detached: true,
         stdio: "ignore",
         windowsHide: true,
@@ -131,9 +137,7 @@ async function execStartProcess(
     try {
       const { stdout, stderr } = await execFileAsync(target.command, target.args, {
         cwd,
-        ...(ctx.builtinProcessSandbox
-          ? { env: sandboxedProcessEnv(process.env, ctx.builtinProcessSandbox) }
-          : {}),
+        env,
         timeout: args.timeoutSecs * 1000,
         maxBuffer: MAX_OUTPUT_BYTES,
         windowsHide: true,

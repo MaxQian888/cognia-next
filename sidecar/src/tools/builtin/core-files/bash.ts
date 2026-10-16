@@ -21,7 +21,11 @@ import { DANGEROUS_PATTERNS } from "../../../policy/shell/rules.ts"
 import { findDangerousShellFragment } from "../../../policy/shell/ast-scan.ts"
 import { tailTruncate } from "../../../shared/text/truncate.ts"
 import { pickStreamDecoder } from "../../../platform/process/console-decode.ts"
-import { sandboxedProcessTarget, sandboxedProcessEnv } from "../../../platform/process/exec.ts"
+import {
+  sandboxedProcessTarget,
+  sandboxedProcessEnv,
+  resolveProcessPortEnv,
+} from "../../../platform/process/exec.ts"
 import { activeShellDescriptor, applyNonInteractiveEnv } from "../../../platform/process/shell.ts"
 import type { ShellDescriptor } from "../../../platform/process/shell.ts"
 import { detectInteractiveCommand } from "../../../policy/shell/interactive.ts"
@@ -266,7 +270,12 @@ export function createBashTool({
         shellArgs,
         env: shellEnv,
       } = resolveShellInvocation(args.command, descriptor)
-      const env = sandboxedProcessEnv(shellEnv, builtinProcessSandbox)
+      const env = sandboxedProcessEnv(
+        shellEnv,
+        builtinProcessSandbox,
+        {},
+        await resolveProcessPortEnv(workdir)
+      )
 
       const target = sandboxedProcessTarget(shell, shellArgs, workdir, builtinProcessSandbox)
       // Background mode: spawn, register, and return a handle immediately.

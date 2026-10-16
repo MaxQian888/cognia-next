@@ -491,12 +491,14 @@ pub async fn terminal_spawn<R: Runtime>(
     let profile_id = profile_id
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "default".into());
+    let payload = crate::host_client::local_spawn_payload(
+        req,
+        profile_id,
+        client.supports("workspaceEnvBridge"),
+    )
+    .await?;
     let response = client
-        .request_json(
-            FrameKind::Spawn,
-            Uuid::nil(),
-            &serde_json::json!({ "profileId": profile_id, "request": req }),
-        )
+        .request_json(FrameKind::Spawn, Uuid::nil(), &payload)
         .await?;
     let session = parse_session(response)?;
     client.register_channel(&session.id, on_event);
@@ -1066,6 +1068,22 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn desktop_spawn_payload_carries_host_resolved_port_values() {
+        let cwd = crate::workspace_env_fixture("some");
+        let request: SpawnRequest = serde_json::from_value(serde_json::json!({
+            "shell": "/bin/sh", "cwd": cwd.path(), "rows": 24, "cols": 80,
+            "env": {"PORT": "renderer-port"}
+        }))
+        .unwrap();
+        let workspace_env = crate::session::resolve_workspace_env_for_request(&request).unwrap();
+        let payload = serde_json::json!({"profileId": "default", "request": request, "workspaceEnv": workspace_env});
+        assert_eq!(payload["request"]["env"]["PORT"], "renderer-port");
+        assert_eq!(payload["workspaceEnv"]["env"]["PORT"], "41000");
+        assert_eq!(payload["workspaceEnv"]["env"]["COGNIA_PORT"], "41000");
+        assert_eq!(payload["workspaceEnv"]["env"]["COGNIA_PORT_COUNT"], "10");
+    }
+
     use super::*;
 
     /// One non-UTF-8 directory must not take the whole hello down with it —
@@ -1105,6 +1123,7 @@ mod tests {
             features: Mutex::new(Vec::new()),
         };
         assert!(!client.supports("flowControl"));
+        assert!(!client.supports("workspaceEnvBridge"));
         client.set_features(vec!["pathInjection".into(), "flowControl".into()]);
         assert!(client.supports("flowControl"));
         assert!(!client.supports("history"));

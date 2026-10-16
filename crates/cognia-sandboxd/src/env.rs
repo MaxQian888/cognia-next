@@ -67,6 +67,9 @@ pub struct RuntimeConfigV1 {
     pub remote_env: BTreeMap<String, Option<String>>,
     #[serde(default)]
     pub spawn_env: BTreeMap<String, String>,
+    /// Host-resolved port lease, separate from credential-bearing task input.
+    #[serde(default)]
+    pub workspace_env: BTreeMap<String, String>,
     #[serde(default)]
     pub lifecycle_commands: RuntimeLifecycleCommands,
     #[serde(default)]
@@ -91,6 +94,7 @@ impl Default for RuntimeConfigV1 {
             container_env: BTreeMap::new(),
             remote_env: BTreeMap::new(),
             spawn_env: BTreeMap::new(),
+            workspace_env: BTreeMap::new(),
             lifecycle_commands: RuntimeLifecycleCommands::default(),
             lifecycle_phases: Vec::new(),
             lifecycle_timeout_ms: default_lifecycle_timeout(),
@@ -259,6 +263,21 @@ impl RuntimeConfigV1 {
             self.spawn_env.iter().map(|(k, v)| (k, Some(v.as_str()))),
             true,
         )?;
+        validate_environment(
+            self.workspace_env
+                .iter()
+                .map(|(k, v)| (k, Some(v.as_str()))),
+            true,
+        )?;
+        if self
+            .workspace_env
+            .keys()
+            .any(|key| !matches!(key.as_str(), "COGNIA_PORT" | "COGNIA_PORT_COUNT" | "PORT"))
+        {
+            return Err(RuntimeConfigError(
+                "workspace environment contains an unsupported key",
+            ));
+        }
         if !(1_000..=3_600_000).contains(&self.lifecycle_timeout_ms) {
             return Err(RuntimeConfigError("lifecycle timeout outside limits"));
         }
@@ -455,6 +474,8 @@ pub fn build_runtime_child_env(
             env.remove(name);
         }
     }
+    // The trusted layer wins even over explicit remote unsets and task input.
+    env.extend(config.workspace_env.clone());
     if env.len() > 1024
         || env
             .values()
@@ -766,6 +787,39 @@ mod tests {
         assert!(!env.contains_key("OPENAI_API_KEY"));
         assert_eq!(env["COGNIA_GATEWAY_TOKEN"], "task-lease");
         assert!(env.keys().all(|key| !key.starts_with(SANDBOXD_ENV_PREFIX)));
+    }
+
+    #[test]
+    fn trusted_workspace_ports_win_over_every_layer_and_survive_boot() {
+        let image = parent(&[("PORT", "1")]);
+        let trusted = parent(&[
+            ("COGNIA_PORT", "41000"),
+            ("COGNIA_PORT_COUNT", "10"),
+            ("PORT", "41000"),
+        ]);
+        let mut runtime = RuntimeConfigV1 {
+            container_env: parent(&[("PORT", "2")]),
+            remote_env: BTreeMap::from([("PORT".into(), None)]),
+            spawn_env: parent(&[("PORT", "4"), ("COGNIA_GATEWAY_TOKEN", "secret")]),
+            workspace_env: trusted.clone(),
+            ..RuntimeConfigV1::default()
+        };
+        for boot in [false, true] {
+            if boot {
+                runtime.spawn_env.clear();
+            }
+            let env = runtime_env(&image, &runtime).unwrap();
+            for (key, value) in &trusted {
+                assert_eq!(env.get(key), Some(value));
+            }
+            if boot {
+                assert!(!env.contains_key("COGNIA_GATEWAY_TOKEN"));
+            }
+        }
+        runtime
+            .workspace_env
+            .insert("COGNIA_GATEWAY_TOKEN".into(), "secret".into());
+        assert!(runtime.validate().is_err());
     }
 
     #[test]

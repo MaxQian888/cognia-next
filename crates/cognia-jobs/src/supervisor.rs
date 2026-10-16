@@ -140,6 +140,8 @@ impl JobSupervisor {
             // dials past the proxy the user configured — and on a network that
             // only permits egress through it, simply fails.
             .envs(cognia_net::proxy_config::child_network_env())
+            // Includes the sidecar's host-resolved workspace port overlay;
+            // keep this final so neither ambient nor host defaults replace it.
             .envs(&req.env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -618,6 +620,27 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         panic!("job {id} did not settle in time");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_preserves_workspace_port_env_received_over_rpc() {
+        let dir = TempDir::new().unwrap();
+        let sup = supervisor(&dir);
+        let mut request = serde_json::to_value(sh(
+            "printf '%s/%s/%s' \"$COGNIA_PORT\" \"$COGNIA_PORT_COUNT\" \"$PORT\"",
+            session("ports"),
+        ))
+        .unwrap();
+        request["env"]["COGNIA_PORT"] = serde_json::json!("41020");
+        request["env"]["COGNIA_PORT_COUNT"] = serde_json::json!("10");
+        request["env"]["PORT"] = serde_json::json!("41020");
+        let rec = sup
+            .spawn(serde_json::from_value(request).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(await_settled(&sup, &rec.id).await.exit_code, Some(0));
+        assert_eq!(sup.read(&rec.id, 0, 4096).unwrap().data, "41020/10/41020");
     }
 
     #[cfg(unix)]

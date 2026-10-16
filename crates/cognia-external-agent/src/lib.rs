@@ -37,3 +37,75 @@ pub(crate) mod test_env_lock {
         ENV_LOCK.lock().await
     }
 }
+
+#[cfg(test)]
+pub(crate) fn workspace_env_fixture(kind: &str) -> tempfile::TempDir {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        cognia_core::workspace_env::set_workspace_env_provider(std::sync::Arc::new(|query| {
+            let path = query.cwd.to_string_lossy();
+            if path.contains("cognia-real-port-fixture-") {
+                return cognia_task_workspace_host::workspace_env::resolve_workspace_env(query);
+            }
+            if path.contains("cognia-port-fixture-error-") {
+                return Err("fixture port range exhausted".into());
+            }
+            if !path.contains("cognia-port-fixture-some-") {
+                return Ok(None);
+            }
+            assert_eq!(
+                query.namespace,
+                cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE
+            );
+            let base = "41000";
+            Ok(Some(std::collections::BTreeMap::from([
+                ("PORT".into(), base.into()),
+                ("COGNIA_PORT".into(), base.into()),
+                ("COGNIA_PORT_COUNT".into(), "10".into()),
+            ])))
+        }))
+        .expect("install fixture provider once");
+    });
+    tempfile::Builder::new()
+        .prefix(&format!("cognia-port-fixture-{kind}-"))
+        .tempdir()
+        .unwrap()
+}
+
+#[cfg(test)]
+pub(crate) fn real_workspace_env_fixture(
+    kind: &str,
+) -> (
+    tempfile::TempDir,
+    std::collections::BTreeMap<String, String>,
+) {
+    static STORE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    STORE.get_or_init(|| {
+        let store = tempfile::tempdir().unwrap();
+        cognia_task_workspace_host::host_surface::install(store.path().to_path_buf()).unwrap();
+        store
+    });
+    let _ = workspace_env_fixture("none");
+    let root = tempfile::Builder::new()
+        .prefix("cognia-real-port-fixture-")
+        .tempdir()
+        .unwrap();
+    // Match the frontend subject registration API, including the host probe.
+    cognia_task_workspace_host::host_surface::task_workspace_port_lease_subject_ensure(
+        serde_json::from_value(serde_json::json!(kind)).unwrap(),
+        root.path().to_string_lossy().into_owned(),
+        root.path().to_string_lossy().into_owned(),
+        None,
+    )
+    .unwrap();
+    let env = cognia_task_workspace_host::workspace_env::resolve_workspace_env(
+        cognia_core::workspace_env::WorkspaceEnvQuery {
+            cwd: root.path().to_path_buf(),
+            workspace_id: None,
+            namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+        },
+    )
+    .unwrap()
+    .unwrap();
+    (root, env)
+}

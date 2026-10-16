@@ -3,6 +3,7 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => desktop }))
 jest.mock("./client", () => ({
   ensureSubjectPortLease: jest.fn(),
   ensureWorkspacePortLease: jest.fn(),
+  getSubjectPortLeases: jest.fn(),
   resolveWorkspacePortLeaseEnsure: jest.fn(),
   releaseSubjectPortLeases: jest.fn(),
 }))
@@ -18,6 +19,7 @@ import { ensureExecutionPortLease, releaseProjectPortLeases } from "./execution-
 import {
   ensureSubjectPortLease,
   ensureWorkspacePortLease,
+  getSubjectPortLeases,
   resolveWorkspacePortLeaseEnsure,
   releaseSubjectPortLeases,
 } from "./client"
@@ -39,6 +41,7 @@ beforeEach(() => {
   desktop = true
   projects.length = 0
   getAllProjects.mockResolvedValue([])
+  jest.mocked(getSubjectPortLeases).mockResolvedValue([])
   jest.mocked(ensureSubjectPortLease).mockResolvedValue(lease as never)
   jest.mocked(ensureWorkspacePortLease).mockResolvedValue(lease as never)
   jest.mocked(resolveWorkspacePortLeaseEnsure).mockResolvedValue(lease as never)
@@ -87,6 +90,47 @@ it("does not register a project root when cwd is outside its roots or absent", a
   await ensureExecutionPortLease({ project, cwd: "/repo-other" })
   await expect(ensureExecutionPortLease({ project })).resolves.toBeNull()
   expect(ensureSubjectPortLease).not.toHaveBeenCalled()
+})
+
+it.each([
+  ["/repo", "/repo/packages/app"],
+  ["/Users/alice", "/Users/alice/projects/app"],
+  ["/", "/repo/packages/app"],
+])(
+  "registers the explicit project root instead of adopting discovered ancestor %s",
+  async (ancestor, root) => {
+    const discovered = {
+      ...lease,
+      subjectKind: "project-root",
+      subjectKey: `root:${ancestor}`,
+      canonicalRoot: ancestor,
+    }
+    jest.mocked(resolveWorkspacePortLeaseEnsure).mockResolvedValue(discovered as never)
+    await ensureExecutionPortLease({
+      project: { id: project.id, roots: [{ id: "app", path: root }] },
+      cwd: `${root}/src`,
+    })
+    expect(ensureSubjectPortLease).toHaveBeenCalledWith({
+      kind: "project-root",
+      key: project.id,
+      root,
+      namespace: undefined,
+    })
+  }
+)
+
+it("deleting a subdirectory project preserves the host checkout's shared root subject", async () => {
+  const discovered = { canonicalRoot: "/repo" }
+  jest.mocked(getSubjectPortLeases).mockResolvedValue([discovered] as never)
+  await releaseProjectPortLeases(project.id, undefined, {
+    id: project.id,
+    roots: [{ id: "app", path: "/repo/packages/app" }],
+  })
+  expect(jest.mocked(releaseSubjectPortLeases).mock.calls.map(([input]) => input.key)).toEqual([
+    "root:/repo/packages/app",
+    project.id,
+  ])
+  expect(getSubjectPortLeases).not.toHaveBeenCalled()
 })
 
 it("loads durable project roots when execution precedes store hydration", async () => {
@@ -258,6 +302,44 @@ it("releases all project-root subjects and propagates refusals", async () => {
   const error = new Error("Occupied: 41000")
   jest.mocked(releaseSubjectPortLeases).mockRejectedValueOnce(error)
   await expect(releaseProjectPortLeases(project.id)).rejects.toBe(error)
+})
+
+it("releases only snapshot roots instead of unrelated recorded canonical roots", async () => {
+  jest
+    .mocked(getSubjectPortLeases)
+    .mockResolvedValue([
+      { canonicalRoot: "/old-offline-root" },
+      { canonicalRoot: "/repo" },
+    ] as never)
+  await releaseProjectPortLeases(project.id, "host-loopback", project)
+  expect(jest.mocked(releaseSubjectPortLeases).mock.calls.map(([input]) => input)).toEqual([
+    { kind: "project-root", key: "root:/repo", namespace: "host-loopback" },
+    { kind: "project-root", key: "root:/other", namespace: "host-loopback" },
+    { kind: "project-root", key: project.id, namespace: "host-loopback" },
+  ])
+  expect(getSubjectPortLeases).not.toHaveBeenCalled()
+})
+
+it("releases only the project-id subject when no project snapshot is supplied", async () => {
+  jest.mocked(getSubjectPortLeases).mockResolvedValue([{ canonicalRoot: "/repo" }] as never)
+  await releaseProjectPortLeases(project.id)
+  expect(jest.mocked(releaseSubjectPortLeases).mock.calls.map(([input]) => input.key)).toEqual([
+    project.id,
+  ])
+  expect(getSubjectPortLeases).not.toHaveBeenCalled()
+})
+
+it("releases host-only allocations for legacy project roots", async () => {
+  await releaseProjectPortLeases(project.id, undefined, {
+    id: project.id,
+    rootDir: "/checkout",
+    additionalDirs: ["/another-checkout"],
+  })
+  expect(jest.mocked(releaseSubjectPortLeases).mock.calls.map(([input]) => input.key)).toEqual([
+    "root:/checkout",
+    "root:/another-checkout",
+    project.id,
+  ])
 })
 
 it("does not send a mutation when approval fails", async () => {

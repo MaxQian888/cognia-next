@@ -51,6 +51,8 @@ serde_json.workspace = true
 log.workspace = true
 
 [dev-dependencies]
+cognia-companion-rpc = { path = "../cognia-companion-rpc" }
+rusqlite.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
 tempfile.workspace = true

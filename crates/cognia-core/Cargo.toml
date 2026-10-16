@@ -19,6 +19,8 @@ path = "src/lib.rs"
 # `rt::spawn` — spawn onto the app's Tokio runtime without naming Tauri
 # (ADR-0196). Off by default: most dependents never spawn.
 rt = ["dep:tokio"]
+# Offload workspace canonicalization and SQLite access at async spawn boundaries.
+workspace-env-async = ["dep:tokio"]
 
 [dependencies]
 # ADR-0175. `CommandError` converts into the plane-level `Problem`.

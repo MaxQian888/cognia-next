@@ -7,27 +7,28 @@ import type { ToolDefinition, ToolHandlerExtra, WrappedToolDefinition } from "..
 import { toolError } from "../kernel/result.ts"
 import { assertToolCallWithinRoots } from "../../policy/confinement/enforce.ts"
 import { withProcessSandbox } from "../../platform/process/exec.ts"
-import type { ProcessSandboxScope } from "../../platform/process/exec.ts"
+import type { ProcessSandboxScope, ProcessPortContext } from "../../platform/process/exec.ts"
 
 /**
- * Wrap each definition's handler in the sandbox scope. Without a scope the
- * definitions come back untouched.
+ * Wrap handlers in their process policy and host port resolver. Standalone
+ * definitions without either capability come back untouched.
  */
 export function wrapDefsWithConfinement<D extends ToolDefinition>(
   defs: readonly D[],
   scope: ProcessSandboxScope | undefined,
-  cwd: string | undefined
+  cwd: string | undefined,
+  ports: ProcessPortContext = {}
 ): readonly WrappedToolDefinition<D>[] {
-  if (!scope) return defs
+  if (!scope && !ports.hostRpc) return defs
   return defs.map((definition) => ({
     ...definition,
     handler: async (input: unknown, extra?: ToolHandlerExtra) => {
       try {
-        assertToolCallWithinRoots(scope, definition.name, input, cwd)
+        if (scope) assertToolCallWithinRoots(scope, definition.name, input, cwd)
+        return await withProcessSandbox(scope, cwd, () => definition.handler(input, extra), ports)
       } catch (error) {
         return toolError(error, definition.name)
       }
-      return withProcessSandbox(scope, cwd, () => definition.handler(input, extra))
     },
   }))
 }

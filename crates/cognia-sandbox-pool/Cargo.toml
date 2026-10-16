@@ -41,6 +41,7 @@ kubernetes = ["dep:kube", "dep:k8s-openapi"]
 e2b = ["dep:flate2", "cognia-environment/registry"]
 
 [dependencies]
+cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
 # `store` only: the registry HTTP transport (and the reqwest it pulls) belongs
 # to the metadata reader in `cognia-environment`, not to a driver that hands
 # every pull to the daemon. `registry::auth` is not behind that feature.
@@ -81,6 +82,7 @@ k8s-openapi = { version = "0.28", features = ["v1_32"], optional = true }
 flate2 = { workspace = true, optional = true }
 
 [dev-dependencies]
+cognia-task-workspace-host = { path = "../cognia-task-workspace-host" }
 cognia-external-agent = { path = "../cognia-external-agent", default-features = false, features = ["test-support"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

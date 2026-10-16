@@ -466,3 +466,55 @@ test("bash background jobs retain supervision and launch through the sandbox", a
   assert.equal(request!.shellArgs.includes("--network"), false)
   assert.ok(request!.shellArgs.includes("echo hello"))
 })
+
+test("bash foreground and host background jobs receive the final workdir lease", async () => {
+  const { withProcessSandbox } = await import("../../../platform/process/exec.ts")
+  const { createHostBgShellRegistry } = await import("../../state/host-background-shells.ts")
+  const trusted = { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }
+  const jobs: Record<string, unknown>[] = []
+  const hostRpc = {
+    async call(method: string, params: unknown) {
+      if (method === "workspace.portEnv") return trusted
+      assert.equal(method, "jobs.spawn")
+      jobs.push(params as Record<string, unknown>)
+      return { id: "ports-job", startedAtMs: 1 }
+    },
+  }
+  const bgShells = createHostBgShellRegistry({ hostRpc, sessionId: "ports" })
+  const tool = asCallable(createBashTool({ cwd: os.tmpdir(), shell: legacyShell, bgShells }))
+  await withProcessSandbox(
+    undefined,
+    process.cwd(),
+    async () => {
+      const command = `${JSON.stringify(process.execPath)} -e "console.log(process.env.COGNIA_PORT,process.env.COGNIA_PORT_COUNT,process.env.PORT)"`
+      const foreground = await tool.handler({ command }, {})
+      assert.match(textOf(foreground), /41000 10 41000/)
+      const background = await tool.handler({ command, run_in_background: true }, {})
+      assert.equal(background.isError, undefined)
+      const env = jobs[0]!.env as Record<string, string>
+      for (const [key, value] of Object.entries(trusted)) assert.equal(env[key], value)
+    },
+    { hostRpc, sessionId: "ports" }
+  )
+})
+
+test("bash refuses foreground and background execution on host lease error", async () => {
+  const { withProcessSandbox } = await import("../../../platform/process/exec.ts")
+  const tool = asCallable(createBashTool({ cwd: os.tmpdir(), shell: legacyShell }))
+  for (const run_in_background of [false, true]) {
+    const result = await withProcessSandbox(
+      undefined,
+      os.tmpdir(),
+      () => tool.handler({ command: "echo must-not-run", run_in_background }, {}),
+      {
+        hostRpc: {
+          call: async () => {
+            throw new Error("lease exhausted")
+          },
+        },
+      }
+    )
+    assert.equal(result.isError, true)
+    assert.match(textOf(result), /lease exhausted/)
+  }
+})

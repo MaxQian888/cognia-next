@@ -16,3 +16,4 @@ pub mod node_runtime;
 #[cfg(feature = "rt")]
 pub mod rt;
 pub mod supervision_backoff;
+pub mod workspace_env;

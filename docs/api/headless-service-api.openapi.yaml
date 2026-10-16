@@ -172304,6 +172304,9 @@ paths:
                             - ambiguousRegistryLink
                             - unresolvedRegistryRoot
                             - registryRootMismatch
+                            - missingRoot
+                            - discoveryRejected
+                            - discoveryFailed
                           type: string
                         leaseIds:
                           items:

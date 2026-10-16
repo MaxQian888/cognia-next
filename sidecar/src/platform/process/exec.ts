@@ -18,6 +18,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { AsyncLocalStorage } from "node:async_hooks"
+import type { HostRpcClient } from "../host-rpc.ts"
 import { ENV_ALLOWLIST, isStrippedName } from "./env.ts"
 
 /**
@@ -59,9 +60,10 @@ const INJECTED_ENV =
 export function sandboxedProcessEnv(
   parentEnv: Env,
   scope: ProcessSandboxScope | undefined,
-  overrides: Env = {}
+  overrides: Env = {},
+  trustedEnv: Readonly<Record<string, string>> = {}
 ): Record<string, string | undefined> {
-  if (scope === undefined) return { ...parentEnv, ...overrides }
+  if (scope === undefined) return { ...parentEnv, ...overrides, ...trustedEnv }
   const base: Record<string, string> = Object.fromEntries(
     Object.entries(parentEnv).filter(
       (entry): entry is [string, string] =>
@@ -72,9 +74,12 @@ export function sandboxedProcessEnv(
     if (!INJECTED_ENV.test(key) && !isStrippedName(key) && typeof value === "string")
       base[key] = value
   }
-  return Object.fromEntries(
-    Object.entries(base).filter(([key]) => !INJECTED_ENV.test(key) && !isStrippedName(key))
-  )
+  return {
+    ...Object.fromEntries(
+      Object.entries(base).filter(([key]) => !INJECTED_ENV.test(key) && !isStrippedName(key))
+    ),
+    ...trustedEnv,
+  }
 }
 
 /** A child `cwd` as a path (Node accepts `file:` URLs there too). */
@@ -82,9 +87,15 @@ function cwdPath(cwd: string | URL | undefined): string | undefined {
   return cwd instanceof URL ? fileURLToPath(cwd) : cwd
 }
 
-interface ProcessScope {
+export interface ProcessPortContext {
+  hostRpc?: Pick<HostRpcClient, "call"> | null | undefined
+  sessionId?: string | undefined
+}
+
+interface ProcessScope extends ProcessPortContext {
   scope: ProcessSandboxScope | undefined
   cwd: string | undefined
+  portEnv: Map<string, Promise<Record<string, string>>>
 }
 
 const processScopes = new AsyncLocalStorage<ProcessScope>()
@@ -94,17 +105,46 @@ const processScopes = new AsyncLocalStorage<ProcessScope>()
 export function withProcessSandbox<T>(
   scope: ProcessSandboxScope | undefined,
   cwd: string | undefined,
-  run: () => T
+  run: () => T,
+  ports: ProcessPortContext = {}
 ): T {
-  return processScopes.run({ scope, cwd }, run)
+  return processScopes.run({ scope, cwd, ...ports, portEnv: new Map() }, run)
+}
+
+/** Resolve only through the host; the cache belongs to one session tool call.
+ * Canonical paths deduplicate aliases, while a different spawn cwd is resolved
+ * independently. Rejected lookups remain rejected for the lifetime of the call. */
+export async function resolveProcessPortEnv(cwd?: string | URL): Promise<Record<string, string>> {
+  const context = processScopes.getStore()
+  if (!context?.hostRpc) return {}
+  const workdir = fs.realpathSync(cwdPath(cwd) ?? context.cwd ?? process.cwd())
+  const key = JSON.stringify([context.sessionId, workdir])
+  let pending = context.portEnv.get(key)
+  if (!pending) {
+    pending = context.hostRpc.call("workspace.portEnv", { cwd: workdir }).then((value) => {
+      if (value === null) return {}
+      if (typeof value !== "object" || value === null || Array.isArray(value))
+        throw new Error("workspace.portEnv returned an invalid environment")
+      const env: Record<string, string> = {}
+      for (const key of ["COGNIA_PORT", "COGNIA_PORT_COUNT", "PORT"]) {
+        const entry = (value as Record<string, unknown>)[key]
+        if (typeof entry !== "string")
+          throw new Error(`workspace.portEnv returned an invalid ${key}`)
+        env[key] = entry
+      }
+      return env
+    })
+    context.portEnv.set(key, pending)
+  }
+  return pending
 }
 
 /** Raw streaming children (rg/AST) share the current tool's async scope. */
-export function spawnInProcessSandbox(
+export async function spawnInProcessSandbox(
   command: string,
   args: readonly string[],
   options: SpawnOptions = {}
-): ChildProcess {
+): Promise<ChildProcess> {
   const context = processScopes.getStore()
   const target = sandboxedProcessTarget(
     command,
@@ -114,9 +154,13 @@ export function spawnInProcessSandbox(
   )
   return spawn(target.command, target.args, {
     ...options,
-    ...(context?.scope
-      ? { env: sandboxedProcessEnv(options.env ?? process.env, context.scope) }
-      : {}),
+    cwd: options.cwd ?? context?.cwd,
+    env: sandboxedProcessEnv(
+      options.env ?? process.env,
+      context?.scope,
+      {},
+      await resolveProcessPortEnv(options.cwd)
+    ),
   })
 }
 
@@ -189,12 +233,12 @@ type ExecCallback = (
  * `/dev/null`. Explicit pipes prevent that fallback while preserving the
  * stdout/stderr capture contract used by every caller.
  */
-function execFileWithPipedStdio(
+async function execFileWithPipedStdio(
   file: string,
   args: readonly string[],
   options: ExecOptions,
   callback: ExecCallback
-): ChildProcess {
+): Promise<ChildProcess> {
   const context = processScopes.getStore()
   let command = file
   let argv = [...args]
@@ -215,9 +259,13 @@ function execFileWithPipedStdio(
     argv,
     {
       ...options,
-      ...(context?.scope
-        ? { env: sandboxedProcessEnv(options.env ?? process.env, context.scope) }
-        : {}),
+      cwd: options.cwd ?? context?.cwd,
+      env: sandboxedProcessEnv(
+        options.env ?? process.env,
+        context?.scope,
+        {},
+        await resolveProcessPortEnv(options.cwd)
+      ),
       // Node forwards `stdio` to the spawned child even though ExecFileOptions omits it.
       ...({ stdio: options.stdio ?? ["pipe", "pipe", "pipe"] } as ExecFileOptions),
     },
@@ -241,7 +289,7 @@ export function execFileAsync(
         return
       }
       resolve({ stdout, stderr })
-    })
+    }).catch(reject)
   })
 }
 

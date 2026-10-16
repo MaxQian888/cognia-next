@@ -111,6 +111,9 @@ pub enum PortLeaseDiagnosticKind {
     AmbiguousRegistryLink,
     UnresolvedRegistryRoot,
     RegistryRootMismatch,
+    MissingRoot,
+    DiscoveryRejected,
+    DiscoveryFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -390,6 +393,116 @@ pub(crate) fn registry_root(root: &Path) -> Result<String, PortLeaseError> {
             Err(error) => return Err(PortLeaseError::Root(format!("{}: {error}", root.display()))),
         }
     }
+}
+
+/// Normalize a recorded root identity without inspecting its current filesystem.
+/// Release must still work after removal, loss of access, or a symlink retarget.
+pub(crate) fn normalize_project_root_path(root: &Path) -> Result<String, PortLeaseError> {
+    if !root.is_absolute() {
+        return Err(PortLeaseError::InvalidSubject(
+            "project root must be absolute".into(),
+        ));
+    }
+    let mut normalized = PathBuf::new();
+    for component in root.components() {
+        match component {
+            #[cfg(windows)]
+            Component::Prefix(prefix) => match prefix.kind() {
+                std::path::Prefix::Disk(drive) | std::path::Prefix::VerbatimDisk(drive) => {
+                    normalized.push(format!("{}:", char::from(drive).to_ascii_uppercase()));
+                }
+                std::path::Prefix::UNC(server, share)
+                | std::path::Prefix::VerbatimUNC(server, share) => {
+                    normalized.push(format!(
+                        "\\\\{}\\{}",
+                        server.to_string_lossy(),
+                        share.to_string_lossy()
+                    ));
+                }
+                _ => normalized.push(prefix.as_os_str()),
+            },
+            component if component.as_os_str() == "." => {}
+            component if component.as_os_str() == ".." => {
+                if !normalized.pop() {
+                    return Err(PortLeaseError::InvalidSubject(
+                        "project root escapes the filesystem root".into(),
+                    ));
+                }
+            }
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    Ok(normalized.to_string_lossy().into_owned())
+}
+
+/// Record only a path known by discovery to name this checkout's root, never
+/// an arbitrary cwd below it. Aliases are durable identity, not new owners.
+pub(crate) fn record_project_root_alias(
+    connection: &Connection,
+    lease: &WorkspacePortLease,
+    requested_root: &Path,
+) -> Result<(), PortLeaseError> {
+    let alias = normalize_project_root_path(requested_root)?;
+    connection.execute(
+        "INSERT OR IGNORE INTO workspace_port_root_aliases (namespace_key, alias_root, lease_id)
+         SELECT namespace_key, ?2, lease_id FROM workspace_port_leases l
+         WHERE lease_id=?1 AND EXISTS (SELECT 1 FROM workspace_port_subjects s
+             WHERE s.lease_id=l.lease_id AND s.subject_kind='project-root'
+             AND s.subject_key='root:' || l.canonical_root)",
+        params![lease.lease_id, alias],
+    )?;
+    Ok(())
+}
+
+/// Release exact durable root identities. This deliberately does not discover
+/// Git roots, canonicalize paths, or match ancestor/descendant directories.
+pub(crate) fn release_project_root_reference_in_transaction(
+    connection: &Connection,
+    namespace: &str,
+    root: &Path,
+    lease_id: Option<&str>,
+) -> Result<(), PortLeaseError> {
+    let root = normalize_project_root_path(root)?;
+    let matches: std::collections::BTreeSet<String> = {
+        let mut statement = connection.prepare(
+            "SELECT l.canonical_root, a.alias_root FROM workspace_port_leases l
+             JOIN workspace_port_subjects s ON s.lease_id=l.lease_id
+             LEFT JOIN workspace_port_root_aliases a
+                 ON a.lease_id=l.lease_id AND a.namespace_key=l.namespace_key
+             WHERE l.namespace_key=?1 AND (?2 IS NULL OR l.lease_id=?2)
+             AND s.subject_kind='project-root' AND s.subject_key='root:' || l.canonical_root",
+        )?;
+        let rows = statement.query_map(params![namespace, lease_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        let mut matches = std::collections::BTreeSet::new();
+        for row in rows {
+            let (canonical, alias) = row?;
+            if std::iter::once(canonical.as_str())
+                .chain(alias.as_deref())
+                .any(|recorded| {
+                    normalize_project_root_path(Path::new(recorded))
+                        .ok()
+                        .as_deref()
+                        == Some(root.as_str())
+                })
+            {
+                // Release the exact persisted key, not its normalized spelling.
+                matches.insert(canonical);
+            }
+        }
+        matches
+    };
+    for root in matches {
+        release_subject_reference_in_transaction(
+            connection,
+            Some(namespace),
+            PortSubjectKind::ProjectRoot,
+            &format!("root:{root}"),
+            lease_id,
+        )?;
+    }
+    Ok(())
 }
 
 fn map_lease(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspacePortLease> {
@@ -744,6 +857,20 @@ fn inspect(
     let leases = list(&tx)?;
     let mut diagnostics = Vec::new();
     for (index, lease) in leases.iter().enumerate() {
+        let missing = match std::fs::metadata(&lease.canonical_root) {
+            Ok(metadata) => !metadata.is_dir(),
+            Err(error) => error.kind() == io::ErrorKind::NotFound,
+        };
+        if missing {
+            diagnostics.push(PortLeaseDiagnostic {
+                kind: PortLeaseDiagnosticKind::MissingRoot,
+                lease_ids: vec![lease.lease_id.clone()],
+                detail: format!(
+                    "leased root {} is missing; lease retained until explicit release",
+                    lease.canonical_root
+                ),
+            });
+        }
         let root = registry_root(Path::new(&lease.canonical_root))
             .unwrap_or_else(|_| lease.canonical_root.clone());
         let persisted: Vec<String> = {
@@ -901,6 +1028,216 @@ mod tests {
             policy,
             1,
         )
+    }
+
+    fn allocate_project_root(
+        store: &WorkspaceStore,
+        namespace: &str,
+        root: &str,
+    ) -> WorkspacePortLease {
+        ensure(
+            &store.connection,
+            namespace,
+            LeaseSubject {
+                kind: PortSubjectKind::ProjectRoot,
+                key: &format!("root:{root}"),
+                root,
+                registry_id: None,
+            },
+            Default::default(),
+            1,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn port_root_release_is_lexical_exact_and_preserves_other_owners_and_namespaces() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("never-created");
+        let child = root.join("child");
+        let root = root.to_str().unwrap();
+        let child = child.to_str().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+        let parent = allocate_project_root(&store, "remote:exact", root);
+        let child = allocate_project_root(&store, "remote:exact", child);
+        let other_namespace = allocate_project_root(&store, "remote:other", root);
+        ensure(
+            &store.connection,
+            "remote:exact",
+            LeaseSubject {
+                kind: PortSubjectKind::ProjectRoot,
+                key: "project-id",
+                root,
+                registry_id: None,
+            },
+            Default::default(),
+            1,
+        )
+        .unwrap();
+        let tx =
+            Transaction::new_unchecked(&store.connection, TransactionBehavior::Immediate).unwrap();
+        release_project_root_reference_in_transaction(
+            &tx,
+            "remote:exact",
+            &Path::new(root).join("./unused/../"),
+            None,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        assert!(read_subject(
+            &store.connection,
+            "remote:exact",
+            PortSubjectKind::ProjectRoot,
+            &format!("root:{root}")
+        )
+        .unwrap()
+        .is_empty());
+        assert_eq!(
+            read_subject(
+                &store.connection,
+                "remote:exact",
+                PortSubjectKind::ProjectRoot,
+                "project-id"
+            )
+            .unwrap()[0]
+                .lease_id,
+            parent.lease_id
+        );
+        let remaining = list(&store.connection).unwrap();
+        assert_eq!(remaining.len(), 3);
+        assert!(remaining
+            .iter()
+            .any(|lease| lease.lease_id == child.lease_id));
+        assert!(remaining
+            .iter()
+            .any(|lease| lease.lease_id == other_namespace.lease_id));
+        assert!(normalize_project_root_path(Path::new("relative")).is_err());
+    }
+
+    #[test]
+    fn port_root_alias_survives_reopen_and_releases_only_the_recorded_root() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("offline-root");
+        let alias = dir.path().join("offline-alias");
+        let other = dir.path().join("other-root");
+        let (lease, other) = {
+            let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+            let lease = allocate_project_root(&store, "remote:alias", root.to_str().unwrap());
+            let other = allocate_project_root(&store, "remote:alias", other.to_str().unwrap());
+            record_project_root_alias(&store.connection, &lease, &alias).unwrap();
+            (lease, other)
+        };
+        // The original alias can now point elsewhere. Release still follows
+        // its durable mapping, without accessing either current directory.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&other.canonical_root, &alias).unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+        let tx =
+            Transaction::new_unchecked(&store.connection, TransactionBehavior::Immediate).unwrap();
+        release_project_root_reference_in_transaction(
+            &tx,
+            "remote:alias",
+            &alias,
+            Some(&other.lease_id),
+        )
+        .unwrap();
+        assert_eq!(list(&tx).unwrap().len(), 2, "lease selection must be exact");
+        release_project_root_reference_in_transaction(&tx, "remote:alias", &alias, None).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(list(&store.connection).unwrap(), vec![other]);
+        assert_eq!(
+            store
+                .connection
+                .query_row(
+                    "SELECT count(*) FROM workspace_port_root_aliases WHERE lease_id=?1",
+                    [lease.lease_id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn port_root_release_normalizes_persisted_roots_and_retains_the_original_subject_key() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+        let raw_root = format!("{}//./checkout/unused/../", dir.path().display());
+        let requested = dir.path().join("checkout");
+        let lease = allocate_project_root(&store, "remote:normalized", &raw_root);
+        let other = allocate_project_root(
+            &store,
+            "remote:normalized",
+            requested.join("child").to_str().unwrap(),
+        );
+        let tx =
+            Transaction::new_unchecked(&store.connection, TransactionBehavior::Immediate).unwrap();
+        release_project_root_reference_in_transaction(&tx, "remote:normalized", &requested, None)
+            .unwrap();
+        tx.commit().unwrap();
+        assert_eq!(list(&store.connection).unwrap(), [other]);
+        assert!(read_subject(
+            &store.connection,
+            "remote:normalized",
+            PortSubjectKind::ProjectRoot,
+            &lease.subject_key
+        )
+        .unwrap()
+        .is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn port_root_release_normalizes_verbatim_disk_and_unc_prefixes() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+        for (recorded, requested) in [
+            (r"\\?\c:\workspace\.\repo", r"C:\workspace\repo"),
+            (
+                r"\\?\UNC\server\share\workspace\repo",
+                r"\\server\share\workspace\repo",
+            ),
+        ] {
+            assert_eq!(
+                normalize_project_root_path(Path::new(recorded)).unwrap(),
+                normalize_project_root_path(Path::new(requested)).unwrap()
+            );
+            allocate_project_root(&store, "remote:windows", recorded);
+            let tx = Transaction::new_unchecked(&store.connection, TransactionBehavior::Immediate)
+                .unwrap();
+            release_project_root_reference_in_transaction(
+                &tx,
+                "remote:windows",
+                Path::new(requested),
+                None,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            assert!(list(&store.connection).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn port_missing_root_diagnostic_never_reclaims_the_lease() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("checkout");
+        std::fs::create_dir(&root).unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+        let lease = allocate_project_root(&store, "remote:missing", root.to_str().unwrap());
+        assert!(list_status(&store).unwrap().diagnostics.is_empty());
+        std::fs::remove_dir(&root).unwrap();
+        for diagnostics in [
+            list_status(&store).unwrap().diagnostics,
+            reconcile(&store).unwrap(),
+        ] {
+            let missing: Vec<_> = diagnostics
+                .iter()
+                .filter(|entry| entry.kind == PortLeaseDiagnosticKind::MissingRoot)
+                .collect();
+            assert_eq!(missing.len(), 1);
+            assert_eq!(missing[0].lease_ids, [lease.lease_id.clone()]);
+        }
+        assert_eq!(list(&store.connection).unwrap(), [lease]);
     }
 
     #[test]

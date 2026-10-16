@@ -219,3 +219,20 @@ test("runSg spawns in the given cwd with the given abort signal", async () => {
   assert.equal(seen?.cwd, "/workspace")
   assert.equal(seen?.signal, signal)
 })
+
+test("ast-grep reports an asynchronous pre-spawn lease failure", async () => {
+  const { withProcessSandbox } = await import("../../../platform/process/exec.ts")
+  const result = await withProcessSandbox(
+    undefined,
+    process.cwd(),
+    () => runSg({ pattern: "x", lang: "typescript" }, { sgPath: process.execPath }),
+    {
+      hostRpc: {
+        call: async () => {
+          throw new Error("lease exhausted")
+        },
+      },
+    }
+  )
+  assert.equal(result.error, "lease exhausted")
+})

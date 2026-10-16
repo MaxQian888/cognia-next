@@ -106,6 +106,19 @@ pub fn filter_env(env: &mut BTreeMap<String, String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn workspace_port_keys_survive_sandbox_filtering() {
+        let mut env = BTreeMap::from([
+            ("COGNIA_PORT".into(), "41000".into()),
+            ("COGNIA_PORT_COUNT".into(), "10".into()),
+            ("PORT".into(), "41000".into()),
+            ("NODE_OPTIONS".into(), "--require evil".into()),
+        ]);
+        assert_eq!(filter_env(&mut env), vec!["NODE_OPTIONS"]);
+        assert_eq!(env.len(), 3);
+        assert_eq!(env["PORT"], "41000");
+    }
+
     use super::*;
 
     #[test]

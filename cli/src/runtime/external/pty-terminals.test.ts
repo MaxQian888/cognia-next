@@ -1,4 +1,8 @@
 /** @jest-environment node */
+import path from "node:path"
+import { resolveWorkspacePortEnv } from "../workspace-port-env"
+
+jest.mock("../workspace-port-env", () => ({ resolveWorkspacePortEnv: jest.fn(async () => ({})) }))
 import {
   acpTerminalCreate,
   acpTerminalGetInfo,
@@ -16,6 +20,33 @@ import {
 } from "./pty-terminals"
 
 describe("CLI PTY terminals", () => {
+  it("passes trusted ports last to the PTY for its final working directory", async () => {
+    if (process.platform === "win32") return
+    const trusted = { COGNIA_PORT: "41020", COGNIA_PORT_COUNT: "10", PORT: "41020" }
+    jest.mocked(resolveWorkspacePortEnv).mockResolvedValueOnce(trusted)
+    const id = await acpTerminalCreate(
+      "port-env",
+      "/bin/sh",
+      ["-c", 'printf \'%s,%s,%s\' "$COGNIA_PORT" "$COGNIA_PORT_COUNT" "$PORT"'],
+      ".",
+      { COGNIA_PORT: "1", COGNIA_PORT_COUNT: "2", PORT: "3" }
+    )
+    try {
+      await acpTerminalWaitForExit(id, 5)
+      expect(resolveWorkspacePortEnv).toHaveBeenCalledWith(path.resolve("."))
+      await expect(acpTerminalOutput(id)).resolves.toMatchObject({ output: "41020,10,41020" })
+    } finally {
+      await acpTerminalRelease(id)
+    }
+  })
+
+  it("refuses the PTY when the host resolver fails", async () => {
+    if (process.platform === "win32") return
+    jest.mocked(resolveWorkspacePortEnv).mockRejectedValueOnce(new Error("port range exhausted"))
+    await expect(acpTerminalCreate("port-error", "/bin/sh")).rejects.toThrow("port range exhausted")
+    await expect(acpTerminalGetSessionTerminals("port-error")).resolves.toEqual([])
+  })
+
   it("exposes every ACP terminal command as the installed terminal plane", () => {
     expect(cliTerminalPlane).toEqual({
       create: acpTerminalCreate,

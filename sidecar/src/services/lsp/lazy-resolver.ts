@@ -10,11 +10,20 @@ import { createSessionLspResolver } from "./service-loader.ts"
 import type { SessionLspOptions } from "./service-loader.ts"
 import type { LspResolver } from "./resolver.ts"
 import type { LspSendOptions } from "./servers.ts"
+import { withProcessSandbox } from "../../platform/process/exec.ts"
+import type { ProcessPortContext } from "../../platform/process/exec.ts"
+
+interface DiagnosticsOptions {
+  text?: string
+  waitMs?: number
+  /** SDK-native hooks run outside the tool middleware's process scope. */
+  processContext?: ProcessPortContext
+}
 
 /** The resolver surface the tools and hooks call; creates the real one on first use. */
 export interface LazyLspResolver {
   request(file: string, method: string, payload?: Record<string, unknown>): Promise<unknown>
-  getDiagnostics(file: string, opts?: { text?: string; waitMs?: number }): Promise<unknown[]>
+  getDiagnostics(file: string, opts?: DiagnosticsOptions): Promise<unknown[]>
 }
 
 export function makeLazyLspResolver(
@@ -71,13 +80,25 @@ export function makeLazyLspResolver(
             )
           return r.request(file, method, payload)
         },
-        async getDiagnostics(file: string, opts?: { text?: string; waitMs?: number }) {
-          const r = await getLspResolver()
-          if (!r)
-            throw new Error(
-              "LSP host unavailable. Rebuild the vscode-ext-host bundle or reinstall cognia-agent, then retry."
-            )
-          return r.getDiagnostics(file, opts)
+        async getDiagnostics(file: string, opts?: DiagnosticsOptions) {
+          const resolve = async () => {
+            const r = await getLspResolver()
+            if (!r)
+              throw new Error(
+                "LSP host unavailable. Rebuild the vscode-ext-host bundle or reinstall cognia-agent, then retry."
+              )
+            return r.getDiagnostics(file, opts)
+          }
+          // Keep both lazy installation and server startup in the caller's
+          // session scope. Tool calls already inherit it from middleware.
+          return opts?.processContext
+            ? withProcessSandbox(
+                sendOptions.builtinProcessSandbox,
+                sendOptions.cwd,
+                resolve,
+                opts.processContext
+              )
+            : resolve()
         },
       }
     : null

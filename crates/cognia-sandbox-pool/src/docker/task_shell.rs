@@ -172,14 +172,16 @@ impl DockerSandboxBackend {
             )
             .await?;
         let libc_volume = self.stage_libc(&prepared).await?;
-        let boot_env = encode_runtime_config_env(&runtime_config_with_env(
-            &prepared.admitted.spec,
-            BTreeMap::new(),
-        )?)
-        .map_err(|error| refused("sandbox_runtime_config_invalid", error.to_string()))?;
+        let boot = runtime_config_with_env(&prepared.admitted.spec, BTreeMap::new())?;
+        let boot_env = encode_runtime_config_env(&boot)
+            .map_err(|error| refused("sandbox_runtime_config_invalid", error.to_string()))?;
         let name = format!("task-shell-{}", &sha256_hex(owner.as_bytes())[..16]);
-        let spec = self.local_runner_spec(&name, &prepared, libc_volume, boot_env, Vec::new())?;
+        let mut spec =
+            self.local_runner_spec(&name, &prepared, libc_volume, boot_env, Vec::new())?;
         let environment = prepared.admitted.spec.clone();
+        self.configure_workspace_ports(&mut spec, &workspace_root)
+            .await?;
+        let workspace_env = spec.workspace_env.clone();
         let tier = prepared.admitted.admission.actual_tier.as_str().to_string();
         let acquired = self
             .acquire_runtime(
@@ -213,6 +215,8 @@ impl DockerSandboxBackend {
         );
         exec.command.extend(argv);
         let mut runtime = runtime_config_with_env(&environment, env.into_iter().collect())?;
+        runtime.workspace_env = workspace_env.clone();
+        exec.workspace_env = workspace_env;
         // The supervisor runs no lifecycle for a task command.
         runtime.lifecycle_phases.clear();
         exec.env = encode_runtime_config_env(&runtime)
@@ -507,6 +511,40 @@ mod tests {
         let mut small = Capture::default();
         small.push(vec![0xff, b'o', b'k']);
         assert_eq!(small.text(), ("\u{fffd}ok".to_string(), false));
+    }
+
+    #[tokio::test]
+    async fn workspace_ports_reach_task_shell_boot_and_each_exec() {
+        super::super::tests::install_port_provider();
+        let (harness, environment) = harness();
+        let backend = harness.backend.clone();
+        let mut req = request(&environment);
+        req.workspace_root = super::super::tests::PORT_CWD.into();
+        req.env.insert("PORT".into(), "9999".into());
+        let running = tokio::spawn(async move { backend.exec_task_shell(req).await });
+        let exec = next_connect(&harness, 0).await;
+        let runtime = decode_agent_environment(&exec.env);
+        assert_eq!(runtime.spawn_env["PORT"], "9999");
+        assert_eq!(runtime.workspace_env["PORT"], "41000");
+        assert_eq!(exec.workspace_env, runtime.workspace_env);
+        let boot = harness
+            .api
+            .specs
+            .lock()
+            .iter()
+            .find(|s| s.cmd[0] == "serve")
+            .unwrap()
+            .clone();
+        let boot_runtime = decode_agent_environment(&boot.env);
+        assert!(boot_runtime.spawn_env.is_empty());
+        assert_eq!(boot_runtime.workspace_env, runtime.workspace_env);
+        let session = format!("session:{}", flag(&exec, "--session"));
+        harness
+            .api
+            .handle_events(&session)
+            .send(RunnerEvent::Exited { code: Some(0) })
+            .unwrap();
+        running.await.unwrap().unwrap();
     }
 
     #[tokio::test]

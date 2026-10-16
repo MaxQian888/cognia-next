@@ -17,7 +17,7 @@ use crate::{
 };
 use parking_lot::Mutex;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -134,6 +134,8 @@ pub struct TaskWorkspaceService {
     /// Rows open-time recovery could not repair, reported (once) by the next
     /// maintenance pass.
     open_recovery_failures: Mutex<Vec<String>>,
+    /// Latest non-authoritative discovery failure per cwd, exposed by snapshots.
+    port_discovery_diagnostics: Mutex<BTreeMap<PathBuf, crate::PortLeaseDiagnostic>>,
 }
 
 #[derive(Clone)]
@@ -362,6 +364,7 @@ impl TaskWorkspaceService {
             code_result_outbox: crate::CodeSnapshotOutbox::new(snapshots_dir.join("results")),
             code_result_inbox,
             open_recovery_failures: Mutex::new(Vec::new()),
+            port_discovery_diagnostics: Mutex::new(BTreeMap::new()),
         };
         service.recover_incomplete_runs()?;
         service.recover_workspace_bundle_turns()?;
@@ -3041,14 +3044,20 @@ impl TaskWorkspaceService {
                 "registry subjects must use ensure_workspace_port_lease".into(),
             ));
         }
+        let requested_root = root;
         let root = crate::ports::canonical_root(root)?;
         let store = self.store.lock();
         let policy = store
             .get_workspace_lifecycle_policy()
             .map_err(crate::PortLeaseError::Store)?
             .unwrap_or_default();
-        crate::ports::ensure(
+        let tx = rusqlite::Transaction::new_unchecked(
             &store.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .map_err(crate::PortLeaseError::from)?;
+        let lease = crate::ports::ensure_in_transaction(
+            &tx,
             namespace,
             crate::ports::LeaseSubject {
                 kind,
@@ -3058,7 +3067,17 @@ impl TaskWorkspaceService {
             },
             policy,
             now_ms(),
-        )
+        )?;
+        if kind == crate::PortSubjectKind::ProjectRoot {
+            let alias = if requested_root.is_absolute() {
+                requested_root
+            } else {
+                Path::new(&root)
+            };
+            crate::ports::record_project_root_alias(&tx, &lease, alias)?;
+        }
+        tx.commit().map_err(crate::PortLeaseError::from)?;
+        Ok(lease)
     }
 
     /// A project may reference several physical roots. Reading never registers a subject.
@@ -3100,13 +3119,25 @@ impl TaskWorkspaceService {
             rusqlite::TransactionBehavior::Immediate,
         )
         .map_err(crate::PortLeaseError::from)?;
-        crate::ports::release_subject_reference_in_transaction(
-            &tx,
-            Some(namespace),
-            kind,
-            key,
-            lease_id,
-        )?;
+        if let Some(root) = key
+            .strip_prefix("root:")
+            .filter(|_| kind == crate::PortSubjectKind::ProjectRoot)
+        {
+            crate::ports::release_project_root_reference_in_transaction(
+                &tx,
+                namespace,
+                Path::new(root),
+                lease_id,
+            )?;
+        } else {
+            crate::ports::release_subject_reference_in_transaction(
+                &tx,
+                Some(namespace),
+                kind,
+                key,
+                lease_id,
+            )?;
+        }
         tx.commit().map_err(crate::PortLeaseError::from)
     }
 
@@ -3157,6 +3188,23 @@ impl TaskWorkspaceService {
         cwd: &Path,
         ensure: bool,
     ) -> Result<Option<crate::WorkspacePortLease>, crate::PortLeaseError> {
+        self.resolve_workspace_port_lease_with_home(
+            namespace,
+            workspace_id,
+            cwd,
+            ensure,
+            std::env::home_dir,
+        )
+    }
+
+    fn resolve_workspace_port_lease_with_home(
+        &self,
+        namespace: &str,
+        workspace_id: Option<&str>,
+        cwd: &Path,
+        ensure: bool,
+        home: impl FnOnce() -> Option<PathBuf>,
+    ) -> Result<Option<crate::WorkspacePortLease>, crate::PortLeaseError> {
         if let Some(id) = workspace_id {
             return if ensure {
                 self.ensure_workspace_port_lease(id, namespace).map(Some)
@@ -3164,6 +3212,7 @@ impl TaskWorkspaceService {
                 self.read_workspace_port_lease(id, namespace)
             };
         }
+        let requested_cwd = cwd;
         let cwd = PathBuf::from(crate::ports::canonical_root(cwd)?);
         let store = self.store.lock();
         let records = store
@@ -3178,24 +3227,74 @@ impl TaskWorkspaceService {
                 self.read_workspace_port_lease(&id, namespace)
             };
         }
-        Ok(crate::ports::resolve_external(
+        let external = crate::ports::resolve_external(
             &crate::ports::external_leases(&store.connection, namespace)?,
             namespace,
             &cwd,
-        ))
+        );
+        drop(store);
+        // Registered identities are authoritative. Discovery only supplies a
+        // missing execution identity; read-only resolution never discovers one.
+        if external.is_some() {
+            self.port_discovery_diagnostics.lock().remove(&cwd);
+            return Ok(external);
+        }
+        if !ensure {
+            return Ok(None);
+        }
+        let root = match discover_port_checkout_root(&cwd, home()) {
+            Ok(root) => {
+                self.port_discovery_diagnostics.lock().remove(&cwd);
+                let Some(root) = root else { return Ok(None) };
+                root
+            }
+            Err(diagnostic) => {
+                self.port_discovery_diagnostics
+                    .lock()
+                    .insert(cwd, diagnostic);
+                return Ok(None);
+            }
+        };
+        // The helper uses explicit ceilings and empty open flags: it neither
+        // reads Git discovery environment variables nor crosses filesystems.
+        // Preserve only an alias of the actual checkout root, never a subdir.
+        let mut requested_root = requested_cwd.to_path_buf();
+        for _ in cwd
+            .strip_prefix(&root)
+            .expect("discovered root contains cwd")
+            .components()
+        {
+            requested_root.pop();
+        }
+        if fs::canonicalize(&requested_root).ok().as_deref() != Some(Path::new(&root)) {
+            requested_root = PathBuf::from(&root);
+        }
+        self.ensure_subject_port_lease(
+            namespace,
+            crate::PortSubjectKind::ProjectRoot,
+            &format!("root:{root}"),
+            &requested_root,
+        )
+        .map(Some)
     }
 
     /// Report the current ledger and diagnostics without repairing or allocating.
     pub fn list_workspace_port_leases(
         &self,
     ) -> Result<crate::WorkspacePortLeaseList, crate::PortLeaseError> {
-        crate::ports::list_status(&self.store.lock())
+        let mut snapshot = crate::ports::list_status(&self.store.lock())?;
+        snapshot
+            .diagnostics
+            .extend(self.port_discovery_diagnostics.lock().values().cloned());
+        Ok(snapshot)
     }
 
     pub fn reconcile_workspace_port_leases(
         &self,
     ) -> Result<Vec<crate::PortLeaseDiagnostic>, crate::PortLeaseError> {
-        crate::ports::reconcile(&self.store.lock())
+        let mut diagnostics = crate::ports::reconcile(&self.store.lock())?;
+        diagnostics.extend(self.port_discovery_diagnostics.lock().values().cloned());
+        Ok(diagnostics)
     }
 
     pub fn workspace_lifecycle_policy(&self) -> crate::WorkspaceLifecyclePolicy {
@@ -6260,6 +6359,55 @@ fn normalized_path_key(path: &Path) -> String {
         .into_owned()
 }
 
+fn discover_port_checkout_root(
+    cwd: &Path,
+    home: Option<PathBuf>,
+) -> Result<Option<String>, crate::PortLeaseDiagnostic> {
+    let diagnostic = |kind, detail| crate::PortLeaseDiagnostic {
+        kind,
+        lease_ids: Vec::new(),
+        detail: format!("{}: {detail}", cwd.display()),
+    };
+    let home = home.map(|path| fs::canonicalize(&path).unwrap_or(path));
+    // Allow inspection of home itself so a home checkout can be diagnosed, but
+    // do not search its ancestors. Empty flags ignore GIT_* and forbid CROSS_FS.
+    let ceilings: Vec<_> = home.as_deref().and_then(Path::parent).into_iter().collect();
+    let repository =
+        match git2::Repository::open_ext(cwd, git2::RepositoryOpenFlags::empty(), &ceilings) {
+            Ok(repository) => repository,
+            Err(error) if error.code() == git2::ErrorCode::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(diagnostic(
+                    crate::PortLeaseDiagnosticKind::DiscoveryFailed,
+                    error.to_string(),
+                ))
+            }
+        };
+    let Some(root) = repository.workdir() else {
+        return Ok(None);
+    };
+    let root = crate::ports::canonical_root(root).map_err(|error| {
+        diagnostic(
+            crate::PortLeaseDiagnosticKind::DiscoveryFailed,
+            error.to_string(),
+        )
+    })?;
+    let path = Path::new(&root);
+    if !cwd.starts_with(path) {
+        return Err(diagnostic(
+            crate::PortLeaseDiagnosticKind::DiscoveryFailed,
+            format!("checkout root {root} does not contain the execution directory"),
+        ));
+    }
+    if path.parent().is_none() || home.as_ref().is_some_and(|home| home.starts_with(path)) {
+        return Err(diagnostic(
+            crate::PortLeaseDiagnosticKind::DiscoveryRejected,
+            format!("checkout root {root} contains the home directory or is a filesystem root; explicit registration required"),
+        ));
+    }
+    Ok(Some(root))
+}
+
 fn git_common_dir(workspace_root: &Path) -> Option<String> {
     git2::Repository::discover(workspace_root)
         .ok()
@@ -6947,6 +7095,467 @@ mod tests {
         time::Duration,
     };
     use tempfile::TempDir;
+
+    #[test]
+    fn port_fresh_git_checkout_ensure_discovers_root_and_releases_both_owners() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        git2::Repository::init(root.path()).unwrap();
+        let nested = root.path().join("src/nested");
+        fs::create_dir_all(&nested).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let ns = "remote:checkout-test";
+        assert!(service
+            .resolve_workspace_port_lease(ns, None, &nested, false)
+            .unwrap()
+            .is_none());
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
+        let lease = service
+            .resolve_workspace_port_lease(ns, None, &nested, true)
+            .unwrap()
+            .unwrap();
+        let canonical = crate::ports::canonical_root(root.path()).unwrap();
+        assert_eq!(lease.subject_kind, crate::PortSubjectKind::ProjectRoot);
+        assert_eq!(lease.subject_key, format!("root:{canonical}"));
+        assert_eq!(lease.canonical_root, canonical);
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease(ns, None, root.path(), true)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            lease.lease_id
+        );
+        let project = service
+            .ensure_subject_port_lease(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                "project-id",
+                root.path(),
+            )
+            .unwrap();
+        assert_eq!(project.lease_id, lease.lease_id);
+        // Canonicalization is host-owned, including symlink aliases.
+        #[cfg(unix)]
+        let alias = {
+            let alias = data.path().join("project-alias");
+            std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+            alias
+        };
+        #[cfg(not(unix))]
+        let alias = root.path().to_path_buf();
+        service
+            .ensure_subject_port_lease(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                "project-id",
+                &alias,
+            )
+            .unwrap();
+        service
+            .release_subject_port_leases(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                &format!("root:{}", alias.display()),
+            )
+            .unwrap();
+        assert_eq!(
+            crate::ports::list(&service.store.lock().connection)
+                .unwrap()
+                .len(),
+            1
+        );
+        service
+            .release_subject_port_leases(ns, crate::PortSubjectKind::ProjectRoot, "project-id")
+            .unwrap();
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn port_git_discovery_keeps_linked_worktrees_separate_and_offline_roots() {
+        let data = TempDir::new().unwrap();
+        let source = TempDir::new().unwrap();
+        git2::Repository::init(source.path()).unwrap();
+        seed_git_repository(source.path());
+        let worktree = data.path().join("linked");
+        git2::Repository::open(source.path())
+            .unwrap()
+            .worktree("port-test", &worktree, None)
+            .unwrap();
+        let service =
+            TaskWorkspaceService::open(ServiceConfig::new(data.path().join("host"))).unwrap();
+        let ns = "remote:worktree-test";
+        let parent = service
+            .resolve_workspace_port_lease(ns, None, source.path(), true)
+            .unwrap()
+            .unwrap();
+        assert!(service
+            .resolve_workspace_port_lease(ns, None, &worktree, false)
+            .unwrap()
+            .is_none());
+        let child = service
+            .resolve_workspace_port_lease(ns, None, &worktree, true)
+            .unwrap()
+            .unwrap();
+        assert_ne!(child.lease_id, parent.lease_id);
+        assert_ne!(child.base_port, parent.base_port);
+        assert_eq!(
+            child.canonical_root,
+            crate::ports::canonical_root(&worktree).unwrap()
+        );
+        fs::remove_dir_all(&worktree).unwrap();
+        service.reconcile_workspace_port_leases().unwrap();
+        assert_eq!(
+            service
+                .read_subject_port_leases(
+                    ns,
+                    crate::PortSubjectKind::ProjectRoot,
+                    &child.subject_key
+                )
+                .unwrap()
+                .len(),
+            1
+        );
+        service
+            .release_subject_port_leases(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                &child.subject_key,
+            )
+            .unwrap();
+        assert_eq!(
+            crate::ports::list(&service.store.lock().connection)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn port_host_only_subdirectory_delete_retains_shared_root_until_exact_orphan_release() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        git2::Repository::init(root.path()).unwrap();
+        let nested = root.path().join("packages/app");
+        fs::create_dir_all(&nested).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let ns = "remote:subdirectory-release";
+        let lease = service
+            .resolve_workspace_port_lease(ns, None, &nested, true)
+            .unwrap()
+            .unwrap();
+        fs::remove_dir_all(&nested).unwrap();
+        service
+            .release_subject_port_leases(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                &format!("root:{}", nested.display()),
+            )
+            .unwrap();
+        service
+            .release_subject_port_leases(ns, crate::PortSubjectKind::ProjectRoot, "deleted-project")
+            .unwrap();
+        let snapshot = service.list_workspace_port_leases().unwrap();
+        assert_eq!(snapshot.leases.len(), 1);
+        assert!(!snapshot
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == crate::PortLeaseDiagnosticKind::MissingRoot));
+        fs::remove_dir_all(root.path()).unwrap();
+        assert!(service
+            .reconcile_workspace_port_leases()
+            .unwrap()
+            .iter()
+            .any(|d| d.kind == crate::PortLeaseDiagnosticKind::MissingRoot
+                && d.lease_ids == [lease.lease_id.clone()]));
+        assert!(service
+            .list_workspace_port_leases()
+            .unwrap()
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == crate::PortLeaseDiagnosticKind::MissingRoot));
+        // The UI can explicitly release the orphan by its recorded root key.
+        service
+            .release_subject_port_leases(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                &lease.subject_key,
+            )
+            .unwrap();
+        assert!(service
+            .list_workspace_port_leases()
+            .unwrap()
+            .leases
+            .is_empty());
+    }
+
+    #[test]
+    fn port_git_discovery_ignores_non_git_and_bare_repositories() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        for bare in [false, true] {
+            if bare {
+                git2::Repository::init_bare(root.path()).unwrap();
+            }
+            assert!(service
+                .resolve_workspace_port_lease("remote:no-checkout", None, root.path(), true)
+                .unwrap()
+                .is_none());
+        }
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn port_discovery_rejects_home_and_ancestors_but_allows_nested_repositories() {
+        let data = TempDir::new().unwrap();
+        let sandbox = TempDir::new().unwrap();
+        let home = sandbox.path().join("home");
+        fs::create_dir(&home).unwrap();
+        git2::Repository::init(&home).unwrap();
+        let nested = home.join("project/src");
+        fs::create_dir_all(&nested).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let ns = "remote:home";
+        assert!(service
+            .resolve_workspace_port_lease_with_home(ns, None, &nested, true, || Some(home.clone()))
+            .unwrap()
+            .is_none());
+        assert!(service
+            .list_workspace_port_leases()
+            .unwrap()
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == crate::PortLeaseDiagnosticKind::DiscoveryRejected));
+        git2::Repository::init(home.join("project")).unwrap();
+        let lease = service
+            .resolve_workspace_port_lease_with_home(ns, None, &nested, true, || Some(home.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            lease.canonical_root,
+            crate::ports::canonical_root(&home.join("project")).unwrap()
+        );
+        assert!(service
+            .list_workspace_port_leases()
+            .unwrap()
+            .diagnostics
+            .is_empty());
+
+        // Treat the sandbox as a filesystem-root-like ceiling. A repository
+        // there must not capture a plain directory under the fake home.
+        fs::remove_dir_all(home.join(".git")).unwrap();
+        git2::Repository::init(sandbox.path()).unwrap();
+        let plain = home.join("plain");
+        fs::create_dir(&plain).unwrap();
+        assert!(service
+            .resolve_workspace_port_lease_with_home(ns, None, &plain, true, || Some(home.clone()))
+            .unwrap()
+            .is_none());
+        assert!(service
+            .resolve_workspace_port_lease_with_home(ns, None, sandbox.path(), true, || Some(
+                home.clone()
+            ))
+            .unwrap()
+            .is_none());
+        assert!(service
+            .reconcile_workspace_port_leases()
+            .unwrap()
+            .iter()
+            .any(|d| d.kind == crate::PortLeaseDiagnosticKind::DiscoveryRejected));
+        // Explicitly registered home roots remain authoritative.
+        let registered = service
+            .ensure_subject_port_lease(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                "explicit-home",
+                &home,
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease_with_home(ns, None, &plain, true, || panic!(
+                    "registered roots do not discover"
+                ))
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            registered.lease_id
+        );
+    }
+
+    #[test]
+    fn port_discovery_ignores_host_git_environment() {
+        const CHILD: &str = "COGNIA_PORT_DISCOVERY_ENV_CHILD";
+        if let Some(cwd) = std::env::var_os(CHILD) {
+            let data = TempDir::new().unwrap();
+            let fake_home = TempDir::new().unwrap();
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            let cwd = PathBuf::from(cwd);
+            let lease = service
+                .resolve_workspace_port_lease_with_home(
+                    "remote:env",
+                    None,
+                    &cwd.join("src"),
+                    true,
+                    || Some(fake_home.path().into()),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                lease.canonical_root,
+                crate::ports::canonical_root(&cwd).unwrap()
+            );
+            return;
+        }
+        // Isolate process environment changes from concurrently running tests.
+        let checkout = TempDir::new().unwrap();
+        let foreign = TempDir::new().unwrap();
+        git2::Repository::init(checkout.path()).unwrap();
+        git2::Repository::init(foreign.path()).unwrap();
+        fs::create_dir(checkout.path().join("src")).unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "service::tests::port_discovery_ignores_host_git_environment",
+                "--nocapture",
+            ])
+            .env(CHILD, checkout.path())
+            .env("GIT_DIR", foreign.path().join(".git"))
+            .env("GIT_WORK_TREE", foreign.path())
+            .env("GIT_CEILING_DIRECTORIES", checkout.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn port_discovery_submodule_uses_its_own_worktree_root() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let repository = git2::Repository::init(root.path()).unwrap();
+        let submodule = repository
+            .submodule(
+                "https://example.invalid/local-fixture",
+                Path::new("child"),
+                true,
+            )
+            .unwrap();
+        let subrepo = submodule.open().unwrap();
+        let child = subrepo.workdir().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let lease = service
+            .resolve_workspace_port_lease("remote:submodule", None, child, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            lease.canonical_root,
+            crate::ports::canonical_root(&root.path().join("child")).unwrap()
+        );
+        let parent = service
+            .resolve_workspace_port_lease("remote:submodule", None, root.path(), true)
+            .unwrap()
+            .unwrap();
+        assert_ne!(parent.lease_id, lease.lease_id);
+    }
+
+    #[test]
+    fn port_discovery_failure_is_report_only_and_registered_subjects_skip_it() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        fs::write(root.path().join(".git"), "invalid gitdir file\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let ns = "remote:corrupt";
+        assert!(service
+            .resolve_workspace_port_lease(ns, None, root.path(), true)
+            .unwrap()
+            .is_none());
+        assert!(service
+            .resolve_workspace_port_lease(ns, None, root.path(), false)
+            .unwrap()
+            .is_none());
+        assert!(service
+            .list_workspace_port_leases()
+            .unwrap()
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == crate::PortLeaseDiagnosticKind::DiscoveryFailed));
+        let lease = service
+            .ensure_subject_port_lease(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                "project",
+                root.path(),
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease_with_home(ns, None, root.path(), true, || panic!(
+                    "registered subjects skip discovery"
+                ))
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            lease.lease_id
+        );
+        service
+            .release_subject_port_leases(ns, crate::PortSubjectKind::ProjectRoot, "project")
+            .unwrap();
+        assert!(service
+            .list_workspace_port_leases()
+            .unwrap()
+            .leases
+            .is_empty());
+        // Allocation and ledger failures are still authoritative errors.
+        service
+            .store
+            .lock()
+            .connection
+            .execute("DROP TABLE workspace_registry", [])
+            .unwrap();
+        assert!(matches!(
+            service.resolve_workspace_port_lease(ns, None, root.path(), true),
+            Err(crate::PortLeaseError::Store(_))
+        ));
+    }
+
+    #[test]
+    fn port_discovered_checkout_propagates_allocation_exhaustion() {
+        let data = TempDir::new().unwrap();
+        let first = TempDir::new().unwrap();
+        let second = TempDir::new().unwrap();
+        git2::Repository::init(first.path()).unwrap();
+        git2::Repository::init(second.path()).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        service
+            .set_workspace_lifecycle_policy(crate::WorkspaceLifecyclePolicy {
+                port_range_start: 41000,
+                port_range_end: 41009,
+                port_block_size: 10,
+                ..Default::default()
+            })
+            .unwrap();
+        service
+            .resolve_workspace_port_lease("remote:exhaustion", None, first.path(), true)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            service.resolve_workspace_port_lease("remote:exhaustion", None, second.path(), true),
+            Err(crate::PortLeaseError::Exhausted { .. })
+        ));
+    }
 
     #[test]
     fn port_targeted_subject_release_retains_new_root_and_shared_owners() {

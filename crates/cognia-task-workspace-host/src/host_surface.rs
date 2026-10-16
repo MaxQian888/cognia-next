@@ -2042,6 +2042,43 @@ mod tests {
     }
 
     #[test]
+    fn port_list_command_reports_and_explicitly_releases_deleted_root() {
+        let _guard = test_guard();
+        let data = tempfile::TempDir::new().unwrap();
+        let root = tempfile::TempDir::new().unwrap();
+        super::install(data.path().into()).unwrap();
+        let key = format!(
+            "root:{}",
+            std::fs::canonicalize(root.path()).unwrap().display()
+        );
+        let namespace = Some("remote:orphan-command-test".to_string());
+        let lease = super::task_workspace_port_lease_subject_ensure(
+            super::ExternalPortSubjectKind::ProjectRoot,
+            key.clone(),
+            root.path().to_string_lossy().into_owned(),
+            namespace.clone(),
+        )
+        .unwrap();
+        std::fs::remove_dir_all(root.path()).unwrap();
+        let snapshot = super::task_workspace_port_lease_list().unwrap();
+        assert_eq!(snapshot.leases.len(), 1);
+        assert!(snapshot.diagnostics.iter().any(|diagnostic| diagnostic.kind
+            == cognia_task_workspace::PortLeaseDiagnosticKind::MissingRoot
+            && diagnostic.lease_ids == [lease.lease_id.clone()]));
+        super::task_workspace_port_lease_subject_release(
+            super::ExternalPortSubjectKind::ProjectRoot,
+            key,
+            namespace,
+            None,
+        )
+        .unwrap();
+        assert!(super::task_workspace_port_lease_list()
+            .unwrap()
+            .leases
+            .is_empty());
+    }
+
+    #[test]
     fn a_remote_source_without_a_token_uses_the_one_stored_for_its_host() {
         use cognia_secrets::host_secrets::{self, HostSecretKind};
         host_secrets::set(HostSecretKind::Git, "supply.example.com", "ghp_stored", None, 1)

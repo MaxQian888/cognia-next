@@ -353,6 +353,8 @@ pub fn run() {
     if let Err(error) = task_workspace::install(task_workspace_data_dir) {
         log::error!("initialize task workspace service: {error}");
     }
+    cognia_task_workspace_host::workspace_env::install_workspace_env_provider()
+        .expect("install workspace environment provider");
 
     let mut builder = tauri::Builder::default().manage(shutdown::ExitState::default());
 

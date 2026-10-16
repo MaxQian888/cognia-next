@@ -102,6 +102,9 @@ const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
 
 /// Exact env keys always allowed through.
 const ENV_KEY_ALLOWLIST: &[&str] = &[
+    "COGNIA_PORT",
+    "COGNIA_PORT_COUNT",
+    "PORT",
     "KIMI_CODE_HOME",
     "KIMI_CODE_NO_AUTO_UPDATE",
     "KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT",
@@ -873,6 +876,22 @@ fn filter_env_with_additions(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn workspace_port_allowlist_does_not_open_other_cognia_keys() {
+        let (_tmp, policy) = policy(false);
+        let mut cfg = config("claude", &[]);
+        cfg.env = HashMap::from([
+            ("COGNIA_PORT".into(), "41000".into()),
+            ("COGNIA_PORT_COUNT".into(), "10".into()),
+            ("PORT".into(), "41000".into()),
+            ("COGNIA_UNREVIEWED".into(), "secret".into()),
+        ]);
+        let validated = policy.validate(cfg).unwrap();
+        assert_eq!(validated.config.env.len(), 3);
+        assert_eq!(validated.config.env["PORT"], "41000");
+        assert_eq!(validated.dropped_env_keys, vec!["COGNIA_UNREVIEWED"]);
+    }
+
     use super::*;
 
     static HOST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -2027,7 +2046,11 @@ mod tests {
         let moved = tempfile::tempdir().expect("tempdir");
         let run_root = moved.path().join("executions").join("bundle-c");
         std::fs::create_dir_all(&run_root).expect("mkdir run root");
-        let old_root = data.path().join("task-workspaces").join("executions").join("b");
+        let old_root = data
+            .path()
+            .join("task-workspaces")
+            .join("executions")
+            .join("b");
         std::fs::create_dir_all(&old_root).expect("mkdir old root");
         std::env::set_var(TASK_WORKSPACE_EXECUTION_ROOT_ENV, moved.path());
 

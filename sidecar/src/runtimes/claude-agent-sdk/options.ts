@@ -191,7 +191,12 @@ export function buildAnthropicOptions({
     // HookCallbackMatcher[]>>`; `mergeHookMaps` concatenates per event. Returns
     // undefined when neither contributes, so the strip pass omits the key.
     hooks: mergeHookMaps(
-      lspEnabled ? buildLspHooks(lspResolver) : undefined,
+      lspEnabled && lspResolver
+        ? buildLspHooks({
+            getDiagnostics: (file) =>
+              lspResolver.getDiagnostics(file, { processContext: { hostRpc, sessionId } }),
+          })
+        : undefined,
       buildAgentHooks(sendOptions.hooks, {
         emit: (frame) => emit({ ...frame }),
         emitAudit: (frame) => emit({ ...frame }),

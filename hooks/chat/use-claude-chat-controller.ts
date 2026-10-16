@@ -144,6 +144,7 @@ import {
   taskIdForMessage,
 } from "@/lib/task-workspace/client"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import { ensureExecutionPortLease } from "@/lib/task-workspace/execution-port-lease"
 import {
   finishDirectChatExecutionRun,
   projectDirectChatCaptureEvent,
@@ -3975,6 +3976,32 @@ export function useClaudeChat() {
               console.error("persist execution context failed", error)
             )
           }
+        }
+      }
+
+      // Options may be prebuilt, and both the local binding and task lease can
+      // replace their cwd. Admit the final working copy once, before setup or
+      // either runtime launches. The refusal's status edge settles the acquired
+      // task lease through the existing turn tracker.
+      if (turnUsesWorkingCopy) {
+        try {
+          await ensureExecutionPortLease({
+            cwd: sendOptions.cwd,
+            sessionId,
+            projectId: executionContext?.projectId || session?.projectId,
+            executionContext,
+          })
+        } catch (error) {
+          await refuseTurn({
+            errorCode: "workspace_port_lease_unavailable",
+            finishRun: true,
+            diagnostic: createDiagnostic("workspaceUnavailable", {
+              source: "chat",
+              message: error instanceof Error ? error.message : String(error),
+              meta: { sessionId },
+            }),
+          })
+          return
         }
       }
 

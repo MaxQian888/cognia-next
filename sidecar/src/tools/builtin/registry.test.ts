@@ -210,3 +210,27 @@ test("process controls precede monitor fallback and occur once when the core sui
     }
   }
 })
+
+test("the registry gives unsandboxed process tools the session host port resolver", async () => {
+  const calls: unknown[] = []
+  const defs = collectCogniaToolDefs({
+    enabled: { process: true },
+    cwd: process.cwd(),
+    sessionId: "ports",
+    hostRpc: {
+      async call(method, params) {
+        calls.push([method, params])
+        return { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" }
+      },
+    },
+  })
+  const result = await findTool(defs, "start_process").handler({
+    program: "node",
+    args: ["-e", "console.log(process.env.PORT)"],
+    detached: false,
+    timeoutSecs: 10,
+  })
+  assert.match(firstText(result), /41000/)
+  assert.equal(calls.length, 1)
+  assert.equal((calls[0] as unknown[])[0], "workspace.portEnv")
+})

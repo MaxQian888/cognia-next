@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto"
 import { chmodSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { resolveWorkspacePortEnv } from "../workspace-port-env"
 
 import type { IDisposable, IPty } from "node-pty"
 
@@ -121,12 +122,14 @@ export async function acpTerminalCreate(
   const inheritedEnv = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
   )
+  const finalCwd = path.resolve(cwd ?? process.cwd())
+  const workspaceEnv = await resolveWorkspacePortEnv(finalCwd)
   const pty = spawnPty(command, args, {
     name: process.env.TERM ?? "xterm-256color",
     cols: 80,
     rows: 24,
-    ...(cwd ? { cwd } : {}),
-    env: { ...inheritedEnv, ...(env ?? {}) },
+    cwd: finalCwd,
+    env: { ...inheritedEnv, ...(env ?? {}), ...workspaceEnv },
   })
   const id = `acp-cli-${randomUUID()}`
   let resolveExit!: (status: TerminalExitStatus) => void

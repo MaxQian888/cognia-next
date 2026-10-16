@@ -153,6 +153,12 @@ impl WorkspaceStore {
                 subject_key TEXT NOT NULL,
                 PRIMARY KEY(namespace_key, subject_kind, subject_key)
             );
+            CREATE TABLE IF NOT EXISTS workspace_port_root_aliases (
+                namespace_key TEXT NOT NULL,
+                alias_root TEXT NOT NULL,
+                lease_id TEXT NOT NULL REFERENCES workspace_port_leases(lease_id) ON DELETE CASCADE,
+                PRIMARY KEY(namespace_key, alias_root, lease_id)
+            );
             INSERT OR IGNORE INTO workspace_port_subjects (lease_id, subject_kind, subject_key)
                 SELECT lease_id, subject_kind, subject_key FROM workspace_port_leases l
                 WHERE NOT EXISTS (SELECT 1 FROM workspace_port_released_subjects r
@@ -3211,6 +3217,52 @@ mod tests {
                 crate::ports::read_registry(&store.connection, "remote:test", &record).unwrap(),
                 Some(lease.clone())
             );
+        }
+    }
+
+    #[test]
+    fn port_root_alias_migration_preserves_legacy_leases_and_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("offline-root");
+        let root = root.to_str().unwrap();
+        let alias = dir.path().join("offline-alias");
+        let lease = {
+            let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+            let lease = crate::ports::ensure(
+                &store.connection,
+                "remote:alias-migration",
+                crate::ports::LeaseSubject {
+                    kind: crate::PortSubjectKind::ProjectRoot,
+                    key: &format!("root:{root}"),
+                    root,
+                    registry_id: None,
+                },
+                WorkspaceLifecyclePolicy::default(),
+                1,
+            )
+            .unwrap();
+            store
+                .connection
+                .execute("DROP TABLE workspace_port_root_aliases", [])
+                .unwrap();
+            lease
+        };
+        for _ in 0..2 {
+            let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+            assert_eq!(
+                crate::ports::list(&store.connection).unwrap(),
+                [lease.clone()]
+            );
+            crate::ports::record_project_root_alias(
+                &store.connection,
+                &lease,
+                &alias,
+            )
+            .unwrap();
+            assert_eq!(store.connection.query_row(
+                "SELECT count(*) FROM workspace_port_root_aliases WHERE lease_id=?1 AND alias_root=?2",
+                rusqlite::params![lease.lease_id, alias.to_str().unwrap()], |row| row.get::<_, i64>(0)
+            ).unwrap(), 1);
         }
     }
 

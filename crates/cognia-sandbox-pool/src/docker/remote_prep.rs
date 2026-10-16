@@ -561,6 +561,7 @@ impl DockerSandboxBackend {
             let mut running = self
                 .api
                 .exec_runtime(RunnerExecSpec {
+                    workspace_env: BTreeMap::new(),
                     container_id: instance.to_string(),
                     command,
                     env,
@@ -656,14 +657,23 @@ impl DockerSandboxBackend {
         let (user, _) = target_user(&admitted.spec.user, admitted.admission.actual_tier);
         let persistent = admitted.spec.lifecycle == SandboxLifecycleKind::Persistent;
         let ephemeral_identity = format!("{id}:{}", uuid::Uuid::new_v4());
-        let key = remote_runtime_key(
+        let mut key = remote_runtime_key(
             &remote.provider_id,
             &admitted.spec,
             &source,
             (!persistent).then_some(ephemeral_identity.as_str()),
         );
 
-        let mut boot = runtime_config(&admitted.spec, &config)?;
+        let workspace_env = match config.cwd.as_deref() {
+            Some(cwd) => workspace_port_env(cwd).await?,
+            None => BTreeMap::new(),
+        };
+        // Dynamic lease values are runtime compatibility, not approval input.
+        if !workspace_env.is_empty() {
+            key = sha256_hex(format!("{key}\0{workspace_env:?}").as_bytes());
+        }
+        let mut boot = runtime_config_with_env(&admitted.spec, BTreeMap::new())?;
+        boot.workspace_env = workspace_env.clone();
         // Task leases never reach the supervisor or the boot hooks.
         boot.spawn_env.clear();
         boot.lifecycle_phases
@@ -791,7 +801,10 @@ impl DockerSandboxBackend {
             invocation.name
         ));
         connect.command.extend(invocation.args.iter().cloned());
-        let mut runtime = runtime_config(&admitted.spec, &config)?;
+        let mut runtime =
+            runtime_config_with_env(&admitted.spec, config.env.clone().into_iter().collect())?;
+        runtime.workspace_env = workspace_env.clone();
+        connect.workspace_env = workspace_env;
         runtime.lifecycle_phases = vec![LifecyclePhase::PostAttach];
         connect.env = encode_runtime_config_env(&runtime)
             .map_err(|error| refused("sandbox_runtime_config_invalid", error.to_string()))?;
@@ -1291,6 +1304,7 @@ impl DockerSandboxBackend {
         let running = tokio::time::timeout(
             Duration::from_secs(10),
             self.api.exec_runtime(RunnerExecSpec {
+                workspace_env: BTreeMap::new(),
                 container_id: instance.to_string(),
                 command: vec![
                     format!("{INJECTION_ROOT}/bin/cognia-sandboxd"),
@@ -1787,6 +1801,7 @@ impl DockerSandboxBackend {
             let mut running = self
                 .api
                 .exec_runtime(RunnerExecSpec {
+                    workspace_env: BTreeMap::new(),
                     container_id: instance.to_string(),
                     command,
                     env,
@@ -2518,6 +2533,58 @@ mod tests {
             *isolation_mandatory = true;
         }
         config
+    }
+
+    #[tokio::test]
+    async fn trusted_workspace_ports_survive_remote_boot_scrubbing_and_exec() {
+        super::super::tests::install_port_provider();
+        let environment = spec(EgressTier::Off, None);
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 2);
+        let mut config = remote_config("port-agent", &environment);
+        config.cwd = Some(super::super::tests::PORT_CWD.into());
+        config.env.insert("PORT".into(), "9999".into());
+        remote.spawn(config).await.unwrap();
+        let request = remote.fake.provisions.lock()[0].clone();
+        let boot = super::super::tests::decode_agent_environment(&request.supervisor_env);
+        assert!(boot.spawn_env.is_empty());
+        assert_eq!(boot.workspace_env["PORT"], "41000");
+        let exec = remote
+            .fake
+            .execs
+            .lock()
+            .iter()
+            .find(|exec| exec.command.iter().any(|arg| arg == "connect-agent"))
+            .unwrap()
+            .clone();
+        let runtime = super::super::tests::decode_agent_environment(&exec.env);
+        assert_eq!(runtime.spawn_env["PORT"], "9999");
+        assert_eq!(runtime.workspace_env, boot.workspace_env);
+        assert_eq!(exec.workspace_env, boot.workspace_env);
+        remote.exit_session();
+    }
+
+    #[tokio::test]
+    async fn real_provider_frontend_leases_reach_remote_boot_and_exec_unchanged() {
+        for kind in ["project-root", "desktop-session"] {
+            let (cwd, expected) = super::super::tests::real_workspace_env_fixture(kind);
+            let environment = spec(EgressTier::Off, None);
+            let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 2);
+            let mut config = remote_config("real-port-agent", &environment);
+            config.cwd = Some(cwd.path().to_string_lossy().into_owned());
+            config.env.insert("PORT".into(), "9999".into());
+            remote.spawn(config).await.unwrap();
+            let request = remote.fake.provisions.lock()[0].clone();
+            let boot = super::super::tests::decode_agent_environment(&request.supervisor_env);
+            assert!(boot.spawn_env.is_empty());
+            assert_eq!(boot.workspace_env, expected);
+            let exec = remote.fake.execs.lock().iter()
+                .find(|exec| exec.command.iter().any(|arg| arg == "connect-agent"))
+                .unwrap().clone();
+            let runtime = super::super::tests::decode_agent_environment(&exec.env);
+            assert_eq!(runtime.workspace_env, expected);
+            assert_eq!(exec.workspace_env, expected);
+            remote.exit_session();
+        }
     }
 
     #[tokio::test]
