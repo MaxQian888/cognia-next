@@ -1,7 +1,11 @@
 //! Trusted, Host-installed desktop releases and bounded OCI verification.
 //! The renderer cannot supply a file path, image, command or digest.
 
-use std::{path::Path, time::Duration};
+use std::{
+    io::Write,
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use cognia_automation::cua_sandbox::managed::{
@@ -51,6 +55,64 @@ fn validate_release(release: &DesktopRelease) -> Result<()> {
 }
 
 pub struct OciDesktopImageVerifier;
+
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+
+// Discards bytes exactly like io::sink; RegistryClient remains responsible for
+// hashing and size validation. Only numeric metadata survives each write.
+struct LayerProgress {
+    layer: usize,
+    layers: usize,
+    expected_bytes: u64,
+    downloaded_bytes: u64,
+    started: Instant,
+    last_report: Instant,
+}
+
+impl LayerProgress {
+    fn new(layer: usize, layers: usize, expected_bytes: u64) -> Self {
+        let started = Instant::now();
+        Self {
+            layer,
+            layers,
+            expected_bytes,
+            downloaded_bytes: 0,
+            started,
+            last_report: started,
+        }
+    }
+
+    fn record(&mut self, bytes: usize, now: Instant) -> bool {
+        self.downloaded_bytes = self.downloaded_bytes.saturating_add(bytes as u64);
+        if bytes == 0 || now.saturating_duration_since(self.last_report) < PROGRESS_INTERVAL {
+            return false;
+        }
+        self.last_report = now;
+        true
+    }
+
+    fn diagnostic(&self, verified: bool, now: Instant) -> String {
+        format!(
+            "desktop image verification: layer={}/{} downloaded_bytes={} expected_bytes={} elapsed_ms={} verified={verified}",
+            self.layer, self.layers, self.downloaded_bytes, self.expected_bytes,
+            now.saturating_duration_since(self.started).as_millis()
+        )
+    }
+}
+
+impl Write for LayerProgress {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let now = Instant::now();
+        if self.record(bytes.len(), now) {
+            eprintln!("{}", self.diagnostic(false, now));
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl ManagedDesktopImageVerifier for OciDesktopImageVerifier {
@@ -109,16 +171,14 @@ async fn verify_image(release: &DesktopRelease) -> Result<()> {
     // accumulated in memory or written as an untracked Host cache.
     let layer_count = layers.len();
     for (index, layer) in layers.into_iter().enumerate() {
-        eprintln!(
-            "desktop image verification: layer={}/{} bytes={}",
-            index + 1,
-            layer_count,
-            layer.size
-        );
+        let mut progress = LayerProgress::new(index + 1, layer_count, layer.size as u64);
+        eprintln!("{}", progress.diagnostic(false, Instant::now()));
         image
-            .fetch_blob(&layer, &mut std::io::sink())
+            .fetch_blob(&layer, &mut progress)
             .await
             .map_err(invalid)?;
+        // Success is emitted only after the registry checked both digest and size.
+        eprintln!("{}", progress.diagnostic(true, Instant::now()));
     }
     Ok(())
 }
@@ -133,6 +193,41 @@ fn registry_status(error: &RegistryError) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layer_progress_counts_all_writes_but_reports_at_most_once_per_interval() {
+        let mut progress = LayerProgress::new(3, 13, 100_000);
+        let start = progress.started;
+        for millis in 0..10_000 {
+            assert!(!progress.record(1, start + Duration::from_millis(millis)));
+        }
+        assert_eq!(progress.downloaded_bytes, 10_000);
+        assert!(!progress.record(0, start + PROGRESS_INTERVAL));
+        assert!(progress.record(5, start + PROGRESS_INTERVAL));
+        assert!(!progress.record(5, start + PROGRESS_INTERVAL));
+        assert!(!progress.record(5, start + Duration::from_secs(19)));
+        assert!(progress.record(5, start + Duration::from_secs(20)));
+        assert_eq!(progress.downloaded_bytes, 10_020);
+        assert_eq!(
+            progress.diagnostic(false, start + Duration::from_secs(20)),
+            "desktop image verification: layer=3/13 downloaded_bytes=10020 expected_bytes=100000 elapsed_ms=20000 verified=false"
+        );
+    }
+
+    #[test]
+    fn layer_progress_discards_payload_and_flush_does_not_claim_verification() {
+        let mut progress = LayerProgress::new(1, 2, 64);
+        let payload = b"https://private.invalid/?signature=secret";
+        assert_eq!(progress.write(payload).unwrap(), payload.len());
+        progress.flush().unwrap();
+        assert_eq!(progress.downloaded_bytes, payload.len() as u64);
+        let diagnostic = progress.diagnostic(false, progress.started);
+        assert!(!diagnostic.contains("private"));
+        assert!(!diagnostic.contains("signature"));
+        assert!(!diagnostic.contains("secret"));
+        assert!(diagnostic.ends_with("elapsed_ms=0 verified=false"));
+    }
+
     #[test]
     fn registry_diagnostics_never_include_redirect_urls_or_error_bodies() {
         let error = RegistryError::UnexpectedStatus {
