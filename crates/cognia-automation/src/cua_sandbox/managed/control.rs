@@ -213,6 +213,39 @@ fn control_error(_: crate::automation::types::AutomationError) -> ManagedDesktop
     refused("managed_desktop_control_unavailable")
 }
 
+// Fixed diagnostic categories only: a server error may contain project text,
+// URLs or credentials and must never be copied into the native smoke log.
+fn smoke_driver_failure(error: &crate::automation::types::AutomationError) -> &'static str {
+    use crate::automation::types::AutomationError;
+    match error {
+        AutomationError::PermissionDenied { reason } if reason == "sandbox input fence expired" => {
+            "send_fence_denied"
+        }
+        AutomationError::PermissionDenied { .. } => "driver_permission_denied",
+        AutomationError::BackendError { message } => {
+            if message.starts_with("cua send:") {
+                "transport_send"
+            } else if message.starts_with("cua recv:") || message == "cua connection closed" {
+                "transport_receive_or_closed"
+            } else if message.starts_with("cua decode:") {
+                "response_decode"
+            } else if message.starts_with("cua call timed out") {
+                "driver_call_timeout"
+            } else if message == "cua client channel closed"
+                || message == "cua reply channel dropped"
+            {
+                "driver_channel_closed"
+            } else if message == "computer-server reported success=false" {
+                "server_negative_acknowledgement"
+            } else {
+                "driver_backend_error"
+            }
+        }
+        AutomationError::Internal { .. } => "driver_internal_error",
+        _ => "driver_other_error",
+    }
+}
+
 /// Native operator entry, deliberately absent from all RPC/agent registries.
 /// Creates one explicitly quoted 120s resource and measures the control path.
 /// The receipt cannot be installed from caller-provided success booleans.
@@ -1235,6 +1268,7 @@ impl ManagedDesktopService {
         authority: &dyn ManagedControlAuthority,
         smoke: bool,
     ) -> Result<()> {
+        let input_started = Instant::now();
         p.require_human()?;
         self.scoped(p, id, generation).await?;
         let slot = self.control_slot(id, generation).await;
@@ -1330,12 +1364,24 @@ impl ManagedDesktopService {
             return Err(refused("managed_desktop_control_unavailable"));
         }
         let live_authority = authority.input_admission(p);
+        let send_counts = smoke.then(|| Arc::new((AtomicU64::new(0), AtomicU64::new(0))));
+        let observed_sends = send_counts.clone();
         let client = client.fenced(Arc::new(move || {
-            live_authority()
+            let admitted = live_authority()
                 && Instant::now() < deadline
                 && principal_epoch.load(Ordering::SeqCst) == expected_principal_epoch
-                && desktop_epoch.load(Ordering::SeqCst) == expected_desktop_epoch
+                && desktop_epoch.load(Ordering::SeqCst) == expected_desktop_epoch;
+            if let Some(counts) = &observed_sends {
+                if admitted {
+                    counts.0.fetch_add(1, Ordering::SeqCst);
+                } else {
+                    counts.1.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+            admitted
         }));
+        let send_started = Instant::now();
+        let send_budget_ms = deadline.saturating_duration_since(send_started).as_millis();
         let outcome = tokio::time::timeout_at(
             tokio::time::Instant::from_std(deadline),
             c.desktop
@@ -1343,6 +1389,16 @@ impl ManagedDesktopService {
         )
         .await;
         if !matches!(outcome, Ok(Ok(()))) {
+            if let Some(counts) = send_counts {
+                let cause = match &outcome {
+                    Err(_) => "input_deadline_elapsed",
+                    Ok(Err(error)) => smoke_driver_failure(error),
+                    Ok(Ok(())) => "unexpected_success",
+                };
+                eprintln!("Native control mutation quarantined: cause={cause} input_elapsed_ms={} send_elapsed_ms={} send_budget_ms={send_budget_ms} admitted_commands={} denied_commands={}",
+                    input_started.elapsed().as_millis(), send_started.elapsed().as_millis(),
+                    counts.0.load(Ordering::SeqCst), counts.1.load(Ordering::SeqCst));
+            }
             c.invalidate();
             return Err(refused("managed_desktop_control_quarantined"));
         }
@@ -1534,6 +1590,41 @@ mod tests {
         receipt.evidence_version = 2;
         receipt.protocol_revision = 2;
         assert!(!receipt.has_complete_evidence());
+    }
+
+    #[test]
+    fn smoke_quarantine_diagnostics_classify_errors_without_logging_their_payloads() {
+        use crate::automation::types::AutomationError;
+        assert_eq!(
+            smoke_driver_failure(&AutomationError::PermissionDenied {
+                reason: "sandbox input fence expired".into()
+            }),
+            "send_fence_denied"
+        );
+        assert_eq!(
+            smoke_driver_failure(&AutomationError::BackendError {
+                message: "cua call timed out; connection discarded".into()
+            }),
+            "driver_call_timeout"
+        );
+        assert_eq!(
+            smoke_driver_failure(&AutomationError::BackendError {
+                message: "cua recv: https://private.invalid/?key=secret".into()
+            }),
+            "transport_receive_or_closed"
+        );
+        assert_eq!(
+            smoke_driver_failure(&AutomationError::BackendError {
+                message: "project secret contents".into()
+            }),
+            "driver_backend_error"
+        );
+        assert_eq!(
+            smoke_driver_failure(&AutomationError::Internal {
+                message: "private text".into()
+            }),
+            "driver_internal_error"
+        );
     }
 
     #[test]

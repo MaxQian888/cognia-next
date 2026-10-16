@@ -10,6 +10,50 @@ use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Only fixed diagnostic failure names cross the protected output channel.
+/// They cannot affect qualification or select any privileged operation.
+static PROBE_STAGE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+fn phase(stage: u8) {
+    PROBE_STAGE.store(stage, std::sync::atomic::Ordering::Relaxed);
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DiagnosticFailure {
+    pub diagnostic_failure: String,
+}
+pub(crate) fn valid_failure(value: &str) -> bool {
+    matches!(
+        value,
+        "payload_identity"
+            | "payload_acceptance"
+            | "payload_terminal_spawn"
+            | "payload_terminal_wait"
+            | "payload_terminal_peer"
+            | "payload_terminal_report"
+            | "payload_browser_local"
+            | "payload_browser_metadata"
+            | "payload_browser_redirect"
+            | "payload_browser_hostname"
+            | "payload_descendant"
+            | "payload_serialization"
+    )
+}
+fn failure_stage() -> &'static str {
+    match PROBE_STAGE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => "payload_acceptance",
+        2 => "payload_terminal_spawn",
+        3 => "payload_terminal_wait",
+        4 => "payload_terminal_peer",
+        5 => "payload_terminal_report",
+        6 => "payload_browser_local",
+        7 => "payload_browser_metadata",
+        8 => "payload_browser_redirect",
+        9 => "payload_browser_hostname",
+        10 => "payload_descendant",
+        11 => "payload_serialization",
+        _ => "payload_identity",
+    }
+}
 fn refused() -> io::Error {
     io::Error::other("qualification probe refused")
 }
@@ -289,11 +333,14 @@ fn terminal() -> io::Result<ProbeRun> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    phase(2);
     let mut child = command.spawn()?;
+    phase(3);
     let until = Instant::now() + Duration::from_secs(10);
     let result = (|| loop {
         match listener.accept() {
             Ok((mut socket, _)) => {
+                phase(4);
                 socket.set_read_timeout(Some(Duration::from_secs(3)))?;
                 let mut credentials = std::mem::MaybeUninit::<libc::ucred>::uninit();
                 let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
@@ -320,6 +367,7 @@ fn terminal() -> io::Result<ProbeRun> {
                 {
                     return Err(refused());
                 }
+                phase(5);
                 let mut bytes = Vec::new();
                 Read::by_ref(&mut socket)
                     .take(32769)
@@ -518,11 +566,15 @@ fn browser_runs() -> io::Result<BrowserRun> {
         }
     });
     let result = (|| {
+        phase(6);
         let (process, exit, html, _) = browser("http://127.0.0.1:18765/", "local")?;
+        phase(7);
         let (_, direct, _, metadata_navigation_net_errors) =
             browser("http://169.254.169.254/", "metadata")?;
+        phase(8);
         let (_, redirect, _, redirect_net_errors) =
             browser("http://127.0.0.1:18765/redirect", "redirect")?;
+        phase(9);
         let (_, hostname, _, hostname_net_errors) = browser("http://example.com/", "hostname")?;
         if direct != 0 || redirect != 0 || hostname != 0 {
             return Err(refused());
@@ -548,9 +600,13 @@ pub(crate) fn desktop() -> io::Result<DesktopProbe> {
     if unsafe { libc::getuid() } != 1000 {
         return Err(refused());
     }
+    phase(1);
     let acceptance = basic()?;
+    phase(2);
     let terminal = terminal()?;
+    phase(6);
     let browser = browser_runs()?;
+    phase(10);
     // A detached descendant outlives the original launch process group. The outer
     // root collector observes it before killing the pinned PID namespace.
     let mut pipe = [-1; 2];
@@ -655,7 +711,19 @@ pub(crate) fn importer() -> io::Result<ImporterProbe> {
 }
 pub(crate) fn child(mode: &str) -> io::Result<()> {
     match mode {
-        "qualification-workload" => write_json(&desktop()?),
+        "qualification-workload" => {
+            let result = desktop().and_then(|report| {
+                phase(11);
+                write_json(&report)
+            });
+            if result.is_err() {
+                // Never emit raw stderr, process environments or arbitrary paths.
+                let _ = write_json(&DiagnosticFailure {
+                    diagnostic_failure: failure_stage().into(),
+                });
+            }
+            result
+        }
         "qualification-importer" => write_json(&importer()?),
         "qualification-terminal" => {
             if unsafe { libc::getuid() } != 1000 {
@@ -676,6 +744,21 @@ pub(crate) fn child(mode: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn diagnostic_failure_names_are_closed_and_never_success_reports() {
+        let failure: DiagnosticFailure =
+            serde_json::from_str(r#"{"diagnosticFailure":"payload_terminal_peer"}"#).unwrap();
+        assert!(valid_failure(&failure.diagnostic_failure));
+        assert!(!valid_failure("payload_terminal_peer: arbitrary stderr"));
+        assert!(serde_json::from_str::<DiagnosticFailure>(
+            r#"{"diagnosticFailure":"payload_acceptance","stdout":"untrusted"}"#
+        )
+        .is_err());
+        assert!(serde_json::from_str::<DesktopProbe>(
+            r#"{"diagnosticFailure":"payload_acceptance"}"#
+        )
+        .is_err());
+    }
     #[test]
     fn browser_error_requires_same_url_source_and_no_response() {
         let unrelated = serde_json::json!({"events":[{"source":{"id":1},"params":{"url":"http://169.254.169.254/"}},{"source":{"id":2},"params":{"net_error":-109}}]});

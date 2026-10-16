@@ -19,6 +19,31 @@ const RESULT: &str = "/run/cognia-desktop/qualification.json";
 const FAILURE: &str = "/run/cognia-desktop/qualification.failed";
 const LIMIT: u64 = 128 * 1024;
 static STAGE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+const ACCEPTANCE_STAGES: [&str; 18] = [
+    "acceptance_prepare",
+    "acceptance_spawn",
+    "acceptance_admission_wait",
+    "acceptance_admission_validate",
+    "acceptance_ack",
+    "acceptance_payload",
+    "payload_identity",
+    "payload_acceptance",
+    "payload_terminal_spawn",
+    "payload_terminal_wait",
+    "payload_terminal_peer",
+    "payload_terminal_report",
+    "payload_browser_local",
+    "payload_browser_metadata",
+    "payload_browser_redirect",
+    "payload_browser_hostname",
+    "payload_descendant",
+    "payload_serialization",
+];
+pub(crate) fn acceptance_stage(value: &str) {
+    if let Some(index) = ACCEPTANCE_STAGES.iter().position(|name| *name == value) {
+        stage(index as u8 + 10);
+    }
+}
 fn stage(value: u8) {
     STAGE.store(value, std::sync::atomic::Ordering::Relaxed);
 }
@@ -30,6 +55,10 @@ fn failure_stage() -> &'static str {
         4 => "descendants",
         5 => "supervisor_death",
         6 => "validation",
+        value if value >= 10 => ACCEPTANCE_STAGES
+            .get((value - 10) as usize)
+            .copied()
+            .unwrap_or("bootstrap"),
         _ => "bootstrap",
     }
 }
@@ -148,6 +177,18 @@ pub(crate) fn result() -> io::Result<()> {
     io::stdout().write_all(&bytes)
 }
 pub(crate) fn worker() -> io::Result<()> {
+    let outcome = worker_inner();
+    if outcome.is_err() && root().is_ok() {
+        // Bootstrap errors precede watchdog installation and otherwise leave a
+        // permanent pending result after the detached worker has already exited.
+        let _ = protected_write(
+            FAILURE,
+            format!("qualification_failed:{}", failure_stage()).as_bytes(),
+        );
+    }
+    outcome
+}
+fn worker_inner() -> io::Result<()> {
     root()?;
     let file = OpenOptions::new()
         .read(true)

@@ -169,6 +169,9 @@ fn spawn_inner(
     deadline: Instant,
     diagnostic: bool,
 ) -> io::Result<AcceptanceJob> {
+    if diagnostic {
+        crate::qualify::acceptance_stage("acceptance_prepare");
+    }
     validate_identifiers(operation, script)?;
     if unsafe { libc::geteuid() } != 0
         || !deadline
@@ -226,6 +229,9 @@ fn spawn_inner(
             Ok(())
         });
     }
+    if diagnostic {
+        crate::qualify::acceptance_stage("acceptance_spawn");
+    }
     let child = command.spawn()?;
     drop(command);
     drop(helper_control);
@@ -244,9 +250,15 @@ fn spawn_inner(
         diagnostic,
     };
     write_spec(&mut control, &spec)?;
+    if diagnostic {
+        crate::qualify::acceptance_stage("acceptance_admission_wait");
+    }
     let mut bytes = [0_u8; 4];
     control.read_exact(&mut bytes)?;
     let pid = u32::from_be_bytes(bytes);
+    if diagnostic {
+        crate::qualify::acceptance_stage("acceptance_admission_validate");
+    }
     validate_child(job.helper.id(), pid, boundary, operation)?;
     job.boundary_report = Some(boundary::report(boundary, pid, 1000, &boundary.generation)?);
     if !alive(job.pins.init.as_fd())?
@@ -255,6 +267,9 @@ fn spawn_inner(
     {
         return Err(refused());
     }
+    if diagnostic {
+        crate::qualify::acceptance_stage("acceptance_ack");
+    }
     control.write_all(b"G")?;
     let mut acknowledged = [0_u8; 1];
     control.read_exact(&mut acknowledged)?;
@@ -262,6 +277,7 @@ fn spawn_inner(
         return Err(refused());
     }
     if diagnostic {
+        crate::qualify::acceptance_stage("acceptance_payload");
         control.set_read_timeout(Some(Duration::from_secs(55)))?;
         let mut length = [0_u8; 4];
         control.read_exact(&mut length)?;
@@ -271,6 +287,12 @@ fn spawn_inner(
         }
         let mut bytes = vec![0; length];
         control.read_exact(&mut bytes)?;
+        if let Ok(failure) = serde_json::from_slice::<crate::probe::DiagnosticFailure>(&bytes) {
+            if crate::probe::valid_failure(&failure.diagnostic_failure) {
+                crate::qualify::acceptance_stage(&failure.diagnostic_failure);
+            }
+            return Err(refused());
+        }
         job.diagnostic_report = Some(serde_json::from_slice(&bytes).map_err(|_| refused())?);
     }
     job.check()?;
@@ -469,6 +491,35 @@ fn pipe() -> io::Result<(File, File)> {
     Ok(unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1])) })
 }
 
+/// Diagnostic output is emitted once after all fixed probes. Its absolute
+/// 50-second limit must not inherit the production transfer's 30-second idle cap.
+fn diagnostic_wait_read(fd: i32, until: Instant) -> io::Result<()> {
+    loop {
+        let remaining = until
+            .checked_duration_since(Instant::now())
+            .ok_or_else(refused)?;
+        let mut poll = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let result = unsafe {
+            libc::poll(
+                &mut poll,
+                1,
+                remaining.as_millis().min(i32::MAX as u128).max(1) as i32,
+            )
+        };
+        if result < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+        if result <= 0 || poll.revents & (libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Err(refused());
+        }
+        return Ok(());
+    }
+}
+
 fn read_byte(fd: i32, timeout: Duration) -> io::Result<Option<u8>> {
     let until = Instant::now() + timeout;
     loop {
@@ -626,7 +677,7 @@ pub(crate) fn helper_main() -> io::Result<()> {
             let mut input = &exec_read;
             let until = Instant::now() + Duration::from_secs(50);
             loop {
-                crate::protocol::wait_read(input.as_raw_fd(), until)?;
+                diagnostic_wait_read(input.as_raw_fd(), until)?;
                 let mut buffer = [0_u8; 8192];
                 let count = input.read(&mut buffer)?;
                 if count == 0 {
@@ -636,6 +687,14 @@ pub(crate) fn helper_main() -> io::Result<()> {
                 if bytes.len() > 96 * 1024 {
                     return Err(refused());
                 }
+            }
+            if let Ok(failure) = serde_json::from_slice::<crate::probe::DiagnosticFailure>(&bytes) {
+                if !crate::probe::valid_failure(&failure.diagnostic_failure) {
+                    return Err(refused());
+                }
+                control.write_all(&(bytes.len() as u32).to_be_bytes())?;
+                control.write_all(&bytes)?;
+                return Err(refused());
             }
             let _: cognia_desktop_guest::qualification::DesktopProbe =
                 serde_json::from_slice(&bytes).map_err(|_| refused())?;
@@ -867,6 +926,17 @@ fn close_except(mut keep: [i32; 3]) -> io::Result<()> {
 mod tests {
     use super::*;
     const OP: &str = "12345678-1234-1234-1234-123456789abc";
+    #[test]
+    fn diagnostic_wait_uses_its_own_absolute_deadline() {
+        let (read, mut write) = pipe().unwrap();
+        assert!(diagnostic_wait_read(read.as_raw_fd(), Instant::now()).is_err());
+        write.write_all(b"x").unwrap();
+        assert!(diagnostic_wait_read(
+            read.as_raw_fd(),
+            Instant::now() + Duration::from_millis(100)
+        )
+        .is_ok());
+    }
     #[test]
     fn executable_cwd_and_arguments_cannot_be_selected_by_project_metadata() {
         assert!(validate_identifiers(OP, "test:gui").is_ok());
