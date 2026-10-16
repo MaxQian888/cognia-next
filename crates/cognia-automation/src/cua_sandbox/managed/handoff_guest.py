@@ -107,7 +107,7 @@ def check_deadline(deadline):
         fail()
 
 
-def size_bound(root):
+def size_bound(root, git_running=False):
     total, count = 0, 0
     for directory, dirs, files in os.walk(root, followlinks=False):
         for name in dirs + files:
@@ -118,7 +118,10 @@ def size_bound(root):
             count += 1
             if stat.S_ISREG(info.st_mode):
                 total += info.st_size
-                if info.st_nlink != 1:
+                # Git publishes loose objects using link/unlink. The size
+                # monitor may observe that transient state; final inspection
+                # and native promotion still reject all surviving hard links.
+                if not git_running and info.st_nlink != 1:
                     fail()
             elif not stat.S_ISDIR(info.st_mode):
                 fail()
@@ -139,7 +142,7 @@ def git(root, args, deadline, limit=4096):
                     check_deadline(deadline)
                     if os.fstat(output.fileno()).st_size > limit:
                         fail()
-                    size_bound(root)
+                    size_bound(root, git_running=True)
                     time.sleep(0.02)
                 if process.returncode or os.fstat(output.fileno()).st_size > limit:
                     fail()

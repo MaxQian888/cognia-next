@@ -148,7 +148,12 @@ fn observe_identity(
         let mut standard = BTreeSet::new();
         for entry in fs::read_dir(format!("/proc/{workload}/fd"))? {
             let entry = entry?;
-            let fd: u32 = entry.file_name().to_str().ok_or_else(invalid)?.parse().map_err(|_| invalid())?;
+            let fd: u32 = entry
+                .file_name()
+                .to_str()
+                .ok_or_else(invalid)?
+                .parse()
+                .map_err(|_| invalid())?;
             let target = fs::read_link(entry.path())?;
             let target = target.to_str().ok_or_else(invalid)?;
             let allowed = match fd {
@@ -156,10 +161,16 @@ fn observe_identity(
                 1 | 2 => target == "/dev/null",
                 _ => target == "/opt/cognia-desktop/handoff-import.py",
             };
-            if !allowed { return Err(invalid()); }
-            if fd <= 2 { standard.insert(fd); }
+            if !allowed {
+                return Err(invalid());
+            }
+            if fd <= 2 {
+                standard.insert(fd);
+            }
         }
-        if standard != BTreeSet::from([0, 1, 2]) { return Err(invalid()); }
+        if standard != BTreeSet::from([0, 1, 2]) {
+            return Err(invalid());
+        }
     }
     if !restricted_identity(
         &fs::read_to_string(format!("/proc/{workload}/status"))?,

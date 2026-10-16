@@ -203,6 +203,17 @@ class HandoffTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             guest.checked_file(source, 7, "0" * 64)
 
+    def test_git_transient_hardlink_is_only_tolerated_by_live_size_monitor(self):
+        tree = self.root / "git-temporary"
+        tree.mkdir()
+        (tree / "temporary").write_bytes(b"raw object")
+        os.link(tree / "temporary", tree / "object")
+        guest.size_bound(tree, git_running=True)
+        with self.assertRaises(ValueError):
+            guest.size_bound(tree)
+        (tree / "temporary").unlink()
+        guest.size_bound(tree)
+
     def test_network_check_requires_no_route_and_rejects_success_or_timeout(self):
         connection = MagicMock()
         connection.__enter__.return_value = connection
