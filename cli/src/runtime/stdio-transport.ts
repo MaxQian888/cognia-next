@@ -13,6 +13,12 @@
  * The settings.json hook interception the Rust layer performs is intentionally
  * omitted — permission decisions flow through the loop's `onPermissionRequest`
  * callback instead.
+ *
+ * `host_rpc` frames are answered here, as the Rust supervisor answers them on
+ * the desktop (`crates/cognia-sidecar/src/supervisor.rs`), and never reach
+ * subscribers. The standalone CLI has none of the Rust host's registries, so an
+ * unsupported method is refused at once rather than left to the sidecar's
+ * 30-second timeout.
  */
 
 import readline from "node:readline"
@@ -41,13 +47,36 @@ export interface SidecarHandle {
 
 type Handler = (payload: unknown) => void
 
+/** Answers one `host_rpc` method; a throw (or rejection) is sent back as `ok: false`. */
+export type HostRpcHandler = (params: unknown) => unknown
+
+/**
+ * The methods the standalone CLI host answers. `workspace.portEnv` asks for the
+ * workspace's leased ports before a shell spawns: the CLI owns no port
+ * allocator, and `null` tells the sidecar to add no port variables.
+ */
+export const CLI_HOST_RPC_HANDLERS: Readonly<Record<string, HostRpcHandler>> = Object.freeze({
+  "workspace.portEnv": () => null,
+})
+
+export interface StdioTransportOptions {
+  /** `host_rpc` handlers by method. Defaults to {@link CLI_HOST_RPC_HANDLERS}. */
+  hostRpc?: Readonly<Record<string, HostRpcHandler>>
+}
+
 export class StdioTransport implements Transport {
   private readonly subscribers = new Map<string, Set<Handler>>()
   private ready = false
   private exited = false
   private readonly readyWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = []
 
-  constructor(private readonly handle: SidecarHandle) {
+  private readonly hostRpc: Readonly<Record<string, HostRpcHandler>>
+
+  constructor(
+    private readonly handle: SidecarHandle,
+    options: StdioTransportOptions = {}
+  ) {
+    this.hostRpc = options.hostRpc ?? CLI_HOST_RPC_HANDLERS
     const rl = readline.createInterface({ input: handle.stdout })
     rl.on("line", (line) => this.onLine(line))
     handle.onExit(() => {
@@ -133,6 +162,10 @@ export class StdioTransport implements Transport {
       // Non-JSON noise on stdout — ignore (matches the Rust reader's warn+skip).
       return
     }
+    if (value.type === "host_rpc") {
+      void this.answerHostRpc(value)
+      return
+    }
     if (value.type === "ready" && !this.ready) {
       this.ready = true
       while (this.readyWaiters.length) this.readyWaiters.pop()!.resolve()
@@ -141,6 +174,32 @@ export class StdioTransport implements Transport {
     if (value.type === "a2ui_dispatch") this.dispatch(A2UI_EVENT, value)
     if (value.type === "agent_event") this.dispatch(AGENT_EVENT, value)
     this.dispatch(SIDECAR_EVENT, value)
+  }
+
+  /** Run the method's handler and write the `host_rpc_result` the sidecar awaits. */
+  private async answerHostRpc(frame: OutboundMessage): Promise<void> {
+    const rpcId = frame.rpcId
+    if (typeof rpcId !== "string" || !rpcId) return
+    const method = typeof frame.method === "string" ? frame.method : ""
+    let reply: Record<string, unknown>
+    try {
+      const handler = Object.hasOwn(this.hostRpc, method) ? this.hostRpc[method] : undefined
+      if (!handler) throw new Error(`host_rpc method "${method}" is not available on the CLI host`)
+      reply = { type: "host_rpc_result", rpcId, ok: true, result: await handler(frame.params) }
+    } catch (err) {
+      reply = {
+        type: "host_rpc_result",
+        rpcId,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      }
+    }
+    if (this.exited) return
+    try {
+      this.handle.stdin.write(JSON.stringify(reply) + "\n")
+    } catch {
+      // The sidecar's stdin closed mid-reply; its own channel teardown rejects the call.
+    }
   }
 
   private dispatch(event: string, payload: unknown): void {
