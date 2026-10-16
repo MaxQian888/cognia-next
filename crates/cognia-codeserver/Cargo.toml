@@ -20,7 +20,7 @@ path = "src/bin/codeserver_e2e_host.rs"
 required-features = ["e2e-host"]
 
 [dependencies]
-cognia-core = { path = "../cognia-core" }
+cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
 cognia-net = { path = "../cognia-net" }
 cognia-agents = { path = "../cognia-agents" }
 cognia-sidecar = { path = "../cognia-sidecar" }

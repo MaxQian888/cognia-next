@@ -124,6 +124,13 @@ impl RemoteCodeServerState {
             return Ok(status);
         }
 
+        // Do not hold an editor lock while the lease provider waits on SQLite.
+        let workspace_env = super::process::resolve_child_workspace_env(
+            &canonical,
+            cognia_core::workspace_env::resolve_workspace_env_async,
+        )
+        .await?;
+
         let _guard = self.operation_lock.lock().await;
         if let Some(status) = self.authorize_live(&canonical, profile, device_id).await {
             return Ok(status);
@@ -222,11 +229,12 @@ impl RemoteCodeServerState {
             }
         }
 
-        let child = spawn_code_server(&binary, &args, &envs).inspect_err(|_error| {
-            if broker_enabled {
-                super::agent_channel::global().deregister(&canonical);
-            }
-        })?;
+        let child =
+            spawn_code_server(&binary, &args, &envs, workspace_env).inspect_err(|_error| {
+                if broker_enabled {
+                    super::agent_channel::global().deregister(&canonical);
+                }
+            })?;
         let mut allowed_devices = HashSet::new();
         allowed_devices.insert(device_id.to_string());
         self.instances.lock().await.insert(
@@ -894,18 +902,15 @@ fn spawn_code_server(
     binary: &str,
     args: &[String],
     envs: &[(&str, String)],
+    workspace_env: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<Child, String> {
+    let mut command = super::process::workspace_child_command(binary, args, envs, workspace_env);
     super::process::prepare_session_socket_dir()?;
-    let mut command = Command::new(binary);
     command
-        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    for (key, value) in envs {
-        command.env(key, value);
-    }
     command
         .spawn()
         .map_err(|error| coded(CodeServerErrorCode::SpawnFailed, error))
@@ -1403,6 +1408,64 @@ fn to_axum(message: tokio_tungstenite::tungstenite::Message) -> Option<Message> 
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn headless_workspace_ports_preserve_the_editor_listener() {
+        let paths = ProfilePaths::new(std::path::Path::new("/data"), IdeProfile::Managed);
+        let args = code_server_args("/workspace", 32124, &paths, IdeProfile::Managed);
+        let workspace_env =
+            super::super::process::resolve_child_workspace_env("/workspace", |query| async move {
+                tokio::task::yield_now().await;
+                assert_eq!(query.cwd, std::path::Path::new("/workspace"));
+                Ok(Some(std::collections::BTreeMap::from([
+                    ("PORT".into(), "41010".into()),
+                    ("COGNIA_PORT".into(), "41010".into()),
+                    ("COGNIA_PORT_COUNT".into(), "10".into()),
+                ])))
+            })
+            .await
+            .unwrap();
+        let command = super::super::process::workspace_child_command(
+            "code-server",
+            &args,
+            &[("PORT", "3000".into())],
+            workspace_env,
+        );
+        let environment: std::collections::BTreeMap<_, _> = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| (key.to_str().unwrap(), value.unwrap().to_str().unwrap()))
+            .collect();
+        assert_eq!(environment["PORT"], "41010");
+        assert_eq!(environment["COGNIA_PORT"], "41010");
+        assert_eq!(environment["COGNIA_PORT_COUNT"], "10");
+        let actual_args: Vec<_> = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert_eq!(actual_args, args);
+        assert!(actual_args
+            .windows(2)
+            .any(|pair| pair == ["--bind-addr", "127.0.0.1:32124"]));
+        let no_lease =
+            super::super::process::resolve_child_workspace_env("/workspace", |_| async {
+                Ok(None)
+            })
+            .await
+            .unwrap();
+        let command =
+            super::super::process::workspace_child_command("code-server", &args, &[], no_lease);
+        assert_eq!(command.as_std().get_envs().count(), 0);
+        assert!(
+            super::super::process::resolve_child_workspace_env("/workspace", |_| async {
+                Err("store unavailable".into())
+            })
+            .await
+            .unwrap_err()
+            .contains("store unavailable")
+        );
+    }
+
     #[test]
     fn a_status_withholds_the_loopback_port_until_the_boundary_grants_it() {
         // The port is only meaningful to a process on this machine, and only

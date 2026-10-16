@@ -349,6 +349,13 @@ impl CodeServerState {
             return Ok(port);
         }
 
+        // Resolve the blocking lease store before taking any code-server lock.
+        let workspace_env = resolve_child_workspace_env(
+            &canonical,
+            cognia_core::workspace_env::resolve_workspace_env_async,
+        )
+        .await?;
+
         // Serialize install + spawn across all roots.
         let _guard = self.operation_lock.lock().await;
         // Re-check under the lock — another caller may have just spawned it.
@@ -465,7 +472,7 @@ impl CodeServerState {
             }
         }
 
-        let child = match spawn_child(&info.binary_path, &args, &agent_envs) {
+        let child = match spawn_child(&info.binary_path, &args, &agent_envs, workspace_env) {
             Ok(child) => child,
             Err(e) => {
                 if broker_enabled {
@@ -1830,18 +1837,61 @@ async fn uninstall_managed_proxy(
     }
 }
 
-#[cfg(feature = "tauri-host")]
-fn spawn_child(binary: &str, args: &[String], envs: &[(&str, String)]) -> Result<Child, String> {
-    prepare_session_socket_dir()?;
+/// Resolve before acquiring editor-operation locks: the provider performs
+/// filesystem and SQLite work on the blocking pool.
+pub(super) async fn resolve_child_workspace_env<F>(
+    cwd: &str,
+    resolve: impl FnOnce(cognia_core::workspace_env::WorkspaceEnvQuery) -> F,
+) -> Result<Option<BTreeMap<String, String>>, String>
+where
+    F: std::future::Future<Output = Result<Option<BTreeMap<String, String>>, String>>,
+{
+    resolve(cognia_core::workspace_env::WorkspaceEnvQuery {
+        cwd: PathBuf::from(cwd),
+        workspace_id: None,
+        namespace: cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE.into(),
+    })
+    .await
+    .map_err(|error| {
+        coded(
+            CodeServerErrorCode::SpawnFailed,
+            format!("workspace environment: {error}"),
+        )
+    })
+}
+
+/// Both desktop and headless editors inherit the resolved workspace lease;
+/// their listener still uses the independent `--bind-addr` argument.
+pub(super) fn workspace_child_command(
+    binary: &str,
+    args: &[String],
+    envs: &[(&str, String)],
+    workspace_env: Option<BTreeMap<String, String>>,
+) -> Command {
     let mut cmd = Command::new(binary);
-    cmd.args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    cmd.args(args);
     for (key, value) in envs {
         cmd.env(key, value);
     }
+    if let Some(workspace_env) = workspace_env {
+        cmd.envs(workspace_env);
+    }
+    cmd
+}
+
+#[cfg(feature = "tauri-host")]
+fn spawn_child(
+    binary: &str,
+    args: &[String],
+    envs: &[(&str, String)],
+    workspace_env: Option<BTreeMap<String, String>>,
+) -> Result<Child, String> {
+    let mut cmd = workspace_child_command(binary, args, envs, workspace_env);
+    prepare_session_socket_dir()?;
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     // Prevent a console window on Windows (defensive; the feature is gated off
     // there because there's no standalone binary, but keep spawn parity).
     #[cfg(target_os = "windows")]
@@ -1962,6 +2012,66 @@ async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn workspace_ports_override_child_env_without_changing_listener() {
+        let args = code_server_args(
+            "/workspace",
+            32123,
+            Path::new("/data"),
+            Path::new("/extensions"),
+            IdeProfile::Managed,
+        );
+        let workspace_env = resolve_child_workspace_env("/workspace", |query| async move {
+            tokio::task::yield_now().await;
+            assert_eq!(query.cwd, Path::new("/workspace"));
+            assert_eq!(
+                query.namespace,
+                cognia_core::workspace_env::HOST_LOOPBACK_NAMESPACE
+            );
+            Ok(Some(BTreeMap::from([
+                ("PORT".into(), "41000".into()),
+                ("COGNIA_PORT".into(), "41000".into()),
+                ("COGNIA_PORT_COUNT".into(), "10".into()),
+            ])))
+        })
+        .await
+        .unwrap();
+        let command = workspace_child_command(
+            "code-server",
+            &args,
+            &[("PORT", "3000".into())],
+            workspace_env,
+        );
+        let environment: BTreeMap<_, _> = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| (key.to_str().unwrap(), value.unwrap().to_str().unwrap()))
+            .collect();
+        assert_eq!(environment["PORT"], "41000");
+        assert_eq!(environment["COGNIA_PORT"], "41000");
+        assert_eq!(environment["COGNIA_PORT_COUNT"], "10");
+        let actual_args: Vec<_> = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert_eq!(actual_args, args);
+        assert!(actual_args
+            .windows(2)
+            .any(|pair| pair == ["--bind-addr", "127.0.0.1:32123"]));
+        let no_lease = resolve_child_workspace_env("/workspace", |_| async { Ok(None) })
+            .await
+            .unwrap();
+        let command = workspace_child_command("code-server", &args, &[], no_lease);
+        assert_eq!(command.as_std().get_envs().count(), 0);
+        assert!(resolve_child_workspace_env("/workspace", |_| async {
+            Err("port range exhausted".into())
+        })
+        .await
+        .unwrap_err()
+        .contains("port range exhausted"));
+    }
 
     #[test]
     fn locale_is_read_out_of_argv_json() {
