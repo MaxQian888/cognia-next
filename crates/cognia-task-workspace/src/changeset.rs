@@ -1572,6 +1572,7 @@ mod tests {
             .unwrap();
             let common = common_directory(&source).unwrap();
             let workspace = WorkspaceRecord {
+                port_lease: None,
                 workspace_id: "ws-capture".into(),
                 environment_kind: WorkspaceEnvironmentKind::Managed,
                 project_id: None,

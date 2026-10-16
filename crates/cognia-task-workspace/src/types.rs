@@ -610,6 +610,8 @@ pub enum WorkspaceBaseKind {
 #[serde(rename_all = "camelCase")]
 #[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
 pub struct WorkspaceRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port_lease: Option<crate::WorkspacePortLease>,
     pub workspace_id: String,
     #[serde(default)]
     pub environment_kind: WorkspaceEnvironmentKind,
@@ -693,6 +695,8 @@ pub enum WorkspaceEnvironmentAction {
 #[serde(rename_all = "camelCase")]
 #[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
 pub struct WorkspaceEnvironmentSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port_lease: Option<crate::WorkspacePortLease>,
     pub environment_id: String,
     pub workspace_id: Option<String>,
     /// Owning Workspace, so the inventory can be scoped to one project instead
@@ -1001,7 +1005,7 @@ pub struct WorkspaceBundleTurnOutcome {
     pub settled_at: i64,
 }
 
-/// Retention policy inputs. All three knobs are user-adjustable in settings.
+/// Retention and new-lease port allocation settings. Existing leases keep their numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(transform = cognia_problem::wire_schema::closed_object)]
@@ -1009,6 +1013,44 @@ pub struct WorkspaceLifecyclePolicy {
     pub active_directory_cap: u32,
     pub snapshot_retention_days: u32,
     pub blob_budget_bytes: u64,
+    #[serde(default = "default_port_range_start")]
+    pub port_range_start: u32,
+    #[serde(default = "default_port_range_end")]
+    pub port_range_end: u32,
+    #[serde(default = "default_port_block_size")]
+    pub port_block_size: u32,
+}
+
+fn default_port_range_start() -> u32 {
+    41000
+}
+fn default_port_range_end() -> u32 {
+    48999
+}
+fn default_port_block_size() -> u32 {
+    10
+}
+
+impl WorkspaceLifecyclePolicy {
+    pub fn validate_ports(&self) -> Result<(), crate::PortLeaseError> {
+        let message = if self.port_range_start < 1024 {
+            Some("portRangeStart must be at least 1024")
+        } else if self.port_range_end > 65535 || self.port_range_end == 0 {
+            Some("portRangeEnd must be between 1024 and 65535")
+        } else if self.port_range_start > self.port_range_end {
+            Some("portRangeStart must not exceed portRangeEnd")
+        } else if self.port_block_size == 0 {
+            Some("portBlockSize must be greater than zero")
+        } else if self.port_block_size > self.port_range_end - self.port_range_start + 1 {
+            Some("portBlockSize must fit within portRangeStart..=portRangeEnd")
+        } else {
+            None
+        };
+        match message {
+            Some(message) => Err(crate::PortLeaseError::InvalidPolicy(message.into())),
+            None => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1060,6 +1102,9 @@ impl Default for WorkspaceLifecyclePolicy {
             active_directory_cap: 15,
             snapshot_retention_days: 30,
             blob_budget_bytes: 1 << 30,
+            port_range_start: default_port_range_start(),
+            port_range_end: default_port_range_end(),
+            port_block_size: default_port_block_size(),
         }
     }
 }
@@ -1558,4 +1603,63 @@ pub enum EligibilityGap {
     },
     MissingHumanApproval,
     StaleHead,
+}
+
+#[cfg(test)]
+mod port_policy_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_policy_json_uses_port_defaults() {
+        let policy: WorkspaceLifecyclePolicy = serde_json::from_str(
+            r#"{"activeDirectoryCap":3,"snapshotRetentionDays":7,"blobBudgetBytes":1024}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                policy.port_range_start,
+                policy.port_range_end,
+                policy.port_block_size
+            ),
+            (41000, 48999, 10)
+        );
+        assert_eq!(
+            serde_json::to_value(policy).unwrap()["portRangeStart"],
+            41000
+        );
+    }
+
+    #[test]
+    fn port_policy_validation_rejects_invalid_bounds_and_block_sizes() {
+        for (start, end, size, setting) in [
+            (0, 48999, 10, "portRangeStart"),
+            (1023, 48999, 10, "portRangeStart"),
+            (41000, 65536, 10, "portRangeEnd"),
+            (41000, 0, 10, "portRangeEnd"),
+            (41001, 41000, 1, "portRangeStart"),
+            (41000, 48999, 0, "portBlockSize"),
+            (41000, 41008, 10, "portBlockSize"),
+            (41000, 48999, u32::MAX, "portBlockSize"),
+        ] {
+            let policy = WorkspaceLifecyclePolicy {
+                port_range_start: start,
+                port_range_end: end,
+                port_block_size: size,
+                ..Default::default()
+            };
+            assert!(policy
+                .validate_ports()
+                .unwrap_err()
+                .to_string()
+                .contains(setting));
+        }
+        WorkspaceLifecyclePolicy {
+            port_range_start: 1024,
+            port_range_end: 65535,
+            port_block_size: 64512,
+            ..Default::default()
+        }
+        .validate_ports()
+        .unwrap();
+    }
 }

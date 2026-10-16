@@ -391,6 +391,23 @@ impl TaskWorkspaceService {
                 .push(format!("provenance mutations not reconciled: {error}"));
         }
         service.reconcile_known_worktrees()?;
+        match service.reconcile_workspace_port_leases() {
+            Ok(diagnostics) => {
+                service
+                    .open_recovery_failures
+                    .lock()
+                    .extend(diagnostics.into_iter().map(|diagnostic| {
+                        format!(
+                            "port lease {:?}: {} ({:?})",
+                            diagnostic.kind, diagnostic.detail, diagnostic.lease_ids
+                        )
+                    }))
+            }
+            Err(error) => service
+                .open_recovery_failures
+                .lock()
+                .push(format!("port leases not reconciled: {error}")),
+        }
         Ok(service)
     }
 
@@ -479,6 +496,13 @@ impl TaskWorkspaceService {
         }
         if let Some(bundle) = owned.first() {
             self.validate_session_scratch_bundle(bundle, &input.session_id, &seed)?;
+            for lease in &bundle.leases {
+                self.ensure_workspace_port_lease(
+                    &lease.workspace_id,
+                    crate::HOST_LOOPBACK_NAMESPACE,
+                )
+                .map_err(|error| error.to_string())?;
+            }
             return Ok((*bundle).clone());
         }
         // An interrupted acquisition can leave a reserved registry row. Do
@@ -1122,11 +1146,11 @@ impl TaskWorkspaceService {
             .clone()
             .unwrap_or_else(|| Uuid::now_v7().to_string());
         validate_id("bundleTurnId", &bundle_turn_id)?;
-        if let Some(existing) = self
+        let existing_turn = self
             .store
             .lock()
-            .get_workspace_bundle_turn(&bundle_turn_id)?
-        {
+            .get_workspace_bundle_turn(&bundle_turn_id)?;
+        if let Some(existing) = existing_turn {
             let matches_runs = existing.runs.iter().all(|lease| {
                 let suffix = &storage_key(&lease.workspace_id)[..12];
                 lease.run.task_id == scoped_run_id(&request.run.task_id, suffix)
@@ -1136,6 +1160,13 @@ impl TaskWorkspaceService {
                 && existing.primary_logical_root_id == request.primary_logical_root_id
                 && matches_runs
             {
+                for lease in &existing.runs {
+                    self.ensure_workspace_port_lease(
+                        &lease.workspace_id,
+                        crate::HOST_LOOPBACK_NAMESPACE,
+                    )
+                    .map_err(|error| error.to_string())?;
+                }
                 return Ok(existing);
             }
             return Err(format!(
@@ -1374,6 +1405,10 @@ impl TaskWorkspaceService {
             return Err(format!("workspace is not a directory: {}", root.display()));
         }
         let tracking_policy = resolve_tracking_policy(&root, &input.tracking_policy)?;
+        if borrowed.is_some() {
+            self.resolve_workspace_port_lease(crate::HOST_LOOPBACK_NAMESPACE, None, &root, true)
+                .map_err(|error| error.to_string())?;
+        }
         {
             let store = self.store.lock();
             if let Some((existing, _)) = store.get_run::<WorkspaceSnapshot>(&input.run_id)? {
@@ -1395,6 +1430,13 @@ impl TaskWorkspaceService {
                     && existing.tracking_policy == tracking_policy
                     && task.session_id == input.session_id
                     && Path::new(&task.workspace_root) == root;
+                if matches_request {
+                    drop(store);
+                    if let Some(id) = existing.workspace_id.as_deref() {
+                        self.ensure_workspace_port_lease(id, crate::HOST_LOOPBACK_NAMESPACE)
+                            .map_err(|error| error.to_string())?;
+                    }
+                }
                 return matches_request.then_some(existing).ok_or_else(|| {
                     format!(
                         "runId is already owned by another task run: {}",
@@ -1880,6 +1922,18 @@ impl TaskWorkspaceService {
             let path_key = normalized_path_key(Path::new(&record.execution_root));
             if seen_paths.insert(path_key) {
                 summaries.push(environment_summary_from_record(&record));
+            }
+        }
+        for summary in &mut summaries {
+            if summary.port_lease.is_none() {
+                if let Ok(root) = crate::ports::registry_root(Path::new(&summary.path)) {
+                    summary.port_lease = crate::ports::read_root(
+                        &self.store.lock().connection,
+                        crate::HOST_LOOPBACK_NAMESPACE,
+                        &root,
+                    )
+                    .map_err(|error| error.to_string())?;
+                }
             }
         }
         summaries.sort_by(|left, right| {
@@ -2755,17 +2809,22 @@ impl TaskWorkspaceService {
                         now,
                     )
                     .map_err(|error| error.to_string())?;
-                let record = self
+                // Metadata failures must release the reservation and its port block too.
+                let initialized = self
                     .registry
                     .set_environment_kind(&record.workspace_id, input.environment_kind)
-                    .map_err(|error| error.to_string())?;
-                // Stamp the owning Workspace, so "which execution slots does
-                // this project own" is answerable — deleting a project can then
-                // find the directories it produced, and the inventory can be
-                // scoped instead of only shown machine-wide.
-                self.registry
-                    .set_project(&record.workspace_id, input.project_id.as_deref())
-                    .map_err(|error| error.to_string())?;
+                    .and_then(|record| {
+                        self.registry
+                            .set_project(&record.workspace_id, input.project_id.as_deref())?;
+                        Ok(record)
+                    });
+                let record = match initialized {
+                    Ok(record) => record,
+                    Err(error) => {
+                        self.discard_managed_workspace(&record, now);
+                        return Err(error.to_string());
+                    }
+                };
                 let admin = self.git_admin_lock(source_root);
                 let created = {
                     let _admin = admin.as_ref().map(|lock| lock.lock());
@@ -2903,7 +2962,8 @@ impl TaskWorkspaceService {
                 .to_string_lossy()
                 .into_owned();
         }
-        if let Err(error) = self.store.lock().put_workspace_bundle(&bundle) {
+        let persisted = self.store.lock().put_workspace_bundle(&bundle);
+        if let Err(error) = persisted {
             let store = self.store.lock();
             let _ = store.delete_bundle_leases(&bundle.bundle_id);
             let _ = store.delete_workspace_bundle(&bundle.bundle_id);
@@ -2912,6 +2972,205 @@ impl TaskWorkspaceService {
             return Err(error);
         }
         Ok(bundle)
+    }
+
+    /// Allocate only at an execution boundary. Existing blocks survive policy changes.
+    pub fn ensure_workspace_port_lease(
+        &self,
+        workspace_id: &str,
+        namespace: &str,
+    ) -> Result<crate::WorkspacePortLease, crate::PortLeaseError> {
+        let store = self.store.lock();
+        let tx = rusqlite::Transaction::new_unchecked(
+            &store.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .map_err(crate::PortLeaseError::from)?;
+        let record = store
+            .get_workspace(workspace_id)
+            .map_err(crate::PortLeaseError::Store)?
+            .ok_or_else(|| crate::PortLeaseError::WorkspaceNotFound(workspace_id.into()))?;
+        let existing = crate::ports::read_registry(&tx, namespace, &record)?;
+        let root = match existing {
+            Some(lease) => lease.canonical_root,
+            None => crate::ports::registry_root(Path::new(&record.execution_root))?,
+        };
+        let policy = store
+            .get_workspace_lifecycle_policy()
+            .map_err(crate::PortLeaseError::Store)?
+            .unwrap_or_default();
+        let lease = crate::ports::ensure_in_transaction(
+            &tx,
+            namespace,
+            crate::ports::LeaseSubject {
+                kind: crate::PortSubjectKind::Registry,
+                key: workspace_id,
+                root: &root,
+                registry_id: Some(workspace_id),
+            },
+            policy,
+            now_ms(),
+        )?;
+        tx.commit().map_err(crate::PortLeaseError::from)?;
+        Ok(lease)
+    }
+
+    pub fn read_workspace_port_lease(
+        &self,
+        workspace_id: &str,
+        namespace: &str,
+    ) -> Result<Option<crate::WorkspacePortLease>, crate::PortLeaseError> {
+        let store = self.store.lock();
+        let record = store
+            .get_workspace(workspace_id)
+            .map_err(crate::PortLeaseError::Store)?
+            .ok_or_else(|| crate::PortLeaseError::WorkspaceNotFound(workspace_id.into()))?;
+        crate::ports::read_registry(&store.connection, namespace, &record)
+    }
+
+    /// Register a desktop session or project checkout, sharing any physical-root block.
+    pub fn ensure_subject_port_lease(
+        &self,
+        namespace: &str,
+        kind: crate::PortSubjectKind,
+        key: &str,
+        root: &Path,
+    ) -> Result<crate::WorkspacePortLease, crate::PortLeaseError> {
+        if kind == crate::PortSubjectKind::Registry {
+            return Err(crate::PortLeaseError::InvalidSubject(
+                "registry subjects must use ensure_workspace_port_lease".into(),
+            ));
+        }
+        let root = crate::ports::canonical_root(root)?;
+        let store = self.store.lock();
+        let policy = store
+            .get_workspace_lifecycle_policy()
+            .map_err(crate::PortLeaseError::Store)?
+            .unwrap_or_default();
+        crate::ports::ensure(
+            &store.connection,
+            namespace,
+            crate::ports::LeaseSubject {
+                kind,
+                key,
+                root: &root,
+                registry_id: None,
+            },
+            policy,
+            now_ms(),
+        )
+    }
+
+    /// A project may reference several physical roots. Reading never registers a subject.
+    pub fn read_subject_port_leases(
+        &self,
+        namespace: &str,
+        kind: crate::PortSubjectKind,
+        key: &str,
+    ) -> Result<Vec<crate::WorkspacePortLease>, crate::PortLeaseError> {
+        crate::ports::read_subject(&self.store.lock().connection, namespace, kind, key)
+    }
+
+    pub fn release_subject_port_leases(
+        &self,
+        namespace: &str,
+        kind: crate::PortSubjectKind,
+        key: &str,
+    ) -> Result<(), crate::PortLeaseError> {
+        if kind == crate::PortSubjectKind::Registry {
+            return Err(crate::PortLeaseError::InvalidSubject(
+                "registry subjects must use release_archived_workspace_port_lease".into(),
+            ));
+        }
+        let store = self.store.lock();
+        let tx = rusqlite::Transaction::new_unchecked(
+            &store.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .map_err(crate::PortLeaseError::from)?;
+        crate::ports::release_subject_in_transaction(&tx, Some(namespace), kind, key)?;
+        tx.commit().map_err(crate::PortLeaseError::from)
+    }
+
+    /// Explicit release requires an archived, idle workspace. Host occupancy is
+    /// report-only elsewhere; here it refuses release without touching the process.
+    pub fn release_archived_workspace_port_lease(
+        &self,
+        workspace_id: &str,
+        namespace: &str,
+    ) -> Result<(), crate::PortLeaseError> {
+        let store = self.store.lock();
+        let tx = rusqlite::Transaction::new_unchecked(
+            &store.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .map_err(crate::PortLeaseError::from)?;
+        let record = store
+            .get_workspace(workspace_id)
+            .map_err(crate::PortLeaseError::Store)?
+            .ok_or_else(|| crate::PortLeaseError::WorkspaceNotFound(workspace_id.into()))?;
+        if !matches!(
+            record.state,
+            WorkspaceState::Archived | WorkspaceState::Restorable
+        ) {
+            return Err(crate::PortLeaseError::WorkspaceBusy {
+                workspace_id: workspace_id.into(),
+                state: record.state,
+            });
+        }
+        if let Some(lease) = crate::ports::read_registry(&tx, namespace, &record)? {
+            crate::ports::require_idle(&lease)?;
+        }
+        crate::ports::release_subject_in_transaction(
+            &tx,
+            Some(namespace),
+            crate::PortSubjectKind::Registry,
+            workspace_id,
+        )?;
+        tx.commit().map_err(crate::PortLeaseError::from)
+    }
+
+    /// Explicit registry identity wins. Cwd fallback uses path components, never
+    /// source_root (several isolated worktrees can share the same source).
+    pub fn resolve_workspace_port_lease(
+        &self,
+        namespace: &str,
+        workspace_id: Option<&str>,
+        cwd: &Path,
+        ensure: bool,
+    ) -> Result<Option<crate::WorkspacePortLease>, crate::PortLeaseError> {
+        if let Some(id) = workspace_id {
+            return if ensure {
+                self.ensure_workspace_port_lease(id, namespace).map(Some)
+            } else {
+                self.read_workspace_port_lease(id, namespace)
+            };
+        }
+        let cwd = PathBuf::from(crate::ports::canonical_root(cwd)?);
+        let store = self.store.lock();
+        let records = store
+            .list_workspaces()
+            .map_err(crate::PortLeaseError::Store)?;
+        if let Some(record) = crate::ports::resolve_registry(&records, &cwd) {
+            let id = record.workspace_id.clone();
+            drop(store);
+            return if ensure {
+                self.ensure_workspace_port_lease(&id, namespace).map(Some)
+            } else {
+                self.read_workspace_port_lease(&id, namespace)
+            };
+        }
+        Ok(crate::ports::resolve_external(
+            &crate::ports::external_leases(&store.connection, namespace)?,
+            namespace,
+            &cwd,
+        ))
+    }
+
+    pub fn reconcile_workspace_port_leases(
+        &self,
+    ) -> Result<Vec<crate::PortLeaseDiagnostic>, crate::PortLeaseError> {
+        crate::ports::reconcile(&self.store.lock())
     }
 
     pub fn workspace_lifecycle_policy(&self) -> crate::WorkspaceLifecyclePolicy {
@@ -3421,6 +3680,8 @@ impl TaskWorkspaceService {
             let mut store = self.store.lock();
             hydrate_snapshot_blobs(&mut store, &snapshot, Path::new(&record.source_root), now)?
         };
+        self.ensure_workspace_port_lease(workspace_id, crate::HOST_LOOPBACK_NAMESPACE)
+            .map_err(|error| error.to_string())?;
         let admin = self.git_admin_lock(Path::new(&record.source_root));
         let created = {
             let _admin = admin.as_ref().map(|lock| lock.lock());
@@ -3538,6 +3799,8 @@ impl TaskWorkspaceService {
                 )
                 .map_err(|error| error.to_string())?;
         }
+        self.ensure_workspace_port_lease(workspace_id, crate::HOST_LOOPBACK_NAMESPACE)
+            .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -5868,6 +6131,7 @@ fn environment_summary_from_git(
         _ => environment_actions(ownership, state, pinned, true),
     };
     crate::WorkspaceEnvironmentSummary {
+        port_lease: record.and_then(|record| record.port_lease.clone()),
         environment_id: workspace_id
             .clone()
             .unwrap_or_else(|| format!("git:{}", storage_key(&normalized_path_key(&row.path)))),
@@ -5903,6 +6167,7 @@ fn environment_summary_from_git(
 fn environment_summary_from_record(record: &WorkspaceRecord) -> crate::WorkspaceEnvironmentSummary {
     let ownership = environment_ownership(record);
     crate::WorkspaceEnvironmentSummary {
+        port_lease: record.port_lease.clone(),
         environment_id: record.workspace_id.clone(),
         workspace_id: Some(record.workspace_id.clone()),
         project_id: record.project_id.clone(),
@@ -6657,6 +6922,655 @@ mod tests {
         time::Duration,
     };
     use tempfile::TempDir;
+
+    #[test]
+    fn port_subject_aliases_share_one_block_and_release_only_their_reference() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let ns = "container:subjects";
+        assert!(service
+            .read_subject_port_leases(ns, crate::PortSubjectKind::DesktopSession, "s")
+            .unwrap()
+            .is_empty());
+        assert!(service
+            .resolve_workspace_port_lease(ns, None, root.path(), false)
+            .unwrap()
+            .is_none());
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
+        let first = service
+            .ensure_subject_port_lease(ns, crate::PortSubjectKind::DesktopSession, "s", root.path())
+            .unwrap();
+        let second = service
+            .ensure_subject_port_lease(ns, crate::PortSubjectKind::ProjectRoot, "p", root.path())
+            .unwrap();
+        assert_eq!(first.lease_id, second.lease_id);
+        let subdir = root.path().join("nested");
+        fs::create_dir(&subdir).unwrap();
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease(ns, None, &subdir, false)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            first.lease_id
+        );
+        service
+            .release_subject_port_leases(ns, crate::PortSubjectKind::DesktopSession, "s")
+            .unwrap();
+        assert_eq!(
+            service
+                .read_subject_port_leases(ns, crate::PortSubjectKind::ProjectRoot, "p")
+                .unwrap()
+                .len(),
+            1
+        );
+        service
+            .release_subject_port_leases(ns, crate::PortSubjectKind::ProjectRoot, "p")
+            .unwrap();
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn port_explicit_release_survives_reconcile_and_restart_until_subject_ensure() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        git2::Repository::init(root.path()).unwrap();
+        seed_git_repository(root.path());
+        let config = ServiceConfig::new(data.path().into());
+        let service = TaskWorkspaceService::open(config.clone()).unwrap();
+        let ns = "remote:released";
+        let mut record = service
+            .registry
+            .insert_imported(
+                crate::ImportedWorkspaceHint {
+                    source_root: root.path().to_string_lossy().into_owned(),
+                    execution_root: root.path().to_string_lossy().into_owned(),
+                    git_common_dir: None,
+                    branch: None,
+                },
+                now_ms(),
+            )
+            .unwrap();
+        record.state = WorkspaceState::Archived;
+        service.store.lock().put_workspace(&record).unwrap();
+        let lease = service
+            .ensure_workspace_port_lease(&record.workspace_id, ns)
+            .unwrap();
+        let project = service
+            .ensure_subject_port_lease(ns, crate::PortSubjectKind::ProjectRoot, "p", root.path())
+            .unwrap();
+        assert_eq!(lease.lease_id, project.lease_id);
+        // Exercise the release transaction without a host probe in this remote namespace.
+        {
+            let store = service.store.lock();
+            let tx = rusqlite::Transaction::new_unchecked(
+                &store.connection,
+                rusqlite::TransactionBehavior::Immediate,
+            )
+            .unwrap();
+            crate::ports::release_subject_in_transaction(
+                &tx,
+                Some(ns),
+                crate::PortSubjectKind::Registry,
+                &record.workspace_id,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        assert!(service
+            .read_workspace_port_lease(&record.workspace_id, ns)
+            .unwrap()
+            .is_none());
+        service.reconcile_workspace_port_leases().unwrap();
+        assert!(service
+            .read_workspace_port_lease(&record.workspace_id, ns)
+            .unwrap()
+            .is_none());
+        drop(service);
+        let service = TaskWorkspaceService::open(config.clone()).unwrap();
+        assert!(service
+            .read_workspace_port_lease(&record.workspace_id, ns)
+            .unwrap()
+            .is_none());
+        service
+            .release_subject_port_leases(ns, crate::PortSubjectKind::ProjectRoot, "p")
+            .unwrap();
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
+
+        // The marker survives the block itself, and another subject's ensure cannot clear it.
+        let project = service
+            .ensure_subject_port_lease(ns, crate::PortSubjectKind::ProjectRoot, "p", root.path())
+            .unwrap();
+        service.reconcile_workspace_port_leases().unwrap();
+        assert!(service
+            .read_workspace_port_lease(&record.workspace_id, ns)
+            .unwrap()
+            .is_none());
+        let restored = service
+            .ensure_workspace_port_lease(&record.workspace_id, ns)
+            .unwrap();
+        assert_eq!(restored.lease_id, project.lease_id);
+        assert_eq!(restored.base_port, project.base_port);
+        drop(service);
+        let service = TaskWorkspaceService::open(config).unwrap();
+        assert_eq!(
+            service
+                .read_workspace_port_lease(&record.workspace_id, ns)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            restored.lease_id
+        );
+        service
+            .release_subject_port_leases(ns, crate::PortSubjectKind::ProjectRoot, "p")
+            .unwrap();
+        assert_eq!(
+            crate::ports::list(&service.store.lock().connection)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn port_resolution_uses_execution_roots_and_component_containment_not_source_roots() {
+        let data = TempDir::new().unwrap();
+        let source = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let ns = "container:paths";
+        let main = service
+            .ensure_subject_port_lease(
+                ns,
+                crate::PortSubjectKind::ProjectRoot,
+                "project",
+                source.path(),
+            )
+            .unwrap();
+        let mut ids = Vec::new();
+        let mut leases = Vec::new();
+        for name in ["work", "work-other"] {
+            let root = source.path().join(name);
+            fs::create_dir_all(root.join("src/nested")).unwrap();
+            let record = service
+                .registry
+                .insert_imported(
+                    crate::ImportedWorkspaceHint {
+                        source_root: source.path().to_string_lossy().into_owned(),
+                        execution_root: root.to_string_lossy().into_owned(),
+                        git_common_dir: None,
+                        branch: None,
+                    },
+                    now_ms(),
+                )
+                .unwrap();
+            assert!(service
+                .read_workspace_port_lease(&record.workspace_id, ns)
+                .unwrap()
+                .is_none());
+            assert!(service
+                .get_managed_workspace(&record.workspace_id)
+                .unwrap()
+                .unwrap()
+                .port_lease
+                .is_none());
+            let lease = service
+                .resolve_workspace_port_lease(ns, None, &root.join("src/nested"), true)
+                .unwrap()
+                .unwrap();
+            ids.push(record.workspace_id);
+            leases.push(lease);
+        }
+        assert_ne!(leases[0].base_port, leases[1].base_port);
+        assert_ne!(leases[0].base_port, main.base_port);
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease(ns, None, source.path(), true)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            main.lease_id
+        );
+        let sibling = source.path().join("work-sibling");
+        fs::create_dir(&sibling).unwrap();
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease(ns, None, &sibling, false)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            main.lease_id
+        );
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease(ns, Some(&ids[0]), &sibling, false)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            leases[0].lease_id
+        );
+        // A nested registry execution root wins over the containing checkout.
+        let nested = source.path().join("work/src");
+        let record = service
+            .registry
+            .insert_imported(
+                crate::ImportedWorkspaceHint {
+                    source_root: source.path().to_string_lossy().into_owned(),
+                    execution_root: nested.to_string_lossy().into_owned(),
+                    git_common_dir: None,
+                    branch: None,
+                },
+                now_ms(),
+            )
+            .unwrap();
+        let lease = service
+            .ensure_workspace_port_lease(&record.workspace_id, ns)
+            .unwrap();
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease(ns, None, &nested.join("nested"), false)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            lease.lease_id
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn port_symlink_aliases_and_registry_aliases_share_a_physical_root() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let alias = data.path().join("alias");
+        std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let ns = "remote:aliases";
+        let first = service
+            .ensure_subject_port_lease(ns, crate::PortSubjectKind::ProjectRoot, "p1", root.path())
+            .unwrap();
+        let second = service
+            .ensure_subject_port_lease(ns, crate::PortSubjectKind::ProjectRoot, "p2", &alias)
+            .unwrap();
+        assert_eq!(first, second);
+        let mut ids = Vec::new();
+        for path in [root.path(), &alias] {
+            let record = service
+                .registry
+                .insert_imported(
+                    crate::ImportedWorkspaceHint {
+                        source_root: "/source".into(),
+                        execution_root: path.to_string_lossy().into_owned(),
+                        git_common_dir: None,
+                        branch: None,
+                    },
+                    now_ms(),
+                )
+                .unwrap();
+            assert_eq!(
+                service
+                    .ensure_workspace_port_lease(&record.workspace_id, ns)
+                    .unwrap()
+                    .lease_id,
+                first.lease_id
+            );
+            ids.push(record.workspace_id);
+        }
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease(ns, None, &alias, false)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            first.lease_id
+        );
+        service.registry.forget_imported(&ids[0]).unwrap();
+        assert_eq!(
+            service
+                .read_workspace_port_lease(&ids[1], ns)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            first.lease_id
+        );
+    }
+
+    #[test]
+    fn port_boot_reconcile_repairs_links_and_retains_offline_archives() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let config = ServiceConfig::new(data.path().into());
+        let service = TaskWorkspaceService::open(config.clone()).unwrap();
+        let mut record = service
+            .registry
+            .insert_imported(
+                crate::ImportedWorkspaceHint {
+                    source_root: root.path().to_string_lossy().into_owned(),
+                    execution_root: root.path().to_string_lossy().into_owned(),
+                    git_common_dir: None,
+                    branch: None,
+                },
+                now_ms(),
+            )
+            .unwrap();
+        let lease = service
+            .ensure_workspace_port_lease(&record.workspace_id, "remote:offline")
+            .unwrap();
+        record.state = WorkspaceState::Archived;
+        service.store.lock().put_workspace(&record).unwrap();
+        service
+            .store
+            .lock()
+            .connection
+            .execute(
+                "UPDATE workspace_port_leases SET registry_workspace_id=NULL",
+                [],
+            )
+            .unwrap();
+        service
+            .set_workspace_lifecycle_policy(crate::WorkspaceLifecyclePolicy {
+                port_range_start: 60000,
+                port_range_end: 60999,
+                ..Default::default()
+            })
+            .unwrap();
+        drop(root);
+        drop(service);
+        let reopened = TaskWorkspaceService::open(config).unwrap();
+        let retained = reopened
+            .read_workspace_port_lease(&record.workspace_id, "remote:offline")
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained.lease_id, lease.lease_id);
+        assert_eq!(retained.base_port, lease.base_port);
+        assert_eq!(
+            retained.registry_workspace_id.as_deref(),
+            Some(record.workspace_id.as_str())
+        );
+        assert!(reopened
+            .open_recovery_failures
+            .lock()
+            .iter()
+            .any(|message| message.contains("port lease OutOfRange")));
+    }
+
+    #[test]
+    fn port_release_refuses_active_and_provisioning_and_ensure_rejects_files() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let mut record = service
+            .registry
+            .insert_imported(
+                crate::ImportedWorkspaceHint {
+                    source_root: root.path().to_string_lossy().into_owned(),
+                    execution_root: root.path().to_string_lossy().into_owned(),
+                    git_common_dir: None,
+                    branch: None,
+                },
+                now_ms(),
+            )
+            .unwrap();
+        for state in [WorkspaceState::Active, WorkspaceState::Provisioning] {
+            record.state = state;
+            service.store.lock().put_workspace(&record).unwrap();
+            assert!(
+                matches!(service.release_archived_workspace_port_lease(&record.workspace_id, crate::HOST_LOOPBACK_NAMESPACE), Err(crate::PortLeaseError::WorkspaceBusy { state: actual, .. }) if actual == state)
+            );
+        }
+        let file = root.path().join("file.txt");
+        fs::write(&file, "file").unwrap();
+        assert!(matches!(
+            service.ensure_subject_port_lease(
+                "remote:test",
+                crate::PortSubjectKind::ProjectRoot,
+                "p",
+                &file
+            ),
+            Err(crate::PortLeaseError::Root(_))
+        ));
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn port_cwd_fallback_requires_a_registered_external_subject() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let record = service
+            .registry
+            .insert_imported(
+                crate::ImportedWorkspaceHint {
+                    source_root: root.path().to_string_lossy().into_owned(),
+                    execution_root: root.path().to_string_lossy().into_owned(),
+                    git_common_dir: None,
+                    branch: None,
+                },
+                now_ms(),
+            )
+            .unwrap();
+        let lease = service
+            .ensure_workspace_port_lease(&record.workspace_id, "remote:orphan")
+            .unwrap();
+        service
+            .store
+            .lock()
+            .connection
+            .execute(
+                "DELETE FROM workspace_registry WHERE workspace_id=?1",
+                [&record.workspace_id],
+            )
+            .unwrap();
+        assert!(service
+            .resolve_workspace_port_lease("remote:orphan", None, root.path(), false)
+            .unwrap()
+            .is_none());
+        let registered = service
+            .ensure_subject_port_lease(
+                "remote:orphan",
+                crate::PortSubjectKind::ProjectRoot,
+                "p",
+                root.path(),
+            )
+            .unwrap();
+        assert_eq!(registered.lease_id, lease.lease_id);
+        assert_eq!(
+            service
+                .resolve_workspace_port_lease("remote:orphan", None, root.path(), false)
+                .unwrap()
+                .unwrap()
+                .lease_id,
+            lease.lease_id
+        );
+        service
+            .release_subject_port_leases("remote:orphan", crate::PortSubjectKind::ProjectRoot, "p")
+            .unwrap();
+        assert_eq!(
+            crate::ports::list(&service.store.lock().connection)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn port_reconcile_reads_registry_after_acquiring_the_cross_connection_write_lock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static RECONCILE_BLOCKED: AtomicBool = AtomicBool::new(false);
+        RECONCILE_BLOCKED.store(false, Ordering::SeqCst);
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let config = ServiceConfig::new(data.path().into());
+        let service = TaskWorkspaceService::open(config.clone()).unwrap();
+        let writer = TaskWorkspaceService::open(config).unwrap();
+        let record = service.registry.insert_imported(crate::ImportedWorkspaceHint {
+            source_root: root.path().to_string_lossy().into_owned(),
+            execution_root: root.path().to_string_lossy().into_owned(),
+            git_common_dir: None,
+            branch: None,
+        }, now_ms()).unwrap();
+        let lease = service.ensure_workspace_port_lease(&record.workspace_id, "remote:interleaving").unwrap();
+        let mut alias = record.clone();
+        alias.workspace_id = "port-alias-b".into();
+
+        let store = writer.store.lock();
+        let tx = rusqlite::Transaction::new_unchecked(&store.connection, rusqlite::TransactionBehavior::Immediate).unwrap();
+        store.put_workspace(&alias).unwrap();
+        crate::ports::ensure_in_transaction(&tx, "remote:interleaving", crate::ports::LeaseSubject {
+            kind: crate::PortSubjectKind::Registry,
+            key: &alias.workspace_id,
+            root: &lease.canonical_root,
+            registry_id: Some(&alias.workspace_id),
+        }, crate::WorkspaceLifecyclePolicy::default(), now_ms()).unwrap();
+        let worker = std::thread::spawn(move || {
+            service.store.lock().connection.busy_handler(Some(|attempt| {
+                RECONCILE_BLOCKED.store(true, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(1));
+                attempt < 5000
+            })).unwrap();
+            service.reconcile_workspace_port_leases().unwrap();
+            service
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !RECONCILE_BLOCKED.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let blocked = RECONCILE_BLOCKED.load(Ordering::SeqCst);
+        tx.commit().unwrap();
+        drop(store);
+        let service = worker.join().unwrap();
+        assert!(blocked, "reconcile must wait for the alias writer's transaction");
+        service.registry.forget_imported(&record.workspace_id).unwrap();
+        let retained = service.read_workspace_port_lease(&alias.workspace_id, "remote:interleaving").unwrap().unwrap();
+        assert_eq!(retained.lease_id, lease.lease_id);
+        assert_eq!(retained.registry_workspace_id.as_deref(), Some(alias.workspace_id.as_str()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn port_reconcile_retains_an_offline_symlink_alias_after_other_alias_deletion() {
+        let data = TempDir::new().unwrap();
+        let paths = TempDir::new().unwrap();
+        let root = paths.path().join("target");
+        let alias = paths.path().join("alias");
+        fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let mut ids = Vec::new();
+        for path in [&root, &alias] {
+            let record = service.registry.insert_imported(crate::ImportedWorkspaceHint {
+                source_root: paths.path().to_string_lossy().into_owned(),
+                execution_root: path.to_string_lossy().into_owned(),
+                git_common_dir: None,
+                branch: None,
+            }, now_ms()).unwrap();
+            service.ensure_workspace_port_lease(&record.workspace_id, "remote:offline-alias").unwrap();
+            ids.push(record.workspace_id);
+        }
+        let original = service.read_workspace_port_lease(&ids[1], "remote:offline-alias").unwrap().unwrap();
+        fs::remove_dir(&root).unwrap();
+        let diagnostics = service.reconcile_workspace_port_leases().unwrap();
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.kind == crate::PortLeaseDiagnosticKind::UnresolvedRegistryRoot && diagnostic.detail.contains(&ids[1])));
+        service.registry.forget_imported(&ids[0]).unwrap();
+        let retained = service.read_workspace_port_lease(&ids[1], "remote:offline-alias").unwrap().unwrap();
+        assert_eq!(retained.lease_id, original.lease_id);
+        assert_eq!(retained.base_port, original.base_port);
+        assert_eq!(retained.registry_workspace_id.as_deref(), Some(ids[1].as_str()));
+        assert!(service.registry.get(&ids[1]).unwrap().is_some());
+    }
+
+    #[test]
+    fn port_policy_set_rejects_invalid_values_without_persisting() {
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let invalid = crate::WorkspaceLifecyclePolicy {
+            port_block_size: 0,
+            ..Default::default()
+        };
+        assert!(service
+            .set_workspace_lifecycle_policy(invalid)
+            .unwrap_err()
+            .contains("portBlockSize"));
+        assert!(matches!(
+            service.registry.set_policy(invalid),
+            Err(crate::RegistryError::PortLease(
+                crate::PortLeaseError::InvalidPolicy(_)
+            ))
+        ));
+        assert_eq!(
+            service.workspace_lifecycle_policy(),
+            crate::WorkspaceLifecyclePolicy::default()
+        );
+        assert!(service
+            .store
+            .lock()
+            .get_workspace_lifecycle_policy()
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn port_settle_reuse_and_explicit_idle_release_obey_lifecycle() {
+        let data = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        service.set_workspace_lifecycle_policy(crate::ports::isolated_host_policy()).unwrap();
+        let mut request = input(&root, "port-task", "port-run");
+        request.workspace_key = Some("pipeline".into());
+        let run = service.begin_run(request.clone()).unwrap();
+        let id = run.workspace_id.as_deref().unwrap();
+        let lease = service
+            .read_workspace_port_lease(id, crate::HOST_LOOPBACK_NAMESPACE)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            service.release_archived_workspace_port_lease(id, crate::HOST_LOOPBACK_NAMESPACE),
+            Err(crate::PortLeaseError::WorkspaceBusy { .. })
+        ));
+        service.settle_run(&run.run_id).unwrap();
+        assert_eq!(
+            service
+                .read_workspace_port_lease(id, crate::HOST_LOOPBACK_NAMESPACE)
+                .unwrap(),
+            Some(lease.clone())
+        );
+        request.run_id = "port-run-2".into();
+        let next = service.begin_run(request).unwrap();
+        assert_eq!(next.workspace_id.as_deref(), Some(id));
+        assert_eq!(
+            service
+                .read_workspace_port_lease(id, crate::HOST_LOOPBACK_NAMESPACE)
+                .unwrap(),
+            Some(lease.clone())
+        );
+        service.settle_run(&next.run_id).unwrap();
+        let listener = crate::ports::eventually(|| {
+            std::net::TcpListener::bind(("127.0.0.1", lease.base_port as u16)).ok()
+        });
+        assert!(matches!(
+            service.release_archived_workspace_port_lease(id, crate::HOST_LOOPBACK_NAMESPACE),
+            Err(crate::PortLeaseError::Occupied { .. })
+        ));
+        drop(listener);
+        crate::ports::eventually(|| {
+            match service.release_archived_workspace_port_lease(id, crate::HOST_LOOPBACK_NAMESPACE) {
+                Ok(()) => Some(()),
+                Err(crate::PortLeaseError::Occupied { .. }) => None,
+                Err(error) => panic!("release idle lease: {error}"),
+            }
+        });
+        assert!(service
+            .read_workspace_port_lease(id, crate::HOST_LOOPBACK_NAMESPACE)
+            .unwrap()
+            .is_none());
+    }
 
     struct ChannelSink(Mutex<mpsc::Sender<TaskWorkspaceResourceEvent>>);
 
@@ -9258,6 +10172,9 @@ mod tests {
         assert!(pruned.reclaimed_bytes > 0);
         assert!(service.get_task("task-prune").unwrap().is_none());
         assert!(!Path::new(&run.execution_root).exists());
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -10340,6 +11257,12 @@ mod tests {
             .map(|lease| lease.workspace_id.as_str())
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(physical_ids.len(), 3);
+        let ports = crate::ports::list(&service.store.lock().connection).unwrap();
+        assert_eq!(ports.len(), physical_ids.len());
+        assert_eq!(
+            ports.iter().map(|lease| lease.base_port).collect::<std::collections::HashSet<_>>().len(),
+            3
+        );
         let primary_lease = bundle
             .leases
             .iter()
@@ -10458,6 +11381,52 @@ mod tests {
     }
 
     #[test]
+    fn port_bundle_metadata_and_publication_failures_release_reservations() {
+        for failure in ["metadata", "publication"] {
+            let data = TempDir::new().unwrap();
+            let root = TempDir::new().unwrap();
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            let trigger = if failure == "metadata" {
+                "CREATE TRIGGER reject_port_metadata BEFORE UPDATE ON workspace_registry
+                 WHEN NEW.state='provisioning' AND OLD.state='provisioning'
+                 BEGIN SELECT RAISE(ABORT, 'injected port failure'); END"
+            } else {
+                "CREATE TRIGGER reject_port_bundle BEFORE INSERT ON workspace_bundles
+                 BEGIN SELECT RAISE(ABORT, 'injected port failure'); END"
+            };
+            service
+                .store
+                .lock()
+                .connection
+                .execute_batch(trigger)
+                .unwrap();
+            let error = service
+                .acquire_workspace_bundle(AcquireWorkspaceBundle {
+                    requested_name: None,
+                    provisioning: None,
+                    project_id: None,
+                    owner_type: WorkspaceOwnerType::Session,
+                    owner_ref: Some("session-port-rollback".into()),
+                    environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                    base: WorkspaceBaseSpec::WorkingState,
+                    roots: vec![crate::WorkspaceBundleRootInput {
+                        logical_root_id: "root".into(),
+                        role: crate::WorkspaceRootRole::Primary,
+                        source_root: root.path().to_string_lossy().into_owned(),
+                    }],
+                })
+                .unwrap_err();
+            assert!(error.contains("injected port failure"), "{error}");
+            assert!(service.list_managed_workspaces().unwrap().is_empty());
+            assert!(service.list_workspace_bundles().unwrap().is_empty());
+            assert!(crate::ports::list(&service.store.lock().connection)
+                .unwrap()
+                .is_empty());
+        }
+    }
+
+    #[test]
     fn bundle_acquisition_rolls_back_every_root_when_one_leg_fails() {
         let data = TempDir::new().unwrap();
         let repository = TempDir::new().unwrap();
@@ -10508,6 +11477,9 @@ mod tests {
                 .count(),
             1
         );
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -10533,12 +11505,17 @@ mod tests {
             })
             .unwrap();
         let lease = &bundle.leases[0];
+        let port_lease = service
+            .read_workspace_port_lease(&lease.workspace_id, crate::HOST_LOOPBACK_NAMESPACE)
+            .unwrap()
+            .unwrap();
         fs::write(Path::new(&lease.alias_path).join("notes.txt"), "after\n").unwrap();
 
         let archived = service
             .archive_managed_workspace(&lease.workspace_id)
             .unwrap();
         assert_eq!(archived.state, WorkspaceState::Archived);
+        assert_eq!(archived.port_lease.as_ref(), Some(&port_lease));
         assert!(!Path::new(&archived.execution_root).exists());
         let expected_snapshot_id = format!("workspace:{}", lease.workspace_id);
         assert_eq!(
@@ -10550,6 +11527,7 @@ mod tests {
             .restore_managed_workspace(&lease.workspace_id)
             .unwrap();
         assert_eq!(restored.state, WorkspaceState::Active);
+        assert_eq!(restored.port_lease.as_ref(), Some(&port_lease));
         assert_eq!(
             fs::read_to_string(Path::new(&restored.execution_root).join("notes.txt")).unwrap(),
             "after\n"
@@ -10565,6 +11543,9 @@ mod tests {
             .get_managed_workspace(&lease.workspace_id)
             .unwrap()
             .is_none());
+        assert!(crate::ports::list(&service.store.lock().connection)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -10808,6 +11789,7 @@ mod tests {
             active_directory_cap: 1,
             snapshot_retention_days: 9,
             blob_budget_bytes: 4096,
+            ..Default::default()
         };
         {
             let service =
@@ -11413,6 +12395,7 @@ mod tests {
                 active_directory_cap: 15,
                 snapshot_retention_days: 1,
                 blob_budget_bytes: 1 << 30,
+                ..Default::default()
             })
             .unwrap();
         let bundle = service
@@ -11466,6 +12449,7 @@ mod tests {
                 active_directory_cap: 15,
                 snapshot_retention_days: 1,
                 blob_budget_bytes: 1 << 30,
+                ..Default::default()
             })
             .unwrap();
         let run = service
@@ -11660,6 +12644,7 @@ mod tests {
                 active_directory_cap: 1,
                 snapshot_retention_days: 9,
                 blob_budget_bytes: 4096,
+                ..Default::default()
             })
             .unwrap();
         service

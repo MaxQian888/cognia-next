@@ -46,6 +46,9 @@ impl WorkspaceStore {
         let connection = Connection::open(data_dir.join("task-workspaces.sqlite"))
             .map_err(|error| format!("open task workspace database: {error}"))?;
         connection
+            .busy_timeout(std::time::Duration::from_secs(30))
+            .map_err(|error| format!("configure workspace database busy timeout: {error}"))?;
+        connection
             .execute_batch(
                 "PRAGMA journal_mode=WAL;
                  PRAGMA foreign_keys=ON;
@@ -112,9 +115,59 @@ impl WorkspaceStore {
             decoded: None,
         };
         store.apply_registry_migration()?;
+        store.apply_port_migration()?;
         store.apply_changeset_migration()?;
         store.apply_provenance_migration()?;
         Ok(store)
+    }
+
+    fn apply_port_migration(&self) -> Result<(), String> {
+        // SET NULL is deliberate: deleting a registry row via SQL must never
+        // silently free a block that another physical-root alias still uses.
+        // Controlled removal explicitly releases references in its transaction.
+        self.connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS workspace_port_leases (
+                lease_id TEXT PRIMARY KEY,
+                namespace_key TEXT NOT NULL,
+                subject_kind TEXT NOT NULL CHECK(subject_kind IN ('registry','desktop-session','project-root')),
+                subject_key TEXT NOT NULL,
+                canonical_root TEXT NOT NULL,
+                registry_workspace_id TEXT REFERENCES workspace_registry(workspace_id) ON DELETE SET NULL,
+                base_port INTEGER NOT NULL CHECK(base_port BETWEEN 1024 AND 65535),
+                port_count INTEGER NOT NULL CHECK(port_count >= 1 AND port_count <= 64512),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                CHECK(base_port + port_count - 1 <= 65535),
+                UNIQUE(namespace_key, canonical_root)
+            );
+            CREATE INDEX IF NOT EXISTS idx_workspace_port_registry ON workspace_port_leases(registry_workspace_id);
+            CREATE TABLE IF NOT EXISTS workspace_port_subjects (
+                lease_id TEXT NOT NULL REFERENCES workspace_port_leases(lease_id) ON DELETE CASCADE,
+                subject_kind TEXT NOT NULL CHECK(subject_kind IN ('registry','desktop-session','project-root')),
+                subject_key TEXT NOT NULL,
+                PRIMARY KEY(lease_id, subject_kind, subject_key)
+            );
+            CREATE TABLE IF NOT EXISTS workspace_port_released_subjects (
+                namespace_key TEXT NOT NULL,
+                subject_kind TEXT NOT NULL CHECK(subject_kind IN ('registry','desktop-session','project-root')),
+                subject_key TEXT NOT NULL,
+                PRIMARY KEY(namespace_key, subject_kind, subject_key)
+            );
+            INSERT OR IGNORE INTO workspace_port_subjects (lease_id, subject_kind, subject_key)
+                SELECT lease_id, subject_kind, subject_key FROM workspace_port_leases l
+                WHERE NOT EXISTS (SELECT 1 FROM workspace_port_released_subjects r
+                    WHERE r.namespace_key=l.namespace_key AND r.subject_kind=l.subject_kind AND r.subject_key=l.subject_key);"
+        ).map_err(|error| format!("initialize workspace port leases: {error}"))
+    }
+
+    fn project_workspace_ports(
+        &self,
+        mut record: crate::WorkspaceRecord,
+    ) -> Result<crate::WorkspaceRecord, String> {
+        record.port_lease =
+            crate::ports::read_registry(&self.connection, crate::HOST_LOOPBACK_NAMESPACE, &record)
+                .map_err(|error| error.to_string())?;
+        Ok(record)
     }
 
     fn apply_changeset_migration(&self) -> Result<(), String> {
@@ -1547,7 +1600,11 @@ impl WorkspaceStore {
                         last_used_at, locked_by, pinned, created_at
                    FROM workspace_registry WHERE workspace_id=?1",
                 [workspace_id],
-                map_workspace_row,
+                |row| {
+                    map_workspace_row(row).map(|result| {
+                        result.and_then(|record| self.project_workspace_ports(record))
+                    })
+                },
             )
             .optional()
             .map_err(|error| format!("get workspace {workspace_id}: {error}"))?
@@ -1585,7 +1642,10 @@ impl WorkspaceStore {
             )
             .map_err(|error| format!("prepare list_workspaces_for_project: {error}"))?;
         let rows = statement
-            .query_map([project_id], map_workspace_row)
+            .query_map([project_id], |row| {
+                map_workspace_row(row)
+                    .map(|result| result.and_then(|record| self.project_workspace_ports(record)))
+            })
             .map_err(|error| format!("query list_workspaces_for_project: {error}"))?;
         rows.collect::<Result<Result<Vec<_>, String>, _>>()
             .map_err(|error| format!("read list_workspaces_for_project: {error}"))?
@@ -1604,24 +1664,39 @@ impl WorkspaceStore {
             )
             .map_err(|error| format!("prepare list_workspaces: {error}"))?;
         let rows = statement
-            .query_map([], map_workspace_row)
+            .query_map([], |row| {
+                map_workspace_row(row)
+                    .map(|result| result.and_then(|record| self.project_workspace_ports(record)))
+            })
             .map_err(|error| format!("query list_workspaces: {error}"))?;
         rows.collect::<Result<Result<Vec<_>, String>, _>>()
             .map_err(|error| format!("read list_workspaces: {error}"))?
     }
 
-    /// Delete a Registry row (and cascade its leases + grants).
+    /// Delete a Registry row, explicitly release its port references, and cascade root leases/grants.
     ///
     /// Callers MUST first verify ownership and lock reason — the store enforces
     /// only referential integrity, not policy.
     pub fn delete_workspace(&self, workspace_id: &str) -> Result<(), String> {
-        self.connection
-            .execute(
-                "DELETE FROM workspace_registry WHERE workspace_id=?1",
-                [workspace_id],
-            )
-            .map(|_| ())
-            .map_err(|error| format!("delete workspace {workspace_id}: {error}"))
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .map_err(|error| format!("begin workspace removal: {error}"))?;
+        crate::ports::release_subject_in_transaction(
+            &tx,
+            None,
+            crate::PortSubjectKind::Registry,
+            workspace_id,
+        )
+        .map_err(|error| error.to_string())?;
+        tx.execute(
+            "DELETE FROM workspace_registry WHERE workspace_id=?1",
+            [workspace_id],
+        )
+        .map_err(|error| format!("delete workspace {workspace_id}: {error}"))?;
+        tx.commit()
+            .map_err(|error| format!("commit workspace removal: {error}"))
     }
 
     pub fn put_workspace_bundle(&self, bundle: &crate::WorkspaceBundle) -> Result<(), String> {
@@ -2353,6 +2428,7 @@ fn map_workspace_row(
         let base_kind = deserialize_enum(&base_kind_raw, "base kind")?;
         let base = crate::WorkspaceBaseSpec::from_storage(base_kind, base_ref.as_deref())?;
         Ok(crate::WorkspaceRecord {
+            port_lease: None,
             workspace_id,
             project_id,
             environment_kind: deserialize_enum(&environment_kind_raw, "environment kind")?,
@@ -3078,8 +3154,103 @@ mod tests {
     // ADR-0111 Registry CRUD round-trips
     // -----------------------------------------------------------------
 
+    #[test]
+    fn port_table_upgrade_preserves_existing_registry_rows_and_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let record = sample_record("legacy");
+        {
+            let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+            store.put_workspace(&record).unwrap();
+            store
+                .connection
+                .execute_batch(
+                    "DROP TABLE workspace_port_subjects; DROP TABLE workspace_port_leases; DROP TABLE workspace_port_released_subjects;",
+                )
+                .unwrap();
+        }
+        for _ in 0..2 {
+            let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+            assert_eq!(store.get_workspace("legacy").unwrap(), Some(record.clone()));
+            assert!(crate::ports::list(&store.connection).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn port_release_marker_migration_preserves_existing_leases() {
+        let dir = TempDir::new().unwrap();
+        let record = sample_record("legacy-lease");
+        let lease = {
+            let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+            store.put_workspace(&record).unwrap();
+            let lease = crate::ports::ensure(
+                &store.connection,
+                "remote:test",
+                crate::ports::LeaseSubject {
+                    kind: crate::PortSubjectKind::Registry,
+                    key: &record.workspace_id,
+                    root: &record.execution_root,
+                    registry_id: Some(&record.workspace_id),
+                },
+                WorkspaceLifecyclePolicy::default(),
+                1,
+            )
+            .unwrap();
+            store
+                .connection
+                .execute("DROP TABLE workspace_port_released_subjects", [])
+                .unwrap();
+            lease
+        };
+        for _ in 0..2 {
+            let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+            assert_eq!(
+                crate::ports::list(&store.connection).unwrap(),
+                vec![lease.clone()]
+            );
+            assert_eq!(
+                crate::ports::read_registry(&store.connection, "remote:test", &record).unwrap(),
+                Some(lease.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn raw_registry_deletion_detaches_instead_of_accidentally_releasing_ports() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024).unwrap();
+        let record = sample_record("raw-delete");
+        store.put_workspace(&record).unwrap();
+        let lease = crate::ports::ensure(
+            &store.connection,
+            "remote:test",
+            crate::ports::LeaseSubject {
+                kind: crate::PortSubjectKind::Registry,
+                key: &record.workspace_id,
+                root: &record.execution_root,
+                registry_id: Some(&record.workspace_id),
+            },
+            WorkspaceLifecyclePolicy::default(),
+            1,
+        )
+        .unwrap();
+        store
+            .connection
+            .execute(
+                "DELETE FROM workspace_registry WHERE workspace_id=?1",
+                [&record.workspace_id],
+            )
+            .unwrap();
+        let retained = crate::ports::list(&store.connection)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(retained.lease_id, lease.lease_id);
+        assert_eq!(retained.registry_workspace_id, None);
+    }
+
     fn sample_record(id: &str) -> crate::WorkspaceRecord {
         crate::WorkspaceRecord {
+            port_lease: None,
             project_id: None,
             workspace_id: id.into(),
             environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -3387,6 +3558,7 @@ mod tests {
             active_directory_cap: 7,
             snapshot_retention_days: 14,
             blob_budget_bytes: 512,
+            ..Default::default()
         };
         store.put_workspace_lifecycle_policy(&policy).unwrap();
         assert_eq!(

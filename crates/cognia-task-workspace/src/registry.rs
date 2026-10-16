@@ -20,10 +20,9 @@
 //!
 //! # Purity
 //!
-//! Everything here is deterministic and I/O-free with respect to the
-//! filesystem and git — the only I/O is through [`WorkspaceStore`], which is
-//! passed in by the caller. This keeps unit tests fast and lets callers wrap
-//! actions in transactions.
+//! Lifecycle planning is deterministic and independent of filesystem/git I/O.
+//! Managed insertion also resolves the physical root and delegates loopback
+//! probing to `ports`, within the same store transaction as its reservation.
 
 use crate::{
     sensitive::{SensitiveAuditEntry, SensitiveDecision, SensitiveGrant, SensitiveGrantStore},
@@ -39,6 +38,8 @@ use uuid::Uuid;
 /// developers; user-facing surfaces translate them into localized strings.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum RegistryError {
+    #[error(transparent)]
+    PortLease(#[from] crate::PortLeaseError),
     /// The requested workspace does not exist.
     #[error("workspace {0} not found")]
     NotFound(String),
@@ -282,6 +283,7 @@ impl WorkspaceRegistry {
 
     /// Override the retention policy. Callers wire this from user settings.
     pub fn set_policy(&self, policy: WorkspaceLifecyclePolicy) -> Result<(), RegistryError> {
+        policy.validate_ports()?;
         RegistryError::from_store(self.store.lock().put_workspace_lifecycle_policy(&policy))?;
         *self.policy.write() = policy;
         Ok(())
@@ -368,7 +370,8 @@ impl WorkspaceRegistry {
                 actual_ref: owner_ref.clone(),
             });
         }
-        let record = WorkspaceRecord {
+        let mut record = WorkspaceRecord {
+            port_lease: None,
             workspace_id: workspace_id.clone(),
             environment_kind: WorkspaceEnvironmentKind::Managed,
             // Stamped by the frontend after creation — see `set_project`. The
@@ -391,7 +394,30 @@ impl WorkspaceRegistry {
             pinned: false,
             created_at: now,
         };
-        RegistryError::from_store(self.store.lock().put_workspace(&record))?;
+        let root = crate::ports::registry_root(std::path::Path::new(&record.execution_root))?;
+        let store = self.store.lock();
+        let tx = rusqlite::Transaction::new_unchecked(
+            &store.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .map_err(|error| RegistryError::Store(error.to_string()))?;
+        RegistryError::from_store(store.put_workspace(&record))?;
+        let policy =
+            RegistryError::from_store(store.get_workspace_lifecycle_policy())?.unwrap_or_default();
+        record.port_lease = Some(crate::ports::ensure_in_transaction(
+            &tx,
+            crate::HOST_LOOPBACK_NAMESPACE,
+            crate::ports::LeaseSubject {
+                kind: crate::PortSubjectKind::Registry,
+                key: &record.workspace_id,
+                root: &root,
+                registry_id: Some(&record.workspace_id),
+            },
+            policy,
+            now,
+        )?);
+        tx.commit()
+            .map_err(|error| RegistryError::Store(error.to_string()))?;
         Ok(record)
     }
 
@@ -435,6 +461,7 @@ impl WorkspaceRegistry {
     ) -> Result<WorkspaceRecord, RegistryError> {
         let workspace_id = Uuid::now_v7().to_string();
         let record = WorkspaceRecord {
+            port_lease: None,
             workspace_id: workspace_id.clone(),
             environment_kind: WorkspaceEnvironmentKind::Imported,
             project_id: None,
@@ -1020,6 +1047,7 @@ mod tests {
 
     fn record(id: &str, state: WorkspaceState, owner_type: WorkspaceOwnerType) -> WorkspaceRecord {
         WorkspaceRecord {
+            port_lease: None,
             project_id: None,
             workspace_id: id.into(),
             environment_kind: if owner_type == WorkspaceOwnerType::Imported {
@@ -1124,6 +1152,64 @@ mod tests {
         );
         let loaded = registry.get(&record.workspace_id).unwrap().unwrap();
         assert_eq!(loaded, record);
+    }
+
+    #[test]
+    fn port_exhaustion_rolls_back_the_registry_reservation() {
+        let (registry, _dir) = new_registry();
+        let policy = WorkspaceLifecyclePolicy {
+            port_range_start: 41000,
+            port_range_end: 41009,
+            ..Default::default()
+        };
+        registry.set_policy(policy).unwrap();
+        {
+            let store = registry.store.lock();
+            crate::ports::ensure(
+                &store.connection,
+                "remote:seed",
+                crate::ports::LeaseSubject {
+                    kind: crate::PortSubjectKind::ProjectRoot,
+                    key: "occupied",
+                    root: "/occupied",
+                    registry_id: None,
+                },
+                policy,
+                0,
+            )
+            .unwrap();
+            store
+                .connection
+                .execute(
+                    "UPDATE workspace_port_leases SET namespace_key='host-loopback'",
+                    [],
+                )
+                .unwrap();
+        }
+        let result = registry.insert_reserved(
+            "no-room".into(),
+            WorkspaceOwnerType::Session,
+            Some("s".into()),
+            "/source".into(),
+            None,
+            WorkspaceBaseSpec::WorkingState,
+            IsolationKind::Shadow,
+            "/tmp/no-room".into(),
+            1,
+        );
+        assert!(matches!(
+            result,
+            Err(RegistryError::PortLease(
+                crate::PortLeaseError::Exhausted { .. }
+            ))
+        ));
+        assert!(registry.get("no-room").unwrap().is_none());
+        assert_eq!(
+            crate::ports::list(&registry.store.lock().connection)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -1639,6 +1725,7 @@ mod tests {
             active_directory_cap: 0,
             snapshot_retention_days: 30,
             blob_budget_bytes: 0,
+            ..Default::default()
         };
         let directories = plan_directory_reclaim(&records, policy);
         assert_eq!(directories.len(), 1);

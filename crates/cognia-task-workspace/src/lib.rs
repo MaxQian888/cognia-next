@@ -17,6 +17,7 @@ pub mod provenance;
 mod lifecycle;
 mod project_source;
 mod registry;
+mod ports;
 mod remote_source;
 mod resource;
 mod resource_index;
@@ -30,6 +31,11 @@ mod transfer;
 mod types;
 mod watcher;
 mod worker_cli;
+
+pub use ports::{
+    occupied_ports, port_lease_env, PortLeaseDiagnostic, PortLeaseDiagnosticKind, PortLeaseError,
+    PortSubjectKind, WorkspacePortLease, HOST_LOOPBACK_NAMESPACE,
+};
 
 pub use bundle::{
     execute_bundle_apply, plan_bundle_apply, plan_bundle_composition, ApplyStep, BundleApplier,
