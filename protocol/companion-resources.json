@@ -128,6 +128,11 @@
     },
     "browser": {
       "children": {
+        "attachment": {
+          "children": {
+            "upload": {}
+          }
+        },
         "capabilities": {},
         "cdp": {},
         "companion": {
@@ -296,6 +301,11 @@
         "agent_control": {},
         "browser_access": {},
         "browser_enrollment": {},
+        "browser_extension": {
+          "children": {
+            "drive": {}
+          }
+        },
         "control": {},
         "deny_list": {},
         "desktop_write": {},

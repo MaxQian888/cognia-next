@@ -778,6 +778,21 @@
     "companion_browser_access_set": {
       "to": "companion.browser_access.set"
     },
+    "companion_browser_extension_call": {
+      "to": "companion.browser_extension.call"
+    },
+    "companion_browser_extension_list": {
+      "to": "companion.browser_extension.list"
+    },
+    "companion_browser_extension_notify": {
+      "to": "companion.browser_extension.notify"
+    },
+    "companion_browser_extension_set_drive": {
+      "to": "companion.browser_extension.drive.set"
+    },
+    "companion_browser_extension_status": {
+      "to": "companion.browser_extension.status"
+    },
     "companion_can_control": {
       "to": "companion.control.probe"
     },
@@ -795,6 +810,9 @@
     },
     "companion_endpoints": {
       "to": "companion.endpoint.list"
+    },
+    "companion_forget_device": {
+      "to": "companion.device.forget"
     },
     "companion_get_tls_fingerprint": {
       "to": "companion.tls_fingerprint.get"
