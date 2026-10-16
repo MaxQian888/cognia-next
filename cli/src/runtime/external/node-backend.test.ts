@@ -998,3 +998,23 @@ it("passes only an explicit managed DeepSeek endpoint", () => {
     )
   ).toEqual({ NODE_ENV: "production", DEEPSEEK_BASE_URL: "http://127.0.0.1:9876" })
 })
+
+describe("Codex wrapper transport hint", () => {
+  it("never leaks explicit root hints into the child environment", () => {
+    expect(
+      buildExternalAgentChildEnv(
+        { NODE_ENV: "test", COGNIA_AGENT_CODEX_WRITABLE_ROOTS: '["/ambient"]' },
+        {
+          COGNIA_AGENT_CODEX_WRITABLE_ROOTS: '["/configured"]',
+          COGNIA_AGENT_CODEX_WRITABLE_CEILING: '["/ceiling"]',
+        }
+      )
+    ).not.toHaveProperty("COGNIA_AGENT_CODEX_WRITABLE_ROOTS")
+    expect(
+      buildExternalAgentChildEnv(
+        { NODE_ENV: "test" },
+        { COGNIA_AGENT_CODEX_WRITABLE_CEILING: '["/ceiling"]' }
+      )
+    ).not.toHaveProperty("COGNIA_AGENT_CODEX_WRITABLE_CEILING")
+  })
+})

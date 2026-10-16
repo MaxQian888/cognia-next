@@ -22,7 +22,7 @@ import {
   type MicrovmExecPayload,
   type MicrovmResult,
 } from "./microvm-bridge"
-import { clampPolicyRequest, isPathUnderRoot } from "./policy-bridge"
+import { clampPolicyRequest, clampReadableRequest, isPathUnderRoot } from "./policy-bridge"
 
 export type SandboxConfine = NonNullable<CallContext["sandboxConfine"]>
 
@@ -477,6 +477,19 @@ export class SandboxSessionRuntime {
       }
       throw error
     }
+    // Enforce the read ceiling again at the execution boundary, including
+    // callers that skipped clampRequest. Use the actual command cwd, never a
+    // caller-stamped request ceiling. File views intentionally carry a target
+    // outside the write ceiling, so this boundary only clamps the read scope.
+    payload = {
+      ...payload,
+      request: clampReadableRequest(
+        { ...payload.request, cwd: payload.command.cwd },
+        record.policy,
+        [...(record.confine?.readable ?? []), ...(record.confine?.writable ?? [])],
+        record.workspaceRoot ? [record.workspaceRoot] : []
+      ),
+    }
     switch (record.binding.shellTier) {
       case "os": {
         // On the desktop the Rust `sandbox_exec` command records the audit
@@ -636,7 +649,19 @@ export class SandboxSessionRuntime {
   }
 
   clampRequest<T extends MicrovmExecPayload["request"]>(ref: SandboxRuntimeRef, request: T): T {
-    return clampPolicyRequest(request, this.requireRecord(ref).policy)
+    const record = this.requireRecord(ref)
+    return clampPolicyRequest(
+      request,
+      record.policy,
+      [...(record.confine?.readable ?? []), ...(record.confine?.writable ?? [])],
+      record.workspaceRoot ? [record.workspaceRoot] : []
+    )
+  }
+
+  /** Copy the frozen write ceiling for native canonicalization at process launch. */
+  writableRootsFor(ref: SandboxRuntimeRef): readonly string[] | undefined {
+    const roots = this.requireRecord(ref).policy?.writableRoots
+    return roots?.length ? [...roots] : undefined
   }
 
   assertWritablePath(ref: SandboxRuntimeRef, path: string, label = "path"): void {

@@ -1,6 +1,6 @@
 ---
 title: "OS backends (T1)"
-description: "The Rust execution-sandbox crate: the SandboxedExec trait, the pure policy resolver, the data types, and the real per-platform backends (bwrap / sandbox-exec / Windows runner) with their honest implementation status."
+description: "The Rust execution-sandbox crate: the SandboxedExec trait, the policy resolver, the data types, and the real per-platform backends (bwrap / sandbox-exec / Windows runner) with their honest implementation status."
 ---
 
 # OS backends (T1)
@@ -74,9 +74,11 @@ pub enum NetworkPolicy {
 
 ## The policy resolver — `policy.rs`
 
-`policy_for` is a pure, no-I/O function that turns the stripped tool name plus a caller-supplied
-`PolicyRequest` into a `SandboxPolicy`. It applies bash defaults, rejects an empty writable set, and
-validates the network shape.
+`policy_for` turns the stripped tool name plus a caller-supplied `PolicyRequest` into a
+`SandboxPolicy`. It applies bash defaults, rejects an empty writable set, and validates the network
+shape. When the runtime supplies `readableRoots`, it canonicalizes both that ceiling and requested
+readable paths with the existing path helper, then compares path components. This second check
+rejects symlink escapes that a lexical frontend preflight cannot see.
 
 ```rust title="crates/cognia-exec-sandbox/src/policy.rs:68-99 (bash branch)"
 "bash" => {
@@ -259,8 +261,11 @@ NetworkPolicy::Allowlist { hosts: _ } => match proxy_port {
 `WindowsSandboxBackend` shells out to the bundled `cognia-sandbox-runner.exe` from
 `crates/cognia-sandbox-runner/`. The runner launches the target with a restricted subset of the app's
 own token, lowers integrity, assigns the child to a Job Object, and returns captured stdout/stderr in
-a JSON result. It does **not** need elevation, separate OS accounts, or a setup marker for filesystem /
-privilege / process confinement.
+a JSON result. Privilege restrictions (restricted token and low integrity) and process/job limits
+are enforced without elevation, separate OS accounts, or a setup marker. **Filesystem writes are
+not scoped to the workspace by this runner today**: its payload carries no readable or writable
+roots. Kernel egress control is also absent; a request for network `off` is refused rather than
+reported as enforced.
 
 ```rust title="crates/cognia-sandbox-runner/src/main.rs (restricted-token launch shape)"
 // 1. Duplicate the caller token.
@@ -333,7 +338,7 @@ root passed the floor while `/usr` and `/bin` (real directories there) were corr
 
 In-file `#[cfg(test)]` suites in `crates/cognia-exec-sandbox/src/` cover the pure + observable
 surface without requiring a real sandbox at unit time (`cargo test -p cognia-exec-sandbox`):
-`policy.rs:146-307` (12 tests on defaults, empty-writable rejection, network parsing),
+`policy.rs` (defaults, empty-writable rejection, network parsing, read-ceiling narrowing and symlink escapes),
 `types.rs:261-320` (serde round-trips + tagged discriminators), `linux.rs:684-1218` (argv baseline,
 per-file binds, share-net, resource-limit resolution, backend string), `macos.rs:577-1006` (SBPL
 rendering, literal vs subpath, escaping, the proxy-port pin), `windows.rs:358-557` (runner

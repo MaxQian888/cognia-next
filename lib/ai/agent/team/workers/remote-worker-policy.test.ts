@@ -101,3 +101,37 @@ it("lowers restrictions through the ordinary permission clamp and removes exclud
   )
   expect(result.mcpServers).toEqual({ allowed: {} })
 })
+
+it("uses the same ancestor narrowing and read/write union for remote read inheritance", () => {
+  const policy = {
+    policyVersion: 1 as const,
+    sandboxRequired: true,
+    sandboxPolicy: { readableRoots: ["docs"], writableRoots: ["src"] },
+  }
+  expect(
+    remoteWorkerCeiling(policy, "/worker", {
+      sandboxPolicy: { readableRoots: ["/worker"] },
+    }).sandboxPolicy?.readableRoots
+  ).toEqual(["/worker/docs", "/worker/src"])
+  expect(() =>
+    remoteWorkerCeiling(policy, "/worker", {
+      sandboxPolicy: { readableRoots: ["/worker/docs-private"] },
+    })
+  ).toThrow(/Settings → Sandbox readable roots/)
+})
+
+it("does not restore broad host writes after narrowing them to an incoming read ceiling", () => {
+  expect(
+    remoteWorkerCeiling(
+      {
+        policyVersion: 1,
+        sandboxRequired: true,
+        sandboxPolicy: { readableRoots: ["docs"] },
+      },
+      "/worker",
+      {
+        sandboxPolicy: { writableRoots: ["/worker"] },
+      }
+    ).sandboxPolicy?.writableRoots
+  ).toEqual(["/worker/docs"])
+})

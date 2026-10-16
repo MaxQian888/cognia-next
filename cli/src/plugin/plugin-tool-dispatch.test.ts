@@ -3,6 +3,7 @@
  */
 import { subscribePluginToolDispatch } from "./plugin-tool-dispatch"
 import type { PluginToolExecRequest, PluginToolExecResponse } from "@/lib/claude/plugin-tool-ipc"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 
 const req: PluginToolExecRequest = {
   type: "plugin_tool_exec",
@@ -13,6 +14,58 @@ const req: PluginToolExecRequest = {
 }
 
 describe("subscribePluginToolDispatch", () => {
+  it("recovers the session's read ceiling on the CLI rail", async () => {
+    const ref = await sandboxSessionRuntime.bindSession({
+      sessionId: "cli-read-ceiling",
+      binding: { shellTier: "os", computerTarget: "local" },
+      policy: { readableRoots: ["/workspace/docs"] },
+      confine: { writable: ["/scratch"] },
+      workspaceRoot: "/workspace",
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+    })
+    let callback!: (request: PluginToolExecRequest) => void
+    const send = jest.fn(async () => {})
+    const stop = await subscribePluginToolDispatch({
+      subscribe: async (handler) => {
+        callback = handler
+        return () => {}
+      },
+      handle: async (event) => ({
+        type: "plugin_tool_response",
+        sessionId: event.sessionId,
+        toolUseId: event.toolUseId,
+        result: sandboxSessionRuntime.clampRequest(event.sandboxRuntimeRef!, {
+          writable: [],
+          targetFiles: [],
+          readable: ["/"],
+          cwd: "/cwd",
+          maxCpuSeconds: 0,
+          maxMemoryMb: 0,
+          network: "off",
+          networkHosts: [],
+        }),
+      }),
+      send,
+    })
+    try {
+      callback({ ...req, sessionId: "cli-read-ceiling", name: "sandbox_bash" })
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(sandboxSessionRuntime.activeRefForSession("cli-read-ceiling")).toBe(ref)
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          result: expect.objectContaining({
+            readable: ["/workspace/docs", "/scratch", "/workspace", "/cwd"],
+          }),
+        }),
+        undefined
+      )
+    } finally {
+      stop()
+      await sandboxSessionRuntime.releaseSession("cli-read-ceiling")
+    }
+  })
+
   it("runs each plugin_tool_exec event through the executor and sends the response", async () => {
     let handler: ((r: PluginToolExecRequest) => void) | null = null
     const sent: PluginToolExecResponse[] = []

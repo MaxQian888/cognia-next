@@ -104,7 +104,7 @@ export function resolveShieldState(args: {
 - **`sandbox-section.tsx`** —— `SandboxSection`：一个由 `useSandboxHealth()` 驱动的三态徽章健康卡片和一个 "Run health probe" 按钮（`data-testid="sandbox-retry-button"`），组合下面的卡片。
 - **`sandbox-enable-card.tsx`** —— 默认 / 逐会话沙盒启用开关。
 - **`sandbox-tier-card.tsx`** —— 默认 tier 选择器（OS / microVM 单选组），写入 `AppSettings.sandboxTier`；它保留不可用的已持久化选择，并显示当前无法执行的原因。
-- **`sandbox-policy-card.tsx`** —— 资源/网络**上限**编辑器（可写根、CPU / 内存上限、网络策略），模型只能收窄，永远无法放宽。
+- **`sandbox-policy-card.tsx`** —— 资源/网络**上限**编辑器（可读根、可写根、CPU / 内存上限、网络策略）。两种根目录均每行填写一个绝对路径。Shell 可读请求会收紧到配置根目录与可写根、运行时 / workspace 根和 cwd 的并集；平台边界见[沙盒化工具](./sandboxed-tools)。
 - **`automation-policy-card.tsx`** —— **T5** 逐动作策略编辑器：`allowedProcessNames`、`allowedWindowTitlePatterns`（正则）、`allowedUrlPatterns`（正则）、`forbiddenScreenRegions`（x/y/w/h），通过 `saveAutomationPolicy` 去抖保存。
 
 它如何接入：

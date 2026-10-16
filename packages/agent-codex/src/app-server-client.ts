@@ -74,6 +74,60 @@ import type {
 } from "@cognia/agent-contracts/external-agent"
 import { catalogModelCapabilities } from "@cognia/agent-contracts/external-agent"
 
+/** Validate explicit Cognia roots without importing host filesystem APIs into this package.
+ * The native wrapper also canonicalizes against the actual host's protected roots.
+ */
+export function validateCodexWritableRoots(
+  roots: readonly string[] | undefined,
+  report: (root: string, reason: string) => void
+): string[] {
+  const accepted = new Set<string>()
+  for (const root of roots ?? []) {
+    const windows = /^[a-z]:[\\/]/i.test(root)
+    if (!root.startsWith("/") && !windows) {
+      report(root, "an absolute path is required")
+      continue
+    }
+    const prefix = windows ? root.slice(0, 2) : ""
+    const parts: string[] = []
+    for (const part of root.slice(prefix.length).replace(/\\/g, "/").split("/")) {
+      if (!part || part === ".") continue
+      if (part === "..") parts.pop()
+      else parts.push(part)
+    }
+    const normalized = `${prefix}/${parts.join("/")}`
+    const folded = normalized.toLowerCase()
+    const posix = prefix ? "" : normalized
+    const system = [
+      "/etc",
+      "/usr",
+      "/bin",
+      "/sbin",
+      "/lib",
+      "/lib64",
+      "/boot",
+      "/proc",
+      "/sys",
+      "/dev",
+      "/run",
+      "/var/run",
+      "/private/etc",
+      "/private/var/run",
+    ]
+    const forbidden =
+      !parts.length ||
+      /[\u0000-\u001f\u007f]/.test(normalized) ||
+      system.some((path) => posix === path || posix.startsWith(`${path}/`)) ||
+      (windows && /^(?:windows|program files(?: \(x86\))?|programdata)$/i.test(parts[0])) ||
+      /(?:^|\/)(?:library\/application support|\.local\/share|\.config|appdata\/(?:local|roaming))\/cognia(?:\/|$)/.test(
+        folded
+      )
+    if (forbidden) report(root, "system and Cognia app-data roots cannot be writable")
+    else accepted.add(normalized)
+  }
+  return [...accepted]
+}
+
 /** Active health-probe timeout — mirrors the ACP adapter's 5s ping. */
 const HEALTH_PROBE_TIMEOUT_MS = 5000
 const COMPACTION_COMPLETION_TIMEOUT_MS = 120_000
@@ -228,7 +282,11 @@ export type CodexSandboxPolicy =
 /** Per-session Codex option overrides carried via session metadata. */
 export interface CodexSessionOptions {
   sandboxMode?: CodexSandboxMode
+  /** Explicit Cognia option only; effective workspaceWrite honours it, other modes ignore it. */
   networkAccess?: boolean
+  /** Absolute explicit Cognia roots, validated and narrowed before the outer process starts.
+   * Ignored by readOnly (no writes) and dangerFullAccess (no inner sandbox).
+   */
   writableRoots?: string[]
   defaultReasoningEffort?: string
   reasoningSummary?: string
@@ -598,6 +656,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
    * the module exists for. Cleared once resolved so later calls cost nothing.
    */
   private configRequirementsRead?: Promise<void>
+  private launchedWritableRoots: string[] = []
   private statusListeners = new Set<(status: CodexAppServerStatus) => void>()
 
   private serverInfo?: { userAgent?: string; codexHome?: string; platformOs?: string }
@@ -720,12 +779,23 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     config: ExternalAgentConfig,
     env: Record<string, string>
   ): Promise<string> {
+    this.launchedWritableRoots = validateCodexWritableRoots(
+      config.defaultPermissionMode === "acceptEdits" &&
+        config.codexOptions?.sandboxMode !== "readOnly"
+        ? config.codexOptions?.writableRoots
+        : [],
+      (root, reason) => this.log.warn("Ignoring Codex writable root", { root, reason })
+    )
     const spawnConfig = {
       id: config.id,
       command: config.process!.command,
       args: config.process!.args ?? [],
       env,
       cwd: config.process!.cwd,
+      extraWritableRoots: this.launchedWritableRoots,
+      ...(Array.isArray(config.metadata?.cogniaCodexWritableCeiling)
+        ? { writableCeiling: config.metadata.cogniaCodexWritableCeiling as string[] }
+        : {}),
     }
     return spawnReclaimingOrphan({
       id: config.id,
@@ -1068,6 +1138,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   /** Session metadata assembled from create options + per-agent codexOptions. */
   private buildSessionMetadata(options?: SessionCreateOptions): Record<string, unknown> {
     const metadata: Record<string, unknown> = {
+      ...(this._config?.codexOptions ? { codexOptions: this._config.codexOptions } : {}),
       ...(options?.metadata ?? {}),
       ...(options?.cwd ? { cwd: options.cwd } : {}),
       ...(this.instructionText(options) ? { systemPrompt: this.instructionText(options) } : {}),
@@ -1139,12 +1210,23 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const mode = this.sandboxModeFor(metadata, permissionMode)
     if (mode === "dangerFullAccess") return { type: "dangerFullAccess" }
     if (mode === "readOnly") return { type: "readOnly", networkAccess: false }
-    // acceptEdits authorizes the workspace, not extra roots, temp directories,
-    // or network access inherited from the user's native Codex configuration.
+    // Only explicit Cognia per-agent options can extend workspaceWrite. Flat
+    // metadata and the user's native config.toml never grant these capabilities.
+    const configured = readObject(metadata?.codexOptions) as CodexSessionOptions | undefined
     return {
       type: "workspaceWrite",
-      writableRoots: [],
-      networkAccess: false,
+      writableRoots: validateCodexWritableRoots(configured?.writableRoots, (root, reason) =>
+        this.log.warn("Ignoring Codex writable root", { root, reason })
+      ).filter((root) => {
+        const allowed = this.launchedWritableRoots.some(
+          (ceiling) => root === ceiling || root.startsWith(`${ceiling}/`)
+        )
+        if (!allowed)
+          this.log.warn("Ignoring Codex writable root outside the process scope", { root })
+        return allowed
+      }),
+      networkAccess:
+        this._config?.codexOptions?.networkAccess === true && configured?.networkAccess === true,
       excludeTmpdirEnvVar: true,
       excludeSlashTmp: true,
     }

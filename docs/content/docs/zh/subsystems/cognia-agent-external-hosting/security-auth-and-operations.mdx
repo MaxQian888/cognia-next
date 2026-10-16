@@ -38,6 +38,24 @@ workspace 可写，home 会挂载为可读，network access 开启。共享 prot
 
 这些例外构成 native-login trust boundary：所选外部 CLI 可以读写自己的 auth state，但不能直接读取 Cognia credential file。launcher 层提供 filesystem 与 network confinement；不同于 one-shot sandbox tool，它不增加 seccomp 或 rlimit。
 
+### Codex workspace-write 选项
+
+Cognia 的 Agent 编辑器和 plugin API 提供 `codexOptions.networkAccess` 与
+`codexOptions.writableRoots`。它们是显式的 Cognia 单 Agent 配置，不会继承
+`~/.codex/config.toml`。只有最终权限模式为 `acceptEdits`（Codex `workspaceWrite`）时生效。
+`readOnly` 忽略它们以维持只读执行；`dangerFullAccess` 忽略它们，因为该内层策略没有按范围配置的沙盒字段。
+
+在 `workspaceWrite` 下，`networkAccess: true` 允许 Codex 内层沙盒联网；false 或未设置时仍禁止联网。
+Cognia 外层 launcher 仍允许网络访问，以便 Agent 与 provider 通信；该选项不提供外层出口过滤。
+
+额外可写根目录必须是绝对路径。相对路径和禁用的系统 / 应用数据根目录会被丢弃并报告诊断；存在会话可写
+上限时，有效路径还会收紧到该上限。最终根目录同时传给 Codex 内层策略与桌面 / CLI 外层 wrapper，
+让两层允许相同的额外写入。现有 workspace、Agent state、tool-host 以及 protected-path 规则继续生效。
+
+仅从设置页连接时不会授予额外根目录。执行前 manager 会保留会话的最终根目录集合；集合变化时会重连空闲的
+app-server，并保留原生 session 以恢复对话。并发 turn 若需要不同的根目录集合，会被拒绝，需等待当前 turn
+结束，避免扩大另一个会话的进程权限边界。
+
 ### 隔离配置
 
 state 为 `isolated` 的配置不共享上述路径。启动时设置 `COGNIA_AGENT_STATE_KEY=<configId>`，spawn backend（桌面端 Rust 或本 Node backend）解析私有 root `<data dir>/cognia/external-agents/<configId>`（macOS 为 `~/Library/Application Support`，Linux 为 `$XDG_DATA_HOME` 或 `~/.local/share`，Windows 为 `%APPDATA%`），以仅属主可访问的权限创建，并把运行时的 home 变量指向其中（`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`QWEN_HOME`、`PI_CODING_AGENT_DIR`、`KIMI_CODE_HOME`、`CLINE_DIR`、`QODER_CONFIG_DIR`、`COPILOT_HOME`，以及 OpenCode 的 config 与 XDG home）。在 sandbox 中该 root 取代上表的共享可写路径，而这些共享路径改为 `--deny-readable`，CLI 因此无法回退到你自己的登录。规则表是 `protocol/external-agent-security-policy.json` 中的 `agentStateIsolation`，`pnpm audit:agent-capabilities` 保证 Rust 副本与之一致。没有对应规则的运行时无法隔离，其隔离启动会被拒绝。Bot 隔离与 gateway task 启动已有私有 home，会忽略该 key。删除配置时会删除该 root（`external_agent_state_root_remove`）。
@@ -95,5 +113,5 @@ spawn 前，已解析 credential 会映射到原生契约：
 ## 运维限制
 
 - v1 验证本地 Codex 与 Claude Code executable hosting；不移植 container 或 Kubernetes external-agent backend。
-- hosted agent 的 network access 已开启，目前不能按 preset 配置。
+- hosted agent 的外层 wrapper 允许联网；Codex 内层 `workspaceWrite` 沙盒支持上述单 Agent 网络选项，外层出口过滤仍未实现。
 - cross-built archive 必须包含目标平台的 native launcher；否则 external hosting 失败即拒绝，built-in chat 仍可工作。

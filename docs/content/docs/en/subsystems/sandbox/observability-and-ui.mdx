@@ -129,8 +129,10 @@ remain readable with their provider-specific configuration, but expose no lifecy
 - **`sandbox-tier-card.tsx`** — the default-tier picker (OS / microVM radio group), writing
   `AppSettings.sandboxTier`; it preserves unavailable persisted choices and displays why they cannot
   currently execute.
-- **`sandbox-policy-card.tsx`** — the resource/network **ceiling** editor (writable roots, CPU /
-  memory caps, network policy) that the model can only narrow, never widen.
+- **`sandbox-policy-card.tsx`** — the resource/network **ceiling** editor (readable roots, writable
+  roots, CPU / memory caps, network policy). Both root lists use one absolute path per line. Shell
+  read requests are clamped to the configured roots plus writable, runtime/workspace, and cwd roots;
+  see [Sandboxed tools](./sandboxed-tools#configured-read-ceiling) for platform boundaries.
 - **`automation-policy-card.tsx`** — the **T5** per-action policy editor: `allowedProcessNames`,
   `allowedWindowTitlePatterns` (regex), `allowedUrlPatterns` (regex), `forbiddenScreenRegions`
   (x/y/w/h), debounced-saved via `saveAutomationPolicy`.

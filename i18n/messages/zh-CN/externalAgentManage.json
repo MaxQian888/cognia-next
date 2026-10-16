@@ -1,5 +1,10 @@
 {
   "editor": {
+    "codexWorkspaceAccessHint": "网络访问和额外可写目录仅在实际权限模式为「接受编辑」（工作区可写）时生效。这些设置仅属于当前 Cognia 智能体，不继承本机 Codex 配置。",
+    "codexWorkspaceAccessInactive": "在当前默认权限或沙箱模式下不生效。这些设置仅用于工作区可写的运行；已保存的值会保留，供单次运行覆盖权限时使用。",
+    "codexWritableRoots": "额外可写目录",
+    "codexWritableRootsDesc": "每行填写一个绝对目录路径。无效或受保护的路径会在启动时忽略并报告；允许的目录仍受会话沙箱可写范围限制。",
+    "codexWritableRootsPlaceholder": "/projects/shared\n/opt/build-output",
     "description": "描述",
     "descriptionPlaceholder": "这个配置的用途，例如只读审查",
     "saving": "正在保存…",

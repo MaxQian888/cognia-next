@@ -1,3 +1,4 @@
+import { validateCodexWritableRoots } from "@cognia/agent-codex/app-server-client"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -128,6 +129,96 @@ export function sandboxSupportsPlatform(platform: NodeJS.Platform = process.plat
   return (SANDBOX_SUPPORTED_PLATFORMS as readonly string[]).includes(platform)
 }
 
+/** Mirror the native wrapper's validation of the host-owned Codex hint. */
+export function codexExtraWritableRoots(config: NodeExternalAgentSpawnConfig): string[] {
+  const raw = config.env?.COGNIA_AGENT_CODEX_WRITABLE_ROOTS
+  if (raw === undefined || config.command !== "codex") return []
+  let requested: string[]
+  try {
+    const value: unknown = JSON.parse(raw)
+    if (!Array.isArray(value) || value.some((root) => typeof root !== "string"))
+      throw new Error("expected paths")
+    requested = value
+  } catch {
+    console.warn("Ignoring malformed Codex writable roots")
+    return []
+  }
+  const report = (root: string, reason: string) =>
+    console.warn("Ignoring Codex writable root", { root, reason })
+  const canonicalize = (root: string): string => {
+    let ancestor = root
+    const tail: string[] = []
+    while (!fs.existsSync(ancestor) && path.dirname(ancestor) !== ancestor) {
+      tail.unshift(path.basename(ancestor))
+      ancestor = path.dirname(ancestor)
+    }
+    return path.join(fs.realpathSync(ancestor), ...tail)
+  }
+  let ceiling: string[] | undefined
+  const rawCeiling = config.env?.COGNIA_AGENT_CODEX_WRITABLE_CEILING
+  if (rawCeiling !== undefined) {
+    try {
+      const value: unknown = JSON.parse(rawCeiling)
+      if (
+        !Array.isArray(value) ||
+        value.some((root) => typeof root !== "string" || !path.isAbsolute(root))
+      ) {
+        throw new Error("expected absolute ceiling roots")
+      }
+      ceiling = value.map(canonicalize)
+    } catch {
+      console.warn("Ignoring Codex writable roots: invalid session writable ceiling")
+      return []
+    }
+  }
+  const canonical = validateCodexWritableRoots(requested, report).flatMap((root) => {
+    if (!path.isAbsolute(root)) {
+      report(root, "an absolute path on this host is required")
+      return []
+    }
+    try {
+      return [canonicalize(root)]
+    } catch {
+      report(root, "path cannot be resolved on this host")
+      return []
+    }
+  })
+  const configuredData = process.env.XDG_DATA_HOME
+    ? path.join(process.env.XDG_DATA_HOME, "cognia")
+    : undefined
+  let dataRoot = configuredData
+  if (configuredData) {
+    try {
+      dataRoot = canonicalize(configuredData)
+    } catch {
+      // A missing/unresolvable configured data root must not remove its lexical deny.
+    }
+  }
+  return validateCodexWritableRoots(canonical, report).filter((root) => {
+    if (
+      ceiling &&
+      !ceiling.some((allowed) => {
+        const relative = path.relative(allowed, root)
+        return (
+          relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+        )
+      })
+    ) {
+      report(root, "outside the canonical session writable ceiling")
+      return false
+    }
+    if (
+      [dataRoot, configuredData].some(
+        (data) => data && (root === data || root.startsWith(`${data}${path.sep}`))
+      )
+    ) {
+      report(root, "Cognia app-data roots cannot be writable")
+      return false
+    }
+    return true
+  })
+}
+
 /**
  * The launcher argv for one spawn.
  *
@@ -154,6 +245,7 @@ export function buildSandboxLauncherArgs(
   const effectiveHome = taskHome ?? homedir
   const writable = [
     config.cwd,
+    ...codexExtraWritableRoots(config),
     ...(botIsolation
       ? [botState!]
       : taskHome

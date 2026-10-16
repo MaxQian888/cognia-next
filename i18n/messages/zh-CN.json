@@ -18385,6 +18385,11 @@
       "approvalsSummaryNone": "无",
       "autoApprove": "无需询问直接批准",
       "autoApproveHint": "不弹出提示直接批准，除非同时匹配了“始终询问”规则。",
+      "codexWorkspaceAccessHint": "网络访问和额外可写目录仅在实际权限模式为「接受编辑」（工作区可写）时生效。这些设置仅属于当前 Cognia 智能体，不继承本机 Codex 配置。",
+      "codexWorkspaceAccessInactive": "在当前默认权限或沙箱模式下不生效。这些设置仅用于工作区可写的运行；已保存的值会保留，供单次运行覆盖权限时使用。",
+      "codexWritableRoots": "额外可写目录",
+      "codexWritableRootsDesc": "每行填写一个绝对目录路径。无效或受保护的路径会在启动时忽略并报告；允许的目录仍受会话沙箱可写范围限制。",
+      "codexWritableRootsPlaceholder": "/projects/shared\n/opt/build-output",
       "description": "描述",
       "descriptionPlaceholder": "这个配置的用途，例如只读审查",
       "idleTimeout": "空闲超时（毫秒）",
@@ -51727,6 +51732,12 @@
           "label": "网络上限",
           "off": "关闭（无网络）",
           "on": "开启（模型决定）"
+        },
+        "readableRoots": {
+          "description": "每行一个绝对目录。Shell 的读取请求限于这些目录、可写根目录、会话工作区根目录和命令工作目录。请求父目录时会缩小到允许的根目录，其他路径会被拒绝。原生 Computer Use 也使用这些根目录。macOS 仍允许全局读取，但会隐藏秘密文件。",
+          "errorAbsolute": "{path} 必须是绝对目录路径，且不能包含控制字符。",
+          "label": "可读根目录",
+          "placeholder": "/opt/toolchain\n/shared/reference"
         },
         "title": "资源与网络上限",
         "writableRoots": {

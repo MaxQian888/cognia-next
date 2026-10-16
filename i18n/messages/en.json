@@ -18385,6 +18385,11 @@
       "approvalsSummaryNone": "None",
       "autoApprove": "Approve without asking",
       "autoApproveHint": "Approved without a prompt unless an \"Always ask for\" rule also matches.",
+      "codexWorkspaceAccessHint": "Network access and extra writable folders apply only when the effective permission mode is Accept edits (workspace write). These settings belong to this Cognia agent and do not inherit native Codex configuration.",
+      "codexWorkspaceAccessInactive": "Inactive under the current default permissions or sandbox mode. These settings apply only to workspace-write runs; saved values are retained for per-run permission overrides.",
+      "codexWritableRoots": "Extra writable folders",
+      "codexWritableRootsDesc": "One absolute folder path per line. Invalid or protected paths are ignored and reported at launch; accepted folders are limited by the session sandbox writable ceiling.",
+      "codexWritableRootsPlaceholder": "/projects/shared\n/opt/build-output",
       "description": "Description",
       "descriptionPlaceholder": "What this configuration is for, e.g. read-only reviews",
       "idleTimeout": "Idle timeout (ms)",
@@ -51727,6 +51732,12 @@
           "label": "Network ceiling",
           "off": "Off (no network)",
           "on": "On (model decides)"
+        },
+        "readableRoots": {
+          "description": "One absolute directory per line. Shell read requests are limited to these directories, writable roots, session workspace roots and the command's working directory. Requests for a parent directory narrow to allowed roots; other paths are refused. Native Computer Use also uses these roots. macOS keeps global reads with secret hiding.",
+          "errorAbsolute": "{path} must be an absolute directory path without control characters.",
+          "label": "Readable roots",
+          "placeholder": "/opt/toolchain\n/shared/reference"
         },
         "title": "Resource & network ceiling",
         "writableRoots": {

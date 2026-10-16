@@ -223,6 +223,63 @@ pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -
     roots
 }
 
+/// Host-owned hint transported through the existing spawn configuration.
+/// It is consumed here and never reaches the external agent's environment.
+pub const CODEX_WRITABLE_ROOTS_ENV: &str = "COGNIA_AGENT_CODEX_WRITABLE_ROOTS";
+pub const CODEX_WRITABLE_CEILING_ENV: &str = "COGNIA_AGENT_CODEX_WRITABLE_CEILING";
+
+/// Recheck explicit Codex roots against the native filesystem floor. Invalid
+/// entries are dropped with a reason, including symlink aliases of deny roots.
+pub fn codex_extra_writable_roots(config: &ExternalAgentSpawnConfig) -> Vec<PathBuf> {
+    let Some(raw) = config.env.get(CODEX_WRITABLE_ROOTS_ENV) else {
+        return Vec::new();
+    };
+    if base_command(&config.command) != "codex" {
+        log::warn!("[sandbox] ignoring Codex writable roots for {}", config.command);
+        return Vec::new();
+    }
+    let entries = match serde_json::from_str::<Vec<String>>(raw) {
+        Ok(entries) => entries,
+        Err(error) => {
+            log::warn!("[sandbox] ignoring malformed Codex writable roots: {error}");
+            return Vec::new();
+        }
+    };
+    let ceiling = match config.env.get(CODEX_WRITABLE_CEILING_ENV) {
+        None => None,
+        Some(raw) => match serde_json::from_str::<Vec<PathBuf>>(raw).ok()
+            .and_then(|roots| cognia_exec_sandbox::paths::safe_canonicalize_all(&roots).ok()) {
+            Some(roots) => Some(roots),
+            None => {
+                log::warn!("[sandbox] ignoring Codex writable roots: invalid session writable ceiling");
+                return Vec::new();
+            }
+        },
+    };
+    let mut forbidden = cognia_exec_sandbox::protected::system_forbidden_roots();
+    if let Some(data) = crate::state_isolation::host_agent_state_data_dir() {
+        forbidden.push(data.join("cognia"));
+    }
+    let resolved: Vec<PathBuf> = forbidden.iter()
+        .filter_map(|root| cognia_exec_sandbox::paths::safe_canonicalize(root).ok())
+        .collect();
+    forbidden.extend(resolved);
+    let mut accepted = Vec::new();
+    for entry in entries {
+        match cognia_exec_sandbox::paths::safe_canonicalize(Path::new(&entry)) {
+            Ok(root) if !cognia_exec_sandbox::protected::is_forbidden_writable(&root, &forbidden)
+                && ceiling.as_ref().is_none_or(|roots| roots.iter().any(|ceiling| root.starts_with(ceiling))) => {
+                if !accepted.contains(&root) {
+                    accepted.push(root);
+                }
+            }
+            Ok(_) => log::warn!("[sandbox] dropping Codex writable root {entry:?}: forbidden system/app-data root or outside the canonical session writable ceiling"),
+            Err(error) => log::warn!("[sandbox] dropping Codex writable root {entry:?}: {error}"),
+        }
+    }
+    accepted
+}
+
 /// `.claude.json` and friends are files; everything else is a directory.
 /// Pre-creating them matters because a sandbox scope naming a path that does
 /// not exist is not the same as one naming an empty file.
@@ -1126,6 +1183,10 @@ pub fn wrap_with_sandbox(
         }
     }
 
+    for root in codex_extra_writable_roots(&config) {
+        args.splice(0..0, ["--writable".to_string(), root.to_string_lossy().into_owned()]);
+    }
+
     // Plugin Pi packages (ADR-0210): each validated package directory is
     // mounted read-only. Computed after every `--deny-readable` above has been
     // emitted, so no package root can re-open a denied subtree.
@@ -1156,6 +1217,8 @@ pub fn wrap_with_sandbox(
     }
 
     let mut env = config.env.clone();
+    env.remove(CODEX_WRITABLE_ROOTS_ENV);
+    env.remove(CODEX_WRITABLE_CEILING_ENV);
     if let Some(root) = &kimi_root {
         let default_root = home.join(".kimi-code").to_string_lossy().into_owned();
         while let Some(index) = args
@@ -1367,6 +1430,53 @@ mod tests {
             framing: Default::default(),
             sandbox: None,
         }
+    }
+
+    #[test]
+    fn codex_explicit_writable_roots_reach_wrapper_and_hint_is_consumed() {
+        let mut request = config("codex", &["app-server"], Some("/work"));
+        request.env.insert(CODEX_WRITABLE_ROOTS_ENV.into(),
+            serde_json::json!(["/work/extra", "relative", "/", "/etc", "/work/extra"]).to_string());
+        let wrapped = wrap_with_sandbox(request, &FakeHost::new("macos")).unwrap();
+        let roots: Vec<&str> = wrapped.args.windows(2)
+            .filter(|pair| pair[0] == "--writable")
+            .map(|pair| pair[1].as_str()).collect();
+        assert_eq!(roots.iter().filter(|root| **root == "/work/extra").count(), 1);
+        assert!(!roots.contains(&"relative"));
+        assert!(!roots.contains(&"/"));
+        assert!(!roots.contains(&"/etc"));
+        assert!(!wrapped.env.contains_key(CODEX_WRITABLE_ROOTS_ENV));
+    }
+
+    #[test]
+    fn codex_writable_roots_cannot_name_app_data_or_another_runtime() {
+        let mut request = config("codex", &[], Some("/work"));
+        let app_data = crate::state_isolation::host_agent_state_data_dir().unwrap().join("cognia");
+        request.env.insert(CODEX_WRITABLE_ROOTS_ENV.into(),
+            serde_json::json!([app_data.to_string_lossy()]).to_string());
+        assert!(codex_extra_writable_roots(&request).is_empty());
+        request.command = "pi".into();
+        request.env.insert(CODEX_WRITABLE_ROOTS_ENV.into(), "[\"/work/extra\"]".into());
+        assert!(codex_extra_writable_roots(&request).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_extra_roots_cannot_escape_the_session_ceiling_through_symlinks() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(workspace.join("inside")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, workspace.join("escape")).unwrap();
+        let mut request = config("codex", &[], Some("/work"));
+        request.env.insert(CODEX_WRITABLE_ROOTS_ENV.into(),
+            serde_json::json!([workspace.join("inside"), workspace.join("escape")]).to_string());
+        request.env.insert(CODEX_WRITABLE_CEILING_ENV.into(),
+            serde_json::json!([workspace]).to_string());
+        assert_eq!(codex_extra_writable_roots(&request), vec![std::fs::canonicalize(workspace.join("inside")).unwrap()]);
+        let wrapped = wrap_with_sandbox(request, &FakeHost::new("macos")).unwrap();
+        assert!(!wrapped.env.contains_key(CODEX_WRITABLE_CEILING_ENV));
     }
 
     #[test]

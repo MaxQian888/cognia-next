@@ -409,6 +409,8 @@ export function buildExternalAgentChildEnv(
   }
   if (overrides?.COGNIA_GATEWAY_TASK_HOME) {
     const env = { ...gatewayRuntimeEnvironment(ambient), ...overrides }
+    delete env.COGNIA_AGENT_CODEX_WRITABLE_ROOTS
+    delete env.COGNIA_AGENT_CODEX_WRITABLE_CEILING
     delete env.COGNIA_GATEWAY_TASK_HOME
     delete env.COGNIA_GATEWAY_TASK_CONFIG
     if (!pi) for (const key of Object.keys(env)) if (isPiPackageOnlyKey(key)) delete env[key]
@@ -416,6 +418,11 @@ export function buildExternalAgentChildEnv(
   }
   const env: NodeJS.ProcessEnv = { NODE_ENV: ambient.NODE_ENV ?? "production" }
   for (const [key, value] of Object.entries(ambient)) {
+    if (
+      key === "COGNIA_AGENT_CODEX_WRITABLE_ROOTS" ||
+      key === "COGNIA_AGENT_CODEX_WRITABLE_CEILING"
+    )
+      continue
     if (!pi && isPiPackageOnlyKey(key)) continue
     if (aider && key.startsWith("AIDER_")) continue
     if (kimi && overrides?.COGNIA_BOT_ISOLATION === "1" && key.startsWith("KIMI_")) continue
@@ -429,6 +436,11 @@ export function buildExternalAgentChildEnv(
     }
   }
   for (const [key, value] of Object.entries(overrides ?? {})) {
+    if (
+      key === "COGNIA_AGENT_CODEX_WRITABLE_ROOTS" ||
+      key === "COGNIA_AGENT_CODEX_WRITABLE_CEILING"
+    )
+      continue
     if (!pi && isPiPackageOnlyKey(key)) continue
     if (
       !DANGEROUS_ENV.test(key) &&

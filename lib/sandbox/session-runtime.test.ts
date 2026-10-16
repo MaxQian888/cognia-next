@@ -607,6 +607,50 @@ describe("SandboxSessionRuntime", () => {
     )
   })
 
+  it("enforces frozen confinement and workspace read roots at clamp and execution boundaries", async () => {
+    const deps = createDeps()
+    const runtime = new SandboxSessionRuntime(deps)
+    const readable = ["/reference"]
+    const ref = await runtime.bindSession({
+      sessionId: "read-ceiling",
+      binding: { shellTier: "os", computerTarget: "local" },
+      policy: null,
+      confine: { readable, writable: ["/scratch"] },
+      workspaceRoot: "/workspace",
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+    })
+    readable[0] = "/mutated"
+    expect(runtime.writableRootsFor(ref)).toBeUndefined()
+    expect(
+      runtime.clampRequest(ref, {
+        ...payload.request,
+        readable: ["/"],
+        cwd: "/call",
+      }).readable
+    ).toEqual(["/reference", "/scratch", "/workspace", "/call"])
+    await expect(
+      runtime.executeSandbox(ref, {
+        ...payload,
+        request: { ...payload.request, readable: ["/outside"] },
+      })
+    ).rejects.toThrow(/configured readable roots/)
+    expect(deps.executeOsSandbox).not.toHaveBeenCalled()
+    await runtime.executeSandbox(ref, {
+      ...payload,
+      command: { ...payload.command, cwd: "/actual-cwd" },
+      request: { ...payload.request, readable: ["/"] },
+    })
+    expect(deps.executeOsSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          readable: ["/reference", "/scratch", "/workspace", "/actual-cwd"],
+          readableRoots: ["/reference", "/scratch", "/workspace", "/actual-cwd"],
+        }),
+      })
+    )
+  })
+
   it("freezes policy intent and applies it to request and path checks", async () => {
     const deps = createDeps()
     const runtime = new SandboxSessionRuntime(deps)
@@ -631,6 +675,12 @@ describe("SandboxSessionRuntime", () => {
     writableRoots[0] = "/mutated"
     readableRoots[0] = "/mutated"
     networkAllowlist[0] = "mutated.example"
+
+    const launchCeiling = runtime.writableRootsFor(ref)
+    expect(launchCeiling).toEqual(["/workspace"])
+    // Returning a copy prevents a launch adapter from mutating the frozen policy.
+    ;(launchCeiling as string[])[0] = "/outside"
+    expect(runtime.writableRootsFor(ref)).toEqual(["/workspace"])
 
     expect(
       runtime.clampRequest(ref, {
@@ -1440,8 +1490,12 @@ describe("OS-tier audit", () => {
       const result = await runtime.executeSandbox(ref, payload)
 
       expect(result.stdout).toBe("in the container")
-      // The environment bounds the container; no microVM ceiling is stamped.
-      expect(adapter.execute).toHaveBeenCalledWith(ref, payload)
+      // The environment bounds resources. No read ceiling is configured, so
+      // the workspace root and cwd do not invent one.
+      expect(adapter.execute).toHaveBeenCalledWith(ref, {
+        ...payload,
+        request: { ...payload.request, cwd: "/workspace" },
+      })
       expect(deps.executeOsSandbox).not.toHaveBeenCalled()
       expect(deps.recordAudit).toHaveBeenCalledWith(
         expect.objectContaining({

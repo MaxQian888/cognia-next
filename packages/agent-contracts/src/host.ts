@@ -25,6 +25,10 @@ export interface AgentProcessSpawnSpec {
   args?: string[]
   cwd?: string
   env?: Record<string, string>
+  /** Validated explicit Codex workspaceWrite grants; the host applies them to the outer OS wrapper. */
+  extraWritableRoots?: string[]
+  /** Original session ceiling; wrappers canonicalize it independently of requested roots. */
+  writableCeiling?: readonly string[]
   /**
    * `line` (default) delivers stripped stdout lines; `raw` delivers undecoded
    * base64 chunks for adapters that own a strict byte framing.

@@ -260,6 +260,41 @@ describe("sandbox_text_editor", () => {
 })
 
 describe("sandbox_bash tier routing", () => {
+  it("narrows readable ancestors to the configured roots, workspace and actual cwd", async () => {
+    const { calls } = installTransport()
+    await bindRuntime({ policy: { readableRoots: ["/shared/docs"] } })
+    const tools = await collectTools()
+    await tools.get("sandbox_bash")!.execute(
+      {
+        command: "pwd",
+        cwd: "/repo",
+        readable: ["/"],
+      },
+      CTX
+    )
+    expect((calls[0].args as { request: object }).request).toMatchObject({
+      readable: ["/shared/docs", "/w", "/repo"],
+      readableRoots: ["/shared/docs", "/w", "/repo"],
+    })
+  })
+
+  it("refuses an unrelated readable root before any execution", async () => {
+    const { calls } = installTransport()
+    await bindRuntime({ policy: { readableRoots: ["/shared/docs"] } })
+    const tools = await collectTools()
+    await expect(
+      tools.get("sandbox_bash")!.execute(
+        {
+          command: "cat /private/data",
+          cwd: "/w",
+          readable: ["/private"],
+        },
+        CTX
+      )
+    ).rejects.toThrow(/Settings → Sandbox readable roots/)
+    expect(calls).toHaveLength(0)
+  })
+
   it("routes to the registered microvm impl when the session tier is microvm", async () => {
     installTransport()
     const seen: MicrovmExecPayload[] = []

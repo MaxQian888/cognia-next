@@ -46,6 +46,29 @@ its own auth state. It cannot read Cognia's credential file directly. The launch
 filesystem and network confinement; unlike one-shot sandbox tools, it does not add seccomp or
 rlimits.
 
+### Codex workspace-write options
+
+Cognia's agent editor and plugin API expose `codexOptions.networkAccess` and
+`codexOptions.writableRoots`. These are explicit per-agent Cognia settings, never inherited from
+`~/.codex/config.toml`. They apply only when the effective permission mode is `acceptEdits`
+(Codex `workspaceWrite`). `readOnly` ignores them to preserve read-only execution;
+`dangerFullAccess` ignores them because that inner policy has no scoped sandbox fields.
+
+In `workspaceWrite`, `networkAccess: true` enables network access for Codex's inner sandbox;
+false or absent keeps it disabled. The outer Cognia launcher still permits network access so the
+agent can communicate with its provider; this option does not add outer-wrapper egress filtering.
+
+Extra writable roots must be absolute. Invalid relative paths and forbidden system/app-data roots
+are dropped with a diagnostic, and valid paths are narrowed to the session's configured writable
+ceiling when one exists. The resulting roots are passed to both Codex's inner policy and the
+desktop/CLI outer wrapper, so the two layers grant the same extra writes. Existing workspace,
+agent-state, tool-host, and protected-path rules remain in force.
+
+A settings-only connection grants no extra roots. Before execution, the manager reserves the
+session's effective roots and reconnects an idle app-server if that set changes, preserving the
+conversation's native session for resume. A concurrent turn that needs a different root set is
+refused until the current turn finishes; it cannot expand another session's process boundary.
+
 ### Isolated configurations
 
 A configuration whose state is `isolated` does not share these roots. The launch sets
@@ -123,6 +146,7 @@ Common failures:
 
 - v1 verifies local Codex and Claude Code executable hosting; it does not port container or
   Kubernetes external-agent backends.
-- Network access is enabled for hosted agents and is not yet configurable per preset.
+- The outer wrapper enables network access for hosted agents. Codex's inner `workspaceWrite`
+  sandbox has the per-agent network option described above; outer egress filtering remains absent.
 - Cross-built archives must contain a native launcher for their target; otherwise hosting fails
   closed while built-in chat continues to work.

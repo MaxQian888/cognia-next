@@ -54,6 +54,12 @@ const MESSAGES = {
           errorForbidden:
             "{path} cannot be used as a writable root. Choose a non-system directory.",
         },
+        readableRoots: {
+          label: "Readable roots",
+          errorAbsolute: "{path} must be an absolute directory path without control characters.",
+          description: "Additional read ceiling roots.",
+          placeholder: "/shared/reference",
+        },
       },
     },
   },
@@ -187,6 +193,45 @@ describe("SandboxPolicyCard", () => {
 })
 
 describe("SandboxPolicyFields", () => {
+  it("refuses relative readable roots and permits absolute system toolchain roots", () => {
+    const { onChange } = renderFields({ network: "off" })
+    const field = screen.getByRole("textbox", { name: "Readable roots" })
+    fireEvent.change(field, { target: { value: "relative/docs" } })
+    fireEvent.blur(field)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent(/absolute directory path/)
+    fireEvent.change(field, { target: { value: "/usr\nC:\\toolchain" } })
+    fireEvent.blur(field)
+    expect(onChange).toHaveBeenCalledWith({
+      readableRoots: ["/usr", "C:\\toolchain"],
+      network: "off",
+    })
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
+  it("loads and saves readable roots without discarding the other policy fields", () => {
+    const { onChange } = renderFields({
+      readableRoots: ["/shared/reference"],
+      writableRoots: ["/workspace"],
+      network: "off",
+    })
+    const field = screen.getByRole("textbox", { name: "Readable roots" })
+    expect(field).toHaveValue("/shared/reference")
+    fireEvent.change(field, { target: { value: "/opt/toolchain\n /docs,\n" } })
+    fireEvent.blur(field)
+    expect(onChange).toHaveBeenCalledWith({
+      readableRoots: ["/opt/toolchain", "/docs"],
+      writableRoots: ["/workspace"],
+      network: "off",
+    })
+    fireEvent.change(field, { target: { value: "" } })
+    fireEvent.blur(field)
+    expect(onChange).toHaveBeenLastCalledWith({
+      readableRoots: [],
+      writableRoots: ["/workspace"],
+      network: "off",
+    })
+  })
   it("uses the caller test id prefix and emits a controlled policy update", () => {
     const { onChange } = renderFields({ maxCpuSeconds: 10, network: "off" })
 

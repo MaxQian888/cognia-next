@@ -126,6 +126,8 @@ describe("isPathUnderRoot", () => {
   it("normalizes case for Windows comparisons", () => {
     expect(isPathUnderRoot("C:\\WORK\\a.txt", "c:\\work", "win32")).toBe(true)
     expect(isPathUnderRoot("/home/User/proj", "/home/user", "win32")).toBe(true)
+    // Renderer callers may not have process.platform available.
+    expect(isPathUnderRoot("C:\\WORK\\a.txt", "c:\\work", "")).toBe(true)
   })
 
   it("keeps POSIX comparisons case-sensitive", () => {
@@ -171,15 +173,83 @@ describe("clampPolicyRequest — writable-root ceiling", () => {
       })
     ).toThrow(/outside the configured writable roots/)
   })
+})
 
-  it("leaves readable untouched even with a ceiling (read surface is not clamped)", () => {
+describe("clampPolicyRequest — readable-root ceiling", () => {
+  it("keeps requested descendants and canonicalizes dot components", () => {
+    expect(
+      clampPolicyRequest(req({ readable: ["/a/b/./src/../docs"] }), {
+        readableRoots: ["/a/b"],
+      }).readable
+    ).toEqual(["/a/b/docs"])
+  })
+
+  it("narrows ancestor requests to each allowed root and removes duplicates", () => {
+    expect(
+      clampPolicyRequest(req({ readable: ["/a", "/a"] }), {
+        readableRoots: ["/a/b", "/a/c"],
+      }).readable
+    ).toEqual(["/a/b", "/a/c"])
+  })
+
+  it.each(["/elsewhere", "/a/bc", "/a/b/../../outside"])(
+    "refuses %s with the settings remedy",
+    (path) => {
+      expect(() =>
+        clampPolicyRequest(req({ readable: ["/a/b/inside", path] }), {
+          readableRoots: ["/a/b"],
+        })
+      ).toThrow(/Settings → Sandbox readable roots/)
+    }
+  )
+
+  it("passes reads through when no ceiling, runtime roots or cwd exist", () => {
+    const request = req({ readable: ["/usr", "/a"] })
+    expect(clampPolicyRequest(request, null)).toEqual(request)
+    expect(clampPolicyRequest(request, { maxCpuSeconds: 10 }).readable).toEqual(request.readable)
+  })
+
+  it("unites readable, writable, frozen runtime roots and cwd even without a policy", () => {
+    const request = req({ readable: ["/"], cwd: "/cwd" })
     const out = clampPolicyRequest(
-      { ...req({ writable: ["/home/me/proj"] }), readable: ["/usr"] } as ClampableRequest & {
-        readable: string[]
-      },
-      { writableRoots: ["/home/me/proj"] }
+      request,
+      { readableRoots: ["/read"], writableRoots: ["/write"] },
+      ["/session"]
     )
-    expect((out as { readable: string[] }).readable).toEqual(["/usr"])
+    expect(out.readable).toEqual(["/read", "/write", "/session", "/cwd"])
+    expect(clampPolicyRequest(request, null, ["/session"]).readable).toEqual(["/session", "/cwd"])
+  })
+
+  it("never invents a ceiling from the workspace root or cwd alone", () => {
+    // A toolchain cache outside the project stays readable when nothing is configured.
+    const request = req({ readable: ["/home/u/.cargo"], cwd: "/proj" })
+    const out = clampPolicyRequest(request, null, [], ["/proj"])
+    expect(out.readable).toEqual(["/home/u/.cargo"])
+    expect(out.readableRoots).toBeUndefined()
+    expect(clampPolicyRequest(request, { maxCpuSeconds: 5 }, [], ["/proj"]).readable).toEqual([
+      "/home/u/.cargo",
+    ])
+  })
+
+  it("widens a configured ceiling with the workspace root and cwd", () => {
+    const request = req({ readable: ["/proj/src", "/cwd/x"], cwd: "/cwd" })
+    const out = clampPolicyRequest(request, { readableRoots: ["/read"] }, [], ["/proj"])
+    expect(out.readable).toEqual(["/proj/src", "/cwd/x"])
+    expect(out.readableRoots).toEqual(["/read", "/proj", "/cwd"])
+    expect(() =>
+      clampPolicyRequest(
+        req({ readable: ["/home/u/.cargo"], cwd: "/cwd" }),
+        { readableRoots: ["/read"] },
+        [],
+        ["/proj"]
+      )
+    ).toThrow(/Settings → Sandbox readable roots/)
+  })
+
+  it("replaces forged native ceiling metadata with the resolved ceiling", () => {
+    const request = req({ readable: ["/a"], readableRoots: ["/"] })
+    expect(clampPolicyRequest(request, { readableRoots: ["/a"] }).readableRoots).toEqual(["/a"])
+    expect(clampPolicyRequest(request, null).readableRoots).toBeUndefined()
   })
 })
 
@@ -229,5 +299,67 @@ describe("clampSandboxPolicy — monotonic parent/child merge", () => {
     // Child CPU (300) exceeds ceiling (60) → clamped to 60; child mem (512) < 1024 → kept.
     expect(out?.maxCpuSeconds).toBe(60)
     expect(out?.maxMemoryMb).toBe(512)
+  })
+
+  it("narrows a child's ancestor read root to the parent's read and write roots", () => {
+    expect(
+      clampSandboxPolicy(
+        { readableRoots: ["/ws/docs"], writableRoots: ["/ws/src"] },
+        { readableRoots: ["/ws"] }
+      )?.readableRoots
+    ).toEqual(["/ws/docs", "/ws/src"])
+  })
+
+  it("refuses a child read root outside the parent's ceiling", () => {
+    expect(() =>
+      clampSandboxPolicy(
+        { readableRoots: ["/ws"] },
+        {
+          readableRoots: ["/elsewhere"],
+        }
+      )
+    ).toThrow(/configured readable roots/)
+  })
+
+  it("keeps an inherited read ceiling when a child supplies an empty list", () => {
+    expect(
+      clampSandboxPolicy(
+        { readableRoots: ["/ws"] },
+        {
+          readableRoots: [],
+        }
+      )?.readableRoots
+    ).toEqual(["/ws"])
+  })
+
+  it("does not let child writable grants broaden an inherited read ceiling", () => {
+    expect(() =>
+      clampSandboxPolicy(
+        { readableRoots: ["/ws"] },
+        {
+          writableRoots: ["/outside"],
+        }
+      )
+    ).toThrow(/configured readable roots/)
+    expect(
+      clampSandboxPolicy(
+        { readableRoots: ["/ws"] },
+        {
+          writableRoots: ["/"],
+        }
+      )?.writableRoots
+    ).toEqual(["/ws"])
+  })
+
+  it("retains the inherited read union when child writable roots become empty", () => {
+    expect(
+      clampSandboxPolicy(
+        { writableRoots: ["/ws"] },
+        {
+          writableRoots: [],
+          readableRoots: [],
+        }
+      )?.readableRoots
+    ).toEqual(["/ws"])
   })
 })

@@ -1,5 +1,10 @@
 {
   "editor": {
+    "codexWorkspaceAccessHint": "Network access and extra writable folders apply only when the effective permission mode is Accept edits (workspace write). These settings belong to this Cognia agent and do not inherit native Codex configuration.",
+    "codexWorkspaceAccessInactive": "Inactive under the current default permissions or sandbox mode. These settings apply only to workspace-write runs; saved values are retained for per-run permission overrides.",
+    "codexWritableRoots": "Extra writable folders",
+    "codexWritableRootsDesc": "One absolute folder path per line. Invalid or protected paths are ignored and reported at launch; accepted folders are limited by the session sandbox writable ceiling.",
+    "codexWritableRootsPlaceholder": "/projects/shared\n/opt/build-output",
     "description": "Description",
     "descriptionPlaceholder": "What this configuration is for, e.g. read-only reviews",
     "saving": "Saving…",

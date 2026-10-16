@@ -24,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 import { saveSettings } from "@/lib/db/settings"
+import { normalizeFsPath } from "@/lib/files/permissions"
 import { useSettingsStore } from "@/stores/settings"
 
 const NETWORK_VALUES = ["off", "allowlist", "on"] as const
@@ -123,7 +124,10 @@ export function SandboxPolicyFields({
   const hostsId = useId()
   const rootsId = useId()
   const rootsErrorId = useId()
+  const readableRootsId = useId()
+  const readableRootsErrorId = useId()
   const [writableRootsError, setWritableRootsError] = useState<string | null>(null)
+  const [readableRootsError, setReadableRootsError] = useState<string | null>(null)
 
   const update = (patch: Partial<SandboxResourcePolicy>) => {
     onChange({ ...policy, ...patch })
@@ -229,6 +233,38 @@ export function SandboxPolicyFields({
           </p>
         )}
         <p className="text-xs text-muted-foreground">{t("writableRoots.description")}</p>
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={readableRootsId}>{t("readableRoots.label")}</Label>
+        <Textarea
+          id={readableRootsId}
+          rows={3}
+          defaultValue={(policy.readableRoots ?? []).join("\n")}
+          placeholder={t("readableRoots.placeholder")}
+          aria-invalid={readableRootsError ? true : undefined}
+          aria-describedby={readableRootsError ? readableRootsErrorId : undefined}
+          onBlur={(e) => {
+            const readableRoots = parseHostList(e.target.value)
+            const invalid = readableRoots.find(
+              (path) =>
+                !/^(?:\/|[a-zA-Z]:\/)/u.test(normalizeFsPath(path)) ||
+                [...path].some((character) => character.charCodeAt(0) < 32)
+            )
+            if (invalid) {
+              setReadableRootsError(t("readableRoots.errorAbsolute", { path: invalid }))
+              return
+            }
+            setReadableRootsError(null)
+            update({ readableRoots })
+          }}
+          data-testid={`${testIdPrefix}-readable-roots`}
+        />
+        {readableRootsError && (
+          <p id={readableRootsErrorId} role="alert" className="text-xs text-destructive">
+            {readableRootsError}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">{t("readableRoots.description")}</p>
       </div>
     </div>
   )

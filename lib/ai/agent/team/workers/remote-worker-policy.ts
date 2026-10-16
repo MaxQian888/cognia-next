@@ -3,7 +3,7 @@ import type { HandoffPolicyV1 } from "@cognia/agent/handoff-envelope"
 import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import { deriveExternalSessionPermission } from "@/lib/ai/agent/external/policy/permission-cascade"
-import { isPathUnderRoot } from "@/lib/sandbox/policy-bridge"
+import { clampSandboxPolicy, intersectPathRoots } from "@/lib/sandbox/policy-bridge"
 
 export const REMOTE_WORKER_POLICY_CAPABILITY = "worker-policy-v1"
 
@@ -82,26 +82,23 @@ export function remoteWorkerCeiling(
 ): AgentPermissionCeiling {
   const incoming = decodeRemoteWorkerPolicy(policy, workspaceRoot)
   const effective = deriveExternalSessionPermission(incoming, local)
-  for (const dimension of ["writableRoots", "readableRoots"] as const) {
+  // Read roots use clampSandboxPolicy's shared read-ceiling union and strict
+  // refusal through deriveExternalSessionPermission above. Preserve the
+  // existing intersection semantics for host/sender writable directories.
+  for (const dimension of ["writableRoots"] as const) {
     const parent = incoming.sandboxPolicy?.[dimension]
     const child = local?.sandboxPolicy?.[dimension]
-    const roots =
-      parent && child
-        ? Array.from(
-            new Set(
-              parent.flatMap((a) =>
-                child.flatMap((b) =>
-                  isPathUnderRoot(a, b) ? [a] : isPathUnderRoot(b, a) ? [b] : []
-                )
-              )
-            )
-          )
-        : (parent ?? child)
+    const roots = parent && child ? intersectPathRoots(child, parent) : (parent ?? child)
     // Current sandbox adapters interpret an empty path list as host defaults, not deny-all.
     // Refuse that unrepresentable contract rather than silently substituting defaults.
     if (roots?.length === 0)
       throw new Error(`Worker sandbox cannot represent an empty ${dimension} ceiling`)
-    if (roots) effective.sandboxPolicy = { ...effective.sandboxPolicy, [dimension]: roots }
+    if (roots) {
+      effective.sandboxPolicy = clampSandboxPolicy(incoming.sandboxPolicy, {
+        ...effective.sandboxPolicy,
+        [dimension]: roots,
+      })
+    }
   }
   return effective
 }

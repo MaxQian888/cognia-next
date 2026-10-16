@@ -5,6 +5,7 @@ import path from "node:path"
 
 import {
   buildSandboxLauncherArgs,
+  codexExtraWritableRoots,
   bundledLauncherCandidates,
   defaultSandboxRuntime,
   findSandboxLauncher,
@@ -18,6 +19,103 @@ import {
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 
 describe("external-agent sandbox launcher", () => {
+  it("rejects foreign drive paths on the POSIX hosts supported by the wrapper", () => {
+    const report = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      expect(
+        codexExtraWritableRoots({
+          id: "codex",
+          command: "codex",
+          cwd: "/work",
+          env: { COGNIA_AGENT_CODEX_WRITABLE_ROOTS: '["C:/work"]' },
+        })
+      ).toEqual([])
+      expect(report).toHaveBeenCalledWith(
+        "Ignoring Codex writable root",
+        expect.objectContaining({ reason: "an absolute path on this host is required" })
+      )
+    } finally {
+      report.mockRestore()
+    }
+  })
+
+  it("treats a filesystem-root ceiling as containing safe descendant roots", () => {
+    expect(
+      codexExtraWritableRoots({
+        id: "codex",
+        command: "codex",
+        cwd: "/work",
+        env: {
+          COGNIA_AGENT_CODEX_WRITABLE_ROOTS: '["/work/extra"]',
+          COGNIA_AGENT_CODEX_WRITABLE_CEILING: '["/"]',
+        },
+      })
+    ).toEqual(["/work/extra"])
+  })
+
+  it("refuses an extra root symlink escaping the independently canonicalized session ceiling", () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-ceiling-"))
+    const workspace = path.join(temp, "workspace")
+    const outside = path.join(temp, "outside")
+    fs.mkdirSync(path.join(workspace, "inside"), { recursive: true })
+    fs.mkdirSync(outside)
+    fs.symlinkSync(outside, path.join(workspace, "escape"))
+    const report = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      expect(
+        codexExtraWritableRoots({
+          id: "codex",
+          command: "codex",
+          cwd: workspace,
+          env: {
+            COGNIA_AGENT_CODEX_WRITABLE_ROOTS: JSON.stringify([
+              path.join(workspace, "inside"),
+              path.join(workspace, "escape"),
+            ]),
+            COGNIA_AGENT_CODEX_WRITABLE_CEILING: JSON.stringify([workspace]),
+          },
+        })
+      ).toEqual([fs.realpathSync(path.join(workspace, "inside"))])
+      expect(report).toHaveBeenCalledWith(
+        "Ignoring Codex writable root",
+        expect.objectContaining({ reason: "outside the canonical session writable ceiling" })
+      )
+    } finally {
+      report.mockRestore()
+      fs.rmSync(temp, { recursive: true, force: true })
+    }
+  })
+
+  it("grants only validated explicit Codex roots in the outer wrapper", () => {
+    const report = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const args = buildSandboxLauncherArgs(
+        {
+          id: "codex",
+          command: "codex",
+          cwd: "/work",
+          env: {
+            COGNIA_AGENT_CODEX_WRITABLE_ROOTS: JSON.stringify([
+              "/work/extra",
+              "relative",
+              "/etc",
+              "/",
+            ]),
+          },
+        },
+        "/home/user"
+      )
+      const roots = args.flatMap((arg, index) => (arg === "--writable" ? [args[index + 1]] : []))
+      expect(roots).toContain("/work/extra")
+      expect(roots).not.toContain("/etc")
+      expect(roots).not.toContain("relative")
+      expect(roots).not.toContain("/")
+      expect(report).toHaveBeenCalledTimes(3)
+    } finally {
+      report.mockRestore()
+    }
+  })
+
   it("rejects a Kimi Bot home symlink outside its owned state before provisioning", async () => {
     const owned = fs.mkdtempSync(path.join(os.tmpdir(), "kimi-owned-"))
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "kimi-outside-"))

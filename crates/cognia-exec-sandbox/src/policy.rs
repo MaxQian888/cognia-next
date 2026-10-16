@@ -3,11 +3,11 @@
 // The renderer-side `cognia-sandboxed-tools` plugin (Phase 4.5) hands each
 // `sandbox_*` tool call to the Rust dispatcher; the dispatcher uses this
 // module to derive a `SandboxPolicy` from the tool name plus the call's
-// inputs (writable / readable paths the caller asked for). Pure: no I/O.
+// inputs (writable / readable paths the caller asked for). When the host supplies
+// a read ceiling, paths are canonicalized before containment is checked.
 //
-// Phase 4.5 wires `policy_for` into the `sandbox_exec` Tauri command;
-// until then the function is exercised only by this file's unit tests.
-#![allow(dead_code)]
+// `cognia-automation`'s `sandbox_exec` command and the `cognia-sandbox-exec`
+// CLI helper both use `policy_for` before entering `run_confined`.
 
 use std::path::PathBuf;
 
@@ -24,6 +24,10 @@ pub struct PolicyRequest {
     /// Common to all tools: readable directories (additionalDirectories
     /// equivalent, plus system paths the tool needs like /usr on Linux).
     pub readable: Vec<PathBuf>,
+    /// Host-resolved read ceiling, stamped after model request clamping. Empty
+    /// preserves legacy callers; nonempty roots are checked after symlink
+    /// resolution as well as the frontend's lexical preflight.
+    pub readable_roots: Vec<PathBuf>,
     /// For Edit / Write / TextEditor: the exact files allowed to be
     /// written. Empty = the tool call is rejected (no write target).
     pub target_files: Vec<PathBuf>,
@@ -63,7 +67,8 @@ pub const BASH_DEFAULT_MAX_PROCESSES: u32 = 512;
 /// is the renderer-side MCP tool name with the `sandbox_` prefix stripped
 /// (so `bash`, `edit`, `write`, `text_editor`). Rejects unknown tools and
 /// invalid combinations.
-pub fn policy_for(tool: &str, req: PolicyRequest) -> Result<SandboxPolicy, SandboxError> {
+pub fn policy_for(tool: &str, mut req: PolicyRequest) -> Result<SandboxPolicy, SandboxError> {
+    req.readable = clamp_readable(req.readable, &req.readable_roots)?;
     match tool {
         "bash" => {
             let network = parse_network(req.network.as_deref(), req.network_hosts)?;
@@ -125,6 +130,66 @@ pub fn policy_for(tool: &str, req: PolicyRequest) -> Result<SandboxPolicy, Sandb
     }
 }
 
+fn clamp_readable(
+    requested: Vec<PathBuf>,
+    roots: &[PathBuf],
+) -> Result<Vec<PathBuf>, SandboxError> {
+    if roots.is_empty() {
+        return Ok(requested);
+    }
+    let canonicalize = |paths: &[PathBuf]| {
+        crate::paths::safe_canonicalize_all(paths).map_err(|error| SandboxError::InvalidPolicy {
+            reason: format!("readable scope: {error}; configure Settings → Sandbox readable roots"),
+        })
+    };
+    let roots = canonicalize(roots)?;
+    let requested = canonicalize(&requested)?;
+    let mut narrowed = Vec::new();
+    for path in requested {
+        let matches: Vec<PathBuf> = if roots.iter().any(|root| path_under_root(&path, root)) {
+            vec![path.clone()]
+        } else {
+            roots
+                .iter()
+                .filter(|root| path_under_root(root, &path))
+                .cloned()
+                .collect()
+        };
+        if matches.is_empty() {
+            return Err(SandboxError::InvalidPolicy {
+                reason: format!(
+                    "readable path {} outside the configured read ceiling; configure Settings → Sandbox readable roots",
+                    path.display()
+                ),
+            });
+        }
+        for matched in matches {
+            if !narrowed.contains(&matched) {
+                narrowed.push(matched);
+            }
+        }
+    }
+    Ok(narrowed)
+}
+
+fn path_under_root(path: &std::path::Path, root: &std::path::Path) -> bool {
+    #[cfg(not(windows))]
+    {
+        path.starts_with(root)
+    }
+    #[cfg(windows)]
+    {
+        let path: Vec<_> = path.components().collect();
+        let root: Vec<_> = root.components().collect();
+        path.len() >= root.len()
+            && path.iter().zip(root.iter()).all(|(a, b)| {
+                a.as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&b.as_os_str().to_string_lossy())
+            })
+    }
+}
+
 fn parse_network(kind: Option<&str>, hosts: Vec<String>) -> Result<NetworkPolicy, SandboxError> {
     match kind.unwrap_or("off") {
         "off" => Ok(NetworkPolicy::Off),
@@ -153,6 +218,69 @@ mod tests {
             readable: vec![PathBuf::from("/usr")],
             ..Default::default()
         }
+    }
+
+    fn scoped_read_request(readable: Vec<PathBuf>, roots: Vec<PathBuf>) -> PolicyRequest {
+        serde_json::from_value(serde_json::json!({
+            "writable": [std::env::temp_dir()],
+            "readable": readable,
+            "readableRoots": roots,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn readable_ceiling_keeps_descendants_and_narrows_ancestors() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let root = base.join("project");
+        let inside = root.join("src");
+        for (requested, expected) in [
+            (inside.clone(), vec![inside]),
+            (base, vec![root.clone()]),
+        ] {
+            let req = scoped_read_request(vec![requested], vec![root.clone()]);
+            let SandboxPolicy::Bash { readable, .. } = policy_for("bash", req).unwrap() else {
+                panic!("expected Bash variant");
+            };
+            assert_eq!(readable, expected);
+        }
+    }
+
+    #[test]
+    fn readable_ceiling_refuses_outside_and_component_prefixes() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        for requested in [base.join("other"), base.join("project-other")] {
+            let req = scoped_read_request(vec![requested], vec![base.join("project")]);
+            let error = policy_for("bash", req).unwrap_err().to_string();
+            assert!(error.contains("Settings → Sandbox readable roots"), "{error}");
+        }
+    }
+
+    #[test]
+    fn absent_readable_ceiling_preserves_the_request() {
+        let req = bash_req();
+        let expected = req.readable.clone();
+        let SandboxPolicy::Bash { readable, .. } = policy_for("bash", req).unwrap() else {
+            panic!("expected Bash variant");
+        };
+        assert_eq!(readable, expected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readable_ceiling_resolves_symlinks_before_containment() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let root = base.join("project");
+        let outside = base.join("outside");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let req = scoped_read_request(vec![link], vec![root]);
+        assert!(policy_for("bash", req).is_err());
     }
 
     #[test]

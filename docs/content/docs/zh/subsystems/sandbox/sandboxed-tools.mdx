@@ -57,6 +57,21 @@ maxCpuSeconds: { type: "integer", minimum: 0 },
 maxMemoryMb: { type: "integer", minimum: 0 },
 ```
 
+## 配置的可读范围上限
+
+桌面端与 CLI 都在派发前收紧模型提供的 `readable` 列表。上限为
+`SandboxResourcePolicy.readableRoots`、`writableRoots`、运行时的 confinement/workspace roots
+以及本次调用 `cwd` 的并集。只有这些根目录全部不存在时，才保留原有透传行为；Rust 的禁读根目录
+与敏感文件隐藏规则始终适用。
+
+位于上限根目录内的请求会保留；祖先目录请求会收紧为其包含的上限根目录。例如仅允许
+`/work/project` 时，请求 `/work` 会得到 `/work/project`。无关路径会被拒绝，并提示前往
+**设置 → 沙盒 → 可读根目录** 调整配置。比较按路径组件进行，`/work/project-other` 不属于
+`/work/project`。父子策略继承与 remote worker 上限也保留这一边界。
+
+这限制了 Linux 上模型选择的只读挂载，以及发往 container/microVM adapter 的路径范围；不会把
+macOS Seatbelt 现有的全局文件读取许可变成内核级读取白名单，也不会给 Windows runner 增加文件系统约束。
+
 ## 层级路由 —— `dispatchSandbox`
 
 每次调用都汇聚到 `dispatchSandbox`，它把 payload 交给本次发送已解析出的**运行时引用**（见[执行总览](./execution-overview)）。插件不再自行查任何按会话存储的层级或策略状态：该引用指向唯一一份不可变的放置记录，由 `SandboxSessionRuntime` 决定走 Rust 的 `sandbox_exec` 命令还是已注册的 E2B 适配器。

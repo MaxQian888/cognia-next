@@ -169,6 +169,8 @@ interface AgentFormData {
   // Codex app-server options (shown only for protocol === "codex-app-server")
   codexSandboxMode: "readOnly" | "workspaceWrite" | "dangerFullAccess"
   codexNetworkAccess: boolean
+  /** Newline-separated extra writable folders; active only in workspaceWrite. */
+  codexWritableRoots: string
   /** Empty string = model default */
   codexDefaultEffort: string
   /** Empty string = server default */
@@ -293,6 +295,7 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   clearApiKey: false,
   codexSandboxMode: "workspaceWrite",
   codexNetworkAccess: false,
+  codexWritableRoots: "",
   codexDefaultEffort: "",
   codexReasoningSummary: "",
   codexExtraSkillRoots: "",
@@ -672,6 +675,7 @@ export function AgentEditorDialog({
       autoApprovePatterns: agent.autoApprovePatterns ?? [],
       codexSandboxMode: agent.codexOptions?.sandboxMode ?? "workspaceWrite",
       codexNetworkAccess: agent.codexOptions?.networkAccess ?? false,
+      codexWritableRoots: agent.codexOptions?.writableRoots?.join("\n") ?? "",
       codexDefaultEffort: agent.codexOptions?.defaultReasoningEffort ?? "",
       codexReasoningSummary: agent.codexOptions?.reasoningSummary ?? "",
       codexExtraSkillRoots: agent.codexOptions?.extraSkillRoots?.join("\n") ?? "",
@@ -681,6 +685,9 @@ export function AgentEditorDialog({
     }
   })
 
+  const codexWorkspaceAccessActive =
+    adaptPermissionMode(formData.defaultPermissionMode, formData.protocol).mode === "acceptEdits" &&
+    formData.codexSandboxMode !== "readOnly"
   const managedDsh = getPresetConfig(selectedPreset)?.metadata?.requiresManagedRuntime === true
   const [processEnvRows, setProcessEnvRows] = useState(() => objectToKvRows(formData.processEnv))
   const [submitting, setSubmitting] = useState(false)
@@ -900,8 +907,9 @@ export function AgentEditorDialog({
     if (formData.protocol === "codex-app-server") {
       input.codexOptions = {
         sandboxMode: formData.codexSandboxMode,
-        ...(formData.codexSandboxMode !== "dangerFullAccess"
-          ? { networkAccess: formData.codexNetworkAccess }
+        networkAccess: formData.codexNetworkAccess,
+        ...(parseSkillRootLines(formData.codexWritableRoots).length
+          ? { writableRoots: parseSkillRootLines(formData.codexWritableRoots) }
           : {}),
         ...(formData.codexDefaultEffort
           ? { defaultReasoningEffort: formData.codexDefaultEffort }
@@ -1870,7 +1878,13 @@ export function AgentEditorDialog({
                 </SelectContent>
               </Select>
             </div>
-            {formData.codexSandboxMode !== "dangerFullAccess" && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">{tManage("codexWorkspaceAccessHint")}</p>
+              {!codexWorkspaceAccessActive && (
+                <p className="text-sm text-muted-foreground">
+                  {tManage("codexWorkspaceAccessInactive")}
+                </p>
+              )}
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 space-y-0.5">
                   <Label htmlFor={fid("codex-network-access")}>{t("codexNetworkAccess")}</Label>
@@ -1879,12 +1893,27 @@ export function AgentEditorDialog({
                 <Switch
                   id={fid("codex-network-access")}
                   checked={formData.codexNetworkAccess}
+                  disabled={!codexWorkspaceAccessActive}
                   onCheckedChange={(checked) =>
                     setFormData({ ...formData, codexNetworkAccess: checked })
                   }
                 />
               </div>
-            )}
+              <div className="grid gap-2">
+                <Label htmlFor={fid("codex-writable-roots")}>{tManage("codexWritableRoots")}</Label>
+                <p className="text-sm text-muted-foreground">{tManage("codexWritableRootsDesc")}</p>
+                <Textarea
+                  id={fid("codex-writable-roots")}
+                  value={formData.codexWritableRoots}
+                  disabled={!codexWorkspaceAccessActive}
+                  onChange={(event) =>
+                    setFormData({ ...formData, codexWritableRoots: event.target.value })
+                  }
+                  placeholder={tManage("codexWritableRootsPlaceholder")}
+                  rows={3}
+                />
+              </div>
+            </div>
             <div className="flex flex-wrap gap-4">
               <div className="grid min-w-[10rem] flex-1 gap-2">
                 <Label htmlFor={fid("codex-default-effort")}>{t("codexDefaultEffort")}</Label>

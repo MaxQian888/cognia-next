@@ -28,6 +28,35 @@ function recordingPlane() {
 }
 
 describe("createProcessPlaneHost", () => {
+  it("transports validated writable roots and replaces caller-owned launch hints", async () => {
+    const { plane, invoke } = recordingPlane()
+    await createProcessPlaneHost(plane, () => true).spawn({
+      id: "codex",
+      command: "codex",
+      extraWritableRoots: ["/work/extra"],
+      writableCeiling: ["/work"],
+      env: { COGNIA_AGENT_CODEX_WRITABLE_ROOTS: '["/"]' },
+    })
+    expect(invoke).toHaveBeenCalledWith("spawn_external_agent", {
+      config: {
+        id: "codex",
+        command: "codex",
+        env: {
+          COGNIA_AGENT_CODEX_WRITABLE_ROOTS: '["/work/extra"]',
+          COGNIA_AGENT_CODEX_WRITABLE_CEILING: '["/work"]',
+        },
+      },
+    })
+    await createProcessPlaneHost(plane, () => true).spawn({
+      id: "other",
+      command: "pi",
+      env: { COGNIA_AGENT_CODEX_WRITABLE_ROOTS: '["/"]' },
+    })
+    expect(invoke).toHaveBeenLastCalledWith("spawn_external_agent", {
+      config: { id: "other", command: "pi", env: {} },
+    })
+  })
+
   it("maps the typed port onto the external-agent process plane commands", async () => {
     const { plane, invoke } = recordingPlane()
     const host = createProcessPlaneHost(plane, () => true)

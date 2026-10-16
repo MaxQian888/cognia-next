@@ -60,6 +60,23 @@ maxCpuSeconds: { type: "integer", minimum: 0 },
 maxMemoryMb: { type: "integer", minimum: 0 },
 ```
 
+## Configured read ceiling
+
+The model's `readable` list is clamped before dispatch on both the desktop and CLI rails. The
+ceiling is the union of `SandboxResourcePolicy.readableRoots`, `writableRoots`, the runtime's
+confinement/workspace roots, and the call's `cwd`. With none of these roots present, the list keeps
+the previous pass-through behavior; the Rust forbidden-root and secret-hiding floors still apply.
+
+A requested path inside a ceiling root is kept. An ancestor request is narrowed to the ceiling
+roots it contains: requesting `/work` when only `/work/project` is allowed yields `/work/project`.
+An unrelated path is refused with a remedy pointing to **Settings → Sandbox → Readable roots**.
+Path-component comparison keeps `/work/project-other` outside `/work/project`. Parent/child policy
+inheritance and remote-worker ceilings preserve the same boundary.
+
+This limits the model-selected readable mounts on Linux and the scopes sent to container/microVM
+adapters. It does not turn macOS Seatbelt's existing global file-read permission into a kernel read
+allowlist, nor add filesystem scoping to the Windows runner.
+
 ## Tier routing — `dispatchSandbox`
 
 Every call funnels through `dispatchSandbox`, which hands the payload to the **runtime reference**

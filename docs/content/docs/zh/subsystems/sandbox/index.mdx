@@ -99,7 +99,7 @@ flowchart TB
     <File name="lib.rs — run_confined（唯一的受限执行路径）+ current_backend()" />
     <File name="traits.rs — SandboxedExec trait" />
     <File name="types.rs — SandboxCommand / Policy / Result / Error / Health / NetworkPolicy / ProbeReport" />
-    <File name="policy.rs — policy_for(tool, request) 纯解析器" />
+    <File name="policy.rs — policy_for(tool, request)，包含规范化后的可读上限检查" />
     <File name="linux.rs · macos.rs · windows.rs — 各平台后端" />
     <File name="sbpl.rs · seccomp.rs · limits.rs · net_proxy.rs — SBPL 规则、系统调用过滤、rlimit、过滤代理" />
     <File name="uninstalled.rs · mock.rs — 回退 + 测试替身" />
@@ -111,7 +111,7 @@ flowchart TB
   <Folder name="crates/cognia-sandbox-runner/">
     <File name="src/main.rs — Windows restricted-token + low-integrity + Job Object runner，带 stdout/stderr capture" />
   </Folder>
-  <Folder name="src-tauri/src/bin/">
+  <Folder name="crates/cognia-elevated-setup/src/bin/">
     <File name="cognia-sandbox-setup.rs — 保留给未来可选 per-SID firewall setup" />
   </Folder>
   <Folder name="crates/cognia-automation/src/cua_sandbox/ (CUA 远程)">
@@ -120,7 +120,7 @@ flowchart TB
   </Folder>
   <Folder name="lib/sandbox/">
     <File name="microvm-bridge.ts — 层级路由 + microvm exec 注册表" />
-    <File name="web/index.ts — web 代码执行桩" />
+    <File name="policy-bridge.ts — 配置的读写范围上限与策略继承" />
   </Folder>
   <Folder name="lib/claude/">
     <File name="build-options.ts — 沙盒优先级 + 工具门控（≈1121–1166）" />
@@ -164,7 +164,7 @@ flowchart TB
   <Card
     title="microVM 与 Web"
     href="./microvm-and-web"
-    description="T4 e2b Firecracker 层级、层级路由、web 代码执行桩，以及消耗元数据类型"
+    description="T4 e2b Firecracker 层级、层级路由、浏览器代码执行，以及消耗元数据类型"
   />
   <Card
     title="插件隔离"

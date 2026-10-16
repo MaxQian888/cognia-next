@@ -477,6 +477,16 @@ export class ExternalAgentManager {
   private intentionalProcessStops = new Set<string>()
   private codexConnections = new Map<string, Promise<void>>()
   private codexDisconnections = new Map<string, Promise<void>>()
+  private codexWritableScopes = new Map<
+    string,
+    {
+      roots: string[]
+      ceiling?: string[]
+      permissionMode: AcpPermissionMode | undefined
+      users: number
+      ready: Promise<void>
+    }
+  >()
   private gatewayTasks = new Map<
     string,
     { parentId: string; taskId: string; release: () => Promise<void> }
@@ -2827,6 +2837,7 @@ export class ExternalAgentManager {
       this.adapters.delete(agentId)
     }
 
+    this.codexWritableScopes.delete(agentId)
     this.sessionHostFacts.delete(agentId)
     this.instances.delete(agentId)
     this.eventListeners.delete(agentId)
@@ -2874,6 +2885,7 @@ export class ExternalAgentManager {
       // Drop the adapter so no resident protocol logic outlives the plugin that
       // contributed it. The config/instance stays for restore + UI explanation.
       this.adapters.delete(agentId)
+      this.codexWritableScopes.delete(agentId)
       this.capabilityCommandSignatures.delete(agentId)
       const instance = this.instances.get(agentId)
       if (instance) {
@@ -3049,7 +3061,24 @@ export class ExternalAgentManager {
         // do less than the project asked for, so the connect stops here
         // rather than starting an unsandboxed agent.
         await assertRunEnvironmentPlaced(agentId)
-        const launchConfig = await prepareDshManagedLaunch(instance.config, dshManagedLaunchHost)
+        const scopedConfig =
+          instance.config.protocol === "codex-app-server"
+            ? {
+                ...instance.config,
+                defaultPermissionMode:
+                  this.codexWritableScopes.get(agentId)?.permissionMode ??
+                  instance.config.defaultPermissionMode,
+                metadata: {
+                  ...instance.config.metadata,
+                  cogniaCodexWritableCeiling: this.codexWritableScopes.get(agentId)?.ceiling,
+                },
+                codexOptions: {
+                  ...instance.config.codexOptions,
+                  writableRoots: this.codexWritableScopes.get(agentId)?.roots ?? [],
+                },
+              }
+            : instance.config
+        const launchConfig = await prepareDshManagedLaunch(scopedConfig, dshManagedLaunchHost)
         const connectTimeout = this.resolveExecutionTimeoutMs(instance)
         if (instance.config.protocol === "codex-app-server") {
           // Native connect times out its handshake and tears down the child
@@ -3245,6 +3274,7 @@ export class ExternalAgentManager {
     // without fetching, so nothing rewrote `metadata.configOptions` and the
     // session panel rendered no config rows at all.
     forgetAgentModelSurface(agentId)
+    if (!this.codexWritableScopes.get(agentId)?.users) this.codexWritableScopes.delete(agentId)
 
     externalAgentManagerLogger.info("Disconnected external agent", { agentId })
   }
@@ -3287,7 +3317,13 @@ export class ExternalAgentManager {
       instructionEnvelope: options?.instructionEnvelope,
       // Per-agent Codex defaults (sandbox mode / reasoning effort / summary)
       // ride to the adapter through metadata — same channel as selectedModel.
-      codexOptions: instance.config.codexOptions,
+      codexOptions:
+        instance.config.protocol === "codex-app-server"
+          ? {
+              ...instance.config.codexOptions,
+              writableRoots: this.codexWritableScopes.get(instance.config.id)?.roots ?? [],
+            }
+          : instance.config.codexOptions,
       // Per-execution thinking level. Rides the same metadata channel as
       // `selectedModel`, and because the Codex client only applies
       // `codexOptions.defaultReasoningEffort` when this is undefined, setting it
@@ -3333,6 +3369,139 @@ export class ExternalAgentManager {
     const mode = requested ?? instance.config.defaultPermissionMode
     if (!mode) return undefined
     return adaptPermissionMode(mode, instance.config.protocol).mode
+  }
+
+  /** Reserve the process-wide writable scope before a Codex turn can connect. */
+  private async acquireCodexWritableScope(
+    agentId: string,
+    options?: PermissionBoundExternalExecutionOptions
+  ): Promise<{
+    options: PermissionBoundExternalExecutionOptions | undefined
+    release: () => void
+  }> {
+    const instance = this.instances.get(agentId)
+    const adapter = this.adapters.get(agentId)
+    if (!instance || !adapter || instance.config.protocol !== "codex-app-server") {
+      return { options, release: () => {} }
+    }
+    options = enforceExternalPermissionCeiling(
+      options,
+      instance.config.protocol,
+      instance.capabilities,
+      instance.config.defaultPermissionMode,
+      this.getAgentCapabilityProfile(agentId)
+    )
+    const mode = this.resolveEffectivePermissionMode(instance, options?.permissionMode)
+    const report = (root: string, reason: string) => {
+      externalAgentManagerLogger.warn("Codex extra writable root was refused", {
+        agentId,
+        root,
+        reason,
+      })
+    }
+    const { validateCodexWritableRoots } = await import("@cognia/agent-codex/app-server-client")
+    const { sandboxSessionRuntime } = await import("@/lib/sandbox/session-runtime")
+    const { narrowRequiredWriteScope } = await import("@/lib/sandbox/policy-bridge")
+    const custom = options?.context?.custom
+    const nativeSessionId =
+      options?.sessionId ?? (typeof custom?.sessionId === "string" ? custom.sessionId : undefined)
+    const nativeSession = nativeSessionId
+      ? (instance.sessions.get(nativeSessionId) ?? adapter.getSession(nativeSessionId))
+      : undefined
+    const boundChatSessionId = nativeSession?.metadata?.cogniaSessionId
+    const chatSessionId =
+      typeof custom?.chatSessionId === "string"
+        ? custom.chatSessionId
+        : typeof boundChatSessionId === "string"
+          ? boundChatSessionId
+          : undefined
+    const ref = sandboxSessionRuntime.activeRefForSession(chatSessionId)
+    // A retired runtime or a native-only resume must not erase a ceiling the
+    // connected process already knows. Reuse it until an active binding replaces it.
+    const configuredCeiling = ref
+      ? sandboxSessionRuntime.writableRootsFor(ref)
+      : this.codexWritableScopes.get(agentId)?.ceiling
+    const ceiling = configuredCeiling?.length ? [...configuredCeiling].sort() : undefined
+    const requested =
+      mode === "acceptEdits" && instance.config.codexOptions?.sandboxMode !== "readOnly"
+        ? validateCodexWritableRoots(instance.config.codexOptions?.writableRoots, report)
+        : []
+    const roots = [
+      ...new Set(
+        requested.flatMap((root) => {
+          try {
+            if (!ref)
+              return ceiling
+                ? (narrowRequiredWriteScope([root], ceiling, "writable") ?? [])
+                : [root]
+            return sandboxSessionRuntime.clampRequest(ref, {
+              maxCpuSeconds: 0,
+              maxMemoryMb: 0,
+              network: "off",
+              networkHosts: [],
+              writable: [root],
+              readable: [],
+              targetFiles: [],
+            }).writable
+          } catch (error) {
+            report(root, this.normalizeErrorMessage(error))
+            return []
+          }
+        })
+      ),
+    ].sort()
+    let scope = this.codexWritableScopes.get(agentId)
+    const changed =
+      JSON.stringify([scope?.roots ?? [], scope?.ceiling]) !== JSON.stringify([roots, ceiling])
+    if (
+      changed &&
+      (scope?.users || this.liveSessions(agentId).some((session) => session.status === "executing"))
+    ) {
+      throw new Error("Codex writable roots cannot change while another session is executing")
+    }
+    if (!scope || changed) {
+      // Disconnect clears session caches. Preserve the conversation's native
+      // session so the normal resolver resumes it under the narrower process.
+      if (
+        changed &&
+        !options?.resetExternalSession &&
+        !options?.sessionId &&
+        !custom?.sessionId &&
+        chatSessionId
+      ) {
+        const previous = latestSession(
+          adapter
+            .getSessions()
+            .filter((session) => session.metadata?.cogniaSessionId === chatSessionId)
+        )
+        if (previous) options = { ...options, sessionId: previous.id }
+      }
+      scope = { roots, ceiling, permissionMode: mode, users: 0, ready: Promise.resolve() }
+      this.codexWritableScopes.set(agentId, scope)
+      if (changed && (adapter.isConnected() || this.codexConnections.has(agentId))) {
+        scope.ready = this.disconnect(agentId)
+      }
+    }
+    const acquiredScope = scope
+    acquiredScope.users++
+    const release = () => {
+      acquiredScope.users--
+      if (
+        acquiredScope.users === 0 &&
+        !adapter.isConnected() &&
+        this.codexWritableScopes.get(agentId) === acquiredScope
+      ) {
+        this.codexWritableScopes.delete(agentId)
+      }
+    }
+    try {
+      await scope.ready
+      return { options, release }
+    } catch (error) {
+      release()
+      if (this.codexWritableScopes.get(agentId) === scope) this.codexWritableScopes.delete(agentId)
+      throw error
+    }
   }
 
   private async resolveExecutionSession(
@@ -4007,9 +4176,13 @@ export class ExternalAgentManager {
       return
     }
     const releaseToolHosts = await this.bindSandboxToolHostLeases(agentId, options)
+    let releaseScope = () => {}
     try {
-      yield* this.executePreparedStreaming(agentId, prompt, options)
+      const scoped = await this.acquireCodexWritableScope(agentId, options)
+      releaseScope = scoped.release
+      yield* this.executePreparedStreaming(agentId, prompt, scoped.options)
     } finally {
+      releaseScope()
       releaseToolHosts()
     }
   }
@@ -4402,9 +4575,13 @@ export class ExternalAgentManager {
       }
     }
     const releaseToolHosts = await this.bindSandboxToolHostLeases(agentId, options)
+    let releaseScope = () => {}
     try {
-      return await this.executePrepared(agentId, prompt, options)
+      const scoped = await this.acquireCodexWritableScope(agentId, options)
+      releaseScope = scoped.release
+      return await this.executePrepared(agentId, prompt, scoped.options)
     } finally {
+      releaseScope()
       releaseToolHosts()
     }
   }
@@ -5609,6 +5786,7 @@ export class ExternalAgentManager {
 
     this.instances.clear()
     this.adapters.clear()
+    this.codexWritableScopes.clear()
     this.kimiDeletedSessions.clear()
     this.delegationRules = []
     this.eventListeners.clear()

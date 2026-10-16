@@ -105,7 +105,7 @@ flowchart TB
     <File name="lib.rs — run_confined (the one confined path) + current_backend()" />
     <File name="traits.rs — SandboxedExec trait" />
     <File name="types.rs — SandboxCommand / Policy / Result / Error / Health / NetworkPolicy / ProbeReport" />
-    <File name="policy.rs — policy_for(tool, request) pure resolver" />
+    <File name="policy.rs — policy_for(tool, request), including canonical read-ceiling checks" />
     <File name="linux.rs · macos.rs · windows.rs — per-platform backends" />
     <File name="sbpl.rs · seccomp.rs · limits.rs · net_proxy.rs — SBPL rules, syscall filter, rlimits, filtering proxy" />
     <File name="uninstalled.rs · mock.rs — fallback + test double" />
@@ -117,7 +117,7 @@ flowchart TB
   <Folder name="crates/cognia-sandbox-runner/">
     <File name="src/main.rs — Windows restricted-token + low-integrity + Job Object runner with stdout/stderr capture" />
   </Folder>
-  <Folder name="src-tauri/src/bin/">
+  <Folder name="crates/cognia-elevated-setup/src/bin/">
     <File name="cognia-sandbox-setup.rs — reserved for future optional per-SID firewall setup" />
   </Folder>
   <Folder name="crates/cognia-automation/src/cua_sandbox/ (CUA remote)">
@@ -126,7 +126,7 @@ flowchart TB
   </Folder>
   <Folder name="lib/sandbox/">
     <File name="microvm-bridge.ts — tier router + microvm exec registry" />
-    <File name="web/index.ts — web code-exec stub" />
+    <File name="policy-bridge.ts — configured read/write ceilings and policy inheritance" />
   </Folder>
   <Folder name="lib/claude/">
     <File name="build-options.ts — sandbox precedence + tool gating (≈1121–1166)" />
@@ -170,7 +170,7 @@ flowchart TB
   <Card
     title="microVM & Web"
     href="./microvm-and-web"
-    description="T4 e2b Firecracker tier, the tier router, the web code-exec stub, and consumption metadata types"
+    description="T4 e2b Firecracker tier, the tier router, browser code execution, and consumption metadata types"
   />
   <Card
     title="Plugin isolation"

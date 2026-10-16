@@ -8,8 +8,8 @@
  * existing `plugin_tool_exec` IPC to the renderer, which dispatches to
  * the Tauri `sandbox_exec` command. The Rust side derives a
  * `SandboxPolicy` from `(tool, request)` and runs the command under the
- * per-platform backend (`sandbox-exec` / `bwrap` / `windows-codex-vendor-
- * pending` SetupRequired stub).
+ * per-platform backend (`sandbox-exec` / `bwrap` / Cognia's Windows
+ * restricted-token runner).
  *
  * `lib/claude/build-options.ts` (Phase 4.5b in the same commit) is what
  * actually gates the builtin replacement: when sandbox is enabled it
@@ -19,7 +19,7 @@
  * picks them up instead.
  *
  * Strict mode (ADR-0028): when the sandbox is unavailable (Windows
- * vendor pending, bwrap missing, etc.) the backend returns
+ * runner missing, bwrap missing, etc.) the backend returns
  * `SetupRequired` / `Unavailable` and the plugin surfaces the error
  * verbatim — no silent fallback to unsandboxed execution.
  */
@@ -453,6 +453,7 @@ async function execBash(
   const explicitWritable = args.writable.length > 0 ? args.writable : null
   const narrowedExplicitWritable = explicitWritable
     ? sandbox.clampRequest(runtimeRef, {
+        cwd,
         writable: explicitWritable,
         readable: [],
         targetFiles: [],
@@ -469,6 +470,7 @@ async function execBash(
   // ceiling (character override beats the app default). The model cannot widen
   // past the configured policy because this is the only path to `sandbox_exec`.
   const request = sandbox.clampRequest(runtimeRef, {
+    cwd,
     writable,
     readable: args.readable,
     targetFiles: [],
@@ -568,6 +570,7 @@ async function sandboxReadFile(
   // roots), then restore the single target: the Rust `policy_for` rejects an
   // `edit` / `write` / `text_editor` request whose `target_files` is empty.
   const clamped = sandbox.clampRequest(requireRuntimeRef(sandbox, callCtx), {
+    cwd: parentDir(path),
     writable: [],
     readable: Array.from(new Set([...args.readable, path])),
     targetFiles: [],
@@ -613,6 +616,7 @@ async function sandboxWriteFile(
 ): Promise<SandboxResultShape> {
   const { path } = args
   const request = sandbox.clampRequest(requireRuntimeRef(sandbox, callCtx), {
+    cwd: parentDir(path),
     writable: [],
     readable: args.readable,
     targetFiles: [path],

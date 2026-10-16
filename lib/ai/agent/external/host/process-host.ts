@@ -62,13 +62,31 @@ export function createProcessPlaneHost(
       return isAvailable()
     },
     spawn: async (spec) => {
+      const env = spec.env ? { ...spec.env } : undefined
+      if (env) {
+        delete env.COGNIA_AGENT_CODEX_WRITABLE_ROOTS
+        delete env.COGNIA_AGENT_CODEX_WRITABLE_CEILING
+      }
       const registered = await plane.invoke<unknown>("spawn_external_agent", {
         config: {
           id: spec.id,
           command: spec.command,
           ...(spec.args ? { args: spec.args } : {}),
           ...(spec.cwd !== undefined ? { cwd: spec.cwd } : {}),
-          ...(spec.env ? { env: spec.env } : {}),
+          ...(spec.extraWritableRoots !== undefined
+            ? {
+                env: {
+                  ...env,
+                  // Host-owned transport hint, consumed by the wrapper before launch.
+                  COGNIA_AGENT_CODEX_WRITABLE_ROOTS: JSON.stringify(spec.extraWritableRoots),
+                  ...(spec.writableCeiling !== undefined
+                    ? { COGNIA_AGENT_CODEX_WRITABLE_CEILING: JSON.stringify(spec.writableCeiling) }
+                    : {}),
+                },
+              }
+            : env
+              ? { env }
+              : {}),
           ...(spec.framing ? { framing: spec.framing } : {}),
         },
       })

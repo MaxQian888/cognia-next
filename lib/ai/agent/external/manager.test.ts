@@ -847,6 +847,265 @@ describe("ExternalAgentManager — singleton + getInstance", () => {
   })
 })
 
+describe("Codex process writable scopes", () => {
+  it("connects settings without extra roots and supplies validated session-clamped roots to both layers", async () => {
+    const { sandboxSessionRuntime } = await import("@/lib/sandbox/session-runtime")
+    const active = jest
+      .spyOn(sandboxSessionRuntime, "activeRefForSession")
+      .mockReturnValue({} as never)
+    const ceiling = jest
+      .spyOn(sandboxSessionRuntime, "writableRootsFor")
+      .mockReturnValue(["/projects"])
+    const clamp = jest
+      .spyOn(sandboxSessionRuntime, "clampRequest")
+      .mockImplementation((_ref, request) => {
+        if (request.writable[0] === "/projects/denied") throw new Error("outside writable ceiling")
+        return request
+      })
+    try {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      const connects = jest.spyOn(currentMock, "connect")
+      await manager.addAgent(
+        buildBaseConfig({
+          protocol: "codex-app-server",
+          codexOptions: {
+            writableRoots: ["relative", "/", "/projects/shared", "/projects/denied"],
+            networkAccess: true,
+          },
+        })
+      )
+      expect(connects.mock.calls[0][0].codexOptions?.writableRoots).toEqual([])
+      await manager.execute("agent-1", "write", {
+        permissionMode: "acceptEdits",
+        context: { custom: { chatSessionId: "chat-1" } },
+      })
+      expect(active).toHaveBeenCalledWith("chat-1")
+      expect(connects.mock.calls.at(-1)?.[0].codexOptions?.writableRoots).toEqual([
+        "/projects/shared",
+      ])
+      expect(currentMock.lastSessionOptions?.metadata).toMatchObject({
+        codexOptions: { writableRoots: ["/projects/shared"], networkAccess: true },
+      })
+      expect(connects.mock.calls.at(-1)?.[0].metadata?.cogniaCodexWritableCeiling).toEqual([
+        "/projects",
+      ])
+      expect(currentMock.lastSessionOptions?.metadata).not.toHaveProperty(
+        "cogniaCodexWritableCeiling"
+      )
+      expect(clamp).toHaveBeenCalledTimes(2)
+    } finally {
+      active.mockRestore()
+      ceiling.mockRestore()
+      clamp.mockRestore()
+    }
+  })
+
+  it("retains the conversation ceiling for native-only session reuse and a retired runtime", async () => {
+    const { sandboxSessionRuntime } = await import("@/lib/sandbox/session-runtime")
+    const active = jest
+      .spyOn(sandboxSessionRuntime, "activeRefForSession")
+      .mockReturnValue({} as never)
+    const ceiling = jest
+      .spyOn(sandboxSessionRuntime, "writableRootsFor")
+      .mockReturnValue(["/projects/shared"])
+    const clamp = jest
+      .spyOn(sandboxSessionRuntime, "clampRequest")
+      .mockImplementation((_ref, request) => {
+        if (request.writable[0] !== "/projects/shared") throw new Error("outside writable ceiling")
+        return request
+      })
+    try {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      const connects = jest.spyOn(currentMock, "connect")
+      await manager.addAgent(
+        buildBaseConfig({
+          protocol: "codex-app-server",
+          codexOptions: { writableRoots: ["/projects/shared", "/outside"] },
+        }),
+        { connect: false }
+      )
+      const first = await manager.execute("agent-1", "first", {
+        permissionMode: "acceptEdits",
+        context: { custom: { chatSessionId: "chat-bound" } },
+      })
+      await manager.execute("agent-1", "reuse", {
+        permissionMode: "acceptEdits",
+        sessionId: first.sessionId,
+      })
+      expect(active).toHaveBeenLastCalledWith("chat-bound")
+      active.mockReturnValue(undefined)
+      await manager.execute("agent-1", "retired", {
+        permissionMode: "acceptEdits",
+        sessionId: first.sessionId,
+      })
+      expect(connects).toHaveBeenCalledTimes(1)
+      expect(connects.mock.calls[0][0].codexOptions?.writableRoots).toEqual(["/projects/shared"])
+      expect(connects.mock.calls[0][0].metadata?.cogniaCodexWritableCeiling).toEqual([
+        "/projects/shared",
+      ])
+    } finally {
+      active.mockRestore()
+      ceiling.mockRestore()
+      clamp.mockRestore()
+    }
+  })
+
+  it("reconnects when the canonical-validation ceiling changes despite unchanged writable roots", async () => {
+    const { sandboxSessionRuntime } = await import("@/lib/sandbox/session-runtime")
+    const active = jest
+      .spyOn(sandboxSessionRuntime, "activeRefForSession")
+      .mockReturnValue({} as never)
+    const ceiling = jest
+      .spyOn(sandboxSessionRuntime, "writableRootsFor")
+      .mockReturnValueOnce(["/projects"])
+      .mockReturnValueOnce(["/projects/shared"])
+    const clamp = jest
+      .spyOn(sandboxSessionRuntime, "clampRequest")
+      .mockImplementation((_ref, request) => request)
+    try {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      const connects = jest.spyOn(currentMock, "connect")
+      const disconnect = jest.spyOn(currentMock, "disconnect")
+      await manager.addAgent(
+        buildBaseConfig({
+          protocol: "codex-app-server",
+          codexOptions: { writableRoots: ["/projects/shared"] },
+        }),
+        { connect: false }
+      )
+      await manager.execute("agent-1", "first", { permissionMode: "acceptEdits" })
+      await manager.execute("agent-1", "second", { permissionMode: "acceptEdits" })
+      expect(connects).toHaveBeenCalledTimes(2)
+      expect(disconnect).toHaveBeenCalledTimes(1)
+      expect(connects.mock.calls[0][0].metadata?.cogniaCodexWritableCeiling).toEqual(["/projects"])
+      expect(connects.mock.calls[1][0].metadata?.cogniaCodexWritableCeiling).toEqual([
+        "/projects/shared",
+      ])
+    } finally {
+      active.mockRestore()
+      ceiling.mockRestore()
+      clamp.mockRestore()
+    }
+  })
+
+  it.each(["default", "bypassPermissions"] as const)(
+    "does not grant extra roots for %s",
+    async (permissionMode) => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      const connects = jest.spyOn(currentMock, "connect")
+      await manager.addAgent(
+        buildBaseConfig({
+          protocol: "codex-app-server",
+          codexOptions: { writableRoots: ["/projects/shared"] },
+        }),
+        { connect: false }
+      )
+      await manager.execute("agent-1", "inspect", { permissionMode })
+      expect(connects.mock.calls[0][0].codexOptions?.writableRoots).toEqual([])
+      expect(currentMock.lastSessionOptions?.metadata).toMatchObject({
+        codexOptions: { writableRoots: [] },
+      })
+    }
+  )
+
+  it("prepares streaming launches with the same explicit writable scope", async () => {
+    const manager = freshManager()
+    protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+    const connects = jest.spyOn(currentMock, "connect")
+    await manager.addAgent(
+      buildBaseConfig({
+        protocol: "codex-app-server",
+        codexOptions: { writableRoots: ["/projects/shared"] },
+      }),
+      { connect: false }
+    )
+    for await (const _event of manager.executeStreaming("agent-1", "write", {
+      permissionMode: "acceptEdits",
+    })) {
+      /* drain */
+    }
+    expect(connects.mock.calls[0][0].codexOptions?.writableRoots).toEqual(["/projects/shared"])
+    expect(currentMock.lastSessionOptions?.metadata).toMatchObject({
+      codexOptions: { writableRoots: ["/projects/shared"] },
+    })
+  })
+
+  it("refuses a concurrent incompatible scope without disconnecting the active turn", async () => {
+    const manager = freshManager()
+    protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+    await manager.addAgent(
+      buildBaseConfig({
+        protocol: "codex-app-server",
+        timeout: 10000,
+        codexOptions: { writableRoots: ["/projects/shared"] },
+      }),
+      { connect: false }
+    )
+    const disconnect = jest.spyOn(currentMock, "disconnect")
+    let finish!: (result: ExternalAgentResult) => void
+    let started!: () => void
+    const executing = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    currentMock.executeImpl = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+          started()
+        })
+    )
+    const first = manager.execute("agent-1", "write", { permissionMode: "acceptEdits" })
+    await executing
+    try {
+      await expect(
+        manager.execute("agent-1", "read", { permissionMode: "default" })
+      ).rejects.toThrow("writable roots cannot change")
+      expect(disconnect).not.toHaveBeenCalled()
+    } finally {
+      finish({
+        success: true,
+        sessionId: "s_1",
+        finalResponse: "ok",
+        messages: [],
+        steps: [],
+        toolCalls: [],
+        duration: 1,
+      })
+      await first
+    }
+  })
+
+  it("resumes the conversation after a scope change reconnect clears its session cache", async () => {
+    const manager = freshManager()
+    protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+    await manager.addAgent(
+      buildBaseConfig({
+        protocol: "codex-app-server",
+        codexOptions: { writableRoots: ["/projects/shared"] },
+      }),
+      { connect: false }
+    )
+    const context = { custom: { chatSessionId: "chat-scope" } }
+    const first = await manager.execute("agent-1", "write", {
+      permissionMode: "acceptEdits",
+      context,
+    })
+    const session = currentMock.getSession(first.sessionId)!
+    const originalDisconnect = currentMock.disconnect.bind(currentMock)
+    jest.spyOn(currentMock, "disconnect").mockImplementation(async () => {
+      await originalDisconnect()
+      currentMock.sessions.clear()
+    })
+    currentMock.resumeSessionImpl = jest.fn(async (_sessionId: string) => session)
+    await manager.execute("agent-1", "read", { permissionMode: "default", context })
+    expect(currentMock.resumeSessionImpl).toHaveBeenCalledWith(first.sessionId)
+  })
+})
+
 describe("addAgent / removeAgent / connect", () => {
   describe("Codex connection storm protection", () => {
     it.each([

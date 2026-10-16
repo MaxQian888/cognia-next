@@ -1729,9 +1729,18 @@ export interface UpdateExternalAgentInput {
 export interface CodexAgentOptions {
   /** Sandbox mode for command execution (`SandboxPolicy` tag). */
   sandboxMode?: "readOnly" | "workspaceWrite" | "dangerFullAccess"
-  /** Allow network access inside the sandbox (readOnly/workspaceWrite). */
+  /** Explicit Cognia per-agent network grant, editable in Settings and the plugin API.
+   * Applied only to effective workspaceWrite (acceptEdits); readOnly always denies
+   * network and dangerFullAccess has no inner sandbox to configure. Never inherited
+   * from the user's native ~/.codex/config.toml.
+   */
   networkAccess?: boolean
-  /** Extra writable roots for workspaceWrite. */
+  /** Extra absolute writable roots for effective workspaceWrite (acceptEdits),
+   * editable in Settings and the plugin API. System/app-data roots are dropped and
+   * reported; the session sandbox writable ceiling narrows the accepted roots.
+   * readOnly and dangerFullAccess ignore these: the former prohibits writes and
+   * the latter has no inner sandbox to configure. Native config.toml is not inherited.
+   */
   writableRoots?: string[]
   /**
    * Absolute folder paths registered as extra Codex skill roots via the

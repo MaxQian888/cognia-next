@@ -44,6 +44,12 @@
       "on": "On (model decides)"
     },
     "title": "Resource & network ceiling",
+    "readableRoots": {
+      "description": "One absolute directory per line. Shell read requests are limited to these directories, writable roots, session workspace roots and the command's working directory. Requests for a parent directory narrow to allowed roots; other paths are refused. Native Computer Use also uses these roots. macOS keeps global reads with secret hiding.",
+      "label": "Readable roots",
+      "errorAbsolute": "{path} must be an absolute directory path without control characters.",
+      "placeholder": "/opt/toolchain\n/shared/reference"
+    },
     "writableRoots": {
       "description": "One absolute directory per line. When set, sandboxed writes are confined to these roots (and their subdirectories) — paths outside are dropped. Leave empty to allow any non-system location. System and app-data directories are always blocked.",
       "errorForbidden": "{path} cannot be used as a writable root. Choose a non-system directory inside a workspace or scratch area.",

@@ -7,7 +7,7 @@ import { makeAppSettings } from "@/lib/storybook/fixtures/settings-system"
 import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 
 // Store-reading: edits `settings.sandboxPolicy` (CPU / memory / network ceiling
-// + writable roots). The network "allowlist" mode reveals the hosts textarea.
+// + writable/readable roots). The network "allowlist" mode reveals the hosts textarea.
 // Reset the settings store between stories.
 function seed(sandboxPolicy: SandboxResourcePolicy) {
   return () => {
@@ -44,5 +44,6 @@ export const Configured: Story = {
     network: "allowlist",
     networkAllowlist: ["api.github.com", "registry.npmjs.org"],
     writableRoots: ["/workspace", "/tmp/cognia"],
+    readableRoots: ["/opt/toolchain", "/shared/reference"],
   }),
 }

@@ -7,6 +7,7 @@
  */
 
 import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
+import { isPathWithinRoot, normalizeFsPath } from "@/lib/files/permissions"
 
 /** The clampable subset of the plugin's `PolicyRequest` (network + caps). */
 export interface ClampableRequest {
@@ -16,13 +17,20 @@ export interface ClampableRequest {
   networkHosts: string[]
   /** Writable directories — narrowed to `policy.writableRoots` when set. */
   writable?: string[]
+  /** Read requests are narrowed against the policy, runtime roots and cwd. */
+  readable?: string[]
+  /** The actual command working directory, supplied by the tool adapter. */
+  cwd?: string
+  /** Host-stamped read ceiling for native canonicalization; never caller authority. */
+  readableRoots?: string[]
   /** Single-file write targets (Edit/Write/TextEditor) — narrowed too. */
   targetFiles?: string[]
 }
 
 /**
  * True when `p` is, or is nested under, `root`. String-prefix with a path
- * separator boundary; tolerant of both `/` and `\\` and trailing slashes.
+ * separator boundary after lexical normalization of `.` / `..`, separators
+ * and trailing slashes.
  * Windows comparisons are case-insensitive to match the backend floor; POSIX
  * comparisons stay case-sensitive. This is the configurable *narrowing* check
  * — the Rust floor canonicalizes for the real (symlink-resolved) boundary.
@@ -33,12 +41,45 @@ export function isPathUnderRoot(
   platform: NodeJS.Platform | string = typeof process === "undefined" ? "" : process.platform
 ): boolean {
   if (!p || !root) return false
-  const strip = (s: string) => s.replace(/[\\/]+$/, "")
   const normalizeCase = (s: string) => (platform === "win32" ? s.toLocaleLowerCase("en-US") : s)
-  const np = normalizeCase(strip(p))
-  const nr = normalizeCase(strip(root))
-  if (np === nr) return true
-  return np.startsWith(`${nr}/`) || np.startsWith(`${nr}\\`)
+  const np = normalizeFsPath(p)
+  const nr = normalizeFsPath(root)
+  if (!np || !nr) return false
+  return isPathWithinRoot(normalizeCase(np), normalizeCase(nr))
+}
+
+/** Intersection of directory scopes, including an ancestor request narrowed to a root. */
+export function intersectPathRoots(paths: string[], roots: string[]): string[] {
+  return Array.from(
+    new Set(
+      paths.flatMap((path) =>
+        roots.flatMap((root) =>
+          isPathUnderRoot(path, root)
+            ? [normalizeFsPath(path)]
+            : isPathUnderRoot(root, path)
+              ? [normalizeFsPath(root)]
+              : []
+        )
+      )
+    )
+  )
+}
+
+function narrowRequiredReadScope(paths: string[], roots: string[]): string[] {
+  return Array.from(
+    new Set(
+      paths.flatMap((path) => {
+        const narrowed = intersectPathRoots([path], roots)
+        if (narrowed.length === 0) {
+          throw new Error(
+            `sandbox: readable path ${JSON.stringify(path)} is outside the configured readable roots; ` +
+              "add an allowed directory in Settings → Sandbox readable roots."
+          )
+        }
+        return narrowed
+      })
+    )
+  )
 }
 
 /** Keep only the paths that sit under one of `roots`. */
@@ -47,7 +88,7 @@ function narrowToRoots(paths: string[] | undefined, roots: string[]): string[] {
   return paths.filter((p) => roots.some((r) => isPathUnderRoot(p, r)))
 }
 
-function narrowRequiredWriteScope(
+export function narrowRequiredWriteScope(
   paths: string[] | undefined,
   roots: string[],
   label: string
@@ -98,19 +139,55 @@ function clampNetwork(
 }
 
 /**
- * Clamp a model-supplied policy request down to the configured ceiling. A
- * `null` policy (no ceiling configured) returns the request unchanged.
+ * Clamp a model-supplied read request down to the configured read ceiling.
+ *
+ * A ceiling exists only when one is configured: `policy.readableRoots` /
+ * `policy.writableRoots`, or the session's frozen confinement roots
+ * (`ceilingRoots`). Then the ceiling is those roots plus the context roots
+ * (the session's workspace root) and the command cwd, and every requested
+ * readable path must sit under it (an ancestor is narrowed to the roots
+ * beneath it; anything else is refused). With no configured ceiling the
+ * readable set passes through unchanged, as before: a workspace root or cwd
+ * alone never creates one, and the native floor still hides secrets.
  */
+export function clampReadableRequest<
+  T extends Pick<ClampableRequest, "readable" | "cwd" | "readableRoots">,
+>(
+  request: T,
+  policy: SandboxResourcePolicy | null,
+  ceilingRoots: string[] = [],
+  contextRoots: string[] = []
+): T {
+  const configured = Array.from(
+    new Set([...(policy?.readableRoots ?? []), ...(policy?.writableRoots ?? []), ...ceilingRoots])
+  )
+  if (configured.length === 0) {
+    // Strip any caller-stamped ceiling: only the host may supply one.
+    const { readableRoots: _ignored, ...rest } = request
+    return rest as T
+  }
+  const readRoots = Array.from(
+    new Set([...configured, ...contextRoots, ...(request.cwd ? [request.cwd] : [])])
+  )
+  return {
+    ...request,
+    readableRoots: readRoots,
+    ...(request.readable !== undefined
+      ? { readable: narrowRequiredReadScope(request.readable, readRoots) }
+      : {}),
+  }
+}
+
 export function clampPolicyRequest<T extends ClampableRequest>(
   request: T,
-  policy: SandboxResourcePolicy | null
+  policy: SandboxResourcePolicy | null,
+  ceilingRoots: string[] = [],
+  contextRoots: string[] = []
 ): T {
-  if (!policy) return request
+  const readableRequest = clampReadableRequest(request, policy, ceilingRoots, contextRoots)
+  if (!policy) return readableRequest
   const net = clampNetwork(request.network, request.networkHosts, policy)
-  // Narrow the write surfaces to the configured ceiling. Readable is left
-  // alone (it legitimately includes system dirs the toolchain needs); the
-  // ceiling constrains WRITES. When no ceiling is set the paths pass through
-  // unchanged and the always-on Rust floor still rejects system / app roots.
+  // The always-on native floor still rejects forbidden roots and hides secrets.
   const roots = policy.writableRoots ?? []
   const pathPatch =
     roots.length > 0
@@ -128,7 +205,7 @@ export function clampPolicyRequest<T extends ClampableRequest>(
         }
       : {}
   return {
-    ...request,
+    ...readableRequest,
     ...pathPatch,
     maxCpuSeconds: clampCap(request.maxCpuSeconds, policy.maxCpuSeconds),
     maxMemoryMb: clampCap(request.maxMemoryMb, policy.maxMemoryMb),
@@ -161,12 +238,28 @@ export function clampSandboxPolicy(
   // Writable roots: narrow the child's roots to those under the parent's. An
   // unset child inherits the parent's ceiling; an unset parent imposes none.
   const parentRoots = parent.writableRoots ?? []
-  const writableRoots =
+  let writableRoots =
     child.writableRoots !== undefined
       ? parentRoots.length > 0
         ? narrowToRoots(child.writableRoots, parentRoots)
         : child.writableRoots
       : parent.writableRoots
+
+  const parentReadRoots = [...(parent.readableRoots ?? []), ...parentRoots]
+  // Writable grants also grant reads. A child cannot evade an inherited read
+  // ceiling by moving its requested directory into writableRoots instead.
+  if (parentReadRoots.length > 0 && writableRoots?.length) {
+    writableRoots = narrowRequiredReadScope(writableRoots, parentReadRoots)
+  }
+  const readableRoots = child.readableRoots?.length
+    ? parentReadRoots.length > 0
+      ? narrowRequiredReadScope(child.readableRoots, parentReadRoots)
+      : child.readableRoots
+    : parent.readableRoots?.length
+      ? parent.readableRoots
+      : parentReadRoots.length > 0
+        ? parentReadRoots
+        : parent.readableRoots
 
   return {
     maxCpuSeconds: clampCap(child.maxCpuSeconds ?? 0, parent.maxCpuSeconds),
@@ -177,8 +270,6 @@ export function clampSandboxPolicy(
         ? net.networkHosts
         : (child.networkAllowlist ?? parent.networkAllowlist),
     ...(writableRoots !== undefined ? { writableRoots } : {}),
-    ...((child.readableRoots ?? parent.readableRoots)
-      ? { readableRoots: child.readableRoots ?? parent.readableRoots }
-      : {}),
+    ...(readableRoots !== undefined ? { readableRoots } : {}),
   }
 }

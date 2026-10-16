@@ -3597,10 +3597,12 @@ export interface SandboxResourcePolicy {
    */
   writableRoots?: string[]
   /**
-   * Extra read-only roots available to native Computer Use bash/text_editor
-   * confinement. Sandboxed write tools keep their model-supplied readable set;
-   * this field exists so native Computer Use gets the same configured ceiling
-   * context that `cognia-sandboxed-tools` receives.
+   * Read ceiling for sandboxed shells and extra native Computer Use read roots.
+   * The shell ceiling combines these with writableRoots, the frozen session
+   * confinement/workspace roots and each command's cwd. Requested descendants
+   * are kept, ancestors narrow to allowed roots, and unrelated paths are refused.
+   * With no roots or cwd, reads pass through to the native forbidden-root and
+   * secret-hiding floor. macOS still permits global reads at the OS layer.
    */
   readableRoots?: string[]
 }

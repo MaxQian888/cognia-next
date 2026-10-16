@@ -44,6 +44,12 @@
       "on": "开启（模型决定）"
     },
     "title": "资源与网络上限",
+    "readableRoots": {
+      "description": "每行一个绝对目录。Shell 的读取请求限于这些目录、可写根目录、会话工作区根目录和命令工作目录。请求父目录时会缩小到允许的根目录，其他路径会被拒绝。原生 Computer Use 也使用这些根目录。macOS 仍允许全局读取，但会隐藏秘密文件。",
+      "label": "可读根目录",
+      "errorAbsolute": "{path} 必须是绝对目录路径，且不能包含控制字符。",
+      "placeholder": "/opt/toolchain\n/shared/reference"
+    },
     "writableRoots": {
       "description": "每行一个绝对目录。设置后，沙盒写入将被限制在这些根目录（及其子目录）内——之外的路径会被丢弃。留空则允许任意非系统位置。系统目录与应用数据目录始终被禁止。",
       "errorForbidden": "{path} 不能作为可写根目录。请选择工作区或临时区内的非系统目录。",

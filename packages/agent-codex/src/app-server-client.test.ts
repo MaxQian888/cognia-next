@@ -105,6 +105,7 @@ function adapterOptions() {
 import {
   CodexAppServerAdapter,
   parseCodexCliVersion,
+  validateCodexWritableRoots,
   type CodexAppServerStatus,
 } from "./app-server-client"
 
@@ -172,9 +173,11 @@ function resetHarness() {
   })
 }
 
-async function connectedAdapter(): Promise<CodexAppServerAdapter> {
+async function connectedAdapter(
+  overrides?: Partial<ExternalAgentConfig>
+): Promise<CodexAppServerAdapter> {
   const adapter = new CodexAppServerAdapter(adapterOptions())
-  await adapter.connect(config)
+  await adapter.connect({ ...config, ...overrides })
   return adapter
 }
 
@@ -193,7 +196,51 @@ function iterator(
 
 beforeEach(resetHarness)
 
+describe("explicit Codex writable roots", () => {
+  it("normalizes, deduplicates and reports relative, system and app-data roots", () => {
+    const report = jest.fn()
+    expect(
+      validateCodexWritableRoots(
+        [
+          "/work/./extra",
+          "/work/extra",
+          "/work/../safe",
+          "relative",
+          "/",
+          "/etc/cron.d",
+          "/private/etc",
+          "/Users/a/Library/Application Support/cognia/vault",
+          "/home/u/.local/share/cognia",
+          "C:\\Windows\\System32",
+          "C:\\work\\extra",
+          "/etcetera",
+          "/work/bc",
+        ],
+        report
+      )
+    ).toEqual(["/work/extra", "/safe", "C:/work/extra", "/etcetera", "/work/bc"])
+    expect(report).toHaveBeenCalledTimes(7)
+  })
+})
+
 describe("CodexAppServerAdapter", () => {
+  it("passes only validated explicit roots to the outer process wrapper", async () => {
+    const adapter = new CodexAppServerAdapter(adapterOptions())
+    await adapter.connect({
+      ...config,
+      defaultPermissionMode: "acceptEdits",
+      codexOptions: { writableRoots: ["/extra", "relative", "/etc"] },
+    })
+    expect(native.spawnExternalAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ extraWritableRoots: ["/extra"] })
+    )
+    expect(testLogger.warn).toHaveBeenCalledWith(
+      "Ignoring Codex writable root",
+      expect.objectContaining({ root: "relative" })
+    )
+    await adapter.disconnect()
+  })
+
   it("rejects process hosting when neither desktop nor headless runtime is available", async () => {
     mockIsTauri.mockReturnValue(false)
 
@@ -2154,7 +2201,7 @@ describe("CodexAppServerAdapter", () => {
       "enforces %s on start, resume, and the next turn despite permissive metadata",
       async (permissionMode, sandbox, type, approvalPolicy) => {
         responders["thread/resume"] = () => ({ thread: { id: "resumed" } })
-        const adapter = await connectedAdapter()
+        const adapter = await connectedAdapter({ codexOptions: { networkAccess: true } })
         const metadata = {
           sandboxMode: "dangerFullAccess",
           networkAccess: true,
@@ -2191,7 +2238,7 @@ describe("CodexAppServerAdapter", () => {
                 ? { type, networkAccess: false }
                 : {
                     type,
-                    networkAccess: false,
+                    networkAccess: true,
                     writableRoots: [],
                     excludeTmpdirEnvVar: true,
                     excludeSlashTmp: true,
@@ -3412,7 +3459,10 @@ describe("CodexAppServerAdapter", () => {
     })
 
     it("sends effort, summary, and sandboxPolicy on turn/start from session options", async () => {
-      const adapter = await connectedAdapter()
+      const adapter = await connectedAdapter({
+        defaultPermissionMode: "acceptEdits",
+        codexOptions: { writableRoots: ["/extra"], networkAccess: true },
+      })
       const session = await adapter.createSession({
         permissionMode: "acceptEdits",
         metadata: {
@@ -3443,13 +3493,42 @@ describe("CodexAppServerAdapter", () => {
         summary: "detailed",
         sandboxPolicy: {
           type: "workspaceWrite",
-          networkAccess: false,
-          writableRoots: [],
+          networkAccess: true,
+          writableRoots: ["/extra"],
           excludeTmpdirEnvVar: true,
           excludeSlashTmp: true,
         },
         approvalPolicy: "untrusted",
       })
+    })
+
+    it("keeps session roots inside the outer process grants at component boundaries", async () => {
+      const adapter = await connectedAdapter({
+        defaultPermissionMode: "acceptEdits",
+        codexOptions: { writableRoots: ["/work/a"] },
+      })
+      const session = await adapter.createSession({
+        permissionMode: "acceptEdits",
+        metadata: {
+          codexOptions: {
+            writableRoots: ["/work/a/nested", "/work/ab", "/other"],
+            networkAccess: true,
+          },
+        },
+      })
+      const it = iterator(adapter, session.id, userMessage("go"))
+      const first = it.next()
+      feed("turn/completed", { threadId: session.id, turn: { id: "turn_1", status: "completed" } })
+      let result = await first
+      while (!result.done) result = await it.next()
+      expect(lastWritten((message) => message.method === "turn/start")?.params).toMatchObject({
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          writableRoots: ["/work/a/nested"],
+          networkAccess: false,
+        },
+      })
+      await adapter.disconnect()
     })
 
     it("maps a readOnly sandbox mode without network access", async () => {

@@ -1,6 +1,6 @@
 ---
 title: "OS 后端 (T1)"
-description: "Rust 执行沙盒 crate：SandboxedExec trait、纯策略解析器、数据类型，以及各平台真实后端（bwrap / sandbox-exec / Windows runner）及其实际实现状态。"
+description: "Rust 执行沙盒 crate：SandboxedExec trait、策略解析器、数据类型，以及各平台真实后端（bwrap / sandbox-exec / Windows runner）及其实际实现状态。"
 ---
 
 # OS 后端 (T1)
@@ -69,7 +69,7 @@ pub enum NetworkPolicy {
 
 ## 策略解析器 —— `policy.rs`
 
-`policy_for` 是一个纯函数、无 I/O，它把去前缀的工具名加上调用方提供的 `PolicyRequest` 转换为 `SandboxPolicy`。它会套用 bash 默认值、拒绝空的 writable 集合，并校验网络形状。
+`policy_for` 把去前缀的工具名加上调用方提供的 `PolicyRequest` 转换为 `SandboxPolicy`。它会套用 bash 默认值、拒绝空的 writable 集合，并校验网络形状。运行时提供 `readableRoots` 时，它通过现有路径工具规范化上限与请求的可读路径，再按路径组件比较。这道检查会拒绝前端词法预检无法识别的符号链接逃逸。
 
 ```rust title="crates/cognia-exec-sandbox/src/policy.rs:68-99 (bash branch)"
 "bash" => {
@@ -212,7 +212,7 @@ NetworkPolicy::Allowlist { hosts: _ } => match proxy_port {
 
 ### Windows —— restricted-token runner（真实）
 
-`WindowsSandboxBackend` 调用随包发布的 `crates/cognia-sandbox-runner/` 产物 `cognia-sandbox-runner.exe`。runner 使用当前应用 token 的受限子集启动目标、降低完整性级别、把子进程放入 Job Object，并以 JSON 结果返回捕获到的 stdout/stderr。文件系统 / 权限 / 进程树约束不再需要提权、独立 OS 账号或 setup 标记。
+`WindowsSandboxBackend` 调用随包发布的 `crates/cognia-sandbox-runner/` 产物 `cognia-sandbox-runner.exe`。runner 使用当前应用 token 的受限子集启动目标、降低完整性级别、把子进程放入 Job Object，并以 JSON 结果返回捕获到的 stdout/stderr。权限约束（restricted token、low integrity）和进程 / Job 限制无需提权、独立 OS 账号或 setup 标记即可生效。**当前 runner 不会把文件系统写入限制在 workspace 内**：payload 不包含 readable 或 writable roots。内核级出口控制也未实现；请求 network `off` 会被拒绝，不会被报告为已强制执行。
 
 ```rust title="crates/cognia-sandbox-runner/src/main.rs (restricted-token launch shape)"
 // 1. Duplicate the caller token.
@@ -260,7 +260,7 @@ NetworkPolicy::Allowlist { hosts: _ } => match proxy_port {
 
 ## 测试
 
-`crates/cognia-exec-sandbox/src/` 里文件内的 `#[cfg(test)]` 套件覆盖了纯逻辑 + 可观测面，无需在单元测试时使用真实沙盒（`cargo test -p cognia-exec-sandbox`）：`policy.rs:146-307`（12 个测试，涵盖默认值、空 writable 拒绝、网络解析）、`types.rs:261-320`（serde 往返 + 带标签判别符）、`linux.rs:684-1218`（argv 基线、按文件 bind、share-net、资源限制解析、后端字符串）、`macos.rs:577-1006`（SBPL 渲染、literal vs subpath、转义、代理端口锁定）、`windows.rs:358-557`（runner 可用性、兼容 payload 形状、stdout/stderr JSON 解析）、`uninstalled.rs:89-167`、`mock.rs:127-267`，以及用一个脚本化后端驱动 `probe_confinement` 的 `traits.rs`。真实沙盒集成测试在 Linux + macOS 上通过 `cargo test -p cognia-next --test sandbox_integration`（`src-tauri/tests/sandbox_integration.rs`）运行；Windows runner crate 由自己的单元测试覆盖。
+`crates/cognia-exec-sandbox/src/` 里文件内的 `#[cfg(test)]` 套件覆盖了纯逻辑 + 可观测面，无需在单元测试时使用真实沙盒（`cargo test -p cognia-exec-sandbox`）：`policy.rs`（默认值、空 writable 拒绝、网络解析、可读上限收紧及符号链接逃逸）、`types.rs:261-320`（serde 往返 + 带标签判别符）、`linux.rs:684-1218`（argv 基线、按文件 bind、share-net、资源限制解析、后端字符串）、`macos.rs:577-1006`（SBPL 渲染、literal vs subpath、转义、代理端口锁定）、`windows.rs:358-557`（runner 可用性、兼容 payload 形状、stdout/stderr JSON 解析）、`uninstalled.rs:89-167`、`mock.rs:127-267`，以及用一个脚本化后端驱动 `probe_confinement` 的 `traits.rs`。真实沙盒集成测试在 Linux + macOS 上通过 `cargo test -p cognia-next --test sandbox_integration`（`src-tauri/tests/sandbox_integration.rs`）运行；Windows runner crate 由自己的单元测试覆盖。
 
 ## 下一步
 

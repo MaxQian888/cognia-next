@@ -4,7 +4,7 @@
  * and produces a CreateExternalAgentInput on save.
  */
 
-import { render, screen, act, within, waitFor } from "@testing-library/react"
+import { render, screen, act, fireEvent, within, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AgentEditorDialog, isApprovalEntryValid } from "./agent-editor-dialog"
 import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
@@ -128,6 +128,112 @@ async function withAgent(patch: Record<string, unknown>, body: () => Promise<voi
 }
 
 describe("AgentEditorDialog", () => {
+  it("loads and saves explicit Codex workspace access options", async () => {
+    await withAgent(
+      {
+        protocol: "codex-app-server",
+        defaultPermissionMode: "acceptEdits",
+        codexOptions: {
+          sandboxMode: "workspaceWrite",
+          networkAccess: true,
+          writableRoots: ["/projects/shared"],
+        },
+      },
+      async () => {
+        const onSave = jest.fn().mockResolvedValue(true)
+        render(
+          <AgentEditorDialog
+            open
+            editingAgentId="agent-1"
+            onOpenChange={jest.fn()}
+            onSave={onSave}
+          />
+        )
+        expect(screen.getByRole("switch", { name: "Network access" })).toBeChecked()
+        const roots = screen.getByRole("textbox", { name: "Extra writable folders" })
+        expect(roots).toHaveValue("/projects/shared")
+        fireEvent.change(roots, {
+          target: { value: "/projects/shared\n /projects/shared \n/opt/build-output\n" },
+        })
+        await userEvent.click(screen.getByRole("switch", { name: "Network access" }))
+        await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+        expect(onSave.mock.calls[0][0].codexOptions).toEqual({
+          sandboxMode: "workspaceWrite",
+          networkAccess: false,
+          writableRoots: ["/projects/shared", "/opt/build-output"],
+        })
+      }
+    )
+  })
+
+  it.each([
+    ["readOnly", "acceptEdits"],
+    ["dangerFullAccess", "bypassPermissions"],
+    ["workspaceWrite", "default"],
+  ])(
+    "labels Codex workspace access inactive for %s with %s and retains saved values",
+    async (sandboxMode, defaultPermissionMode) => {
+      await withAgent(
+        {
+          protocol: "codex-app-server",
+          defaultPermissionMode,
+          codexOptions: { sandboxMode, networkAccess: true, writableRoots: ["/projects/shared"] },
+        },
+        async () => {
+          const onSave = jest.fn().mockResolvedValue(true)
+          render(
+            <AgentEditorDialog
+              open
+              editingAgentId="agent-1"
+              onOpenChange={jest.fn()}
+              onSave={onSave}
+            />
+          )
+          expect(screen.getByRole("switch", { name: "Network access" })).toBeDisabled()
+          expect(screen.getByRole("textbox", { name: "Extra writable folders" })).toBeDisabled()
+          expect(
+            screen.getByText(/Inactive under the current default permissions or sandbox mode/)
+          ).toBeInTheDocument()
+          await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+          expect(onSave.mock.calls[0][0].codexOptions).toEqual({
+            sandboxMode,
+            networkAccess: true,
+            writableRoots: ["/projects/shared"],
+          })
+        }
+      )
+    }
+  )
+
+  it("enables workspace options when Accept edits caps configured full access", async () => {
+    await withAgent(
+      {
+        protocol: "codex-app-server",
+        defaultPermissionMode: "acceptEdits",
+        codexOptions: {
+          sandboxMode: "dangerFullAccess",
+          networkAccess: true,
+          writableRoots: ["/projects/shared"],
+        },
+      },
+      async () => {
+        render(
+          <AgentEditorDialog
+            open
+            editingAgentId="agent-1"
+            onOpenChange={jest.fn()}
+            onSave={jest.fn()}
+          />
+        )
+        expect(screen.getByRole("switch", { name: "Network access" })).toBeEnabled()
+        expect(screen.getByRole("textbox", { name: "Extra writable folders" })).toBeEnabled()
+        expect(
+          screen.queryByText(/Inactive under the current default permissions or sandbox mode/)
+        ).not.toBeInTheDocument()
+      }
+    )
+  })
+
   it("summarizes the picked preset and delegates Change to the add flow", async () => {
     const onChangePreset = jest.fn()
     render(
