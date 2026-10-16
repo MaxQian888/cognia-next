@@ -100,6 +100,45 @@ fn input(
         },
     }
 }
+// Each independent case receives its own fresh frame budget. Do not silently
+// reacquire expired authority: renewal must still pass the live Host gate.
+async fn renewed_frame(
+    service: &ManagedDesktopService,
+    p: &ManagedDesktopPrincipal,
+    desktop: &ManagedDesktop,
+    lease: &ManagedControlLease,
+    authority: &HostAuthority<'_>,
+    permit: &ExplicitPaidSmokeAuthorization,
+) -> Result<(ManagedControlLease, ManagedControlFrame)> {
+    let lease = service
+        .control_renew_smoke(
+            p,
+            &desktop.id,
+            desktop.generation,
+            &lease.token,
+            lease.fence,
+            authority,
+            permit,
+        )
+        .await?;
+    let frame = service
+        .control_frame_smoke(p, &desktop.id, desktop.generation, authority, permit)
+        .await?;
+    Ok((lease, frame))
+}
+fn diagnostic_error_code(code: &str) -> &str {
+    if code.starts_with("managed_desktop_")
+        && code.len() <= 128
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+    {
+        code
+    } else {
+        "unexpected_error_code"
+    }
+}
+
 fn observer(count: &Arc<AtomicU64>) -> Arc<dyn Fn(bool) + Send + Sync> {
     let count = count.clone();
     Arc::new(move |admitted| {
@@ -206,6 +245,8 @@ pub async fn run(
         .into_iter()
         .map(|row| row.id)
         .collect::<std::collections::BTreeSet<_>>();
+    let diagnostic_started = tokio::time::Instant::now();
+    let mut stage = "quote_and_authorization";
     let result: Result<()> = async {
         let quote = service.quote(p, config_id, 120).await?;
         host.approve_quote(&quote, AuthorizationPurpose::Smoke)
@@ -220,6 +261,7 @@ pub async fn run(
                 Some(format!("authority:{operation}")),
             )
             .await?;
+        stage = "create_and_readiness";
         let mut desktop = service
             .create_smoke(
                 p,
@@ -248,6 +290,7 @@ pub async fn run(
             input_policy: None,
             admission_observer: Some(observer(&positive)),
         };
+        stage = "acquire_and_positive_input";
         let lease = service
             .control_acquire_smoke(
                 &paired,
@@ -281,15 +324,9 @@ pub async fn run(
 
         let denied = Arc::new(AtomicU64::new(0));
         authority.admission_observer = Some(observer(&denied));
-        let frame = service
-            .control_frame_smoke(
-                &paired,
-                &desktop.id,
-                desktop.generation,
-                &authority,
-                &permit,
-            )
-            .await?;
+        stage = "host_denial";
+        let (lease, frame) =
+            renewed_frame(&service, &paired, &desktop, &lease, &authority, &permit).await?;
         let denial_observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let rejected = denial_observed.clone();
         let denied_result = execute_input_inner(
@@ -313,26 +350,9 @@ pub async fn run(
                 .is_err_and(|error| error.code == "managed_desktop_control_consent_denied")
             && denied.load(Ordering::SeqCst) == 0;
 
-        let lease = service
-            .control_renew_smoke(
-                &paired,
-                &desktop.id,
-                desktop.generation,
-                &lease.token,
-                lease.fence,
-                &authority,
-                &permit,
-            )
-            .await?;
-        let frame = service
-            .control_frame_smoke(
-                &paired,
-                &desktop.id,
-                desktop.generation,
-                &authority,
-                &permit,
-            )
-            .await?;
+        stage = "real_consent_timeout";
+        let (lease, frame) =
+            renewed_frame(&service, &paired, &desktop, &lease, &authority, &permit).await?;
         let prompt_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let seen = prompt_seen.clone();
         let started = tokio::time::Instant::now();
@@ -355,26 +375,9 @@ pub async fn run(
             && denied.load(Ordering::SeqCst) == 0;
         host_consent::forget_device(&device);
 
-        let lease = service
-            .control_renew_smoke(
-                &paired,
-                &desktop.id,
-                desktop.generation,
-                &lease.token,
-                lease.fence,
-                &authority,
-                &permit,
-            )
-            .await?;
-        let frame = service
-            .control_frame_smoke(
-                &paired,
-                &desktop.id,
-                desktop.generation,
-                &authority,
-                &permit,
-            )
-            .await?;
+        stage = "policy_disabled_during_consent";
+        let (lease, frame) =
+            renewed_frame(&service, &paired, &desktop, &lease, &authority, &permit).await?;
         let mut disabled_runtime = runtime(Arc::new(|_, _| {}));
         let gate = disabled_runtime.enforcement.gate.clone();
         let policy_prompt_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -399,15 +402,9 @@ pub async fn run(
                 .is_err_and(|error| error.code == "managed_desktop_control_policy_denied")
             && denied.load(Ordering::SeqCst) == 0;
 
-        let frame = service
-            .control_frame_smoke(
-                &paired,
-                &desktop.id,
-                desktop.generation,
-                &authority,
-                &permit,
-            )
-            .await?;
+        stage = "cancelled_consent_and_late_approval";
+        let (lease, frame) =
+            renewed_frame(&service, &paired, &desktop, &lease, &authority, &permit).await?;
         let pending = Arc::new(parking_lot::Mutex::new(None::<Value>));
         let captured = pending.clone();
         let outcome = tokio::time::timeout(
@@ -459,15 +456,9 @@ pub async fn run(
             && denied.load(Ordering::SeqCst) == 0;
         host_consent::forget_device(&device);
 
-        let frame = service
-            .control_frame_smoke(
-                &paired,
-                &desktop.id,
-                desktop.generation,
-                &authority,
-                &permit,
-            )
-            .await?;
+        stage = "admin_revoked_during_consent";
+        let (lease, frame) =
+            renewed_frame(&service, &paired, &desktop, &lease, &authority, &permit).await?;
         let revoke = device.clone();
         let denied_result = execute_input_inner(
             &service,
@@ -488,17 +479,6 @@ pub async fn run(
 
         let token = issued_lease(&device, &tenant, 120)?;
         authority.admin_check = Some(admin_check(&device, &token));
-        let lease = service
-            .control_renew_smoke(
-                &paired,
-                &desktop.id,
-                desktop.generation,
-                &lease.token,
-                lease.fence,
-                &authority,
-                &permit,
-            )
-            .await?;
         let compound = Arc::new(AtomicU64::new(0));
         let counted = compound.clone();
         let compound_denied = Arc::new(AtomicU64::new(0));
@@ -512,15 +492,9 @@ pub async fn run(
                 denied_command.fetch_add(1, Ordering::SeqCst);
             }
         }));
-        let frame = service
-            .control_frame_smoke(
-                &paired,
-                &desktop.id,
-                desktop.generation,
-                &authority,
-                &permit,
-            )
-            .await?;
+        stage = "compound_admission_revocation";
+        let (lease, frame) =
+            renewed_frame(&service, &paired, &desktop, &lease, &authority, &permit).await?;
         let result = execute_input_inner(
             &service,
             &paired,
@@ -540,6 +514,7 @@ pub async fn run(
         let token = issued_lease(&device, &tenant, 120)?;
         authority.admin_check = Some(admin_check(&device, &token));
         authority.admission_observer = None;
+        stage = "paired_device_revocation";
         store
             .revoke_device(
                 &tenant,
@@ -554,12 +529,20 @@ pub async fn run(
             .await
             .is_err_and(|error| error.code == "managed_desktop_forbidden")
             && !(authority.input_admission(&paired))();
+        stage = "complete_authority_evidence";
         if !evidence.has_complete_evidence() {
             eprintln!("Native authority diagnostic assertions: {evidence:?}");
         }
         check(evidence.has_complete_evidence())
     }
     .await;
+    if let Err(error) = &result {
+        eprintln!(
+            "Native authority smoke failed: stage={stage} code={} elapsed_ms={}",
+            diagnostic_error_code(&error.code),
+            diagnostic_started.elapsed().as_millis()
+        );
+    }
     // The exclusively opened private journal cannot admit another operator.
     // Include a row persisted before create returned an error, not only its ID.
     let cleanup: Result<()> = async {
@@ -575,6 +558,13 @@ pub async fn run(
         Ok(())
     }
     .await;
+    if let Err(error) = &cleanup {
+        eprintln!(
+            "Native authority smoke failed: stage=cleanup code={} elapsed_ms={}",
+            diagnostic_error_code(&error.code),
+            diagnostic_started.elapsed().as_millis()
+        );
+    }
     result?;
     cleanup?;
     Ok(evidence)
@@ -583,6 +573,25 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn diagnostic_codes_exclude_secrets_and_unbounded_messages() {
+        assert_eq!(
+            diagnostic_error_code("managed_desktop_control_lease_expired"),
+            "managed_desktop_control_lease_expired"
+        );
+        for code in [
+            "token-secret",
+            "https://provider.invalid/?key=secret",
+            "managed_desktop_failure\nsecret",
+        ] {
+            assert_eq!(diagnostic_error_code(code), "unexpected_error_code");
+        }
+        assert_eq!(
+            diagnostic_error_code(&format!("managed_desktop_{}", "x".repeat(128))),
+            "unexpected_error_code"
+        );
+    }
+
     #[test]
     fn native_admission_observation_cannot_turn_denial_into_permission() {
         let count = Arc::new(AtomicU64::new(0));

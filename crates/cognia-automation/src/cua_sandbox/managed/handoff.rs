@@ -571,6 +571,18 @@ async fn file_hash(path: &Path, max: u64, budget: &HandoffBudget) -> Result<Stri
 
 /// Installs only our fixed program. Any error after dispatch has an uncertain
 /// guest outcome: the owning service MUST quarantine and destroy that desktop.
+fn transfer_diagnostic(error: &str) -> &'static str {
+    match error {
+        "managed_handoff_guest_unavailable" => "transport",
+        "managed_handoff_guest_protocol" => "protocol",
+        "managed_handoff_guest_failed" => "guest_exit",
+        "managed_handoff_guest_output_limit" => "output_limit",
+        "managed_handoff_file_limit" => "file_limit",
+        "managed_handoff_deadline" => "deadline",
+        _ => "unavailable",
+    }
+}
+
 pub async fn install_on_desktop(
     bootstrap: &DesktopBootstrap,
     prepared: &PreparedHandoff,
@@ -589,7 +601,7 @@ pub async fn install_on_desktop(
         args: vec!["handoff".into()],
         envs: BTreeMap::new(), cwd: Some("/".into()), stdin: true,
     };
-    budget.run(async {
+    let result = budget.run(async {
         let mut stream = cognia_e2b::envd::start_protected(bootstrap, &spec).await
             .map_err(|_| "managed_handoff_guest_unavailable")?;
         let pid = match stream.next_event().await.map_err(|_| "managed_handoff_guest_unavailable")? {
@@ -650,7 +662,11 @@ pub async fn install_on_desktop(
         };
         let (_, result) = tokio::try_join!(send, receive)?;
         Ok(result)
-    }).await
+    }).await;
+    if let Err(error) = &result {
+        eprintln!("Native handoff transfer failed: stage={}", transfer_diagnostic(error));
+    }
+    result
 }
 
 fn validate_receipt(installed: &InstalledHandoff, operation_id: &str, manifest: &TransferManifest, digest: &str, launched: bool) -> Result<()> {
@@ -720,6 +736,14 @@ pub fn validate_acceptance_paths(paths: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn transfer_diagnostics_do_not_emit_untrusted_errors() {
+        assert_eq!(transfer_diagnostic("managed_handoff_guest_failed"), "guest_exit");
+        assert_eq!(transfer_diagnostic("managed_handoff_guest_unavailable"), "transport");
+        for value in ["https://secret", "managed_handoff_guest_failed secret", "/private/source"] {
+            assert_eq!(transfer_diagnostic(value), "unavailable");
+        }
+    }
     // The fixture exercises real Git smart HTTP on loopback; no provider,
     // credential helper or caller's repository/configuration is involved.
     struct SourceFixture {
