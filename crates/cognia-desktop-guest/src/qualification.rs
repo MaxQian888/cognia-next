@@ -77,6 +77,105 @@ pub struct BrowserRun {
     pub redirect_net_errors: Vec<i32>,
     pub hostname_net_errors: Vec<i32>,
 }
+impl BrowserRun {
+    fn validate_outcome(&self) -> Result<(), &'static str> {
+        if self.process.executable != "/usr/lib/chromium/chromium" {
+            return Err("validation_browser_executable");
+        }
+        if self.exit_code != 0 {
+            return Err("validation_browser_exit");
+        }
+        if self.local_preview != "cognia-qualified-loopback" {
+            return Err("validation_browser_preview");
+        }
+        if !self.metadata_navigation_net_errors.contains(&-109) {
+            return Err("validation_browser_metadata");
+        }
+        if !self.redirect_net_errors.contains(&-109) {
+            return Err("validation_browser_redirect");
+        }
+        if !self.hostname_net_errors.contains(&-105) {
+            return Err("validation_browser_hostname");
+        }
+        Ok(())
+    }
+}
+
+/// Failure-only diagnostic projection. It contains no URL, response, path,
+/// environment or arbitrary message and can never substitute for a report.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BrowserDiagnostic {
+    pub boundary_generation: String,
+    pub acceptance_executable_matches: bool,
+    pub terminal_executable_matches: bool,
+    pub importer_executable_matches: bool,
+    pub git_executable_matches: bool,
+    pub browser_executable_matches: bool,
+    pub git_exit_code: i32,
+    pub local_exit_code: i32,
+    pub local_preview_present: bool,
+    pub metadata_net_errors: Vec<i32>,
+    pub redirect_net_errors: Vec<i32>,
+    pub hostname_net_errors: Vec<i32>,
+}
+impl BrowserDiagnostic {
+    pub fn from_report(report: &WorkloadQualificationReport) -> Self {
+        let browser = &report.desktop_probe.browser;
+        Self {
+            boundary_generation: report.boundary_generation.clone(),
+            acceptance_executable_matches: report.desktop_probe.acceptance.process.executable
+                == "/usr/local/bin/cognia-desktop-guest",
+            terminal_executable_matches: report.desktop_probe.terminal.process.executable
+                == "/usr/local/bin/cognia-desktop-guest",
+            importer_executable_matches: report.importer_probe.importer.process.executable
+                == "/usr/local/bin/cognia-desktop-guest",
+            git_executable_matches: report.importer_probe.git.executable == "/usr/bin/git",
+            browser_executable_matches: browser.process.executable == "/usr/lib/chromium/chromium",
+            git_exit_code: report.importer_probe.git_exit_code,
+            local_exit_code: browser.exit_code,
+            local_preview_present: browser.local_preview == "cognia-qualified-loopback",
+            metadata_net_errors: browser
+                .metadata_navigation_net_errors
+                .iter()
+                .take(8)
+                .copied()
+                .collect(),
+            redirect_net_errors: browser
+                .redirect_net_errors
+                .iter()
+                .take(8)
+                .copied()
+                .collect(),
+            hostname_net_errors: browser
+                .hostname_net_errors
+                .iter()
+                .take(8)
+                .copied()
+                .collect(),
+        }
+    }
+    pub fn validate_for(&self, generation: &str) -> Result<(), &'static str> {
+        if self.boundary_generation != generation
+            || !uuid::Uuid::parse_str(generation)
+                .is_ok_and(|id| !id.is_nil() && id.to_string() == generation)
+            || !(0..=255).contains(&self.git_exit_code)
+            || !(0..=255).contains(&self.local_exit_code)
+            || [
+                &self.metadata_net_errors,
+                &self.redirect_net_errors,
+                &self.hostname_net_errors,
+            ]
+            .into_iter()
+            .any(|errors| {
+                errors.len() > 8 || errors.iter().any(|code| !(-10000..=0).contains(code))
+            })
+        {
+            return Err("managed_desktop_browser_diagnostic_invalid");
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DesktopProbe {
@@ -456,52 +555,36 @@ impl WorkloadQualificationReport {
             .git
             .validate(1001, &self.importer_admission.namespaces)
             .map_err(|_| "validation_git_process")?;
-        if !self
-            .desktop_probe
-            .acceptance
-            .process
-            .executable
-            .eq("/usr/local/bin/cognia-desktop-guest")
-            || !self
-                .desktop_probe
-                .terminal
-                .process
-                .executable
-                .eq("/usr/local/bin/cognia-desktop-guest")
-            || !self
-                .importer_probe
-                .importer
-                .process
-                .executable
-                .eq("/usr/local/bin/cognia-desktop-guest")
-            || !self.importer_probe.git.executable.eq("/usr/bin/git")
-            || !self
-                .desktop_probe
-                .browser
-                .process
-                .executable
-                .eq("/usr/lib/chromium/chromium")
-            || self.importer_probe.git_exit_code != 0
-            || self.desktop_probe.browser.exit_code != 0
-            || self.desktop_probe.browser.local_preview != "cognia-qualified-loopback"
-            || !self
-                .desktop_probe
-                .browser
-                .metadata_navigation_net_errors
-                .contains(&-109)
-            || !self
-                .desktop_probe
-                .browser
-                .redirect_net_errors
-                .contains(&-109)
-            || !self
-                .desktop_probe
-                .browser
-                .hostname_net_errors
-                .contains(&-105)
-        {
-            return Err("validation_browser");
+        for (actual, expected, category) in [
+            (
+                &self.desktop_probe.acceptance.process.executable,
+                "/usr/local/bin/cognia-desktop-guest",
+                "validation_acceptance_executable",
+            ),
+            (
+                &self.desktop_probe.terminal.process.executable,
+                "/usr/local/bin/cognia-desktop-guest",
+                "validation_terminal_executable",
+            ),
+            (
+                &self.importer_probe.importer.process.executable,
+                "/usr/local/bin/cognia-desktop-guest",
+                "validation_importer_executable",
+            ),
+            (
+                &self.importer_probe.git.executable,
+                "/usr/bin/git",
+                "validation_git_executable",
+            ),
+        ] {
+            if actual != expected {
+                return Err(category);
+            }
         }
+        if self.importer_probe.git_exit_code != 0 {
+            return Err("validation_git_exit");
+        }
+        self.desktop_probe.browser.validate_outcome()?;
         if self.desktop_probe.acceptance.process.pid == self.desktop_probe.terminal.process.pid
             || self.desktop_probe.detached_pid == 0
             || self.detached_outer_pid <= 1
@@ -539,6 +622,38 @@ mod tests {
             .map(|n| (n.into(), format!("{n}:[42]")))
             .collect();
         ProbeRun{ process:ProcessSnapshot{pid:5,start_time:9,executable:"/usr/local/bin/cognia-desktop-guest".into(),status:"Uid:1000 1000 1000 1000\nGid:1000 1000 1000 1000\nGroups:\nCapInh:0\nCapPrm:0\nCapEff:0\nCapBnd:0\nCapAmb:0\nNoNewPrivs:1\nSeccomp:2".into(),namespaces,descriptors:(0..=2).map(|fd|(fd,crate::observation::DescriptorObservation{target:"/dev/null".into(),flags:0,socket_scope:None})).collect()}, sockets:TARGETS.into_iter().flat_map(|target|[("tcp",80),("tcp",443),("udp",443)].into_iter().map(move|(transport,port)|SocketAttempt{target:target.into(),transport:transport.into(),port,result:-1,errno:101})).collect(), escapes:vec![ErrorObservation{operation:"unshareUser".into(),result:-1,errno:1},ErrorObservation{operation:"setuidRoot".into(),result:-1,errno:22}], paths:HIDDEN_PATHS.into_iter().map(|operation|ErrorObservation{operation:operation.into(),result:-1,errno:2}).collect(), hostnames:["example.com","metadata.google.internal"].into_iter().map(|operation|ErrorObservation{operation:operation.into(),result:-3,errno:-3}).collect(),local_helpers:["127.0.0.1:49983","127.0.0.1:8000"].into_iter().map(|operation|ErrorObservation{operation:operation.into(),result:-1,errno:111}).collect() }
+    }
+    #[test]
+    fn browser_failure_categories_preserve_each_required_outcome() {
+        let mut process = valid_probe().process;
+        process.executable = "/usr/lib/chromium/chromium".into();
+        let good = BrowserRun {
+            process,
+            exit_code: 0,
+            local_preview: "cognia-qualified-loopback".into(),
+            metadata_navigation_net_errors: vec![-109],
+            redirect_net_errors: vec![-109],
+            hostname_net_errors: vec![-105],
+        };
+        assert!(good.validate_outcome().is_ok());
+        let mut bad = good.clone();
+        bad.process.executable = "/wrong".into();
+        assert_eq!(bad.validate_outcome(), Err("validation_browser_executable"));
+        let mut bad = good.clone();
+        bad.exit_code = 1;
+        assert_eq!(bad.validate_outcome(), Err("validation_browser_exit"));
+        let mut bad = good.clone();
+        bad.local_preview.clear();
+        assert_eq!(bad.validate_outcome(), Err("validation_browser_preview"));
+        let mut bad = good.clone();
+        bad.metadata_navigation_net_errors = vec![-3];
+        assert_eq!(bad.validate_outcome(), Err("validation_browser_metadata"));
+        let mut bad = good.clone();
+        bad.redirect_net_errors = vec![-3];
+        assert_eq!(bad.validate_outcome(), Err("validation_browser_redirect"));
+        let mut bad = good.clone();
+        bad.hostname_net_errors = vec![-3];
+        assert_eq!(bad.validate_outcome(), Err("validation_browser_hostname"));
     }
     #[test]
     fn weakened_launch_requires_actual_missing_filter_and_otherwise_complete_boundary() {

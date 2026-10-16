@@ -571,6 +571,16 @@ async fn control_smoke_steps(
             .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
             .await?;
         let released_deadline = smoke_live_lease_deadline(&service, p, &desktop, &lease).await?;
+        let transfer_slot = service.control_slot(&desktop.id, desktop.generation).await;
+        let transfer_frame_deadline = transfer_slot
+            .lock()
+            .await
+            .frames
+            .get(&p.principal_id)
+            .and_then(|frames| frames.iter().find(|f| f.id == transfer_frame.frame_id))
+            .ok_or_else(|| refused("managed_desktop_control_smoke_failed"))?
+            .deadline;
+        let sent_before_release = authority.admitted.load(Ordering::SeqCst);
         stage = "human_release_transfer_release";
         service
             .control_release(
@@ -582,6 +592,27 @@ async fn control_smoke_steps(
                 &authority,
             )
             .await?;
+        stage = "released_fresh_frame_invalidated";
+        {
+            let control = transfer_slot.lock().await;
+            // Prove release invalidated an unexpired frame before remote
+            // acquisition consumes time. The next acquire performs two live
+            // boundary observations and need not fit the old frame's TTL.
+            if Instant::now() >= transfer_frame_deadline
+                || control.lease.is_some()
+                || !control.frames.is_empty()
+                || control.fence <= lease.fence
+            {
+                return Err(refused("managed_desktop_control_smoke_failed"));
+            }
+        }
+        stage = "released_live_token_denial";
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &lease, &transfer_frame, &authority).await,
+            "managed_desktop_control_lease_expired",
+        )?;
+        require_smoke_before_deadline(released_deadline)?;
+        authority.require_no_sends_since(sent_before_release)?;
         stage = "human_release_transfer_acquire";
         let second_lease = service
             .control_acquire_inner(
@@ -597,15 +628,20 @@ async fn control_smoke_steps(
         if second_lease.fence <= lease.fence || second_lease.token == lease.token {
             return Err(refused("managed_desktop_control_smoke_failed"));
         }
-        stage = "transferred_frame_still_fresh";
-        if service.now().await >= transfer_frame.expires_at {
-            return Err(refused("managed_desktop_control_smoke_failed"));
+        stage = "transferred_old_frame_unbound";
+        {
+            let mut control = transfer_slot.lock().await;
+            control.require_lease(&second, &second_lease.token, second_lease.fence)?;
+            if control
+                .frames
+                .values()
+                .flatten()
+                .any(|frame| frame.id == transfer_frame.frame_id)
+            {
+                return Err(refused("managed_desktop_control_smoke_failed"));
+            }
         }
-        stage = "old_token_and_frame_denials";
-        require_smoke_error(
-            smoke_input(&service, p, &desktop, &lease, &transfer_frame, &authority).await,
-            "managed_desktop_control_lease_expired",
-        )?;
+        stage = "transferred_old_frame_denial";
         require_smoke_error(
             smoke_input(
                 &service,
@@ -618,7 +654,9 @@ async fn control_smoke_steps(
             .await,
             "managed_desktop_control_stale_frame",
         )?;
-        require_smoke_before_deadline(released_deadline)?;
+        smoke_live_lease_deadline(&service, &second, &desktop, &second_lease).await?;
+        authority.require_no_sends_since(sent_before_release)?;
+        drop(transfer_slot); // Do not retain the client across the later service-reopen probe.
         assertions.old_token_and_frame_rejected = true;
         stage = "transferred_positive_fresh_input";
         let (second_lease, _) =
@@ -1978,7 +2016,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn released_human_lease_transfers_and_rejects_old_tokens_and_frames() {
+    async fn release_invalidates_live_frame_before_slow_takeover_and_rejects_replay() {
         let f = wire_fixture().await;
         let (service, p, row) = (&f.domain.service, &f.domain.p, &f.row);
         let authority = NativeSmokeAuthority::new(p);
@@ -1988,6 +2026,11 @@ mod tests {
             .unwrap();
         let old = service
             .control_frame_inner(p, &row.id, row.generation, &authority, true)
+            .await
+            .unwrap();
+        let slot = service.control_slot(&row.id, row.generation).await;
+        let frame_deadline = slot.lock().await.frames[&p.principal_id][0].deadline;
+        let lease_deadline = smoke_live_lease_deadline(service, p, row, &first)
             .await
             .unwrap();
         service
@@ -2001,6 +2044,25 @@ mod tests {
             )
             .await
             .unwrap();
+        {
+            let control = slot.lock().await;
+            assert!(Instant::now() < frame_deadline);
+            assert!(control.frames.is_empty());
+            assert!(control.lease.is_none());
+            assert!(control.fence > first.fence);
+        }
+        assert_eq!(
+            smoke_input(service, p, row, &first, &old, &authority)
+                .await
+                .unwrap_err()
+                .code,
+            "managed_desktop_control_lease_expired"
+        );
+        require_smoke_before_deadline(lease_deadline).unwrap();
+        assert_eq!(f.input_count.load(Ordering::SeqCst), 0);
+        // Model remote takeover exceeding the original frame's lifetime using
+        // real elapsed time, without changing clocks or production deadlines.
+        tokio::time::sleep(Duration::from_millis(FRAME_MS as u64 + 100)).await;
         let mut other = p.clone();
         other.principal_id = "second".into();
         let next = service
@@ -2009,6 +2071,17 @@ mod tests {
             .unwrap();
         assert!(next.fence > first.fence);
         assert_ne!(next.token, first.token);
+        {
+            let mut control = slot.lock().await;
+            control
+                .require_lease(&other, &next.token, next.fence)
+                .unwrap();
+            assert!(control
+                .frames
+                .values()
+                .flatten()
+                .all(|frame| frame.id != old.frame_id));
+        }
         assert_eq!(
             smoke_input(service, p, row, &first, &old, &authority)
                 .await
@@ -2024,6 +2097,9 @@ mod tests {
             "managed_desktop_control_stale_frame"
         );
         assert_eq!(f.input_count.load(Ordering::SeqCst), 0);
+        smoke_live_lease_deadline(service, &other, row, &next)
+            .await
+            .unwrap();
         let frame = service
             .control_frame_inner(&other, &row.id, row.generation, &authority, true)
             .await

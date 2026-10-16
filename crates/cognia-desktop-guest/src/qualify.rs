@@ -92,6 +92,17 @@ const ACCEPTANCE_STAGES: &[&str] = &[
     "validation_importer_probe",
     "validation_git_process",
     "validation_browser",
+    "validation_acceptance_executable",
+    "validation_terminal_executable",
+    "validation_importer_executable",
+    "validation_git_executable",
+    "validation_git_exit",
+    "validation_browser_executable",
+    "validation_browser_exit",
+    "validation_browser_preview",
+    "validation_browser_metadata",
+    "validation_browser_redirect",
+    "validation_browser_hostname",
     "validation_teardown",
     "negative_prepare",
     "negative_spawn",
@@ -214,6 +225,22 @@ pub(crate) fn result() -> io::Result<()> {
                 .all(|b| b.is_ascii_lowercase() || *b == b'_' || *b == b':')
         {
             eprintln!("{}", String::from_utf8_lossy(&failure));
+        }
+        // A failed report stays private. Only this bounded typed projection
+        // may cross the authenticated root result channel; stdout stays empty.
+        if let Ok(bytes) = protected_read(RESULT) {
+            if let Ok(report) = serde_json::from_slice::<WorkloadQualificationReport>(&bytes) {
+                if report.boundary_generation == claim && report.validate().is_err() {
+                    let diagnostic = BrowserDiagnostic::from_report(&report);
+                    if diagnostic.validate_for(&claim).is_ok() {
+                        if let Ok(json) = serde_json::to_string(&diagnostic) {
+                            if json.len() <= 2048 {
+                                eprintln!("qualification_browser_diagnostic:{json}");
+                            }
+                        }
+                    }
+                }
+            }
         }
         return Err(refused());
     }

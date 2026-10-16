@@ -696,31 +696,60 @@ pub async fn observe_desktop_boundary(bootstrap: &DesktopBootstrap) -> Result<Ve
 /// command accepts no caller script, destination, PID, environment or stdin.
 pub async fn qualify_desktop_workload(bootstrap: &DesktopBootstrap) -> Result<Vec<u8>, EnvdError> {
     let endpoint = bootstrap.endpoint()?;
-    let start = fixed_desktop_report_at(bootstrap, &endpoint, Duration::from_secs(15), "qualify-start", 1024).await?;
+    let start = fixed_desktop_report_at(
+        bootstrap,
+        &endpoint,
+        Duration::from_secs(15),
+        "qualify-start",
+        1024,
+        None,
+    )
+    .await?;
     let start: serde_json::Value = serde_json::from_slice(&start)
         .map_err(|_| EnvdError::Protocol("workload qualification start invalid".into()))?;
-    let generation = start.get("boundaryGeneration").and_then(|v|v.as_str())
-        .filter(|_| start.as_object().is_some_and(|v|v.len()==2) && start["started"]==true)
-        .ok_or_else(|| EnvdError::Protocol("workload qualification start invalid".into()))?.to_owned();
-    if !uuid::Uuid::parse_str(&generation).is_ok_and(|id|!id.is_nil() && id.to_string()==generation) {
-        return Err(EnvdError::Protocol("workload qualification generation invalid".into()));
+    let generation = start
+        .get("boundaryGeneration")
+        .and_then(|v| v.as_str())
+        .filter(|_| start.as_object().is_some_and(|v| v.len() == 2) && start["started"] == true)
+        .ok_or_else(|| EnvdError::Protocol("workload qualification start invalid".into()))?
+        .to_owned();
+    if !uuid::Uuid::parse_str(&generation)
+        .is_ok_and(|id| !id.is_nil() && id.to_string() == generation)
+    {
+        return Err(EnvdError::Protocol(
+            "workload qualification generation invalid".into(),
+        ));
     }
     // The start stream has ended and been dropped. The independent collector
     // kills the supervisor while no Host request or reconciliation is active.
     tokio::time::sleep(Duration::from_secs(90)).await;
     let result = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let bytes = fixed_desktop_report_at(bootstrap,&endpoint,Duration::from_secs(15),"qualify-result",262144).await?;
-            let value:serde_json::Value=serde_json::from_slice(&bytes)
-                .map_err(|_|EnvdError::Protocol("workload qualification report invalid".into()))?;
-            if value["boundaryGeneration"] != generation {return Err(EnvdError::Protocol("workload qualification generation changed".into()));}
-            if value.as_object().is_some_and(|v|v.len()==2) && value["pending"]==true {
-                tokio::time::sleep(Duration::from_secs(2)).await;continue;
+            let bytes = fixed_desktop_report_at(
+                bootstrap,
+                &endpoint,
+                Duration::from_secs(15),
+                "qualify-result",
+                262144,
+                Some(&generation),
+            )
+            .await?;
+            let value: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|_| EnvdError::Protocol("workload qualification report invalid".into()))?;
+            if value["boundaryGeneration"] != generation {
+                return Err(EnvdError::Protocol(
+                    "workload qualification generation changed".into(),
+                ));
+            }
+            if value.as_object().is_some_and(|v| v.len() == 2) && value["pending"] == true {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
             }
             return Ok(bytes);
         }
-    }).await;
-    result.map_err(|_|EnvdError::Transport("workload qualification timed out".into()))?
+    })
+    .await;
+    result.map_err(|_| EnvdError::Transport("workload qualification timed out".into()))?
 }
 
 async fn observe_desktop_boundary_at(
@@ -728,7 +757,7 @@ async fn observe_desktop_boundary_at(
     endpoint: &EnvdEndpoint,
     deadline: Duration,
 ) -> Result<Vec<u8>, EnvdError> {
-    fixed_desktop_report_at(bootstrap, endpoint, deadline, "observe", 32768).await
+    fixed_desktop_report_at(bootstrap, endpoint, deadline, "observe", 32768, None).await
 }
 
 // Only fixed collector stage names may leave the guest diagnostic stream.
@@ -744,7 +773,9 @@ fn qualification_failure_stage(stderr: &[u8]) -> Option<&'static str> {
         "qualification_failed:acceptance_prepare" => Some("acceptance_prepare"),
         "qualification_failed:acceptance_spawn" => Some("acceptance_spawn"),
         "qualification_failed:acceptance_admission_wait" => Some("acceptance_admission_wait"),
-        "qualification_failed:acceptance_admission_validate" => Some("acceptance_admission_validate"),
+        "qualification_failed:acceptance_admission_validate" => {
+            Some("acceptance_admission_validate")
+        }
         "qualification_failed:acceptance_ack" => Some("acceptance_ack"),
         "qualification_failed:acceptance_payload" => Some("acceptance_payload"),
         "qualification_failed:payload_identity" => Some("payload_identity"),
@@ -792,20 +823,30 @@ fn qualification_failure_stage(stderr: &[u8]) -> Option<&'static str> {
         "qualification_failed:payload_acceptance_snapshot" => Some("payload_acceptance_snapshot"),
         "qualification_failed:payload_acceptance_sockets" => Some("payload_acceptance_sockets"),
         "qualification_failed:payload_acceptance_dns_spawn" => Some("payload_acceptance_dns_spawn"),
-        "qualification_failed:payload_acceptance_dns_deadline" => Some("payload_acceptance_dns_deadline"),
-        "qualification_failed:payload_acceptance_dns_channel" => Some("payload_acceptance_dns_channel"),
+        "qualification_failed:payload_acceptance_dns_deadline" => {
+            Some("payload_acceptance_dns_deadline")
+        }
+        "qualification_failed:payload_acceptance_dns_channel" => {
+            Some("payload_acceptance_dns_channel")
+        }
         "qualification_failed:payload_acceptance_helpers" => Some("payload_acceptance_helpers"),
         "qualification_failed:payload_terminal_snapshot" => Some("payload_terminal_snapshot"),
         "qualification_failed:payload_terminal_sockets" => Some("payload_terminal_sockets"),
         "qualification_failed:payload_terminal_dns_spawn" => Some("payload_terminal_dns_spawn"),
-        "qualification_failed:payload_terminal_dns_deadline" => Some("payload_terminal_dns_deadline"),
+        "qualification_failed:payload_terminal_dns_deadline" => {
+            Some("payload_terminal_dns_deadline")
+        }
         "qualification_failed:payload_terminal_dns_channel" => Some("payload_terminal_dns_channel"),
         "qualification_failed:payload_terminal_helpers" => Some("payload_terminal_helpers"),
         "qualification_failed:validation_desktop" => Some("validation_desktop"),
         "qualification_failed:validation_negative_control" => Some("validation_negative_control"),
         "qualification_failed:validation_tamper_control" => Some("validation_tamper_control"),
-        "qualification_failed:validation_acceptance_admission" => Some("validation_acceptance_admission"),
-        "qualification_failed:validation_importer_admission" => Some("validation_importer_admission"),
+        "qualification_failed:validation_acceptance_admission" => {
+            Some("validation_acceptance_admission")
+        }
+        "qualification_failed:validation_importer_admission" => {
+            Some("validation_importer_admission")
+        }
         "qualification_failed:validation_binding" => Some("validation_binding"),
         "qualification_failed:validation_acceptance_probe" => Some("validation_acceptance_probe"),
         "qualification_failed:validation_terminal_probe" => Some("validation_terminal_probe"),
@@ -813,6 +854,26 @@ fn qualification_failure_stage(stderr: &[u8]) -> Option<&'static str> {
         "qualification_failed:validation_importer_probe" => Some("validation_importer_probe"),
         "qualification_failed:validation_git_process" => Some("validation_git_process"),
         "qualification_failed:validation_browser" => Some("validation_browser"),
+        "qualification_failed:validation_acceptance_executable" => {
+            Some("validation_acceptance_executable")
+        }
+        "qualification_failed:validation_terminal_executable" => {
+            Some("validation_terminal_executable")
+        }
+        "qualification_failed:validation_importer_executable" => {
+            Some("validation_importer_executable")
+        }
+        "qualification_failed:validation_git_executable" => Some("validation_git_executable"),
+        "qualification_failed:validation_git_exit" => Some("validation_git_exit"),
+        "qualification_failed:validation_browser_executable" => {
+            Some("validation_browser_executable")
+        }
+        "qualification_failed:validation_browser_exit" => Some("validation_browser_exit"),
+        "qualification_failed:validation_browser_preview" => Some("validation_browser_preview"),
+        "qualification_failed:validation_browser_metadata" => Some("validation_browser_metadata"),
+        "qualification_failed:validation_browser_redirect" => Some("validation_browser_redirect"),
+        "qualification_failed:validation_browser_hostname" => Some("validation_browser_hostname"),
+
         "qualification_failed:validation_teardown" => Some("validation_teardown"),
         "qualification_failed:negative_prepare" => Some("negative_prepare"),
         "qualification_failed:negative_spawn" => Some("negative_spawn"),
@@ -827,12 +888,35 @@ fn qualification_failure_stage(stderr: &[u8]) -> Option<&'static str> {
     })
 }
 
+fn qualification_browser_diagnostic(
+    stderr: &[u8],
+    generation: Option<&str>,
+) -> Option<cognia_desktop_guest::qualification::BrowserDiagnostic> {
+    let generation = generation?;
+    if stderr.len() > 4096 {
+        return None;
+    }
+    let text = std::str::from_utf8(stderr).ok()?;
+    let mut lines = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("qualification_browser_diagnostic:"));
+    let json = lines.next()?;
+    if lines.next().is_some() || json.len() > 2048 {
+        return None;
+    }
+    let diagnostic: cognia_desktop_guest::qualification::BrowserDiagnostic =
+        serde_json::from_str(json).ok()?;
+    diagnostic.validate_for(generation).ok()?;
+    Some(diagnostic)
+}
+
 async fn fixed_desktop_report_at(
     bootstrap: &DesktopBootstrap,
     endpoint: &EnvdEndpoint,
     deadline: Duration,
     command: &str,
     maximum_bytes: usize,
+    expected_generation: Option<&str>,
 ) -> Result<Vec<u8>, EnvdError> {
     let spec = StartSpec {
         cmd: "/usr/local/bin/cognia-desktop-guest".into(),
@@ -863,9 +947,13 @@ async fn fixed_desktop_report_at(
                     if total > maximum_bytes {
                         return Err(EnvdError::Protocol("boundary report exceeded bound".into()));
                     }
-                    if command == "qualify-result" && diagnostic.len() < 1024 {
-                        let remaining = 1024 - diagnostic.len();
-                        diagnostic.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+                    if command == "qualify-result" {
+                        if diagnostic.len().saturating_add(bytes.len()) > 4096 {
+                            return Err(EnvdError::Protocol(
+                                "qualification diagnostic exceeded bound".into(),
+                            ));
+                        }
+                        diagnostic.extend_from_slice(&bytes);
                     }
                 }
                 Some(ProcessEvent::Keepalive) => (),
@@ -876,12 +964,21 @@ async fn fixed_desktop_report_at(
                 }
                 _ => {
                     if command == "qualify-result" {
-                        eprintln!("workload qualification: stage={}",
-                            qualification_failure_stage(&diagnostic).unwrap_or("unavailable"));
+                        eprintln!(
+                            "workload qualification: stage={}",
+                            qualification_failure_stage(&diagnostic).unwrap_or("unavailable")
+                        );
+                        if let Some(value) =
+                            qualification_browser_diagnostic(&diagnostic, expected_generation)
+                        {
+                            if let Ok(json) = serde_json::to_string(&value) {
+                                eprintln!("workload qualification browser diagnostic: {json}");
+                            }
+                        }
                     }
                     return Err(EnvdError::Protocol(
                         "boundary report did not complete".into(),
-                    ))
+                    ));
                 }
             }
         }
@@ -1403,13 +1500,92 @@ mod tests {
     #[test]
     fn qualification_diagnostics_only_emit_fixed_stages() {
         assert_eq!(qualification_failure_stage(b"qualification_failed:importer\nmanaged_desktop_guest_refused:qualification_result\n"), Some("importer"));
-        assert_eq!(qualification_failure_stage(b"qualification_failed:payload_terminal_exited\n"), Some("payload_terminal_exited"));
-        assert_eq!(qualification_failure_stage(b"qualification_failed:payload_terminal_deadline\n"), Some("payload_terminal_deadline"));
-        assert_eq!(qualification_failure_stage(b"qualification_failed:payload_terminal_probe\n"), Some("payload_terminal_probe"));
-        assert_eq!(qualification_failure_stage(b"qualification_deadline\n"), Some("deadline"));
-        for rejected in [b"qualification_failed:secret".as_slice(), b"qualification_failed:importer secret", b"https://secret/qualification_failed:importer", &[255]] {
+        assert_eq!(
+            qualification_failure_stage(b"qualification_failed:payload_terminal_exited\n"),
+            Some("payload_terminal_exited")
+        );
+        assert_eq!(
+            qualification_failure_stage(b"qualification_failed:payload_terminal_deadline\n"),
+            Some("payload_terminal_deadline")
+        );
+        assert_eq!(
+            qualification_failure_stage(b"qualification_failed:payload_terminal_probe\n"),
+            Some("payload_terminal_probe")
+        );
+        assert_eq!(
+            qualification_failure_stage(b"qualification_deadline\n"),
+            Some("deadline")
+        );
+        for rejected in [
+            b"qualification_failed:secret".as_slice(),
+            b"qualification_failed:importer secret",
+            b"https://secret/qualification_failed:importer",
+            &[255],
+        ] {
             assert_eq!(qualification_failure_stage(rejected), None);
         }
+    }
+
+    #[test]
+    fn browser_diagnostic_is_typed_unique_bounded_and_generation_bound() {
+        let generation = "6a370d8e-2d69-40fb-9586-786b7424365a";
+        let raw = json!({
+            "boundaryGeneration": generation,
+            "acceptanceExecutableMatches": true, "terminalExecutableMatches": true,
+            "importerExecutableMatches": true, "gitExecutableMatches": true,
+            "browserExecutableMatches": true, "gitExitCode": 0, "localExitCode": 0,
+            "localPreviewPresent": true, "metadataNetErrors": [-109, -3],
+            "redirectNetErrors": [-109], "hostnameNetErrors": [-105]
+        });
+        let line =
+            |value: &serde_json::Value| format!("qualification_browser_diagnostic:{value}\n");
+        let bytes = line(&raw);
+        let accepted =
+            qualification_browser_diagnostic(bytes.as_bytes(), Some(generation)).unwrap();
+        assert_eq!(accepted.metadata_net_errors, [-109, -3]);
+        assert!(qualification_browser_diagnostic(bytes.as_bytes(), None).is_none());
+        assert!(qualification_browser_diagnostic(
+            bytes.as_bytes(),
+            Some("6a370d8e-2d69-40fb-9586-786b7424365b")
+        )
+        .is_none());
+        assert!(qualification_browser_diagnostic(
+            format!("{bytes}{bytes}").as_bytes(),
+            Some(generation)
+        )
+        .is_none());
+        let mut unknown = raw.clone();
+        unknown["stderr"] = json!("secret");
+        assert!(
+            qualification_browser_diagnostic(line(&unknown).as_bytes(), Some(generation)).is_none()
+        );
+        let mut oversized = raw.clone();
+        oversized["metadataNetErrors"] = json!(vec![-109; 9]);
+        assert!(
+            qualification_browser_diagnostic(line(&oversized).as_bytes(), Some(generation))
+                .is_none()
+        );
+        let mut invalid = raw.clone();
+        invalid["hostnameNetErrors"] = json!(["secret"]);
+        assert!(
+            qualification_browser_diagnostic(line(&invalid).as_bytes(), Some(generation)).is_none()
+        );
+        assert!(qualification_browser_diagnostic(&vec![b'x'; 4097], Some(generation)).is_none());
+        assert!(qualification_browser_diagnostic(
+            format!(
+                "qualification_browser_diagnostic:{}{}",
+                " ".repeat(2049),
+                raw
+            )
+            .as_bytes(),
+            Some(generation)
+        )
+        .is_none());
+        assert!(qualification_browser_diagnostic(
+            b"qualification_browser_diagnostic:{",
+            Some(generation)
+        )
+        .is_none());
     }
 
     #[tokio::test]
@@ -1421,7 +1597,8 @@ mod tests {
                 &fixture.endpoint,
                 Duration::from_secs(1),
                 "qualify-result",
-                262144
+                262144,
+                None,
             )
             .await
             .unwrap(),
@@ -1448,7 +1625,8 @@ mod tests {
                 &fixture.endpoint,
                 Duration::from_secs(1),
                 "qualify-result",
-                262144
+                262144,
+                None,
             )
             .await
             .is_err());

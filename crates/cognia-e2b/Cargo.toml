@@ -9,6 +9,7 @@ description = "Host-only E2B control-plane transport and immutable template requ
 
 [dependencies]
 base64.workspace = true
+cognia-desktop-guest = { path = "../cognia-desktop-guest" }
 cognia-net = { path = "../cognia-net" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
