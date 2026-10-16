@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cognia_e2b::envd::{DesktopBootstrap, ProcessEvent, ProcessInput, StartSpec};
+use cognia_desktop_guest::source_tree::{self, SourceTreeBuilder, SourceTreeEntry, SourceTreeProof};
 use cognia_exec_sandbox::proc_group::{apply_process_group, kill_process_group};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,7 +22,6 @@ pub const MAX_ACCEPTANCE_FILE_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_ACCEPTANCE_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_ACCEPTANCE_FILES: usize = 100;
 const MAX_STAGING_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-const GUEST_INSTALLER: &str = include_str!("handoff_guest.py");
 type Result<T> = std::result::Result<T, String>;
 
 /// Constructed only after a durable delivery/revision/source authorization.
@@ -91,6 +91,9 @@ struct TransferManifest {
     commit: String,
     bundle_bytes: u64,
     bundle_sha256: String,
+    source_tree_sha256: String,
+    source_file_count: u64,
+    source_bytes: u64,
     files: Vec<TransferFile>,
 }
 struct HandoffStaging(Option<tempfile::TempDir>);
@@ -123,6 +126,11 @@ impl PreparedHandoff {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstalledHandoff {
+    pub receipt_version: u32,
+    pub boundary_generation: String,
+    pub source_tree_sha256: String,
+    pub source_file_count: u64,
+    pub source_bytes: u64,
     pub operation_id: String,
     pub commit: String,
     pub manifest_digest: String,
@@ -252,6 +260,104 @@ async fn run_git_command(repository: &GitRepository, mut command: tokio::process
         if !status.success() { return Err("managed_handoff_git_failed".into()); }
         staging_size(repository).await?;
         Ok(output)
+    }).await
+}
+
+struct SourceBlob {
+    path: Vec<u8>,
+    executable: bool,
+    bytes: u64,
+    object_id: String,
+}
+fn source_tree_error(_: impl std::fmt::Display) -> String { "managed_handoff_source_tree_invalid".into() }
+fn parse_source_tree_listing(listing: &[u8]) -> Result<Vec<SourceBlob>> {
+    if listing.len() > source_tree::MAX_SOURCE_METADATA_BYTES || (!listing.is_empty() && listing.last() != Some(&0)) {
+        return Err("managed_handoff_source_tree_limit".into());
+    }
+    let mut entries = Vec::new();
+    let mut names = BTreeSet::new();
+    let mut total = 0_u64;
+    let mut metadata = 0_usize;
+    if listing.is_empty() { return Ok(entries); }
+    for record in listing[..listing.len() - 1].split(|byte| *byte == 0) {
+        let separator = record.iter().position(|byte| *byte == b'\t').ok_or("managed_handoff_source_tree_invalid")?;
+        let fields = record[..separator].split(|byte| *byte == b' ').filter(|field| !field.is_empty()).collect::<Vec<_>>();
+        if fields.len() != 4 { return Err("managed_handoff_source_tree_invalid".into()); }
+        let executable = source_tree::git_executable(fields[0], fields[1]).map_err(source_tree_error)?;
+        let id = std::str::from_utf8(fields[2]).map_err(source_tree_error)?;
+        if !object_id(id) || fields[3].is_empty() || !fields[3].iter().all(u8::is_ascii_digit) {
+            return Err("managed_handoff_source_tree_invalid".into());
+        }
+        let bytes = std::str::from_utf8(fields[3]).map_err(source_tree_error)?.parse::<u64>().map_err(source_tree_error)?;
+        let path = record[separator + 1..].to_vec();
+        source_tree::validate_path(&path).map_err(source_tree_error)?;
+        if !names.insert(path.clone()) { return Err("managed_handoff_source_tree_invalid".into()); }
+        total = total.checked_add(bytes).ok_or("managed_handoff_source_tree_limit")?;
+        metadata = metadata.checked_add(path.len() * 2 + 45).ok_or("managed_handoff_source_tree_limit")?;
+        if entries.len() >= source_tree::MAX_SOURCE_FILES || total > source_tree::MAX_SOURCE_BYTES
+            || metadata > source_tree::MAX_SOURCE_METADATA_BYTES {
+            return Err("managed_handoff_source_tree_limit".into());
+        }
+        entries.push(SourceBlob { path, executable, bytes, object_id: id.into() });
+    }
+    for path in &names {
+        if path.iter().enumerate().any(|(index, byte)| *byte == b'/' && names.contains(&path[..index])) {
+            return Err("managed_handoff_source_tree_invalid".into());
+        }
+    }
+    Ok(entries)
+}
+
+async fn source_tree_proof(repository: &GitRepository, commit: &str, budget: &HandoffBudget) -> Result<SourceTreeProof> {
+    let listing = git(repository, &["ls-tree", "-r", "-z", "--full-tree", "-l", commit],
+        source_tree::MAX_SOURCE_METADATA_BYTES as u64, budget).await?;
+    let entries = parse_source_tree_listing(&listing)?;
+    drop(listing);
+    budget.check()?;
+    if entries.is_empty() { return SourceTreeBuilder::new().finish().map_err(source_tree_error); }
+    // One bounded raw-object reader avoids both checkout filters and buffering
+    // a potentially multi-gigabyte source file in the Host process.
+    budget.run(async {
+        let mut command = git_command(&repository.path, &["cat-file", "--batch"]);
+        command.stdin(Stdio::piped());
+        apply_process_group(&mut command);
+        let mut process = command.spawn().map_err(io_error)?;
+        let _process_group = GitProcessGroup(process.id());
+        let mut input = process.stdin.take().ok_or("managed_handoff_git_failed")?;
+        let mut output = tokio::io::BufReader::new(process.stdout.take().ok_or("managed_handoff_git_failed")?);
+        let mut proof = SourceTreeBuilder::new();
+        let mut buffer = vec![0; 64 * 1024];
+        for entry in entries {
+            budget.check()?;
+            input.write_all(format!("{}\n", entry.object_id).as_bytes()).await.map_err(io_error)?;
+            let mut header = Vec::new();
+            loop {
+                let byte = output.read_u8().await.map_err(io_error)?;
+                header.push(byte);
+                if header.len() > 128 { return Err("managed_handoff_source_tree_invalid".into()); }
+                if byte == b'\n' { break; }
+            }
+            if header != format!("{} blob {}\n", entry.object_id, entry.bytes).as_bytes() {
+                return Err("managed_handoff_source_tree_invalid".into());
+            }
+            let mut remaining = entry.bytes;
+            let mut content = Sha256::new();
+            while remaining > 0 {
+                budget.check()?;
+                let count = remaining.min(buffer.len() as u64) as usize;
+                output.read_exact(&mut buffer[..count]).await.map_err(io_error)?;
+                content.update(&buffer[..count]);
+                remaining -= count as u64;
+            }
+            if output.read_u8().await.map_err(io_error)? != b'\n' { return Err("managed_handoff_source_tree_invalid".into()); }
+            proof.push(SourceTreeEntry { path: entry.path, executable: entry.executable, bytes: entry.bytes,
+                content_sha256: content.finalize().into() }).map_err(source_tree_error)?;
+        }
+        drop(input);
+        if output.read(&mut buffer[..1]).await.map_err(io_error)? != 0 { return Err("managed_handoff_source_tree_invalid".into()); }
+        if !process.wait().await.map_err(io_error)?.success() { return Err("managed_handoff_git_failed".into()); }
+        staging_size(repository).await?;
+        proof.finish().map_err(source_tree_error)
     }).await
 }
 async fn fetch(repository: &GitRepository, port: u16, commit: &str, budget: &HandoffBudget) -> Result<()> {
@@ -408,6 +514,7 @@ async fn prepare_source_with_reservation(
     let commit_expr = format!("{}^{{commit}}", source.commit);
     let verified = git(&repo, &["rev-parse", "--verify", &commit_expr], 100, budget).await?;
     if verified != format!("{}\n", source.commit).as_bytes() { return Err("managed_handoff_commit_mismatch".into()); }
+    let source_tree = source_tree_proof(&repo, &source.commit, budget).await?;
     git(&repo, &["update-ref", "refs/cognia/acceptance", &source.commit], 4096, budget).await?;
     let bundle = repo.path.join("source.bundle");
     git(&repo, &["bundle", "create", bundle.to_str().ok_or("managed_handoff_io_failed")?, "refs/cognia/acceptance"], 4096, budget).await?;
@@ -429,7 +536,11 @@ async fn prepare_source_with_reservation(
         files.push(TransferFile { path: name.clone(), bytes: bytes.len() as u64, sha256: hash(&bytes) });
         tokio::fs::write(staging.path().join(format!("file-{index}")), &bytes).await.map_err(io_error)?;
     }
-    let manifest = TransferManifest { version: 1, commit: source.commit.clone(), bundle_bytes: size, bundle_sha256: digest, files };
+    // The confined importer and native promotion independently verify this
+    // Host-derived raw tree proof before acknowledging the handoff.
+    let manifest = TransferManifest { version: 2, commit: source.commit.clone(), bundle_bytes: size, bundle_sha256: digest,
+        source_tree_sha256: source_tree.source_tree_sha256, source_file_count: source_tree.source_file_count,
+        source_bytes: source_tree.source_bytes, files };
     let digest = hash(&serde_json::to_vec(&manifest).map_err(io_error)?);
     budget.check()?;
     Ok(PreparedHandoff { staging, manifest, digest })
@@ -466,8 +577,8 @@ pub async fn install_on_desktop(
         parse_launch(&["npm".into(), "run".into(), launch.script.clone()])?;
     }
     let spec = StartSpec {
-        cmd: "/usr/local/bin/python3".into(),
-        args: vec!["-I".into(), "-c".into(), GUEST_INSTALLER.into()],
+        cmd: "/usr/local/bin/cognia-desktop-guest".into(),
+        args: vec!["handoff".into()],
         envs: BTreeMap::new(), cwd: Some("/".into()), stdin: true,
     };
     budget.run(async {
@@ -526,16 +637,26 @@ pub async fn install_on_desktop(
                 }
             }
             let installed: InstalledHandoff = serde_json::from_slice(&stdout).map_err(|_| "managed_handoff_guest_protocol")?;
-            if installed.operation_id != operation_id || installed.commit != prepared.manifest.commit
-                || installed.manifest_digest != prepared.digest
-                || installed.workspace != format!("/var/lib/cognia-acceptance/{operation_id}/workspace")
-                || installed.launched != launch.is_some()
-            { return Err("managed_handoff_guest_protocol".into()); }
+            validate_receipt(&installed, operation_id, &prepared.manifest, &prepared.digest, launch.is_some())?;
             Ok::<InstalledHandoff, String>(installed)
         };
         let (_, result) = tokio::try_join!(send, receive)?;
         Ok(result)
     }).await
+}
+
+fn validate_receipt(installed: &InstalledHandoff, operation_id: &str, manifest: &TransferManifest, digest: &str, launched: bool) -> Result<()> {
+    if installed.receipt_version != 2
+        || uuid::Uuid::parse_str(&installed.boundary_generation).map(|id| !id.is_nil() && id.to_string() == installed.boundary_generation).ok() != Some(true)
+        || installed.source_tree_sha256 != manifest.source_tree_sha256
+        || installed.source_file_count != manifest.source_file_count
+        || installed.source_bytes != manifest.source_bytes
+        || installed.operation_id != operation_id || installed.commit != manifest.commit
+        || installed.manifest_digest != digest
+        || installed.workspace != format!("/workspace/{operation_id}/workspace")
+        || installed.launched != launched
+    { return Err("managed_handoff_guest_protocol".into()); }
+    Ok(())
 }
 
 pub fn validate_commit(commit: &str) -> Result<()> {
@@ -698,6 +819,64 @@ mod tests {
         }).await.unwrap();
     }
 
+    #[test]
+    fn receipt_cannot_substitute_source_proof_generation_or_destination() {
+        let operation = uuid::Uuid::new_v4().to_string();
+        let manifest = TransferManifest { version: 2, commit: "a".repeat(40), bundle_bytes: 1,
+            bundle_sha256: "b".repeat(64), source_tree_sha256: "c".repeat(64), source_file_count: 2,
+            source_bytes: 16, files: vec![] };
+        let receipt = serde_json::json!({ "receiptVersion": 2, "boundaryGeneration": uuid::Uuid::new_v4().to_string(),
+            "operationId": operation, "commit": manifest.commit, "manifestDigest": "d".repeat(64),
+            "sourceTreeSha256": manifest.source_tree_sha256, "sourceFileCount": 2, "sourceBytes": 16,
+            "workspace": format!("/workspace/{operation}/workspace"), "launched": false });
+        let valid: InstalledHandoff = serde_json::from_value(receipt.clone()).unwrap();
+        assert!(validate_receipt(&valid, &operation, &manifest, &"d".repeat(64), false).is_ok());
+        for (key, value) in [
+            ("receiptVersion", serde_json::json!(1)), ("boundaryGeneration", serde_json::json!(uuid::Uuid::nil().to_string())),
+            ("sourceTreeSha256", serde_json::json!("f".repeat(64))), ("sourceFileCount", serde_json::json!(3)),
+            ("sourceBytes", serde_json::json!(17)), ("workspace", serde_json::json!("/tmp/workspace")),
+            ("launched", serde_json::json!(true)), ("commit", serde_json::json!("e".repeat(40))),
+        ] {
+            let mut changed = receipt.clone(); changed[key] = value;
+            let changed: InstalledHandoff = serde_json::from_value(changed).unwrap();
+            assert!(validate_receipt(&changed, &operation, &manifest, &"d".repeat(64), false).is_err(), "{key}");
+        }
+    }
+
+    fn assert_pinned_source_proof(prepared: &PreparedHandoff) {
+        assert_eq!(prepared.manifest.version, 2);
+        assert_eq!(prepared.manifest.source_file_count, 1);
+        assert_eq!(prepared.manifest.source_bytes, 23);
+        assert_eq!(prepared.manifest.source_tree_sha256,
+            "0980bdafbb539c3901d0f53098e5ebff484794df9466ccc593ff67ccf3de5013");
+        let wire = serde_json::to_value(&prepared.manifest).unwrap();
+        assert_eq!(wire["sourceFileCount"], 1);
+        assert_eq!(wire["sourceBytes"], 23);
+        assert_eq!(wire["sourceTreeSha256"], prepared.manifest.source_tree_sha256);
+        assert_eq!(prepared.digest, hash(&serde_json::to_vec(&prepared.manifest).unwrap()));
+    }
+
+    #[test]
+    fn source_listing_refuses_symlinks_gitlinks_duplicate_and_traversal_paths() {
+        let id = "a".repeat(40);
+        for listing in [
+            format!("120000 blob {id} 1\tlink\0"),
+            format!("160000 commit {id} -\tsubmodule\0"),
+            format!("100644 blob {id} 1\t../escape\0"),
+            format!("100644 blob {id} 1\t.git/HEAD\0"),
+            format!("100644 blob {id} 1\ta\0" ).repeat(2),
+            format!("100644 blob {id} 1\ta\0" ) + &format!("100644 blob {id} 1\ta-b\0" ) + &format!("100644 blob {id} 1\ta/b\0" ),
+            format!("100644 blob {id} 1\tunterminated"),
+            format!("100644 blob {id} {}\tlarge\0", source_tree::MAX_SOURCE_BYTES + 1),
+        ] { assert!(parse_source_tree_listing(listing.as_bytes()).is_err()); }
+        assert!(parse_source_tree_listing(&[]).unwrap().is_empty());
+        let mut raw = format!("100755 blob {id}       0\t").into_bytes();
+        raw.extend_from_slice(b"raw\xff\nname\0");
+        let parsed = parse_source_tree_listing(&raw).unwrap();
+        assert_eq!(parsed[0].path, b"raw\xff\nname");
+        assert!(parsed[0].executable);
+    }
+
     #[tokio::test]
     async fn host_preparation_fetches_exact_commit_after_branch_moves_and_extracts_pinned_blobs() {
         let fixture = SourceFixture::new().await;
@@ -706,12 +885,47 @@ mod tests {
         let source = TrustedHandoffSource { commit: fixture.commit.clone(), readonly_proxy_port: proxy.port, recovery: None };
         let prepared = prepare_source_with_reservation(&source, &["check.json".into()], &budget, fixture.reservation()).await.unwrap();
         assert_eq!(prepared.commit(), fixture.commit);
+        assert_pinned_source_proof(&prepared);
         assert_eq!(tokio::fs::read(prepared.staging.path().join("file-0")).await.unwrap(), b"pinned acceptance bytes");
         assert_eq!(prepared.manifest.files[0].sha256, hash(b"pinned acceptance bytes"));
         assert!(!proxy.bodies.lock().unwrap().is_empty());
         let path = prepared.staging.path().join("source.bundle");
         let check = tokio::task::spawn_blocking(move || fixture_git(path.parent().unwrap(), &["bundle", "list-heads", path.to_str().unwrap()])).await.unwrap();
         assert_eq!(String::from_utf8(check).unwrap(), format!("{} refs/cognia/acceptance\n", fixture.commit));
+        drop(prepared);
+        staging_is_empty(&fixture.staging).await;
+    }
+
+    #[tokio::test]
+    async fn source_proof_uses_raw_objects_even_when_committed_attributes_transform_checkout() {
+        let fixture = SourceFixture::new().await;
+        let work = fixture._root.path().join("work");
+        let published = fixture.published.join("repo.git");
+        let commit = tokio::task::spawn_blocking(move || {
+            std::fs::write(work.join(".gitattributes"), b"check.json ident\n").unwrap();
+            std::fs::write(work.join("check.json"), b"$Id$\n").unwrap();
+            fixture_git(&work, &["add", "."]);
+            fixture_git(&work, &["commit", "-m", "raw object fixture"]);
+            let commit = String::from_utf8(fixture_git(&work, &["rev-parse", "HEAD"])).unwrap().trim().to_string();
+            fixture_git(&published, &["fetch", work.to_str().unwrap(), &format!("{commit}:refs/heads/raw")]);
+            std::fs::remove_file(work.join("check.json")).unwrap();
+            fixture_git(&work, &["checkout", "--", "check.json"]);
+            assert_ne!(std::fs::read(work.join("check.json")).unwrap(), b"$Id$\n");
+            commit
+        }).await.unwrap();
+        let proxy = GitHttpFixture::start(fixture.published.clone(), false).await;
+        let (_sender, budget) = fixture_budget();
+        let source = TrustedHandoffSource { commit, readonly_proxy_port: proxy.port, recovery: None };
+        let prepared = prepare_source_with_reservation(&source, &[], &budget, fixture.reservation()).await.unwrap();
+        let mut expected = SourceTreeBuilder::new();
+        for (path, content) in [(b".gitattributes".as_slice(), b"check.json ident\n".as_slice()), (b"check.json", b"$Id$\n")] {
+            expected.push(SourceTreeEntry { path: path.to_vec(), executable: false, bytes: content.len() as u64,
+                content_sha256: Sha256::digest(content).into() }).unwrap();
+        }
+        let expected = expected.finish().unwrap();
+        assert_eq!(prepared.manifest.source_tree_sha256, expected.source_tree_sha256);
+        assert_eq!(prepared.manifest.source_file_count, expected.source_file_count);
+        assert_eq!(prepared.manifest.source_bytes, expected.source_bytes);
         drop(prepared);
         staging_is_empty(&fixture.staging).await;
     }
@@ -728,6 +942,7 @@ mod tests {
         };
         let prepared = prepare_source_with_reservation(&source, &["check.json".into()], &budget, fixture.reservation()).await.unwrap();
         assert_eq!(prepared.commit(), fixture.commit);
+        assert_pinned_source_proof(&prepared);
         assert_eq!(tokio::fs::read(prepared.staging.path().join("file-0")).await.unwrap(), b"pinned acceptance bytes");
         let bodies = proxy.bodies.lock().unwrap().clone();
         assert!(bodies.iter().any(|body| body.windows(fixture.base.len()).any(|window| window == fixture.base.as_bytes())));

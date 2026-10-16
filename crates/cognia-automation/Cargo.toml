@@ -35,6 +35,7 @@ cognia-core = { path = "../cognia-core" }
 cognia-secrets = { path = "../cognia-secrets" }
 aes-gcm = { workspace = true, features = ["aes"] }
 cognia-e2b = { path = "../cognia-e2b" }
+cognia-desktop-guest = { path = "../cognia-desktop-guest" }
 cognia-environment = { path = "../cognia-environment", default-features = false }
 cognia-net = { path = "../cognia-net" }
 reqwest = { workspace = true, features = ["json", "rustls"] }
