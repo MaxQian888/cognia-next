@@ -269,26 +269,25 @@ export function createHostClient({
     idempotencyKey?: string
   ): Promise<T> {
     const path = `/api/_rpc/${command}`
-    const headers: Record<string, string> = {
-      ...(await session.authorizationHeaders("POST", path)),
-      "Content-Type": "application/json",
-    }
+    const extra: Record<string, string> = { "Content-Type": "application/json" }
     // Only the write declares `idempotency: required`. Sending a key on a read
     // is refused with `idempotency_key_forbidden`, so this is not "always send
     // one to be safe" — the header is as much a declaration as a value.
     if (command === "browser_context_submit" && typeof args.submissionId === "string") {
-      headers["Idempotency-Key"] = idempotencyKey ?? args.submissionId
+      extra["Idempotency-Key"] = idempotencyKey ?? args.submissionId
     }
     // The Host parses the header as a UUID; see FRESH_KEY_COMMANDS.
     if (FRESH_KEY_COMMANDS.has(command)) {
-      headers["Idempotency-Key"] = crypto.randomUUID()
+      extra["Idempotency-Key"] = crypto.randomUUID()
     }
-    const body = await expectCompanionJson(
-      fetchImpl(`${pairing.baseUrl}${path}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(args),
-      })
+    const body = await session.authorized("POST", path, async (auth) =>
+      expectCompanionJson(
+        fetchImpl(`${pairing.baseUrl}${path}`, {
+          method: "POST",
+          headers: { ...auth, ...extra },
+          body: JSON.stringify(args),
+        })
+      )
     )
     return unwrapRpcResult<T>(body)
   }
@@ -336,15 +335,14 @@ export function createHostClient({
     },
     socketTicket: async () => {
       const path = "/api/auth/socket-ticket"
-      const body = await expectCompanionJson(
-        fetchImpl(`${pairing.baseUrl}${path}`, {
-          method: "POST",
-          headers: {
-            ...(await session.authorizationHeaders("POST", path)),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ channel: "browser-companion" }),
-        })
+      const body = await session.authorized("POST", path, async (auth) =>
+        expectCompanionJson(
+          fetchImpl(`${pairing.baseUrl}${path}`, {
+            method: "POST",
+            headers: { ...auth, "Content-Type": "application/json" },
+            body: JSON.stringify({ channel: "browser-companion" }),
+          })
+        )
       )
       if (typeof body.ticket !== "string" || typeof body.expiresIn !== "number") {
         throw new Error("socket ticket response is malformed")

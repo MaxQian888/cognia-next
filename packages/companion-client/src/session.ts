@@ -10,10 +10,16 @@
 import { base64UrlToText } from "./base64url"
 import { createDeviceProof } from "./dpop"
 import type { DeviceSigner } from "./device-signer"
-import { expectCompanionJson } from "./errors"
+import { companionErrorCode, expectCompanionJson } from "./errors"
 
 /** Refresh this far before expiry, so a proof cannot be minted for a dead token. */
 const REFRESH_MARGIN_MS = 30_000
+
+/**
+ * What the Host answers for a token it cannot verify. Refused by the auth
+ * layer before any command runs, so the request is safe to send again.
+ */
+const STALE_TOKEN_CODE = "invalid_access_token"
 
 /** The `fetch` this client uses. Injected so callers can pin, proxy, or stub. */
 export type CompanionFetch = (input: string, init: RequestInit) => Promise<Response>
@@ -37,6 +43,22 @@ interface TokenState {
 export interface CompanionSession {
   /** `{ Authorization, DPoP }` for one request. */
   authorizationHeaders(method: string, path: string): Promise<Record<string, string>>
+  /**
+   * Send one authenticated request, re-authenticating once if the Host no
+   * longer accepts the cached token.
+   *
+   * The Host signs tokens with a key it regenerates on every start, so after a
+   * restart a cached token is refused with `invalid_access_token` until it
+   * would have expired anyway — minutes in which a reachable Host does nothing
+   * for this client. The refusal comes from the auth layer before any command
+   * runs, so the retry cannot repeat a write. Only once: a token minted moments
+   * ago that is still refused is not a stale token.
+   */
+  authorized<T>(
+    method: string,
+    path: string,
+    send: (headers: Record<string, string>) => Promise<T>
+  ): Promise<T>
   /** Drop the cached token; the next call re-authenticates. */
   invalidate(): void
 }
@@ -111,12 +133,31 @@ export function createCompanionSession({
     return refreshing
   }
 
+  async function headersFor(
+    active: TokenState,
+    method: string,
+    path: string
+  ): Promise<Record<string, string>> {
+    return {
+      Authorization: `Bearer ${active.accessToken}`,
+      DPoP: await createDeviceProof({ signer, nonce: active.jti, method, path }),
+    }
+  }
+
   return {
     async authorizationHeaders(method, path) {
+      return headersFor(await currentToken(), method, path)
+    },
+    async authorized(method, path, send) {
       const active = await currentToken()
-      return {
-        Authorization: `Bearer ${active.accessToken}`,
-        DPoP: await createDeviceProof({ signer, nonce: active.jti, method, path }),
+      try {
+        return await send(await headersFor(active, method, path))
+      } catch (error) {
+        if (companionErrorCode(error) !== STALE_TOKEN_CODE) throw error
+        // Only the token that was refused: concurrent requests refused for the
+        // same restart share the one replacement the first of them minted.
+        if (token === active) token = null
+        return send(await headersFor(await currentToken(), method, path))
       }
     },
     invalidate() {

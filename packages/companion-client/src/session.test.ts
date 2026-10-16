@@ -206,4 +206,82 @@ describe("createCompanionSession", () => {
     await expect(session.authorizationHeaders("GET", "/a")).resolves.toHaveProperty("DPoP")
     expect(tokens).toBe(1)
   })
+
+  describe("authorized", () => {
+    function session(h: Harness) {
+      return createCompanionSession({
+        baseUrl: "http://127.0.0.1:27891",
+        tenantId: "tenant-a",
+        signer: SIGNER,
+        fetchImpl: h.fetchImpl,
+      })
+    }
+
+    const stale = () =>
+      new CompanionApiError("the access token is invalid", "invalid_access_token", 401)
+
+    it("re-authenticates once when the Host no longer accepts the cached token", async () => {
+      // A Host restart regenerates the signing key; the cached token stays
+      // refused until it would have expired, unless the client re-authenticates.
+      const h = harness()
+      const s = session(h)
+      await s.authorizationHeaders("GET", "/warm")
+      const seen: string[] = []
+      const value = await s.authorized("POST", "/api/_rpc/x", async (headers) => {
+        seen.push(headers.Authorization)
+        if (headers.Authorization.endsWith(accessToken("jti-1"))) throw stale()
+        return "ok"
+      })
+      expect(value).toBe("ok")
+      expect(seen).toEqual([`Bearer ${accessToken("jti-1")}`, `Bearer ${accessToken("jti-2")}`])
+      // The replacement is cached, not minted per request.
+      await s.authorized("POST", "/api/_rpc/y", async () => "again")
+      expect(h.tokens).toBe(2)
+    })
+
+    it("does not retry any other refusal", async () => {
+      const h = harness()
+      const s = session(h)
+      let sends = 0
+      await expect(
+        s.authorized("POST", "/api/_rpc/x", async () => {
+          sends += 1
+          throw new CompanionApiError("revoked", "device_unavailable", 401)
+        })
+      ).rejects.toMatchObject({ code: "device_unavailable" })
+      expect(sends).toBe(1)
+      expect(h.tokens).toBe(1)
+    })
+
+    it("gives up when a freshly minted token is refused too", async () => {
+      const h = harness()
+      const s = session(h)
+      let sends = 0
+      await expect(
+        s.authorized("POST", "/api/_rpc/x", async () => {
+          sends += 1
+          throw stale()
+        })
+      ).rejects.toMatchObject({ code: "invalid_access_token" })
+      expect(sends).toBe(2)
+      expect(h.tokens).toBe(2)
+    })
+
+    it("shares one replacement among requests refused for the same restart", async () => {
+      const h = harness()
+      const s = session(h)
+      await s.authorizationHeaders("GET", "/warm")
+      const send = async (headers: Record<string, string>) => {
+        if (headers.Authorization.endsWith(accessToken("jti-1"))) throw stale()
+        return headers.Authorization
+      }
+      const [one, two] = await Promise.all([
+        s.authorized("POST", "/a", send),
+        s.authorized("POST", "/b", send),
+      ])
+      expect(one).toBe(`Bearer ${accessToken("jti-2")}`)
+      expect(two).toBe(one)
+      expect(h.tokens).toBe(2)
+    })
+  })
 })

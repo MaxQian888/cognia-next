@@ -85,6 +85,11 @@ Host 以自己的 `host:browser-companion` 调用方把字节暂存在现有会�
 （`device_unavailable`、`browser_submissions_disabled` 等），只有这类持续性拒绝才等待长间隔。Browser Access
 关闭期间，票据交换会拒绝此通道，因此不会出现套接字刚收到 welcome 一秒后就被关闭的情况。
 
+重启后的 Host 用新密钥签发访问令牌，重启前缓存的令牌都会被以 `invalid_access_token` 拒绝。客户端会丢弃该令牌并重新认证一次
+（该拒绝来自认证层，发生在任何命令执行之前，因此重发不会重复写入），而不是在旧令牌过期前让每个请求都失败。
+无论从桌面端还是通过 host-admin RPC 修改 Browser Access，都经由同一个函数（`browser_access::save_and_apply`）立即生效，
+因此被远程关闭的无界面 Host 无需重启即停止接受提交和套接字票据。
+
 驱动是第三项类能力 **`browser.drive`**。它属于浏览器类（因此存储的类约束允许它），但**不会**在注册时授予：
 由 Owner 在设置里按浏览器打开。Host 只在发送时向持有该能力的设备连接发送操作帧。
 

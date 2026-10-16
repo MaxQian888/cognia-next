@@ -172,7 +172,10 @@ pub(super) async fn dispatch(
                 required_aliased(&args, "allowed_origins", "allowedOrigins")?;
             let port: Option<u16> = optional(&args, "port")?;
             let data_dir = host.data_dir().map_err(RpcError::internal)?;
-            let saved = crate::companion_api::browser_access::save(
+            // `save_and_apply`, as the desktop command does: a headless Host
+            // switched off from the Connectivity settings must stop taking
+            // submissions now, not at its next restart.
+            let saved = crate::companion_api::browser_access::save_and_apply(
                 Some(&data_dir),
                 crate::companion_api::browser_access::BrowserAccessConfig {
                     enabled,

@@ -286,6 +286,31 @@ pub fn save(
     Ok(sanitized)
 }
 
+/// Persist the config and apply its switch to this running Host.
+///
+/// Every place the Owner changes browser access goes through here — the
+/// desktop command and the host-admin RPC a headless Host is configured over.
+/// Saving alone binds nothing until a restart, but refusing new submissions
+/// (and new device-socket tickets) must not wait for one: that is the kill
+/// switch ADR-0154 describes. The saved config is applied, not the argument —
+/// `sanitized()` turns `enabled` off when no origin survives.
+pub fn save_and_apply(
+    data_dir: Option<&Path>,
+    config: BrowserAccessConfig,
+) -> Result<BrowserAccessConfig, String> {
+    save_and_apply_to(&SUBMISSIONS_ENABLED, data_dir, config)
+}
+
+fn save_and_apply_to(
+    switch: &AtomicBool,
+    data_dir: Option<&Path>,
+    config: BrowserAccessConfig,
+) -> Result<BrowserAccessConfig, String> {
+    let saved = save(data_dir, config)?;
+    switch.store(saved.listener_enabled(), Ordering::Relaxed);
+    Ok(saved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,6 +551,54 @@ mod tests {
         // the whole reason this mirror exists.
         set_submissions_enabled(false);
         assert!(!submissions_enabled());
+    }
+
+    /// A switch of its own: the process-wide one starts `false` by contract
+    /// and another test asserts exactly that.
+    #[test]
+    fn saving_applies_the_switch_without_a_restart() {
+        let dir = temp_dir("save-and-apply");
+        let switch = AtomicBool::new(false);
+
+        let on = save_and_apply_to(
+            &switch,
+            Some(&dir),
+            BrowserAccessConfig {
+                enabled: true,
+                allowed_origins: vec!["http://localhost:3000".to_string()],
+                port: DEFAULT_BROWSER_PORT,
+            },
+        )
+        .unwrap();
+        assert!(on.listener_enabled());
+        assert!(switch.load(Ordering::Relaxed));
+
+        save_and_apply_to(
+            &switch,
+            Some(&dir),
+            BrowserAccessConfig {
+                enabled: false,
+                allowed_origins: vec!["http://localhost:3000".to_string()],
+                port: DEFAULT_BROWSER_PORT,
+            },
+        )
+        .unwrap();
+        assert!(!switch.load(Ordering::Relaxed));
+        assert!(!load(Some(&dir)).enabled);
+
+        // A refused save changes nothing: neither the file nor the switch.
+        let refused = save_and_apply_to(
+            &switch,
+            Some(&dir),
+            BrowserAccessConfig {
+                enabled: true,
+                allowed_origins: vec![],
+                port: DEFAULT_BROWSER_PORT,
+            },
+        );
+        assert!(refused.is_err());
+        assert!(!switch.load(Ordering::Relaxed));
+        assert!(!load(Some(&dir)).enabled);
     }
 
     #[test]

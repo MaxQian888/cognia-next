@@ -1135,7 +1135,9 @@ pub fn companion_browser_access_set(
     allowed_origins: Vec<String>,
     port: Option<u16>,
 ) -> Result<BrowserAccessSummary, String> {
-    let saved = browser_access::save(
+    // Binding the listener still needs a restart; refusing new submissions
+    // does not (see `save_and_apply`).
+    let saved = browser_access::save_and_apply(
         state.data_dir(),
         browser_access::BrowserAccessConfig {
             enabled,
@@ -1143,12 +1145,6 @@ pub fn companion_browser_access_set(
             port: port.unwrap_or(browser_access::DEFAULT_BROWSER_PORT),
         },
     )?;
-    // Binding the listener still needs a restart, but refusing new submissions
-    // must not: an already-bound listener that keeps accepting them after the
-    // switch is off is the gap ADR-0154's kill switch was written to describe.
-    // The saved config, not the argument — `sanitized()` can turn `enabled` off
-    // when nothing survives the origin list.
-    browser_access::set_submissions_enabled(saved.listener_enabled());
     Ok(browser_access_summary(&state, saved))
 }
 

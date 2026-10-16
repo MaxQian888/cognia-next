@@ -328,6 +328,108 @@ describe("createHostClient", () => {
     ).rejects.toThrow("malformed")
   })
 
+  /**
+   * A Host that restarts: tokens minted before the restart are refused the way
+   * the real auth layer refuses them, before any command runs.
+   */
+  function restartingHost(rpcBody: unknown) {
+    let generation = 0
+    let minted = 0
+    const valid = new Set<string>()
+    const calls: { path: string; headers: Headers }[] = []
+    const fetchImpl = async (input: string, init: RequestInit) => {
+      const path = new URL(input).pathname
+      const headers = new Headers(init.headers)
+      calls.push({ path, headers })
+      if (path === "/api/auth/device/challenge") {
+        return jsonResponse({ challengeId: "c", nonce: "n", expiresAt: NOW + 60_000 })
+      }
+      if (path === "/api/auth/token") {
+        minted += 1
+        const token = [
+          btoa(JSON.stringify({ alg: "HS256" })),
+          btoa(JSON.stringify({ jti: `jti-${minted}` })),
+          `g${generation}`,
+        ].join(".")
+        valid.add(token)
+        return jsonResponse({ accessToken: token, tokenType: "DPoP", expiresIn: 300 })
+      }
+      const token = headers.get("Authorization")?.replace(/^\S+ /, "") ?? ""
+      if (!valid.has(token)) {
+        return jsonResponse(
+          {
+            type: "https://cognia.dev/problems/invalid_access_token",
+            title: "Unauthorized",
+            status: 401,
+            detail: "the access token is invalid or expired",
+            code: "invalid_access_token",
+            requestId: "r",
+            retryable: false,
+            details: {},
+          },
+          401
+        )
+      }
+      return jsonResponse(rpcBody)
+    }
+    return {
+      calls,
+      fetchImpl,
+      minted: () => minted,
+      restart() {
+        generation += 1
+        valid.clear()
+      },
+    }
+  }
+
+  it("re-authenticates after a Host restart instead of failing until the token expires", async () => {
+    const host = restartingHost({ requestId: "r1", result: { items: [] } })
+    const client = createHostClient({ pairing, signer, fetchImpl: host.fetchImpl })
+    await client.list()
+    host.restart()
+
+    await expect(client.list()).resolves.toEqual({ items: [] })
+    expect(host.minted()).toBe(2)
+  })
+
+  it("gets a socket ticket after a Host restart, so the device socket reconnects", async () => {
+    const host = restartingHost({ ticket: "tk", expiresIn: 30 })
+    const client = createHostClient({ pairing, signer, fetchImpl: host.fetchImpl })
+    await client.socketTicket()
+    host.restart()
+
+    await expect(client.socketTicket()).resolves.toEqual({ ticket: "tk", expiresIn: 30 })
+  })
+
+  it("resends a write refused for a stale token under the same idempotency key", async () => {
+    // The refusal comes before dispatch, so the resend is the first delivery;
+    // keeping the key means even a lost answer could not run the write twice.
+    const submissionId = "11111111-2222-3333-4444-555555555555"
+    const host = restartingHost({ requestId: "r1", result: {} })
+    const client = createHostClient({ pairing, signer, fetchImpl: host.fetchImpl })
+    await client.list()
+    host.restart()
+
+    await client.submit({
+      submissionId,
+      workspaceId: "w1",
+      instruction: "summarize",
+      context: {
+        schemaVersion: 1,
+        captureMode: "metadata",
+        url: "https://example.com/",
+        title: "Example",
+        capturedAt: NOW,
+      },
+    })
+    const submits = host.calls.filter((call) => call.path === "/api/_rpc/browser_context_submit")
+    expect(submits.map((call) => call.headers.get("Idempotency-Key"))).toEqual([
+      submissionId,
+      submissionId,
+    ])
+  })
+
   it("presents a fresh key, under the same submission id, only when asked to re-drive", async () => {
     // A `host_unavailable` answer is a completed receipt in the Host's ledger.
     // Re-sending the same key could only replay it; a fresh key lets the Host

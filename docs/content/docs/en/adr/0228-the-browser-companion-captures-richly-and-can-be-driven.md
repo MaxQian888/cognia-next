@@ -121,6 +121,16 @@ and only such a standing refusal waits the long interval. The ticket exchange
 refuses this channel while Browser Access is off, so a socket is never opened
 only to be closed a second after its welcome.
 
+A restarted Host signs access tokens with a new key, so every token cached
+before the restart is refused with `invalid_access_token`. The client drops
+that token and re-authenticates once — the refusal comes from the auth layer
+before any command runs, so the resend cannot repeat a write — instead of
+failing every request until the old token would have expired. Changing Browser
+Access from the desktop or over the host-admin RPC applies the switch at once
+through one function (`browser_access::save_and_apply`), so a headless Host
+switched off remotely stops taking submissions and socket tickets without a
+restart.
+
 Driving is a third class capability, **`browser.drive`**. It joins the browser
 class (so the store's class confinement admits it) but is **not** granted at
 enrollment: the Owner turns it on per browser in Settings. The Host only sends
