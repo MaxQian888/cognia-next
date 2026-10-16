@@ -1,6 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
 import { sessionRestartNotice, useAgentSession, type CreateSession } from "./useAgentSession"
+import { appendTranscript, readTranscript } from "../../agent/transcript"
 import type { SendTurnOptions } from "../../agent/session-runner"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
@@ -110,10 +115,11 @@ function harness(
       isLive: () => opts.isLive ?? false,
     }
   }) as unknown as CreateSession
-  let sidecarHandler: ((p: unknown) => void) | null = null
+  // The hook subscribes more than once (MCP logs, file snapshots); deliver to all.
+  const sidecarHandlers = new Set<(p: unknown) => void>()
   const subscribeSidecar = jest.fn((h: (p: unknown) => void) => {
-    sidecarHandler = h
-    return () => undefined
+    sidecarHandlers.add(h)
+    return () => void sidecarHandlers.delete(h)
   })
   const requestCompact = jest.fn(async () => undefined)
   // Inject a fake checkpoint capture so tests never touch the real on-disk store.
@@ -124,6 +130,7 @@ function harness(
   const capture = {
     beginTurn: jest.fn(),
     onToolCall: jest.fn(),
+    onPreMutationFrame: jest.fn(),
     list: jest.fn(() => checkpoints),
     store: { restore },
   }
@@ -159,7 +166,9 @@ function harness(
     capture,
     restore,
     appendMcpLog,
-    fireSidecar: (p: unknown) => sidecarHandler?.(p),
+    fireSidecar: (p: unknown) => {
+      for (const h of [...sidecarHandlers]) h(p)
+    },
     resolveExecution: (spec: ResolvedAgentExecutionSpec) => resolveExecution?.(spec),
     api: () => hook.current,
   }
@@ -208,6 +217,19 @@ function userReplayEnvelope(): AgentEventEnvelope {
 }
 
 describe("useAgentSession", () => {
+  // Conversation rewind rewrites the session transcript under COGNIA_HOME;
+  // keep it in a scratch dir instead of the developer's real ~/.cognia.
+  const previousHome = process.env.COGNIA_HOME
+  let scratchHome = ""
+  beforeAll(() => {
+    scratchHome = fs.mkdtempSync(path.join(os.tmpdir(), "use-agent-session-"))
+    process.env.COGNIA_HOME = scratchHome
+  })
+  afterAll(() => {
+    if (previousHome === undefined) delete process.env.COGNIA_HOME
+    else process.env.COGNIA_HOME = previousHome
+    fs.rmSync(scratchHome, { recursive: true, force: true })
+  })
   beforeEach(() => {
     nativeCheckpointFlag = false
     createAgentExecutionHandle.mockClear()
@@ -324,6 +346,7 @@ describe("useAgentSession", () => {
       config: expect.anything(),
       sessionId: "app-session-1",
       onResolvedExecutionSpec: expect.any(Function),
+      fileCheckpoints: true,
     })
   })
 
@@ -335,6 +358,7 @@ describe("useAgentSession", () => {
     expect(h.create).toHaveBeenCalledWith({
       config: expect.anything(),
       onResolvedExecutionSpec: expect.any(Function),
+      fileCheckpoints: true,
     })
   })
 
@@ -1022,6 +1046,7 @@ describe("useAgentSession", () => {
       config: expect.anything(),
       sessionId: "ses-old",
       onResolvedExecutionSpec: expect.any(Function),
+      fileCheckpoints: true,
     })
     expect(h.actions).toContainEqual({ type: "RESET", sessionId: "ses-old" })
     expect(h.actions).toContainEqual({
@@ -1340,6 +1365,43 @@ describe("useAgentSession", () => {
     expect(h.actions).toContainEqual({ type: "LOAD_CELLS", cells: [cells[0]] })
   })
 
+  it("feeds the session's pre-mutation snapshot frames into the checkpoint capture", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ fileCheckpoints: true }))
+    const frame = { type: "file_pre_mutation", sessionId: "s", toolName: "write", entries: [] }
+    act(() => {
+      h.fireSidecar(frame)
+      h.fireSidecar({ ...frame, sessionId: "other" })
+      h.fireSidecar({ type: "log", sessionId: "s" })
+    })
+    expect(h.capture.onPreMutationFrame).toHaveBeenCalledTimes(1)
+    expect(h.capture.onPreMutationFrame).toHaveBeenCalledWith(frame)
+  })
+
+  it("rewind names the files it could not restore", async () => {
+    const h = harness()
+    ;(h.capture.list as jest.Mock).mockReturnValue([
+      {
+        seq: 3,
+        label: "big",
+        ts: 1,
+        cellCount: 0,
+        files: [],
+        unrestorable: [{ absPath: "/w/huge.bin", reason: "too-large" }],
+      },
+    ])
+    await act(async () => {
+      await h.api().rewind(3, "files", [])
+    })
+    expect(h.actions).toContainEqual({
+      type: "NOTICE",
+      message: "Not restored: /w/huge.bin (too large to snapshot).",
+    })
+  })
+
   it("rewind notices when the checkpoint is missing", async () => {
     const h = harness()
     await act(async () => {
@@ -1411,9 +1473,19 @@ describe("useAgentSession", () => {
       { id: "2", kind: "assistant", raw: "b" },
       { id: "3", kind: "user", text: "c" },
     ] as never
+    // The on-disk transcript of that session: the kept turn's assistant entry
+    // carries the provider snapshot the next turn resumes from.
+    const runtimeHistory = { version: 1, runtime: "ai-sdk", provider: "p", messages: [] }
+    appendTranscript(scratchHome, "s", { role: "user", content: "a" })
+    appendTranscript(scratchHome, "s", { role: "assistant", content: "b", meta: { runtimeHistory } })
+    appendTranscript(scratchHome, "s", { role: "user", content: "c" })
+    appendTranscript(scratchHome, "s", { role: "assistant", content: "d" })
     await act(async () => {
       await h.api().forkConversationAt(2, cells)
     })
+    const onDisk = readTranscript(scratchHome, "s")
+    expect(onDisk.map((entry) => entry.content)).toEqual(["a", "b"])
+    expect(onDisk[1]!.meta).toEqual({ runtimeHistory })
     // Keeps the first two cells, drops the rest, and resets onto the same id.
     expect(h.actions).toContainEqual({ type: "LOAD_CELLS", cells: [cells[0], cells[1]] })
     expect(h.actions.some((a) => a.type === "RESET")).toBe(true)

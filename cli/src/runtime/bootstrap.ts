@@ -20,7 +20,13 @@ import { setTransport } from "@/lib/tauri"
 import { redactCredentialText } from "@/lib/security/redact-credentials"
 import { DEFAULT_REDACTION_KEYS } from "@/packages/logging/src/redaction-patterns"
 
-import { StdioTransport, type SidecarHandle } from "./stdio-transport"
+import {
+  CLI_HOST_RPC_HANDLERS,
+  StdioTransport,
+  type HostRpcHandler,
+  type SidecarHandle,
+} from "./stdio-transport"
+import { resolveWorkspacePortEnv } from "./workspace-port-env"
 
 /** Minimal spawned-child surface the bootstrap consumes. */
 export interface SpawnedChild {
@@ -83,6 +89,8 @@ export interface BootstrapOptions {
   packaged?: boolean
   /** Executable override paired with `packaged`. */
   execPath?: string
+  /** `host_rpc` handlers. Defaults to {@link cliHostRpcHandlers}. */
+  hostRpc?: Readonly<Record<string, HostRpcHandler>>
 }
 
 export interface SidecarBootstrap {
@@ -396,6 +404,29 @@ function startupDiagnostics(stderr: SpawnedChild["stderr"], env: NodeJS.ProcessE
   }
 }
 
+/**
+ * The CLI's `host_rpc` handlers. `workspace.portEnv` resolves the cwd's port
+ * lease through the headless brain's execution host. A standalone CLI has no
+ * allocator, so it resolves to `{}`, which goes back as `null`. A failure is
+ * thrown so the sidecar refuses the spawn instead of running without ports.
+ */
+export function cliHostRpcHandlers(
+  resolvePortEnv: (cwd: string) => Promise<Record<string, string>> = resolveWorkspacePortEnv
+): Readonly<Record<string, HostRpcHandler>> {
+  return Object.freeze({
+    ...CLI_HOST_RPC_HANDLERS,
+    "workspace.portEnv": async (params: unknown) => {
+      const cwd =
+        params && typeof params === "object" ? (params as { cwd?: unknown }).cwd : undefined
+      if (typeof cwd !== "string" || cwd.length === 0) {
+        throw new Error("workspace.portEnv requires a cwd")
+      }
+      const env = await resolvePortEnv(cwd)
+      return Object.keys(env).length > 0 ? env : null
+    },
+  })
+}
+
 /** Spawn the sidecar, install the StdioTransport, and await readiness. */
 export async function bootstrapSidecar(opts: BootstrapOptions = {}): Promise<SidecarBootstrap> {
   const env = opts.env ?? process.env
@@ -407,7 +438,9 @@ export async function bootstrapSidecar(opts: BootstrapOptions = {}): Promise<Sid
 
   const child = spawn(script, { cwd, env })
   const diagnostics = startupDiagnostics(child.stderr, env)
-  const transport = new StdioTransport(toHandle(child))
+  const transport = new StdioTransport(toHandle(child), {
+    hostRpc: opts.hostRpc ?? cliHostRpcHandlers(),
+  })
   setTransport(transport)
 
   try {

@@ -13,6 +13,7 @@ import { transport as installedTransport } from "@/lib/tauri"
 import {
   adaptBunSubprocess,
   bootstrapSidecar,
+  cliHostRpcHandlers,
   isPackaged,
   resolveBunSpawn,
   resolveSidecarScript,
@@ -180,7 +181,102 @@ describe("adaptBunSubprocess", () => {
   })
 })
 
+describe("cliHostRpcHandlers", () => {
+  it("answers workspace.portEnv with the leased env for the requested cwd", async () => {
+    const resolve = jest.fn(async () => ({
+      COGNIA_PORT: "41010",
+      COGNIA_PORT_COUNT: "10",
+      PORT: "41010",
+    }))
+    const handlers = cliHostRpcHandlers(resolve)
+    await expect(handlers["workspace.portEnv"]({ cwd: "/repo/app" })).resolves.toEqual({
+      COGNIA_PORT: "41010",
+      COGNIA_PORT_COUNT: "10",
+      PORT: "41010",
+    })
+    expect(resolve).toHaveBeenCalledWith("/repo/app")
+  })
+
+  it("answers null when the cwd has no lease, so the shell spawns without ports", async () => {
+    const handlers = cliHostRpcHandlers(async () => ({}))
+    await expect(handlers["workspace.portEnv"]({ cwd: "/tmp/scratch" })).resolves.toBeNull()
+  })
+
+  it("refuses a request without a cwd", async () => {
+    const resolve = jest.fn(async () => ({}))
+    const handlers = cliHostRpcHandlers(resolve)
+    await expect(handlers["workspace.portEnv"]({})).rejects.toThrow(/requires a cwd/)
+    await expect(handlers["workspace.portEnv"](null)).rejects.toThrow(/requires a cwd/)
+    expect(resolve).not.toHaveBeenCalled()
+  })
+
+  it("propagates a lease failure so the sidecar refuses the spawn", async () => {
+    const handlers = cliHostRpcHandlers(async () => {
+      throw new Error("port range exhausted; widen portRangeStart/portRangeEnd")
+    })
+    await expect(handlers["workspace.portEnv"]({ cwd: "/repo" })).rejects.toThrow(
+      /port range exhausted/
+    )
+  })
+})
+
 describe("bootstrapSidecar", () => {
+  it("answers the sidecar's workspace.portEnv host_rpc through the injected handlers", async () => {
+    const f = fakeChild()
+    const spawn: SpawnFn = () => {
+      setImmediate(() => f.stdout.write(JSON.stringify({ type: "ready" }) + "\n"))
+      return f.child
+    }
+    const boot = await bootstrapSidecar({
+      spawn,
+      scriptPath: "/x/claude-host.mjs",
+      hostRpc: cliHostRpcHandlers(async (cwd): Promise<Record<string, string>> =>
+        cwd === "/repo" ? { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" } : {}
+      ),
+    })
+    f.stdout.write(
+      JSON.stringify({
+        type: "host_rpc",
+        rpcId: "p1",
+        method: "workspace.portEnv",
+        params: { cwd: "/repo" },
+      }) + "\n"
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(f.writes.map((line) => JSON.parse(line.trim()))).toContainEqual({
+      type: "host_rpc_result",
+      rpcId: "p1",
+      ok: true,
+      result: { COGNIA_PORT: "41000", COGNIA_PORT_COUNT: "10", PORT: "41000" },
+    })
+    await boot.shutdown()
+  })
+
+  it("answers workspace.portEnv with null by default outside a headless host", async () => {
+    const f = fakeChild()
+    const spawn: SpawnFn = () => {
+      setImmediate(() => f.stdout.write(JSON.stringify({ type: "ready" }) + "\n"))
+      return f.child
+    }
+    const boot = await bootstrapSidecar({ spawn, scriptPath: "/x/claude-host.mjs" })
+    f.stdout.write(
+      JSON.stringify({
+        type: "host_rpc",
+        rpcId: "p2",
+        method: "workspace.portEnv",
+        params: { cwd: "/repo" },
+      }) + "\n"
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(f.writes.map((line) => JSON.parse(line.trim()))).toContainEqual({
+      type: "host_rpc_result",
+      rpcId: "p2",
+      ok: true,
+      result: null,
+    })
+    await boot.shutdown()
+  })
+
   it("does not require an adjacent sidecar script in a standalone executable", async () => {
     const f = fakeChild()
     let spawnedScript = ""
