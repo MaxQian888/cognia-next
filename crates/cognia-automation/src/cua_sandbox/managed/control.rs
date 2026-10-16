@@ -812,6 +812,22 @@ impl ManagedDesktopService {
         authority: &dyn ManagedControlAuthority,
         smoke: bool,
     ) -> Result<DesktopRecord> {
+        let row = self
+            .control_check_local(p, id, generation, authority, smoke)
+            .await?;
+        // Boundary identity is a live admission check, including reused clients.
+        self.validate_live_boundary(p, &row.desktop).await?;
+        authority.revalidate(p).await?;
+        Ok(row)
+    }
+    async fn control_check_local(
+        &self,
+        p: &ManagedDesktopPrincipal,
+        id: &str,
+        generation: u64,
+        authority: &dyn ManagedControlAuthority,
+        smoke: bool,
+    ) -> Result<DesktopRecord> {
         authority.revalidate(p).await?;
         let row = self.scoped(p, id, generation).await?;
         let current = self.config(p, &row.config.id).await?;
@@ -831,8 +847,6 @@ impl ManagedDesktopService {
         if self.state.lock().await.control_quarantines.contains(id) {
             return Err(refused("managed_desktop_control_quarantined"));
         }
-        // Boundary identity is a live admission check, including reused clients.
-        self.validate_live_boundary(p, &row.desktop).await?;
         // Recheck authentication after asynchronous configuration/storage work.
         authority.revalidate(p).await?;
         Ok(row)
@@ -1273,8 +1287,12 @@ impl ManagedDesktopService {
         self.scoped(p, id, generation).await?;
         let slot = self.control_slot(id, generation).await;
         let mut c = slot.lock().await;
+        // Admit the non-mutating screenshot locally. The full live boundary
+        // check below still runs after capture and before every mutation. A
+        // second remote observation here consumed most of the frame's fixed
+        // five-second lifetime without strengthening that final send check.
         if let Err(e) = self
-            .control_check(p, id, generation, authority, smoke)
+            .control_check_local(p, id, generation, authority, smoke)
             .await
         {
             c.invalidate();
@@ -2056,6 +2074,72 @@ mod tests {
             )
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn input_observes_boundary_after_capture_and_blocks_unbound_generation() {
+        let f = wire_fixture().await;
+        let (service, p, row) = (&f.domain.service, &f.domain.p, &f.row);
+        let authority = Authority(Arc::new(AtomicBool::new(true)));
+        let lease = service
+            .control_acquire_inner(p, &row.id, row.generation, true, &authority, true)
+            .await
+            .unwrap();
+        let frame = service
+            .control_frame_inner(p, &row.id, row.generation, &authority, true)
+            .await
+            .unwrap();
+        // An old frame/client cannot replace the live, generation-bound proof.
+        // Removing it before input also proves we do not spend another remote
+        // observation before the harmless screenshot: capture must still start.
+        service
+            .state
+            .lock()
+            .await
+            .workload_boundaries
+            .remove(&row.id);
+        f.pause_frame.store(true, Ordering::SeqCst);
+        let input = service.control_input_inner(
+            p,
+            &row.id,
+            row.generation,
+            &lease.token,
+            lease.fence,
+            &frame.frame_id,
+            Some(Point { x: 1, y: 1 }),
+            UiAction::Click {
+                button: None,
+                count: None,
+            },
+            &authority,
+            true,
+        );
+        let capture = async {
+            let started = tokio::time::timeout(Duration::from_secs(1), f.frame_started.notified())
+                .await
+                .is_ok();
+            f.frame_continue.notify_one();
+            started
+        };
+        let (result, captured) = tokio::join!(input, capture);
+        assert!(
+            captured,
+            "input must defer its remote boundary check until after capture"
+        );
+        assert_eq!(
+            result.unwrap_err().code,
+            "managed_desktop_boundary_generation_mismatch"
+        );
+        assert_eq!(f.input_count.load(Ordering::SeqCst), 0);
+        assert!(service
+            .control_slot(&row.id, row.generation)
+            .await
+            .lock()
+            .await
+            .lease
+            .is_none());
+        assert_eq!(FRAME_MS, 5_000);
+        assert_eq!(LEASE_MS, 15_000);
     }
 
     #[tokio::test]

@@ -751,6 +751,9 @@ fn qualification_failure_stage(stderr: &[u8]) -> Option<&'static str> {
         "qualification_failed:payload_acceptance" => Some("payload_acceptance"),
         "qualification_failed:payload_terminal_spawn" => Some("payload_terminal_spawn"),
         "qualification_failed:payload_terminal_wait" => Some("payload_terminal_wait"),
+        "qualification_failed:payload_terminal_exited" => Some("payload_terminal_exited"),
+        "qualification_failed:payload_terminal_deadline" => Some("payload_terminal_deadline"),
+        "qualification_failed:payload_terminal_probe" => Some("payload_terminal_probe"),
         "qualification_failed:payload_terminal_peer" => Some("payload_terminal_peer"),
         "qualification_failed:payload_terminal_report" => Some("payload_terminal_report"),
         "qualification_failed:payload_browser_local" => Some("payload_browser_local"),
@@ -1342,6 +1345,9 @@ mod tests {
     #[test]
     fn qualification_diagnostics_only_emit_fixed_stages() {
         assert_eq!(qualification_failure_stage(b"qualification_failed:importer\nmanaged_desktop_guest_refused:qualification_result\n"), Some("importer"));
+        assert_eq!(qualification_failure_stage(b"qualification_failed:payload_terminal_exited\n"), Some("payload_terminal_exited"));
+        assert_eq!(qualification_failure_stage(b"qualification_failed:payload_terminal_deadline\n"), Some("payload_terminal_deadline"));
+        assert_eq!(qualification_failure_stage(b"qualification_failed:payload_terminal_probe\n"), Some("payload_terminal_probe"));
         assert_eq!(qualification_failure_stage(b"qualification_deadline\n"), Some("deadline"));
         for rejected in [b"qualification_failed:secret".as_slice(), b"qualification_failed:importer secret", b"https://secret/qualification_failed:importer", &[255]] {
             assert_eq!(qualification_failure_stage(rejected), None);

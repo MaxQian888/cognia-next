@@ -30,6 +30,9 @@ pub(crate) fn valid_failure(value: &str) -> bool {
             | "payload_terminal_wait"
             | "payload_terminal_peer"
             | "payload_terminal_report"
+            | "payload_terminal_exited"
+            | "payload_terminal_deadline"
+            | "payload_terminal_probe"
             | "payload_browser_local"
             | "payload_browser_metadata"
             | "payload_browser_redirect"
@@ -51,6 +54,9 @@ fn failure_stage() -> &'static str {
         9 => "payload_browser_hostname",
         10 => "payload_descendant",
         11 => "payload_serialization",
+        12 => "payload_terminal_exited",
+        13 => "payload_terminal_deadline",
+        14 => "payload_terminal_probe",
         _ => "payload_identity",
     }
 }
@@ -266,21 +272,28 @@ pub(crate) fn basic() -> io::Result<ProbeRun> {
     let b = syscall_result("setuidRoot", uid);
     let mut hostnames = Vec::new();
     for name in ["example.com", "metadata.google.internal"] {
-        let name_c = std::ffi::CString::new(name).map_err(|_| refused())?;
-        let mut address = std::ptr::null_mut();
-        let code = unsafe {
-            libc::getaddrinfo(
-                name_c.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                &mut address,
-            )
-        };
-        if !address.is_null() {
-            unsafe {
-                libc::freeaddrinfo(address);
+        // A resolver stall is diagnostic failure, never a fabricated DNS denial.
+        // The fixed child exits on timeout; no resolver thread survives its run.
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let name_c = std::ffi::CString::new(name).expect("fixed hostname");
+            let mut address = std::ptr::null_mut();
+            let code = unsafe {
+                libc::getaddrinfo(
+                    name_c.as_ptr(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    &mut address,
+                )
+            };
+            if !address.is_null() {
+                unsafe { libc::freeaddrinfo(address) };
             }
-        }
+            let _ = send.send(code);
+        });
+        let code = receive
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| refused())?;
         hostnames.push(ErrorObservation {
             operation: name.into(),
             result: code,
@@ -336,12 +349,13 @@ fn terminal() -> io::Result<ProbeRun> {
     phase(2);
     let mut child = command.spawn()?;
     phase(3);
-    let until = Instant::now() + Duration::from_secs(10);
+    let started = Instant::now();
+    let until = started + Duration::from_secs(10);
+    let report_deadline = started + Duration::from_secs(14);
     let result = (|| loop {
         match listener.accept() {
             Ok((mut socket, _)) => {
                 phase(4);
-                socket.set_read_timeout(Some(Duration::from_secs(3)))?;
                 let mut credentials = std::mem::MaybeUninit::<libc::ucred>::uninit();
                 let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
                 if unsafe {
@@ -369,10 +383,38 @@ fn terminal() -> io::Result<ProbeRun> {
                 }
                 phase(5);
                 let mut bytes = Vec::new();
-                Read::by_ref(&mut socket)
-                    .take(32769)
-                    .read_to_end(&mut bytes)?;
-                if bytes.len() > 32768 {
+                // One absolute deadline bounds partial writes as well as initial
+                // probe latency. It never resets when the peer sends a byte.
+                loop {
+                    let remaining = report_deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        phase(13);
+                        return Err(refused());
+                    }
+                    socket.set_read_timeout(Some(remaining))?;
+                    let mut chunk = [0_u8; 4096];
+                    match socket.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(length) => bytes.extend_from_slice(&chunk[..length]),
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                            ) =>
+                        {
+                            phase(13);
+                            return Err(refused());
+                        }
+                        Err(error) => return Err(error),
+                    }
+                    if bytes.len() > 32768 {
+                        return Err(refused());
+                    }
+                }
+                if serde_json::from_slice::<DiagnosticFailure>(&bytes)
+                    .is_ok_and(|failure| failure.diagnostic_failure == "payload_terminal_probe")
+                {
+                    phase(14);
                     return Err(refused());
                 }
                 let value: ProbeRun = serde_json::from_slice(&bytes).map_err(|_| refused())?;
@@ -387,7 +429,12 @@ fn terminal() -> io::Result<ProbeRun> {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => (),
             Err(e) => return Err(e),
         }
-        if child.try_wait()?.is_some() || Instant::now() >= until {
+        if child.try_wait()?.is_some() {
+            phase(12);
+            return Err(refused());
+        }
+        if Instant::now() >= until {
+            phase(13);
             return Err(refused());
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -466,7 +513,7 @@ fn browser(url: &str, label: &str) -> io::Result<(ProcessSnapshot, i32, String, 
             "--disable-background-networking",
             "--disable-component-update",
             "--disable-features=HttpsUpgrades",
-            "--timeout=6000",
+            "--timeout=4000",
             "--dump-dom",
         ])
         .arg(format!("--log-net-log={log}"))
@@ -485,7 +532,7 @@ fn browser(url: &str, label: &str) -> io::Result<(ProcessSnapshot, i32, String, 
         });
     }
     let mut child = command.spawn()?;
-    let until = Instant::now() + Duration::from_secs(12);
+    let until = Instant::now() + Duration::from_secs(6);
     let mut observed = None;
     let result = (|| {
         let code = loop {
@@ -709,6 +756,25 @@ pub(crate) fn importer() -> io::Result<ImporterProbe> {
     let _ = child.wait();
     result
 }
+// Connect before running probes: startup and probe completion are separate
+// deadlines. SO_PEERCRED still authenticates the live xterm descendant.
+fn terminal_payload(path: &str, probe: impl FnOnce() -> io::Result<ProbeRun>) -> io::Result<()> {
+    let mut socket = std::os::unix::net::UnixStream::connect(path)?;
+    socket.set_write_timeout(Some(Duration::from_secs(3)))?;
+    let result = probe();
+    let bytes = match &result {
+        Ok(report) => serde_json::to_vec(report),
+        Err(_) => serde_json::to_vec(&DiagnosticFailure {
+            diagnostic_failure: "payload_terminal_probe".into(),
+        }),
+    }
+    .map_err(|_| refused())?;
+    socket.write_all(&bytes)?;
+    socket.shutdown(std::net::Shutdown::Write)?;
+    // Keep the actual peer alive until the parent checks its start time/namespaces.
+    std::thread::sleep(Duration::from_secs(2));
+    result.map(|_| ())
+}
 pub(crate) fn child(mode: &str) -> io::Result<()> {
     match mode {
         "qualification-workload" => {
@@ -729,14 +795,7 @@ pub(crate) fn child(mode: &str) -> io::Result<()> {
             if unsafe { libc::getuid() } != 1000 {
                 return Err(refused());
             }
-            let report = basic()?;
-            let mut socket =
-                std::os::unix::net::UnixStream::connect("/tmp/cognia-p4-terminal.sock")?;
-            socket.set_write_timeout(Some(Duration::from_secs(3)))?;
-            socket.write_all(&serde_json::to_vec(&report).map_err(|_| refused())?)?;
-            socket.shutdown(std::net::Shutdown::Write)?;
-            std::thread::sleep(Duration::from_secs(2));
-            Ok(())
+            terminal_payload("/tmp/cognia-p4-terminal.sock", basic)
         }
         _ => Err(refused()),
     }
@@ -758,6 +817,30 @@ mod tests {
             r#"{"diagnosticFailure":"payload_acceptance"}"#
         )
         .is_err());
+    }
+    #[test]
+    fn terminal_connects_before_probe_and_reports_probe_failure() {
+        use std::os::unix::net::UnixListener;
+        let path =
+            std::env::temp_dir().join(format!("cognia-terminal-{}.sock", std::process::id()));
+        let listener = UnixListener::bind(&path).unwrap();
+        let (connected, ready) = std::sync::mpsc::sync_channel(1);
+        let thread = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            connected.send(()).unwrap();
+            let mut bytes = Vec::new();
+            socket.read_to_end(&mut bytes).unwrap();
+            let failure: DiagnosticFailure = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(failure.diagnostic_failure, "payload_terminal_probe");
+        });
+        assert!(terminal_payload(path.to_str().unwrap(), || {
+            // This receive would time out with the former probe-before-connect ordering.
+            ready.recv_timeout(Duration::from_secs(1)).unwrap();
+            Err(refused())
+        })
+        .is_err());
+        thread.join().unwrap();
+        fs::remove_file(path).unwrap();
     }
     #[test]
     fn browser_error_requires_same_url_source_and_no_response() {

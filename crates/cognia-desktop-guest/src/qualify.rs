@@ -19,7 +19,7 @@ const RESULT: &str = "/run/cognia-desktop/qualification.json";
 const FAILURE: &str = "/run/cognia-desktop/qualification.failed";
 const LIMIT: u64 = 128 * 1024;
 static STAGE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-const ACCEPTANCE_STAGES: [&str; 18] = [
+const ACCEPTANCE_STAGES: [&str; 21] = [
     "acceptance_prepare",
     "acceptance_spawn",
     "acceptance_admission_wait",
@@ -32,6 +32,9 @@ const ACCEPTANCE_STAGES: [&str; 18] = [
     "payload_terminal_wait",
     "payload_terminal_peer",
     "payload_terminal_report",
+    "payload_terminal_exited",
+    "payload_terminal_deadline",
+    "payload_terminal_probe",
     "payload_browser_local",
     "payload_browser_metadata",
     "payload_browser_redirect",
