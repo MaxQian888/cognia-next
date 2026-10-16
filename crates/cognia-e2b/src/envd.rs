@@ -731,6 +731,23 @@ async fn observe_desktop_boundary_at(
     fixed_desktop_report_at(bootstrap, endpoint, deadline, "observe", 32768).await
 }
 
+// Only fixed collector stage names may leave the guest diagnostic stream.
+// Never log provider errors, arbitrary stderr, command arguments or tokens.
+fn qualification_failure_stage(stderr: &[u8]) -> Option<&'static str> {
+    let text = std::str::from_utf8(stderr).ok()?;
+    text.lines().find_map(|line| match line {
+        "qualification_deadline" => Some("deadline"),
+        "qualification_failed:bootstrap" => Some("bootstrap"),
+        "qualification_failed:boundary" => Some("boundary"),
+        "qualification_failed:importer" => Some("importer"),
+        "qualification_failed:acceptance" => Some("acceptance"),
+        "qualification_failed:descendants" => Some("descendants"),
+        "qualification_failed:supervisor_death" => Some("supervisor_death"),
+        "qualification_failed:validation" => Some("validation"),
+        _ => None,
+    })
+}
+
 async fn fixed_desktop_report_at(
     bootstrap: &DesktopBootstrap,
     endpoint: &EnvdEndpoint,
@@ -749,6 +766,7 @@ async fn fixed_desktop_report_at(
         let mut stream =
             start_with_traffic(endpoint, &spec, Some(&bootstrap.traffic_access_token)).await?;
         let mut stdout = Vec::new();
+        let mut diagnostic = Vec::new();
         let mut total = 0usize;
         let mut started = false;
         loop {
@@ -766,6 +784,10 @@ async fn fixed_desktop_report_at(
                     if total > maximum_bytes {
                         return Err(EnvdError::Protocol("boundary report exceeded bound".into()));
                     }
+                    if command == "qualify-result" && diagnostic.len() < 1024 {
+                        let remaining = 1024 - diagnostic.len();
+                        diagnostic.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+                    }
                 }
                 Some(ProcessEvent::Keepalive) => (),
                 Some(ProcessEvent::End(status))
@@ -774,6 +796,10 @@ async fn fixed_desktop_report_at(
                     return Ok(stdout)
                 }
                 _ => {
+                    if command == "qualify-result" {
+                        eprintln!("workload qualification: stage={}",
+                            qualification_failure_stage(&diagnostic).unwrap_or("unavailable"));
+                    }
                     return Err(EnvdError::Protocol(
                         "boundary report did not complete".into(),
                     ))
@@ -1295,6 +1321,15 @@ mod tests {
         assert!(matches!(error, EnvdError::Unauthorized(_)));
         assert!(!error.to_string().contains("secret"));
     }
+    #[test]
+    fn qualification_diagnostics_only_emit_fixed_stages() {
+        assert_eq!(qualification_failure_stage(b"qualification_failed:importer\nmanaged_desktop_guest_refused:qualification_result\n"), Some("importer"));
+        assert_eq!(qualification_failure_stage(b"qualification_deadline\n"), Some("deadline"));
+        for rejected in [b"qualification_failed:secret".as_slice(), b"qualification_failed:importer secret", b"https://secret/qualification_failed:importer", &[255]] {
+            assert_eq!(qualification_failure_stage(rejected), None);
+        }
+    }
+
     #[tokio::test]
     async fn destructive_qualification_uses_only_fixed_command_and_bounded_output() {
         let fixture = bootstrap_fixture(200, probe_frames(b"{}"), Duration::ZERO).await;

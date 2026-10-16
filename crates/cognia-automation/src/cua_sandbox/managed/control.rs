@@ -264,7 +264,18 @@ pub async fn run_control_qualification_smoke(
 fn require_smoke_error<T>(result: Result<T>, code: &str) -> Result<()> {
     match result {
         Err(error) if error.code == code => Ok(()),
-        _ => Err(refused("managed_desktop_control_smoke_failed")),
+        other => {
+            let actual = other
+                .as_ref()
+                .err()
+                .map(|e| smoke_error_label(&e.code))
+                .unwrap_or("unexpected_success");
+            eprintln!(
+                "Native control smoke expected={} actual={actual}",
+                smoke_error_label(code)
+            );
+            Err(refused("managed_desktop_control_smoke_failed"))
+        }
     }
 }
 
@@ -295,51 +306,189 @@ async fn smoke_input(
         .await
 }
 
+// Positive probes must not borrow frame lifetime from unrelated negative
+// checks. Renewal precedes capture, so its provider reads consume no frame TTL.
+async fn fresh_smoke_input(
+    service: &ManagedDesktopService,
+    p: &ManagedDesktopPrincipal,
+    desktop: &ManagedDesktop,
+    lease: &ManagedControlLease,
+    authority: &NativeSmokeAuthority,
+) -> Result<(ManagedControlLease, ManagedControlFrame)> {
+    let lease = service
+        .control_renew_inner(
+            p,
+            &desktop.id,
+            desktop.generation,
+            &lease.token,
+            lease.fence,
+            authority,
+            true,
+        )
+        .await?;
+    let frame = service
+        .control_frame_inner(p, &desktop.id, desktop.generation, authority, true)
+        .await?;
+    smoke_input(service, p, desktop, &lease, &frame, authority).await?;
+    Ok((lease, frame))
+}
+
+fn smoke_error_label(code: &str) -> &str {
+    if code.starts_with("managed_desktop_")
+        && code.len() <= 128
+        && code.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+    {
+        code
+    } else {
+        "unexpected_error_code"
+    }
+}
+
 async fn control_smoke_steps(
     host: &dyn ManagedDesktopSmokeHost,
     p: &ManagedDesktopPrincipal,
     config_id: &str,
     source: &str,
 ) -> Result<ControlQualificationReceipt> {
-    let service = host.open(host.provider())?;
-    let config = service.config(p, config_id).await?;
-    let digest = config.binding_digest();
-    {
-        let state = service.state.lock().await;
-        if !latest_template(&state, &digest)
-            .and_then(|t| t.identity.as_ref())
-            .is_some_and(|t| lifecycle_diagnostic_valid(&state, &digest, t))
+    let started = Instant::now();
+    let mut stage = "admission";
+    let outcome: Result<ControlQualificationReceipt> = async {
+        let service = host.open(host.provider())?;
+        let config = service.config(p, config_id).await?;
+        let digest = config.binding_digest();
         {
-            return Err(refused("managed_desktop_unqualified"));
+            let state = service.state.lock().await;
+            if !latest_template(&state, &digest)
+                .and_then(|t| t.identity.as_ref())
+                .is_some_and(|t| lifecycle_diagnostic_valid(&state, &digest, t))
+            {
+                return Err(refused("managed_desktop_unqualified"));
+            }
         }
-    }
-    let request = smoke::authorized_request(
-        host,
-        &service,
-        p,
-        config_id,
-        AuthorizationPurpose::Smoke,
-        source,
-    )
-    .await?;
-    let desktop = service.create_smoke(p, request).await?;
-    let desktop = smoke::wait_ready(&service, p, desktop, &smoke::RealWait).await?;
-    let authority = NativeSmokeAuthority::new(p);
-    let mut assertions = ControlQualificationAssertions::default();
-    require_smoke_error(
-        service
-            .control_acquire_inner(p, &desktop.id, desktop.generation, false, &authority, true)
-            .await,
-        "managed_desktop_control_takeover_required",
-    )?;
-    assertions.explicit_takeover_required = true;
-    let lease = service
-        .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
+        let request = smoke::authorized_request(
+            host,
+            &service,
+            p,
+            config_id,
+            AuthorizationPurpose::Smoke,
+            source,
+        )
         .await?;
-    let mut second = p.clone();
-    second.principal_id = format!("smoke-second-{}", Uuid::new_v4());
-    require_smoke_error(
+        stage = "create_and_readiness";
+        let desktop = service.create_smoke(p, request).await?;
+        let desktop = smoke::wait_ready(&service, p, desktop, &smoke::RealWait).await?;
+        let authority = NativeSmokeAuthority::new(p);
+        let mut assertions = ControlQualificationAssertions::default();
+        stage = "explicit_takeover";
+        require_smoke_error(
+            service
+                .control_acquire_inner(p, &desktop.id, desktop.generation, false, &authority, true)
+                .await,
+            "managed_desktop_control_takeover_required",
+        )?;
+        assertions.explicit_takeover_required = true;
+        let lease = service
+            .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
+            .await?;
+        stage = "exclusive_controller";
+        let mut second = p.clone();
+        second.principal_id = format!("smoke-second-{}", Uuid::new_v4());
+        require_smoke_error(
+            service
+                .control_acquire_inner(
+                    &second,
+                    &desktop.id,
+                    desktop.generation,
+                    true,
+                    &authority,
+                    true,
+                )
+                .await,
+            "managed_desktop_control_busy",
+        )?;
+        assertions.exclusive_controller = true;
+        stage = "authenticated_frame";
+        let frame = service
+            .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
+            .await?;
+        if frame.screenshot.width == 0
+            || frame.screenshot.height == 0
+            || frame.screenshot.bytes.is_empty()
+        {
+            return Err(refused("managed_desktop_control_smoke_failed"));
+        }
+        // connect_managed independently challenges both missing ingress and guest
+        // authentication before opening the authenticated WebSocket.
+        assertions.authenticated_websocket_and_decoded_frame = true;
+        stage = "wrong_fence_and_agent_denials";
+        let mut wrong_fence = lease.clone();
+        wrong_fence.fence = wrong_fence.fence.saturating_add(1);
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &wrong_fence, &frame, &authority).await,
+            "managed_desktop_control_lease_expired",
+        )?;
+        let mut agent = p.clone();
+        agent.authority = ManagedDesktopAuthority::Agent;
+        require_smoke_error(
+            smoke_input(&service, &agent, &desktop, &lease, &frame, &authority).await,
+            "managed_desktop_human_authorization_required",
+        )?;
+        assertions.agent_delegation_refused = true;
+        stage = "first_positive_fresh_input";
+        let (lease, frame) = fresh_smoke_input(&service, p, &desktop, &lease, &authority).await?;
+        stage = "single_use_frame";
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &lease, &frame, &authority).await,
+            "managed_desktop_control_stale_frame",
+        )?;
+        assertions.single_use_frame = true;
+        stage = "frame_expiry";
+        let lease = service
+            .control_renew_inner(
+                p,
+                &desktop.id,
+                desktop.generation,
+                &lease.token,
+                lease.fence,
+                &authority,
+                true,
+            )
+            .await?;
+        let stale = service
+            .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
+            .await?;
+        tokio::time::sleep(Duration::from_millis(FRAME_MS as u64 + 100)).await;
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &lease, &stale, &authority).await,
+            "managed_desktop_control_stale_frame",
+        )?;
+        assertions.expired_frame_rejected = true;
+        stage = "human_release_transfer";
+        let lease = service
+            .control_renew_inner(
+                p,
+                &desktop.id,
+                desktop.generation,
+                &lease.token,
+                lease.fence,
+                &authority,
+                true,
+            )
+            .await?;
+        let transfer_frame = service
+            .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
+            .await?;
         service
+            .control_release(
+                p,
+                &desktop.id,
+                desktop.generation,
+                &lease.token,
+                lease.fence,
+                &authority,
+            )
+            .await?;
+        let second_lease = service
             .control_acquire_inner(
                 &second,
                 &desktop.id,
@@ -348,231 +497,172 @@ async fn control_smoke_steps(
                 &authority,
                 true,
             )
+            .await?;
+        if second_lease.fence <= lease.fence || second_lease.token == lease.token {
+            return Err(refused("managed_desktop_control_smoke_failed"));
+        }
+        stage = "transferred_frame_still_fresh";
+        if service.now().await >= transfer_frame.expires_at {
+            return Err(refused("managed_desktop_control_smoke_failed"));
+        }
+        stage = "old_token_and_frame_denials";
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &lease, &transfer_frame, &authority).await,
+            "managed_desktop_control_lease_expired",
+        )?;
+        require_smoke_error(
+            smoke_input(
+                &service,
+                &second,
+                &desktop,
+                &second_lease,
+                &transfer_frame,
+                &authority,
+            )
             .await,
-        "managed_desktop_control_busy",
-    )?;
-    assertions.exclusive_controller = true;
-    let frame = service
-        .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    if frame.screenshot.width == 0
-        || frame.screenshot.height == 0
-        || frame.screenshot.bytes.is_empty()
-    {
-        return Err(refused("managed_desktop_control_smoke_failed"));
-    }
-    // connect_managed independently challenges both missing ingress and guest
-    // authentication before opening the authenticated WebSocket.
-    assertions.authenticated_websocket_and_decoded_frame = true;
-    let mut wrong_fence = lease.clone();
-    wrong_fence.fence = wrong_fence.fence.saturating_add(1);
-    require_smoke_error(
-        smoke_input(&service, p, &desktop, &wrong_fence, &frame, &authority).await,
-        "managed_desktop_control_lease_expired",
-    )?;
-    let mut agent = p.clone();
-    agent.authority = ManagedDesktopAuthority::Agent;
-    require_smoke_error(
-        smoke_input(&service, &agent, &desktop, &lease, &frame, &authority).await,
-        "managed_desktop_human_authorization_required",
-    )?;
-    assertions.agent_delegation_refused = true;
-    smoke_input(&service, p, &desktop, &lease, &frame, &authority).await?;
-    require_smoke_error(
-        smoke_input(&service, p, &desktop, &lease, &frame, &authority).await,
-        "managed_desktop_control_stale_frame",
-    )?;
-    assertions.single_use_frame = true;
-    let lease = service
-        .control_renew_inner(
-            p,
-            &desktop.id,
-            desktop.generation,
-            &lease.token,
-            lease.fence,
-            &authority,
-            true,
-        )
-        .await?;
-    let stale = service
-        .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    tokio::time::sleep(Duration::from_millis(FRAME_MS as u64 + 100)).await;
-    require_smoke_error(
-        smoke_input(&service, p, &desktop, &lease, &stale, &authority).await,
-        "managed_desktop_control_stale_frame",
-    )?;
-    assertions.expired_frame_rejected = true;
-    let transfer_frame = service
-        .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    service
-        .control_release(
-            p,
-            &desktop.id,
-            desktop.generation,
-            &lease.token,
-            lease.fence,
-            &authority,
-        )
-        .await?;
-    let second_lease = service
-        .control_acquire_inner(
-            &second,
-            &desktop.id,
-            desktop.generation,
-            true,
-            &authority,
-            true,
-        )
-        .await?;
-    if second_lease.fence <= lease.fence || second_lease.token == lease.token {
-        return Err(refused("managed_desktop_control_smoke_failed"));
-    }
-    if service.now().await >= transfer_frame.expires_at {
-        return Err(refused("managed_desktop_control_smoke_failed"));
-    }
-    require_smoke_error(
-        smoke_input(&service, p, &desktop, &lease, &transfer_frame, &authority).await,
-        "managed_desktop_control_lease_expired",
-    )?;
-    require_smoke_error(
-        smoke_input(
-            &service,
-            &second,
-            &desktop,
-            &second_lease,
-            &transfer_frame,
-            &authority,
-        )
-        .await,
-        "managed_desktop_control_stale_frame",
-    )?;
-    assertions.old_token_and_frame_rejected = true;
-    let second_frame = service
-        .control_frame_inner(&second, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    smoke_input(
-        &service,
-        &second,
-        &desktop,
-        &second_lease,
-        &second_frame,
-        &authority,
-    )
-    .await?;
-    assertions.human_release_transfer = true;
-    // A fresh frame distinguishes epoch revocation from frame expiry.
-    let second_frame = service
-        .control_frame_inner(&second, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    let sent = authority.admitted.load(Ordering::SeqCst);
-    service.revoke_control_principal(&second.principal_id).await;
-    require_smoke_error(
-        smoke_input(
-            &service,
-            &second,
-            &desktop,
-            &second_lease,
-            &second_frame,
-            &authority,
-        )
-        .await,
-        "managed_desktop_control_lease_expired",
-    )?;
-    authority.require_no_sends_since(sent)?;
-    assertions.principal_revocation_rejected = true;
-    let lease = service
-        .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
-        .await?;
-    let frame = service
-        .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    authority.active.store(false, Ordering::SeqCst);
-    require_smoke_error(
-        smoke_input(&service, p, &desktop, &lease, &frame, &authority).await,
-        "managed_desktop_forbidden",
-    )?;
-    authority.require_no_sends_since(sent)?;
-    assertions.live_authority_revocation_rejected = true;
-    authority.active.store(true, Ordering::SeqCst);
-    let lease = service
-        .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
-        .await?;
-    // Real monotonic expiry, not a modified test clock or fabricated deadline.
-    tokio::time::sleep(Duration::from_millis(LEASE_MS as u64 + 100)).await;
-    let frame = service
-        .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    require_smoke_error(
-        smoke_input(&service, p, &desktop, &lease, &frame, &authority).await,
-        "managed_desktop_control_lease_expired",
-    )?;
-    authority.require_no_sends_since(sent)?;
-    assertions.expired_lease_rejected = true;
-    let old_lease = service
-        .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
-        .await?;
-    let old_frame = service
-        .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    // Closing the service drops its actual WebSocket senders and journal lock.
-    // This is a service reopen, not an operating-system/process restart claim.
-    drop(service);
-    let service = host.open(host.provider())?;
-    require_smoke_error(
-        smoke_input(&service, p, &desktop, &old_lease, &old_frame, &authority).await,
-        "managed_desktop_control_lease_expired",
-    )?;
-    let lease = service
-        .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
-        .await?;
-    if lease.token == old_lease.token {
-        return Err(refused("managed_desktop_control_smoke_failed"));
-    }
-    let frame = service
-        .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    smoke_input(&service, p, &desktop, &lease, &frame, &authority).await?;
-    assertions.service_reopen_invalidates_tokens = true;
-    // Revoke after the first admitted command. The driver must acknowledge the
-    // pointer move, then reject the second send without emitting a scroll.
-    let frame = service
-        .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
-        .await?;
-    let sent = authority.admitted.load(Ordering::SeqCst);
-    authority.revoke_at.store(sent + 1, Ordering::SeqCst);
-    require_smoke_error(
-        smoke_input(&service, p, &desktop, &lease, &frame, &authority).await,
-        "managed_desktop_control_quarantined",
-    )?;
-    if authority.admitted.load(Ordering::SeqCst) != sent + 1
-        || authority.denied.load(Ordering::SeqCst) != 1
-    {
-        return Err(refused("managed_desktop_control_smoke_failed"));
-    }
-    assertions.compound_send_revocation = true;
-    authority.active.store(true, Ordering::SeqCst);
-    drop(service);
-    let service = host.open(host.provider())?;
-    require_smoke_error(
-        service
+            "managed_desktop_control_stale_frame",
+        )?;
+        assertions.old_token_and_frame_rejected = true;
+        stage = "transferred_positive_fresh_input";
+        let (second_lease, _) =
+            fresh_smoke_input(&service, &second, &desktop, &second_lease, &authority).await?;
+        assertions.human_release_transfer = true;
+        stage = "principal_revocation";
+        // A fresh frame distinguishes epoch revocation from frame expiry.
+        let second_frame = service
+            .control_frame_inner(&second, &desktop.id, desktop.generation, &authority, true)
+            .await?;
+        let sent = authority.admitted.load(Ordering::SeqCst);
+        service.revoke_control_principal(&second.principal_id).await;
+        require_smoke_error(
+            smoke_input(
+                &service,
+                &second,
+                &desktop,
+                &second_lease,
+                &second_frame,
+                &authority,
+            )
+            .await,
+            "managed_desktop_control_lease_expired",
+        )?;
+        authority.require_no_sends_since(sent)?;
+        assertions.principal_revocation_rejected = true;
+        stage = "live_authority_revocation";
+        let lease = service
             .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
-            .await,
-        "managed_desktop_control_quarantined",
-    )?;
-    assertions.quarantine_survives_reopen = true;
-    let row = service.scoped(p, &desktop.id, desktop.generation).await?;
-    Ok(ControlQualificationReceipt {
-        binding_digest: digest,
-        template: row.template,
-        smoke_desktop_id: desktop.id,
-        smoke_desktop_generation: desktop.generation,
-        observed_at: service.now().await,
-        protocol_revision: 1,
-        evidence_version: 2,
-        assertions,
-    })
+            .await?;
+        let frame = service
+            .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
+            .await?;
+        authority.active.store(false, Ordering::SeqCst);
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &lease, &frame, &authority).await,
+            "managed_desktop_forbidden",
+        )?;
+        authority.require_no_sends_since(sent)?;
+        assertions.live_authority_revocation_rejected = true;
+        stage = "lease_expiry";
+        authority.active.store(true, Ordering::SeqCst);
+        let lease = service
+            .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
+            .await?;
+        // Real monotonic expiry, not a modified test clock or fabricated deadline.
+        tokio::time::sleep(Duration::from_millis(LEASE_MS as u64 + 100)).await;
+        let frame = service
+            .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
+            .await?;
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &lease, &frame, &authority).await,
+            "managed_desktop_control_lease_expired",
+        )?;
+        authority.require_no_sends_since(sent)?;
+        assertions.expired_lease_rejected = true;
+        stage = "service_reopen_old_token";
+        let old_lease = service
+            .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
+            .await?;
+        let old_frame = service
+            .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
+            .await?;
+        // Closing the service drops its actual WebSocket senders and journal lock.
+        // This is a service reopen, not an operating-system/process restart claim.
+        drop(service);
+        let service = host.open(host.provider())?;
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &old_lease, &old_frame, &authority).await,
+            "managed_desktop_control_lease_expired",
+        )?;
+        let lease = service
+            .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
+            .await?;
+        if lease.token == old_lease.token {
+            return Err(refused("managed_desktop_control_smoke_failed"));
+        }
+        stage = "reopened_positive_fresh_input";
+        let (lease, _) = fresh_smoke_input(&service, p, &desktop, &lease, &authority).await?;
+        assertions.service_reopen_invalidates_tokens = true;
+        stage = "compound_send_revocation";
+        let lease = service
+            .control_renew_inner(
+                p,
+                &desktop.id,
+                desktop.generation,
+                &lease.token,
+                lease.fence,
+                &authority,
+                true,
+            )
+            .await?;
+        // Revoke after the first admitted command. The driver must acknowledge the
+        // pointer move, then reject the second send without emitting a scroll.
+        let frame = service
+            .control_frame_inner(p, &desktop.id, desktop.generation, &authority, true)
+            .await?;
+        let sent = authority.admitted.load(Ordering::SeqCst);
+        authority.revoke_at.store(sent + 1, Ordering::SeqCst);
+        require_smoke_error(
+            smoke_input(&service, p, &desktop, &lease, &frame, &authority).await,
+            "managed_desktop_control_quarantined",
+        )?;
+        if authority.admitted.load(Ordering::SeqCst) != sent + 1
+            || authority.denied.load(Ordering::SeqCst) != 1
+        {
+            return Err(refused("managed_desktop_control_smoke_failed"));
+        }
+        assertions.compound_send_revocation = true;
+        stage = "quarantine_survives_reopen";
+        authority.active.store(true, Ordering::SeqCst);
+        drop(service);
+        let service = host.open(host.provider())?;
+        require_smoke_error(
+            service
+                .control_acquire_inner(p, &desktop.id, desktop.generation, true, &authority, true)
+                .await,
+            "managed_desktop_control_quarantined",
+        )?;
+        assertions.quarantine_survives_reopen = true;
+        let row = service.scoped(p, &desktop.id, desktop.generation).await?;
+        Ok(ControlQualificationReceipt {
+            binding_digest: digest,
+            template: row.template,
+            smoke_desktop_id: desktop.id,
+            smoke_desktop_generation: desktop.generation,
+            observed_at: service.now().await,
+            protocol_revision: 1,
+            evidence_version: 2,
+            assertions,
+        })
+    }
+    .await;
+    if let Err(error) = &outcome {
+        eprintln!(
+            "Native control smoke failed: stage={stage} code={} elapsed_ms={}",
+            smoke_error_label(&error.code),
+            started.elapsed().as_millis()
+        );
+    }
+    outcome
 }
 
 /// Only constructed inside the explicitly authorized native smoke process.
@@ -1507,6 +1597,67 @@ mod tests {
             "managed_desktop_control_smoke_required"
         );
         assert_eq!(f.input_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn positive_smoke_recaptures_after_negative_checks_expire_the_prior_frame() {
+        let f = wire_fixture().await;
+        let (service, p, row) = (&f.domain.service, &f.domain.p, &f.row);
+        let authority = NativeSmokeAuthority::new(p);
+        let lease = service
+            .control_acquire_inner(p, &row.id, row.generation, true, &authority, true)
+            .await
+            .unwrap();
+        let previous = service
+            .control_frame_inner(p, &row.id, row.generation, &authority, true)
+            .await
+            .unwrap();
+        // Model time consumed by remote negative checks without sleeping the
+        // test or changing the production five-second frame deadline.
+        service
+            .control_slot(&row.id, row.generation)
+            .await
+            .lock()
+            .await
+            .frames
+            .get_mut(&p.principal_id)
+            .unwrap()[0]
+            .deadline = Instant::now() - Duration::from_millis(1);
+        assert_eq!(
+            smoke_input(service, p, row, &lease, &previous, &authority)
+                .await
+                .unwrap_err()
+                .code,
+            "managed_desktop_control_stale_frame"
+        );
+        assert_eq!(f.input_count.load(Ordering::SeqCst), 0);
+        let (renewed, fresh) = fresh_smoke_input(service, p, row, &lease, &authority)
+            .await
+            .unwrap();
+        assert_ne!(fresh.frame_id, previous.frame_id);
+        assert_eq!(renewed.token, lease.token);
+        assert_eq!(renewed.fence, lease.fence);
+        assert_eq!(f.input_count.load(Ordering::SeqCst), 2);
+        assert_eq!(FRAME_MS, 5_000);
+    }
+
+    #[test]
+    fn smoke_stage_error_labels_cannot_include_secrets_or_unbounded_provider_text() {
+        assert_eq!(
+            smoke_error_label("managed_desktop_control_stale_frame"),
+            "managed_desktop_control_stale_frame"
+        );
+        for value in [
+            "secret",
+            "https://provider.invalid/?token=secret",
+            "managed_desktop_error\nsecret",
+        ] {
+            assert_eq!(smoke_error_label(value), "unexpected_error_code");
+        }
+        assert_eq!(
+            smoke_error_label(&format!("managed_desktop_{}", "x".repeat(128))),
+            "unexpected_error_code"
+        );
     }
 
     #[tokio::test]
