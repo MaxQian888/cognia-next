@@ -35,6 +35,8 @@ struct LaunchSpec {
     operation_id: String,
     script: String,
     namespaces: BTreeMap<String, String>,
+    #[serde(default)]
+    diagnostic: bool,
 }
 
 struct PinnedDesktop {
@@ -90,6 +92,7 @@ pub(crate) struct AcceptanceJob {
     pins: PinnedDesktop,
     deadline: Instant,
     pub(crate) boundary_report: Option<cognia_desktop_guest::observation::ProcessBoundaryReport>,
+    pub(crate) diagnostic_report: Option<cognia_desktop_guest::qualification::DesktopProbe>,
 }
 
 impl AcceptanceJob {
@@ -147,6 +150,24 @@ pub(crate) fn spawn(
     operation: &str,
     script: &str,
     deadline: Instant,
+) -> io::Result<AcceptanceJob> {
+    spawn_inner(boundary, operation, script, deadline, false)
+}
+
+pub(crate) fn spawn_diagnostic(
+    boundary: &Boundary,
+    operation: &str,
+    deadline: Instant,
+) -> io::Result<AcceptanceJob> {
+    spawn_inner(boundary, operation, "qualification", deadline, true)
+}
+
+fn spawn_inner(
+    boundary: &Boundary,
+    operation: &str,
+    script: &str,
+    deadline: Instant,
+    diagnostic: bool,
 ) -> io::Result<AcceptanceJob> {
     validate_identifiers(operation, script)?;
     if unsafe { libc::geteuid() } != 0
@@ -213,12 +234,14 @@ pub(crate) fn spawn(
         pins,
         deadline,
         boundary_report: None,
+        diagnostic_report: None,
     };
     let spec = LaunchSpec {
         generation: boundary.generation.clone(),
         operation_id: operation.into(),
         script: script.into(),
         namespaces: boundary.namespaces.clone(),
+        diagnostic,
     };
     write_spec(&mut control, &spec)?;
     let mut bytes = [0_u8; 4];
@@ -237,6 +260,18 @@ pub(crate) fn spawn(
     control.read_exact(&mut acknowledged)?;
     if acknowledged != *b"E" {
         return Err(refused());
+    }
+    if diagnostic {
+        control.set_read_timeout(Some(Duration::from_secs(55)))?;
+        let mut length = [0_u8; 4];
+        control.read_exact(&mut length)?;
+        let length = u32::from_be_bytes(length) as usize;
+        if length == 0 || length > 96 * 1024 {
+            return Err(refused());
+        }
+        let mut bytes = vec![0; length];
+        control.read_exact(&mut bytes)?;
+        job.diagnostic_report = Some(serde_json::from_slice(&bytes).map_err(|_| refused())?);
     }
     job.check()?;
     Ok(job)
@@ -585,9 +620,32 @@ pub(crate) fn helper_main() -> io::Result<()> {
         let mut gate_write = gate_write;
         gate_write.write_all(b"G")?;
         drop(gate_write);
-        if read_byte(exec_read.as_raw_fd(), SETUP)?.is_some() {
-            return Err(refused());
-        }
+        let diagnostic_bytes = if spec.diagnostic {
+            control.write_all(b"E")?;
+            let mut bytes = Vec::new();
+            let mut input = &exec_read;
+            let until = Instant::now() + Duration::from_secs(50);
+            loop {
+                crate::protocol::wait_read(input.as_raw_fd(), until)?;
+                let mut buffer = [0_u8; 8192];
+                let count = input.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..count]);
+                if bytes.len() > 96 * 1024 {
+                    return Err(refused());
+                }
+            }
+            let _: cognia_desktop_guest::qualification::DesktopProbe =
+                serde_json::from_slice(&bytes).map_err(|_| refused())?;
+            Some(bytes)
+        } else {
+            if read_byte(exec_read.as_raw_fd(), SETUP)?.is_some() {
+                return Err(refused());
+            }
+            None
+        };
         // A killed pre-exec child also closes its error pipe. Do not label that
         // EOF as successful exec. An already exited zero-status child can only
         // come from npm: the immutable pre-exec branch exits 125 on every error.
@@ -602,7 +660,12 @@ pub(crate) fn helper_main() -> io::Result<()> {
                 return Err(refused());
             }
         }
-        control.write_all(b"E")?;
+        if let Some(bytes) = diagnostic_bytes {
+            control.write_all(&(bytes.len() as u32).to_be_bytes())?;
+            control.write_all(&bytes)?;
+        } else {
+            control.write_all(b"E")?;
+        }
         Ok(())
     })();
     if finish.is_err() && completed_status.is_none() {
@@ -754,7 +817,13 @@ fn child_exec(
     unsafe {
         libc::close(gate);
     }
+    if spec.diagnostic && unsafe { libc::dup2(error, 1) } < 0 {
+        return Err(refused());
+    }
     let mut command = Command::new("/usr/bin/npm");
+    if spec.diagnostic {
+        command.args(["--silent", "--prefix", "/opt/cognia-desktop/qualification"]);
+    }
     command
         .args(["--ignore-scripts", "run", &spec.script])
         .env_clear()
@@ -768,6 +837,9 @@ fn child_exec(
         .env("DO_NOT_TRACK", "1")
         .env("NPM_CONFIG_UPDATE_NOTIFIER", "false")
         .current_dir(format!("/workspace/{}/workspace", spec.operation_id));
+    if spec.diagnostic {
+        command.current_dir("/");
+    }
     Err(command.exec())
 }
 
@@ -819,6 +891,7 @@ mod tests {
             generation: OP.into(),
             operation_id: OP.into(),
             script: "dev".into(),
+            diagnostic: false,
             namespaces: NAMES
                 .into_iter()
                 .map(|name| (name.into(), format!("{name}:[123]")))

@@ -7,9 +7,13 @@ mod boundary;
 #[cfg(target_os = "linux")]
 mod control;
 #[cfg(target_os = "linux")]
+mod probe;
+#[cfg(target_os = "linux")]
 mod promotion;
 #[cfg(target_os = "linux")]
 mod protocol;
+#[cfg(target_os = "linux")]
+mod qualify;
 #[cfg(target_os = "linux")]
 mod relay;
 #[cfg(target_os = "linux")]
@@ -23,6 +27,19 @@ fn main() {
             (result, supervisor::failure_stage())
         }
         [operation] if operation == "observe" => (boundary::print_live_report(), "observation"),
+        [operation] if operation == "qualify-start" => (qualify::start(), "qualification_start"),
+        [operation] if operation == "qualify-result" => (qualify::result(), "qualification_result"),
+        [operation] if operation == "qualify-worker" => (qualify::worker(), "qualification_worker"),
+        [operation]
+            if [
+                "qualification-workload",
+                "qualification-terminal",
+                "qualification-importer",
+            ]
+            .contains(&operation.as_str()) =>
+        {
+            (probe::child(operation), "qualification_payload")
+        }
         [operation] if operation == "relay" => (relay::run(), "relay"),
         [operation] if operation == "handoff" => (control::forward(), "handoff"),
         [operation] if operation == "handoff-worker" => (control::worker(), "handoff_worker"),

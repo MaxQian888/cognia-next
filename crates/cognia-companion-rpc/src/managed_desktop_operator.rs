@@ -16,7 +16,7 @@ use crate::{
 };
 
 const PERMIT: &str = "--authorize-paid-smoke";
-const HELP: &str = "managed-desktop-operator <store-key|smoke|control-smoke|handoff-smoke> --host-kind <headless|desktop-debug|desktop-release> --data-dir <Host journal directory> --config <provider id> [--authorize-paid-smoke] [--handoff-request <private JSON file>]\nstore-key reads a provider key from non-terminal stdin; smoke and control-smoke require the explicit flag and a typed approval for each quoted operation. Stop the Host first and match its build profile and secret-store environment. Never use this command without the account owner's permission.";
+const HELP: &str = "managed-desktop-operator <store-key|smoke|control-smoke|handoff-smoke|workload-smoke|authority-smoke|complete-qualification> --host-kind <headless|desktop-debug|desktop-release> --data-dir <Host journal directory> --config <provider id> [--authorize-paid-smoke] [--handoff-request <private JSON file>]\nstore-key reads a provider key from non-terminal stdin; all diagnostic and qualification commands require the explicit flag; billed operations also require typed approval of each quote. Stop the Host first and match its build profile and secret-store environment. Never use this command without the account owner's permission.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct OperatorArgs {
@@ -30,7 +30,7 @@ pub struct OperatorArgs {
 pub fn parse_args(args: &[String]) -> Result<OperatorArgs> {
     let Some(command) = args
         .first()
-        .filter(|s| matches!(s.as_str(), "store-key" | "smoke" | "control-smoke" | "handoff-smoke"))
+        .filter(|s| matches!(s.as_str(), "store-key" | "smoke" | "control-smoke" | "handoff-smoke" | "workload-smoke" | "authority-smoke" | "complete-qualification"))
     else {
         return Err(refused("managed_desktop_operator_usage"));
     };
@@ -65,7 +65,7 @@ pub fn parse_args(args: &[String]) -> Result<OperatorArgs> {
             _ => return Err(refused("managed_desktop_operator_usage")),
         }
     }
-    if matches!(command.as_str(), "smoke" | "control-smoke" | "handoff-smoke") != permit {
+    if matches!(command.as_str(), "smoke" | "control-smoke" | "handoff-smoke" | "workload-smoke" | "authority-smoke" | "complete-qualification") != permit {
         return Err(refused(
             "managed_desktop_smoke_explicit_permission_required",
         ));
@@ -229,6 +229,19 @@ pub async fn run(args: Vec<String>) -> Result<()> {
             &host, &principal, &args.data_dir, &args.config_id,
             args.handoff_request.ok_or_else(|| refused("managed_desktop_operator_usage"))?, permit,
         ).await?)
+    } else if args.command == "workload-smoke" {
+        serde_json::to_value(cognia_automation::cua_sandbox::managed::service::qualification::run_workload_qualification_smoke(
+            &host,&principal,&args.config_id,permit).await?)
+    } else if args.command == "authority-smoke" {
+        let receipt = crate::managed_desktops::authority_operator::run(
+            &host,&principal,&args.data_dir,&args.config_id,permit).await?;
+        let service=host.open(host.provider())?;
+        service.record_authority_qualification_smoke(&principal,&args.config_id,receipt.clone(),
+            ExplicitPaidSmokeAuthorization::from_operator_flag(PERMIT)?).await?;
+        serde_json::to_value(receipt)
+    } else if args.command == "complete-qualification" {
+        let service=host.open(host.provider())?;
+        serde_json::to_value(service.complete_native_qualification(&principal,&args.config_id,permit).await?)
     } else if args.command == "control-smoke" {
         serde_json::to_value(
             run_control_qualification_smoke(&host, &principal, &args.config_id, permit).await?,
@@ -290,6 +303,13 @@ mod tests {
         assert!(parse_args(&control).is_err());
         control.push(PERMIT.into());
         assert!(parse_args(&control).is_ok());
+        for command in ["workload-smoke", "authority-smoke", "complete-qualification"] {
+            let mut input=base.clone();input[0]=command.into();
+            assert!(parse_args(&input).is_err());
+            input.push(PERMIT.into());assert!(parse_args(&input).is_ok());
+            input.extend(args(&["--receipt", "/tmp/untrusted.json"]));
+            assert!(parse_args(&input).is_err());
+        }
         for extra in ["--confirmed", "--api-key", PERMIT, "--config"] {
             let mut invalid = approved.clone();
             invalid.push(extra.into());

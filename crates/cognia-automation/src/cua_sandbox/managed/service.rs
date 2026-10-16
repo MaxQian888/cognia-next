@@ -5,6 +5,8 @@ mod handoff_service;
 pub mod control;
 #[path = "smoke.rs"]
 mod smoke;
+#[path = "qualification.rs"]
+pub mod qualification;
 use super::{
     contracts::*,
     journal::{JournalStore, ManagedDesktopJournal},
@@ -224,12 +226,13 @@ impl ManagedDesktopService {
                         && qualified
                         && state.control_qualifications.get(&digest).is_some_and(|q| {
                             q.binding_digest == digest
-                                && q.protocol_revision == 1
+                                && q.has_complete_evidence()
                                 && template.and_then(|t| t.identity.as_ref()) == Some(&q.template)
                                 && state.desktops.get(&q.smoke_desktop_id).is_some_and(|d| {
                                     d.smoke
                                         && d.config.binding_digest() == digest
                                         && d.template == q.template
+                                        && d.desktop.generation == q.smoke_desktop_generation
                                         && d.desktop.state == ManagedDesktopState::Destroyed
                                 })
                         }),
@@ -1308,28 +1311,10 @@ fn lifecycle_diagnostic_valid(s: &ManagedDesktopJournal, digest: &str, template:
 fn qualified(s: &ManagedDesktopJournal, digest: &str, template: &TemplateIdentity) -> bool {
     s.qualifications.get(digest).is_some_and(|q| {
         lifecycle_receipt_valid(s, q, digest, template)
-            && q.workload_evidence.as_ref().is_some_and(|e| {
-                e.workload_isolation_revision == 1
-                    && e.enforcement == "provider-and-guest-kernel"
-                    && e.launch_paths_verified == ["desktop", "importer", "acceptance"]
-                    && e.workload_egress_verified
-                    && e.escape_resistance_verified
-                    && e.native_handoff_receipt_sha256.len() == 2
-                    && e.native_handoff_receipt_sha256.iter().all(|v| {
-                        v.len() == 64 && v.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-                    })
-                    && e.native_handoff_receipt_sha256[0] != e.native_handoff_receipt_sha256[1]
-                    && !e.boundaries.is_empty()
-                    && e.boundaries.iter().all(|binding| {
-                        s.desktops.get(&binding.desktop_id).is_some_and(|row| {
-                            row.smoke && row.desktop.state == ManagedDesktopState::Destroyed
-                                && row.config.binding_digest() == digest
-                                && row.template == *template
-                                && binding.matches_record(row)
-                                && s.workload_boundaries.get(&binding.desktop_id)
-                                    .is_some_and(|pinned| pinned.same_generation(binding))
-                        })
-                    })
+            && q.workload_evidence.as_ref().is_some_and(|stored| {
+                qualification::derive_evidence(s,digest,template).is_some_and(|derived| {
+                    serde_json::to_value(stored).is_ok_and(|value| serde_json::to_value(derived).is_ok_and(|expected|value==expected))
+                })
             })
     })
 }

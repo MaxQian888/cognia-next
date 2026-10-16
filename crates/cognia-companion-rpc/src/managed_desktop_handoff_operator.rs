@@ -210,6 +210,9 @@ pub async fn run(
         evidence_write(&directory, p, move |s,owner,host| s.capture(owner,host,&acceptance_id,
             CaptureInput { artifact_id:uuid::Uuid::new_v4().to_string(), criterion_id:"criterion-0".into(),
                 kind:CaptureKind::Checkpoint, explicitly_requested:true, sensitive_human_input:false }, &bytes).map(|_| ())).await?;
+        if installed.launched {
+            service.record_native_handoff_smoke(p, &reconnected, &prepared, &installed).await?;
+        }
         row.state = "diagnosticCompleted".into();
         Ok(())
     }.await;
@@ -267,7 +270,7 @@ mod tests {
     #[tokio::test]
     async fn failed_revoked_or_expired_transfer_still_cleans_up_and_persists_pending_destroy() {
         let root = tempfile::tempdir().unwrap(); let path = root.path().join("child.json");
-        for error in ["managed_desktop_handoff_transfer_failed", "managed_desktop_handoff_source_unavailable", "managed_desktop_handoff_deadline"] {
+        for error in ["managed_desktop_handoff_transfer_failed", "managed_desktop_handoff_source_unavailable", "managed_desktop_handoff_deadline", "managed_desktop_storage_unavailable"] {
             let mut child = row(); let called = std::sync::atomic::AtomicBool::new(false);
             let result = finish_diagnostic(&path, &mut child, Err(refused(error)), async {
                 called.store(true, std::sync::atomic::Ordering::SeqCst);

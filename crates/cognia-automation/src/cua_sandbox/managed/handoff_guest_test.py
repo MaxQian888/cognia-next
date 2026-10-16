@@ -1,4 +1,5 @@
 """Offline raw-object importer fixtures; no provider or privileged execution."""
+from contextlib import ExitStack
 import hashlib
 import importlib.util
 import json
@@ -85,6 +86,32 @@ class HandoffTests(unittest.TestCase):
         self.git("bundle", "create", str(self.bundle), "refs/cognia/acceptance")
         self.bundle_bytes = self.bundle.read_bytes()
         self.request, self.payload = self.packet()
+
+    def test_fixed_diagnostic_opcode_never_reads_source(self):
+        with ExitStack() as stack:
+            for name, value in [("getuid", 1001), ("getgid", 1001), ("getgroups", [])]:
+                stack.enter_context(patch.object(guest.os, name, return_value=value))
+            stack.enter_context(patch.object(guest.sys, "platform", "linux"))
+            stack.enter_context(patch.object(guest.os, "umask"))
+            stack.enter_context(patch.dict(guest.os.environ, {}))
+            stack.enter_context(patch.object(guest.signal, "signal"))
+            stack.enter_context(patch.object(guest.signal, "alarm"))
+            stdin = stack.enter_context(patch.object(guest.sys, "stdin"))
+            stdin.buffer.read.side_effect = [b"Q", b""]
+            diagnostic = stack.enter_context(patch.object(guest, "run_qualification"))
+            source = stack.enter_context(patch.object(guest, "import_source"))
+            raw = stack.enter_context(patch.object(Path, "read_bytes", side_effect=AssertionError("source read before diagnostic")))
+            guest.main()
+            diagnostic.assert_called_once_with()
+            source.assert_not_called()
+            raw.assert_not_called()
+
+    def test_diagnostic_launch_is_fixed_and_not_a_project_command(self):
+        with patch("builtins.open") as opened, patch.object(guest.subprocess, "run") as run, patch.object(guest.os, "fsync"):
+            output = opened.return_value.__enter__.return_value
+            guest.run_qualification()
+            opened.assert_called_once_with("/output/qualification.json", "xb")
+            run.assert_called_once_with(["/usr/local/bin/cognia-desktop-guest", "qualification-importer"], env=guest.ENV, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.DEVNULL, timeout=20, check=True)
 
     def test_actual_bundle_reconstruction_pins_commit_and_selected_files(self):
         (self.repo / "check.json").write_text("moving branch")

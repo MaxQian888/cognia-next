@@ -326,6 +326,15 @@ def verify_offline_network():
                 fail()
 
 
+def run_qualification():
+    with open("/output/qualification.json", "xb") as output:
+        subprocess.run(["/usr/local/bin/cognia-desktop-guest", "qualification-importer"],
+                       env=ENV, stdin=subprocess.DEVNULL, stdout=output,
+                       stderr=subprocess.DEVNULL, timeout=20, check=True)
+        output.flush()
+        os.fsync(output.fileno())
+
+
 def main():
     if sys.platform != "linux" or os.getuid() != 1001 or os.getgid() != 1001 or os.getgroups():
         fail()
@@ -335,8 +344,15 @@ def main():
     signal.alarm(30)
     # No untrusted source is touched until the root supervisor has observed this
     # actual Python process inside all mandatory boundaries.
-    if sys.stdin.buffer.read(1) != b"G" or sys.stdin.buffer.read(1):
+    admission = sys.stdin.buffer.read(1)
+    if admission not in (b"G", b"Q") or sys.stdin.buffer.read(1):
         fail()
+    if admission == b"Q":
+        # Fixed native payload before any source input; only the root-owned
+        # private admission pipe can select this diagnostic. The outer root
+        # collector independently validates the actual interpreter boundary.
+        run_qualification()
+        return
     verify_offline_network()
     raw = Path("/input/request.json").read_bytes()
     if len(raw) > 128 * 1024:

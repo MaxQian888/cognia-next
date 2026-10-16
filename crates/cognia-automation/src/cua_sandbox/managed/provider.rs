@@ -151,6 +151,12 @@ pub trait ManagedDesktopProvider: Send + Sync {
         record: &DesktopRecord,
         secrets: &DesktopSecrets,
     ) -> Result<cognia_desktop_guest::observation::ProcessBoundaryReport>;
+    /// Fixed destructive native diagnostic. Unsupported providers fail closed.
+    async fn qualify_workload(
+        &self, _record: &DesktopRecord, _secrets: &DesktopSecrets,
+    ) -> Result<cognia_desktop_guest::qualification::WorkloadQualificationReport> {
+        Err(refused("managed_desktop_workload_qualification_unsupported"))
+    }
     async fn register_template(
         &self,
         config: &ManagedDesktopConfig,
@@ -339,6 +345,18 @@ impl ManagedDesktopProvider for E2bDesktopProvider {
         if report.phase != cognia_desktop_guest::observation::ObservationPhase::DesktopLive {
             return Err(refused("managed_desktop_boundary_invalid"));
         }
+        Ok(report)
+    }
+
+    async fn qualify_workload(
+        &self, record: &DesktopRecord, secrets: &DesktopSecrets,
+    ) -> Result<cognia_desktop_guest::qualification::WorkloadQualificationReport> {
+        let request = bootstrap_request(record, secrets)?;
+        let bytes = cognia_e2b::envd::qualify_desktop_workload(&request).await
+            .map_err(|_| refused("managed_desktop_workload_qualification_unavailable"))?;
+        let report: cognia_desktop_guest::qualification::WorkloadQualificationReport =
+            serde_json::from_slice(&bytes).map_err(|_| refused("managed_desktop_workload_qualification_invalid"))?;
+        report.validate().map_err(refused)?;
         Ok(report)
     }
 

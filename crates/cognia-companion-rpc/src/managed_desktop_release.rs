@@ -17,7 +17,7 @@ use cognia_environment::{
 
 pub const RELEASE_FILE: &str = "managed-desktop-release.json";
 pub const PROTOCOL: &str = "computer-server-0.3.46";
-pub const RECIPE: &str = "6";
+pub const RECIPE: &str = "7";
 
 /// No embedded digest is guessed before the image has actually been published.
 /// An absent release leaves provisioning dormant and cleanup operational.

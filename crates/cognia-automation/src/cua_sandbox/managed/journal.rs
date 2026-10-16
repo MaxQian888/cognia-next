@@ -26,6 +26,13 @@ pub struct ManagedDesktopJournal {
     pub lifecycle_diagnostics: BTreeMap<String, QualificationReceipt>,
     #[serde(default)]
     pub workload_boundaries: BTreeMap<String, HostBoundaryBinding>,
+    /// Old journals remain readable but cannot invent missing qualification.
+    #[serde(default)]
+    pub handoff_diagnostics: BTreeMap<String, NativeHandoffDiagnostic>,
+    #[serde(default)]
+    pub workload_diagnostics: BTreeMap<String, NativeWorkloadDiagnostic>,
+    #[serde(default)]
+    pub authority_diagnostics: BTreeMap<String, NativeAuthorityDiagnostic>,
     pub desktops: BTreeMap<String, DesktopRecord>,
     #[serde(default)]
     pub control_quarantines: std::collections::BTreeSet<String>,
@@ -221,10 +228,16 @@ mod tests {
         let mut legacy = serde_json::to_value(&state).unwrap();
         legacy.as_object_mut().unwrap().remove("workloadBoundaries");
         legacy.as_object_mut().unwrap().remove("lifecycleDiagnostics");
+        for key in ["handoffDiagnostics", "workloadDiagnostics", "authorityDiagnostics"] {
+            legacy.as_object_mut().unwrap().remove(key);
+        }
         write_json(&tmp.path().join("managed-desktops-journal.json"), &legacy).unwrap();
         let restored = store.load("host").unwrap();
         assert!(restored.workload_boundaries.is_empty());
         assert!(restored.lifecycle_diagnostics.is_empty());
+        assert!(restored.handoff_diagnostics.is_empty());
+        assert!(restored.workload_diagnostics.is_empty());
+        assert!(restored.authority_diagnostics.is_empty());
         assert!(store.load("other").is_err());
         fs::write(tmp.path().join("managed-desktops-journal.json"), b"partial").unwrap();
         assert!(store.load("host").is_err());

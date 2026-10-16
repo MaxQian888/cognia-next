@@ -422,6 +422,34 @@ pub struct WorkloadQualificationEvidence {
     pub native_handoff_receipt_sha256: Vec<String>,
 }
 
+/// Native-only records collected by fixed smoke producers. No RPC or operator
+/// input accepts caller-authored qualification assertions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeHandoffDiagnostic {
+    pub evidence_version: u32,
+    pub mode: String,
+    pub operation_id: String,
+    pub boundary: HostBoundaryBinding,
+    pub receipt_sha256: String,
+    pub source_tree_sha256: String,
+    pub recorded_at: i64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeWorkloadDiagnostic {
+    pub boundary: HostBoundaryBinding,
+    pub report: cognia_desktop_guest::qualification::WorkloadQualificationReport,
+    pub recorded_at: i64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeAuthorityDiagnostic {
+    pub boundary: HostBoundaryBinding,
+    pub evidence: HostAuthoritySmokeEvidence,
+    pub recorded_at: i64,
+}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -632,5 +660,61 @@ mod tests {
         for id in ["../x", "", "x/y", "x\n"] {
             assert!(validate_id(id).is_err());
         }
+    }
+}
+
+/// Native Host authority evidence. Counts observe actual driver admission, not
+/// a guest-side input counter or an authenticated remote RPC envelope.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostAuthoritySmokeEvidence {
+    pub evidence_version: u32,
+    pub smoke_desktop_id: String,
+    pub smoke_desktop_generation: u64,
+    pub observed_at: i64,
+    pub paired_owner_resolved: bool,
+    pub self_approval_rejected: bool,
+    pub consent_wrong_device_rejected: bool,
+    pub consent_wrong_operation_rejected: bool,
+    pub consent_one_shot: bool,
+    pub admin_wrong_device_rejected: bool,
+    pub admin_wrong_operation_rejected: bool,
+    pub admin_expiry_rejected: bool,
+    pub admin_revocation_rejected: bool,
+    pub positive_input_acknowledged: bool,
+    pub cancelled_consent_not_delivered: bool,
+    pub late_approval_not_replayed: bool,
+    pub admin_revoked_after_consent_not_delivered: bool,
+    pub compound_revocation_second_send_blocked: bool,
+    pub paired_device_revocation_rejected: bool,
+    pub positive_admitted_commands: u64,
+    pub denied_admitted_commands: u64,
+    pub compound_admitted_commands: u64,
+    pub compound_denied_commands: u64,
+}
+impl HostAuthoritySmokeEvidence {
+    pub fn has_complete_evidence(&self) -> bool {
+        self.evidence_version == 1 && !self.smoke_desktop_id.is_empty()
+            && self.smoke_desktop_generation > 0
+            && self.observed_at > 0
+            && self.paired_owner_resolved
+            && self.self_approval_rejected
+            && self.consent_wrong_device_rejected
+            && self.consent_wrong_operation_rejected
+            && self.consent_one_shot
+            && self.admin_wrong_device_rejected
+            && self.admin_wrong_operation_rejected
+            && self.admin_expiry_rejected
+            && self.admin_revocation_rejected
+            && self.positive_input_acknowledged
+            && self.cancelled_consent_not_delivered
+            && self.late_approval_not_replayed
+            && self.admin_revoked_after_consent_not_delivered
+            && self.compound_revocation_second_send_blocked
+            && self.paired_device_revocation_rejected
+            && self.positive_admitted_commands == 1
+            && self.denied_admitted_commands == 0
+            && self.compound_admitted_commands == 1
+            && self.compound_denied_commands == 1
     }
 }

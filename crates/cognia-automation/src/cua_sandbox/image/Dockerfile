@@ -36,11 +36,14 @@ COPY startup.py /opt/cognia-desktop/startup.py
 COPY server.py /opt/cognia-desktop/server.py
 COPY entrypoint.sh /usr/local/bin/cognia-desktop
 COPY menu.xml /opt/cognia-desktop/menu.xml
-RUN chmod 0755 /usr/local/bin/cognia-desktop
+RUN chmod 0755 /usr/local/bin/cognia-desktop \
+    && mkdir -p /opt/cognia-desktop/qualification \
+    && printf '%s\n' '{"private":true,"scripts":{"qualification":"/usr/local/bin/cognia-desktop-guest qualification-workload"}}' > /opt/cognia-desktop/qualification/package.json \
+    && chmod 0444 /opt/cognia-desktop/qualification/package.json
 
 LABEL org.opencontainers.image.title="Cognia Linux Desktop" \
       cognia.cua.protocol="computer-server-0.3.46" \
-      cognia.cua.recipe="6"
+      cognia.cua.recipe="7"
 EXPOSE 8000
 WORKDIR /home/cua
 ENTRYPOINT ["/usr/local/bin/cognia-desktop"]

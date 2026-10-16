@@ -51,7 +51,7 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(events[0]["status"], 200)
         self.assertIn((b"cache-control", b"no-store"), events[0]["headers"])
         self.assertEqual(json.loads(events[1]["body"]), {
-            "protocol": "computer-server-0.3.46", "recipeRevision": "6", "serverVersion": "0.3.46"
+            "protocol": "computer-server-0.3.46", "recipeRevision": "7", "serverVersion": "0.3.46"
         })
         self.assertNotIn(b"a" * 64, events[1]["body"])
 

@@ -24,7 +24,7 @@ class TokenAuth:
         valid = valid and not any(key.lower() == b"origin" for key, _ in headers)
         if valid:
             if scope["type"] == "http" and scope.get("path") == "/cognia/health" and scope.get("method") == "GET":
-                body = json.dumps({"protocol": "computer-server-0.3.46", "recipeRevision": "6",
+                body = json.dumps({"protocol": "computer-server-0.3.46", "recipeRevision": "7",
                                    "serverVersion": "0.3.46"}).encode("utf-8")
                 await send({"type": "http.response.start", "status": 200,
                             "headers": [(b"content-type", b"application/json"), (b"cache-control", b"no-store")]})

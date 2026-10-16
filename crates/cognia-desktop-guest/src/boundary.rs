@@ -370,41 +370,50 @@ pub(crate) fn report(
     Ok(report)
 }
 
+pub(crate) fn load_current() -> io::Result<Boundary> {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    if unsafe { libc::getuid() } != 0 || unsafe { libc::geteuid() } != 0 {
+        return Err(invalid());
+    }
+    let parent = fs::symlink_metadata("/run/cognia-desktop")?;
+    if !parent.is_dir() || parent.uid() != 0 || parent.mode() & 0o022 != 0 {
+        return Err(invalid());
+    }
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .open("/run/cognia-desktop/state.json")?;
+    let meta = file.metadata()?;
+    if !meta.is_file()
+        || meta.uid() != 0
+        || meta.nlink() != 1
+        || meta.mode() & 0o7777 != 0o600
+        || meta.len() > 16384
+    {
+        return Err(invalid());
+    }
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(16385)
+        .read_to_end(&mut bytes)?;
+    let boundary: Boundary = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    if boundary.isolation_revision != ISOLATION_REVISION || !still_current(&boundary) {
+        return Err(invalid());
+    }
+    Ok(boundary)
+}
+
 /// Fixed root-only observer; no project path, PID, command or destination input.
 pub(crate) fn print_live_report() -> io::Result<()> {
-    use std::io::{Read, Write};
-    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    use std::io::Write;
     if unsafe { libc::geteuid() } != 0 || unsafe { libc::getuid() } != 0 {
         return Err(invalid());
     }
     let until = std::time::Instant::now() + std::time::Duration::from_secs(25);
     loop {
         let attempt = (|| -> io::Result<ProcessBoundaryReport> {
-            let parent = fs::symlink_metadata("/run/cognia-desktop")?;
-            if !parent.is_dir() || parent.uid() != 0 || parent.mode() & 0o022 != 0 {
-                return Err(invalid());
-            }
-            let mut file = fs::OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
-                .open("/run/cognia-desktop/state.json")?;
-            let meta = file.metadata()?;
-            if !meta.is_file()
-                || meta.uid() != 0
-                || meta.nlink() != 1
-                || meta.mode() & 0o7777 != 0o600
-                || meta.len() > 16384
-            {
-                return Err(invalid());
-            }
-            let mut bytes = Vec::new();
-            Read::by_ref(&mut file)
-                .take(16385)
-                .read_to_end(&mut bytes)?;
-            let boundary: Boundary = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-            if boundary.isolation_revision != ISOLATION_REVISION || !still_current(&boundary) {
-                return Err(invalid());
-            }
+            let boundary = load_current()?;
             report(&boundary, boundary.workload_pid, 1000, &boundary.generation)
         })();
         match attempt {

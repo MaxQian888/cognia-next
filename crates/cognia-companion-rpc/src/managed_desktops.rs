@@ -269,6 +269,8 @@ struct HostAuthority<'a> {
     host_id: &'a str,
     admin_check: Option<AdminAuthorityCheck>,
     input_policy: Option<&'a InputPolicyGuard>,
+    // Native diagnostics observe the real command-pump decision; never override it.
+    admission_observer: Option<Arc<dyn Fn(bool) + Send + Sync>>,
 }
 #[async_trait]
 impl ManagedControlAuthority for HostAuthority<'_> {
@@ -284,12 +286,14 @@ impl ManagedControlAuthority for HostAuthority<'_> {
         let expected = expected.clone();
         let admin_check = self.admin_check.clone();
         let input_policy = self.input_policy.cloned();
+        let observer = self.admission_observer.clone();
         Arc::new(move || {
             if admin_check.as_ref().is_some_and(|check| check().is_err())
                 || input_policy
                     .as_ref()
                     .is_some_and(|policy| policy.check().is_err())
             {
+                if let Some(observer) = &observer { observer(false); }
                 return false;
             }
             let caller = Caller {
@@ -298,13 +302,15 @@ impl ManagedControlAuthority for HostAuthority<'_> {
                 scope: scope.as_deref(),
                 local,
             };
-            principal(&caller, &host_id).is_ok_and(|current| {
+            let admitted = principal(&caller, &host_id).is_ok_and(|current| {
                 current.owner_principal_id == expected.owner_principal_id
                     && current.principal_id == expected.principal_id
                     && current.host_id == expected.host_id
                     && current.authority == expected.authority
                     && current.require_human().is_ok()
-            })
+            });
+            if let Some(observer) = &observer { observer(admitted); }
+            admitted
         })
     }
     async fn revalidate(&self, expected: &ManagedDesktopPrincipal) -> Result<()> {
@@ -739,7 +745,18 @@ async fn execute_input(
     p: &ManagedDesktopPrincipal,
     authority: &HostAuthority<'_>,
     a: InputArgs,
+    runtime: ManagedControlRuntime,
+) -> Result<()> {
+    execute_input_inner(service, p, authority, a, runtime, None).await
+}
+
+async fn execute_input_inner(
+    service: &ManagedDesktopService,
+    p: &ManagedDesktopPrincipal,
+    authority: &HostAuthority<'_>,
+    a: InputArgs,
     mut runtime: ManagedControlRuntime,
+    smoke: Option<&ExplicitPaidSmokeAuthorization>,
 ) -> Result<()> {
     let command = input_command(&a.action)?;
     require_verified_target_constraints(&runtime.enforcement)?;
@@ -749,6 +766,7 @@ async fn execute_input(
         host_id: authority.host_id,
         admin_check: authority.admin_check.clone(),
         input_policy: Some(&policy_guard),
+        admission_observer: authority.admission_observer.clone(),
     };
     let authority = &guarded_authority;
     let detail = format!("Managed desktop {}: {}", a.desktop_id, command);
@@ -797,19 +815,14 @@ async fn execute_input(
         {
             return Err(error);
         }
-        service
-            .control_input(
-                p,
-                &a.desktop_id,
-                a.generation,
-                &a.token,
-                a.fence,
-                &a.frame_id,
-                a.point,
-                a.action,
-                authority,
-            )
-            .await
+        let delivery = if let Some(permit) = smoke {
+            service.control_input_smoke(p, &a.desktop_id, a.generation, &a.token,
+                a.fence, &a.frame_id, a.point, a.action, authority, permit).await
+        } else {
+            service.control_input(p, &a.desktop_id, a.generation, &a.token,
+                a.fence, &a.frame_id, a.point, a.action, authority).await
+        };
+        delivery
             .map_err(|error| AutomationError::BackendError {
                 message: error.code,
             })
@@ -862,6 +875,7 @@ pub async fn dispatch(
         host_id: &host_id,
         admin_check,
         input_policy: None,
+        admission_observer: None,
     };
     if crate::managed_desktop_results::COMMANDS.contains(&name) {
         return crate::managed_desktop_results::dispatch(&directory, &service, &principal, &authority, name, args).await;
@@ -1288,6 +1302,7 @@ mod tests {
                 Err(refused("managed_desktop_control_admin_lease_expired"))
             })),
             input_policy: None,
+            admission_observer: None,
         };
         assert!(!(expired.input_admission(&expected))());
         assert_eq!(
@@ -1299,6 +1314,7 @@ mod tests {
             host_id: "host",
             admin_check: None,
             input_policy: None,
+            admission_observer: None,
         };
         authority.revalidate(&expected).await.unwrap();
         let live = authority.input_admission(&expected);
@@ -1330,6 +1346,7 @@ mod tests {
             host_id: "host",
             admin_check: None,
             input_policy: None,
+            admission_observer: None,
         };
         assert_eq!(
             authority.revalidate(&expected).await.unwrap_err().code,
@@ -1647,6 +1664,7 @@ mod tests {
             host_id: "host",
             admin_check: None,
             input_policy: None,
+            admission_observer: None,
         };
         let result = execute_input(
             &service,
@@ -1738,3 +1756,7 @@ mod tests {
         );
     }
 }
+
+// Kept below this module so native smoke reuses private Host authority and consent.
+#[path = "managed_desktop_authority_operator.rs"]
+pub mod authority_operator;

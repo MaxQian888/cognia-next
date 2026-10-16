@@ -23,7 +23,7 @@ test("release uses the published immutable digest and contains no runtime token"
   assert.equal(release.image, `${imageRepository}@${digest}`)
   assert.equal(release.imageDigest, digest)
   assert.equal(release.architecture, "linux/amd64")
-  assert.equal(release.recipeRevision, "6")
+  assert.equal(release.recipeRevision, "7")
   assert.equal(release.protocol, "computer-server-0.3.46")
   assert.equal(release.serverVersion, "0.3.46")
   assert.equal(release.startCommand, "sleep infinity")
@@ -77,7 +77,7 @@ test("recipe drift and mutable base prevent publication of a stale manifest", ()
     writeFileSync(join(context, "server.py"), server)
     writeFileSync(
       join(context, "Dockerfile"),
-      dockerfile.replace('cognia.cua.recipe="6"', 'cognia.cua.recipe="7"')
+      dockerfile.replace('cognia.cua.recipe="7"', 'cognia.cua.recipe="8"')
     )
     assert.throws(() => verifyImageSources(root), /identity/)
     writeFileSync(join(context, "Dockerfile"), dockerfile.replace(/@sha256:[0-9a-f]{64}/, ""))
@@ -85,7 +85,7 @@ test("recipe drift and mutable base prevent publication of a stale manifest", ()
     writeFileSync(join(context, "Dockerfile"), dockerfile)
     writeFileSync(
       join(context, "server.py"),
-      server.replace('"recipeRevision": "6"', '"recipeRevision": "7"')
+      server.replace('"recipeRevision": "7"', '"recipeRevision": "8"')
     )
     assert.throws(() => verifyImageSources(root), /health identity/)
   } finally {

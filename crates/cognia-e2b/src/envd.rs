@@ -692,14 +692,55 @@ pub async fn observe_desktop_boundary(bootstrap: &DesktopBootstrap) -> Result<Ve
     observe_desktop_boundary_at(bootstrap, &endpoint, Duration::from_secs(35)).await
 }
 
+/// Destructive native qualification of the fixed workload launch paths. This
+/// command accepts no caller script, destination, PID, environment or stdin.
+pub async fn qualify_desktop_workload(bootstrap: &DesktopBootstrap) -> Result<Vec<u8>, EnvdError> {
+    let endpoint = bootstrap.endpoint()?;
+    let start = fixed_desktop_report_at(bootstrap, &endpoint, Duration::from_secs(15), "qualify-start", 1024).await?;
+    let start: serde_json::Value = serde_json::from_slice(&start)
+        .map_err(|_| EnvdError::Protocol("workload qualification start invalid".into()))?;
+    let generation = start.get("boundaryGeneration").and_then(|v|v.as_str())
+        .filter(|_| start.as_object().is_some_and(|v|v.len()==2) && start["started"]==true)
+        .ok_or_else(|| EnvdError::Protocol("workload qualification start invalid".into()))?.to_owned();
+    if !uuid::Uuid::parse_str(&generation).is_ok_and(|id|!id.is_nil() && id.to_string()==generation) {
+        return Err(EnvdError::Protocol("workload qualification generation invalid".into()));
+    }
+    // The start stream has ended and been dropped. The independent collector
+    // kills the supervisor while no Host request or reconciliation is active.
+    tokio::time::sleep(Duration::from_secs(90)).await;
+    let result = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let bytes = fixed_desktop_report_at(bootstrap,&endpoint,Duration::from_secs(15),"qualify-result",262144).await?;
+            let value:serde_json::Value=serde_json::from_slice(&bytes)
+                .map_err(|_|EnvdError::Protocol("workload qualification report invalid".into()))?;
+            if value["boundaryGeneration"] != generation {return Err(EnvdError::Protocol("workload qualification generation changed".into()));}
+            if value.as_object().is_some_and(|v|v.len()==2) && value["pending"]==true {
+                tokio::time::sleep(Duration::from_secs(2)).await;continue;
+            }
+            return Ok(bytes);
+        }
+    }).await;
+    result.map_err(|_|EnvdError::Transport("workload qualification timed out".into()))?
+}
+
 async fn observe_desktop_boundary_at(
     bootstrap: &DesktopBootstrap,
     endpoint: &EnvdEndpoint,
     deadline: Duration,
 ) -> Result<Vec<u8>, EnvdError> {
+    fixed_desktop_report_at(bootstrap, endpoint, deadline, "observe", 32768).await
+}
+
+async fn fixed_desktop_report_at(
+    bootstrap: &DesktopBootstrap,
+    endpoint: &EnvdEndpoint,
+    deadline: Duration,
+    command: &str,
+    maximum_bytes: usize,
+) -> Result<Vec<u8>, EnvdError> {
     let spec = StartSpec {
         cmd: "/usr/local/bin/cognia-desktop-guest".into(),
-        args: vec!["observe".into()],
+        args: vec![command.into()],
         envs: BTreeMap::new(),
         cwd: None,
         stdin: false,
@@ -715,14 +756,14 @@ async fn observe_desktop_boundary_at(
                 Some(ProcessEvent::Start { pid }) if pid > 0 && !started => started = true,
                 Some(ProcessEvent::Stdout(bytes)) if started => {
                     total = total.saturating_add(bytes.len());
-                    if total > 32768 {
+                    if total > maximum_bytes {
                         return Err(EnvdError::Protocol("boundary report exceeded bound".into()));
                     }
                     stdout.extend_from_slice(&bytes);
                 }
                 Some(ProcessEvent::Stderr(bytes)) if started => {
                     total = total.saturating_add(bytes.len());
-                    if total > 32768 {
+                    if total > maximum_bytes {
                         return Err(EnvdError::Protocol("boundary report exceeded bound".into()));
                     }
                 }
@@ -1253,5 +1294,47 @@ mod tests {
                 .unwrap_err();
         assert!(matches!(error, EnvdError::Unauthorized(_)));
         assert!(!error.to_string().contains("secret"));
+    }
+    #[tokio::test]
+    async fn destructive_qualification_uses_only_fixed_command_and_bounded_output() {
+        let fixture = bootstrap_fixture(200, probe_frames(b"{}"), Duration::ZERO).await;
+        assert_eq!(
+            fixed_desktop_report_at(
+                &bootstrap(),
+                &fixture.endpoint,
+                Duration::from_secs(1),
+                "qualify-result",
+                262144
+            )
+            .await
+            .unwrap(),
+            b"{}"
+        );
+        let request = fixture.requests.lock().unwrap()[0].clone();
+        let mut decoder = EnvelopeDecoder::default();
+        decoder.push(&request.1);
+        let Frame::Message(payload) = decoder.next_frame().unwrap().unwrap() else {
+            panic!("not message")
+        };
+        let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(
+            value["process"]["cmd"],
+            "/usr/local/bin/cognia-desktop-guest"
+        );
+        assert_eq!(value["process"]["args"], json!(["qualify-result"]));
+        assert_eq!(value["process"]["envs"], json!({}));
+        assert_eq!(value["stdin"], false);
+        for output in [Vec::new(), vec![b'x'; 262145]] {
+            let fixture = bootstrap_fixture(200, probe_frames(&output), Duration::ZERO).await;
+            assert!(fixed_desktop_report_at(
+                &bootstrap(),
+                &fixture.endpoint,
+                Duration::from_secs(1),
+                "qualify-result",
+                262144
+            )
+            .await
+            .is_err());
+        }
     }
 }

@@ -119,10 +119,15 @@ pub struct PreparedHandoff {
     staging: Arc<HandoffStaging>,
     manifest: TransferManifest,
     digest: String,
+    recovery: bool,
 }
 impl PreparedHandoff {
     pub fn manifest_digest(&self) -> &str { &self.digest }
     pub fn commit(&self) -> &str { &self.manifest.commit }
+    pub(crate) fn mode(&self) -> &'static str { if self.recovery { "bundle" } else { "commit" } }
+    pub(crate) fn validate_installed(&self, installed: &InstalledHandoff, operation: &str) -> Result<()> {
+        validate_receipt(installed, operation, &self.manifest, &self.digest, true)
+    }
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -546,7 +551,7 @@ async fn prepare_source_with_reservation(
         source_bytes: source_tree.source_bytes, files };
     let digest = hash(&serde_json::to_vec(&manifest).map_err(io_error)?);
     budget.check()?;
-    Ok(PreparedHandoff { staging, manifest, digest })
+    Ok(PreparedHandoff { staging, manifest, digest, recovery: source.recovery.is_some() })
 }
 async fn file_hash(path: &Path, max: u64, budget: &HandoffBudget) -> Result<String> {
     let mut input = tokio::fs::File::open(path).await.map_err(io_error)?;
@@ -876,6 +881,7 @@ mod tests {
         for (key, value) in [
             ("receiptVersion", serde_json::json!(2)), ("boundaryGeneration", serde_json::json!(uuid::Uuid::nil().to_string())),
             ("sourceTreeSha256", serde_json::json!("f".repeat(64))), ("sourceFileCount", serde_json::json!(3)),
+            ("manifestDigest", serde_json::json!("f".repeat(64))),
             ("sourceBytes", serde_json::json!(17)), ("workspace", serde_json::json!("/tmp/workspace")),
             ("launched", serde_json::json!(true)), ("commit", serde_json::json!("e".repeat(40))),
         ] {
