@@ -252,13 +252,39 @@ describe("createSocketClient", () => {
     expect(h.sockets).toHaveLength(0)
   })
 
-  it("treats a policy close as a refusal", async () => {
+  it("lets the ticket exchange decide after a policy close", async () => {
+    let refuse = false
+    const h = harness({
+      ticket: async () => {
+        if (refuse) throw Object.assign(new Error("no"), { code: "device_unavailable" })
+        return "t1"
+      },
+    })
+    h.client.start()
+    await flush()
+    h.sockets[0]!.open()
+    // Not waited out as a refusal: a Host about to stop used to close this way.
+    h.sockets[0]!.drop(1008, "browser access is switched off on this Host")
+    expect(h.client.state()).toEqual({ kind: "waiting", retryAt: 1_000, code: null })
+    // A real revocation shows at the ticket exchange, and that one is standing.
+    refuse = true
+    await h.advance(1_000)
+    expect(h.client.state()).toEqual({
+      kind: "waiting",
+      retryAt: 301_000,
+      code: "device_unavailable",
+    })
+  })
+
+  it("reconnects at once after the Host closes as going away", async () => {
     const h = harness()
     h.client.start()
     await flush()
     h.sockets[0]!.open()
-    h.sockets[0]!.drop(1008, "device revoked")
-    expect(h.client.state()).toEqual({ kind: "waiting", retryAt: 300_000, code: "device revoked" })
+    h.sockets[0]!.drop(1001, "the Host is stopping")
+    expect(h.client.state()).toEqual({ kind: "waiting", retryAt: 1_000, code: null })
+    await h.advance(1_000)
+    expect(h.sockets).toHaveLength(2)
   })
 
   it("retries a transient wait at once when asked for", async () => {

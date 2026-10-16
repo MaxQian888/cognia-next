@@ -2797,6 +2797,9 @@ async fn run_serve(
         file_share.shutdown().await;
     }
     if let Some(browser_handle) = browser_handle {
+        // Close browser device sockets as "going away" before clearing the
+        // flag, which they would otherwise read as access switched off.
+        app_lib::companion_api::ws_browser_companion::close_all_for_host_stop();
         app_lib::companion_api::browser_access::set_submissions_enabled(false);
         let mut browser_terminated = browser_handle.terminated.clone();
         let _ = browser_handle.shutdown.send(());

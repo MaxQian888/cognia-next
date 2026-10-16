@@ -85,9 +85,6 @@ const STANDING_REFUSALS = new Set([
   "origin_mismatch",
 ])
 
-/** Close codes the Host uses for "your authorization changed". */
-const CLOSE_POLICY_VIOLATION = 1008
-
 function errorCode(error: unknown): string | null {
   if (error && typeof error === "object" && "code" in error) {
     const code = (error as { code: unknown }).code
@@ -258,12 +255,11 @@ export function createSocketClient(deps: SocketClientDeps) {
         setState({ kind: "stopped" })
         return
       }
-      if (event.code === CLOSE_POLICY_VIOLATION) {
-        // Revoked, or Browser Access switched off: the ticket exchange will
-        // say which on the next attempt; until then, wait like a refusal.
-        schedule(REFUSED_RETRY_MS, event.reason || "browser_companion_closed")
-        return
-      }
+      // A policy close (1008) means the authorization may have changed —
+      // revoked, Browser Access switched off — but the close itself cannot be
+      // trusted to be standing: it is also what a Host about to stop used to
+      // send. So it reconnects on the normal backoff, and the ticket exchange
+      // decides: a standing refusal there waits the long interval.
       schedule(backoffMs(attempt++, deps.random()), null)
     }
   }

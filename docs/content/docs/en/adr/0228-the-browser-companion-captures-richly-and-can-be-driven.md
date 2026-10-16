@@ -112,6 +112,15 @@ second, a bounded outbound queue, and closure on revocation or when Browser
 Access is switched off. It needs `browser.read-own`, and carries status hints to
 any paired browser.
 
+A close code is never trusted to be standing. A Host that is stopping closes
+every socket with 1001 (going away) before it clears the Browser Access flag, and
+the extension reconnects on its normal backoff; a 1008 close (replaced, revoked,
+switched off) is retried on the same backoff, and the ticket exchange decides:
+it refuses by name — `device_unavailable`, `browser_submissions_disabled`, … —
+and only such a standing refusal waits the long interval. The ticket exchange
+refuses this channel while Browser Access is off, so a socket is never opened
+only to be closed a second after its welcome.
+
 Driving is a third class capability, **`browser.drive`**. It joins the browser
 class (so the store's class confinement admits it) but is **not** granted at
 enrollment: the Owner turns it on per browser in Settings. The Host only sends

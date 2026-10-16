@@ -80,6 +80,11 @@ Host 以自己的 `host:browser-companion` 调用方把字节暂存在现有会�
 每秒重新校验授权、有界的发送队列，并在吊销或关闭 Browser Access 时关闭。它需要 `browser.read-own`，
 向任何已配对浏览器推送状态提示。
 
+关闭码从不被视为持续性拒绝。正在停止的 Host 在清除 Browser Access 标志之前先以 1001（going away）关闭所有套接字，
+扩展按常规退避重连；1008 关闭（被替换、被吊销、被关闭）同样按常规退避重试，由票据交换来判定：它按名称拒绝
+（`device_unavailable`、`browser_submissions_disabled` 等），只有这类持续性拒绝才等待长间隔。Browser Access
+关闭期间，票据交换会拒绝此通道，因此不会出现套接字刚收到 welcome 一秒后就被关闭的情况。
+
 驱动是第三项类能力 **`browser.drive`**。它属于浏览器类（因此存储的类约束允许它），但**不会**在注册时授予：
 由 Owner 在设置里按浏览器打开。Host 只在发送时向持有该能力的设备连接发送操作帧。
 

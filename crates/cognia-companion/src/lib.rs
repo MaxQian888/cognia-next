@@ -584,6 +584,9 @@ impl CompanionServerState {
         }
         inner.bound_port = None;
         inner.browser_port = None;
+        // Before the flag: a browser socket that reads the cleared flag first
+        // would be told access was switched off and wait minutes to retry.
+        ws_browser_companion::close_all_for_host_stop();
         browser_access::set_submissions_enabled(false);
         inner.bind_mode = None;
         // Mirror the bind state in the process-global so /healthz responses

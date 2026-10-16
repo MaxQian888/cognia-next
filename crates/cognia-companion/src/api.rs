@@ -2255,6 +2255,7 @@ async fn socket_ticket_handler(
     socket_channel_host_gate(
         request.channel,
         cognia_terminal::terminal_host_service::terminal_remote_access_enabled().await,
+        super::browser_access::submissions_enabled(),
     )?;
     let ticket = security
         .issue_socket_ticket(
@@ -2287,12 +2288,24 @@ async fn socket_ticket_handler(
 fn socket_channel_host_gate(
     channel: SocketChannel,
     remote_terminal_enabled: bool,
+    browser_submissions_enabled: bool,
 ) -> Result<(), Problem> {
     if matches!(channel, SocketChannel::Terminal) && !remote_terminal_enabled {
         return Err(api_error(
             StatusCode::FORBIDDEN,
             "terminal_remote_access_disabled",
             "remote terminal access is disabled on this host",
+        ));
+    }
+    // The device socket would be closed within a second of its welcome while
+    // Browser Access is off, and the welcome resets the extension's backoff:
+    // refused here, by name, the extension waits it out as a standing refusal
+    // instead of reconnecting every couple of seconds (ADR-0228 §5).
+    if matches!(channel, SocketChannel::BrowserCompanion) && !browser_submissions_enabled {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "browser_submissions_disabled",
+            "browser access is switched off on this Host",
         ));
     }
     Ok(())
@@ -2935,13 +2948,42 @@ mod tests {
     /// say "connection failed".
     #[test]
     fn a_terminal_ticket_is_refused_by_name_when_the_host_switch_is_off() {
-        let error = socket_channel_host_gate(SocketChannel::Terminal, false)
+        let error = socket_channel_host_gate(SocketChannel::Terminal, false, true)
             .expect_err("a terminal ticket must not be issued while remote access is off");
         assert_eq!(error.code, "terminal_remote_access_disabled");
         assert_eq!(error.status_code(), StatusCode::FORBIDDEN);
 
-        socket_channel_host_gate(SocketChannel::Terminal, true)
+        socket_channel_host_gate(SocketChannel::Terminal, true, true)
             .expect("the switch being on is the whole point of the switch");
+    }
+
+    /// Issued anyway, the socket would be closed a second after its welcome
+    /// and the extension would reconnect on a backoff that welcome reset.
+    #[test]
+    fn a_browser_companion_ticket_is_refused_by_name_while_browser_access_is_off() {
+        let error = socket_channel_host_gate(SocketChannel::BrowserCompanion, true, false)
+            .expect_err("no device socket while Browser Access is off");
+        assert_eq!(error.code, "browser_submissions_disabled");
+        assert_eq!(error.status_code(), StatusCode::FORBIDDEN);
+
+        socket_channel_host_gate(SocketChannel::BrowserCompanion, true, true)
+            .expect("a device socket opens while Browser Access is on");
+    }
+
+    /// Browser Access is about the extension's channel; the browser stream and
+    /// the rest of the companion surface do not follow it.
+    #[test]
+    fn the_browser_access_switch_does_not_reach_other_channels() {
+        for channel in [
+            SocketChannel::Events,
+            SocketChannel::Terminal,
+            SocketChannel::Browser,
+            SocketChannel::Acp,
+            SocketChannel::Worker,
+        ] {
+            socket_channel_host_gate(channel, true, false)
+                .unwrap_or_else(|_| panic!("{channel:?} must not depend on Browser Access"));
+        }
     }
 
     /// The switch is about terminals. Gating events/browser/acp/worker on it
@@ -2954,7 +2996,7 @@ mod tests {
             SocketChannel::Acp,
             SocketChannel::Worker,
         ] {
-            socket_channel_host_gate(channel, false)
+            socket_channel_host_gate(channel, false, true)
                 .unwrap_or_else(|_| panic!("{channel:?} must not depend on the terminal switch"));
         }
     }

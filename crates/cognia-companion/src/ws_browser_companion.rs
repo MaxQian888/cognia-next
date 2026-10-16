@@ -54,6 +54,7 @@ const HEARTBEAT_SECS: u64 = 20;
 const IDLE_TIMEOUT_SECS: u64 = 75;
 /// Ceiling on how long one operation may take, whatever the caller asked for.
 pub const MAX_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
+const CLOSE_GOING_AWAY: u16 = 1001;
 const CLOSE_PROTOCOL_ERROR: u16 = 1002;
 const CLOSE_POLICY_VIOLATION: u16 = 1008;
 
@@ -149,6 +150,17 @@ impl OperationError {
     }
 }
 
+/// Why the Host ends a live connection from its side.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloseReason {
+    /// The same browser connected again; this socket is stale.
+    Replaced,
+    /// The companion server is stopping. Not a refusal: the browser should
+    /// reconnect as soon as the Host is back, so this closes with 1001, never
+    /// the 1008 a browser waits out as "your authorization changed".
+    HostStopping,
+}
+
 struct Connection {
     connection_id: String,
     connected_at: u64,
@@ -157,7 +169,7 @@ struct Connection {
     sender: mpsc::Sender<Queued>,
     queue_bytes: Arc<Semaphore>,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, OperationError>>>>>,
-    shutdown: watch::Sender<bool>,
+    shutdown: watch::Sender<Option<CloseReason>>,
 }
 
 struct Queued {
@@ -230,7 +242,7 @@ async fn handle_socket(mut socket: WebSocket, tenant_id: String, device_id: Stri
         };
     let connection_id = uuid::Uuid::new_v4().to_string();
     let (sender, mut outgoing) = mpsc::channel::<Queued>(MAX_QUEUE_FRAMES);
-    let (shutdown, mut shutdown_rx) = watch::channel(false);
+    let (shutdown, mut shutdown_rx) = watch::channel(None::<CloseReason>);
     let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, OperationError>>>>> =
         Arc::new(Mutex::new(HashMap::new()));
     install(
@@ -327,6 +339,15 @@ async fn handle_socket(mut socket: WebSocket, tenant_id: String, device_id: Stri
                 if socket.send(Message::Text(beat.into())).await.is_err() { break; }
             }
             _ = authorization.tick() => {
+                // A stop already under way decides how this socket closes:
+                // the server clears the submissions flag as it stops, and
+                // reading that here first would tell the browser access was
+                // switched off.
+                let stopping = *shutdown_rx.borrow();
+                if let Some(reason) = stopping {
+                    close_for(&mut socket, reason).await;
+                    break;
+                }
                 if !has_capability(&tenant_id, &device_id, SOCKET_CAPABILITY) {
                     close_with(&mut socket, CLOSE_POLICY_VIOLATION, "this browser is no longer paired").await;
                     break;
@@ -348,8 +369,9 @@ async fn handle_socket(mut socket: WebSocket, tenant_id: String, device_id: Stri
                 }
             }
             changed = shutdown_rx.changed() => {
-                if changed.is_err() || *shutdown_rx.borrow() {
-                    close_with(&mut socket, CLOSE_POLICY_VIOLATION, "replaced by a newer connection").await;
+                let reason = *shutdown_rx.borrow();
+                if changed.is_err() || reason.is_some() {
+                    close_for(&mut socket, reason.unwrap_or(CloseReason::Replaced)).await;
                     break;
                 }
             }
@@ -394,8 +416,24 @@ async fn receive_hello(socket: &mut WebSocket) -> Result<(String, Vec<String>), 
 fn install(key: ConnectionKey, connection: Connection) {
     let previous = CONNECTIONS.write().insert(key, connection);
     if let Some(previous) = previous {
-        let _ = previous.shutdown.send(true);
+        let _ = previous.shutdown.send(Some(CloseReason::Replaced));
         fail_pending(&previous.pending, "browser_extension_replaced");
+    }
+}
+
+/// Close every browser's device socket because the companion server is
+/// stopping (ADR-0228 §5). Axum's graceful shutdown does not end upgraded
+/// sockets, so without this they outlive the stop until their authorization
+/// tick reads the cleared submissions flag and refuses them with 1008 — which
+/// a browser waits out for minutes, though the Host may be back in seconds.
+pub fn close_all_for_host_stop() {
+    close_all_for_stop(&CONNECTIONS.read());
+}
+
+fn close_all_for_stop(connections: &HashMap<ConnectionKey, Connection>) {
+    for connection in connections.values() {
+        let _ = connection.shutdown.send(Some(CloseReason::HostStopping));
+        fail_pending(&connection.pending, "browser_extension_disconnected");
     }
 }
 
@@ -575,6 +613,22 @@ fn has_capability(tenant_id: &str, device_id: &str, capability: &str) -> bool {
         .unwrap_or(false)
 }
 
+async fn close_for(socket: &mut WebSocket, reason: CloseReason) {
+    match reason {
+        CloseReason::Replaced => {
+            close_with(
+                socket,
+                CLOSE_POLICY_VIOLATION,
+                "replaced by a newer connection",
+            )
+            .await
+        }
+        CloseReason::HostStopping => {
+            close_with(socket, CLOSE_GOING_AWAY, "the Host is stopping").await
+        }
+    }
+}
+
 async fn close_with(socket: &mut WebSocket, code: u16, reason: &str) {
     let _ = socket
         .send(Message::Close(Some(CloseFrame {
@@ -725,9 +779,13 @@ mod tests {
 
     fn test_connection(
         connection_id: &str,
-    ) -> (Connection, mpsc::Receiver<Queued>, watch::Receiver<bool>) {
+    ) -> (
+        Connection,
+        mpsc::Receiver<Queued>,
+        watch::Receiver<Option<CloseReason>>,
+    ) {
         let (sender, receiver) = mpsc::channel(MAX_QUEUE_FRAMES);
-        let (shutdown, shutdown_rx) = watch::channel(false);
+        let (shutdown, shutdown_rx) = watch::channel(None);
         (
             Connection {
                 connection_id: connection_id.to_string(),
@@ -753,7 +811,7 @@ mod tests {
         install(key.clone(), first);
         let (second, _second_rx, _) = test_connection("c2");
         install(key.clone(), second);
-        assert!(*first_shutdown.borrow());
+        assert_eq!(*first_shutdown.borrow(), Some(CloseReason::Replaced));
         assert_eq!(
             answer.try_recv().unwrap().unwrap_err().code,
             "browser_extension_replaced"
@@ -763,6 +821,36 @@ mod tests {
         assert!(CONNECTIONS.read().contains_key(&key));
         remove(&key.0, &key.1, "c2");
         assert!(!CONNECTIONS.read().contains_key(&key));
+    }
+
+    #[test]
+    fn a_host_stop_closes_every_socket_as_going_away_and_fails_its_calls() {
+        // A map of its own: the process-wide registry is shared with the
+        // tests running beside this one, and stopping it would close theirs.
+        let mut connections = HashMap::new();
+        let mut shutdowns = Vec::new();
+        let mut answers = Vec::new();
+        for index in 0..2 {
+            let (connection, _rx, shutdown) = test_connection(&format!("c-stop-{index}"));
+            let (waiter, answer) = oneshot::channel();
+            connection.pending.lock().insert("op-1".to_string(), waiter);
+            connections.insert(
+                ("tenant-stop".to_string(), format!("browser-stop-{index}")),
+                connection,
+            );
+            shutdowns.push(shutdown);
+            answers.push(answer);
+        }
+        close_all_for_stop(&connections);
+        for shutdown in &shutdowns {
+            assert_eq!(*shutdown.borrow(), Some(CloseReason::HostStopping));
+        }
+        for answer in &mut answers {
+            assert_eq!(
+                answer.try_recv().unwrap().unwrap_err().code,
+                "browser_extension_disconnected"
+            );
+        }
     }
 
     #[test]
