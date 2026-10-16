@@ -424,6 +424,30 @@ pub async fn companion_revoke_device(
     Ok(())
 }
 
+/// Forget a revoked device: remove it from every device list on this Host.
+///
+/// Refused for anything not revoked, and while the device still has an
+/// operation in flight; the revocation ledger and the audit log outlive it,
+/// and its id can never be enrolled again (see
+/// `SecurityStore::forget_revoked_device`).
+#[tauri::command]
+pub async fn companion_forget_device(
+    device_id: String,
+    state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    if device_id.trim().is_empty() {
+        return Err("device_id is required".into());
+    }
+    super::device_lifecycle::forget(
+        &lifecycle_context(&state, Some(app_handle)),
+        &super::device_lifecycle::LifecycleActor::local_trust_root(paired_tenant_id()),
+        &device_id,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 /// Temporarily stop serving a paired device, keeping its identity.
 ///
 /// The device key and signaling registration survive, so

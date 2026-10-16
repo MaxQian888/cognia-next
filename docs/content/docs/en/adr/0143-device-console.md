@@ -193,6 +193,32 @@ device back), the user's choice is mirrored into the URL with `replace`, and a
 link to a device the fleet no longer has is reported rather than silently
 replaced with this machine.
 
+## Update — forgetting a revoked device (2026-10-16)
+
+A revoked device used to stay on every list for good: no store method,
+command or route removed one. **Forget** is the one action a revoked row now
+offers, in the masthead and on the Browser Companion card's paired-browser
+list, behind a confirmation and the "delete a pairing" biometric policy that
+revoke uses.
+
+`SecurityStore::forget_revoked_device` refuses anything not revoked, a
+service principal, and a device with an operation still in flight. It deletes
+the device with its keys, grants, socket tickets, browser marker, idempotency
+receipts and runs in one transaction. The audit log and the revocation ledger
+outlive it. The ledger becomes the tombstone: a device id is chosen by the
+client, and only the revoked row's primary key used to stop it from being
+enrolled again, so owner, member, browser and OIDC enrolment now refuse any id
+the ledger names. A forgotten device can come back only by pairing anew, under
+a new id.
+
+`device_lifecycle::forget` runs the same ordered effects whichever surface
+asks: the store first, then a best-effort second pass over the signaling
+registration and host secrets, then the renderer mirror. The desktop calls
+`companion_forget_device`; a shell that is not the Host calls
+`POST /api/devices/{id}/forget`, a POST of its own because `DELETE` on the
+device already means revoke. The Dexie mirror row is deleted by the shell that
+asked and, for a forget another shell made, by the event bridge.
+
 ## Amends
 
 - **ADR-0136** — `PlacementDimension` gains `host-feature`, and the `sandbox`

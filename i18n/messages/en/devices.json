@@ -300,6 +300,9 @@
     "sshFilesReachIsWhole": "This grant has no folder limit. SFTP paths are that machine's own absolute paths and it resolves its own symlinks, so there is no root to confine this to.",
     "revokeConfirmTitle": "Revoke {label}?",
     "revokeConfirmBody": "Revoking is permanent. The device loses every grant and its key, and has to pair again to come back. To stop it for now, pause it instead.",
+    "forget": "Forget",
+    "forgetConfirmTitle": "Forget {label}?",
+    "forgetConfirmBody": "This removes the revoked device from every list on this Host. It cannot come back under the same identity; pair it again with a new code to use it. The audit log keeps its history.",
     "pauseHint": "Pausing blocks this device until you resume it.",
     "lifecycleBlocked": {
       "no-host": "This browser is not connected to a Host, so a pause, resume or revoke has nowhere to go.",

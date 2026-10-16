@@ -13,6 +13,7 @@ const db = {
   pausePairedDevice: jest.fn(async () => {}),
   resumePairedDevice: jest.fn(async () => {}),
   revokePairedDevice: jest.fn(async () => {}),
+  forgetPairedDevice: jest.fn(async () => {}),
 }
 const hostCalls: { name: string; args: Record<string, unknown> }[] = []
 const terminalToggle = jest.fn(async () => {})
@@ -26,6 +27,7 @@ jest.mock("@/lib/db/paired-devices", () => ({
   pausePairedDevice: (...a: unknown[]) => db.pausePairedDevice(...(a as [])),
   resumePairedDevice: (...a: unknown[]) => db.resumePairedDevice(...(a as [])),
   revokePairedDevice: (...a: unknown[]) => db.revokePairedDevice(...(a as [])),
+  forgetPairedDevice: (...a: unknown[]) => db.forgetPairedDevice(...(a as [])),
 }))
 
 /** Flipped per-test to stand in for a phone or a browser tab. */
@@ -243,6 +245,7 @@ describe("a refused guard explains itself in words", () => {
     ["pause", (a) => a.pause("d1", "Phone"), `Pause not completed. ${LOCKOUT}`],
     ["resume", (a) => a.resume("d1", "Phone"), `Resume not completed. ${LOCKOUT}`],
     ["revoke", (a) => a.revoke("d1", "Phone"), `Revoke not completed. ${LOCKOUT}`],
+    ["forget", (a) => a.forget("d1", "Phone"), `Forget not completed. ${LOCKOUT}`],
   ]
 
   it.each(cases)("%s", async (_name, run, expected) => {
@@ -332,6 +335,37 @@ describe("useDeviceGrantActions — Settings → Security → deletePairing", ()
     expect(onChanged).toHaveBeenCalled()
   })
 
+  it("keys forgetting on the same row, since it deletes a pairing too", async () => {
+    const { actions: a } = actions()
+    await a.forget("d1", "Phone")
+    expect(guardCalls).toHaveLength(1)
+    expect(db.forgetPairedDevice).toHaveBeenCalledWith("d1")
+    expect(toast.success).toHaveBeenCalledWith("Phone forgotten.")
+
+    jest.clearAllMocks()
+    guardCalls.length = 0
+    hostCalls.length = 0
+    biometricPolicy.value = { deletePairing: false }
+    const onChanged = jest.fn()
+    const { actions: b } = actions(onChanged)
+    await b.forget("d1", "Phone")
+    expect(guardCalls).toHaveLength(0)
+    expect(hostCalls).toEqual([{ name: "companion_forget_device", args: { deviceId: "d1" } }])
+    expect(db.forgetPairedDevice).toHaveBeenCalledWith("d1")
+    expect(onChanged).toHaveBeenCalled()
+  })
+
+  it("keeps the mirror row when the Host refuses to forget", async () => {
+    // A device that is not revoked, or still has an operation in flight: the
+    // Host still lists it, so its mirror row must stay too.
+    shell.refuse = "the device is not in a state that permits this lifecycle change"
+    const { actions: a } = actions()
+    await a.forget("d1", "Phone")
+    expect(db.forgetPairedDevice).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
   it("keeps the capability toggles gated regardless of the row", async () => {
     // Those rows do not exist in the security panel; handing a remote device
     // control of this machine is not a preference it offers to waive.
@@ -363,6 +397,7 @@ describe("a shell that cannot reach the host writes nothing", () => {
     ["pause", (a: DeviceGrantActions) => a.pause("d1", "Phone")],
     ["resume", (a: DeviceGrantActions) => a.resume("d1", "Phone")],
     ["revoke", (a: DeviceGrantActions) => a.revoke("d1", "Phone")],
+    ["forget", (a: DeviceGrantActions) => a.forget("d1", "Phone")],
   ])("%s leaves the mirror untouched and reports it", async (_name, run) => {
     off()
     const { actions: a } = actions()
@@ -413,6 +448,7 @@ describe("a paired companion changes lifecycle over the Host's owner routes", ()
     ["pause", "suspend", (a: DeviceGrantActions) => a.pause("d1", "Phone"), "pausePairedDevice"],
     ["resume", "resume", (a: DeviceGrantActions) => a.resume("d1", "Phone"), "resumePairedDevice"],
     ["revoke", "revoke", (a: DeviceGrantActions) => a.revoke("d1", "Phone"), "revokePairedDevice"],
+    ["forget", "forget", (a: DeviceGrantActions) => a.forget("d1", "Phone"), "forgetPairedDevice"],
   ] as const)(
     "%s goes over HTTP and then updates the mirror",
     async (_name, action, run, write) => {

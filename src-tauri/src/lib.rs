@@ -1320,6 +1320,7 @@ pub fn run() {
             companion_api::commands::companion_resume_device,
             companion_api::commands::companion_list_devices,
             companion_api::commands::companion_unrevoke_device,
+            companion_api::commands::companion_forget_device,
             companion_api::commands::companion_list_device_grants,
             companion_api::commands::companion_set_remote_control,
             companion_api::commands::companion_set_agent_control,

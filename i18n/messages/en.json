@@ -14358,6 +14358,9 @@
   },
   "devices": {
     "access": {
+      "forget": "Forget",
+      "forgetConfirmBody": "This removes the revoked device from every list on this Host. It cannot come back under the same identity; pair it again with a new code to use it. The audit log keeps its history.",
+      "forgetConfirmTitle": "Forget {label}?",
       "heldCount": "{held}/{total} granted",
       "lifecycleBlocked": {
         "needs-desktop-shell": "Pausing, resuming and revoking need the desktop app on the Host.",
@@ -25716,6 +25719,12 @@
         "driveLabel": "Let agents act here",
         "expired": "This code has expired. Generate a new one.",
         "expiresIn": "Expires in {minutes} min",
+        "forget": "Forget",
+        "forgetAria": "Forget {name}",
+        "forgetConfirm": "Forget",
+        "forgetConfirmCancel": "Cancel",
+        "forgetConfirmDescription": "This browser was revoked. Forgetting removes it from this list and every other list on this Host. To use it again, pair it with a new code.",
+        "forgetConfirmTitle": "Forget {name}?",
         "generate": "Generate pairing code",
         "generateFailed": "The pairing code could not be created.",
         "generating": "Generating…",
@@ -25737,6 +25746,7 @@
         "pairedHint": "Paired browsers appear in the device console, where you can revoke one.",
         "pairedLoadFailed": "Could not read the paired browsers.",
         "pairedOffline": "Not connected",
+        "pairedRevoked": "Revoked",
         "pairedTitle": "Paired browsers",
         "pairedVersion": "Extension {version}",
         "regenerate": "Generate a new code",
@@ -25793,6 +25803,13 @@
         "title": "Collaboration server",
         "urlLabel": "Server URL",
         "urlPlaceholder": "https://collab.example.com"
+      },
+      "forget": {
+        "blocked": "Forget not completed. {reason}",
+        "description": "The revoked device is removed from every list on this Host.",
+        "reason": "Confirm forgetting {label}",
+        "successToast": "{label} forgotten.",
+        "title": "Forget device"
       },
       "groups": {
         "advanced": "Advanced & diagnostics",

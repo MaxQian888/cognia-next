@@ -45,6 +45,10 @@ pub enum SecurityStoreError {
     Migration(String),
     #[error("device lifecycle transition is invalid")]
     InvalidDeviceTransition,
+    /// A device with an operation still in flight cannot be forgotten: the run
+    /// it started records its result against the device's rows.
+    #[error("the device still has operations in progress")]
+    DeviceHasActiveRuns,
     #[error("the local account does not match this host's recorded binding")]
     HostBindingMismatch,
 }
@@ -627,6 +631,7 @@ impl SecurityStore {
         // a deliberate act (`assign_device_user` clearing or reassigning an
         // owner), not the default outcome of an unconfigured host.
         let status = "active";
+        refuse_retired_device_id(&tx, tenant_id, device_id)?;
         tx.execute(
             "INSERT INTO devices
              (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
@@ -764,6 +769,7 @@ impl SecurityStore {
         // a deliberate act (`assign_device_user` clearing or reassigning an
         // owner), not the default outcome of an unconfigured host.
         let status = "active";
+        refuse_retired_device_id(&tx, tenant_id, device_id)?;
         tx.execute(
             "INSERT INTO devices
              (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
@@ -905,6 +911,7 @@ impl SecurityStore {
         // a deliberate act (`assign_device_user` clearing or reassigning an
         // owner), not the default outcome of an unconfigured host.
         let status = "active";
+        refuse_retired_device_id(&tx, tenant_id, device_id)?;
         tx.execute(
             "INSERT INTO devices
              (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
@@ -2325,6 +2332,80 @@ impl SecurityStore {
         Ok(())
     }
 
+    /// Forget a revoked device: remove it, and everything keyed to it, from
+    /// this Host's records so it no longer appears in any device list.
+    ///
+    /// Only a revoked device — forgetting is how a revocation is tidied away,
+    /// never a shortcut around it — and never a service principal, which is
+    /// the Host's own and is recreated by `ensure_service_principal`.
+    ///
+    /// Two records outlive it on purpose. The audit log is append-only. The
+    /// revocation ledger is the tombstone: a device id is chosen by the client
+    /// at registration, and only the `devices` row used to stop a revoked id
+    /// from being enrolled again, so registration now refuses any id the ledger
+    /// names (see `refuse_retired_device_id`). A ledger row is written here if
+    /// the revocation predates the ledger, so the id stays retired either way.
+    pub fn forget_revoked_device(
+        &self,
+        tenant_id: &str,
+        actor_id: &str,
+        device_id: &str,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let row: Option<(String, String)> = tx
+            .query_row(
+                "SELECT role, status FROM devices WHERE tenant_id = ?1 AND id = ?2",
+                params![tenant_id, device_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let (role, status) = row.ok_or(SecurityStoreError::DeviceUnavailable)?;
+        if status != "revoked" || role == "service" {
+            return Err(SecurityStoreError::InvalidDeviceTransition);
+        }
+        let active_runs: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM runs
+             WHERE tenant_id = ?1 AND device_id = ?2
+               AND status IN ('queued', 'running', 'waiting_input', 'cancelling', 'recovering')",
+            params![tenant_id, device_id],
+            |row| row.get(0),
+        )?;
+        if active_runs > 0 {
+            return Err(SecurityStoreError::DeviceHasActiveRuns);
+        }
+
+        for statement in [
+            "DELETE FROM run_events WHERE run_id IN
+               (SELECT id FROM runs WHERE tenant_id = ?1 AND device_id = ?2)",
+            "DELETE FROM artifacts WHERE run_id IN
+               (SELECT id FROM runs WHERE tenant_id = ?1 AND device_id = ?2)",
+            "DELETE FROM runs WHERE tenant_id = ?1 AND device_id = ?2",
+            "DELETE FROM idempotency_records WHERE tenant_id = ?1 AND device_id = ?2",
+            "DELETE FROM socket_tickets WHERE tenant_id = ?1 AND device_id = ?2",
+            "DELETE FROM capability_grants WHERE tenant_id = ?1 AND device_id = ?2",
+            "DELETE FROM device_keys WHERE tenant_id = ?1 AND device_id = ?2",
+            "DELETE FROM browser_devices WHERE tenant_id = ?1 AND device_id = ?2",
+            "DELETE FROM devices WHERE tenant_id = ?1 AND id = ?2",
+        ] {
+            tx.execute(statement, params![tenant_id, device_id])?;
+        }
+        tx.execute(
+            "INSERT INTO revocations
+             (id, tenant_id, subject_type, subject_id, reason, created_at)
+             SELECT ?1, ?2, 'device', ?3, 'owner_forgotten', ?4
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM revocations
+                 WHERE tenant_id = ?2 AND subject_type = 'device' AND subject_id = ?3
+             )",
+            params![uuid::Uuid::new_v4().to_string(), tenant_id, device_id, now],
+        )?;
+        insert_audit(&tx, tenant_id, actor_id, "device.forgotten", device_id, now)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn issue_socket_ticket(
         &self,
         tenant_id: &str,
@@ -2668,6 +2749,31 @@ fn is_browser_class_capability(capability: &str) -> bool {
 /// Whether `(tenant_id, device_id)` was registered through a browser
 /// enrollment. The row is written by [`SecurityStore::register_browser_device`]
 /// and nothing else, so it is the device's class, not a claim.
+/// Refuse to enrol a device under an id this Host has revoked.
+///
+/// The client picks its device id. While a revoked device's row existed, its
+/// primary key alone kept the id from being enrolled again; once the device
+/// is forgotten the revocation ledger is what remembers it, and an id it names
+/// must not come back carrying whatever history is still keyed to it.
+fn refuse_retired_device_id(
+    tx: &rusqlite::Transaction<'_>,
+    tenant_id: &str,
+    device_id: &str,
+) -> Result<(), SecurityStoreError> {
+    let retired: bool = tx.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM revocations
+             WHERE tenant_id = ?1 AND subject_type = 'device' AND subject_id = ?2
+         )",
+        params![tenant_id, device_id],
+        |row| row.get(0),
+    )?;
+    if retired {
+        return Err(SecurityStoreError::DeviceUnavailable);
+    }
+    Ok(())
+}
+
 fn is_browser_device(
     conn: &Connection,
     tenant_id: &str,
@@ -5032,6 +5138,260 @@ CREATE TABLE devices (
 
     /// Register a browser companion the way `browser_register_handler` does:
     /// by spending a browser enrollment.
+    fn start_operation(store: &SecurityStore, device: &str, key: &str, now: i64) -> String {
+        match store
+            .begin_idempotent_operation("tenant-a", device, "host-a", key, "hash-a", now)
+            .unwrap()
+        {
+            IdempotencyDecision::Started { operation_id } => operation_id,
+            other => panic!("expected a new operation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn forgetting_a_revoked_device_removes_it_and_everything_keyed_to_it() {
+        let store = SecurityStore::in_memory().unwrap();
+        register_browser(&store, "tenant-a", "browser-a", 100);
+        register_browser(&store, "tenant-a", "browser-b", 100);
+        let operation = start_operation(&store, "browser-a", "key-a", 101);
+        store
+            .mark_operation_running("tenant-a", &operation, 101)
+            .unwrap();
+        store
+            .complete_idempotent_operation("tenant-a", "browser-a", "key-a", "{}", true, 102)
+            .unwrap();
+        store
+            .issue_socket_ticket(
+                "tenant-a",
+                "browser-a",
+                "/ws/browser-companion",
+                "browser-companion",
+                103,
+                60,
+            )
+            .unwrap();
+        store
+            .revoke_device("tenant-a", "owner-a", "browser-a", false, 104)
+            .unwrap();
+
+        store
+            .forget_revoked_device("tenant-a", "owner-a", "browser-a", 105)
+            .unwrap();
+
+        let listed: Vec<String> = store
+            .list_browser_devices("tenant-a")
+            .unwrap()
+            .into_iter()
+            .map(|device| device.device_id)
+            .collect();
+        assert_eq!(listed, vec!["browser-b".to_string()]);
+        assert_eq!(store.device_state("tenant-a", "browser-a").unwrap(), None);
+        for rows in [
+            "devices WHERE id",
+            "device_keys WHERE device_id",
+            "capability_grants WHERE device_id",
+            "socket_tickets WHERE device_id",
+            "browser_devices WHERE device_id",
+            "runs WHERE device_id",
+            "idempotency_records WHERE device_id",
+        ] {
+            assert_eq!(
+                scalar_i64(
+                    &store,
+                    &format!("SELECT COUNT(*) FROM {rows} = 'browser-a'")
+                ),
+                0,
+                "{rows}"
+            );
+        }
+        // The neighbour is untouched.
+        assert_eq!(
+            scalar_i64(
+                &store,
+                "SELECT COUNT(*) FROM device_keys WHERE device_id = 'browser-b'"
+            ),
+            1
+        );
+        // The revocation ledger and the audit log outlive the device.
+        assert_eq!(
+            scalar_i64(
+                &store,
+                "SELECT COUNT(*) FROM revocations WHERE subject_id = 'browser-a'"
+            ),
+            1
+        );
+        assert_eq!(
+            scalar_i64(
+                &store,
+                "SELECT COUNT(*) FROM audit_events
+                 WHERE target_id = 'browser-a' AND action = 'device.forgotten'
+                   AND actor_id = 'owner-a' AND created_at = 105"
+            ),
+            1
+        );
+        assert_eq!(
+            scalar_i64(
+                &store,
+                "SELECT COUNT(*) FROM audit_events WHERE target_id = 'browser-a' AND action = 'device.revoked'"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn only_a_revoked_device_that_is_not_mid_operation_can_be_forgotten() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "owner-keep", 100);
+        register_browser(&store, "tenant-a", "browser-a", 100);
+
+        // Active, suspended, unknown: forgetting is not a shortcut around revoke.
+        assert!(matches!(
+            store.forget_revoked_device("tenant-a", "owner-keep", "browser-a", 101),
+            Err(SecurityStoreError::InvalidDeviceTransition)
+        ));
+        store
+            .suspend_device("tenant-a", "owner-keep", "browser-a", false, 101)
+            .unwrap();
+        assert!(matches!(
+            store.forget_revoked_device("tenant-a", "owner-keep", "browser-a", 102),
+            Err(SecurityStoreError::InvalidDeviceTransition)
+        ));
+        assert!(matches!(
+            store.forget_revoked_device("tenant-a", "owner-keep", "nobody", 102),
+            Err(SecurityStoreError::DeviceUnavailable)
+        ));
+
+        // An operation still in flight records its result against the device.
+        store
+            .resume_device("tenant-a", "owner-keep", "browser-a", 103)
+            .unwrap();
+        let operation = start_operation(&store, "browser-a", "key-a", 103);
+        store
+            .revoke_device("tenant-a", "owner-keep", "browser-a", false, 104)
+            .unwrap();
+        assert!(matches!(
+            store.forget_revoked_device("tenant-a", "owner-keep", "browser-a", 105),
+            Err(SecurityStoreError::DeviceHasActiveRuns)
+        ));
+        assert!(store
+            .device_state("tenant-a", "browser-a")
+            .unwrap()
+            .is_some());
+        store
+            .mark_operation_running("tenant-a", &operation, 106)
+            .unwrap();
+        store
+            .complete_idempotent_operation("tenant-a", "browser-a", "key-a", "{}", false, 107)
+            .unwrap();
+        store
+            .forget_revoked_device("tenant-a", "owner-keep", "browser-a", 108)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_service_principal_is_never_forgotten() {
+        let store = SecurityStore::in_memory().unwrap();
+        store
+            .ensure_service_principal("tenant-a", "brain", "Brain", &["agent.run"], 100)
+            .unwrap();
+        store
+            .revoke_device("tenant-a", "local-trust-root", "brain", true, 101)
+            .unwrap();
+        assert!(matches!(
+            store.forget_revoked_device("tenant-a", "local-trust-root", "brain", 102),
+            Err(SecurityStoreError::InvalidDeviceTransition)
+        ));
+        // The Host recreates its own principal, so the ledger must not block it.
+        store
+            .ensure_service_principal("tenant-a", "brain", "Brain", &["agent.run"], 103)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_forgotten_device_id_cannot_be_enrolled_again() {
+        let store = SecurityStore::in_memory().unwrap();
+        register_browser(&store, "tenant-a", "browser-a", 100);
+        store
+            .revoke_device("tenant-a", "owner-a", "browser-a", false, 101)
+            .unwrap();
+        store
+            .forget_revoked_device("tenant-a", "owner-a", "browser-a", 102)
+            .unwrap();
+
+        // The client chooses its id; a fresh code must not bring this one back.
+        let challenge = store.issue_challenge("tenant-a", 103, 60).unwrap();
+        let enrollment = store
+            .create_browser_enrollment("tenant-a", "owner-a", 103, 300)
+            .unwrap();
+        let reused = store.register_browser_device(
+            "tenant-a",
+            &enrollment,
+            &challenge.id,
+            &challenge.nonce,
+            "browser-a",
+            "Chrome",
+            "pem",
+            "thumb-again",
+            "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+            103,
+        );
+        assert!(matches!(reused, Err(SecurityStoreError::DeviceUnavailable)));
+        assert_eq!(store.device_state("tenant-a", "browser-a").unwrap(), None);
+
+        // The refusal rolled back: the same code still pairs a new id.
+        let challenge = store.issue_challenge("tenant-a", 104, 60).unwrap();
+        store
+            .register_browser_device(
+                "tenant-a",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-new",
+                "Chrome",
+                "pem",
+                "thumb-new",
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                104,
+            )
+            .unwrap();
+
+        // Owner and OIDC enrolment read the same ledger.
+        let challenge = store.issue_challenge("tenant-a", 105, 60).unwrap();
+        let invitation = store
+            .create_owner_invitation("tenant-a", "local-trust-root", 105, 60)
+            .unwrap();
+        assert!(matches!(
+            store.register_owner_device(
+                "tenant-a",
+                &invitation,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Phone",
+                "pem",
+                "thumb-owner",
+                105,
+            ),
+            Err(SecurityStoreError::DeviceUnavailable)
+        ));
+        let challenge = store.issue_challenge("tenant-a", 106, 60).unwrap();
+        assert!(matches!(
+            store.register_oidc_device(
+                "tenant-a",
+                "owner-a",
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Laptop",
+                "pem",
+                "thumb-oidc",
+                "member",
+                106,
+            ),
+            Err(SecurityStoreError::DeviceUnavailable)
+        ));
+    }
+
     fn register_browser(store: &SecurityStore, tenant: &str, device: &str, now: i64) {
         let challenge = store.issue_challenge(tenant, now, 60).unwrap();
         let enrollment = store

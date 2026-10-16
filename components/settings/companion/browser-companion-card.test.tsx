@@ -22,6 +22,11 @@ jest.mock("@/lib/tauri", () => ({
   localTransport: { call: jest.fn() },
 }))
 import { localTransport, transport } from "@/lib/tauri"
+// The paired-browsers list borrows the device console's `forget`; this card's
+// tests stub the list's data and never forget anything.
+jest.mock("@/hooks/devices/use-device-grant-actions", () => ({
+  useDeviceGrantActions: () => ({ forget: jest.fn(async () => undefined) }),
+}))
 
 import { decodeBrowserEnrollmentPayload } from "@cognia/companion-client"
 

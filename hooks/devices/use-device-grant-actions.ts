@@ -25,6 +25,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import {
+  forgetPairedDevice,
   pausePairedDevice,
   resumePairedDevice,
   revokePairedDevice,
@@ -76,8 +77,8 @@ async function hostCall(command: string, args: Record<string, unknown>): Promise
 }
 
 /**
- * The three lifecycle changes are the ones a shell that is NOT the Host can
- * still make: every Host mounts owner routes for them (ADR-0170 batch 4, see
+ * The lifecycle changes are the ones a shell that is NOT the Host can still
+ * make: every Host mounts owner routes for them (ADR-0170 batch 4, see
  * `lib/devices/lifecycle-http.ts`). On the desktop they stay on Tauri IPC. Off
  * it, a paired companion sends the owner-authenticated request and a
  * standalone browser is told there is no Host, which is the same refusal the
@@ -113,6 +114,8 @@ export interface DeviceGrantActions {
   pause: (deviceId: string, label: string) => Promise<void>
   resume: (deviceId: string, label: string) => Promise<void>
   revoke: (deviceId: string, label: string) => Promise<void>
+  /** Remove a revoked device from every list. The Host refuses anything else. */
+  forget: (deviceId: string, label: string) => Promise<void>
 }
 
 /**
@@ -153,7 +156,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
   // used to prompt unconditionally, so switching the row off changed nothing —
   // the only surface that reads the flag is the settings page that writes it.
   //
-  // Only `revoke` is keyed on the policy. The capability toggles below have no
+  // Only `revoke` and `forget` — both delete a pairing — are keyed on the policy. The capability toggles below have no
   // row in that panel and stay gated unconditionally: handing a remote device
   // control of this machine is not a preference the panel offers to waive.
   const requireBiometricForRevoke =
@@ -161,6 +164,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
     DEFAULT_BIOMETRIC_GUARD.deletePairing
   const t = useTranslations("mobile.companion.paired")
   const tRev = useTranslations("mobile.companion.revoke")
+  const tForget = useTranslations("mobile.companion.forget")
   const tPause = useTranslations("mobile.companion.pause")
   const tResume = useTranslations("mobile.companion.resume")
   const tRc = useTranslations("mobile.companion.remoteControl")
@@ -411,6 +415,40 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
     [blockReason, guard, notifyChanged, requireBiometricForRevoke, tRev]
   )
 
+  const forget = useCallback(
+    async (deviceId: string, label: string) => {
+      // Host first, mirror second, as everywhere here: the Host refuses a
+      // device that is not revoked, and the mirror row must not vanish for a
+      // device the Host still lists.
+      const doForget = async () => {
+        await lifecycleCall("forget", "companion_forget_device", deviceId)
+        await forgetPairedDevice(deviceId)
+      }
+      if (!requireBiometricForRevoke) {
+        await doForget()
+        await notifyChanged()
+        toast.success(tForget("successToast", { label }))
+        return
+      }
+      const result = await guard(
+        {
+          reason: tForget("reason", { label }),
+          title: tForget("title"),
+          description: tForget("description"),
+        },
+        doForget
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tForget("blocked", { reason: blockReason(result.reason) }))
+        return
+      }
+      await notifyChanged()
+      toast.success(tForget("successToast", { label }))
+    },
+    [blockReason, guard, notifyChanged, requireBiometricForRevoke, tForget]
+  )
+
   // Wrapped at the boundary rather than inside each body: the seven actions
   // already differ in their success and "blocked" toasts, and a refusal reads
   // the same for all of them.
@@ -432,5 +470,6 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
     pause: wrap(pause),
     resume: wrap(resume),
     revoke: wrap(revoke),
+    forget: wrap(forget),
   }
 }

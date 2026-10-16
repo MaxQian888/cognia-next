@@ -274,6 +274,75 @@ pub fn apply(
     Ok(outcome)
 }
 
+/// What forgetting a device did.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ForgetOutcome {
+    pub device_id: String,
+}
+
+/// The `action` the renderer mirror carries for a forgotten device.
+pub const FORGET_ACTION: &str = "forget";
+
+/// Forget a revoked device: remove it from every device list on this Host.
+///
+/// Not a lifecycle *transition* — there is no state after revoked — so not a
+/// [`LifecycleAction`], but it lives here for the same reason [`apply`] does:
+/// one ordered set of effects whichever surface asks.
+///
+/// 1. Store transaction — the authority
+///    ([`SecurityStore::forget_revoked_device`]): refuses anything not revoked,
+///    a service principal, or a device with an operation still in flight.
+/// 2. Signaling registration and host secrets, again. Revocation already
+///    removed both; this is the second chance for a revoke whose cleanup
+///    failed, and it is best-effort — the device is gone from the store by
+///    now, so a keyring hiccup is logged rather than reported as a failed
+///    forget.
+/// 3. Renderer mirror, so the desktop drops the device from its own list.
+///
+/// No bus frame and no deny-list change: a revoked device holds no live
+/// socket to close, and its deny-list entry is worth keeping.
+///
+/// [`SecurityStore::forget_revoked_device`]: super::security_store::SecurityStore::forget_revoked_device
+pub fn forget(
+    context: &LifecycleContext,
+    actor: &LifecycleActor,
+    device_id: &str,
+) -> Result<ForgetOutcome, LifecycleError> {
+    let store = security_store().ok_or(LifecycleError::StoreUnavailable)?;
+    let now = unix_time_secs();
+
+    // ── 1. Store transaction ────────────────────────────────────────────────
+    store
+        .device_state(&actor.tenant_id, device_id)?
+        .ok_or(LifecycleError::UnknownDevice)?;
+    store.forget_revoked_device(&actor.tenant_id, &actor.actor_id, device_id, now)?;
+
+    // ── 2. Leftover signaling registration and host secrets ─────────────────
+    if let Err(error) = clear_signaling_registration(device_id) {
+        log::warn!("forgotten device {device_id}: {error}");
+    }
+    forget_device_secrets(device_id);
+
+    // ── 3. Renderer mirror ──────────────────────────────────────────────────
+    if let Some(renderer) = context.renderer.as_ref() {
+        renderer.emit(
+            RENDERER_LIFECYCLE_EVENT,
+            json!({
+                "tenantId": actor.tenant_id,
+                "deviceId": device_id,
+                "action": FORGET_ACTION,
+                "previousState": DeviceLifecycleState::Revoked.as_str(),
+                "state": "forgotten",
+                "atMs": now.saturating_mul(1_000),
+            }),
+        );
+    }
+
+    Ok(ForgetOutcome {
+        device_id: device_id.to_string(),
+    })
+}
+
 /// Control-plane topic. Not in `EVENT_CHANNELS` on purpose: it is never
 /// delivered to a subscriber, it closes their socket.
 pub const LIFECYCLE_EVENT: &str = "security://device-lifecycle";
@@ -517,6 +586,95 @@ mod tests {
             "resolvesTenant": tenant,
             "capabilities": capabilities,
         })
+    }
+
+    /// Records what the lifecycle emitted, standing in for the desktop WebView.
+    #[derive(Default)]
+    struct RecordingRenderer {
+        emitted: parking_lot::Mutex<Vec<(String, serde_json::Value)>>,
+    }
+
+    impl crate::host::RendererPort for RecordingRenderer {
+        fn emit(&self, event: &str, payload: serde_json::Value) {
+            self.emitted.lock().push((event.to_string(), payload));
+        }
+
+        fn bridge_transport(&self) -> Arc<dyn crate::bridge_transport::BridgeTransport> {
+            unreachable!("RecordingRenderer carries no bridge")
+        }
+
+        fn resource_dir(&self) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[test]
+    fn forgetting_a_revoked_device_removes_it_and_tells_the_renderer() {
+        let _scope = store_scope();
+        let store = store_with_owners(&["owner-keep", "target-device"]);
+        let actor = LifecycleActor::owner_device(TENANT, "owner-keep");
+        apply(
+            &lifecycle_context(),
+            &actor,
+            "target-device",
+            LifecycleAction::Revoke,
+        )
+        .expect("revoke");
+
+        let recording = Arc::new(RecordingRenderer::default());
+        let context = LifecycleContext {
+            renderer: Some(recording.clone()),
+            ..lifecycle_context()
+        };
+        let outcome = forget(&context, &actor, "target-device").expect("forget");
+
+        assert_eq!(outcome.device_id, "target-device");
+        assert_eq!(
+            store.device_state(TENANT, "target-device").expect("state"),
+            None
+        );
+        assert!(store
+            .device_state(TENANT, "owner-keep")
+            .expect("state")
+            .is_some());
+        let emitted = recording.emitted.lock();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].0, RENDERER_LIFECYCLE_EVENT);
+        assert_eq!(emitted[0].1["deviceId"], "target-device");
+        assert_eq!(emitted[0].1["action"], FORGET_ACTION);
+        assert_eq!(emitted[0].1["previousState"], "revoked");
+    }
+
+    #[test]
+    fn forgetting_refuses_a_device_that_is_not_revoked_and_one_that_is_unknown() {
+        let _scope = store_scope();
+        let store = store_with_owners(&["owner-keep", "target-device"]);
+        let actor = LifecycleActor::owner_device(TENANT, "owner-keep");
+        let recording = Arc::new(RecordingRenderer::default());
+        let context = LifecycleContext {
+            renderer: Some(recording.clone()),
+            ..lifecycle_context()
+        };
+
+        assert!(matches!(
+            forget(&context, &actor, "target-device"),
+            Err(LifecycleError::Store(
+                SecurityStoreError::InvalidDeviceTransition
+            ))
+        ));
+        assert_eq!(
+            store.device_state(TENANT, "target-device").expect("state"),
+            Some(DeviceLifecycleState::Active)
+        );
+        assert!(matches!(
+            forget(&context, &actor, "nobody"),
+            Err(LifecycleError::UnknownDevice)
+        ));
+        assert!(recording.emitted.lock().is_empty());
     }
 
     /// The reason this module exists.

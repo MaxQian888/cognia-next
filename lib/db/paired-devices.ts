@@ -107,6 +107,25 @@ export async function revokePairedDevice(
 }
 
 /**
+ * Drop the mirror row of a device the Host has forgotten.
+ *
+ * Unlike {@link revokePairedDevice} this is a hard delete: the Host has already
+ * removed the device from its own records, and the revoked row was only kept
+ * so the device lists could show it — which is what forgetting ends. Called
+ * after the Host confirms, by the shell that asked and by the event bridge for
+ * a forget another shell made.
+ *
+ * @returns true if a row was removed; false if the deviceId was not mirrored.
+ */
+export async function forgetPairedDevice(deviceId: string): Promise<boolean> {
+  const table = getDb().pairedDevices
+  const existing = await table.get(deviceId)
+  if (!existing) return false
+  await table.delete(deviceId)
+  return true
+}
+
+/**
  * Temporarily block a paired device. Sets `pausedAt`; the Rust deny-list
  * mirror (driven from `companion_revoke_device` by the caller) is what
  * actually refuses the device's JWT — this Dexie write only records the

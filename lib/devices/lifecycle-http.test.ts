@@ -21,7 +21,7 @@ const config = () => ({
 })
 
 describe("lifecycleRoute", () => {
-  it("maps the three actions onto the owner routes", () => {
+  it("maps the four actions onto the owner routes", () => {
     expect(lifecycleRoute("suspend", "d 1")).toEqual({
       method: "POST",
       path: "/api/devices/d%201/suspend",
@@ -31,6 +31,11 @@ describe("lifecycleRoute", () => {
       path: "/api/devices/d1/resume",
     })
     expect(lifecycleRoute("revoke", "d1")).toEqual({ method: "DELETE", path: "/api/devices/d1" })
+    // A POST of its own: DELETE on the device already means revoke.
+    expect(lifecycleRoute("forget", "d1")).toEqual({
+      method: "POST",
+      path: "/api/devices/d1/forget",
+    })
   })
 })
 
@@ -69,6 +74,19 @@ describe("applyDeviceLifecycleOverHttp", () => {
           DPoP: "POST /api/devices/d1/suspend",
         }),
       })
+    )
+  })
+
+  it("reads the forgotten device out of the forget reply", async () => {
+    const fetcher = jest.fn(
+      async () => new Response(JSON.stringify({ forgottenDeviceId: "d1" }), { status: 200 })
+    )
+    await expect(
+      applyDeviceLifecycleOverHttp("forget", "d1", { config, fetcher })
+    ).resolves.toEqual({ deviceId: "d1", state: "forgotten", changed: true })
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://host:27890/api/devices/d1/forget",
+      expect.objectContaining({ method: "POST" })
     )
   })
 

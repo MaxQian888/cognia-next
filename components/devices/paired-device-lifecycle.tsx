@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * Pause, resume and revoke for a paired device, in the device masthead.
+ * Pause, resume, revoke and forget for a paired device, in the device masthead.
  *
  * They used to close the Access card, under every grant switch. They act on
  * the whole device rather than on any one grant, so they belong beside the
@@ -14,6 +14,9 @@
  *    only gate, and Settings → Security can switch that off for revocation, at
  *    which point one click (a mis-click beside "Pause") revoked the device.
  *    The confirmation is the gate that does not depend on that preference.
+ *  * **A revoked device can be forgotten**, which is the only action it has
+ *    left: the Host removes it from every list. It asks too — the device's id
+ *    is retired for good, so it can only come back by pairing anew.
  *  * **A disabled control says why.** All three are `host-admin` writes, which
  *    a standalone browser and a non-owner companion cannot make. The buttons
  *    were disabled with nothing beside them, the shape working rule 7 exists
@@ -22,7 +25,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { InfoIcon, PauseIcon, PlayIcon, TrashIcon } from "lucide-react"
+import { EraserIcon, InfoIcon, PauseIcon, PlayIcon, TrashIcon } from "lucide-react"
 
 import {
   AlertDialog,
@@ -55,6 +58,7 @@ export function PairedDeviceLifecycle({ row, actions }: PairedDeviceLifecyclePro
    */
   const reach = useHostAdminReach("host-admin")
   const [confirmRevoke, setConfirmRevoke] = useState(false)
+  const [confirmForget, setConfirmForget] = useState(false)
 
   if (row.kind !== "paired-device") return null
   const deviceId = row.deviceId ?? ""
@@ -88,7 +92,19 @@ export function PairedDeviceLifecycle({ row, actions }: PairedDeviceLifecyclePro
           {t("access.resume")}
         </Button>
       ) : null}
-      {revoked ? null : (
+      {revoked ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-destructive hover:text-destructive"
+          disabled={blocked}
+          onClick={() => setConfirmForget(true)}
+          data-testid={`paired-device-forget-${deviceId}`}
+        >
+          <EraserIcon className="size-3.5" />
+          {t("access.forget")}
+        </Button>
+      ) : (
         <Button
           size="sm"
           variant="ghost"
@@ -125,6 +141,30 @@ export function PairedDeviceLifecycle({ row, actions }: PairedDeviceLifecyclePro
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={confirmForget} onOpenChange={setConfirmForget}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("access.forgetConfirmTitle", { label: row.label })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t("access.forgetConfirmBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("host.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                setConfirmForget(false)
+                void actions.forget(deviceId, row.label)
+              }}
+              data-testid={`paired-device-forget-confirm-${deviceId}`}
+            >
+              {t("access.forget")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -138,7 +178,8 @@ export function PairedDeviceLifecycle({ row, actions }: PairedDeviceLifecyclePro
 export function PairedDeviceLifecycleNotice({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices.access")
   const reach = useHostAdminReach("host-admin")
-  if (row.kind !== "paired-device" || row.adminState === "revoked") return null
+  // Revoked rows too: Forget is a `host-admin` write like the others.
+  if (row.kind !== "paired-device") return null
   if (reach.available || !reach.block) return null
   // Own copy rather than Settings' `HostReachNotice`: that one explains why
   // the Host's *reachability* cannot be configured, which is the wrong

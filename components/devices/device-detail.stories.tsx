@@ -27,6 +27,7 @@ const noopActions: DeviceGrantActions = {
   pause: async () => {},
   resume: async () => {},
   revoke: async () => {},
+  forget: async () => {},
 }
 
 function fleet(overrides: Partial<Parameters<typeof buildDeviceRows>[0]> = {}): DeviceRow[] {

@@ -1446,6 +1446,26 @@ paths:
           description: Successful response.
         "401":
           $ref: "#/components/responses/AuthenticationRejected"
+  /api/devices/{device_id}/forget:
+    post:
+      operationId: postApiDevicesDeviceIdForget
+      tags:
+        - api
+      summary: POST /api/devices/{device_id}/forget
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
+        - in: path
+          name: device_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Successful response.
+        "401":
+          $ref: "#/components/responses/AuthenticationRejected"
   /api/devices/{device_id}/capabilities:
     put:
       operationId: replaceDeviceCapabilities

@@ -14358,6 +14358,9 @@
   },
   "devices": {
     "access": {
+      "forget": "移除",
+      "forgetConfirmBody": "这会把这台已吊销的设备从此主机的所有列表中移除。它无法以相同身份回来；如需再次使用，请用新的配对码重新配对。审计日志会保留它的记录。",
+      "forgetConfirmTitle": "移除 {label}？",
       "heldCount": "已授权 {held}/{total}",
       "lifecycleBlocked": {
         "needs-desktop-shell": "暂停、恢复和吊销需要主机上的桌面应用。",
@@ -25716,6 +25719,12 @@
         "driveLabel": "允许代理在此操作",
         "expired": "配对码已过期，请重新生成。",
         "expiresIn": "{minutes} 分钟后过期",
+        "forget": "移除",
+        "forgetAria": "移除 {name}",
+        "forgetConfirm": "移除",
+        "forgetConfirmCancel": "取消",
+        "forgetConfirmDescription": "该浏览器已被吊销。移除后，它会从此列表及此主机的所有列表中消失。如需再次使用，请用新的配对码重新配对。",
+        "forgetConfirmTitle": "移除 {name}？",
         "generate": "生成配对码",
         "generateFailed": "配对码创建失败。",
         "generating": "生成中…",
@@ -25737,6 +25746,7 @@
         "pairedHint": "已配对的浏览器会出现在设备控制台，可在那里撤销。",
         "pairedLoadFailed": "无法读取已配对的浏览器。",
         "pairedOffline": "未连接",
+        "pairedRevoked": "已吊销",
         "pairedTitle": "已配对的浏览器",
         "pairedVersion": "扩展 {version}",
         "regenerate": "重新生成配对码",
@@ -25793,6 +25803,13 @@
         "title": "协作服务器",
         "urlLabel": "服务器地址",
         "urlPlaceholder": "https://collab.example.com"
+      },
+      "forget": {
+        "blocked": "移除未完成。{reason}",
+        "description": "这台已解除配对的设备将从此主机的所有列表中移除。",
+        "reason": "确认移除 {label}",
+        "successToast": "已移除 {label}。",
+        "title": "移除设备"
       },
       "groups": {
         "advanced": "高级与诊断",

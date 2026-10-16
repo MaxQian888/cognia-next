@@ -8,6 +8,13 @@ jest.mock("next-intl", () => ({
 jest.mock("@/lib/tauri", () => ({ localTransport: { call: jest.fn() } }))
 import { localTransport } from "@/lib/tauri"
 
+/** The device console's `forget`, which the list uses unless one is injected. */
+// eslint-disable-next-line no-var -- jest.mock factories hoist above this body.
+var consoleForget: jest.Mock
+jest.mock("@/hooks/devices/use-device-grant-actions", () => ({
+  useDeviceGrantActions: () => ({ forget: consoleForget }),
+}))
+
 import { PairedBrowsersList, type PairedBrowser } from "./paired-browsers-list"
 
 function browser(overrides: Partial<PairedBrowser> = {}): PairedBrowser {
@@ -23,7 +30,10 @@ function browser(overrides: Partial<PairedBrowser> = {}): PairedBrowser {
   }
 }
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  consoleForget = jest.fn(async (_deviceId: string, _name: string) => undefined)
+})
 
 describe("PairedBrowsersList", () => {
   it("shows each browser's connection and version", async () => {
@@ -124,6 +134,66 @@ describe("PairedBrowsersList", () => {
         allowed: false,
       })
     )
+  })
+
+  it("offers Forget instead of the agent switch on a revoked browser", async () => {
+    render(
+      <PairedBrowsersList
+        loadBrowsers={async () => [
+          browser({ deviceId: "browser-r", status: "revoked", connected: false }),
+          browser(),
+        ]}
+        setDrive={async () => undefined}
+      />
+    )
+    const revoked = await screen.findByTestId("paired-browser-browser-r")
+    expect(revoked).toHaveTextContent("mobile.companion.browserCompanion.pairedRevoked")
+    expect(revoked).not.toHaveTextContent("mobile.companion.browserCompanion.pairedOffline")
+    expect(screen.queryByTestId("paired-browser-drive-browser-r")).not.toBeInTheDocument()
+    expect(screen.getByTestId("paired-browser-forget-browser-r")).toBeEnabled()
+    // A live browser keeps its switch and has nothing to forget.
+    expect(screen.getByTestId("paired-browser-drive-browser-a")).toBeInTheDocument()
+    expect(screen.queryByTestId("paired-browser-forget-browser-a")).not.toBeInTheDocument()
+  })
+
+  it("asks before forgetting, then forgets and re-reads the list", async () => {
+    let listed = [browser({ deviceId: "browser-r", status: "revoked", displayName: "Old" })]
+    const loadBrowsers = jest.fn(async () => listed)
+    const forgetBrowser = jest.fn(async (_deviceId: string, _name: string) => {
+      listed = []
+    })
+    render(
+      <PairedBrowsersList
+        loadBrowsers={loadBrowsers}
+        setDrive={async () => undefined}
+        forgetBrowser={forgetBrowser}
+      />
+    )
+
+    fireEvent.click(await screen.findByTestId("paired-browser-forget-browser-r"))
+    expect(screen.getByTestId("paired-browser-forget-dialog")).toHaveTextContent(
+      "mobile.companion.browserCompanion.forgetConfirmTitle:Old"
+    )
+    fireEvent.click(screen.getByText("mobile.companion.browserCompanion.forgetConfirmCancel"))
+    expect(forgetBrowser).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId("paired-browser-forget-browser-r"))
+    fireEvent.click(screen.getByTestId("paired-browser-forget-confirm"))
+    await waitFor(() => expect(forgetBrowser).toHaveBeenCalledWith("browser-r", "Old"))
+    expect(await screen.findByTestId("paired-browsers-empty")).toBeInTheDocument()
+    expect(consoleForget).not.toHaveBeenCalled()
+  })
+
+  it("forgets through the device console's action by default", async () => {
+    render(
+      <PairedBrowsersList
+        loadBrowsers={async () => [browser({ status: "revoked", displayName: "Old" })]}
+        setDrive={async () => undefined}
+      />
+    )
+    fireEvent.click(await screen.findByTestId("paired-browser-forget-browser-a"))
+    fireEvent.click(screen.getByTestId("paired-browser-forget-confirm"))
+    await waitFor(() => expect(consoleForget).toHaveBeenCalledWith("browser-a", "Old"))
   })
 
   it("re-reads the connection state while open", async () => {

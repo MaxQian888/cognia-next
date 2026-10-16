@@ -15,7 +15,7 @@ import { DEFAULT_ACCOUNT_NAMESPACE } from "@/lib/companion/account-namespace"
 import { detachDevice } from "@/lib/companion/remote-attach-registry"
 import { releaseDeviceAttachmentUploads } from "@/lib/db/session-attachment-uploads"
 import { noteDeviceSeen } from "@/lib/companion/device-presence-registry"
-import { addPairedDevice, touchPairedDevice } from "@/lib/db/paired-devices"
+import { addPairedDevice, forgetPairedDevice, touchPairedDevice } from "@/lib/db/paired-devices"
 import { transport } from "@/lib/tauri"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { getRuntimeTranslator } from "@/lib/i18n/runtime-translator"
@@ -50,10 +50,10 @@ interface DeviceSeenPayload {
 
 /**
  * `companion://device-lifecycle`, emitted by
- * `src-tauri/src/companion_api/device_lifecycle.rs` after a pairing is
- * suspended, revoked or restored. Rust drops the device's event-plane leases
- * itself; the attach leases live only in this renderer, so nothing but this
- * handler can release them.
+ * `crates/cognia-companion/src/device_lifecycle.rs` after a pairing is
+ * suspended, revoked, restored or forgotten. Rust drops the device's
+ * event-plane leases itself; the attach leases live only in this renderer, so
+ * nothing but this handler can release them.
  */
 interface DeviceLifecyclePayload {
   deviceId: string
@@ -64,6 +64,9 @@ interface DeviceLifecyclePayload {
 
 /** Lifecycle actions that end a device's authority to drive a session. */
 const AUTHORITY_ENDING_ACTIONS: ReadonlySet<string> = new Set(["suspend", "revoke"])
+
+/** The Host removed the device from its records (only ever a revoked one). */
+const FORGET_ACTION = "forget"
 
 // `browser` is the extension (ADR-0154). Left out, a registered browser was
 // mirrored as `unknown`, which the device console cannot tell from a phone that
@@ -115,6 +118,13 @@ export function installCompanionEventBridge(): () => void {
     "companion://device-lifecycle",
     (payload) => {
       if (!payload?.deviceId) return
+      // A forget another shell made (an owner phone, over the Host's route)
+      // reaches this desktop only here, and the mirror row is all that would
+      // keep the device on its lists. Its authority ended at revocation.
+      if (payload.action === FORGET_ACTION) {
+        void forgetPairedDevice(payload.deviceId).catch(() => undefined)
+        return
+      }
       if (!AUTHORITY_ENDING_ACTIONS.has(payload.action)) return
       detachDevice(payload.deviceId)
       // Its staged attachments go with it. Those bytes exist only so a message

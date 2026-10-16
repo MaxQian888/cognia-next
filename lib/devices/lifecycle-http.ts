@@ -2,14 +2,15 @@
  * The HTTP leg of a device lifecycle change, for shells that are not the Host.
  *
  * `companion_suspend_device` / `companion_resume_device` /
- * `companion_revoke_device` are `target: client` commands: only the desktop
- * renderer can invoke them over Tauri IPC. The same three changes have owner
- * routes on every Host, desktop and headless alike
- * (`src-tauri/src/companion_api/server.rs`, behind `require_owner_access`):
+ * `companion_revoke_device` / `companion_forget_device` are desktop commands:
+ * only the desktop renderer can invoke them over Tauri IPC. The same four
+ * changes have owner routes on every Host, desktop and headless alike
+ * (`crates/cognia-companion/src/server.rs`, behind `require_owner_access`):
  *
  *   POST   /api/devices/{id}/suspend
  *   POST   /api/devices/{id}/resume
  *   DELETE /api/devices/{id}
+ *   POST   /api/devices/{id}/forget   (a revoked device only)
  *
  * A browser or a phone that is the Host's owner device can therefore change a
  * device's lifecycle from a distance, which is what makes the Pause / Resume /
@@ -21,7 +22,7 @@ import { pinnedFetch } from "@/lib/tauri/pinned-fetch"
 import { loadCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import { parseProblem } from "@/lib/tauri/companion-problem"
 
-export type DeviceLifecycleAction = "suspend" | "resume" | "revoke"
+export type DeviceLifecycleAction = "suspend" | "resume" | "revoke" | "forget"
 
 /** Mirror of the Rust `DeviceLifecycleResponse` (`companion_api/api.rs`). */
 export interface DeviceLifecycleOutcome {
@@ -83,9 +84,12 @@ export async function applyDeviceLifecycleOverHttp(
     )
   }
   const body = (await response.json().catch(() => ({}))) as
-    DeviceLifecycleOutcome | { revokedDeviceId?: string }
+    DeviceLifecycleOutcome | { revokedDeviceId?: string } | { forgottenDeviceId?: string }
   if ("revokedDeviceId" in body && body.revokedDeviceId) {
     return { deviceId: body.revokedDeviceId, state: "revoked", changed: true }
+  }
+  if ("forgottenDeviceId" in body && body.forgottenDeviceId) {
+    return { deviceId: body.forgottenDeviceId, state: "forgotten", changed: true }
   }
   return {
     ...body,

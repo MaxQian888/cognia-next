@@ -1,5 +1,6 @@
 import {
   addPairedDevice,
+  forgetPairedDevice,
   getPairedDevice,
   listPairedDevices,
   pausePairedDevice,
@@ -236,6 +237,31 @@ describe("revokePairedDevice", () => {
     const row = await getPairedDevice("dev-r2")
     expect(row?.revokedAt).toBeGreaterThanOrEqual(before)
     expect(row?.revokedAt).toBeLessThanOrEqual(after)
+  })
+})
+
+describe("forgetPairedDevice", () => {
+  it("removes the mirror row, revoked tombstone and all, and leaves the others", async () => {
+    for (const deviceId of ["dev-f1", "dev-f2"]) {
+      await addPairedDevice({
+        deviceId,
+        label: "phone",
+        platform: "ios",
+        pubkey: "pk",
+        appVersion: "0.1.0",
+        nowMs: 1,
+      })
+    }
+    await revokePairedDevice("dev-f1", 5)
+
+    await expect(forgetPairedDevice("dev-f1")).resolves.toBe(true)
+
+    expect(await getPairedDevice("dev-f1")).toBeUndefined()
+    expect((await listPairedDevices()).map((row) => row.deviceId)).toEqual(["dev-f2"])
+  })
+
+  it("returns false for a device that was never mirrored", async () => {
+    await expect(forgetPairedDevice("does-not-exist")).resolves.toBe(false)
   })
 })
 

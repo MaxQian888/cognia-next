@@ -256,6 +256,13 @@
     "successToast": "已解除该设备的配对。",
     "title": "解除配对"
   },
+  "forget": {
+    "blocked": "移除未完成。{reason}",
+    "description": "这台已解除配对的设备将从此主机的所有列表中移除。",
+    "reason": "确认移除 {label}",
+    "successToast": "已移除 {label}。",
+    "title": "移除设备"
+  },
   "server": {
     "autostartFailed": "上次已开启服务器，但现在没有运行。请关闭再开启，或查看桌面日志了解启动失败原因。",
     "bindMode": "绑定模式",
@@ -489,6 +496,13 @@
     "pairedEmpty": "还没有配对任何浏览器。",
     "pairedConnected": "已连接",
     "pairedOffline": "未连接",
+    "pairedRevoked": "已吊销",
+    "forget": "移除",
+    "forgetAria": "移除 {name}",
+    "forgetConfirmTitle": "移除 {name}？",
+    "forgetConfirmDescription": "该浏览器已被吊销。移除后，它会从此列表及此主机的所有列表中消失。如需再次使用，请用新的配对码重新配对。",
+    "forgetConfirm": "移除",
+    "forgetConfirmCancel": "取消",
     "pairedVersion": "扩展 {version}",
     "driveLabel": "允许代理在此操作",
     "driveAria": "允许代理在 {name} 中操作",

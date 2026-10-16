@@ -283,6 +283,7 @@ commands.allow = [
   "companion_create_owner_invitation",
   "companion_create_worker_enrollment",
   "companion_desktop_write_response",
+  "companion_forget_device",
   "companion_get_tls_fingerprint",
   "companion_host_state_publish",
   "companion_list_device_grants",

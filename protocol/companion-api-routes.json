@@ -105,6 +105,11 @@
       "document": "public"
     },
     {
+      "path": "/api/devices/{device_id}/forget",
+      "method": "post",
+      "document": "public"
+    },
+    {
       "path": "/api/devices/{device_id}/capabilities",
       "method": "put",
       "document": "public"

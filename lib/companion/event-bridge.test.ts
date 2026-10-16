@@ -152,6 +152,35 @@ describe("installCompanionEventBridge", () => {
   })
 
   /**
+   * A forget made elsewhere — an owner phone over the Host's route — reaches
+   * the desktop only through this event; without it the mirror row would keep
+   * the device on the desktop's lists.
+   */
+  it("device-lifecycle drops the mirror row of a forgotten device", async () => {
+    const { handlers } = captureHandlers()
+    installCompanionEventBridge()
+    const handler = handlers.get("companion://device-lifecycle")!
+    const { addPairedDevice, revokePairedDevice } = await import("@/lib/db/paired-devices")
+    for (const deviceId of ["dev-gone", "dev-kept"]) {
+      await addPairedDevice({
+        deviceId,
+        label: deviceId,
+        platform: "browser",
+        pubkey: "pk",
+        appVersion: "0.1.0",
+        nowMs: 1,
+      })
+    }
+    await revokePairedDevice("dev-gone", 2)
+
+    handler({ deviceId: "dev-gone", action: "forget", state: "forgotten" })
+
+    await waitFor(async () =>
+      expect((await listPairedDevices()).map((row) => row.deviceId)).toEqual(["dev-kept"])
+    )
+  })
+
+  /**
    * The bytes exist only so a message from that device can carry them, and a
    * suspended device may no longer send one. Waiting for the 30-minute
    * collector would leave a revoked phone's screenshot on the desktop's disk.

@@ -27,6 +27,7 @@ function actions(): DeviceGrantActions {
     pause: jest.fn(async () => {}),
     resume: jest.fn(async () => {}),
     revoke: jest.fn(async () => {}),
+    forget: jest.fn(async () => {}),
   }
 }
 
@@ -86,10 +87,41 @@ describe("PairedDeviceLifecycle", () => {
     expect(handlers.revoke).toHaveBeenCalledWith("d1", "Phone")
   })
 
-  it("offers nothing on a device that is already revoked", () => {
+  it("offers only Forget on a device that is already revoked", () => {
     render(<PairedDeviceLifecycle row={row({ adminState: "revoked" })} actions={actions()} />)
     expect(screen.queryByTestId("paired-device-pause-d1")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("paired-device-resume-d1")).not.toBeInTheDocument()
     expect(screen.queryByTestId("paired-device-revoke-d1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("paired-device-forget-d1")).toBeEnabled()
+  })
+
+  /** Forgetting retires the device's id for good, so it asks as revoke does. */
+  it("asks before forgetting, and forgets nothing when the answer is no", async () => {
+    const handlers = actions()
+    render(<PairedDeviceLifecycle row={row({ adminState: "revoked" })} actions={handlers} />)
+
+    await userEvent.click(screen.getByTestId("paired-device-forget-d1"))
+    expect(screen.getByText("Forget Phone?")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(handlers.forget).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByTestId("paired-device-forget-d1"))
+    await userEvent.click(screen.getByTestId("paired-device-forget-confirm-d1"))
+    expect(handlers.forget).toHaveBeenCalledWith("d1", "Phone")
+    expect(handlers.revoke).not.toHaveBeenCalled()
+  })
+
+  it("never offers Forget on a device that is not revoked", () => {
+    const { rerender } = render(<PairedDeviceLifecycle row={row()} actions={actions()} />)
+    expect(screen.queryByTestId("paired-device-forget-d1")).not.toBeInTheDocument()
+    rerender(<PairedDeviceLifecycle row={row({ adminState: "paused" })} actions={actions()} />)
+    expect(screen.queryByTestId("paired-device-forget-d1")).not.toBeInTheDocument()
+  })
+
+  it("disables Forget for a browser with no Host", () => {
+    hostProfile = "web-standalone"
+    render(<PairedDeviceLifecycle row={row({ adminState: "revoked" })} actions={actions()} />)
+    expect(screen.getByTestId("paired-device-forget-d1")).toBeDisabled()
   })
 
   it("renders nothing for a kind that has no lifecycle here", () => {
@@ -133,11 +165,12 @@ describe("PairedDeviceLifecycleNotice", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("says nothing for a revoked device, which has no controls to explain", () => {
+  it("explains a disabled Forget on a revoked device too", () => {
     hostProfile = "web-standalone"
-    const { container } = render(
-      <PairedDeviceLifecycleNotice row={row({ adminState: "revoked" })} />
+    render(<PairedDeviceLifecycleNotice row={row({ adminState: "revoked" })} />)
+    expect(screen.getByTestId("paired-device-lifecycle-blocked")).toHaveAttribute(
+      "data-reach",
+      "no-host"
     )
-    expect(container).toBeEmptyDOMElement()
   })
 })

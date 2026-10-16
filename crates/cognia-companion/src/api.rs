@@ -739,6 +739,12 @@ pub struct DeviceRevocationResponse {
     revoked_device_id: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceForgetResponse {
+    forgotten_device_id: String,
+}
+
 /// Result of a suspend or resume.
 ///
 /// Reports `changed: false` when the device was already in the target state.
@@ -777,6 +783,29 @@ pub(crate) async fn revoke_device_handler(
     )?;
     Ok(Json(DeviceRevocationResponse {
         revoked_device_id: device_id,
+    }))
+}
+
+/// Forget a revoked device: drop it from every device list on this Host.
+///
+/// `POST`, not a second `DELETE`: `DELETE /api/devices/{id}` already means
+/// revoke, and forgetting is a different act that only follows one.
+pub(crate) async fn forget_device_handler(
+    Path(device_id): Path<String>,
+    Extension(context): Extension<DeviceContext>,
+    State(state): State<SharedState>,
+) -> ApiResult<DeviceForgetResponse> {
+    let outcome = super::device_lifecycle::forget(
+        &lifecycle_context(&state),
+        &super::device_lifecycle::LifecycleActor::owner_device(
+            &context.tenant_id,
+            &context.device_id,
+        ),
+        &device_id,
+    )
+    .map_err(lifecycle_error)?;
+    Ok(Json(DeviceForgetResponse {
+        forgotten_device_id: outcome.device_id,
     }))
 }
 
@@ -820,11 +849,7 @@ fn apply_lifecycle(
     action: super::device_lifecycle::LifecycleAction,
 ) -> Result<super::device_lifecycle::LifecycleOutcome, Problem> {
     super::device_lifecycle::apply(
-        &super::device_lifecycle::LifecycleContext {
-            event_bus: Some(std::sync::Arc::clone(&state.event_bus)),
-            deny_list: Some(std::sync::Arc::clone(&state.deny_list)),
-            renderer: state.renderer.clone(),
-        },
+        &lifecycle_context(state),
         // Never the trust root: a remote owner must not be able to revoke the
         // last owner device and lock the deployment out of its own API. The
         // local operator can, through the CLI.
@@ -836,6 +861,14 @@ fn apply_lifecycle(
         action,
     )
     .map_err(lifecycle_error)
+}
+
+fn lifecycle_context(state: &SharedState) -> super::device_lifecycle::LifecycleContext {
+    super::device_lifecycle::LifecycleContext {
+        event_bus: Some(std::sync::Arc::clone(&state.event_bus)),
+        deny_list: Some(std::sync::Arc::clone(&state.deny_list)),
+        renderer: state.renderer.clone(),
+    }
 }
 
 fn lifecycle_error(error: super::device_lifecycle::LifecycleError) -> Problem {
@@ -2588,6 +2621,11 @@ fn store_error(error: SecurityStoreError) -> Problem {
             StatusCode::CONFLICT,
             "invalid_device_transition",
             "the device is not in a state that permits this lifecycle change",
+        ),
+        SecurityStoreError::DeviceHasActiveRuns => api_error(
+            StatusCode::CONFLICT,
+            "device_operations_in_progress",
+            "the device still has operations in progress; try again when they finish",
         ),
         SecurityStoreError::Sqlite(_) | SecurityStoreError::Migration(_) => {
             store_unavailable_error("the security database could not complete the request")

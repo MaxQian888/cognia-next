@@ -55,6 +55,7 @@ const actions = {
   pause: jest.fn(async () => {}),
   resume: jest.fn(async () => {}),
   revoke: jest.fn(async () => {}),
+  forget: jest.fn(async () => {}),
 } as unknown as DeviceGrantActions
 
 const CELL: DeviceCapabilityCell = {

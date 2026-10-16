@@ -38,6 +38,7 @@ function actions(): DeviceGrantActions {
     pause: jest.fn(async () => {}),
     resume: jest.fn(async () => {}),
     revoke: jest.fn(async () => {}),
+    forget: jest.fn(async () => {}),
   }
 }
 

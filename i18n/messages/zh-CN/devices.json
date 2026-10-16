@@ -300,6 +300,9 @@
     "sshFilesReachIsWhole": "该授权没有目录范围限制。SFTP 路径是那台机器自己的绝对路径，符号链接也由它自己解析，因此没有可以限制的根目录。",
     "revokeConfirmTitle": "吊销 {label}？",
     "revokeConfirmBody": "吊销不可逆。该设备会失去全部授权和密钥，必须重新配对才能回来。如果只是暂时停用，请改为暂停。",
+    "forget": "移除",
+    "forgetConfirmTitle": "移除 {label}？",
+    "forgetConfirmBody": "这会把这台已吊销的设备从此主机的所有列表中移除。它无法以相同身份回来；如需再次使用，请用新的配对码重新配对。审计日志会保留它的记录。",
     "pauseHint": "暂停会阻断该设备，直到你恢复它。",
     "lifecycleBlocked": {
       "no-host": "此浏览器未连接任何主机，暂停、恢复或吊销无处发送。",

@@ -256,6 +256,13 @@
     "successToast": "Device revoked.",
     "title": "Revoke pairing"
   },
+  "forget": {
+    "blocked": "Forget not completed. {reason}",
+    "description": "The revoked device is removed from every list on this Host.",
+    "reason": "Confirm forgetting {label}",
+    "successToast": "{label} forgotten.",
+    "title": "Forget device"
+  },
   "server": {
     "autostartFailed": "The server was enabled last time but is not running. Turn it off and on again, or check the desktop log for why the start failed.",
     "bindMode": "Bind mode",
@@ -489,6 +496,13 @@
     "pairedEmpty": "No browser is paired yet.",
     "pairedConnected": "Connected",
     "pairedOffline": "Not connected",
+    "pairedRevoked": "Revoked",
+    "forget": "Forget",
+    "forgetAria": "Forget {name}",
+    "forgetConfirmTitle": "Forget {name}?",
+    "forgetConfirmDescription": "This browser was revoked. Forgetting removes it from this list and every other list on this Host. To use it again, pair it with a new code.",
+    "forgetConfirm": "Forget",
+    "forgetConfirmCancel": "Cancel",
     "pairedVersion": "Extension {version}",
     "driveLabel": "Let agents act here",
     "driveAria": "Let agents act in {name}",

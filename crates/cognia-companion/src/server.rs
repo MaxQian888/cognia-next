@@ -720,6 +720,10 @@ fn build_router_for_mode(
             post(super::api::resume_device_handler),
         )
         .route(
+            "/api/devices/{device_id}/forget",
+            post(super::api::forget_device_handler),
+        )
+        .route(
             "/api/devices/{device_id}/capabilities",
             put(super::api::replace_device_capabilities_handler),
         )
