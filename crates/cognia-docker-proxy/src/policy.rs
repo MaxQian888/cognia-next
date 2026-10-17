@@ -232,12 +232,15 @@ pub fn classify(verb: Verb, path: &str) -> Result<Route, String> {
         }
         (Verb::Post, ["images", "create"]) => Ok(Route::ImagePull),
         (Verb::Post, ["commit"]) => Ok(Route::SnapshotCommit),
+        // Inspect also takes a snapshot-namespace name: compensation looks an
+        // image up by name before its ID is in the ledger. The handler then
+        // requires this deployment's namespace and commit provenance.
         (Verb::Get, ["images", id, "json"]) => Ok(Route::SnapshotImage {
-            id: decode_image_id(id)?,
+            id: decode_image_id(id, true)?,
             remove: false,
         }),
         (Verb::Delete, ["images", id]) => Ok(Route::SnapshotImage {
-            id: decode_image_id(id)?,
+            id: decode_image_id(id, false)?,
             remove: true,
         }),
         (Verb::Get, ["volumes"]) => Ok(Route::VolumeList),
@@ -260,19 +263,28 @@ pub fn snapshot_repository(policy: &ProxyPolicy) -> String {
         &hex::encode(Sha256::digest(policy.deployment_id.as_bytes()))[..24]
     )
 }
-fn decode_image_id(raw: &str) -> Result<String, String> {
+fn decode_image_id(raw: &str, allow_snapshot_name: bool) -> Result<String, String> {
     let pair = format!("id={raw}");
     let id = url::form_urlencoded::parse(pair.as_bytes())
         .next()
         .map(|(_, id)| id.into_owned())
         .ok_or("invalid image identity")?;
-    // Snapshots are addressed by image ID only; a name or tag (`alpine`,
-    // `repo:tag`) is never a snapshot and stays refused at classification.
-    if snapshot_image_id(&id) {
+    // Snapshots are addressed by image ID, or (inspect only) by a name in the
+    // snapshot namespace; any other name or tag (`alpine`, `repo:tag`) is never
+    // a snapshot and stays refused at classification.
+    if snapshot_image_id(&id) || (allow_snapshot_name && snapshot_namespace_name(&id)) {
         Ok(id)
     } else {
         Err("invalid snapshot image identity".into())
     }
+}
+/// `cognia-snapshot-<24 hex>:<uuid>`, whichever deployment it belongs to.
+fn snapshot_namespace_name(name: &str) -> bool {
+    name.split_once(':').is_some_and(|(repository, tag)| {
+        repository.strip_prefix("cognia-snapshot-").is_some_and(|hash| {
+            hash.len() == 24 && hash.bytes().all(|b| b.is_ascii_hexdigit())
+        }) && uuid::Uuid::parse_str(tag).is_ok()
+    })
 }
 pub fn snapshot_image_id(id: &str) -> bool {
     id.strip_prefix("sha256:")
@@ -705,6 +717,16 @@ mod tests {
             Ok(Route::SnapshotImage { remove: false, .. })
         ));
         assert!(classify(Verb::Delete, "/images/..%2fother").is_err());
+        // Compensation inspects a not-yet-recorded image by its snapshot name;
+        // deletion stays immutable-ID only, and other names stay refused.
+        let name = format!("{repository}%3A{id}");
+        assert!(matches!(
+            classify(Verb::Get, &format!("/images/{name}/json")),
+            Ok(Route::SnapshotImage { remove: false, .. })
+        ));
+        assert!(classify(Verb::Delete, &format!("/images/{name}")).is_err());
+        assert!(classify(Verb::Get, "/images/alpine/json").is_err());
+        assert!(classify(Verb::Get, "/images/cognia-snapshot-x%3Anot-a-uuid/json").is_err());
     }
 
     #[test]

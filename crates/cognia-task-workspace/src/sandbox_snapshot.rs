@@ -222,6 +222,18 @@ fn paths_overlap(candidate: &Path, root: &Path) -> bool {
         .is_some_and(|candidate| candidate.starts_with(root) || root.starts_with(candidate))
 }
 
+/// An in-flight reference is a restore when its journal says so. Restore
+/// reservations always carry the archived workspace backup and a reservation
+/// token; fork reservations never do.
+fn is_restore_reservation(payload: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(payload).is_ok_and(|value| {
+        match value.get("operation").and_then(serde_json::Value::as_str) {
+            Some(operation) => operation == "restore",
+            None => value.get("reservationToken").is_some() && value.get("workspace").is_some(),
+        }
+    })
+}
+
 pub(crate) fn canonical_lock_root(root: &Path) -> Result<PathBuf, String> {
     let absolute = if root.is_absolute() {
         root.to_path_buf()
@@ -812,6 +824,7 @@ impl TaskWorkspaceService {
         let root = self.execution_dir.join(&workspace_id);
         let pending_root = canonical_lock_root(&root)?;
         let reservation = serde_json::json!({
+            "operation": "fork",
             "pendingRuntime": true,
             "executionRoot": pending_root.to_string_lossy(),
         });
@@ -1075,7 +1088,7 @@ impl TaskWorkspaceService {
                 workspace_id,
             )?;
             let prior_reference:bool=store.connection.query_row("SELECT EXISTS(SELECT 1 FROM snapshot_artifact_refs WHERE snapshot_id=?1 AND kind='fork' AND owner=?2)",params![id,workspace_id],|r|r.get(0)).map_err(|e|e.to_string())?;
-            let backup = serde_json::json!({"workspace":workspace,"priorReference":prior_reference,"pendingRuntime":true,"reservationToken":token,"materializationStarted":false});
+            let backup = serde_json::json!({"operation":"restore","workspace":workspace,"priorReference":prior_reference,"pendingRuntime":true,"reservationToken":token,"materializationStarted":false});
             store.connection.execute("INSERT INTO snapshot_artifact_refs(snapshot_id,kind,owner,payload) VALUES(?1,'inFlight',?2,?3)",params![id,workspace_id,serde_json::to_string(&backup).map_err(|e|e.to_string())?]).map_err(|e|e.to_string())?;
             tx.commit().map_err(|e| e.to_string())?;
         }
@@ -1452,8 +1465,25 @@ impl TaskWorkspaceService {
                 if kind != "inFlight" {
                     continue;
                 }
-                let registered = { self.store.lock().get_workspace(&owner)?.is_some() };
-                if owner.starts_with("snapshot-fork-") {
+                let (registered, restore) = {
+                    let store = self.store.lock();
+                    let payload: Option<String> = store
+                        .connection
+                        .query_row(
+                            "SELECT payload FROM snapshot_artifact_refs WHERE snapshot_id=?1 AND kind='inFlight' AND owner=?2",
+                            params![record.snapshot_id, owner],
+                            |row| row.get(0),
+                        )
+                        .map_err(|e| e.to_string())?;
+                    (
+                        store.get_workspace(&owner)?.is_some(),
+                        payload.as_deref().is_some_and(is_restore_reservation),
+                    )
+                };
+                // The journal, not the owner's name, says what was in flight: an
+                // archived fork (`snapshot-fork-*`) can itself be restored in place,
+                // and undoing that restore must never discard the fork.
+                if !restore {
                     self.discard_sandbox_snapshot_fork_inner(
                         deployment,
                         &record.snapshot_id,
@@ -2438,6 +2468,80 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .starts_with("snapshot-fork-")));
+    }
+
+    #[test]
+    fn sandbox_snapshot_recovery_undoes_an_archived_fork_restore_instead_of_discarding_it() {
+        let (_data, source, service, request) = fixture();
+        ready(&service, &request);
+        // An earlier fork, since archived, is restored in place; the Host
+        // crashes after the restore reservation. Recovery must roll the
+        // restore back, never treat the `snapshot-fork-*` owner as a new fork.
+        let workspace_id = format!("snapshot-fork-{}", uuid::Uuid::new_v4());
+        let root = service
+            .execution_dir
+            .canonicalize()
+            .unwrap()
+            .join(&workspace_id);
+        let original = crate::WorkspaceRecord {
+            workspace_id: workspace_id.clone(),
+            port_lease: None,
+            environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+            project_id: Some(request.project_id.clone()),
+            owner_type: crate::WorkspaceOwnerType::Session,
+            owner_ref: Some("old-session".into()),
+            state: crate::WorkspaceState::Archived,
+            source_root: source.path().to_string_lossy().into(),
+            git_common_dir: None,
+            base: crate::WorkspaceBaseSpec::default(),
+            head: None,
+            branch: None,
+            isolation_kind: crate::IsolationKind::Shadow,
+            execution_root: root.to_string_lossy().into(),
+            snapshot_task_id: None,
+            size_bytes: None,
+            last_used_at: 1,
+            locked_by: Some(crate::compose_lock_reason(&workspace_id)),
+            pinned: false,
+            created_at: 1,
+        };
+        {
+            let store = service.store.lock();
+            store.put_workspace(&original).unwrap();
+            store.connection.execute("INSERT INTO workspace_port_leases(lease_id,namespace_key,subject_kind,subject_key,canonical_root,registry_workspace_id,base_port,port_count,created_at,updated_at) VALUES('retained-fork',?1,'registry',?2,?3,?2,41000,10,0,0)",params![crate::HOST_LOOPBACK_NAMESPACE,workspace_id,root.to_string_lossy()]).unwrap();
+        }
+        service
+            .reserve_sandbox_snapshot_restore_target(
+                &request.deployment_id,
+                &request.snapshot_id,
+                &workspace_id,
+            )
+            .unwrap();
+        let recovered = service
+            .recover_sandbox_snapshot_workspace_operations(&request.deployment_id)
+            .unwrap();
+        assert_eq!(recovered, vec![workspace_id.clone()]);
+        let store = service.store.lock();
+        let kept = store.get_workspace(&workspace_id).unwrap().expect("fork stays registered");
+        assert_eq!(kept.state, crate::WorkspaceState::Archived);
+        let leases: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM workspace_port_leases WHERE lease_id='retained-fork'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(leases, 1, "the archived fork keeps its port lease");
+        let in_flight: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM snapshot_artifact_refs WHERE owner=?1 AND kind='inFlight'",
+                params![workspace_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(in_flight, 0);
     }
 
     #[test]
