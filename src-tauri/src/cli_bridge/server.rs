@@ -120,6 +120,7 @@ pub fn build_router(state: SharedState) -> Router {
             "/api/dev/teams/run-status",
             post(handlers::teams_run_status),
         )
+        .route("/api/dev/best-of-n/{action}", post(handlers::best_of_n))
         // ── Provider admin leg (ADR-0163) ───────────────────────────────
         // The management plane for providers. Deliberately NOT on the LLM
         // gateway listener (that port is an agent subprocess's base URL):
@@ -208,7 +209,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 mod tests {
     use super::*;
 
-    const DOCUMENTED_DEV_ROUTES: [&str; 22] = [
+    const DOCUMENTED_DEV_ROUTES: [&str; 23] = [
         "/api/dev/health",
         "/api/dev/plugins/installed",
         "/api/dev/plugins/install",
@@ -227,6 +228,7 @@ mod tests {
         "/api/dev/teams/list",
         "/api/dev/teams/run",
         "/api/dev/teams/run-status",
+        "/api/dev/best-of-n/{action}",
         "/api/dev/provider-operations/manifest",
         "/api/dev/provider-operations/execute",
         "/api/dev/gateway/route-ticket",

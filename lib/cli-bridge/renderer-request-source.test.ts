@@ -28,6 +28,10 @@ jest.mock("./handlers/agent-team", () => ({
 }))
 
 const desktopWriteDispatchMock = jest.fn()
+const bestOfNCliMock = jest.fn()
+jest.mock("./handlers/best-of-n", () => ({
+  bestOfNCli: (...args: unknown[]) => bestOfNCliMock(...args),
+}))
 jest.mock("@/lib/companion/desktop-write-source", () => ({
   dispatchCommand: (...args: unknown[]) => desktopWriteDispatchMock(...args),
 }))
@@ -151,6 +155,10 @@ describe("dispatchCommand", () => {
 
     await dispatchCommand("agent_team_run_status", { teamId: "t1", sinceTs: 5 })
     expect(agentTeamRunStatusMock).toHaveBeenCalledWith({ teamId: "t1", sinceTs: 5 })
+
+    bestOfNCliMock.mockResolvedValue({ ok: true, runs: [] })
+    await dispatchCommand("best_of_n_cli", { action: "list" })
+    expect(bestOfNCliMock).toHaveBeenCalledWith({ action: "list" })
 
     pluginDevReloadMock.mockResolvedValue({ ok: true, outcome: "activated" })
     const reloadPayload = { pluginId: "demo.plugin", attempt: 1 }

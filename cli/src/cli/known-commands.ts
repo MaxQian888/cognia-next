@@ -19,6 +19,7 @@ export const KNOWN_COMMANDS = new Set([
   "lark",
   "eval",
   "durability",
+  "best-of-n",
   "sdk",
   "x",
   "rpc",

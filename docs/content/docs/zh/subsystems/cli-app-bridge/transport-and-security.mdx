@@ -28,28 +28,39 @@ Unix 会在写入后 best-effort 改为 `0600`；Windows 依赖用户 profile AC
 
 ## 路由 catalog
 
-实际注册 path 严格为 **12** 条。`src-tauri/src/cli_bridge/server.rs` 内的 Rust characterization test 锁定了列表与 router 路由数。
+实际注册 path 严格为 **23** 条。`src-tauri/src/cli_bridge/server.rs` 内的 Rust characterization test 锁定了列表与 router 路由数。wire 前缀为 `/api/dev/*`（稳定，与已安装的 CLI 共用，并非仅调试可用）。
 
 | Method 与 path | 消费者 | 执行方式 |
 | --- | --- | --- |
-| `GET /api/v1/dev/health` | 两个 CLI | Rust 存活响应 |
-| `GET /api/v1/dev/plugins/installed` | `cognia` | 脱敏插件快照 |
-| `POST /api/v1/dev/plugins/install` | `cognia` | 安装 bundle |
-| `POST /api/v1/dev/plugins/install-directory` | `cognia` | 安装 unpacked 目录 |
-| `POST /api/v1/dev/plugins/uninstall` | `cognia` | 移除插件 |
-| `POST /api/v1/dev/plugins/reload` | `cognia` | reload 或重新安装 artifact |
-| `POST /api/v1/dev/acp/token` | `cognia` | 为 ACP 签发 device-scope companion JWT |
-| `POST /api/v1/dev/sessions/handoff` | `cognia-agent` | 发出异步 renderer import event |
-| `POST /api/v1/dev/twin/context` | `cognia-agent` | Renderer round-trip |
-| `POST /api/v1/dev/teams/list` | `cognia-agent` | Renderer round-trip |
-| `POST /api/v1/dev/teams/run` | `cognia-agent` | Renderer round-trip |
-| `POST /api/v1/dev/teams/run-status` | `cognia-agent` | Renderer round-trip |
+| `GET /api/dev/health` | 两个 CLI | Rust 存活响应 |
+| `GET /api/dev/plugins/installed` | `cognia` | 脱敏插件快照 |
+| `POST /api/dev/plugins/install` | `cognia` | 安装 bundle |
+| `POST /api/dev/plugins/install-directory` | `cognia` | 安装 unpacked 目录 |
+| `POST /api/dev/plugins/uninstall` | `cognia` | 移除插件 |
+| `POST /api/dev/plugins/reload` | `cognia` | reload 或重新安装 artifact |
+| `POST /api/dev/plugins/session-events` | `cognia` | 开发会话生命周期事件（body 上限 64 KiB） |
+| `POST /api/dev/acp/ticket` | `cognia` | 为 ACP 签发一次性 Companion socket ticket |
+| `POST /api/dev/sessions/handoff` | `cognia-agent` | 发出异步 renderer import event |
+| `POST /api/dev/host-state/snapshot` | `cognia-agent` | Attach/会话状态快照 |
+| `POST /api/dev/host-state/submit` | `cognia-agent` | Attach/会话状态提交 |
+| `POST /api/dev/host-state/status` | `cognia-agent` | Attach/会话状态查询 |
+| `GET /api/dev/host-state/events` | `cognia-agent` | 长轮询 host 事件流 |
+| `GET /api/dev/host-state/agent-events` | `cognia-agent` | 长轮询 agent 事件流 |
+| `POST /api/dev/twin/context` | `cognia-agent` | Renderer round-trip |
+| `POST /api/dev/teams/list` | `cognia-agent` | Renderer round-trip |
+| `POST /api/dev/teams/run` | `cognia-agent` | Renderer round-trip |
+| `POST /api/dev/teams/run-status` | `cognia-agent` | Renderer round-trip |
+| `POST /api/dev/best-of-n/{action}` | `cognia-agent` | Renderer round-trip：best-of-N 的 `list`、`status`、`start`、`cancel`、`select`、`publish`、`archive` |
+| `GET /api/dev/provider-operations/manifest` | `cognia-agent` | Provider admin manifest（ADR-0163） |
+| `POST /api/dev/provider-operations/execute` | `cognia-agent` | 执行 provider admin 操作 |
+| `POST /api/dev/gateway/route-ticket` | `cognia-agent` | 签发 LLM gateway route ticket |
+| `POST /api/dev/gateway/route-ticket/revoke` | `cognia-agent` | 撤销 route ticket |
 
-`cognia-agent` 使用 6 条 path，`cognia` 使用 7 条。Health 是唯一共享项，所以并集为 12。Installed-plugin projection 刻意排除 `runtime_state`；twin context 只返回脱敏 prompt segment，不会返回 raw source chunk。
+`cognia` 使用 8 条 path（插件、ACP ticket 与 health），`cognia-agent` 使用 16 条。Health 是唯一共享项，所以并集为 23。Installed-plugin projection 刻意排除 `runtime_state`；twin context 只返回脱敏 prompt segment，不会返回 raw source chunk。
 
 ## Renderer request/response
 
-Twin 与 team route 的权威数据在 WebView 内，无法只由 Rust 回答。它们使用真正的 pending-request protocol，而不是 fire-and-forget event：
+Twin、team 与 best-of-N route 的权威数据在 WebView 内，无法只由 Rust 回答。它们使用真正的 pending-request protocol，而不是 fire-and-forget event：
 
 ```mermaid
 sequenceDiagram

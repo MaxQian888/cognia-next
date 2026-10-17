@@ -168,15 +168,25 @@ async fn renderer_roundtrip(
     command: &str,
     payload: serde_json::Value,
 ) -> Response {
+    renderer_roundtrip_with_timeout(
+        state,
+        command,
+        payload,
+        super::renderer_bridge::DEFAULT_TIMEOUT,
+    )
+    .await
+}
+
+async fn renderer_roundtrip_with_timeout(
+    state: &SharedState,
+    command: &str,
+    payload: serde_json::Value,
+    timeout: std::time::Duration,
+) -> Response {
     match state
         .renderer
         .clone()
-        .dispatch(
-            &state.app_handle,
-            command,
-            payload,
-            super::renderer_bridge::DEFAULT_TIMEOUT,
-        )
+        .dispatch(&state.app_handle, command, payload, timeout)
         .await
     {
         Ok(result) => Json(json!({ "ok": true, "result": result })).into_response(),
@@ -222,6 +232,55 @@ pub async fn teams_run_status(
     Json(payload): Json<serde_json::Value>,
 ) -> Response {
     renderer_roundtrip(&state, "agent_team_run_status", payload).await
+}
+
+/// The best-of-N actions the CLI may drive. Select and publish reach the
+/// desktop's own native approval; nothing on this route asserts a human origin.
+const BEST_OF_N_ACTIONS: [&str; 7] = [
+    "list", "status", "start", "cancel", "select", "publish", "archive",
+];
+
+/// Exact-head checks and the native approval of select/publish can outlast
+/// the default renderer round-trip.
+const BEST_OF_N_DECISION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+fn best_of_n_request(
+    action: &str,
+    mut payload: serde_json::Value,
+) -> Result<(serde_json::Value, std::time::Duration), (StatusCode, &'static str)> {
+    if !BEST_OF_N_ACTIONS.contains(&action) {
+        return Err((StatusCode::NOT_FOUND, "unknown best-of-N action"));
+    }
+    let Some(map) = payload.as_object_mut() else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "best-of-N request must be an object",
+        ));
+    };
+    map.insert("action".into(), json!(action));
+    let timeout = if matches!(action, "select" | "publish") {
+        BEST_OF_N_DECISION_TIMEOUT
+    } else {
+        super::renderer_bridge::DEFAULT_TIMEOUT
+    };
+    Ok((payload, timeout))
+}
+
+/// `POST /api/dev/best-of-n/{action}` — the renderer owns best-of-N
+/// orchestration (fan-out, checks, integration), so the CLI drives it here.
+pub async fn best_of_n(
+    State(state): State<SharedState>,
+    axum::extract::Path(action): axum::extract::Path<String>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    match best_of_n_request(&action, payload) {
+        Ok((payload, timeout)) => {
+            renderer_roundtrip_with_timeout(&state, "best_of_n_cli", payload, timeout).await
+        }
+        Err((status, error)) => {
+            (status, Json(json!({ "ok": false, "error": error }))).into_response()
+        }
+    }
 }
 
 async fn host_state_roundtrip(
@@ -1714,6 +1773,26 @@ pub async fn gateway_route_ticket_revoke(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn best_of_n_request_names_its_action_and_widens_only_decisions() {
+        let (payload, timeout) = best_of_n_request("status", json!({ "groupId": "g" })).unwrap();
+        assert_eq!(payload, json!({ "groupId": "g", "action": "status" }));
+        assert_eq!(timeout, super::super::renderer_bridge::DEFAULT_TIMEOUT);
+        // A caller cannot smuggle a different action through the body.
+        let (payload, timeout) =
+            best_of_n_request("publish", json!({ "groupId": "g", "action": "list" })).unwrap();
+        assert_eq!(payload["action"], "publish");
+        assert_eq!(timeout, BEST_OF_N_DECISION_TIMEOUT);
+        assert_eq!(
+            best_of_n_request("judge", json!({})).unwrap_err().0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            best_of_n_request("list", json!([])).unwrap_err().0,
+            StatusCode::BAD_REQUEST
+        );
+    }
 
     #[test]
     fn route_ticket_revoke_request_reads_camel_case_and_nothing_else() {

@@ -32,6 +32,7 @@ import {
 import { apiCommand as defaultApi } from "./api-command"
 import { dispatchDerived, matchDerived } from "./api-dispatch"
 import { hostCommand as defaultHost } from "./host-command"
+import { bestOfNCommand as defaultBestOfN } from "./best-of-n-command"
 import { KNOWN_COMMANDS } from "./known-commands"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
@@ -89,6 +90,9 @@ Usage:
                      [--to journal|sqlite|<generation>] [--from auto|snapshot|journal|sqlite]
                      [--activate] [--generation id] [--confirm]
                       headless persistence: inspect, migrate, recover, roll back
+  cognia-agent best-of-n <start|status|list|cancel|select|publish|archive> ...
+                     independent attempts in the desktop app; select and publish
+                     need an interactive terminal and the desktop's approval
   cognia-agent sdk <capabilities|sessions|info|messages|rename|tag|fork|delete|settings>
                      typed Claude Agent SDK management (never raw option JSON)
   cognia-agent provider <capabilities|models|balance|limits|usage|probe>
@@ -174,6 +178,7 @@ export interface MainDeps {
   update?: typeof defaultUpdate
   api?: typeof defaultApi
   host?: typeof defaultHost
+  bestOfN?: typeof defaultBestOfN
   out?: OutputSink
 }
 
@@ -248,6 +253,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.eval ?? defaultEval)(args, { out })
     case "durability":
       return (deps.durability ?? defaultDurability)(args, { out })
+    case "best-of-n":
+      return (deps.bestOfN ?? defaultBestOfN)(args, { out })
     case "sdk":
       return (deps.sdk ?? defaultSdk)(args, { out }).catch((error) => {
         out.error(error instanceof Error ? error.message : String(error))

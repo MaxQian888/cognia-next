@@ -4,7 +4,7 @@
  * Desktop-side counterpart of the Rust `cli_bridge::renderer_bridge`.
  *
  * The CLI hits a renderer-backed bridge route (`/api/dev/twin/context`,
- * `/api/dev/teams/*`); the Rust handler emits one unified
+ * `/api/dev/teams/*`, `/api/dev/best-of-n/*`); the Rust handler emits one unified
  * `cli-bridge://renderer-request` event with `{ requestId, command,
  * payload }`. This module dispatches by command name, runs the matching
  * renderer operation (Dexie / Zustand / twin runtime), and ships the result
@@ -17,6 +17,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { createSharedInstall, type SharedInstallOptions } from "@/lib/tauri/shared-install"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -37,19 +38,15 @@ interface TauriBridge {
   invoke(name: string, args: Record<string, unknown>): Promise<unknown>
 }
 
-let installed = false
-
-export interface InstallOptions {
+export interface InstallOptions extends SharedInstallOptions {
   bridge?: TauriBridge
-  forceReinstall?: boolean
 }
 
-export async function installCliRendererRequestSource(
-  opts: InstallOptions = {}
-): Promise<() => void> {
-  if (installed && !opts.forceReinstall) return () => {}
-  installed = true
-
+/**
+ * Listen for the CLI bridge's renderer requests. Shared by every caller and released by the last one
+ * ({@link createSharedInstall}), so a StrictMode remount keeps it.
+ */
+export const installCliRendererRequestSource = createSharedInstall<InstallOptions>(async (opts) => {
   let bridge: TauriBridge
   if (opts.bridge) {
     bridge = opts.bridge
@@ -57,8 +54,7 @@ export async function installCliRendererRequestSource(
     try {
       bridge = { listen, invoke }
     } catch {
-      installed = false
-      return () => {}
+      return null
     }
   }
 
@@ -67,10 +63,9 @@ export async function installCliRendererRequestSource(
   })
 
   return () => {
-    installed = false
     safeUnlisten(unlisten)
   }
-}
+})
 
 async function respond(req: RendererRequestEvent, bridge: TauriBridge): Promise<void> {
   const { requestId, command, payload } = req
@@ -122,6 +117,10 @@ export async function dispatchCommand(
     case "agent_team_run_status": {
       const { agentTeamRunStatus } = await import("./handlers/agent-team")
       return agentTeamRunStatus(payload)
+    }
+    case "best_of_n_cli": {
+      const { bestOfNCli } = await import("./handlers/best-of-n")
+      return bestOfNCli(payload)
     }
     case "plugin_dev_reload": {
       const { pluginDevReload } = await import("./handlers/plugin-dev-reload")
