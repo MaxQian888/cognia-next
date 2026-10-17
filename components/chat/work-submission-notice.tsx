@@ -10,6 +10,49 @@ interface Props {
   sessionId: string | undefined
 }
 
+function recoveryBodyKey(errorCode: string | undefined) {
+  switch (errorCode) {
+    case "observed-tool-activity":
+      return "recoveryRequired.reasons.toolActivity"
+    case "ambiguous-side-effects":
+      return "recoveryRequired.reasons.uncertainEffects"
+    case "corrupt-canonical-log":
+      return "recoveryRequired.reasons.corruptLog"
+    case "unreadable-journal":
+      return "recoveryRequired.reasons.unreadableJournal"
+    case "no-candidates":
+      return "recoveryRequired.reasons.missingHistory"
+    case "forked-history":
+      return "recoveryRequired.reasons.conflictingHistory"
+    case "no-dominant":
+      return "recoveryRequired.reasons.ambiguousHistory"
+    case "missing_frozen_input":
+      return "recoveryRequired.reasons.missingInput"
+    case "missing_frozen_context":
+    case "missing_frozen_send_options":
+      return "recoveryRequired.reasons.incompleteContext"
+    case "invalid_frozen_input":
+      return "recoveryRequired.reasons.invalidInput"
+    case "frozen_payload_unreadable":
+      return "recoveryRequired.reasons.unreadablePayload"
+    case "frozen_input_digest_mismatch":
+    case "frozen_context_digest_mismatch":
+      return "recoveryRequired.reasons.integrityMismatch"
+    case "takeover_abort_failed":
+      return "recoveryRequired.reasons.previousRuntime"
+    case "frozen_transcript_host_unverified":
+      return "recoveryRequired.reasons.unverifiedHost"
+    case "transcript_authoritative_host_required":
+      return "recoveryRequired.reasons.authoritativeHost"
+    case "frozen_transcript_session_missing":
+      return "recoveryRequired.reasons.missingSession"
+    case "frozen_transcript_generation_mismatch":
+      return "recoveryRequired.reasons.changedHistory"
+    default:
+      return "recoveryRequired.body"
+  }
+}
+
 /**
  * Tells the user what happened to a turn the system accepted but has not
  * answered (ADR-0123).
@@ -27,7 +70,7 @@ interface Props {
  */
 export function WorkSubmissionNotice({ sessionId }: Props) {
   const t = useTranslations("chat.workSubmission")
-  const { state } = useWorkSubmissionStatus(sessionId)
+  const { state, submission } = useWorkSubmissionStatus(sessionId)
 
   if (state === "idle") return null
 
@@ -36,7 +79,7 @@ export function WorkSubmissionNotice({ sessionId }: Props) {
       <Alert variant="destructive" data-testid="work-submission-recovery">
         <AlertCircleIcon />
         <AlertTitle>{t("recoveryRequired.title")}</AlertTitle>
-        <AlertDescription>{t("recoveryRequired.body")}</AlertDescription>
+        <AlertDescription>{t(recoveryBodyKey(submission?.errorCode))}</AlertDescription>
       </Alert>
     )
   }

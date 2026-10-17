@@ -1000,51 +1000,60 @@ export function ChatPane({
       {activeSession?.platformBinding && (
         <PlatformConversationContext session={activeSession} showHeader={!showHeader} />
       )}
-      {runtimeNotice && !runtimeStrip && <ChatColumn className="mt-3">{runtimeNotice}</ChatColumn>}
-      {/* ADR-0030 — surfaces a destructive Alert when session.characterId
+      {/* The summary card is anchored to the whole pane below the header.
+          Notices stay in the reading column; their height must not move the
+          floating card in the side gutter. */}
+      <div className="relative flex min-h-0 flex-1 flex-col" data-slot="chat-surface-stage">
+        {inScope ? (
+          <SessionSummaryStageHost key={activeSession.id} session={activeSession} />
+        ) : null}
+        {runtimeNotice && !runtimeStrip && (
+          <ChatColumn className="mt-3">{runtimeNotice}</ChatColumn>
+        )}
+        {/* ADR-0030 — surfaces a destructive Alert when session.characterId
           no longer resolves (plugin disabled, local pack deleted). Renders
           nothing when the character resolves or the id is a plain Dexie
           row that's simply missing. */}
-      <ChatColumn className="mt-2">
-        <CharacterMissingBanner
-          characterId={activeSession.characterId}
-          onPickAnother={onPickCharacter ?? onCreate}
-        />
-      </ChatColumn>
-      {/* ADR-0123 — explains a turn that was durably accepted but is waiting,
+        <ChatColumn className="mt-2">
+          <CharacterMissingBanner
+            characterId={activeSession.characterId}
+            onPickAnother={onPickCharacter ?? onCreate}
+          />
+        </ChatColumn>
+        {/* ADR-0123 — explains a turn that was durably accepted but is waiting,
           held offline, or stopped for human recovery. Renders nothing when a
           turn is streaming normally or the feature is off. */}
-      <ChatColumn className="mt-2">
-        <WorkSubmissionNotice sessionId={activeSession.id} />
-      </ChatColumn>
-      {/* ADR-0204 — a paused project's coordinator and threads refuse sends;
-          this says why and offers Resume. Nothing while the project runs. */}
-      {activeSession.projectRole && activeSession.projectId ? (
         <ChatColumn className="mt-2">
-          <ProjectPausedBanner projectId={activeSession.projectId} />
+          <WorkSubmissionNotice sessionId={activeSession.id} />
         </ChatColumn>
-      ) : null}
-      {/* ADR-0213 — an open archived conversation says so and offers
+        {/* ADR-0204 — a paused project's coordinator and threads refuse sends;
+          this says why and offers Resume. Nothing while the project runs. */}
+        {activeSession.projectRole && activeSession.projectId ? (
+          <ChatColumn className="mt-2">
+            <ProjectPausedBanner projectId={activeSession.projectId} />
+          </ChatColumn>
+        ) : null}
+        {/* ADR-0213 — an open archived conversation says so and offers
           Unarchive. Not for an imported subagent transcript (ADR-0062): it is
           a read-only inner transcript, not a conversation in the list. */}
-      {activeSession.archivedAt != null && activeSession.kind !== "subagent" ? (
-        <ChatColumn className="mt-2">
-          <ArchivedConversationBanner session={activeSession} />
-        </ChatColumn>
-      ) : null}
-      {/* ADR-0103 / ADR-0224 A11c — a conversation that moved to another
+        {activeSession.archivedAt != null && activeSession.kind !== "subagent" ? (
+          <ChatColumn className="mt-2">
+            <ArchivedConversationBanner session={activeSession} />
+          </ChatColumn>
+        ) : null}
+        {/* ADR-0103 / ADR-0224 A11c — a conversation that moved to another
           device says where, and brings back the work its code got there. */}
-      {activeSession.handoffLock?.state === "committed" ? (
-        <ChatColumn className="mt-2">
-          <HandedOffBanner session={activeSession} />
-        </ChatColumn>
-      ) : null}
-      <ExternalAgentSessionPanel
-        sessionId={activeSession.id}
-        externalSession={activeSession.externalAgentSession}
-        onExecuteCommand={handleSend}
-      />
-      {/* The surface swap (loader / welcome ⇄ transcript) is a crossfade IN
+        {activeSession.handoffLock?.state === "committed" ? (
+          <ChatColumn className="mt-2">
+            <HandedOffBanner session={activeSession} />
+          </ChatColumn>
+        ) : null}
+        <ExternalAgentSessionPanel
+          sessionId={activeSession.id}
+          externalSession={activeSession.externalAgentSession}
+          onExecuteCommand={handleSend}
+        />
+        {/* The surface swap (loader / welcome ⇄ transcript) is a crossfade IN
           PLACE, not a reflow. `popLayout` lifts the exiting branch out of the
           flex column for the duration of its exit, so the entering branch owns
           the full height from its very first frame. Under `sync` both `flex-1`
@@ -1053,150 +1062,147 @@ export function ChatPane({
           the exit finished (messages "appearing in the middle, then at the
           top"). This wrapper is the positioned offset parent that popLayout
           pins the exiting branch against; keep it `relative`. */}
-      <div className="relative flex min-h-0 flex-1 flex-col" data-slot="chat-surface-stage">
-        {/* The summary card floats at the stage's top-right, under the title
-            bar's summary button, when the gutter beside the chat column holds
-            it — outside the scroll lane so it never scrolls with the messages,
-            and below the stage's top edge so it never covers a banner. Scoped
-            to the workspace (embedded hosts use the popover). Split panes each
-            get their own, bound to that pane's session. */}
-        {inScope ? (
-          <SessionSummaryStageHost key={activeSession.id} session={activeSession} />
-        ) : null}
-        <AnimatePresence mode="popLayout" initial={false} onExitComplete={restoreComposerFocus}>
-          {showHistorySurface || !hasHistory ? (
-            <motion.div
-              key="empty"
-              className="flex min-h-0 flex-1 flex-col"
-              // Both surfaces share one motion vocabulary — content rises in
-              // (y 8 → 0) and lifts away (y 0 → -6) — so the eye tracks a
-              // single upward handoff instead of two unrelated animations.
-              // `initial` only fires when this branch REPLACES the transcript
-              // (new session / cleared history); the presence root's
-              // `initial={false}` keeps the first mount static.
-              initial={reduce ? false : { opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={reduce ? undefined : { opacity: 0, y: -6 }}
-              transition={mobileTransition("fast")}
-            >
-              {messagesLoadError && !hasHistory ? (
-                // History load failed — surface it with a retry instead of the
-                // welcome layout, which would read as silently lost history.
-                <div
-                  role="alert"
-                  className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
-                >
-                  <AlertTriangle className="size-8 text-destructive" aria-hidden />
-                  <p className="text-sm text-muted-foreground">{tHistory("loadError")}</p>
-                  <Button variant="outline" size="sm" onClick={handleRetryLoad}>
-                    {tHistory("retry")}
-                  </Button>
-                </div>
-              ) : showHistoryLoader ? (
-                <HistoryLoadingIndicator label={tHistory("loading")} />
-              ) : coldHistoryLoading ? (
-                // Keep fast Dexie reads visually quiet. If the wait crosses the
-                // anti-flicker threshold, the animated indicator replaces this.
-                <div className="min-h-0 flex-1" aria-busy="true" />
-              ) : (
-                <EmptyChatState
-                  onCreate={onCreate}
-                  onUseSample={(text) => onUseSample(text)}
-                  variant="inline"
-                  recentSessions={recentSessions}
-                  onResumeSession={onResumeSession}
-                  characterSamples={characterSamples}
-                  aiSamples={aiStarters}
-                  override={emptyState}
-                  workspaceAvailable={workspaceAvailable}
-                  statsSlot={statsSlot}
-                  hiddenSections={welcomeHidden}
-                  onDismissSection={handleDismissSection}
-                  // Same density and name as the no-session welcome: without
-                  // them an empty conversation on a phone fell back to the rich
-                  // desktop hero and ignored the name set in Personalization.
-                  welcomeStyle={welcomeStyle}
-                  userName={userName}
-                />
-              )}
-              {errorAndFooter}
-              {supportPanel}
-              {/* Composer is hidden while history is loading / failed — same as
+        <div className="relative flex min-h-0 flex-1 flex-col" data-slot="chat-transcript-stage">
+          <AnimatePresence mode="popLayout" initial={false} onExitComplete={restoreComposerFocus}>
+            {showHistorySurface || !hasHistory ? (
+              <motion.div
+                key="empty"
+                className="flex min-h-0 flex-1 flex-col"
+                // Both surfaces share one motion vocabulary — content rises in
+                // (y 8 → 0) and lifts away (y 0 → -6) — so the eye tracks a
+                // single upward handoff instead of two unrelated animations.
+                // `initial` only fires when this branch REPLACES the transcript
+                // (new session / cleared history); the presence root's
+                // `initial={false}` keeps the first mount static.
+                initial={reduce ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={reduce ? undefined : { opacity: 0, y: -6 }}
+                transition={mobileTransition("fast")}
+              >
+                {messagesLoadError && !hasHistory ? (
+                  // History load failed — surface it with a retry instead of the
+                  // welcome layout, which would read as silently lost history.
+                  <div
+                    role="alert"
+                    className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
+                  >
+                    <AlertTriangle className="size-8 text-destructive" aria-hidden />
+                    <p className="text-sm text-muted-foreground">{tHistory("loadError")}</p>
+                    <Button variant="outline" size="sm" onClick={handleRetryLoad}>
+                      {tHistory("retry")}
+                    </Button>
+                  </div>
+                ) : showHistoryLoader ? (
+                  <HistoryLoadingIndicator label={tHistory("loading")} />
+                ) : coldHistoryLoading ? (
+                  // Keep fast Dexie reads visually quiet. If the wait crosses the
+                  // anti-flicker threshold, the animated indicator replaces this.
+                  <div className="min-h-0 flex-1" aria-busy="true" />
+                ) : (
+                  <EmptyChatState
+                    onCreate={onCreate}
+                    onUseSample={(text) => onUseSample(text)}
+                    variant="inline"
+                    recentSessions={recentSessions}
+                    onResumeSession={onResumeSession}
+                    characterSamples={characterSamples}
+                    aiSamples={aiStarters}
+                    override={emptyState}
+                    workspaceAvailable={workspaceAvailable}
+                    statsSlot={statsSlot}
+                    hiddenSections={welcomeHidden}
+                    onDismissSection={handleDismissSection}
+                    // Same density and name as the no-session welcome: without
+                    // them an empty conversation on a phone fell back to the rich
+                    // desktop hero and ignored the name set in Personalization.
+                    welcomeStyle={welcomeStyle}
+                    userName={userName}
+                  />
+                )}
+                {errorAndFooter}
+                {supportPanel}
+                {/* Composer is hidden while history is loading / failed — same as
                 the previous layout, where it only mounted with the welcome. */}
-              {!messagesLoadError && !showHistorySurface && composerEl}
-            </motion.div>
-          ) : (
-            <motion.div
-              key="chat"
-              className="flex min-h-0 flex-1 flex-col"
-              initial={reduce ? false : { opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={mobileTransition("fast")}
-            >
-              <div className="relative flex min-h-0 flex-1 flex-col" data-computer-use-pip-host>
-                <ChatMessages
-                  sessionId={boundId}
-                  messageDisplayOverride={activeSession?.messageDisplayOverride}
-                  directCharacter={activeCharacter ?? null}
-                  projectRoot={projectRoot}
-                  onCopy={handleCopySuccess}
-                  onRegenerate={activeSession.platformBinding ? undefined : handleRegenerate}
-                  onEditResend={activeSession.platformBinding ? undefined : handleEditResend}
-                  onRewindFiles={onRewindFiles ?? (directSession ? runtime.rewindFiles : undefined)}
-                  useCompanionTranscript={usesCompanionTranscript}
-                />
-                {boundId && <ComputerUsePictureInPicture sessionId={boundId} />}
-              </div>
-              <ChatColumn>
-                <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
-              </ChatColumn>
-              {errorAndFooter}
-              {/* The plan slot above the composer — three docks, mutually
+                {!messagesLoadError && !showHistorySurface && composerEl}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="chat"
+                className="flex min-h-0 flex-1 flex-col"
+                initial={reduce ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={mobileTransition("fast")}
+              >
+                <div className="relative flex min-h-0 flex-1 flex-col" data-computer-use-pip-host>
+                  <ChatMessages
+                    sessionId={boundId}
+                    messageDisplayOverride={activeSession?.messageDisplayOverride}
+                    directCharacter={activeCharacter ?? null}
+                    projectRoot={projectRoot}
+                    onCopy={handleCopySuccess}
+                    onRegenerate={activeSession.platformBinding ? undefined : handleRegenerate}
+                    onEditResend={activeSession.platformBinding ? undefined : handleEditResend}
+                    onRewindFiles={
+                      onRewindFiles ?? (directSession ? runtime.rewindFiles : undefined)
+                    }
+                    useCompanionTranscript={usesCompanionTranscript}
+                  />
+                  {boundId && <ComputerUsePictureInPicture sessionId={boundId} />}
+                </div>
+                <ChatColumn>
+                  <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
+                </ChatColumn>
+                {errorAndFooter}
+                {/* The plan slot above the composer — three docks, mutually
                 exclusive by plan status. A plan awaiting a decision is reviewed
                 here, beside the composer its decisions resume, so the document
                 never pushes the transcript down from the top of the pane. Only
                 the pane that owns this session's decisions renders it. */}
-              {boundId && ownsDecisions && directSession && (
-                <ChatColumn>
-                  <PlanApprovalDock
-                    sessionId={boundId}
-                    session={activeSession}
-                    onResume={handleResumeAfterPlanApproval}
-                    onSendPlanFeedback={handleSendPlanFeedback}
-                  />
-                </ChatColumn>
-              )}
-              {/* Executing/paused plans surface the live tracker in the same slot
+                {boundId && ownsDecisions && directSession && (
+                  <ChatColumn>
+                    <PlanApprovalDock
+                      sessionId={boundId}
+                      session={activeSession}
+                      onResume={handleResumeAfterPlanApproval}
+                      onSendPlanFeedback={handleSendPlanFeedback}
+                    />
+                  </ChatColumn>
+                )}
+                {/* Executing/paused plans surface the live tracker in the same slot
                 (statuses are mutually exclusive with awaiting_approval). */}
-              {boundId && (
-                <ChatColumn>
-                  <PlanTrackerDock sessionId={boundId} />
-                </ChatColumn>
-              )}
-              {/* Third mutually-exclusive state for this slot: planning, with no
+                {boundId && (
+                  <ChatColumn>
+                    <PlanTrackerDock sessionId={boundId} />
+                  </ChatColumn>
+                )}
+                {/* Third mutually-exclusive state for this slot: planning, with no
                 plan yet — offer to hand-author one (PlanSource "manual"). */}
-              {boundId && (
-                <ChatColumn>
-                  <PlanComposerDock sessionId={boundId} characterId={activeSession?.characterId} />
-                </ChatColumn>
-              )}
-              {supportPanel}
-              {runStatusEl}
-              {boundId ? (
-                <ChatScopeProvider
-                  sessionId={boundId}
-                  compact={onCompact ?? (() => runtime.compact(boundId))}
-                  setModel={onSetModel ?? ((model) => runtime.setModel(boundId, model))}
-                  resetRuntime={onResetRuntime ?? (() => runtime.resetRuntime(boundId))}
-                >
-                  {composerEl}
-                </ChatScopeProvider>
-              ) : (
-                composerEl
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+                {boundId && (
+                  <ChatColumn>
+                    <PlanComposerDock
+                      sessionId={boundId}
+                      characterId={activeSession?.characterId}
+                    />
+                  </ChatColumn>
+                )}
+                {supportPanel}
+                {runStatusEl}
+                {boundId ? (
+                  <ChatScopeProvider
+                    sessionId={boundId}
+                    compact={onCompact ?? (() => runtime.compact(boundId))}
+                    setModel={onSetModel ?? ((model) => runtime.setModel(boundId, model))}
+                    resetRuntime={onResetRuntime ?? (() => runtime.resetRuntime(boundId))}
+                  >
+                    {composerEl}
+                  </ChatScopeProvider>
+                ) : (
+                  composerEl
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </ChatSurfaceTransition>
   )

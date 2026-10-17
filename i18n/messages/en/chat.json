@@ -1943,6 +1943,8 @@
     "undone": "Undone"
   },
   "message": {
+    "collapseUserMessage": "Collapse message",
+    "expandUserMessage": "Show full message",
     "attachmentAlt": "attachment",
     "bookmarkLabel": "Toggle bookmark",
     "bookmarkRemoveTooltip": "Remove bookmark",
@@ -2994,7 +2996,26 @@
     },
     "recoveryRequired": {
       "title": "Needs your attention",
-      "body": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again."
+      "body": "The app could not safely restore this turn, so it was not retried automatically. Review the conversation and execution details before deciding whether to send it again.",
+      "reasons": {
+        "toolActivity": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again.",
+        "uncertainEffects": "The app could not confirm whether earlier tool operations finished, so it did not retry this turn automatically. Check their results before sending it again to avoid repeating an operation.",
+        "corruptLog": "The saved conversation log is damaged, so this turn could not be restored safely. Review the conversation and execution details before deciding whether to send it again.",
+        "unreadableJournal": "The app could not read the saved execution log and could not verify what this turn had already done. It was not retried automatically. Review its execution details before sending it again.",
+        "missingHistory": "No usable conversation history was found for recovery. This turn was not retried automatically. Check the conversation and its execution details before sending it again.",
+        "conflictingHistory": "Saved versions of this conversation conflict, so the app did not choose one or retry this turn automatically. Review the conversation history before continuing.",
+        "ambiguousHistory": "The app could not choose a complete, consistent conversation history for recovery. This turn was not retried automatically. Review the saved history before continuing.",
+        "missingInput": "The saved message input is missing, so the original turn could not be restored. Check the message, attachments, and execution details before deciding whether to send it again.",
+        "incompleteContext": "The saved execution context is incomplete, so the app could not restore this turn with its original settings. Check the conversation settings and execution details before deciding whether to send it again.",
+        "invalidInput": "The saved message input is invalid, so the original turn could not be restored. Check the message, attachments, and execution details before deciding whether to send it again.",
+        "unreadablePayload": "The app could not open the saved message or execution context, so this turn was not retried automatically. Review the conversation and execution details before deciding whether to send it again.",
+        "integrityMismatch": "The saved message or execution context failed its integrity check, so the app did not retry with unverified data. Review the original message, settings, and execution details before continuing.",
+        "previousRuntime": "The app could not confirm that the previous runtime stopped, so it did not start another attempt. Check whether the turn is still running on its execution host before continuing.",
+        "unverifiedHost": "The app could not verify the execution host for this saved conversation, so this turn was not retried automatically. Check the host connection and review the conversation before continuing.",
+        "authoritativeHost": "This turn must be recovered on the host that owns its history. Open the conversation on that host and review its execution details before continuing.",
+        "missingSession": "The saved conversation could not be found on the execution host, so this turn was not retried automatically. Check that the correct host and conversation are available before continuing.",
+        "changedHistory": "The conversation history changed since this turn was saved, so the app did not retry against a different history. Review the current conversation before continuing."
+      }
     }
   },
   "workspaceRestricted": {

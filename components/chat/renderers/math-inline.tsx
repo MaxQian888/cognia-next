@@ -1,12 +1,12 @@
 "use client"
 
-import { useMemo, useState, useCallback } from "react"
+import { useMemo, useState, useCallback, useContext } from "react"
 import { useTranslations } from "next-intl"
+import { Check, Copy } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { renderMathSafe } from "@cognia/latex"
-import { withMathErrorBoundary } from "./math-error-boundary"
+import { InlineMathLinkContext, withMathErrorBoundary } from "./math-error-boundary"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@cognia/logging"
 
@@ -24,6 +24,7 @@ function MathInlineBase({
   showCopyOnHover = true,
 }: MathInlineProps) {
   const t = useTranslations("chat.renderers.math")
+  const inLink = useContext(InlineMathLinkContext)
   const [isHovered, setIsHovered] = useState(false)
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
@@ -98,20 +99,22 @@ function MathInlineBase({
           style={scaleStyle}
           role="math"
           aria-label={t("expressionLabelInline", { tex: cleanContent })}
-          tabIndex={0}
-          onClick={handleCopy}
-          onKeyDown={handleKeyDown}
+          tabIndex={inLink ? undefined : 0}
+          onClick={inLink ? undefined : handleCopy}
+          onKeyDown={inLink ? undefined : handleKeyDown}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
         >
           <span dangerouslySetInnerHTML={{ __html: result.html }} />
-          {showCopyOnHover && isHovered && (
+          {showCopyOnHover && isHovered && !inLink && (
             <span className="inline-flex items-center text-muted-foreground ml-0.5">
-              <CopyFeedbackIcon
-                copied={copied}
-                size={12}
-                className={copied ? "text-green-500" : undefined}
-              />
+              <span
+                aria-hidden="true"
+                data-slot="copy-feedback-icon"
+                data-state={copied ? "copied" : "idle"}
+              >
+                {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+              </span>
             </span>
           )}
         </span>
@@ -119,11 +122,11 @@ function MathInlineBase({
       <TooltipContent>
         <div className="text-xs space-y-1">
           <p className="font-mono bg-muted px-1.5 py-0.5 rounded">{cleanContent}</p>
-          <p className="text-muted-foreground">{t("clickToCopy")}</p>
+          {!inLink && <p className="text-muted-foreground">{t("clickToCopy")}</p>}
         </div>
       </TooltipContent>
     </Tooltip>
   )
 }
 
-export const MathInline = withMathErrorBoundary(MathInlineBase, (props) => props.content)
+export const MathInline = withMathErrorBoundary(MathInlineBase, (props) => props.content, true)

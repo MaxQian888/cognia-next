@@ -55,7 +55,7 @@
 
   .typeset *:not(:where(.not-typeset, [data-not-typeset], .not-typeset *, [data-not-typeset] *)) {
     /* Paragraphs. */
-    &:where(p) {
+    &:where(p, [data-markdown-paragraph]) {
       margin-block-start: var(--typeset-flow);
       margin-block-end: 0;
     }
@@ -209,7 +209,7 @@
       margin-block-start: 0.5em;
       padding-inline-start: 0.4em;
     }
-    &:where(li > p, li > ul, li > ol) {
+    &:where(li > p, li > [data-markdown-paragraph], li > ul, li > ol) {
       margin-block-start: 0.5em;
     }
     &:where(ul > li)::marker {

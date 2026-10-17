@@ -342,8 +342,17 @@ jest.mock("@/hooks/ui/use-pointer", () => ({
   useShowKeyboardHints: () => mockShowKeyboardHints,
 }))
 
+const mockMessageCopy = jest.fn(async (_text: string) => true)
 jest.mock("@/hooks/ui/use-copy", () => ({
-  useCopy: () => ({ copied: false, copy: jest.fn(async () => true) }),
+  useCopy: () => ({ copied: false, copy: mockMessageCopy }),
+}))
+
+let mockUserBodyHeight = 0
+jest.mock("@/hooks/use-element-height", () => ({
+  useElementHeight: (element: HTMLElement | null) =>
+    element?.parentElement?.parentElement?.hasAttribute("data-user-message-body")
+      ? mockUserBodyHeight
+      : 0,
 }))
 
 jest.mock("@/lib/ui/avatar", () => ({
@@ -513,6 +522,36 @@ function assistantMsg(id = "m1", text = "Hello"): UIMessage {
 function userMsg(id = "u1", text = "Hi"): UIMessage {
   return { id, role: "user", parts: [{ type: "text", text }] }
 }
+
+describe("long user messages", () => {
+  afterEach(() => {
+    mockUserBodyHeight = 0
+  })
+
+  it("folds the user's body while copy and edit still read the complete message", async () => {
+    mockUserBodyHeight = 900
+    const text = "Long input paragraph.\n".repeat(80) + "Final paragraph"
+    render(<MessageRenderer message={userMsg("long-user", text)} onEditResend={jest.fn()} />)
+    const toggle = screen.getByRole("button", { name: "expandUserMessage" })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(screen.getByLabelText("copyTooltip"))
+    await waitFor(() => expect(mockMessageCopy).toHaveBeenCalledWith(text))
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByLabelText("editTooltip"))
+    expect(screen.getByRole("textbox")).toHaveValue(text)
+  })
+
+  it("leaves assistant messages outside the user-message fold", () => {
+    mockUserBodyHeight = 900
+    const { container } = render(
+      <MessageRenderer message={assistantMsg("long-assistant", "Long reply. ".repeat(200))} />
+    )
+    expect(container.querySelector("[data-user-message-body]")).toBeNull()
+    expect(screen.queryByRole("button", { name: "expandUserMessage" })).toBeNull()
+  })
+})
 
 describe("message display actions", () => {
   it("reveals the hover action bar on focus and on touch, not hover alone", () => {

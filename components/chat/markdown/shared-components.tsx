@@ -162,6 +162,7 @@ interface MarkdownAstNode {
   type?: string
   tagName?: string
   value?: string
+  properties?: Record<string, unknown>
   children?: MarkdownAstNode[]
 }
 
@@ -584,7 +585,27 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
         </td>
       )
     },
-    p({ children }: MarkdownElementProps<"p">) {
+    p({ children, node }: MarkdownElementProps<"p">) {
+      // Markdown images are phrasing nodes, but the rich renderers produce
+      // figures and block controls (including their loading/error states).
+      // Inspect the HAST, including linked/emphasized images, before choosing
+      // a container: a <p> around those blocks creates invalid hydration HTML.
+      const containsBlockMedia = (element: MarkdownAstNode): boolean => {
+        if (element.tagName === "img") {
+          const src = element.properties?.src
+          return (
+            typeof src === "string" &&
+            src.length > 0 &&
+            (enableEnhancedImages ||
+              (enableVideoEmbed && isVideoUrl(src)) ||
+              (enableAudioEmbed && isAudioUrl(src)))
+          )
+        }
+        return element.children?.some(containsBlockMedia) ?? false
+      }
+      if (node && typeof node === "object" && containsBlockMedia(node as MarkdownAstNode)) {
+        return <div data-markdown-paragraph>{children}</div>
+      }
       return <p>{children}</p>
     },
     hr() {

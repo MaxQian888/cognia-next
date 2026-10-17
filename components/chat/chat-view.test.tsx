@@ -79,6 +79,11 @@ jest.mock("@/components/shell/title-bar-outlets", () => ({
 jest.mock("./character-missing-banner", () => ({
   CharacterMissingBanner: () => null,
 }))
+let mockWorkSubmissionNoticeVisible = false
+jest.mock("./work-submission-notice", () => ({
+  WorkSubmissionNotice: () =>
+    mockWorkSubmissionNoticeVisible ? <div role="alert">Recovery notice</div> : null,
+}))
 jest.mock("@/components/project-coordinator/project-paused-banner", () => ({
   ProjectPausedBanner: ({ projectId }: { projectId: string }) => (
     <div data-testid="project-paused-banner-stub">{projectId}</div>
@@ -436,6 +441,7 @@ describe("ChatPane shared blocking capabilities", () => {
 
 describe("ChatPane", () => {
   beforeEach(() => {
+    mockWorkSubmissionNoticeVisible = false
     mockPaneRuntime.ownsDecisions = true
     mockPlanDockProps.length = 0
     peekPendingChatPromptMock.mockReset().mockReturnValue(null)
@@ -477,6 +483,32 @@ describe("ChatPane", () => {
     // carries the card that floats under it.
     expect(stage).toContainElement(screen.getByTestId("summary-stage-host"))
   })
+
+  it.each(["recovery", "runtime", "archived"])(
+    "keeps the summary anchor above the %s banner and outside the shrinking transcript",
+    (banner) => {
+      inScopeMock = true
+      mockWorkSubmissionNoticeVisible = banner === "recovery"
+      render(
+        <ChatPane
+          {...makeProps()}
+          activeSession={banner === "archived" ? { ...mockSession, archivedAt: 1 } : mockSession}
+          runtimeNotice={banner === "runtime" ? <div role="status">Runtime notice</div> : undefined}
+        />
+      )
+      const host = screen.getByTestId("summary-stage-host")
+      const stage = host.closest('[data-slot="chat-surface-stage"]')
+      const notice =
+        banner === "archived"
+          ? screen.getByTestId("archived-banner-stub")
+          : screen.getByRole(banner === "recovery" ? "alert" : "status")
+      expect(stage).toContainElement(notice)
+      expect(host.parentElement).toBe(stage)
+      expect(host.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(host.closest('[data-slot="chat-transcript-stage"]')).toBeNull()
+      expect(stage).toHaveClass("relative", "flex-1", "min-h-0")
+    }
+  )
 
   it("leaves the stage without a card host outside the workspace scope", () => {
     inScopeMock = false

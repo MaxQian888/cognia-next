@@ -14,6 +14,7 @@ import {
   chatStreamdownRehypePlugins,
 } from "@/components/chat/markdown/rendering-policy"
 import { createSharedMarkdownComponents } from "@/components/chat/markdown/shared-components"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 const markdown = [
   "4. fourth",
@@ -35,7 +36,7 @@ const markdown = [
 function withMessages(children: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
-      {children}
+      <TooltipProvider>{children}</TooltipProvider>
     </NextIntlClientProvider>
   )
 }
@@ -84,6 +85,79 @@ const streaming = renderToStaticMarkup(
   )
 )
 
+function renderMedia(markdown: string, streaming: boolean, enableEnhancedImages = true) {
+  const components = createSharedMarkdownComponents({
+    enableEnhancedImages,
+    isStreaming: streaming,
+  })
+  return renderToStaticMarkup(
+    withMessages(
+      streaming ? (
+        <Streamdown
+          components={components}
+          controls={{ table: false }}
+          linkSafety={{ enabled: false }}
+          mode="static"
+          rehypePlugins={chatStreamdownRehypePlugins}
+          urlTransform={chatMarkdownUrlTransform}
+        >
+          {markdown}
+        </Streamdown>
+      ) : (
+        <ReactMarkdown
+          components={components}
+          rehypePlugins={[rehypeRaw, [rehypeSanitize, chatMarkdownSanitizeSchema]]}
+          remarkPlugins={[remarkGfm]}
+          urlTransform={chatMarkdownUrlTransform}
+        >
+          {markdown}
+        </ReactMarkdown>
+      )
+    )
+  )
+}
+
+function summarizeMedia(html: string) {
+  // HTML parsers repair <p><figure> before selectors can catch it. XML mode
+  // preserves the server markup so this check can detect the hydration bug.
+  const $ = load(html, { xmlMode: true })
+  return {
+    invalidParagraphDescendants: $("p figure, p div").length,
+    figures: $("figure").length,
+    mediaParagraphs: $("[data-markdown-paragraph]").length,
+  }
+}
+
+const media = [
+  "![diagram](https://cdn.example.com/diagram.png)",
+  "Before ![diagram](https://cdn.example.com/diagram.png) after",
+  "[![diagram](https://cdn.example.com/diagram.png)](https://example.com)",
+  "**![diagram](https://cdn.example.com/diagram.png)**",
+  "> ![diagram](https://cdn.example.com/diagram.png)",
+  "- Before ![diagram](https://cdn.example.com/diagram.png) after\n\n  More text",
+  "Before ![video](https://cdn.example.com/demo.mp4) after",
+  "Before ![audio](https://cdn.example.com/demo.mp3) after",
+].map((markdown, index) => ({
+  finalized: summarizeMedia(renderMedia(markdown, false, index < 6)),
+  streaming: summarizeMedia(renderMedia(markdown, true, index < 6)),
+}))
+const nativeHtml = load(
+  renderMedia(
+    "Ordinary **text**.\n\nBefore ![image](https://cdn.example.com/pic.png) after",
+    false,
+    false
+  ),
+  { xmlMode: true }
+)
+
 process.stdout.write(
-  JSON.stringify({ finalized: summarize(finalized), streaming: summarize(streaming) })
+  JSON.stringify({
+    finalized: summarize(finalized),
+    streaming: summarize(streaming),
+    media,
+    nativeImages: {
+      paragraphs: nativeHtml("p").length,
+      mediaParagraphs: nativeHtml("[data-markdown-paragraph]").length,
+    },
+  })
 )

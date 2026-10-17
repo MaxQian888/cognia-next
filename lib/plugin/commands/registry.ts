@@ -78,9 +78,13 @@ export function registerCommand(reg: CommandRegistration): () => void {
       `Command "${reg.id}" already registered by plugin "${existing?.pluginId ?? "cognia"}" — overridden by "${reg.pluginId ?? "cognia"}"`
     )
   }
-  registry.set(reg.id, reg)
+  // Each call owns a distinct entry, even if the caller reuses `reg`.
+  const entry = { ...reg }
+  registry.set(entry.id, entry)
   emit({ type: "register", id: reg.id, pluginId: reg.pluginId })
-  return () => unregisterCommand(reg.id)
+  return () => {
+    if (registry.get(entry.id) === entry) unregisterCommand(entry.id)
+  }
 }
 
 /**

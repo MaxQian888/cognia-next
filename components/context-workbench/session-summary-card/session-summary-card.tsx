@@ -146,7 +146,7 @@ export function SessionSummaryCard({
       data-testid="session-summary-card"
       data-mode={mode}
       style={{ width, maxHeight }}
-      className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/70 bg-popover p-1.5 text-popover-foreground shadow-(--elevation-3)"
+      className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/70 bg-popover p-1.5 text-popover-foreground shadow-(--elevation-2)"
     >
       <CardHeader
         session={session}

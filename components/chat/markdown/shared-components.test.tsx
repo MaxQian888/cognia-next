@@ -174,6 +174,64 @@ describe("createSharedMarkdownComponents — img routing", () => {
   })
 })
 
+describe("createSharedMarkdownComponents — media paragraph containers", () => {
+  it.each([
+    [{ enableEnhancedImages: false }, "https://cdn.example.com/pic.png", "P"],
+    [{ enableEnhancedImages: false }, "https://cdn.example.com/clip.mp4", "DIV"],
+    [{ enableEnhancedImages: false }, "https://cdn.example.com/song.mp3", "DIV"],
+    [
+      { enableEnhancedImages: false, enableVideoEmbed: false },
+      "https://cdn.example.com/clip.mp4",
+      "P",
+    ],
+    [
+      { enableEnhancedImages: false, enableAudioEmbed: false },
+      "https://cdn.example.com/song.mp3",
+      "P",
+    ],
+    [{}, "", "P"],
+  ] as const)("matches the media routing flags for %j and %s", (options, src, tagName) => {
+    const { p: Paragraph } = createSharedMarkdownComponents(options)
+    const { container } = renderNode(
+      <Paragraph node={{ tagName: "p", children: [{ tagName: "img", properties: { src } }] }}>
+        media
+      </Paragraph>
+    )
+    expect(screen.getByText("media").tagName).toBe(tagName)
+    expect(container.querySelector("[data-markdown-paragraph]") !== null).toBe(tagName === "DIV")
+  })
+
+  it.each([false, true])("uses a block container while isStreaming=%s", (isStreaming) => {
+    const { p: Paragraph, img: Img } = createSharedMarkdownComponents({ isStreaming })
+    const node = {
+      type: "element",
+      tagName: "p",
+      children: [
+        {
+          type: "element",
+          tagName: "a",
+          children: [
+            {
+              type: "element",
+              tagName: "img",
+              properties: { src: "https://cdn.example.com/pic.png" },
+            },
+          ],
+        },
+      ],
+    }
+    const { container } = renderNode(
+      <Paragraph node={node}>
+        Before <Img src="https://cdn.example.com/pic.png" alt="pic" /> after
+      </Paragraph>
+    )
+    expect(container.querySelector("[data-markdown-paragraph]")).not.toBeNull()
+    expect(container.querySelector("p")).toBeNull()
+    expect(container).toHaveTextContent("Before")
+    expect(container).toHaveTextContent("after")
+  })
+})
+
 describe("createSharedMarkdownComponents — blockquote alerts", () => {
   it("promotes a GitHub alert blockquote to AlertBlock", () => {
     const { blockquote: Blockquote } = createSharedMarkdownComponents()

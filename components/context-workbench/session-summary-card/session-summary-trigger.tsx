@@ -209,13 +209,13 @@ export function SessionSummaryButton({ session, className }: SessionSummaryButto
   )
 }
 
-/** The chat pane's surface, which the floating card lives on. */
+/** The stable pane surface containing both banners and the transcript. */
 export const CHAT_SURFACE_STAGE_SELECTOR = '[data-slot="chat-surface-stage"]'
 
 /**
  * Where the floating card's top edge sits inside the stage: its `top-3` inset.
- * The stage begins under any banner (restricted mode, archive), so the card
- * never covers one.
+ * Banners occupy the centred reading column within this stage; the card stays
+ * in its side gutter without moving when a banner appears or changes height.
  */
 const FLOAT_TOP_OFFSET_PX = 12
 

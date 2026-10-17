@@ -10,7 +10,7 @@
  * Streaming text uses streamdown (see ai-elements/message MessageResponse).
  */
 
-import { memo, useMemo } from "react"
+import { createContext, memo, useContext, useMemo } from "react"
 import dynamic from "next/dynamic"
 import { Skeleton } from "@/components/ui/skeleton"
 import ReactMarkdown from "react-markdown"
@@ -24,6 +24,7 @@ import { CodeBlock } from "@/components/chat/renderers/code-block"
 import type { ChatCodeThemeId, MessageMarkdownOptions } from "@/types/appearance"
 import { resolveChatCodeTheme, type ChatCodeThemePair } from "@/lib/chat/code-theme"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
+import { InlineMathLinkContext } from "@/components/chat/renderers/math-error-boundary"
 import {
   createSharedMarkdownComponents,
   MarkdownInlineCode,
@@ -61,7 +62,15 @@ const MathInline = dynamic(
   () => import("@/components/chat/renderers/math-inline").then((m) => ({ default: m.MathInline })),
   {
     ssr: false,
-    loading: () => <Skeleton className="inline-block h-4 w-12" />,
+    // Inline math also loads inside paragraphs and links. Skeleton renders a
+    // div, so keep the same loading treatment on a phrasing element here.
+    loading: () => (
+      <span
+        data-slot="skeleton"
+        aria-hidden="true"
+        className="inline-block h-4 w-12 animate-pulse rounded-md bg-accent"
+      />
+    ),
   }
 )
 
@@ -375,6 +384,10 @@ interface BuildComponentsOptions {
   onOpenProjectFile?: (target: ProjectFileReference) => void
 }
 
+// Language classes and terminal newlines can also appear on inline HTML code.
+// Only a surrounding <pre> grants permission to mount a block renderer.
+const MarkdownCodeBlockContext = createContext(false)
+
 function buildComponents(
   opts: BuildComponentsOptions
 ): NonNullable<Parameters<typeof ReactMarkdown>[0]["components"]> {
@@ -415,20 +428,17 @@ function buildComponents(
     // descendant match, so each one is wrapped in `not-typeset` at its mount
     // rather than at its root: these components have two to four return
     // branches each, and the mount is the one place that covers all of them.
-    code({ className: codeClassName, children }) {
+    code: function MarkdownCode({ className: codeClassName, children }) {
+      const isBlock = useContext(MarkdownCodeBlockContext)
       const match = /(?:^|\s)language-([^\s]+)/.exec(codeClassName || "")
       const language = match ? match[1] : undefined
       const rawCodeContent = String(children)
-      // react-markdown preserves a terminal newline for block code, including
-      // one-line fences without a language. Inline code has no terminal newline.
-      const isInline = !match && !rawCodeContent.endsWith("\n")
       const codeContent = rawCodeContent.replace(/\n$/, "")
 
       // remark-math emits code elements with `language-math` and an
       // additional `math-display` / `math-inline` class.
       if (enableMath && language === "math") {
-        const isDisplayMath = codeClassName?.includes("math-display")
-        if (isDisplayMath) {
+        if (isBlock) {
           return (
             <div className="not-typeset">
               <MathBlock
@@ -448,7 +458,7 @@ function buildComponents(
         )
       }
 
-      if (isInline) {
+      if (!isBlock) {
         return (
           <MarkdownInlineCode projectRoot={projectRoot} onOpenProjectFile={onOpenProjectFile}>
             {children}
@@ -517,19 +527,25 @@ function buildComponents(
       )
     },
     pre({ children }) {
-      return <>{children}</>
+      return (
+        <MarkdownCodeBlockContext.Provider value={true}>
+          {children}
+        </MarkdownCodeBlockContext.Provider>
+      )
     },
     a({ href, children }) {
       return (
-        <ChatLink
-          href={href}
-          projectRoot={projectRoot}
-          onOpenProjectFile={onOpenProjectFile}
-          messageId={messageId}
-          isStreaming={isStreaming}
-        >
-          {children}
-        </ChatLink>
+        <InlineMathLinkContext.Provider value={true}>
+          <ChatLink
+            href={href}
+            projectRoot={projectRoot}
+            onOpenProjectFile={onOpenProjectFile}
+            messageId={messageId}
+            isStreaming={isStreaming}
+          >
+            {children}
+          </ChatLink>
+        </InlineMathLinkContext.Provider>
       )
     },
   }

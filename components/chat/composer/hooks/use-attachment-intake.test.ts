@@ -27,15 +27,22 @@ jest.mock("@/lib/chat/drop-entries", () => ({
   collectDroppedFiles: jest.fn(),
   MAX_DROPPED_DIR_FILES: 50,
 }))
-jest.mock("@/lib/plugin/commands/registry", () => ({ registerCommand: jest.fn(() => () => {}) }))
 jest.mock("@/lib/tauri/pet-window", () => ({ showMainWindow: jest.fn() }))
+jest.mock("@/stores/chat", () => ({
+  useChatStore: { getState: () => ({ activeSessionId: null }) },
+}))
 jest.mock("@/hooks/chat/use-remote-doc-staging", () => ({
   useRemoteDocStaging: () => async () => undefined,
 }))
 
 import { toast } from "sonner"
 import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
-import { captureSmartSnapshotFiles } from "@/lib/chat/smart-snapshot"
+import { captureSmartSnapshotFiles, SMART_SNAPSHOT_COMMAND_ID } from "@/lib/chat/smart-snapshot"
+import {
+  __resetCommandRegistryForTesting,
+  executeCommand,
+  getCommand,
+} from "@/lib/plugin/commands/registry"
 import { collectDroppedFiles } from "@/lib/chat/drop-entries"
 
 const prepared = prepareComposerAttachments as jest.Mock
@@ -51,6 +58,7 @@ function mount(
   opts: { isDesktop?: boolean; staged?: number; initialText?: string; acceptMotion?: boolean } = {}
 ) {
   const add = jest.fn()
+  const sink = { add }
   const expectCitation = jest.fn()
   const setInput = jest.fn()
   const setCaret = jest.fn()
@@ -59,10 +67,16 @@ function mount(
   // the user.
   const tAttach = jest.fn((k: string) => k)
   const textarea = document.createElement("textarea")
+  const root = document.createElement("div")
+  root.dataset.composerRoot = ""
+  root.append(textarea)
+  document.body.append(root)
+  const textareaRef = { current: textarea }
+  const t = (k: string) => k
   const state = { value: opts.initialText ?? "" }
   const view = renderHook(() =>
     useAttachmentIntake({
-      attachments: { files: new Array(opts.staged ?? 0).fill(null), add },
+      attachments: { files: new Array(opts.staged ?? 0).fill(null), add: sink.add },
       attachmentCitations: { expect: expectCitation },
       textInput: {
         get value() {
@@ -73,15 +87,15 @@ function mount(
           setInput(next)
         },
       },
-      textareaRef: { current: textarea },
+      textareaRef,
       setCaret,
       isDesktop: opts.isDesktop ?? true,
       acceptMotion: opts.acceptMotion ?? true,
-      t: (k) => k,
+      t,
       tAttach,
     })
   )
-  return { view, add, expectCitation, setInput, setCaret, state, textarea, tAttach }
+  return { view, add, sink, expectCitation, setInput, setCaret, state, textarea, root, tAttach }
 }
 
 /** A paste event carrying only text (no files). */
@@ -100,6 +114,7 @@ function fileDrag(types: string[]) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  __resetCommandRegistryForTesting()
   prepared.mockResolvedValue({
     files: [],
     unsupportedCount: 0,
@@ -107,6 +122,10 @@ beforeEach(() => {
     optimizedCount: 0,
     motionTooLargeCount: 0,
   })
+})
+
+afterEach(() => {
+  document.body.replaceChildren()
 })
 
 describe("acceptFiles — the single gate", () => {
@@ -391,6 +410,34 @@ describe("drag depth", () => {
 })
 
 describe("smart snapshot", () => {
+  it("routes the shared command to the focused composer without duplicate registration", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const first = mount()
+      const second = mount()
+      const shot = file("shot.png", "image/png")
+      snapshot.mockResolvedValue({ files: [shot], appName: "Finder" })
+      first.textarea.focus()
+      await act(async () => {
+        await executeCommand(SMART_SNAPSHOT_COMMAND_ID)
+      })
+      expect(first.add).toHaveBeenCalledWith([shot])
+      expect(second.add).not.toHaveBeenCalled()
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("already registered"))
+      first.view.unmount()
+      expect(getCommand(SMART_SNAPSHOT_COMMAND_ID)).toBeDefined()
+      second.textarea.focus()
+      await act(async () => {
+        await executeCommand(SMART_SNAPSHOT_COMMAND_ID)
+      })
+      expect(second.add).toHaveBeenCalledWith([shot])
+      second.view.unmount()
+      expect(getCommand(SMART_SNAPSHOT_COMMAND_ID)).toBeUndefined()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it("is a no-op off the desktop shell", async () => {
     const { view, add } = mount({ isDesktop: false })
     await act(async () => {
@@ -409,6 +456,121 @@ describe("smart snapshot", () => {
     })
     expect(add).toHaveBeenCalledWith([f])
     expect(view.result.current.smartSnapshotPending).toBe(false)
+  })
+
+  it("keeps the command handler current after attachment and capture state rerenders", async () => {
+    const { view, textarea, add, sink } = mount()
+    const command = getCommand(SMART_SNAPSHOT_COMMAND_ID)
+    const shot = file("shot.png", "image/png")
+    snapshot.mockResolvedValue({ files: [shot], appName: "Finder" })
+    textarea.focus()
+    const nextAdd = jest.fn()
+    sink.add = nextAdd
+    view.rerender()
+    for (let index = 0; index < 2; index += 1) {
+      await act(async () => {
+        await executeCommand(SMART_SNAPSHOT_COMMAND_ID)
+      })
+      expect(getCommand(SMART_SNAPSHOT_COMMAND_ID)).toBe(command)
+    }
+    expect(nextAdd).toHaveBeenCalledTimes(2)
+    expect(add).not.toHaveBeenCalled()
+    expect(view.result.current.smartSnapshotPending).toBe(false)
+  })
+
+  it("does not start two captures before React commits pending state", async () => {
+    const { view } = mount()
+    snapshot.mockResolvedValue({ files: [file("shot.png", "image/png")], appName: "Finder" })
+    await act(async () => {
+      await Promise.all([
+        view.result.current.captureSmartSnapshot(),
+        view.result.current.captureSmartSnapshot(),
+      ])
+    })
+    expect(snapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it("discards an in-flight capture after its composer unmounts", async () => {
+    const { view, add } = mount()
+    let finish!: (value: unknown) => void
+    snapshot.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
+    let capture!: Promise<void>
+    act(() => {
+      capture = view.result.current.captureSmartSnapshot()
+    })
+    view.unmount()
+    await act(async () => {
+      finish({ files: [file("shot.png", "image/png")], appName: "Finder" })
+      await capture
+    })
+    expect(add).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("discards a capture when the mounted composer changes conversations", async () => {
+    const { view, root, add } = mount()
+    root.dataset.composerSession = "old"
+    let finish!: (value: unknown) => void
+    snapshot.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
+    let capture!: Promise<void>
+    act(() => {
+      capture = view.result.current.captureSmartSnapshot()
+    })
+    root.dataset.composerSession = "new"
+    await act(async () => {
+      finish({ files: [file("shot.png", "image/png")], appName: "Finder" })
+      await capture
+    })
+    expect(add).not.toHaveBeenCalled()
+    expect(view.result.current.smartSnapshotPending).toBe(false)
+  })
+
+  it("does not begin a delayed capture after its composer unmounts", async () => {
+    jest.useFakeTimers()
+    try {
+      const { view, add } = mount()
+      let capture!: Promise<void>
+      act(() => {
+        capture = view.result.current.captureSmartSnapshot({ delayMs: 2200 })
+      })
+      view.unmount()
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2200)
+        await capture
+      })
+      expect(snapshot).not.toHaveBeenCalled()
+      expect(add).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not report a stale capture error after its composer unmounts", async () => {
+    const { view } = mount()
+    let reject!: (error: Error) => void
+    snapshot.mockReturnValue(
+      new Promise((_resolve, fail) => {
+        reject = fail
+      })
+    )
+    let capture!: Promise<void>
+    act(() => {
+      capture = view.result.current.captureSmartSnapshot()
+    })
+    view.unmount()
+    await act(async () => {
+      reject(new Error("stale capture failed"))
+      await capture
+    })
+    expect(toast.error).not.toHaveBeenCalled()
   })
 })
 

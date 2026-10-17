@@ -28,9 +28,9 @@ import {
   COMPOSER_VIDEO_SOURCE_MAX_BYTES,
   prepareComposerAttachments,
 } from "@/lib/chat/attachments/prepare"
-import { captureSmartSnapshotFiles, SMART_SNAPSHOT_COMMAND_ID } from "@/lib/chat/smart-snapshot"
+import { captureSmartSnapshotFiles } from "@/lib/chat/smart-snapshot"
+import { registerSmartSnapshotComposer } from "@/lib/chat/smart-snapshot-command"
 import { collectDroppedFiles, MAX_DROPPED_DIR_FILES } from "@/lib/chat/drop-entries"
-import { registerCommand } from "@/lib/plugin/commands/registry"
 import { collapsePaste } from "@/lib/paste-collapse"
 import { spliceToken } from "@/components/chat/composer-trigger"
 import { useRemoteDocStaging, type RemoteDocStagingItem } from "@/hooks/chat/use-remote-doc-staging"
@@ -197,9 +197,30 @@ export function useAttachmentIntake({
   )
 
   const [smartSnapshotPending, setSmartSnapshotPending] = useState(false)
+  const snapshotGenerationRef = useRef(0)
+  const pendingSnapshotRef = useRef<symbol | null>(null)
+  useEffect(
+    () => () => {
+      snapshotGenerationRef.current += 1
+      pendingSnapshotRef.current = null
+    },
+    []
+  )
   const captureSmartSnapshot = useCallback(
     async (options: { delayMs?: number; switchPrompt?: boolean } = {}) => {
-      if (!isDesktop || smartSnapshotPending) return
+      if (!isDesktop || pendingSnapshotRef.current) return
+      const pending = Symbol()
+      pendingSnapshotRef.current = pending
+      const generation = snapshotGenerationRef.current
+      const textarea = textareaRef.current
+      const sessionId = textarea
+        ?.closest("[data-composer-root]")
+        ?.getAttribute("data-composer-session")
+      const isCurrent = () =>
+        snapshotGenerationRef.current === generation &&
+        textareaRef.current === textarea &&
+        textarea?.closest("[data-composer-root]")?.getAttribute("data-composer-session") ===
+          sessionId
       setSmartSnapshotPending(true)
       try {
         if (options.switchPrompt) {
@@ -209,31 +230,41 @@ export function useAttachmentIntake({
         if (delayMs > 0) {
           await new Promise((resolve) => setTimeout(resolve, delayMs))
         }
+        if (!isCurrent()) return
         const result = await captureSmartSnapshotFiles()
+        if (!isCurrent()) return
         attachments.add(result.files)
         toast.success(t("smartSnapshot.captured", { appName: result.appName }))
         // A global shortcut runs while another application is focused. Capture
         // first, then raise Cognia so the staged attachments are visible.
         void showMainWindow()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("smartSnapshot.captureFailed"))
+        if (isCurrent()) {
+          toast.error(err instanceof Error ? err.message : t("smartSnapshot.captureFailed"))
+        }
       } finally {
-        setSmartSnapshotPending(false)
+        if (pendingSnapshotRef.current === pending) {
+          pendingSnapshotRef.current = null
+          if (snapshotGenerationRef.current === generation) setSmartSnapshotPending(false)
+        }
       }
     },
-    [attachments, isDesktop, smartSnapshotPending, t]
+    [attachments, isDesktop, t, textareaRef]
   )
+
+  const captureSmartSnapshotRef = useRef(captureSmartSnapshot)
+  useEffect(() => {
+    captureSmartSnapshotRef.current = captureSmartSnapshot
+  }, [captureSmartSnapshot])
 
   useEffect(() => {
     if (!isDesktop) return
-    return registerCommand({
-      id: SMART_SNAPSHOT_COMMAND_ID,
+    return registerSmartSnapshotComposer({
+      textarea: () => textareaRef.current,
       title: t("smartSnapshot.captureTooltip"),
-      category: "Chat",
-      pluginId: null,
-      handler: () => captureSmartSnapshot(),
+      capture: () => captureSmartSnapshotRef.current(),
     })
-  }, [captureSmartSnapshot, isDesktop, t])
+  }, [isDesktop, t, textareaRef])
 
   const stageRemoteDoc = useRemoteDocStaging({ acceptFiles })
 

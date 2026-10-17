@@ -10,6 +10,7 @@ import { Reasoning } from "@/components/ai-elements/reasoning"
 import { selectStreamdownPlugins } from "@/components/ai-elements/streamdown-plugins"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { MessageMetaLine, MessageShell } from "@/components/chat/message-shell"
+import { UserMessageBody } from "@/components/chat/user-message-body"
 import { ReasoningToolRow } from "@/components/chat/message-parts/reasoning-part"
 import {
   chatMarkdownUrlTransform,
@@ -1076,18 +1077,32 @@ function MessageRendererInner({
                 {/* into one activity group. Subagent parts are transparent here and */}
                 {/* render once below as a dispatch tree. A finished turn draws its */}
                 {/* process segments (and the tree) inside the fold, the rest after it. */}
-                {turnFold ? (
-                  <TurnProcessFold fold={turnFold} durationMs={runMetadataOf(message)?.durationMs}>
-                    {segments.map((segment, si) =>
-                      isSegmentFolded(segment, turnFold) ? renderSegment(segment, si) : null
-                    )}
+                {message.role === "user" ? (
+                  <UserMessageBody key={message.id} previewText={messageText}>
+                    {segments.map((segment, si) => renderSegment(segment, si))}
                     <SubagentTree parts={message.parts} mode={agentFlowMode} />
-                  </TurnProcessFold>
-                ) : null}
-                {segments.map((segment, si) =>
-                  turnFold && isSegmentFolded(segment, turnFold) ? null : renderSegment(segment, si)
+                  </UserMessageBody>
+                ) : (
+                  <>
+                    {turnFold ? (
+                      <TurnProcessFold
+                        fold={turnFold}
+                        durationMs={runMetadataOf(message)?.durationMs}
+                      >
+                        {segments.map((segment, si) =>
+                          isSegmentFolded(segment, turnFold) ? renderSegment(segment, si) : null
+                        )}
+                        <SubagentTree parts={message.parts} mode={agentFlowMode} />
+                      </TurnProcessFold>
+                    ) : null}
+                    {segments.map((segment, si) =>
+                      turnFold && isSegmentFolded(segment, turnFold)
+                        ? null
+                        : renderSegment(segment, si)
+                    )}
+                    {turnFold ? null : <SubagentTree parts={message.parts} mode={agentFlowMode} />}
+                  </>
                 )}
-                {turnFold ? null : <SubagentTree parts={message.parts} mode={agentFlowMode} />}
               </MessageContent>
             </MessageImageCollectionProvider>
           )}

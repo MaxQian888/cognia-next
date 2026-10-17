@@ -52,6 +52,40 @@ describe("command registry", () => {
       // Second unregister should not throw.
       expect(() => unregisterCommand("x")).not.toThrow()
     })
+
+    it.each([null, "plugin-a"])(
+      "a stale disposer cannot remove a replacement owned by %s",
+      (pluginId) => {
+        const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+        try {
+          const disposeOld = registerCommand({ id: "x", pluginId, handler: () => "old" })
+          const replacement = jest.fn(() => "new")
+          const disposeNew = registerCommand({ id: "x", pluginId, handler: replacement })
+          disposeOld()
+          disposeOld()
+          expect(getCommand("x")?.handler).toBe(replacement)
+          disposeNew()
+          expect(getCommand("x")).toBeUndefined()
+        } finally {
+          warn.mockRestore()
+        }
+      }
+    )
+
+    it("gives repeated registration of the same object distinct ownership", () => {
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+      try {
+        const registration = { id: "x", pluginId: null, handler: () => "value" }
+        const disposeOld = registerCommand(registration)
+        const disposeNew = registerCommand(registration)
+        disposeOld()
+        expect(getCommand("x")?.handler).toBe(registration.handler)
+        disposeNew()
+        expect(getCommand("x")).toBeUndefined()
+      } finally {
+        warn.mockRestore()
+      }
+    })
   })
 
   describe("execution", () => {
