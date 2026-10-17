@@ -351,6 +351,8 @@ fn add_embed_webview(
         .ok_or_else(|| "main window not found".to_string())?;
     let nav_app = app.clone();
     let nav_label = EMBED_LABEL.to_string();
+    // The address the current main-frame load started at (see `on_page_load`).
+    let load_started_url = std::sync::Mutex::new(None::<String>);
     let mut builder = WebviewBuilder::new(EMBED_LABEL, WebviewUrl::External(target))
         .initialization_script(overlay::AUTOMATION_CORE_JS)
         .initialization_script(overlay::OVERLAY_JS)
@@ -368,15 +370,26 @@ fn add_embed_webview(
                 serde_json::json!({ "paneId": EMBED_LABEL, "title": title }),
             );
         })
+        // Page loads are main-frame only, unlike `on_navigation`, which also
+        // sees every iframe's document: the pane's address comes from here.
         // A new document starts untitled: drop the previous page's title so a
         // title-less page never reports its predecessor's.
-        .on_page_load(|webview, payload| {
-            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
-                webview
-                    .app_handle()
-                    .state::<EmbeddedBrowserLease>()
-                    .forget_document_title();
+        .on_page_load(move |webview, payload| {
+            let app = webview.app_handle();
+            let started = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
+            let url = payload.url().as_str();
+            if started {
+                app.state::<EmbeddedBrowserLease>().forget_document_title();
             }
+            let mut started_url = load_started_url
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(intent) =
+                super::commands::report_document_load(started, url, started_url.as_deref())
+            {
+                super::commands::emit_navigated(app, EMBED_LABEL, url, "document", intent);
+            }
+            *started_url = started.then(|| url.to_string());
         });
     if let Some(proxy_url) = proxy_url {
         builder = builder.proxy_url(proxy_url);

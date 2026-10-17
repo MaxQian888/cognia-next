@@ -127,6 +127,11 @@ export interface LocalBrowserSessionCreate {
   browser?: UserChromeBrowser
   allowFileUrls?: boolean
   viewport?: { width: number; height: number }
+  /**
+   * `kind: "local"` only: the density Chromium renders (and so streams) at,
+   * fixed for the session's life — see `resolveLocalRenderScale`.
+   */
+  deviceScaleFactor?: number
   grants?: string[]
 }
 

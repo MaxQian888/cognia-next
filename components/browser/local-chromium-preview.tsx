@@ -96,6 +96,12 @@ import { localBrowser, type UserChromeBrowser } from "@/lib/browser/local-client
 import type { LocalChromiumEngine, LocalEngineBackend } from "@/lib/browser/local-chromium-engine"
 import type { BrowserPageSummary } from "@/lib/browser/session-types"
 import type { LocalBrowserDialog as LocalBrowserDialogState } from "@/lib/browser/shared-local-browser"
+import { createFramePainter, type FramePainter } from "@/lib/browser/frame-painter"
+import {
+  createLocalInputQueue,
+  type LocalBrowserInput,
+  type LocalInputQueue,
+} from "@/lib/browser/local-input-queue"
 import { canvasPointToFrame, decodeRemoteBrowserFrame } from "@/lib/browser/remote-stream"
 import type { BrowserAdjustDriver } from "@/lib/browser/adjust"
 import { BROWSER_DETAIL_STORAGE_KEY } from "@/lib/browser/preview-data"
@@ -144,7 +150,7 @@ interface PaneSession {
   error: string | null
   sessionId: string | null
   engine: LocalChromiumEngine | null
-  pages: BrowserPageSummary[]
+  pages: (BrowserPageSummary & { zoom?: number; fitToWidth?: boolean })[]
   activePageId: string | null
   dialog: LocalBrowserDialogState | null
   answerDialog: (answer: { accept: boolean; promptText?: string }) => Promise<void>
@@ -173,14 +179,20 @@ function storedDetailLevel(): OutputDetailLevel {
     : "standard"
 }
 
-/** The canvas the screencast is drawn into. */
+/** The canvas the screencast is drawn into (`createFramePainter`). */
 function useFrameCanvas(): FrameCanvas {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const frameSizeRef = useRef({ width: 1, height: 1 })
-  const drawingRef = useRef(false)
+  // Made on the first frame and dropped on unmount (a remount makes another).
+  const painterRef = useRef<FramePainter | null>(null)
+  useEffect(
+    () => () => {
+      painterRef.current?.dispose()
+      painterRef.current = null
+    },
+    []
+  )
   const drawFrame = useCallback((bytes: Uint8Array) => {
-    // Frames arrive faster than a bitmap decodes; drop the ones that land mid-draw.
-    if (drawingRef.current) return
     let frame
     try {
       const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
@@ -188,23 +200,11 @@ function useFrameCanvas(): FrameCanvas {
     } catch {
       return
     }
+    // The header describes CSS input coordinates; the bitmap carries the
+    // Retina pixels Chromium rendered at its launch density.
     frameSizeRef.current = { width: frame.width, height: frame.height }
-    const canvas = canvasRef.current
-    if (!canvas || typeof createImageBitmap !== "function") return
-    drawingRef.current = true
-    const jpeg = new Uint8Array(frame.jpeg.byteLength)
-    jpeg.set(frame.jpeg)
-    void createImageBitmap(new Blob([jpeg.buffer], { type: "image/jpeg" }))
-      .then((bitmap) => {
-        canvas.width = frame.width
-        canvas.height = frame.height
-        canvas.getContext("2d")?.drawImage(bitmap, 0, 0, frame.width, frame.height)
-        bitmap.close()
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        drawingRef.current = false
-      })
+    painterRef.current ??= createFramePainter(() => canvasRef.current)
+    painterRef.current.paint(frame)
   }, [])
   return { canvasRef, frameSizeRef, drawFrame }
 }
@@ -287,16 +287,28 @@ function LocalPreviewBody({
   const dialogT = useTranslations("browserLocal.dialog")
 
   const { canvasRef, frameSizeRef } = canvas
+  const viewportRef = useRef<HTMLDivElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
   const navigationAttemptRef = useRef(0)
-  const moveInFlightRef = useRef(false)
+  const resizeQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   const { engine, sessionId, pages, activePageId, state, refreshPages } = session
+  // The user's input goes out in order, coalesced while one event is in
+  // flight: one queue per runtime session, made on the first event.
+  const inputQueueRef = useRef<{ sessionId: string; queue: LocalInputQueue } | null>(null)
+  useEffect(
+    () => () => {
+      inputQueueRef.current?.queue.dispose()
+      inputQueueRef.current = null
+    },
+    []
+  )
   // A file input clicked in the page: the user picks, Rust stages, the page gets the copies.
   useLocalFileChooser(sessionId)
   const activePage =
     pages.find((page) => page.id === activePageId) ?? pages.find((page) => page.active)
+  const fitToWidth = activePage?.fitToWidth !== false
   const ready = state === "ready" && !!engine
   const [navigationFailure, setNavigationFailure] = useState<{
     url: string
@@ -399,6 +411,99 @@ function LocalPreviewBody({
     [browserT]
   )
 
+  // Resize the page itself, rather than letterboxing a fixed desktop viewport.
+  // Measure the available box, independently of the frame's intrinsic size.
+  useEffect(() => {
+    const element = viewportRef.current
+    if (!ready || session.dialog || !sessionId || !shownPageId || !element) return
+    let disposed = false
+    let inFlight = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    type Viewport = {
+      width: number
+      height: number
+      deviceScaleFactor: number
+      fitToWidth: boolean
+    }
+    let desired: Viewport | null = null
+    let applied: Viewport | null = null
+
+    const flush = async () => {
+      if (disposed || inFlight || !desired) return
+      const viewport = desired
+      if (
+        applied?.width === viewport.width &&
+        applied.height === viewport.height &&
+        applied.deviceScaleFactor === viewport.deviceScaleFactor
+      )
+        return
+      inFlight = true
+      try {
+        // Keep the queue across tab changes: switching away and back must not
+        // let an older request finish after the new tab's current dimensions.
+        const resize = resizeQueueRef.current.then(async () => {
+          if (!disposed) {
+            await localBrowser.rpc("browser.emulate", { sessionId, pageId: shownPageId, viewport })
+          }
+        })
+        resizeQueueRef.current = resize.catch(() => undefined)
+        await resize
+        applied = viewport
+      } catch (error) {
+        if (!disposed) fail(error)
+      } finally {
+        inFlight = false
+        // A drag may have changed size while the runtime was still resizing.
+        // Only the latest pending measurement is sent after that call settles.
+        if (!disposed && desired && desired !== viewport) void flush()
+      }
+    }
+    const measure = () => {
+      clearTimeout(timer)
+      const { clientWidth: width, clientHeight: height } = element
+      if (width <= 0 || height <= 0) {
+        desired = null
+        return
+      }
+      const next = {
+        width: Math.max(1, Math.min(8192, Math.round(width))),
+        height: Math.max(1, Math.min(8192, Math.round(height))),
+        deviceScaleFactor: Math.max(0.5, Math.min(4, window.devicePixelRatio || 1)),
+        fitToWidth,
+      }
+      if (
+        desired?.width !== next.width ||
+        desired.height !== next.height ||
+        desired.deviceScaleFactor !== next.deviceScaleFactor
+      )
+        desired = next
+      timer = setTimeout(() => void flush(), 100)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    // Moving the window to another display can change density without size.
+    let densityQuery: MediaQueryList
+    const watchDensity = () => {
+      densityQuery?.removeEventListener("change", densityChanged)
+      densityQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+      densityQuery.addEventListener("change", densityChanged)
+    }
+    const densityChanged = () => {
+      measure()
+      watchDensity()
+    }
+    watchDensity()
+    window.addEventListener("resize", measure)
+    measure()
+    return () => {
+      disposed = true
+      clearTimeout(timer)
+      observer.disconnect()
+      densityQuery.removeEventListener("change", densityChanged)
+      window.removeEventListener("resize", measure)
+    }
+  }, [ready, sessionId, shownPageId, session.dialog, fitToWidth, fail])
+
   const go = useCallback(
     async (input: string) => {
       if (!engine) return
@@ -482,9 +587,21 @@ function LocalPreviewBody({
     }
   }
 
-  const sendInput = (input: { kind: "mouse" | "key"; payload: Record<string, unknown> }) => {
-    if (!sessionId) return Promise.resolve()
-    return localBrowser.rpc("browser.input", { sessionId, input }).catch(() => undefined)
+  const sendInput = (input: LocalBrowserInput) => {
+    if (!sessionId) return
+    let entry = inputQueueRef.current
+    if (entry?.sessionId !== sessionId) {
+      entry?.queue.dispose()
+      const target = sessionId
+      entry = {
+        sessionId: target,
+        queue: createLocalInputQueue((queued) =>
+          localBrowser.rpc("browser.input", { sessionId: target, input: queued })
+        ),
+      }
+      inputQueueRef.current = entry
+    }
+    entry.queue.send(input)
   }
 
   const pointerPayload = (event: PointerEvent<HTMLCanvasElement>) => ({
@@ -500,7 +617,7 @@ function LocalPreviewBody({
   const sendKey = (event: KeyboardEvent<HTMLCanvasElement>, type: "keyDown" | "keyUp") => {
     if (!ready) return
     event.preventDefault()
-    void sendInput({
+    sendInput({
       kind: "key",
       payload: {
         type,
@@ -539,7 +656,7 @@ function LocalPreviewBody({
           onUrlFocus={() => setEditingUrl(true)}
           onUrlBlur={() => setEditingUrl(false)}
           addressDisplay={urlInput === (pageUrl ?? "") ? addressDisplayParts(urlInput) : null}
-          collapsedActive={findOpen || zoom !== 1}
+          collapsedActive={findOpen || (activePage?.zoom ?? zoom) !== 1}
           overflowExtras={backendSwitcher}
           navigation={
             <BrowserNavigationControls
@@ -612,10 +729,10 @@ function LocalPreviewBody({
             <>
               {toolbarExtras}
               <BrowserZoomControl
-                zoom={zoom}
+                zoom={activePage?.zoom ?? zoom}
                 onZoomChange={(next) => {
                   setZoom(next)
-                  void engine?.setZoom(next).catch(() => undefined)
+                  void engine?.setZoom(next).then(refreshPages).catch(fail)
                 }}
                 disabled={!ready}
               />
@@ -727,21 +844,21 @@ function LocalPreviewBody({
         {sessionId && <BrowserSavePasswordPrompt sessionId={sessionId} />}
 
         <div className={cn("flex min-h-0 flex-1", railPlacement === "bottom" && "flex-col")}>
-          <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
+          <div
+            ref={viewportRef}
+            className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black"
+          >
             <canvas
               ref={canvasRef}
               tabIndex={0}
               role="application"
               aria-label={t("canvas")}
-              className="h-full w-full object-contain outline-none"
+              className="absolute inset-0 h-full w-full object-contain outline-none"
               onPointerMove={(event) => {
-                if (!ready || moveInFlightRef.current) return
-                moveInFlightRef.current = true
-                void sendInput({
+                if (!ready) return
+                sendInput({
                   kind: "mouse",
                   payload: { type: "mouseMoved", ...pointerPayload(event) },
-                }).finally(() => {
-                  moveInFlightRef.current = false
                 })
               }}
               onPointerDown={(event) => {
@@ -755,21 +872,21 @@ function LocalPreviewBody({
                   y: Math.max(0, Math.min(100, y)),
                   key: (previous?.key ?? 0) + 1,
                 }))
-                void sendInput({
+                sendInput({
                   kind: "mouse",
                   payload: { type: "mousePressed", ...pointerPayload(event) },
                 })
               }}
               onPointerUp={(event) => {
                 if (!ready) return
-                void sendInput({
+                sendInput({
                   kind: "mouse",
                   payload: { type: "mouseReleased", ...pointerPayload(event) },
                 })
               }}
               onWheel={(event) => {
                 if (!ready) return
-                void sendInput({
+                sendInput({
                   kind: "mouse",
                   payload: {
                     type: "mouseWheel",

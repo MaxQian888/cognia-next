@@ -9,12 +9,133 @@ import {
   OVERLAY_TRANSPORT_SCRIPT,
   clearStorageInPage,
   detectLoginFormsInPage,
+  fitPageToWidth,
   readStorageInPage,
   resolveLoginRegistryEntry,
   writeStorageInPage,
 } from "./page-scripts.mjs"
 
 const FOLLOWING = 4
+
+/**
+ * A document whose metrics follow CSS zoom the way Chromium reports them on a
+ * zoomed root: `clientWidth` is the viewport in zoomed px, `scrollWidth` the
+ * wider of that and the content's natural width.
+ */
+function fitPage({ natural, viewport, zoom = "1", bodyOverflowX = "visible", layout = viewport }) {
+  const page = {
+    natural,
+    viewport,
+    layout,
+    bodyOverflowX,
+    zoomWrites: [],
+    mutate: null,
+    context: null,
+  }
+  const style = {
+    get zoom() {
+      return zoom
+    },
+    set zoom(value) {
+      zoom = value
+      page.zoomWrites.push(value)
+    },
+  }
+  const scale = () => Number(zoom) || 1
+  const root = {
+    style,
+    get clientWidth() {
+      return page.viewport / scale()
+    },
+    get scrollWidth() {
+      return Math.max(page.natural, page.viewport / scale())
+    },
+    // The root's own box: the viewport, or a wider layout's minimum width.
+    getBoundingClientRect: () => ({ width: Math.max(page.viewport, page.layout) * scale() }),
+  }
+  const body = {
+    getBoundingClientRect: () => ({ width: Math.max(page.viewport, page.layout) * scale() }),
+  }
+  const context = vm.createContext({
+    document: { documentElement: root, body },
+    getComputedStyle: (element) => ({
+      overflowX: element === body ? page.bodyOverflowX : "visible",
+    }),
+    MutationObserver: class {
+      constructor(callback) {
+        page.mutate = callback
+      }
+      observe() {}
+    },
+  })
+  page.context = context
+  page.fit = (now, reset = false) =>
+    vm.runInContext(
+      `(${fitPageToWidth.toString()})(args)`,
+      Object.assign(context, {
+        args: { width: page.viewport, reset, now },
+      })
+    ).zoom
+  return page
+}
+
+test("fit-to-width shrinks a fixed-width page and stays stable while it is unchanged", () => {
+  const page = fitPage({ natural: 1280, viewport: 840 })
+  assert.equal(page.fit(0, true), 840 / 1280)
+  const writes = page.zoomWrites.length
+  // Scroll-driven checks of an unchanged page are reads: no relayout at 100%.
+  assert.equal(page.fit(2000), 840 / 1280)
+  assert.equal(page.fit(4000), 840 / 1280)
+  assert.equal(page.zoomWrites.length, writes)
+  // Wider content arrives: the cheap path shrinks further.
+  page.natural = 1600
+  assert.equal(page.fit(4100), 840 / 1600)
+})
+
+test("fit-to-width restores a responsive page that only overflowed while loading", () => {
+  const page = fitPage({ natural: 1780, viewport: 721 })
+  assert.equal(page.fit(0, true), 721 / 1780)
+  // The page finished loading and reflows to the viewport.
+  page.natural = 721
+  page.mutate()
+  // Within a second of the last full measure: the cheap path, flagged so the
+  // runtime checks again once the measure is due.
+  assert.equal(page.fit(500), 721 / 1780)
+  assert.equal(vm.runInContext("__cogniaFitState.dirty", page.context), true)
+  assert.equal(page.fit(1200), 1)
+  assert.equal(vm.runInContext("__cogniaFitState.dirty", page.context), false)
+  // An unchanged page is not re-measured again.
+  const writes = page.zoomWrites.length
+  assert.equal(page.fit(5000), 1)
+  assert.equal(page.zoomWrites.length, writes)
+})
+
+test("fit-to-width remeasures on reset, e.g. after the pane resized", () => {
+  const page = fitPage({ natural: 1280, viewport: 840 })
+  assert.equal(page.fit(0, true), 840 / 1280)
+  page.viewport = 1000
+  assert.equal(page.fit(100, true), 1000 / 1280)
+  page.viewport = 1400
+  assert.equal(page.fit(200, true), 1)
+})
+
+test("fit-to-width ignores overflow the page clips sideways but fits a wide clipped layout", () => {
+  // google.com/chrome: a 3840px video backdrop under `body { overflow-x: hidden }`.
+  const backdrop = fitPage({ natural: 3948, viewport: 721, bodyOverflowX: "hidden" })
+  assert.equal(backdrop.fit(0, true), 1)
+  assert.equal(backdrop.fit(2000), 1)
+  // A fixed 1280px layout that also hides its horizontal overflow.
+  const fixed = fitPage({ natural: 3948, viewport: 721, layout: 1280, bodyOverflowX: "clip" })
+  assert.equal(fixed.fit(0, true), 721 / 1280)
+  // The same page with a scrollable viewport: everything sticking out counts.
+  const scrolling = fitPage({ natural: 1280, viewport: 721, bodyOverflowX: "auto" })
+  assert.equal(scrolling.fit(0, true), 721 / 1280)
+})
+
+test("fit-to-width leaves responsive pages at 100% and restores them on a wide panel", () => {
+  const page = fitPage({ natural: 1400, viewport: 1400, zoom: "0.5" })
+  assert.equal(page.fit(0, true), 1)
+})
 
 // Minimal DOM: elements are ordered by `index` for compareDocumentPosition.
 class Element {

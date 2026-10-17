@@ -43,8 +43,13 @@ pub(crate) enum NavDisposition {
     /// ADR-0127: the page's DOM changed since the last marker — emit
     /// `browser://snapshot` (an invalidation, not a snapshot), cancel.
     SnapshotDirty(serde_json::Value),
-    /// Real http(s) navigation: emit `browser://navigated`, proceed.
-    AllowAndReport,
+    /// Real http(s) navigation request: proceed, unreported. WKWebView asks
+    /// this policy for every frame — an iframe's document load included — and
+    /// the request carries no frame, so reporting here put an iframe's address
+    /// in the pane (and in the dock tab it reopens). The embed reports its
+    /// main-frame document loads from `on_page_load` instead
+    /// ([`report_document_load`]).
+    AllowDocument,
     /// Webview-internal document (`about:blank`/`about:srcdoc`): proceed silently.
     Allow,
     /// Any other scheme (`file:`, custom protocols, …) a remote page might
@@ -136,12 +141,31 @@ pub(crate) fn classify_navigation(url_str: &str) -> NavDisposition {
         return NavDisposition::Block;
     }
     if url_str.starts_with("http://") || url_str.starts_with("https://") {
-        return NavDisposition::AllowAndReport;
+        return NavDisposition::AllowDocument;
     }
     if url_str.starts_with("about:") {
         return NavDisposition::Allow;
     }
     NavDisposition::Block
+}
+
+/// What a main-frame page-load event reports as `browser://navigated`, given
+/// the URL the current load started at. `Started` reports the requested
+/// address; `Finished` reports only where a redirect chain ended somewhere
+/// else, as a `replace` (the redirect replaced the requested entry). Non-http(s)
+/// documents (`about:blank`) are never reported — the same rule as the policy.
+pub(crate) fn report_document_load(
+    started: bool,
+    url_str: &str,
+    started_url: Option<&str>,
+) -> Option<&'static str> {
+    if !(url_str.starts_with("http://") || url_str.starts_with("https://")) {
+        return None;
+    }
+    if started {
+        return Some("push");
+    }
+    (started_url != Some(url_str)).then_some("replace")
 }
 
 /// Bootstrap fragments are bearer credentials. Allow the actual navigation,
@@ -157,7 +181,13 @@ pub(crate) fn is_preview_bootstrap(url_str: &str) -> bool {
 /// on `browser://loaded`, so a `"document"` report — which fires at the *start*
 /// of a navigation and therefore once per hop of a redirect chain — is used for
 /// address-bar sync only. `intent` is one of {@link NAV_INTENTS}.
-fn emit_navigated(app: &AppHandle, pane_label: &str, url_str: &str, kind: &str, intent: &str) {
+pub(crate) fn emit_navigated(
+    app: &AppHandle,
+    pane_label: &str,
+    url_str: &str,
+    kind: &str,
+    intent: &str,
+) {
     if is_preview_bootstrap(url_str) {
         return;
     }
@@ -270,10 +300,7 @@ pub(crate) fn handle_navigation(app: &AppHandle, pane_label: &str, url_str: &str
             );
             false
         }
-        NavDisposition::AllowAndReport => {
-            emit_navigated(app, pane_label, url_str, "document", "push");
-            true
-        }
+        NavDisposition::AllowDocument => true,
         NavDisposition::Allow => true,
         NavDisposition::Block => false,
     }
@@ -291,7 +318,7 @@ mod tests {
             assert!(super::is_preview_bootstrap(raw));
             assert_eq!(
                 super::classify_navigation(raw),
-                super::NavDisposition::AllowAndReport
+                super::NavDisposition::AllowDocument
             );
         }
         assert!(!super::is_preview_bootstrap(
@@ -381,15 +408,35 @@ mod tests {
     }
 
     #[test]
-    fn classifies_http_as_allow_and_report() {
+    fn classifies_http_as_an_unreported_document_load() {
         assert_eq!(
             classify_navigation("https://example.com/a"),
-            NavDisposition::AllowAndReport
+            NavDisposition::AllowDocument
         );
         assert_eq!(
             classify_navigation("http://localhost:3000/"),
-            NavDisposition::AllowAndReport
+            NavDisposition::AllowDocument
         );
+    }
+
+    #[test]
+    fn page_loads_report_the_main_frame_address_and_a_redirect_destination() {
+        assert_eq!(
+            report_document_load(true, "https://a.example/", None),
+            Some("push")
+        );
+        // Finished where it started: already reported.
+        assert_eq!(
+            report_document_load(false, "https://a.example/", Some("https://a.example/")),
+            None
+        );
+        // A redirect chain ended elsewhere.
+        assert_eq!(
+            report_document_load(false, "https://b.example/", Some("https://a.example/")),
+            Some("replace")
+        );
+        assert_eq!(report_document_load(true, "about:blank", None), None);
+        assert_eq!(report_document_load(false, "about:blank", None), None);
     }
 
     #[test]

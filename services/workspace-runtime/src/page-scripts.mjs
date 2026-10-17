@@ -155,6 +155,72 @@ export function writeStorageInPage({ area, key, value }) {
   return { origin: location.origin, key }
 }
 
+/**
+ * Fit fixed-width documents without enlarging pages that already reflow.
+ *
+ * Shrinking is a cheap read: a page wider than the viewport at its current
+ * zoom is zoomed down to fit. Growing back needs the page's natural width,
+ * which only a layout at 100% reveals — so after the document changed (DOM
+ * mutations, a window resize, `load`; at most once a second) or on `reset`,
+ * the page is laid out at 100%, measured and given its fit within one task,
+ * before anything paints. Without that, a responsive page that overflowed for
+ * a moment while loading stayed shrunk for good.
+ *
+ * A page whose viewport clips sideways (`overflow-x: hidden`/`clip` on the
+ * root, or on the body, which the viewport takes over) has chosen to cut what
+ * sticks out — a decorative backdrop, an off-screen carousel slide — and no
+ * browser would let the user scroll to it. There only the page's own layout
+ * width counts (`body { min-width: 1280px }` still fits), measured at 100%.
+ */
+export function fitPageToWidth({ width, reset, now = Date.now() }) {
+  const root = document.documentElement
+  const body = document.body
+  const state = (globalThis.__cogniaFitState ??= { dirty: true, measuredAt: -Infinity })
+  if (!state.watching && typeof MutationObserver === "function" && body) {
+    state.watching = true
+    const changed = () => {
+      state.dirty = true
+    }
+    // The body subtree, not the root: the root's own `style.zoom` is ours.
+    new MutationObserver(changed).observe(body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    })
+    globalThis.addEventListener?.("resize", changed)
+    globalThis.addEventListener?.("load", changed)
+  }
+  const overflowX = (element) =>
+    element && typeof getComputedStyle === "function"
+      ? getComputedStyle(element).overflowX
+      : "visible"
+  const rootOverflow = overflowX(root)
+  const viewportOverflow = rootOverflow !== "visible" ? rootOverflow : overflowX(body)
+  const clipsSideways = viewportOverflow === "hidden" || viewportOverflow === "clip"
+  const current = Number(root.style.zoom) || 1
+  if (reset || (state.dirty && now - state.measuredAt >= 1000)) {
+    root.style.zoom = "1"
+    const layoutWidth = clipsSideways
+      ? Math.max(root.getBoundingClientRect().width, body ? body.getBoundingClientRect().width : 0)
+      : root.scrollWidth
+    const zoom = layoutWidth > root.clientWidth + 1 ? Math.min(1, width / layoutWidth) : 1
+    root.style.zoom = String(zoom)
+    state.dirty = false
+    state.measuredAt = now
+    return { zoom }
+  }
+  // Clipped overflow is never fitted by the cheap read; the next full measure
+  // decides (`pending` tells the caller one is waiting).
+  const zoom =
+    !clipsSideways && root.scrollWidth > root.clientWidth + 1
+      ? Math.min(1, width / root.scrollWidth)
+      : current
+  if (zoom !== current) root.style.zoom = String(zoom)
+  // A change waiting for its full measure: the caller checks again shortly.
+  return { zoom, pending: state.dirty }
+}
+
 export function clearStorageInPage({ area }) {
   const storage = area === "session" ? window.sessionStorage : window.localStorage
   const cleared = storage.length

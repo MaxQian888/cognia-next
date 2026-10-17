@@ -58,6 +58,184 @@ it("is visible by default", () => {
   expect(ioObserve).toHaveBeenCalled()
 })
 
+it("hides for a Next.js error overlay in a persistent shadow portal and restores on close", async () => {
+  const { result } = mountRegion()
+  const portal = document.createElement("nextjs-portal")
+  const shadow = portal.attachShadow({ mode: "open" })
+  const badge = document.createElement("button")
+  badge.setAttribute("data-nextjs-toast", "")
+  shadow.appendChild(badge)
+
+  await act(async () => {
+    document.body.appendChild(portal)
+  })
+  expect(result.current).toBe(true)
+
+  const overlay = document.createElement("div")
+  overlay.setAttribute("data-nextjs-dialog-overlay", "")
+  overlay.setAttribute("data-rendered", "true")
+  // Next.js retains the dialog inside the overlay during its close animation.
+  overlay.innerHTML = '<div data-nextjs-dialog aria-modal="true" role="dialog"></div>'
+  await act(async () => {
+    shadow.appendChild(overlay)
+  })
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    overlay.setAttribute("data-rendered", "false")
+  })
+  expect(result.current).toBe(true)
+
+  await act(async () => {
+    overlay.setAttribute("data-rendered", "true")
+  })
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    overlay.remove()
+  })
+  expect(result.current).toBe(true)
+})
+
+it("detects an already-open Next.js overlay and restores when its portal wrapper is removed", async () => {
+  const wrapper = document.createElement("div")
+  const portal = document.createElement("nextjs-portal")
+  portal.attachShadow({ mode: "open" }).innerHTML = "<div data-nextjs-dialog-overlay></div>"
+  wrapper.appendChild(portal)
+  document.body.appendChild(wrapper)
+  const { result } = mountRegion()
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    wrapper.remove()
+  })
+  expect(result.current).toBe(true)
+})
+
+it("keeps the region hidden until both the Next.js overlay and an app dialog close", async () => {
+  const { result } = mountRegion()
+  const portal = document.createElement("nextjs-portal")
+  const shadow = portal.attachShadow({ mode: "open" })
+  let dialog: HTMLElement | null = null
+  await act(async () => {
+    shadow.innerHTML = "<div data-nextjs-dialog-overlay></div>"
+    document.body.appendChild(portal)
+    dialog = mountPortalElement("dialog-overlay", new DOMRect(0, 0, 1200, 800))
+  })
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    shadow.replaceChildren()
+  })
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    dialog?.remove()
+  })
+  expect(result.current).toBe(true)
+})
+
+it.each(['role="dialog"', 'role="alertdialog" aria-modal="false"', 'data-sonner-toast=""'])(
+  "hides for an overlapping custom popup (%s) and restores on removal",
+  async (attributes) => {
+    const { result } = mountRegion()
+    const container = document.createElement("div")
+    container.innerHTML = `<div ${attributes}></div>`
+    const popup = container.firstElementChild as HTMLElement
+    popup.getBoundingClientRect = () => new DOMRect(120, 120, 160, 80)
+    await act(async () => {
+      document.body.appendChild(container)
+    })
+    expect(result.current).toBe(false)
+
+    await act(async () => {
+      container.remove()
+    })
+    expect(result.current).toBe(true)
+  }
+)
+
+it.each(['role="dialog"', 'role="alertdialog" aria-modal="false"', 'data-sonner-toast=""'])(
+  "keeps the region visible when a custom popup (%s) does not overlap it",
+  async (attributes) => {
+    const { result } = mountRegion()
+    const container = document.createElement("div")
+    container.innerHTML = `<div ${attributes}></div>`
+    const popup = container.firstElementChild as HTMLElement
+    popup.getBoundingClientRect = () => new DOMRect(0, 0, 80, 40)
+    await act(async () => {
+      document.body.appendChild(container)
+    })
+    expect(result.current).toBe(true)
+  }
+)
+
+it("disconnects the Next.js shadow observer on portal removal and unmount", async () => {
+  const disconnect = jest.spyOn(MutationObserver.prototype, "disconnect")
+  const { unmount } = mountRegion()
+  const portal = document.createElement("nextjs-portal")
+  portal.attachShadow({ mode: "open" })
+  await act(async () => {
+    document.body.appendChild(portal)
+  })
+  await act(async () => {
+    portal.remove()
+  })
+  expect(disconnect).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    document.body.appendChild(portal)
+  })
+  unmount()
+  expect(disconnect).toHaveBeenCalledTimes(3)
+  disconnect.mockRestore()
+})
+
+it("restores when a toast is dismissed but remains mounted for its exit animation", async () => {
+  const { result } = mountRegion()
+  const toast = document.createElement("div")
+  toast.setAttribute("data-sonner-toast", "")
+  toast.getBoundingClientRect = () => new DOMRect(120, 120, 160, 80)
+  await act(async () => {
+    document.body.appendChild(toast)
+  })
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    toast.setAttribute("data-removed", "true")
+  })
+  expect(result.current).toBe(true)
+})
+
+it("keeps an editor inside its own dialog visible", async () => {
+  const { result, wrap } = mountRegion()
+  await act(async () => {
+    wrap.setAttribute("role", "dialog")
+    wrap.setAttribute("aria-modal", "true")
+  })
+  expect(result.current).toBe(true)
+})
+
+it("ignores a CSS-hidden modal and responds when its wrapper becomes visible", async () => {
+  const { result } = mountRegion()
+  const wrapper = document.createElement("div")
+  wrapper.style.display = "none"
+  wrapper.innerHTML = '<div role="dialog" aria-modal="true"></div>'
+  await act(async () => {
+    document.body.appendChild(wrapper)
+  })
+  expect(result.current).toBe(true)
+
+  await act(async () => {
+    wrapper.style.display = "block"
+  })
+  expect(result.current).toBe(false)
+
+  await act(async () => {
+    wrapper.hidden = true
+  })
+  expect(result.current).toBe(true)
+})
+
 it("hides when a modal marks an ancestor aria-hidden, and restores on close", async () => {
   const { result, wrap } = mountRegion()
   expect(result.current).toBe(true)

@@ -32,6 +32,7 @@
 import { createStore } from "zustand/vanilla"
 
 import { localBrowser, type LocalBrowserEvent } from "@/lib/browser/local-client"
+import { resolveLocalRenderScale } from "@/lib/browser/local-render-scale"
 import {
   isLocalSessionCredentialFilled,
   LocalChromiumEngine,
@@ -124,6 +125,7 @@ function defaultSessionId(): string {
 }
 
 let createSessionId = defaultSessionId
+let resolveRenderScale: () => Promise<number> = () => resolveLocalRenderScale()
 
 function pagesFrom(event: Record<string, unknown>): {
   pages: BrowserPageSummary[]
@@ -255,6 +257,8 @@ export function ensureSharedLocalBrowser(): Promise<string> {
         kind: "local",
         headless: true,
         allowFileUrls: true,
+        // Chromium's frames are captured at its launch density.
+        deviceScaleFactor: await resolveRenderScale(),
       })
       const sessionId = created?.id ?? requested
       sharedLocalBrowserStore.setState({ sessionId, status: "ready" })
@@ -616,7 +620,9 @@ function scheduleIdleClose(): void {
 }
 
 /** Test seam: forget the session and every listener without touching the runtime. */
-export function resetSharedLocalBrowserForTests(options: { createSessionId?: () => string } = {}) {
+export function resetSharedLocalBrowserForTests(
+  options: { createSessionId?: () => string; renderScale?: number } = {}
+) {
   unlistenEvents?.()
   unlistenEvents = null
   listening = null
@@ -628,5 +634,6 @@ export function resetSharedLocalBrowserForTests(options: { createSessionId?: () 
   taggedCreates.clear()
   focusTagResolver = () => null
   createSessionId = options.createSessionId ?? defaultSessionId
+  resolveRenderScale = () => Promise.resolve(options.renderScale ?? 1)
   reset()
 }

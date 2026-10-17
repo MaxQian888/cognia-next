@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("@/components/ui/popover")
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
@@ -183,6 +184,343 @@ function renderPreview(
   return render(<LocalChromiumPreview backend="local-chromium" chatSessionId="chat-1" {...props} />)
 }
 
+describe("adaptive viewport", () => {
+  let size: { width: number; height: number }
+  let observers: { callback: ResizeObserverCallback; elements: Set<Element> }[]
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    size = { width: 830, height: 1450 }
+    observers = []
+    jest.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return this.querySelector("canvas") ? size.width : 0
+    })
+    jest.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return this.querySelector("canvas") ? size.height : 0
+    })
+    jest.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockImplementation(() => ({
+      ...size,
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: size.width,
+      bottom: size.height,
+      toJSON: () => ({}),
+    }))
+    jest.spyOn(globalThis, "ResizeObserver").mockImplementation((callback) => {
+      const elements = new Set<Element>()
+      observers.push({ callback, elements })
+      return {
+        observe: (element) => {
+          elements.add(element)
+        },
+        unobserve: (element) => {
+          elements.delete(element)
+        },
+        disconnect: () => {
+          elements.clear()
+        },
+      }
+    })
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+    jest.useRealTimers()
+  })
+
+  async function settleResize() {
+    await act(async () => {
+      jest.advanceTimersByTime(150)
+    })
+  }
+
+  function notifyResize() {
+    const canvas = screen.getByRole("application", { name: "Local browser page" })
+    const observer = observers.find(({ elements }) => elements.has(canvas.parentElement!))
+    expect(observer).toBeDefined()
+    act(() => observer!.callback([], {} as ResizeObserver))
+  }
+
+  it.each(["local-chromium", "user-chrome"] as const)(
+    "fits %s to the content area on opening",
+    async (backend) => {
+      renderPreview(makeSession(), { backend })
+      await settleResize()
+      expect(rpcMock).toHaveBeenCalledWith("browser.emulate", {
+        sessionId: "pane-1",
+        pageId: "p1",
+        viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
+      })
+    }
+  )
+
+  it("coalesces splitter changes and skips unchanged dimensions", async () => {
+    renderPreview(makeSession())
+    await settleResize()
+    rpcMock.mockClear()
+    size = { width: 650, height: 1450 }
+    notifyResize()
+    size = { width: 600, height: 1450 }
+    notifyResize()
+    await settleResize()
+    expect(rpcMock).toHaveBeenCalledTimes(1)
+    expect(rpcMock).toHaveBeenLastCalledWith(
+      "browser.emulate",
+      expect.objectContaining({ viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true } })
+    )
+    notifyResize()
+    await settleResize()
+    expect(rpcMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("follows window resizing and the height left after expanding Console", async () => {
+    renderPreview(makeSession())
+    await settleResize()
+    size = { width: 720, height: 1000 }
+    fireEvent(window, new Event("resize"))
+    await settleResize()
+    expect(rpcMock).toHaveBeenLastCalledWith(
+      "browser.emulate",
+      expect.objectContaining({ viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true } })
+    )
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime })
+    await user.click(screen.getByRole("tab", { name: /Console/ }))
+    expect(screen.getByRole("button", { name: "Collapse browser tools" })).toBeInTheDocument()
+    size = { width: 720, height: 740 }
+    notifyResize()
+    await settleResize()
+    expect(rpcMock).toHaveBeenLastCalledWith(
+      "browser.emulate",
+      expect.objectContaining({ viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true } })
+    )
+  })
+
+  it("serializes in-flight resizes and delivers only the latest pending size", async () => {
+    let finish!: () => void
+    rpcMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    renderPreview(makeSession())
+    await settleResize()
+    size = { width: 650, height: 1100 }
+    notifyResize()
+    await settleResize()
+    size = { width: 600, height: 900 }
+    notifyResize()
+    await settleResize()
+    expect(rpcMock).toHaveBeenCalledTimes(1)
+    await act(async () => finish())
+    await settleResize()
+    expect(rpcMock).toHaveBeenCalledTimes(2)
+    expect(rpcMock).toHaveBeenLastCalledWith(
+      "browser.emulate",
+      expect.objectContaining({ viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true } })
+    )
+  })
+
+  it("ignores hidden content and cancels pending work on unmount", async () => {
+    size = { width: 0, height: 0 }
+    const { unmount } = renderPreview(makeSession())
+    await settleResize()
+    expect(rpcMock).not.toHaveBeenCalled()
+    size = { width: 830, height: 1450 }
+    notifyResize()
+    unmount()
+    await settleResize()
+    expect(rpcMock).not.toHaveBeenCalled()
+  })
+
+  it("fits the new page when switching tabs without a layout change", async () => {
+    const session = makeSession()
+    const { rerender } = renderPreview(session)
+    await settleResize()
+    session.activePageId = "p2"
+    rerender(<LocalChromiumPreview backend="local-chromium" />)
+    await settleResize()
+    expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
+      sessionId: "pane-1",
+      pageId: "p2",
+      viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
+    })
+  })
+
+  it("reports a failed resize and retries on the next measurement", async () => {
+    rpcMock.mockRejectedValueOnce(new Error("resize failed"))
+    renderPreview(makeSession())
+    await settleResize()
+    expect(toast.error).toHaveBeenCalled()
+    notifyResize()
+    await settleResize()
+    expect(rpcMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps resizes ordered when switching away and back with a request in flight", async () => {
+    let finish!: () => void
+    rpcMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const session = makeSession()
+    const { rerender } = renderPreview(session)
+    await settleResize()
+    session.activePageId = "p2"
+    size = { width: 700, height: 1100 }
+    rerender(<LocalChromiumPreview backend="local-chromium" />)
+    await settleResize()
+    session.activePageId = "p1"
+    size = { width: 600, height: 900 }
+    rerender(<LocalChromiumPreview backend="local-chromium" />)
+    await settleResize()
+    expect(rpcMock).toHaveBeenCalledTimes(1)
+    await act(async () => finish())
+    expect(rpcMock).toHaveBeenCalledTimes(2)
+    expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
+      sessionId: "pane-1",
+      pageId: "p1",
+      viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
+    })
+  })
+
+  it("defers resizing during a page dialog and measures again after dismissal", async () => {
+    const session = makeSession({ dialog: { type: "alert", message: "Wait" } })
+    const { rerender } = renderPreview(session)
+    await settleResize()
+    expect(rpcMock).not.toHaveBeenCalled()
+    session.dialog = null
+    rerender(<LocalChromiumPreview backend="local-chromium" />)
+    await settleResize()
+    expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
+      sessionId: "pane-1",
+      pageId: "p1",
+      viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
+    })
+  })
+
+  it("uses the available content box independently of the canvas intrinsic dimensions", async () => {
+    jest.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 1280,
+      height: 720,
+      left: 0,
+      top: 0,
+      right: 1280,
+      bottom: 720,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    renderPreview(makeSession())
+    await settleResize()
+    expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
+      sessionId: "pane-1",
+      pageId: "p1",
+      viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
+    })
+  })
+
+  it("keeps CSS layout size while matching the screen's pixel density", async () => {
+    jest.replaceProperty(window, "devicePixelRatio", 2)
+    renderPreview(makeSession())
+    await settleResize()
+    expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
+      sessionId: "pane-1",
+      pageId: "p1",
+      viewport: { ...size, deviceScaleFactor: 2, fitToWidth: true },
+    })
+  })
+
+  it("updates density without changing CSS size and cleans up the resolution listener", async () => {
+    let densityChanged: EventListener | undefined
+    const remove = jest.fn()
+    const media = jest.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      media: query,
+      matches: false,
+      onchange: null,
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+      removeEventListener: remove,
+      addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
+        densityChanged = listener as EventListener
+      },
+    }))
+    const { unmount } = renderPreview(makeSession())
+    await settleResize()
+    jest.replaceProperty(window, "devicePixelRatio", 2)
+    act(() => densityChanged!(new Event("change")))
+    await settleResize()
+    expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
+      sessionId: "pane-1",
+      pageId: "p1",
+      viewport: { ...size, deviceScaleFactor: 2, fitToWidth: true },
+    })
+    expect(media).toHaveBeenLastCalledWith("(resolution: 2dppx)")
+    expect(remove.mock.calls.filter(([, listener]) => listener === densityChanged)).toHaveLength(1)
+    unmount()
+    expect(remove.mock.calls.filter(([, listener]) => listener === densityChanged)).toHaveLength(2)
+  })
+})
+
+it("preserves high-density bitmap pixels while mapping input in CSS page coordinates", async () => {
+  const original = globalThis.createImageBitmap
+  const bitmap = { width: 1660, height: 2900, close: jest.fn() }
+  globalThis.createImageBitmap = jest.fn().mockResolvedValue(bitmap)
+  try {
+    renderPreview(makeSession())
+    const canvas = screen.getByRole("application", {
+      name: "Local browser page",
+    }) as HTMLCanvasElement
+    const drawImage = jest.fn()
+    Object.defineProperty(canvas, "getContext", {
+      configurable: true,
+      value: () => ({ drawImage }),
+    })
+    const frame = new Uint8Array(25)
+    const header = new DataView(frame.buffer)
+    header.setUint8(0, 1)
+    header.setUint8(1, 1)
+    header.setUint16(2, 24)
+    header.setUint16(8, 830)
+    header.setUint16(10, 1450)
+    header.setUint32(20, 1)
+    await act(async () => sharedMock.mock.calls[0][0].onFrame(frame))
+    expect(canvas.width).toBe(1660)
+    expect(canvas.height).toBe(2900)
+    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0)
+    jest.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      width: 830,
+      height: 1450,
+      left: 0,
+      top: 0,
+      right: 830,
+      bottom: 1450,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    fireEvent.pointerDown(canvas, { clientX: 415, clientY: 725 })
+    expect(rpcMock).toHaveBeenLastCalledWith(
+      "browser.input",
+      expect.objectContaining({
+        input: { kind: "mouse", payload: expect.objectContaining({ x: 415, y: 725 }) },
+      })
+    )
+  } finally {
+    globalThis.createImageBitmap = original
+    jest.restoreAllMocks()
+  }
+})
+
 it("renders tabs, the address of the active tab and the vault prompts", () => {
   renderPreview(makeSession())
   expect(screen.getByRole("tab", { name: "Example" })).toHaveAttribute("aria-selected", "true")
@@ -194,6 +532,24 @@ it("renders tabs, the address of the active tab and the vault prompts", () => {
   expect(screen.getByTestId("downloads-button")).toHaveTextContent("chat-1")
   expect(screen.getByTestId("extensions-panel")).toHaveTextContent("local-chromium:pane-1")
   expect(mockPushHistory).toHaveBeenCalledWith("https://example.com/")
+})
+
+it("shows the effective fitted zoom and preserves manual zoom mode on resize", async () => {
+  const page = {
+    id: "p1",
+    url: "https://wide.test/",
+    title: "Wide",
+    active: true,
+    zoom: 0.65625,
+    fitToWidth: true,
+  }
+  const session = makeSession({ pages: [page] })
+  renderPreview(session)
+  expect(screen.getByRole("button", { name: "Reset zoom" })).toHaveTextContent("66%")
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }))
+  await waitFor(() => expect(session.refreshPages).toHaveBeenCalled())
+  const engine = session.engine as unknown as ReturnType<typeof makeEngine>
+  expect(engine.setZoom).toHaveBeenCalledWith(0.67)
 })
 
 it("answers the session's file choosers with staged uploads", () => {
@@ -375,13 +731,15 @@ it("does not re-navigate the initial address the session already loaded", async 
   expect(resolveMock).not.toHaveBeenCalled()
 })
 
-it("forwards native input to the runtime", () => {
+it("forwards native input to the runtime, one event at a time in order", async () => {
   renderPreview(makeSession())
   const canvas = screen.getByRole("application", { name: "Local browser page" })
-  fireEvent.pointerDown(canvas, { clientX: 1, clientY: 1 })
-  fireEvent.pointerUp(canvas, { clientX: 1, clientY: 1 })
-  fireEvent.keyDown(canvas, { key: "a", code: "KeyA" })
-  fireEvent.wheel(canvas, { deltaY: 40 })
+  await act(async () => {
+    fireEvent.pointerDown(canvas, { clientX: 1, clientY: 1 })
+    fireEvent.pointerUp(canvas, { clientX: 1, clientY: 1 })
+    fireEvent.keyDown(canvas, { key: "a", code: "KeyA" })
+    fireEvent.wheel(canvas, { deltaY: 40 })
+  })
   const kinds = rpcMock.mock.calls.map(([, payload]) => payload.input.payload.type)
   expect(kinds).toEqual(["mousePressed", "mouseReleased", "keyDown", "mouseWheel"])
   expect(rpcMock.mock.calls[2]).toEqual([
@@ -396,13 +754,29 @@ it("forwards native input to the runtime", () => {
   ])
 })
 
-it("throttles pointer moves to one in flight", () => {
-  rpcMock.mockReturnValue(new Promise(() => undefined))
+it("holds input behind the event in flight and coalesces the moves and wheels waiting", async () => {
+  let finish: () => void = () => undefined
+  rpcMock.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve
+      })
+  )
   renderPreview(makeSession())
   const canvas = screen.getByRole("application", { name: "Local browser page" })
+  fireEvent.pointerDown(canvas, { clientX: 1, clientY: 1 })
   fireEvent.pointerMove(canvas, { clientX: 1, clientY: 1 })
   fireEvent.pointerMove(canvas, { clientX: 2, clientY: 2 })
+  fireEvent.wheel(canvas, { deltaY: 40 })
+  fireEvent.wheel(canvas, { deltaY: 60 })
+  // Only the press is out; the rest waits for it.
   expect(rpcMock).toHaveBeenCalledTimes(1)
+  for (let index = 0; index < 3; index += 1) {
+    await act(async () => finish())
+  }
+  const sent = rpcMock.mock.calls.map(([, payload]) => payload.input.payload)
+  expect(sent.map((payload) => payload.type)).toEqual(["mousePressed", "mouseMoved", "mouseWheel"])
+  expect(sent[2]).toMatchObject({ deltaY: 100 })
 })
 
 it("answers a page dialog through the session", async () => {

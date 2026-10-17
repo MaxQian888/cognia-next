@@ -369,6 +369,7 @@ test("cloud mode refuses every local-only session option with a typed error", as
     uploadRoots: ["/tmp"],
     allowFileUrls: true,
     viewport: { width: 800, height: 600 },
+    deviceScaleFactor: 2,
   }
   assert.deepEqual(Object.keys(samples).sort(), [...LOCAL_SESSION_FIELDS].sort())
   for (const [field, value] of Object.entries(samples)) {
@@ -1037,6 +1038,280 @@ test("credential capture publishes one sensitive credential.submitted per submis
 test("the capture script hides the binding before page scripts run", () => {
   assert.match(CREDENTIAL_CAPTURE_SCRIPT, /delete window\[name\]/)
   assert.match(CREDENTIAL_CAPTURE_SCRIPT, new RegExp(CREDENTIAL_BINDING))
+})
+
+test("local viewport resizing follows tall, wide and small pane content areas", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const page = chromium.launches[0].context._pages[0]
+  for (const viewport of [
+    { width: 830, height: 1450 },
+    { width: 1920, height: 1080 },
+    { width: 600, height: 150 },
+  ]) {
+    await service.emulate("s1", { viewport })
+    assert.deepEqual(page.viewport, viewport)
+  }
+  for (const viewport of [
+    { width: 0, height: 100 },
+    { width: 100, height: -1 },
+  ]) {
+    await assert.rejects(() => service.emulate("s1", { viewport }), {
+      code: "browser_session_option_invalid",
+    })
+  }
+})
+
+test("local pane density changes rendering resolution without changing CSS layout", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const context = chromium.launches[0].context
+  await service.emulate("s1", { viewport: { width: 830, height: 1450, deviceScaleFactor: 2 } })
+  assert.deepEqual(context._pages[0].viewport, { width: 830, height: 1450 })
+  assert.ok(
+    context.cdpSessions.some(({ cdp }) =>
+      cdp.commands.some(
+        ([method, args]) =>
+          method === "Emulation.setDeviceMetricsOverride" &&
+          args.width === 830 &&
+          args.height === 1450 &&
+          args.deviceScaleFactor === 2 &&
+          args.mobile === false
+      )
+    )
+  )
+  for (const deviceScaleFactor of [0, -1, 5, Infinity, NaN, "2"]) {
+    await assert.rejects(
+      () =>
+        service.emulate("s1", {
+          viewport: { width: 830, height: 1450, deviceScaleFactor },
+        }),
+      { code: "browser_option_invalid" }
+    )
+  }
+})
+
+test("fit-to-width reports the applied zoom and manual zoom disables automatic fitting", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const page = chromium.launches[0].context._pages[0]
+  page.evaluate = async (fn) => (fn.name === "fitPageToWidth" ? { zoom: 840 / 1280 } : undefined)
+  await service.emulate("s1", { viewport: { width: 840, height: 1370, fitToWidth: true } })
+  let [summary] = await service.listPages("s1")
+  assert.equal(summary.zoom, 840 / 1280)
+  assert.equal(summary.fitToWidth, true)
+  await service.setZoom("s1", 0.8)
+  ;[summary] = await service.listPages("s1")
+  assert.equal(summary.zoom, 0.8)
+  assert.equal(summary.fitToWidth, false)
+})
+
+test("a late automatic fit cannot overwrite a newer manual zoom", async (t) => {
+  const { service } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const session = service.sessions.get("s1")
+  const record = session.pages.get(session.activePageId)
+  record.fitToWidth = true
+  let finish
+  record.page.evaluate = (fn) =>
+    fn.name === "fitPageToWidth"
+      ? new Promise((resolve) => {
+          finish = resolve
+        })
+      : Promise.resolve()
+  const fit = service.applyFitToWidth(session, record)
+  await service.setZoom("s1", 0.8)
+  finish({ zoom: 0.65625 })
+  await fit
+  assert.equal(record.zoom, 0.8)
+  assert.equal(record.fitToWidth, false)
+})
+
+test("local Chromium launches at the pane's render density, which only local sessions accept", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "retina", deviceScaleFactor: 2 })
+  assert.ok(chromium.launches[0].options.args.includes("--force-device-scale-factor=2"))
+  await service.closeSession("retina")
+  await service.createSession({ id: "standard" })
+  assert.ok(!chromium.launches[1].options.args.some((arg) => arg.startsWith("--force-device")))
+  for (const deviceScaleFactor of [0, 0.5, 5, Infinity, NaN, "2"]) {
+    await assert.rejects(() => service.createSession({ id: "bad", deviceScaleFactor }), {
+      code: "browser_session_option_invalid",
+    })
+  }
+  await assert.rejects(
+    () =>
+      service.createSession({
+        id: "chrome",
+        kind: "user-chrome",
+        cdpEndpoint: "ws://127.0.0.1:9222/devtools/browser/x",
+        deviceScaleFactor: 2,
+      }),
+    { code: "browser_session_option_invalid" }
+  )
+})
+
+test("local screencast streams Chromium's own Retina frames in the frame's CSS coordinate space", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1", deviceScaleFactor: 2 })
+  const context = chromium.launches[0].context
+  await service.emulate("s1", { viewport: { width: 830, height: 1450, deviceScaleFactor: 2 } })
+  const frames = []
+  await service.startScreencast("s1", (frame) => frames.push(frame))
+  const cdp = context.cdpSessions.at(-1).cdp
+  const [, options] = cdp.commands.find(([method]) => method === "Page.startScreencast")
+  assert.equal(options.maxWidth, undefined)
+  assert.equal(options.maxHeight, undefined)
+  assert.ok(options.quality >= 80)
+  const retina = Buffer.from("1660x2900-jpeg")
+  // Chromium painted at the old size; the page was resized before the frame
+  // was published. The header must describe the frame, not the new viewport.
+  await context._pages[0].setViewportSize({ width: 500, height: 1000 })
+  cdp.emit("Page.screencastFrame", {
+    data: retina.toString("base64"),
+    sessionId: 1,
+    metadata: { deviceWidth: 830, deviceHeight: 1450 },
+  })
+  await tick()
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0].readUInt16BE(8), 830)
+  assert.equal(frames[0].readUInt16BE(10), 1450)
+  assert.deepEqual(frames[0].subarray(24), retina)
+  // No second capture per frame: the screencast frame is the picture.
+  for (const { cdp: session } of context.cdpSessions) {
+    assert.ok(!session.commands.some(([method]) => method === "Page.captureScreenshot"))
+  }
+})
+
+test("a frame the consumer fails to take is acknowledged so the next frame still flows", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const frames = []
+  let fail = true
+  await service.startScreencast("s1", (frame) => {
+    if (fail) {
+      fail = false
+      throw new Error("consumer gone")
+    }
+    frames.push(frame)
+  })
+  const cdp = chromium.launches[0].context.cdpSessions.at(-1).cdp
+  cdp.emit("Page.screencastFrame", { sessionId: 1, data: Buffer.from("a").toString("base64") })
+  await tick()
+  assert.equal(frames.length, 0)
+  assert.ok(
+    cdp.commands.some(
+      ([method, args]) => method === "Page.screencastFrameAck" && args.sessionId === 1
+    )
+  )
+  cdp.emit("Page.screencastFrame", { sessionId: 2, data: Buffer.from("b").toString("base64") })
+  await tick()
+  assert.equal(frames.length, 1)
+  assert.deepEqual(frames[0].subarray(24), Buffer.from("b"))
+})
+
+test("a frame painted before the consumer's ACK is published right after it", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const frames = []
+  await service.startScreencast("s1", (frame) => frames.push(frame))
+  const cdp = chromium.launches[0].context.cdpSessions.at(-1).cdp
+  cdp.emit("Page.screencastFrame", { sessionId: 1, data: Buffer.from("1").toString("base64") })
+  await tick()
+  cdp.emit("Page.screencastFrame", { sessionId: 2, data: Buffer.from("2").toString("base64") })
+  cdp.emit("Page.screencastFrame", { sessionId: 3, data: Buffer.from("3").toString("base64") })
+  await tick()
+  assert.equal(frames.length, 1)
+  // Chromium keeps painting while the consumer holds frame 1.
+  for (const sessionId of [2, 3]) {
+    assert.ok(
+      cdp.commands.some(
+        ([method, args]) => method === "Page.screencastFrameAck" && args.sessionId === sessionId
+      )
+    )
+  }
+  await service.ackScreencastFrame("s1", frames[0].readUInt32BE(4))
+  await tick()
+  // Only the newest waiting frame is published.
+  assert.equal(frames.length, 2)
+  assert.deepEqual(frames[1].subarray(24), Buffer.from("3"))
+})
+
+test("fit-to-width is re-checked after painted frames without holding them back", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const context = chromium.launches[0].context
+  const page = context._pages[0]
+  let fits = 0
+  let finishFit
+  page.evaluate = (fn) => {
+    if (fn.name !== "fitPageToWidth") return Promise.resolve()
+    fits += 1
+    return new Promise((resolve) => {
+      finishFit = resolve
+    })
+  }
+  const session = service.sessions.get("s1")
+  const record = session.pages.get(session.activePageId)
+  record.fitToWidth = true
+  const frames = []
+  await service.startScreencast("s1", (frame) => frames.push(frame))
+  const cdp = context.cdpSessions.at(-1).cdp
+  cdp.emit("Page.screencastFrame", { sessionId: 1, data: Buffer.from("a").toString("base64") })
+  await tick()
+  // Published at once, while no layout check has even started.
+  assert.equal(frames.length, 1)
+  assert.equal(fits, 0)
+  await service.ackScreencastFrame("s1", frames[0].readUInt32BE(4))
+  cdp.emit("Page.screencastFrame", { sessionId: 2, data: Buffer.from("b").toString("base64") })
+  await tick(200)
+  assert.equal(frames.length, 2)
+  // Two frames inside one interval: one layout check.
+  assert.equal(fits, 1)
+  // Damage while that check runs earns exactly one trailing check.
+  await service.ackScreencastFrame("s1", frames[1].readUInt32BE(4))
+  cdp.emit("Page.screencastFrame", { sessionId: 3, data: Buffer.from("c").toString("base64") })
+  await tick()
+  finishFit({ zoom: 0.75 })
+  await tick(200)
+  assert.equal(fits, 2)
+  assert.equal(record.zoom, 0.75)
+  // A deferred full measure is followed up without any further paint.
+  finishFit({ zoom: 0.75, pending: true })
+  await tick(200)
+  assert.equal(fits, 3)
+  finishFit({ zoom: 1, pending: false })
+  await tick(200)
+  assert.equal(fits, 3)
+  assert.equal(record.zoom, 1)
+})
+
+test("input reuses one CDP session per page so events arrive in order", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const context = chromium.launches[0].context
+  const before = context.cdpSessions.length
+  const press = { type: "mousePressed", x: 1, y: 1, button: "left", clickCount: 1 }
+  const release = { ...press, type: "mouseReleased" }
+  await Promise.all([
+    service.dispatchInput("s1", { kind: "mouse", payload: press }),
+    service.dispatchInput("s1", { kind: "mouse", payload: release }),
+    service.dispatchInput("s1", { kind: "key", payload: { type: "keyDown", key: "a" } }),
+  ])
+  const created = context.cdpSessions.slice(before)
+  assert.equal(created.length, 1)
+  assert.deepEqual(
+    created[0].cdp.commands.map(([method, args]) => [method, args.type]),
+    [
+      ["Input.dispatchMouseEvent", "mousePressed"],
+      ["Input.dispatchMouseEvent", "mouseReleased"],
+      ["Input.dispatchKeyEvent", "keyDown"],
+    ]
+  )
+  assert.equal(created[0].cdp.detached, false)
+  await assert.rejects(() => service.dispatchInput("s1", { kind: "touch", payload: {} }), {
+    code: "browser_input_invalid",
+  })
 })
 
 test("emulate applies page-scoped overrides and reset drops them", async (t) => {

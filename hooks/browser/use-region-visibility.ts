@@ -10,6 +10,10 @@ const MODAL_OVERLAY_SLOTS = [
 ]
 const GENERIC_MODAL_SELECTOR =
   'dialog[open],[role="dialog"][aria-modal="true"],[role="alertdialog"][aria-modal="true"]'
+const NEXT_PORTAL_SELECTOR = "nextjs-portal"
+const NEXT_MODAL_SELECTOR = "[data-nextjs-dialog-overlay],[data-nextjs-dialog]"
+const GENERIC_FLOATING_SELECTOR =
+  '[role="dialog"]:not([aria-modal="true"]),[role="alertdialog"]:not([aria-modal="true"]),[data-sonner-toast]'
 
 const FLOATING_OVERLAY_SLOTS = [
   "combobox-content",
@@ -28,17 +32,17 @@ const FLOATING_OVERLAY_SLOTS = [
 
 const MODAL_OVERLAY_SELECTOR = `${MODAL_OVERLAY_SLOTS.map(
   (slot) => `[data-slot="${slot}"]:not([data-state="closed"])`
-).join(",")},${GENERIC_MODAL_SELECTOR}`
+).join(",")},${GENERIC_MODAL_SELECTOR},${NEXT_MODAL_SELECTOR}`
 
-const FLOATING_OVERLAY_SELECTOR = FLOATING_OVERLAY_SLOTS.map(
+const FLOATING_OVERLAY_SELECTOR = `${FLOATING_OVERLAY_SLOTS.map(
   (slot) => `[data-slot="${slot}"]:not([data-state="closed"])`
-).join(",")
+).join(",")},${GENERIC_FLOATING_SELECTOR}`
 
 const OBSERVED_OVERLAY_SLOT_SELECTOR = [...MODAL_OVERLAY_SLOTS, ...FLOATING_OVERLAY_SLOTS]
   .map((slot) => `[data-slot="${slot}"]`)
   .join(",")
 
-const OBSERVED_OVERLAY_SELECTOR = `${MODAL_OVERLAY_SELECTOR},${FLOATING_OVERLAY_SELECTOR}`
+const OBSERVED_OVERLAY_SELECTOR = `${OBSERVED_OVERLAY_SLOT_SELECTOR},dialog,[role="dialog"],[role="alertdialog"],${NEXT_MODAL_SELECTOR},[data-sonner-toast]`
 
 function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
   if (a.width <= 0 || a.height <= 0 || b.width <= 0 || b.height <= 0) return false
@@ -53,6 +57,28 @@ function containsObservedOverlay(node: Node): boolean {
   )
 }
 
+function containsNextPortal(node: Node): boolean {
+  return (
+    node instanceof Element &&
+    (node.matches(NEXT_PORTAL_SELECTOR) || node.querySelector(NEXT_PORTAL_SELECTOR) !== null)
+  )
+}
+
+function isOverlayVisible(overlay: Element): boolean {
+  for (let node: Element | null = overlay; node; node = node.parentElement) {
+    if (
+      node.matches(
+        '[hidden],[aria-hidden="true"],[data-state="closed"],[data-rendered="false"],[data-visible="false"],[data-removed="true"]'
+      )
+    ) {
+      return false
+    }
+    const style = getComputedStyle(node)
+    if (style.display === "none" || style.visibility === "hidden") return false
+  }
+  return true
+}
+
 /**
  * Whether a reserved region is genuinely visible on screen.
  *
@@ -60,7 +86,7 @@ function containsObservedOverlay(node: Node): boolean {
  * clipped by CSS (see `src-tauri/src/browser/embedded.rs`), so it must be
  * parked off-screen the moment its region stops being visible — otherwise the
  * always-on-top webview keeps covering whatever is now on screen and eats all
- * input, which reads as the app "freezing". This hook watches the three ways a
+ * input, which reads as the app "freezing". This hook watches the ways a
  * region stops being visible without unmounting:
  *
  *  - **scrolled off / collapsed / route hidden** → `IntersectionObserver`
@@ -74,7 +100,11 @@ function containsObservedOverlay(node: Node): boolean {
  *    non-modal, as are Popover and the menu primitives, so they do not mark the
  *    app inert. Their portal rect must be compared with the reserved region;
  *    otherwise the native webview paints above the popup and makes it look as
- *    though it instantly closed.
+ *    though it instantly closed. Non-modal consent dialogs and Sonner toasts
+ *    use the same overlap check.
+ *  - **Next.js dev overlay** → its persistent `nextjs-portal` has an open
+ *    shadow root, which document queries and observers cannot see through.
+ *    Watch that root too, without treating the idle dev indicator as a modal.
  */
 export function useRegionVisibility(ref: RefObject<HTMLElement | null>): boolean {
   const [visible, setVisible] = useState(true)
@@ -84,11 +114,22 @@ export function useRegionVisibility(ref: RefObject<HTMLElement | null>): boolean
     if (!el) return
 
     let onScreen = true
-    const coveredByModalOverlay = () => document.querySelector(MODAL_OVERLAY_SELECTOR) !== null
+    const shadowObservers = new Map<ShadowRoot, MutationObserver>()
+    const overlays = (selector: string) =>
+      [document.body, ...shadowObservers.keys()].flatMap((root) =>
+        Array.from(root.querySelectorAll<HTMLElement>(selector))
+      )
+    const coveredByModalOverlay = () =>
+      overlays(MODAL_OVERLAY_SELECTOR).some(
+        (overlay) => !overlay.contains(el) && isOverlayVisible(overlay)
+      )
     const coveredByFloatingOverlay = () => {
       const regionRect = el.getBoundingClientRect()
-      return Array.from(document.querySelectorAll<HTMLElement>(FLOATING_OVERLAY_SELECTOR)).some(
-        (overlay) => rectsOverlap(regionRect, overlay.getBoundingClientRect())
+      return overlays(FLOATING_OVERLAY_SELECTOR).some(
+        (overlay) =>
+          !overlay.contains(el) &&
+          isOverlayVisible(overlay) &&
+          rectsOverlap(regionRect, overlay.getBoundingClientRect())
       )
     }
     const occluded = () =>
@@ -98,6 +139,28 @@ export function useRegionVisibility(ref: RefObject<HTMLElement | null>): boolean
     const windowVisible = () =>
       typeof document === "undefined" || document.visibilityState !== "hidden"
     const evaluate = () => setVisible(onScreen && windowVisible() && !occluded())
+
+    const syncShadowObservers = () => {
+      if (typeof MutationObserver === "undefined") return
+      const roots = new Set(
+        Array.from(document.querySelectorAll(NEXT_PORTAL_SELECTOR))
+          .map((portal) => portal.shadowRoot)
+          .filter((root): root is ShadowRoot => root !== null)
+      )
+      for (const [root, observer] of shadowObservers) {
+        if (!roots.has(root)) {
+          observer.disconnect()
+          shadowObservers.delete(root)
+        }
+      }
+      for (const root of roots) {
+        if (shadowObservers.has(root)) continue
+        const observer = new MutationObserver(evaluate)
+        observer.observe(root, { subtree: true, childList: true, attributes: true })
+        shadowObservers.set(root, observer)
+      }
+    }
+    syncShadowObservers()
 
     let io: IntersectionObserver | null = null
     if (typeof IntersectionObserver !== "undefined") {
@@ -115,6 +178,12 @@ export function useRegionVisibility(ref: RefObject<HTMLElement | null>): boolean
     const mo =
       typeof MutationObserver !== "undefined"
         ? new MutationObserver((records) => {
+            const portalsChanged = records.some(
+              (record) =>
+                record.type === "childList" &&
+                [...record.addedNodes, ...record.removedNodes].some(containsNextPortal)
+            )
+            if (portalsChanged) syncShadowObservers()
             const affectsOcclusion = records.some((record) => {
               if (record.type === "childList") {
                 return [...record.addedNodes, ...record.removedNodes].some(containsObservedOverlay)
@@ -129,15 +198,9 @@ export function useRegionVisibility(ref: RefObject<HTMLElement | null>): boolean
               ) {
                 return true
               }
-              if (record.attributeName === "data-state" || record.attributeName === "style") {
-                return (
-                  record.target instanceof Element &&
-                  record.target.matches(OBSERVED_OVERLAY_SLOT_SELECTOR)
-                )
-              }
               return containsObservedOverlay(record.target)
             })
-            if (affectsOcclusion) evaluate()
+            if (portalsChanged || affectsOcclusion) evaluate()
           })
         : null
     mo?.observe(document.body, {
@@ -147,7 +210,12 @@ export function useRegionVisibility(ref: RefObject<HTMLElement | null>): boolean
       attributeFilter: [
         "aria-hidden",
         "aria-modal",
+        "class",
+        "data-rendered",
+        "data-removed",
         "data-state",
+        "data-visible",
+        "hidden",
         "inert",
         "open",
         "role",
@@ -162,6 +230,7 @@ export function useRegionVisibility(ref: RefObject<HTMLElement | null>): boolean
     return () => {
       io?.disconnect()
       mo?.disconnect()
+      for (const observer of shadowObservers.values()) observer.disconnect()
       document.removeEventListener("visibilitychange", evaluate)
     }
   }, [ref])

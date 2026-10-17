@@ -72,7 +72,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   pages = []
   nextPage = 0
-  resetSharedLocalBrowserForTests({ createSessionId: () => "shared-1" })
+  resetSharedLocalBrowserForTests({ createSessionId: () => "shared-1", renderScale: 2 })
   client.onEvent.mockImplementation(async (callback) => {
     emit = callback
     return jest.fn()
@@ -120,6 +120,8 @@ describe("ensureSharedLocalBrowser", () => {
       kind: "local",
       headless: true,
       allowFileUrls: true,
+      // Launched at the display density so the screencast is Retina-sharp.
+      deviceScaleFactor: 2,
     })
     expect(sharedLocalBrowserStore.getState()).toMatchObject({
       status: "ready",

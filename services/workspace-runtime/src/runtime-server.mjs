@@ -355,21 +355,58 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
   }
 }
 
+/** The longest a media read may wait for a frame (`?waitMs=`). */
+export const MAX_MEDIA_WAIT_MS = 1_000
+
 class MediaLatestStore {
   constructor() {
     this.frames = new Map()
     this.sequence = new Map()
+    this.waiters = new Map()
   }
 
   publish(sessionId, bytes) {
     const sequence = (this.sequence.get(sessionId) ?? 0) + 1
     this.sequence.set(sessionId, sequence)
-    this.frames.set(sessionId, { sequence, bytes: Buffer.from(bytes) })
+    const frame = { sequence, bytes: Buffer.from(bytes) }
+    this.frames.set(sessionId, frame)
+    const waiting = this.waiters.get(sessionId)
+    if (!waiting) return
+    this.waiters.delete(sessionId)
+    for (const wake of waiting) wake()
   }
 
   latest(sessionId, after) {
     const frame = this.frames.get(sessionId)
     return frame && frame.sequence > after ? frame : null
+  }
+
+  /**
+   * The latest frame newer than `after`, waiting up to `waitMs` for one to be
+   * published (or for `signal` to abort). A long poll: the reader learns of a
+   * frame when it is published rather than on its next polling tick.
+   */
+  async next(sessionId, after, waitMs, signal) {
+    const ready = this.latest(sessionId, after)
+    if (ready || waitMs <= 0 || signal?.aborted) return ready
+    await new Promise((resolve) => {
+      let timer = null
+      const done = () => {
+        clearTimeout(timer)
+        signal?.removeEventListener("abort", done)
+        this.waiters.get(sessionId)?.delete(done)
+        resolve()
+      }
+      timer = setTimeout(done, waitMs)
+      signal?.addEventListener("abort", done, { once: true })
+      let waiting = this.waiters.get(sessionId)
+      if (!waiting) {
+        waiting = new Set()
+        this.waiters.set(sessionId, waiting)
+      }
+      waiting.add(done)
+    })
+    return this.latest(sessionId, after)
   }
 }
 
@@ -414,7 +451,14 @@ export function createRuntimeServer({
       if (mediaMatch) {
         const sessionId = decodeURIComponent(mediaMatch[1])
         const after = Number(url.searchParams.get("after") ?? 0)
-        const frame = media.latest(sessionId, after)
+        const requestedWait = Number(url.searchParams.get("waitMs") ?? 0)
+        const waitMs = Number.isFinite(requestedWait)
+          ? Math.max(0, Math.min(MAX_MEDIA_WAIT_MS, requestedWait))
+          : 0
+        const abandoned = new AbortController()
+        response.on("close", () => abandoned.abort())
+        const frame = await media.next(sessionId, after, waitMs, abandoned.signal)
+        if (response.destroyed) return
         if (!frame) {
           response.writeHead(204, { "cache-control": "no-store" })
           response.end()

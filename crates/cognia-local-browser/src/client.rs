@@ -6,8 +6,9 @@
 //! - `POST /v1/control` with the envelope `{version: 1, type, requestId?, payload}`;
 //!   the reply is `{version, type: "result", requestId?, payload}` on success and
 //!   `{code, message}` with a 4xx status on failure;
-//! - `GET /v1/media/:session?after=<sequence>` returns the latest 24-byte framed
-//!   JPEG newer than `after` (`200` + `x-cognia-media-sequence`) or `204`;
+//! - `GET /v1/media/:session?after=<sequence>&waitMs=<ms>` returns the latest
+//!   24-byte framed JPEG newer than `after` (`200` + `x-cognia-media-sequence`),
+//!   waiting up to `waitMs` for one to be published, or `204`;
 //! - `GET /v1/events?after=<sequence>` returns `{..., payload: [event]}` from the
 //!   runtime's event journal.
 //!
@@ -27,6 +28,11 @@ pub const PRIVATE_PROTOCOL_VERSION: u64 = 1;
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(180);
 /// Media and event polls are cheap reads of in-memory state.
 const POLL_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a media read waits for the next frame before answering `204`.
+/// The runtime answers as soon as a frame is published, so a frame reaches
+/// the pane without waiting for the poller's next tick; a runtime that predates
+/// the parameter ignores it and answers at once.
+const MEDIA_WAIT_MS: u64 = 500;
 
 /// Where the running service listens and the bearer secret it accepts.
 ///
@@ -160,7 +166,7 @@ pub fn decode_events_reply(status: u16, body: &[u8]) -> Result<Vec<Value>, Clien
 
 fn media_path(session_id: &str, after: u64) -> String {
     format!(
-        "/v1/media/{}?after={after}",
+        "/v1/media/{}?after={after}&waitMs={MEDIA_WAIT_MS}",
         percent_encode_segment(session_id)
     )
 }
@@ -392,8 +398,11 @@ mod tests {
 
     #[test]
     fn media_path_encodes_the_session_segment() {
-        assert_eq!(media_path("abc-1", 4), "/v1/media/abc-1?after=4");
-        assert_eq!(media_path("a/b c", 0), "/v1/media/a%2Fb%20c?after=0");
+        assert_eq!(media_path("abc-1", 4), "/v1/media/abc-1?after=4&waitMs=500");
+        assert_eq!(
+            media_path("a/b c", 0),
+            "/v1/media/a%2Fb%20c?after=0&waitMs=500"
+        );
     }
 
     #[test]
@@ -464,6 +473,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/v1/media/s1"))
             .and(query_param("after", "0"))
+            .and(query_param("waitMs", "500"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .insert_header("x-cognia-media-sequence", "7")

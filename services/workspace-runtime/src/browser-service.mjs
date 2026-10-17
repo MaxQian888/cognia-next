@@ -16,6 +16,7 @@ import {
   LOGIN_REGISTRY_KEY,
   clearStorageInPage,
   detectLoginFormsInPage,
+  fitPageToWidth,
   readStorageInPage,
   resolveLoginRegistryEntry,
   writeStorageInPage,
@@ -45,7 +46,14 @@ export const LOCAL_SESSION_FIELDS = Object.freeze([
   "uploadRoots",
   "allowFileUrls",
   "viewport",
+  "deviceScaleFactor",
 ])
+
+/**
+ * Local fit-to-width runs off the frame path: at most one layout check per
+ * window, triggered by screencast damage (load, reflow, resize all paint).
+ */
+const FIT_CHECK_INTERVAL_MS = 150
 
 const MAX_TRACKED_REQUESTS = 200
 const CREDENTIAL_DEDUPE_MS = 10_000
@@ -72,6 +80,8 @@ function pageSummary(record, pageId, activePageId) {
       title,
       active: pageId === activePageId,
       ...(record.openerPageId ? { openerId: record.openerPageId } : {}),
+      ...(record.zoom !== undefined ? { zoom: record.zoom } : {}),
+      ...(record.fitToWidth !== undefined ? { fitToWidth: record.fitToWidth } : {}),
     })
   )
 }
@@ -129,14 +139,26 @@ function absolutePathList(value, field, { max = 256, forbidComma = false } = {})
   })
 }
 
-function clampViewport(viewport, fallback) {
+/** A screencast frame's CSS viewport, when its metadata carries one. */
+function cssViewportOf(metadata) {
+  const width = Math.round(Number(metadata?.deviceWidth))
+  const height = Math.round(Number(metadata?.deviceHeight))
+  return width > 0 && height > 0 ? { width, height } : null
+}
+
+function clampViewport(viewport, fallback, limits = { min: 200, width: 1600, height: 1200 }) {
   if (viewport === undefined || viewport === null) return { ...fallback }
   const width = Number(viewport.width)
   const height = Number(viewport.height)
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 200 || height < 200) {
-    throw invalidOption("viewport must have integer width and height of at least 200")
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width < limits.min ||
+    height < limits.min
+  ) {
+    throw invalidOption(`viewport must have integer width and height of at least ${limits.min}`)
   }
-  return { width: Math.min(width, 1600), height: Math.min(height, 1200) }
+  return { width: Math.min(width, limits.width), height: Math.min(height, limits.height) }
 }
 
 /**
@@ -472,6 +494,20 @@ export class RemoteChromiumService {
     } else if (options.cdpEndpoint !== undefined) {
       throw invalidOption("cdpEndpoint is only valid for user-chrome sessions")
     }
+    // Chromium's screencast captures the compositor surface, whose density is
+    // fixed at launch; CDP device-metrics emulation only changes what the page
+    // sees (`devicePixelRatio`), never the captured pixels. A Retina pane
+    // therefore needs Chromium launched at that density.
+    let renderScale = 1
+    if (options.deviceScaleFactor !== undefined) {
+      if (kind !== "local")
+        throw invalidOption("deviceScaleFactor is only valid for local sessions")
+      const scale = options.deviceScaleFactor
+      if (typeof scale !== "number" || !Number.isFinite(scale) || scale < 1 || scale > 4) {
+        throw invalidOption("deviceScaleFactor must be between 1 and 4")
+      }
+      renderScale = scale
+    }
     let downloadsDir = this.defaultDownloadsDir
     if (options.downloadsDir !== undefined) {
       if (typeof options.downloadsDir !== "string" || !path.isAbsolute(options.downloadsDir)) {
@@ -488,6 +524,7 @@ export class RemoteChromiumService {
       uploadRoots: absolutePathList(options.uploadRoots, "uploadRoots"),
       allowFileUrls: options.allowFileUrls ?? false,
       viewport: clampViewport(options.viewport, this.viewport),
+      renderScale,
     }
   }
 
@@ -587,6 +624,7 @@ export class RemoteChromiumService {
       uploadRoots: local.uploadRoots,
       allowFileUrls: local.allowFileUrls,
       viewport: local.viewport,
+      renderScale: local.renderScale,
       policy: this.localPolicyFactory({
         allowFileUrls: local.allowFileUrls,
         allowExtensionUrls: local.kind === "local",
@@ -647,6 +685,7 @@ export class RemoteChromiumService {
     await fs.mkdir(this.stagingRoot, { recursive: true, mode: 0o700 })
     await fs.mkdir(session.downloadsDir, { recursive: true })
     const args = ["--no-first-run", "--no-default-browser-check"]
+    if (session.renderScale > 1) args.push(`--force-device-scale-factor=${session.renderScale}`)
     if (session.extensionPaths.length > 0) {
       const list = session.extensionPaths.join(",")
       args.push(`--disable-extensions-except=${list}`, `--load-extension=${list}`)
@@ -984,6 +1023,7 @@ export class RemoteChromiumService {
       if (frame !== pageMainFrame(page)) return
       const url = page.url()
       if (!url.startsWith("chrome-error:")) record.navigationUrl = url
+      if (record.fitToWidth) record.fitReset = true
       this.schedulePagesChanged(session)
     })
     if (session.uploadRoots?.length) {
@@ -1482,14 +1522,24 @@ export class RemoteChromiumService {
     const factor = Number.isFinite(numeric) ? Math.min(5, Math.max(0.25, numeric)) : 1
     return this.runActionWithDialog(session, record.generation, async () => {
       session.zoom = factor
+      record.zoom = factor
+      record.fitToWidth = false
+      record.viewportRevision = (record.viewportRevision ?? 0) + 1
       await page.evaluate((value) => {
         document.documentElement.style.zoom = String(value)
       }, factor)
+      this.schedulePagesChanged(session)
       return { ok: true, zoom: factor }
     })
   }
 
   async applyZoom(session) {
+    const { record } = this.activeRecord(session)
+    if (record.fitToWidth) {
+      record.fitReset = true
+      await this.applyFitToWidth(session, record)
+      return
+    }
     const factor = session.zoom
     if (!factor || factor === 1) return
     try {
@@ -1500,6 +1550,54 @@ export class RemoteChromiumService {
     } catch {
       // Page may be mid-navigation; the next navigate re-applies.
     }
+  }
+
+  async applyFitToWidth(session, record) {
+    if (!record.fitToWidth || record.pendingDialog) return null
+    const viewport = record.page.viewportSize() ?? this.viewport
+    const revision = record.viewportRevision
+    const result = await record.page.evaluate(fitPageToWidth, {
+      width: viewport.width,
+      reset: record.fitReset === true,
+    })
+    if (!record.fitToWidth || record.viewportRevision !== revision) return null
+    if (!Number.isFinite(result?.zoom) || result.zoom <= 0 || result.zoom > 1) return null
+    record.fitReset = false
+    if (record.zoom !== result.zoom) {
+      record.zoom = result.zoom
+      this.schedulePagesChanged(session)
+    }
+    return result
+  }
+
+  /**
+   * Re-check fit-to-width after the page painted, without holding the frame:
+   * one layout read per `FIT_CHECK_INTERVAL_MS`, plus one trailing check when
+   * damage arrived while a check was running.
+   */
+  scheduleFitCheck(session, record) {
+    if (!record.fitToWidth) return
+    if (record.fitCheck) {
+      record.fitCheck.again = true
+      return
+    }
+    const check = { again: false }
+    record.fitCheck = check
+    const timer = setTimeout(async () => {
+      try {
+        if (!session.closing && session.pages.get(session.activePageId) === record) {
+          // The page changed but its full re-measure is rate-limited: check
+          // again even if nothing else paints in the meantime.
+          if ((await this.applyFitToWidth(session, record))?.pending) check.again = true
+        }
+      } catch {
+        // Mid-navigation or a closed page: the next painted frame retries.
+      } finally {
+        record.fitCheck = null
+        if (check.again) this.scheduleFitCheck(session, record)
+      }
+    }, FIT_CHECK_INTERVAL_MS)
+    timer.unref?.()
   }
 
   // Find-in-page runs the injected `__cogniaFind` helper directly (NOT the
@@ -1875,10 +1973,7 @@ export class RemoteChromiumService {
       .map((download) => ({ ...download, backend: "remote" }))
   }
 
-  /**
-   * Stream the page in front — never an addressed one: the screencast is what
-   * the user sees, and `setActivePage` moves it when the front page changes.
-   */
+  /** Stream the page in front; `setActivePage` moves the stream with it. */
   async startScreencast(sessionId, onFrame, { quality = 70 } = {}) {
     const session = this.requireSession(sessionId)
     const pageId = session.activePageId
@@ -1888,28 +1983,72 @@ export class RemoteChromiumService {
     if (session.screencast) await this.stopScreencast(sessionId)
     session.screencastRequest = { onFrame, quality }
     const cdp = await session.context.newCDPSession(page)
-    const state = { cdp, pageId, sequence: 0, pending: null }
+    const state = { cdp, pageId, sequence: 0, pending: null, queuedEvent: null, receive: null }
     session.screencast = state
-    cdp.on("Page.screencastFrame", async (event) => {
-      if (state.pending) return
+    const local = this.mode === "local"
+    const frameQuality = local
+      ? Math.max(80, Math.min(100, quality))
+      : Math.max(60, Math.min(80, quality))
+    const receive = async (event, acknowledged = false) => {
+      if (session.screencast !== state) return
+      if (local) this.scheduleFitCheck(session, record)
+      if (state.pending) {
+        if (local) {
+          state.queuedEvent = event
+          await cdp
+            .send("Page.screencastFrameAck", { sessionId: event.sessionId })
+            .catch(() => undefined)
+        }
+        return
+      }
       state.sequence += 1
-      state.pending = { sequence: state.sequence, cdpSessionId: event.sessionId }
-      const viewport = page.viewportSize() ?? this.viewport
-      await onFrame(
-        encodeMediaFrame({
-          sequence: state.sequence,
-          width: viewport.width,
-          height: viewport.height,
-          timestamp: Date.now(),
-          jpeg: Buffer.from(event.data, "base64"),
-        })
-      )
-    })
+      const pending = {
+        sequence: state.sequence,
+        cdpSessionId: acknowledged ? null : event.sessionId,
+      }
+      state.pending = pending
+      let published = false
+      try {
+        // The frame is the compositor surface at the density Chromium was
+        // launched with (`renderScale`): Retina pixels with no extra capture.
+        // The header carries the CSS viewport the input coordinates map to —
+        // locally the frame's own metadata, so a resize can never pair a frame
+        // with the next frame's dimensions.
+        const viewport =
+          (local && cssViewportOf(event.metadata)) || page.viewportSize() || this.viewport
+        await onFrame(
+          encodeMediaFrame({
+            sequence: state.sequence,
+            width: viewport.width,
+            height: viewport.height,
+            timestamp: Date.now(),
+            jpeg: Buffer.from(event.data, "base64"),
+          })
+        )
+        published = true
+      } catch {
+        // The sink failed (the consumer went away mid-publish). Release this
+        // damage signal so the next frame can recover without hanging.
+      } finally {
+        if (!published && state.pending === pending) {
+          if (pending.cdpSessionId !== null) {
+            await cdp
+              .send("Page.screencastFrameAck", { sessionId: pending.cdpSessionId })
+              .catch(() => undefined)
+          }
+          state.pending = null
+          const next = state.queuedEvent
+          state.queuedEvent = null
+          if (next) void receive(next, true)
+        }
+      }
+    }
+    state.receive = receive
+    cdp.on("Page.screencastFrame", receive)
     await cdp.send("Page.startScreencast", {
       format: "jpeg",
-      quality: Math.max(60, Math.min(80, quality)),
-      maxWidth: 1600,
-      maxHeight: 1200,
+      quality: frameQuality,
+      ...(local ? {} : { maxWidth: 1600, maxHeight: 1200 }),
       everyNthFrame: 1,
     })
   }
@@ -1917,8 +2056,15 @@ export class RemoteChromiumService {
   async ackScreencastFrame(sessionId, sequence) {
     const state = this.requireSession(sessionId).screencast
     if (!state?.pending || state.pending.sequence !== sequence) return false
-    await state.cdp.send("Page.screencastFrameAck", { sessionId: state.pending.cdpSessionId })
+    const pending = state.pending
+    if (pending.cdpSessionId !== null) {
+      await state.cdp.send("Page.screencastFrameAck", { sessionId: pending.cdpSessionId })
+    }
+    if (state.pending !== pending) return false
     state.pending = null
+    const next = state.queuedEvent
+    state.queuedEvent = null
+    if (next) void state.receive(next, true)
     return true
   }
 
@@ -1933,19 +2079,19 @@ export class RemoteChromiumService {
   async dispatchInput(sessionId, input) {
     const session = this.requireSession(sessionId)
     this.assertNoPendingDialog(session)
-    const { page } = this.activeRecord(session)
-    const cdp = await session.context.newCDPSession(page)
-    try {
-      if (input.kind === "mouse") {
-        await cdp.send("Input.dispatchMouseEvent", input.payload)
-      } else if (input.kind === "key") {
-        session.humanKeyboardInputOccurred = true
-        await cdp.send("Input.dispatchKeyEvent", input.payload)
-      } else {
-        throw new RemoteBrowserError("browser_input_invalid", "Unsupported input kind")
-      }
-    } finally {
-      await cdp.detach()
+    const { record } = this.activeRecord(session)
+    if (input.kind !== "mouse" && input.kind !== "key") {
+      throw new RemoteBrowserError("browser_input_invalid", "Unsupported input kind")
+    }
+    // The page's own CDP session, attached once: one attach/detach round trip
+    // per wheel tick or pointer move was a large share of input latency, and a
+    // single session keeps press/release in the order they were sent.
+    const cdp = await this.emulationSession(session, record)
+    if (input.kind === "mouse") {
+      await cdp.send("Input.dispatchMouseEvent", input.payload)
+    } else {
+      session.humanKeyboardInputOccurred = true
+      await cdp.send("Input.dispatchKeyEvent", input.payload)
     }
   }
 
@@ -2543,8 +2689,19 @@ export class RemoteChromiumService {
   }
 
   async emulationSession(session, record) {
-    if (!record.emulationCdp) record.emulationCdp = await session.context.newCDPSession(record.page)
-    return record.emulationCdp
+    if (!record.emulationCdpReady) {
+      record.emulationCdpReady = session.context.newCDPSession(record.page).then(
+        (cdp) => {
+          record.emulationCdp = cdp
+          return cdp
+        },
+        (error) => {
+          record.emulationCdpReady = null
+          throw error
+        }
+      )
+    }
+    return record.emulationCdpReady
   }
 
   /**
@@ -2559,11 +2716,14 @@ export class RemoteChromiumService {
     const { page, record } = this.pageRecord(session, options.pageId)
     const applied = []
     if (options.reset === true) {
-      if (record.emulationCdp) {
-        await record.emulationCdp.detach().catch(() => undefined)
+      if (record.emulationCdpReady) {
+        const cdp = await record.emulationCdpReady.catch(() => null)
+        await cdp?.detach().catch(() => undefined)
+        record.emulationCdpReady = null
         record.emulationCdp = null
       }
       await page.setViewportSize(session.viewport ?? this.viewport)
+      record.viewportRevision = (record.viewportRevision ?? 0) + 1
       await page.emulateMedia({ colorScheme: null })
       return { ok: true, applied: ["reset"] }
     }
@@ -2574,10 +2734,34 @@ export class RemoteChromiumService {
     }
     const viewport =
       options.viewport !== undefined
-        ? clampViewport(options.viewport, this.viewport)
+        ? clampViewport(
+            options.viewport,
+            this.viewport,
+            this.mode === "local" ? { min: 1, width: 8192, height: 8192 } : undefined
+          )
         : device?.viewport
           ? clampViewport(device.viewport, this.viewport)
           : null
+    const deviceScaleFactor = options.viewport?.deviceScaleFactor
+    const fitToWidth = options.viewport?.fitToWidth
+    if (fitToWidth !== undefined) {
+      this.assertLocalMode("browser.fit-to-width")
+      if (typeof fitToWidth !== "boolean")
+        throw new RemoteBrowserError("browser_option_invalid", "fitToWidth must be a boolean")
+      record.fitToWidth = fitToWidth
+      record.fitReset = fitToWidth
+    }
+    if (
+      deviceScaleFactor !== undefined &&
+      (typeof deviceScaleFactor !== "number" ||
+        !Number.isFinite(deviceScaleFactor) ||
+        deviceScaleFactor < 0.5 ||
+        deviceScaleFactor > 4)
+    )
+      throw new RemoteBrowserError(
+        "browser_option_invalid",
+        "deviceScaleFactor must be between 0.5 and 4"
+      )
     const userAgent = options.userAgent ?? device?.userAgent
     if (userAgent !== undefined && (typeof userAgent !== "string" || userAgent.length > 1024)) {
       throw new RemoteBrowserError("browser_option_invalid", "userAgent is invalid")
@@ -2623,19 +2807,24 @@ export class RemoteChromiumService {
     }
     const needsCdp =
       device ||
+      deviceScaleFactor !== undefined ||
       userAgent !== undefined ||
       options.locale !== undefined ||
       options.timezone !== undefined ||
       geolocation ||
       options.offline !== undefined
     const cdp = needsCdp ? await this.emulationSession(session, record) : null
-    if (device && viewport) {
+    if (viewport && (device || deviceScaleFactor !== undefined)) {
       await cdp.send("Emulation.setDeviceMetricsOverride", {
         width: viewport.width,
         height: viewport.height,
-        deviceScaleFactor: Number(device.deviceScaleFactor) || 1,
-        mobile: device.isMobile === true,
+        deviceScaleFactor: deviceScaleFactor ?? (Number(device?.deviceScaleFactor) || 1),
+        mobile: device?.isMobile === true,
       })
+    }
+    if (viewport) record.viewportRevision = (record.viewportRevision ?? 0) + 1
+    if (fitToWidth) await this.applyFitToWidth(session, record)
+    if (device && viewport) {
       await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: device.hasTouch === true })
       applied.push("device")
     }

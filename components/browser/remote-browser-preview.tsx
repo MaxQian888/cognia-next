@@ -68,6 +68,7 @@ import {
   type RemoteBrowserLease,
   type RemoteBrowserStreamOptions,
 } from "@/lib/browser/remote-stream"
+import { createFramePainter } from "@/lib/browser/frame-painter"
 import type { BrowserPageSummary } from "@/lib/browser/session-types"
 import type { BrowserSelection, SnapshotNode } from "@/lib/browser/protocol"
 import { buildTimeServerUrl } from "@/lib/platform/web-companion"
@@ -293,21 +294,10 @@ export function RemoteBrowserPreview({
     let disposed = false
     let reconnectAttempts = 0
 
-    const drawFrame = async (frame: RemoteBrowserFrame) => {
+    const painter = createFramePainter(() => canvasRef.current)
+    const drawFrame = (frame: RemoteBrowserFrame) => {
       frameSizeRef.current = { width: frame.width, height: frame.height }
-      const canvas = canvasRef.current
-      if (!canvas) return
-      canvas.width = frame.width
-      canvas.height = frame.height
-      const jpegBytes = new Uint8Array(frame.jpeg.byteLength)
-      jpegBytes.set(frame.jpeg)
-      const bitmap = await createImageBitmap(new Blob([jpegBytes.buffer], { type: "image/jpeg" }))
-      if (disposed) {
-        bitmap.close()
-        return
-      }
-      canvas.getContext("2d")?.drawImage(bitmap, 0, 0, frame.width, frame.height)
-      bitmap.close()
+      painter.paint(frame)
     }
 
     const setup = async () => {
@@ -394,7 +384,7 @@ export function RemoteBrowserPreview({
                   sessionId: summary.id,
                 })
               : issueCompanionSocketTicket({ channel: "browser", sessionId: summary.id }),
-          onFrame: (frame) => void drawFrame(frame),
+          onFrame: drawFrame,
           onLease: setLease,
           onEvent: (event) => {
             if (event.kind === "pages.changed" && Array.isArray(event.pages)) {
@@ -441,6 +431,7 @@ export function RemoteBrowserPreview({
     void setup()
     return () => {
       disposed = true
+      painter.dispose()
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
       streamRef.current?.close()
       streamRef.current = null

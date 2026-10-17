@@ -176,6 +176,45 @@ test("media endpoint returns only the latest frame and acknowledges by sequence"
   assert.deepEqual(Buffer.from(await frame.arrayBuffer()), Buffer.from([1, 2, 3]))
 })
 
+test("a media read with waitMs is answered by the next published frame", async (t) => {
+  let publish = null
+  const browser = serviceStub()
+  browser.startScreencast = async (_sessionId, onFrame) => {
+    publish = onFrame
+  }
+  const baseUrl = await fixture(t, browser)
+  const headers = {
+    authorization: `Bearer ${"x".repeat(32)}`,
+    "content-type": "application/json",
+  }
+  await fetch(`${baseUrl}/v1/control`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      version: 1,
+      type: "browser.screencast.start",
+      payload: { sessionId: "session-1" },
+    }),
+  })
+  const started = Date.now()
+  const pending = fetch(`${baseUrl}/v1/media/session-1?after=0&waitMs=1000`, { headers })
+  setTimeout(() => void publish(Buffer.from([7, 8])), 50)
+  const frame = await pending
+  assert.equal(frame.status, 200)
+  assert.equal(frame.headers.get("x-cognia-media-sequence"), "1")
+  assert.deepEqual(Buffer.from(await frame.arrayBuffer()), Buffer.from([7, 8]))
+  assert.ok(Date.now() - started < 900, "the frame wakes the read before its deadline")
+
+  // Nothing newer than the cursor: the read waits out its (capped) deadline.
+  const idleStart = Date.now()
+  const idle = await fetch(`${baseUrl}/v1/media/session-1?after=1&waitMs=60`, { headers })
+  assert.equal(idle.status, 204)
+  assert.ok(Date.now() - idleStart >= 50)
+  // A reader without waitMs keeps the immediate 204 older Rust shells expect.
+  const immediate = await fetch(`${baseUrl}/v1/media/session-1?after=1`, { headers })
+  assert.equal(immediate.status, 204)
+})
+
 test("audit events retain operation metadata without URLs, file paths, or human key input", async (t) => {
   const baseUrl = await fixture(t)
   const headers = {
