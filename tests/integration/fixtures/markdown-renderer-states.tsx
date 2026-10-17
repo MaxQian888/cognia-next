@@ -1,7 +1,7 @@
 // Run outside Jest's simplified react-markdown mock. Only expensive leaf
 // renderers are replaced; parsing, routing, placeholders and boundaries are real.
 import React, { act } from "react"
-import { createRoot, hydrateRoot } from "react-dom/client"
+import { createRoot, hydrateRoot, type Root } from "react-dom/client"
 import { renderToString } from "react-dom/server"
 import { createRequire } from "node:module"
 import { load } from "cheerio"
@@ -73,11 +73,12 @@ async function main() {
         )
         const container = document.createElement("div")
         document.body.append(container)
-        let root
+        let root: Root | undefined
         let invalidServerElements = 0
         if (state === "error") {
-          root = createRoot(container)
-          await act(async () => root.render(element))
+          const created = createRoot(container)
+          root = created
+          await act(async () => created.render(element))
         } else {
           const html = renderToString(element)
           // XML mode preserves invalid server nesting instead of repairing it.

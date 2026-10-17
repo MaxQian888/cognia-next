@@ -73,7 +73,7 @@ describe("installTuiExitSignals", () => {
     const shell = runInteractiveShell("top", {
       spawn: () => ({
         on(event, callback) {
-          if (event === "close") closeChild = callback
+          if (event === "close") closeChild = callback as (code: number | null) => void
         },
       }),
     })

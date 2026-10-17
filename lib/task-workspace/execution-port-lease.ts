@@ -14,7 +14,10 @@ import { runWorkspaceUserAction } from "./user-action"
 
 export interface ExecutionPortLeaseInput {
   cwd?: string
-  project?: Pick<Project, "id" | "roots" | "rootDir" | "additionalDirs"> | null
+  // `roots` is optional: rows stored before multi-root projects carry only
+  // rootDir/additionalDirs, which rootsFromLegacy turns into roots.
+  project?:
+    (Pick<Project, "id" | "rootDir" | "additionalDirs"> & Partial<Pick<Project, "roots">>) | null
   projectId?: string | null
   sessionId?: string | null
   executionContext?: SessionExecutionContext | null

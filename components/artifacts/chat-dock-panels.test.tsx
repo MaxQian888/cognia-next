@@ -1250,6 +1250,6 @@ it("registers best-of-N as a retained session comparison panel", () => {
   expect(panel.retention).toBe("stateful")
   expect(panel.preferredMode).toBe("wide")
   const Renderer = panel.renderer
-  render(<Renderer />)
+  render(<Renderer workbenchInstanceId="wb" resource={SESSION_RESOURCE} active />)
   expect(screen.getByTestId("best-of-n-comparison")).toHaveAttribute("data-session", "s1")
 })

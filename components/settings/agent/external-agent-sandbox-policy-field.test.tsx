@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
-import type { ExternalAgentSandboxPolicy } from "@cognia/agent-contracts/external-agent"
+import type { ExternalAgentProcessSandboxPolicy } from "@cognia/agent-contracts/external-agent"
 
 import messages from "@/i18n/messages/en.json"
 import externalAgentManage from "@/i18n/messages/en/externalAgentManage.json"
@@ -10,7 +10,7 @@ import { ExternalAgentSandboxPolicyField } from "./external-agent-sandbox-policy
 // copy here without changing generated locale artifacts in the shared tree.
 Object.assign(messages.externalAgentManage.editor, externalAgentManage.editor)
 
-function Editor({ initial }: { initial?: ExternalAgentSandboxPolicy }) {
+function Editor({ initial }: { initial?: ExternalAgentProcessSandboxPolicy }) {
   const [policy, setPolicy] = useState(initial)
   return <ExternalAgentSandboxPolicyField value={policy} onChange={setPolicy} platform="macos" />
 }

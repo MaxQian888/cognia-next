@@ -265,7 +265,7 @@ describe("runInteractiveShell", () => {
     const closers: Array<() => void> = []
     const spawn: InteractiveShellSpawn = () => ({
       on(event, callback) {
-        if (event === "close") closers.push(() => callback(0))
+        if (event === "close") closers.push(() => (callback as (code: number | null) => void)(0))
       },
     })
     const first = runInteractiveShell("first", { spawn })

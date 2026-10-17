@@ -56,7 +56,9 @@ describe("external-agent sandbox launcher", () => {
                 allowedHosts: ["api.example.com", "*.example.org"],
                 readableScope,
               },
-              env: bot ? { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" } : {},
+              env: bot
+                ? { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" }
+                : ({} as Record<string, string>),
             }
             const promise = resolveSandboxedExternalAgentLaunch(config, {
               platform,
