@@ -150495,9 +150495,15 @@ paths:
                         items:
                           type: string
                         type: array
+                      selfContained:
+                        default: false
+                        description: Capture every file into the blob store, including ignored/generated content. Used for scratch archives
+                          whose directory is their only source of truth.
+                        type: boolean
                     required:
                       - autoDetect
                       - generatedOutputRoots
+                      - selfContained
                     type: object
                     default:
                       autoDetect: true
@@ -151447,9 +151453,15 @@ paths:
                         items:
                           type: string
                         type: array
+                      selfContained:
+                        default: false
+                        description: Capture every file into the blob store, including ignored/generated content. Used for scratch archives
+                          whose directory is their only source of truth.
+                        type: boolean
                     required:
                       - autoDetect
                       - generatedOutputRoots
+                      - selfContained
                     type: object
                     default:
                       autoDetect: true
@@ -153885,9 +153897,15 @@ paths:
                                   items:
                                     type: string
                                   type: array
+                                selfContained:
+                                  default: false
+                                  description: Capture every file into the blob store, including ignored/generated content. Used for scratch archives
+                                    whose directory is their only source of truth.
+                                  type: boolean
                               required:
                                 - autoDetect
                                 - generatedOutputRoots
+                                - selfContained
                               type: object
                               default:
                                 autoDetect: true
@@ -154314,9 +154332,15 @@ paths:
                                       items:
                                         type: string
                                       type: array
+                                    selfContained:
+                                      default: false
+                                      description: Capture every file into the blob store, including ignored/generated content. Used for scratch archives
+                                        whose directory is their only source of truth.
+                                      type: boolean
                                   required:
                                     - autoDetect
                                     - generatedOutputRoots
+                                    - selfContained
                                   type: object
                                   default:
                                     autoDetect: true
@@ -161159,9 +161183,15 @@ paths:
                               items:
                                 type: string
                               type: array
+                            selfContained:
+                              default: false
+                              description: Capture every file into the blob store, including ignored/generated content. Used for scratch archives
+                                whose directory is their only source of truth.
+                              type: boolean
                           required:
                             - autoDetect
                             - generatedOutputRoots
+                            - selfContained
                           type: object
                           default:
                             autoDetect: true
@@ -167396,9 +167426,15 @@ paths:
                           items:
                             type: string
                           type: array
+                        selfContained:
+                          default: false
+                          description: Capture every file into the blob store, including ignored/generated content. Used for scratch archives
+                            whose directory is their only source of truth.
+                          type: boolean
                       required:
                         - autoDetect
                         - generatedOutputRoots
+                        - selfContained
                       type: object
                       default:
                         autoDetect: true
@@ -175572,9 +175608,15 @@ paths:
                         items:
                           type: string
                         type: array
+                      selfContained:
+                        default: false
+                        description: Capture every file into the blob store, including ignored/generated content. Used for scratch archives
+                          whose directory is their only source of truth.
+                        type: boolean
                     required:
                       - autoDetect
                       - generatedOutputRoots
+                      - selfContained
                     type: object
                     default:
                       autoDetect: true

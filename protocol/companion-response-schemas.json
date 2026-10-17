@@ -9193,9 +9193,14 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "selfContained": {
+          "default": false,
+          "description": "Capture every file into the blob store, including ignored/generated content. Used for scratch archives whose directory is their only source of truth.",
+          "type": "boolean"
         }
       },
-      "required": ["autoDetect", "generatedOutputRoots"],
+      "required": ["autoDetect", "generatedOutputRoots", "selfContained"],
       "type": "object"
     },
     "RunState": {

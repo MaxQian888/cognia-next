@@ -62561,11 +62561,17 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "selfContained": {
+                "default": false,
+                "description": "Capture every file into the blob store, including ignored/generated content. Used for scratch archives whose directory is their only source of truth.",
+                "type": "boolean"
               }
             },
             "required": [
               "autoDetect",
-              "generatedOutputRoots"
+              "generatedOutputRoots",
+              "selfContained"
             ],
             "type": "object",
             "default": {
@@ -63189,11 +63195,17 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "selfContained": {
+                "default": false,
+                "description": "Capture every file into the blob store, including ignored/generated content. Used for scratch archives whose directory is their only source of truth.",
+                "type": "boolean"
               }
             },
             "required": [
               "autoDetect",
-              "generatedOutputRoots"
+              "generatedOutputRoots",
+              "selfContained"
             ],
             "type": "object",
             "default": {
@@ -64756,11 +64768,17 @@
                             "type": "string"
                           },
                           "type": "array"
+                        },
+                        "selfContained": {
+                          "default": false,
+                          "description": "Capture every file into the blob store, including ignored/generated content. Used for scratch archives whose directory is their only source of truth.",
+                          "type": "boolean"
                         }
                       },
                       "required": [
                         "autoDetect",
-                        "generatedOutputRoots"
+                        "generatedOutputRoots",
+                        "selfContained"
                       ],
                       "type": "object",
                       "default": {
@@ -65143,11 +65161,17 @@
                                 "type": "string"
                               },
                               "type": "array"
+                            },
+                            "selfContained": {
+                              "default": false,
+                              "description": "Capture every file into the blob store, including ignored/generated content. Used for scratch archives whose directory is their only source of truth.",
+                              "type": "boolean"
                             }
                           },
                           "required": [
                             "autoDetect",
-                            "generatedOutputRoots"
+                            "generatedOutputRoots",
+                            "selfContained"
                           ],
                           "type": "object",
                           "default": {
@@ -71343,11 +71367,17 @@
                         "type": "string"
                       },
                       "type": "array"
+                    },
+                    "selfContained": {
+                      "default": false,
+                      "description": "Capture every file into the blob store, including ignored/generated content. Used for scratch archives whose directory is their only source of truth.",
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "autoDetect",
-                    "generatedOutputRoots"
+                    "generatedOutputRoots",
+                    "selfContained"
                   ],
                   "type": "object",
                   "default": {
@@ -76096,11 +76126,17 @@
                     "type": "string"
                   },
                   "type": "array"
+                },
+                "selfContained": {
+                  "default": false,
+                  "description": "Capture every file into the blob store, including ignored/generated content. Used for scratch archives whose directory is their only source of truth.",
+                  "type": "boolean"
                 }
               },
               "required": [
                 "autoDetect",
-                "generatedOutputRoots"
+                "generatedOutputRoots",
+                "selfContained"
               ],
               "type": "object",
               "default": {
@@ -80887,11 +80923,17 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "selfContained": {
+                "default": false,
+                "description": "Capture every file into the blob store, including ignored/generated content. Used for scratch archives whose directory is their only source of truth.",
+                "type": "boolean"
               }
             },
             "required": [
               "autoDetect",
-              "generatedOutputRoots"
+              "generatedOutputRoots",
+              "selfContained"
             ],
             "type": "object",
             "default": {
@@ -89824,5 +89866,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "119292edf0b45e65d435b2adfaa2586ca6a07a42d15ebe2c2136072b66881cbf"
+  "catalogHash": "91768ecbc2286c095e346a85838cc761db04a0d2902c505dbd1a597694c16863"
 }
