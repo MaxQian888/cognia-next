@@ -178,5 +178,6 @@
   "rewindNotRestored": "Not restored: {paths}.",
   "rewindReasonTooLarge": "too large to snapshot",
   "rewindReasonUnreadable": "unreadable",
-  "rewindReasonOutsideWorkspace": "outside the workspace"
+  "rewindReasonOutsideWorkspace": "outside the workspace",
+  "rewindAmbiguousCheckpoint": "Checkpoint #{seq} matches {count} checkpoints from earlier runs of this session, so nothing was restored."
 }

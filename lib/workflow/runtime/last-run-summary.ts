@@ -18,13 +18,15 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { getDb } from "@/lib/db/schema"
 import { aggregateRunUsage } from "@/lib/workflow/runs/usage-aggregate"
-import type { WorkflowRunEventRow } from "@/types/workflow/visual"
+import type { StepUsage, WorkflowRunEventRow } from "@/types/workflow/visual"
 
 /** One step's outcome from its most recent terminal event. */
 export type LastRunStatus = "succeeded" | "failed" | "skipped"
 
 export interface LastRunSummary {
   status: LastRunStatus
+  /** The run whose terminal event produced this summary. */
+  runId?: string
   /** Wall-clock when the step started (last attempt). May be 0 if missing. */
   startedAt: number
   /** Wall-clock when the step ended (terminal event). */
@@ -33,7 +35,7 @@ export interface LastRunSummary {
   durationMs: number
   /** First line of the failure message, if status is "failed". */
   errorMessage?: string
-  /** Number of retry attempts collapsed into this entry. */
+  /** Attempts of this step within {@link runId}; earlier runs never add to it. */
   attempt: number
   /**
    * True when the step FAILED but its per-node error handling substituted an
@@ -91,7 +93,8 @@ function extractErrorMessage(payload: unknown): string | undefined {
  *
  * Algorithm:
  *   1. Sort by ts.
- *   2. Track per-stepId: latest start ts + retry count.
+ *   2. Track per-stepId: latest start ts + retry count within its run (the
+ *      count restarts when a step starts under a different runId).
  *   3. On terminal event: emit a summary keyed by stepId. Subsequent
  *      terminal events overwrite (so the *latest* run wins).
  */
@@ -101,6 +104,7 @@ export function deriveLastRunSummary(
   const sorted = [...events].sort((a, b) => a.ts - b.ts)
   const startedAt: Record<string, number> = {}
   const attempts: Record<string, number> = {}
+  const attemptRun: Record<string, string> = {}
   // Failure message seen since the step's last start — a step_completed
   // arriving while this is set (no new attempt in between) means the
   // orchestrator's per-node error handling substituted an output.
@@ -110,6 +114,10 @@ export function deriveLastRunSummary(
     if (!ev.stepId) continue
     if (ev.type === "step_started") {
       startedAt[ev.stepId] = ev.ts
+      if (attemptRun[ev.stepId] !== ev.runId) {
+        attemptRun[ev.stepId] = ev.runId
+        attempts[ev.stepId] = 0
+      }
       attempts[ev.stepId] = (attempts[ev.stepId] ?? 0) + 1
       delete failedSinceStart[ev.stepId]
       continue
@@ -121,8 +129,10 @@ export function deriveLastRunSummary(
     }
     const handled = status === "succeeded" && ev.stepId in failedSinceStart
     const start = startedAt[ev.stepId] ?? 0
+    const sameRun = attemptRun[ev.stepId] === ev.runId
     out[ev.stepId] = {
       status,
+      runId: ev.runId,
       startedAt: start,
       finishedAt: ev.ts,
       durationMs: start > 0 ? Math.max(0, ev.ts - start) : 0,
@@ -132,12 +142,12 @@ export function deriveLastRunSummary(
           : handled
             ? failedSinceStart[ev.stepId]
             : undefined,
-      attempt: attempts[ev.stepId] ?? 1,
+      attempt: sameRun ? (attempts[ev.stepId] ?? 1) : 1,
       ...(handled ? { handled: true } : {}),
     }
     // Reset only the start tracker so a re-attempt (which fires another
     // `step_started`) measures duration correctly. `attempts` keeps counting
-    // so the final emitted summary shows total attempts for this step.
+    // within the run so the summary shows that run's attempts for this step.
     delete startedAt[ev.stepId]
   }
   return out
@@ -146,16 +156,27 @@ export function deriveLastRunSummary(
 /**
  * Attach per-step token/cost figures to summaries. Split out so the pure
  * derivation stays testable without the aggregate, and so a step with no usage
- * carries no `usage` key at all rather than a row of zeros.
+ * carries no `usage` key at all rather than a row of zeros. A summary that
+ * names its run only takes usage that run reported.
  */
 export function withStepUsage(
   summaries: Record<string, LastRunSummary>,
   events: ReadonlyArray<WorkflowRunEventRow>
 ): Record<string, LastRunSummary> {
   const { perStep } = aggregateRunUsage([...events])
+  const perRun = new Map<string, Record<string, StepUsage>>()
+  const usageFor = (stepId: string, runId: string | undefined) => {
+    if (runId === undefined) return perStep[stepId]
+    let steps = perRun.get(runId)
+    if (!steps) {
+      steps = aggregateRunUsage(events.filter((e) => e.runId === runId)).perStep
+      perRun.set(runId, steps)
+    }
+    return steps[stepId]
+  }
   const out: Record<string, LastRunSummary> = {}
   for (const [stepId, summary] of Object.entries(summaries)) {
-    const usage = perStep[stepId]
+    const usage = usageFor(stepId, summary.runId)
     out[stepId] =
       usage && usage.totalTokens > 0
         ? {

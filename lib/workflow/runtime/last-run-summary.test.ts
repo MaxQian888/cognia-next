@@ -27,6 +27,7 @@ describe("deriveLastRunSummary", () => {
     ])
     expect(out["n1"]).toEqual({
       status: "succeeded",
+      runId: "r1",
       startedAt: 100,
       finishedAt: 250,
       durationMs: 150,
@@ -90,6 +91,33 @@ describe("deriveLastRunSummary", () => {
     expect(out["n1"].finishedAt).toBe(30)
   })
 
+  it("restarts the attempt count for each run", () => {
+    // Two runs that each started the step once: the latest run made one
+    // attempt, not two.
+    const run = (runId: string, ts: number, type: WorkflowRunEventRow["type"]) =>
+      ({ ...ev(ts, type, "n1"), id: `${runId}_${ts}`, runId }) as WorkflowRunEventRow
+    const out = deriveLastRunSummary([
+      run("r1", 0, "step_started"),
+      run("r1", 10, "step_completed"),
+      run("r2", 20, "step_started"),
+      run("r2", 30, "step_completed"),
+    ])
+    expect(out["n1"]).toMatchObject({ runId: "r2", attempt: 1, startedAt: 20 })
+  })
+
+  it("does not carry an earlier run's attempts onto a step the latest run only skipped", () => {
+    const run = (runId: string, ts: number, type: WorkflowRunEventRow["type"]) =>
+      ({ ...ev(ts, type, "n1"), id: `${runId}_${ts}`, runId }) as WorkflowRunEventRow
+    const out = deriveLastRunSummary([
+      run("r1", 0, "step_started"),
+      run("r1", 5, "step_failed"),
+      run("r1", 6, "step_started"),
+      run("r1", 10, "step_completed"),
+      run("r2", 20, "step_skipped"),
+    ])
+    expect(out["n1"]).toMatchObject({ runId: "r2", status: "skipped", attempt: 1 })
+  })
+
   it("treats skipped events as their own terminal status", () => {
     const out = deriveLastRunSummary([ev(5, "step_skipped", "n1")])
     expect(out["n1"].status).toBe("skipped")
@@ -150,6 +178,25 @@ describe("withStepUsage", () => {
     expect(withStepUsage(summaries, []).n1!.usage).toBeUndefined()
   })
 
+  it("takes usage only from the run that produced the summary", () => {
+    // The latest run's step reported nothing; an older run's tokens must not
+    // show up on it.
+    const summaries = {
+      n1: {
+        status: "succeeded",
+        runId: "new",
+        startedAt: 0,
+        finishedAt: 1,
+        durationMs: 1,
+        attempt: 1,
+      },
+    } as never
+    const out = withStepUsage(summaries, [
+      usageEvent({ runId: "old", stepId: "n1", payload: { inputTokens: 9, outputTokens: 9 } }),
+    ])
+    expect(out.n1!.usage).toBeUndefined()
+  })
+
   it("keeps cost absent when the provider reported no pricing", () => {
     const summaries = {
       n1: { status: "succeeded", startedAt: 0, finishedAt: 1, durationMs: 1, attempt: 1 },
@@ -197,7 +244,13 @@ describe("loadLastRunSummaryByStep", () => {
 
     const summary = await loadLastRunSummaryByStep("w1")
     expect(Object.keys(summary)).toEqual(["s1"])
-    expect(summary.s1).toMatchObject({ status: "succeeded", startedAt: 101, finishedAt: 104 })
+    expect(summary.s1).toMatchObject({
+      status: "succeeded",
+      runId: "new",
+      startedAt: 101,
+      finishedAt: 104,
+      attempt: 1,
+    })
   })
 
   it("is empty for a workflow that never ran", async () => {

@@ -142,6 +142,13 @@ export interface RunInteractiveShellOpts {
 const realInteractiveSpawn: InteractiveShellSpawn = (command, opts) =>
   nodeSpawn(command, opts) as InteractiveShellChild
 
+let activeInteractiveShells = 0
+
+/** Whether an inherited-terminal child currently owns terminal interrupts. */
+export function hasActiveInteractiveShell(): boolean {
+  return activeInteractiveShells > 0
+}
+
 /**
  * Run a command with the real terminal attached. The caller must first suspend
  * Ink (via `useApp().suspendTerminal`) so full-screen programs and REPLs receive
@@ -162,11 +169,13 @@ export function runInteractiveShell(
       aborted = true
     }
     process.on("SIGINT", onTerminalInterrupt)
+    activeInteractiveShells++
     let child: InteractiveShellChild
     try {
       child = spawn(command, { cwd: opts.cwd, shell: true, stdio: "inherit" })
     } catch (e) {
       process.removeListener("SIGINT", onTerminalInterrupt)
+      activeInteractiveShells--
       resolve({ stdout: "", stderr: e instanceof Error ? e.message : String(e), code: 1 })
       return
     }
@@ -176,6 +185,7 @@ export function runInteractiveShell(
       if (settled) return
       settled = true
       process.removeListener("SIGINT", onTerminalInterrupt)
+      activeInteractiveShells--
       opts.signal?.removeEventListener("abort", onAbort)
       resolve(result)
     }

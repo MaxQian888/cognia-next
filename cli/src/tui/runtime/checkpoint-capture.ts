@@ -106,11 +106,14 @@ export function createCheckpointCapture(deps: CheckpointCaptureDeps): Checkpoint
   let seq = 0
 
   // Open a fresh segment when the session changes (first use, /clear, /resume).
+  // Numbering continues after the session's committed checkpoints, so a resumed
+  // session never mints a second `#N` that shadows an older one on disk.
   const ensureOpen = (sid: string): void => {
     if (openedFor === sid) return
     store.openSegment(sid)
     openedFor = sid
     pending = null
+    seq = store.listCheckpoints(sid).reduce((max, cp) => Math.max(max, cp.seq + 1), 0)
   }
 
   const commitPending = (sid: string): void => {

@@ -71,6 +71,50 @@ describe("createCheckpointCapture", () => {
     const [cp] = cap.list()
     expect(cp.files).toEqual([])
   })
+
+  it("continues numbering after a restart so older checkpoints stay addressable", () => {
+    const fs = memFs()
+    fs.files.set("/proj/a.ts", "original")
+    let clock = 0
+    const make = () =>
+      createCheckpointCapture({ home: "/home", getSessionId: () => "s1", fs, now: () => ++clock })
+
+    const first = make()
+    first.beginTurn(0, "edit")
+    first.onToolCall("Edit", { file_path: "/proj/a.ts" })
+    fs.files.set("/proj/a.ts", "changed")
+    const [before] = first.list()
+    expect(before.seq).toBe(0)
+
+    // --continue: a new capture over the same session and the same disk.
+    const second = make()
+    second.beginTurn(2, "after restart")
+    fs.files.set("/proj/a.ts", "after-restart")
+    const listed = second.list()
+    expect(listed.map((c) => c.seq)).toEqual([1, 0])
+
+    const target = listed.find((c) => c.seq === 0)!
+    expect(target.label).toBe("edit")
+    second.store.restore(target, { files: true, conversation: false })
+    expect(fs.read("/proj/a.ts")).toBe("original")
+  })
+
+  it("numbers each session from its own committed checkpoints", () => {
+    const fs = memFs()
+    let sid = "s1"
+    const cap = createCheckpointCapture({
+      home: "/home",
+      getSessionId: () => sid,
+      fs,
+      now: () => 1,
+    })
+    cap.beginTurn(0, "a")
+    cap.beginTurn(1, "b")
+    expect(cap.list().map((c) => c.seq)).toEqual([1, 0])
+    sid = "s2"
+    cap.beginTurn(0, "fresh")
+    expect(cap.list().map((c) => c.seq)).toEqual([0])
+  })
 })
 
 describe("pre-mutation frames", () => {

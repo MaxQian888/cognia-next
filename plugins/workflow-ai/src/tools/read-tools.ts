@@ -201,7 +201,7 @@ export function buildReadTools(): PluginToolRegistration[] {
       definition: {
         name: "wf_get_last_run",
         description:
-          "Return the aggregated outcome (succeeded / failed / skipped, durationMs, attempt, errorMessage) for each step's MOST RECENT terminal event across all runs of this workflow. Use to diagnose failures or summarize 'what happened on the last run'.",
+          "Return the aggregated outcome (succeeded / failed / skipped, runId, durationMs, attempt, errorMessage) for each step's MOST RECENT terminal event across all runs of this workflow. `attempt` counts tries within that step's `runId` only. Use to diagnose failures or summarize 'what happened on the last run'.",
         category: "workflow",
         requiresApproval: false,
         parametersSchema: {

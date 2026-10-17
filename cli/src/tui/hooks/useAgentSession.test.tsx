@@ -1402,6 +1402,29 @@ describe("useAgentSession", () => {
     })
   })
 
+  it("rewind refuses a checkpoint number shared by two stored checkpoints", async () => {
+    const h = harness()
+    ;(h.capture.list as jest.Mock).mockReturnValue([
+      { seq: 1, label: "after restart", ts: 2, cellCount: 2, files: [] },
+      {
+        seq: 1,
+        label: "edit",
+        ts: 1,
+        cellCount: 0,
+        files: [{ absPath: "/w/a", shadowPath: "/s" }],
+      },
+    ])
+    await act(async () => {
+      await h.api().rewind(1, "files", [])
+    })
+    expect(h.restore).not.toHaveBeenCalled()
+    expect(h.actions).toContainEqual({
+      type: "NOTICE",
+      message:
+        "Checkpoint #1 matches 2 checkpoints from earlier runs of this session, so nothing was restored.",
+    })
+  })
+
   it("rewind notices when the checkpoint is missing", async () => {
     const h = harness()
     await act(async () => {

@@ -13,6 +13,7 @@
  * in cooked mode. In that second case the shell runner has its own SIGINT
  * listener and owns the interrupt: the child gets it, and Cognia stays up.
  */
+import { hasActiveInteractiveShell } from "../agent/run-shell"
 
 export type ExitSignal = "SIGINT" | "SIGTERM" | "SIGHUP"
 
@@ -22,13 +23,12 @@ const SIGNAL_NUMBERS: Readonly<Record<ExitSignal, number>> = {
   SIGTERM: 15,
 }
 
-/** How long a signal waits for the database flush before exiting anyway. */
-export const SIGNAL_FLUSH_TIMEOUT_MS = 5_000
+/** Match the normal exit budget: a fresh store may still be syncing its first snapshot. */
+export const SIGNAL_FLUSH_TIMEOUT_MS = 15_000
 
 export interface SignalProcess {
   on(event: ExitSignal, listener: () => void): unknown
   off(event: ExitSignal, listener: () => void): unknown
-  listenerCount(event: ExitSignal): number
   exit(code: number): void
 }
 
@@ -78,9 +78,9 @@ export function installTuiExitSignals(deps: TuiExitSignalDeps): () => void {
       proc.exit(code)
       return
     }
-    // Another SIGINT listener is the interactive-shell runner: the interrupt
-    // belongs to the program in the foreground, not to Cognia.
-    if (signal === "SIGINT" && proc.listenerCount("SIGINT") > 1) return
+    // Only an inherited-terminal child owns the interrupt. Ink / signal-exit
+    // also install cleanup listeners, which must not suppress an idle exit.
+    if (signal === "SIGINT" && hasActiveInteractiveShell()) return
     exiting = true
     void flushWithin(deps.flush, timeoutMs)
       .catch((error) => deps.onFlushError?.(error))

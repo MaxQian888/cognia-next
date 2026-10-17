@@ -178,5 +178,6 @@
   "rewindNotRestored": "未恢复：{paths}。",
   "rewindReasonTooLarge": "文件过大，无法快照",
   "rewindReasonUnreadable": "无法读取",
-  "rewindReasonOutsideWorkspace": "不在工作区内"
+  "rewindReasonOutsideWorkspace": "不在工作区内",
+  "rewindAmbiguousCheckpoint": "检查点 #{seq} 对应本会话先前运行留下的 {count} 个检查点，未执行恢复。"
 }

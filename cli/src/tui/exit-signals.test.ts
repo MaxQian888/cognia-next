@@ -2,11 +2,12 @@
  * @jest-environment node
  */
 import { flushWithin, installTuiExitSignals, type SignalProcess } from "./exit-signals"
+import { runInteractiveShell } from "../agent/run-shell"
 
 function fakeProcess() {
   const listeners = new Map<string, Array<() => void>>()
   const exit = jest.fn()
-  const proc: SignalProcess = {
+  const proc: SignalProcess & { listenerCount(event: string): number } = {
     on: (event, fn) => listeners.set(event, [...(listeners.get(event) ?? []), fn]),
     off: (event, fn) =>
       listeners.set(
@@ -54,15 +55,42 @@ describe("installTuiExitSignals", () => {
     }
   })
 
-  it("leaves SIGINT to an interactive shell runner that also listens for it", async () => {
+  it("exits on SIGINT despite an unrelated cleanup listener", async () => {
     const { proc, exit, fire } = fakeProcess()
     const flush = jest.fn(async () => {})
+    proc.on("SIGINT", () => {}) // signal-exit / Ink cleanup, not a foreground shell
     installTuiExitSignals({ proc, flush, restore: () => {} })
-    proc.on("SIGINT", () => {}) // the `!` command runner
     fire("SIGINT")
     await settle()
-    expect(flush).not.toHaveBeenCalled()
-    expect(exit).not.toHaveBeenCalled()
+    expect(flush).toHaveBeenCalledTimes(1)
+    expect(exit).toHaveBeenCalledWith(130)
+  })
+
+  it("leaves SIGINT to the actual interactive shell until its child closes", async () => {
+    const { proc, exit, fire } = fakeProcess()
+    const flush = jest.fn(async () => {})
+    let closeChild: (code: number | null) => void = () => {}
+    const shell = runInteractiveShell("top", {
+      spawn: () => ({
+        on(event, callback) {
+          if (event === "close") closeChild = callback
+        },
+      }),
+    })
+    installTuiExitSignals({ proc, flush, restore: () => {} })
+    try {
+      fire("SIGINT")
+      await settle()
+      expect(flush).not.toHaveBeenCalled()
+      expect(exit).not.toHaveBeenCalled()
+    } finally {
+      closeChild(0)
+      await shell
+    }
+    fire("SIGINT")
+    await settle()
+    expect(flush).toHaveBeenCalledTimes(1)
+    expect(exit).toHaveBeenCalledWith(130)
   })
 
   it("still exits when the flush fails, and reports the failure", async () => {
@@ -82,9 +110,39 @@ describe("installTuiExitSignals", () => {
     expect(exit).toHaveBeenCalledWith(143)
   })
 
+  it("lets a first-store flush finish within the normal exit budget", async () => {
+    jest.useFakeTimers()
+    const { proc, exit, fire } = fakeProcess()
+    const restore = jest.fn()
+    const onFlushError = jest.fn()
+    installTuiExitSignals({
+      proc,
+      flush: () => new Promise((resolve) => setTimeout(resolve, 6_000)),
+      restore,
+      onFlushError,
+    })
+    try {
+      fire("SIGINT")
+      await jest.advanceTimersByTimeAsync(5_000)
+      expect(exit).not.toHaveBeenCalled()
+      await jest.advanceTimersByTimeAsync(1_000)
+      expect(onFlushError).not.toHaveBeenCalled()
+      expect(restore).toHaveBeenCalledTimes(1)
+      expect(exit).toHaveBeenCalledWith(130)
+    } finally {
+      await jest.runAllTimersAsync()
+      jest.useRealTimers()
+    }
+  })
+
   it("exits at once on a second signal while the flush is still running", async () => {
     const { proc, exit, fire } = fakeProcess()
-    installTuiExitSignals({ proc, flush: () => new Promise(() => {}), restore: () => {} })
+    installTuiExitSignals({
+      proc,
+      flush: () => new Promise(() => {}),
+      restore: () => {},
+      timeoutMs: 50,
+    })
     fire("SIGTERM")
     fire("SIGINT")
     expect(exit).toHaveBeenCalledWith(130)

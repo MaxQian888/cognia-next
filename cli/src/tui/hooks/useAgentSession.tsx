@@ -1249,9 +1249,21 @@ export function useAgentSession({
         })
         return
       }
-      const cp = checkpoint.list().find((c) => c.seq === seq)
+      const matches = checkpoint.list().filter((c) => c.seq === seq)
+      const cp = matches[0]
       if (!cp) {
         dispatch({ type: "NOTICE", message: `Checkpoint #${seq} not found.` })
+        return
+      }
+      // Sessions resumed before numbering continued across restarts can hold
+      // two checkpoints with one number. Refuse rather than restore whichever
+      // happens to sort first.
+      if (matches.length > 1) {
+        const t = createCliTranslator(configRef.current.locale, "cliUiCommon")
+        dispatch({
+          type: "NOTICE",
+          message: t("rewindAmbiguousCheckpoint", { seq, count: matches.length }),
+        })
         return
       }
       if (scope === "files" || scope === "both") {

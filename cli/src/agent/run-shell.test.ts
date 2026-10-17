@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import {
+  hasActiveInteractiveShell,
   runInteractiveShell,
   runShell,
   type InteractiveShellChild,
@@ -218,6 +219,7 @@ describe("runShell", () => {
 
 describe("runInteractiveShell", () => {
   it("consumes terminal SIGINT only until the child closes and marks interruption", async () => {
+    expect(hasActiveInteractiveShell()).toBe(false)
     const before = process.listeners("SIGINT")
     const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
     const kill = jest.fn()
@@ -230,12 +232,14 @@ describe("runInteractiveShell", () => {
       }),
     })
     const installed = process.listeners("SIGINT").filter((listener) => !before.includes(listener))
+    expect(hasActiveInteractiveShell()).toBe(true)
     expect(installed).toHaveLength(1)
     installed[0]("SIGINT")
     expect(kill).not.toHaveBeenCalled()
     handlers.close?.forEach((cb) => cb(0, null))
     await expect(promise).resolves.toMatchObject({ code: 0, aborted: true })
     expect(process.listeners("SIGINT")).toEqual(before)
+    expect(hasActiveInteractiveShell()).toBe(false)
   })
 
   it.each(["throw", "error"])("restores SIGINT handling after a spawn %s", async (failure) => {
@@ -254,6 +258,29 @@ describe("runInteractiveShell", () => {
     handlers.error?.forEach((cb) => cb(new Error("spawn failed")))
     await expect(promise).resolves.toMatchObject({ code: 1 })
     expect(process.listeners("SIGINT")).toEqual(before)
+    expect(hasActiveInteractiveShell()).toBe(false)
+  })
+
+  it("keeps terminal interrupt ownership until all interactive children finish", async () => {
+    const closers: Array<() => void> = []
+    const spawn: InteractiveShellSpawn = () => ({
+      on(event, callback) {
+        if (event === "close") closers.push(() => callback(0))
+      },
+    })
+    const first = runInteractiveShell("first", { spawn })
+    const second = runInteractiveShell("second", { spawn })
+    try {
+      expect(hasActiveInteractiveShell()).toBe(true)
+      closers[0]()
+      await first
+      expect(hasActiveInteractiveShell()).toBe(true)
+    } finally {
+      closers[0]()
+      closers[1]()
+      await Promise.all([first, second])
+    }
+    expect(hasActiveInteractiveShell()).toBe(false)
   })
 
   it.each([
