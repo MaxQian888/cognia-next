@@ -29,7 +29,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::process::ExternalAgentSpawnConfig;
+use super::process::{ExternalAgentSpawnConfig, ExternalAgentSandboxPolicy, SandboxNetworkMode, SandboxReadableScope};
 
 /// Explicit launcher override. Same variable the CLI honours, so a developer
 /// pointing one host at a freshly built launcher points both.
@@ -48,6 +48,7 @@ pub enum SandboxError {
     /// No home directory to derive agent state roots from.
     MissingHome,
     InvalidQoderConfigDir,
+    InvalidPolicy(String),
     InvalidClineConfigDir,
     InvalidKimiConfigDir,
     /// The configuration asked for a private state root
@@ -87,6 +88,7 @@ impl std::fmt::Display for SandboxError {
                 "The external-agent sandbox requires a working directory; set one on the agent \
                  before starting a session."
             ),
+            Self::InvalidPolicy(reason) => write!(f, "Invalid external-agent sandbox policy: {reason}"),
             Self::InvalidClineConfigDir => write!(f, "Cline ACP requires a nonempty --config or CLINE_DIR inside the Bot state directory when isolated; --data-dir is unsupported in ACP."),
             Self::InvalidKimiConfigDir => write!(f, "Kimi state directory must be nonempty and stay inside the Bot state directory when isolated."),
             Self::InvalidQoderConfigDir => write!(f, "Qoder config directory must be nonempty and stay inside the Bot state directory when isolated."),
@@ -314,6 +316,17 @@ pub fn build_sandbox_launcher_args(
     home: &Path,
     tool_host_dir: &Path,
 ) -> Vec<String> {
+    build_sandbox_launcher_args_with_policy(command, args, cwd, home, tool_host_dir, &Default::default())
+}
+
+pub fn build_sandbox_launcher_args_with_policy(
+    command: &str,
+    args: &[String],
+    cwd: &str,
+    home: &Path,
+    tool_host_dir: &Path,
+    policy: &ExternalAgentSandboxPolicy,
+) -> Vec<String> {
     let mut writable = vec![PathBuf::from(cwd)];
     writable.extend(agent_state_writable_roots(command, args, home));
     writable.push(tool_host_dir.to_path_buf());
@@ -323,19 +336,62 @@ pub fn build_sandbox_launcher_args(
         out.push("--writable".to_string());
         out.push(root.to_string_lossy().into_owned());
     }
-    out.push("--readable".to_string());
-    out.push(home.to_string_lossy().into_owned());
+    if policy.readable_scope == SandboxReadableScope::Workspace {
+        out.push("--workspace-readable".into());
+        for root in workspace_toolchain_readable_roots(command, home) {
+            out.extend(["--readable".into(), root.to_string_lossy().into_owned()]);
+        }
+    } else {
+        out.extend(["--readable".into(), home.to_string_lossy().into_owned()]);
+    }
     if base_command(command) == "aider" {
         for file in aider_implicit_config_paths(Path::new(cwd), home) {
             out.push("--deny-readable".into());
             out.push(file.to_string_lossy().into_owned());
         }
     }
-    out.push("--network".to_string());
+    out.extend(sandbox_network_args(policy));
     out.push("--".to_string());
     out.push(command.to_string());
     out.extend(args.iter().cloned());
     out
+}
+
+/// Policy flags are deliberately independent of platform and bot isolation.
+fn sandbox_network_args(policy: &ExternalAgentSandboxPolicy) -> Vec<String> {
+    match policy.network {
+        SandboxNetworkMode::Full => vec!["--network".into()],
+        SandboxNetworkMode::Off => vec![],
+        SandboxNetworkMode::Allowlist => policy.allowed_hosts.iter()
+            .flat_map(|host| ["--network-allow".into(), host.clone()]).collect(),
+    }
+}
+
+/// Resolve the actual executable and its install prefix, without opening home.
+/// System loader roots are supplied by LaunchScope; state/workspace roots are writable.
+fn workspace_toolchain_readable_roots(command: &str, home: &Path) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = [".local/bin", ".cargo/bin", ".rustup/toolchains", ".gitconfig", ".config/git"]
+        .iter().map(|relative| home.join(relative)).collect();
+    if base_command(command) == "npx" { roots.push(home.join(".npm")); }
+    let canonical_home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    let broad_roots = [home.to_path_buf(), home.join(".local"), home.join(".cargo"),
+        canonical_home.clone(), canonical_home.join(".local"), canonical_home.join(".cargo")];
+    // npm/native wrappers may depend on Node even when the selected command is a script.
+    for binary in [command, "node"] {
+        if let Some(found) = super::command_resolver::resolve_command_path(binary) {
+            for executable in [Some(found.clone()), std::fs::canonicalize(&found).ok()].into_iter().flatten() {
+                if let Some(parent) = executable.parent() {
+                    let prefix = executable.ancestors().find(|dir| dir.file_name().is_some_and(|name| name == "node_modules"))
+                        .or_else(|| if parent.file_name().is_some_and(|name| name == "bin") { parent.parent() } else { Some(parent) });
+                    let prefix = prefix.map(|prefix| if broad_roots.iter().any(|root| root == prefix) { parent } else { prefix });
+                    if let Some(prefix) = prefix.filter(|prefix| *prefix != home && *prefix != Path::new("/")) {
+                        if !roots.iter().any(|root| root == prefix) { roots.push(prefix.to_path_buf()); }
+                    }
+                }
+            }
+        }
+    }
+    roots
 }
 
 /// Mirrors aiderImplicitConfigPaths in the CLI launcher. Aider searches these
@@ -599,6 +655,13 @@ pub trait SandboxHost {
     /// unknown, which refuses every isolated launch.
     fn agent_state_data_dir(&self) -> Option<PathBuf> {
         None
+    }
+    /// This host's live upstream proxy policy for an allowlisted launch's
+    /// filtering proxy (see [`cognia_exec_sandbox::net_proxy::UPSTREAM_POLICY_ENV`]).
+    /// `Ok(None)` lets the launcher derive one from the agent's environment;
+    /// `Err` (a blocked policy) refuses the launch.
+    fn upstream_proxy_policy(&self) -> Result<Option<String>, String> {
+        cognia_exec_sandbox::net_proxy::host_upstream_policy()
     }
 }
 
@@ -1014,6 +1077,7 @@ pub fn wrap_with_sandbox(
         .ok_or(SandboxError::MissingCwd)?;
 
     let mut config = config;
+    config.sandbox_policy.validate().map_err(SandboxError::InvalidPolicy)?;
     let isolation = crate::state_isolation::apply_state_isolation(
         &mut config,
         host.agent_state_data_dir().as_deref(),
@@ -1062,7 +1126,6 @@ pub fn wrap_with_sandbox(
             state.clone(),
             "--writable".into(),
             tool_host_dir.to_string_lossy().into_owned(),
-            "--network".into(),
             "--".into(),
             config.command.clone(),
         ]
@@ -1070,9 +1133,11 @@ pub fn wrap_with_sandbox(
         .chain(config.args.clone())
         .collect()
     } else {
-        build_sandbox_launcher_args(&config.command, &config.args, &cwd, &home, &tool_host_dir)
+        build_sandbox_launcher_args_with_policy(&config.command, &config.args, &cwd, &home, &tool_host_dir, &config.sandbox_policy)
     };
     if bot_isolation {
+        let separator = args.iter().position(|arg| arg == "--").expect("target separator");
+        args.splice(separator..separator, sandbox_network_args(&config.sandbox_policy));
         // The launcher owns env/keychain confinement too. An old launcher
         // rejects this flag instead of silently running with a weaker policy.
         args.splice(
@@ -1122,6 +1187,7 @@ pub fn wrap_with_sandbox(
                 home.to_string_lossy().into_owned(),
             ],
         );
+        if config.sandbox_policy.readable_scope == SandboxReadableScope::Home {
         args.splice(
             0..0,
             [
@@ -1129,6 +1195,11 @@ pub fn wrap_with_sandbox(
                 host_home.to_string_lossy().into_owned(),
             ],
         );
+        } else {
+            for root in workspace_toolchain_readable_roots(&config.command, &host_home) {
+                args.splice(0..0, ["--readable".into(), root.to_string_lossy().into_owned()]);
+            }
+        }
         for relative in [
             ".codex",
             ".claude",
@@ -1219,6 +1290,25 @@ pub fn wrap_with_sandbox(
     let mut env = config.env.clone();
     env.remove(CODEX_WRITABLE_ROOTS_ENV);
     env.remove(CODEX_WRITABLE_CEILING_ENV);
+    // Only this host supplies the upstream policy, never the caller's env.
+    env.remove(cognia_exec_sandbox::net_proxy::UPSTREAM_POLICY_ENV);
+    if config.sandbox_policy.network == SandboxNetworkMode::Allowlist {
+        if let Some(policy) = host
+            .upstream_proxy_policy()
+            .map_err(SandboxError::InvalidPolicy)?
+        {
+            let dir = host.temp_dir().join(format!(
+                "cognia-upstream-{}",
+                host.uid().map(|uid| uid.to_string()).unwrap_or_else(|| "user".into())
+            ));
+            let path = cognia_exec_sandbox::net_proxy::write_upstream_policy_file(&dir, &policy)
+                .map_err(|error| SandboxError::InvalidPolicy(format!("upstream proxy policy: {error}")))?;
+            env.insert(
+                cognia_exec_sandbox::net_proxy::UPSTREAM_POLICY_ENV.into(),
+                path.to_string_lossy().into_owned(),
+            );
+        }
+    }
     if let Some(root) = &kimi_root {
         let default_root = home.join(".kimi-code").to_string_lossy().into_owned();
         while let Some(index) = args
@@ -1341,6 +1431,126 @@ mod tests {
     /// The desktop wrapper and a container never both apply, and a placement
     /// nothing will route is wrapped because it falls back to this host.
     #[test]
+    fn sandbox_policy_modes_platforms_and_bot_isolation() {
+        for os in ["macos", "linux", "windows"] {
+            for mode in [SandboxNetworkMode::Full, SandboxNetworkMode::Allowlist, SandboxNetworkMode::Off] {
+                for bot in [false, true] {
+                    for readable_scope in [SandboxReadableScope::Home, SandboxReadableScope::Workspace] {
+                        let host = FakeHost::new(os);
+                        let mut cfg = config("codex", &[], Some("/work/project"));
+                        cfg.sandbox_policy = ExternalAgentSandboxPolicy {
+                            network: mode, allowed_hosts: vec!["api.example.com".into(), "*.example.org".into()], readable_scope,
+                        };
+                        if bot {
+                            cfg.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+                            cfg.env.insert("COGNIA_BOT_STATE_DIR".into(), "/work/state".into());
+                        }
+                        let wrapped = wrap_with_sandbox(cfg, &host);
+                        if os == "windows" { assert!(matches!(wrapped, Err(SandboxError::UnsupportedPlatform(_)))); continue; }
+                        let args = wrapped.unwrap().args;
+                        assert_eq!(args.iter().any(|arg| arg == "--network"), mode == SandboxNetworkMode::Full);
+                        assert_eq!(args.windows(2).filter(|pair| pair[0] == "--network-allow").count(), if mode == SandboxNetworkMode::Allowlist { 2 } else { 0 });
+                        assert_eq!(args.windows(2).any(|pair| pair == ["--readable", "/home/dev"]), !bot && readable_scope == SandboxReadableScope::Home);
+                        assert_eq!(args.iter().any(|arg| arg == "--workspace-readable"), !bot && readable_scope == SandboxReadableScope::Workspace);
+                        if bot { assert!(args.windows(2).any(|pair| pair == ["--deny-readable", "/home/dev"])); }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn allowlisted_launch_hands_the_host_upstream_policy_through_a_private_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let policy = r#"{"mode":"manual","host":"proxy.corp","port":3128,"password":"s3cret"}"#;
+        let mut host = FakeHost::new("macos");
+        host.temp = Some(temp.path().to_path_buf());
+        host.upstream = Some(Ok(Some(policy.to_string())));
+        let mut cfg = config("codex", &[], Some("/work/project"));
+        cfg.sandbox_policy.network = SandboxNetworkMode::Allowlist;
+        cfg.sandbox_policy.allowed_hosts = vec!["api.openai.com".into()];
+        // A caller can never point the launcher at a policy of its choosing.
+        cfg.env.insert(
+            cognia_exec_sandbox::net_proxy::UPSTREAM_POLICY_ENV.into(),
+            "/tmp/forged.json".into(),
+        );
+        let wrapped = wrap_with_sandbox(cfg.clone(), &host).unwrap();
+        let path = PathBuf::from(&wrapped.env[cognia_exec_sandbox::net_proxy::UPSTREAM_POLICY_ENV]);
+        assert!(path.starts_with(temp.path().join("cognia-upstream-501")));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), policy);
+        assert!(
+            !wrapped.env.values().any(|value| value.contains("s3cret")),
+            "the password travels only inside the file"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+
+        // Full network starts no proxy, so no policy is handed over, and a
+        // caller-supplied variable is still stripped.
+        let mut full = cfg.clone();
+        full.sandbox_policy.network = SandboxNetworkMode::Full;
+        assert!(!wrap_with_sandbox(full, &host)
+            .unwrap()
+            .env
+            .contains_key(cognia_exec_sandbox::net_proxy::UPSTREAM_POLICY_ENV));
+
+        // A blocked host policy refuses the allowlisted launch.
+        host.upstream = Some(Err("blocked".into()));
+        assert!(matches!(
+            wrap_with_sandbox(cfg, &host),
+            Err(SandboxError::InvalidPolicy(_))
+        ));
+    }
+
+    #[test]
+    fn sandbox_workspace_keeps_git_toolchain_and_aider_denies() {
+        let mut cfg = config("aider", &[], Some("/work/project"));
+        cfg.sandbox_policy.readable_scope = SandboxReadableScope::Workspace;
+        cfg.sandbox_policy.network = SandboxNetworkMode::Allowlist;
+        let args = wrap_with_sandbox(cfg, &FakeHost::new("linux")).unwrap().args;
+        for root in ["/home/dev/.gitconfig", "/home/dev/.config/git", "/home/dev/.cargo/bin"] {
+            assert!(args.windows(2).any(|pair| pair == ["--readable", root]));
+        }
+        assert!(args.windows(2).any(|pair| pair == ["--deny-readable", "/home/dev/.aider.conf.yml"]));
+        assert!(!args.iter().any(|arg| arg == "--network" || arg == "--network-allow"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sandbox_workspace_resolves_symlinked_toolchain_without_reading_local_share() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        let modules = home.join(".nvm/versions/node/v22/lib/node_modules");
+        let executable = modules.join("agent/bin/agent");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let link = bin.join("codex");
+        symlink(&executable, &link).unwrap();
+        let roots = workspace_toolchain_readable_roots(link.to_str().unwrap(), home);
+        assert!(roots.contains(&bin));
+        assert!(roots.contains(&std::fs::canonicalize(modules).unwrap()));
+        assert!(!roots.contains(&home.join(".local")));
+        assert!(!roots.contains(&std::fs::canonicalize(home.join(".local")).unwrap()));
+        assert!(!roots.contains(&home.to_path_buf()));
+    }
+
+    #[test]
+    fn sandbox_invalid_policy_never_prepares_or_launches() {
+        let mut cfg = config("codex", &[], Some("/work/project"));
+        cfg.sandbox_policy.allowed_hosts = vec!["https://example.com".into()];
+        let host = FakeHost::new("macos");
+        assert!(matches!(wrap_with_sandbox(cfg, &host), Err(SandboxError::InvalidPolicy(_))));
+        assert!(host.dirs.borrow().is_empty());
+    }
+
+    #[test]
     fn the_desktop_wrapper_stands_down_only_for_a_routed_placement() {
         let mut config: ExternalAgentSpawnConfig = serde_json::from_value(serde_json::json!({
             "id": "a", "command": "codex", "args": [], "env": {}, "cwd": "/tmp"
@@ -1373,6 +1583,8 @@ mod tests {
         files: RefCell<Vec<PathBuf>>,
         plugin_root: Option<PathBuf>,
         state_data_dir: Option<PathBuf>,
+        temp: Option<PathBuf>,
+        upstream: Option<Result<Option<String>, String>>,
     }
 
     impl FakeHost {
@@ -1395,10 +1607,13 @@ mod tests {
             self.home.clone()
         }
         fn temp_dir(&self) -> PathBuf {
-            PathBuf::from("/tmp")
+            self.temp.clone().unwrap_or_else(|| PathBuf::from("/tmp"))
         }
         fn uid(&self) -> Option<u32> {
             Some(501)
+        }
+        fn upstream_proxy_policy(&self) -> Result<Option<String>, String> {
+            self.upstream.clone().unwrap_or(Ok(None))
         }
         fn launcher_candidates(&self) -> Vec<PathBuf> {
             self.candidates.clone()
@@ -1428,6 +1643,7 @@ mod tests {
             env: HashMap::new(),
             cwd: cwd.map(|value| value.to_string()),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         }
     }

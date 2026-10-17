@@ -557,7 +557,8 @@ fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String
         writable: vec![cwd],
         readable: sandbox_home_readable(),
         denied_readable: Vec::new(),
-        network: req.sandbox_network.unwrap_or(true),
+        network: if req.sandbox_network.unwrap_or(true) { cognia_exec_sandbox::types::NetworkPolicy::On } else { cognia_exec_sandbox::types::NetworkPolicy::Off },
+        ..Default::default()
     };
     #[cfg(target_os = "linux")]
     {

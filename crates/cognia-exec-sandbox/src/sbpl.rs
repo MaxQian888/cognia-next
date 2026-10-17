@@ -51,6 +51,24 @@ pub(crate) fn push_loadability_base(out: &mut String) {
     out.push_str("(allow file-write-data (literal \"/dev/null\"))\n");
 }
 
+/// Workspace-scoped launches still need loader metadata and the OS runtime,
+/// but must not inherit the legacy global content-read rule. Declared roots are
+/// added by the launcher; the credential deny floor is applied afterwards.
+pub(crate) fn push_scoped_loadability_base(out: &mut String) {
+    out.push_str("(allow process*)\n(allow mach-lookup)\n(allow sysctl-read)\n");
+    out.push_str("(allow file-read-metadata)\n");
+    out.push_str("(allow file-write-data (literal \"/dev/null\"))\n");
+    for root in [
+        "/dev",
+        "/Library/Apple",
+        "/Library/Preferences",
+        "/private/var/db/dyld",
+        "/private/var/db/timezone",
+    ] {
+        out.push_str(&format!("(allow file-read* (subpath \"{root}\"))\n"));
+    }
+}
+
 /// Write-deny every protected path under each writable root, and read-deny the
 /// SECRET ones as well.
 ///
@@ -295,6 +313,15 @@ fn push_read_deny(out: &mut String, escaped: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn workspace_loadability_does_not_grant_global_content_reads() {
+        let mut profile = String::new();
+        super::push_scoped_loadability_base(&mut profile);
+        assert!(profile.contains("(allow file-read-metadata)"));
+        assert!(!profile.contains("(allow file-read*)\n"));
+        assert!(profile.contains("/private/var/db/dyld"));
+    }
+
     use super::*;
 
     #[test]

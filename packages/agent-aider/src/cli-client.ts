@@ -583,6 +583,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       const registered = await this.processHost.spawn({
         id: turn.id,
         command: this._config!.process!.command,
+        sandboxPolicy: this._config!.sandboxPolicy,
         args,
         cwd: record.cwd,
         env: this._config!.process!.env ?? {},

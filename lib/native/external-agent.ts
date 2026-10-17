@@ -9,6 +9,10 @@
  * terminal planes instead of to Tauri (ADR-0217).
  */
 
+import {
+  validateExternalAgentSandboxPolicy,
+  type ExternalAgentProcessSandboxPolicy,
+} from "@cognia/agent-contracts/external-agent"
 import { invoke } from "@tauri-apps/api/core"
 import { listen, UnlistenFn } from "@tauri-apps/api/event"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
@@ -27,6 +31,7 @@ export interface ExternalAgentSpawnConfig {
   args?: string[]
   cwd?: string
   env?: Record<string, string>
+  sandboxPolicy?: ExternalAgentProcessSandboxPolicy
   /**
    * How the host delivers stdout. Defaults to `"line"` (stripped lines on
    * `external-agent://stdout`); `"raw"` forwards undecoded base64 chunks on
@@ -133,6 +138,7 @@ function installedTerminals() {
 }
 
 export async function spawnExternalAgent(config: ExternalAgentSpawnConfig): Promise<string> {
+  validateExternalAgentSandboxPolicy(config.sandboxPolicy)
   // The run's runtime-environment placement, if one was resolved for this
   // agent id. `withSpawnPlacement` returns the same arguments object when
   // there is none, so a deployment without runtime environments sends exactly

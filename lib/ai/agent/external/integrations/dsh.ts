@@ -27,7 +27,13 @@ export function createDshSdkAdapterFactory(
         createDshRuntimeTransport(
           config,
           resolveDshLaunchFromConfig,
-          processHost,
+          {
+            ...processHost,
+            get available() {
+              return processHost.available
+            },
+            spawn: (spec) => processHost.spawn({ ...spec, sandboxPolicy: config.sandboxPolicy }),
+          },
           hasNoLeakingPiiDeep
         ),
     })

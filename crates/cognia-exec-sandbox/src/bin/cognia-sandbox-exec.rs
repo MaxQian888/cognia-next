@@ -189,6 +189,30 @@ async fn run(mode: Mode) -> Result<Envelope, String> {
 }
 
 fn main() {
+    // A standalone process never ran the desktop's proxy_apply: install the
+    // host-provided upstream policy (or the inherited environment's) before
+    // any confined run can start a filtering proxy.
+    // A host-provided policy that does not parse is a host bug: refuse. An
+    // unusable proxy variable in the inherited environment only blocks
+    // upstream dials, so commands that need no network still run.
+    let upstream = match cognia_exec_sandbox::net_proxy::take_upstream_policy_env() {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            eprintln!("cognia-sandbox-exec: {error}");
+            std::process::exit(2);
+        }
+    };
+    if let Err(error) = cognia_exec_sandbox::net_proxy::install_upstream_policy(
+        upstream.as_deref(),
+        |name| std::env::var(name).ok(),
+    ) {
+        if upstream.is_some() {
+            eprintln!("cognia-sandbox-exec: upstream proxy policy: {error}");
+            std::process::exit(2);
+        }
+        eprintln!("cognia-sandbox-exec: allowlisted network disabled: {error}");
+        cognia_exec_sandbox::net_proxy::block_upstream_policy(&error);
+    }
     let mode = match parse_mode(std::env::args().skip(1)) {
         Ok(mode) => mode,
         Err(error) => {

@@ -8,7 +8,7 @@
  * so declaring a need here grants nothing.
  */
 
-import type { ExternalAgentConfig } from "./external-agent"
+import type { ExternalAgentConfig, ExternalAgentProcessSandboxPolicy } from "./external-agent"
 
 /** Release a subscription. Idempotent. */
 export type Unsubscribe = () => void
@@ -25,6 +25,7 @@ export interface AgentProcessSpawnSpec {
   args?: string[]
   cwd?: string
   env?: Record<string, string>
+  sandboxPolicy?: ExternalAgentProcessSandboxPolicy
   /** Validated explicit Codex workspaceWrite grants; the host applies them to the outer OS wrapper. */
   extraWritableRoots?: string[]
   /** Original session ceiling; wrappers canonicalize it independently of requested roots. */

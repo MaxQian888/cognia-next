@@ -38,6 +38,7 @@
  * chain decision, and it belongs to an operator.
  */
 
+import { validateExternalAgentSandboxPolicy } from "@cognia/agent-contracts/external-agent"
 import {
   ExternalAgentConfigConflictError,
   ExternalAgentConfigNotFoundError,
@@ -561,6 +562,7 @@ export async function createHostExternalAgentConfig(
   input: CreateHostConfigInput,
   deps: HostConfigServiceDeps
 ): Promise<ExternalAgentConfigRecord> {
+  validateExternalAgentSandboxPolicy(input.config.sandboxPolicy)
   let incoming = input.config
   if (input.fromImport) {
     incoming = {
@@ -630,6 +632,7 @@ export async function updateHostExternalAgentConfig(
   if (current.tombstonedAt !== undefined) {
     throw new ExternalAgentConfigNotFoundError(input.configId)
   }
+  validateExternalAgentSandboxPolicy(input.patch.sandboxPolicy)
   const { id: _ignoredId, ...patch } = input.patch
   if (patch.credentialRefs !== undefined) {
     assertOwnCredentialRefs(patch.credentialRefs, input.configId)

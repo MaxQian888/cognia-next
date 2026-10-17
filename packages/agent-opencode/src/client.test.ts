@@ -450,7 +450,11 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
 
     const a = new OpenCodeClientAdapter(deps())
     await a.connect(
-      buildConfig({ metadata: { autoSpawnServer: true }, process: { command: "opencode" } })
+      buildConfig({
+        metadata: { autoSpawnServer: true },
+        process: { command: "opencode" },
+        sandboxPolicy: { network: "off" },
+      })
     )
 
     expect(mockSpawn).toHaveBeenCalledWith(
@@ -458,6 +462,7 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
         id: "opencode-server-agent",
         command: "opencode",
         args: expect.arrayContaining(["serve", "--port=0"]),
+        sandboxPolicy: { network: "off" },
       })
     )
     expect(mockCreateOpencodeClient).toHaveBeenCalledWith(

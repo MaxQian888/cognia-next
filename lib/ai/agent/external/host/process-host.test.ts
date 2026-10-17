@@ -28,6 +28,25 @@ function recordingPlane() {
 }
 
 describe("createProcessPlaneHost", () => {
+  it("carries sandbox policy as a typed field and rejects invalid hosts before spawn", async () => {
+    const { plane, invoke } = recordingPlane()
+    const host = createProcessPlaneHost(plane, () => true)
+    const sandboxPolicy = {
+      network: "allowlist" as const,
+      allowedHosts: ["api.example.com"],
+      readableScope: "workspace" as const,
+    }
+    await host.spawn({ id: "agent", command: "codex", sandboxPolicy })
+    expect(invoke).toHaveBeenCalledWith("spawn_external_agent", {
+      config: { id: "agent", command: "codex", sandboxPolicy },
+    })
+    invoke.mockClear()
+    await expect(
+      host.spawn({ id: "agent", command: "codex", sandboxPolicy: { allowedHosts: ["bad/path"] } })
+    ).rejects.toThrow("allowed host")
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
   it("transports validated writable roots and replaces caller-owned launch hints", async () => {
     const { plane, invoke } = recordingPlane()
     await createProcessPlaneHost(plane, () => true).spawn({

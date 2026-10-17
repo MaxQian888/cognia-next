@@ -1723,6 +1723,7 @@ describe("AcpClientAdapter — Goose permission modes", () => {
     const adapter = new AcpClientAdapter(acpDeps())
     const config = {
       ...stdioConfig(),
+      sandboxPolicy: { network: "off" as const, readableScope: "workspace" as const },
       metadata: {},
       process: {
         command: "goose",
@@ -1739,6 +1740,7 @@ describe("AcpClientAdapter — Goose permission modes", () => {
       expect.objectContaining({
         config: expect.objectContaining({
           env: expect.objectContaining({ GOOSE_MODE: "approve", GOOSE_MODEL: "test-model" }),
+          sandboxPolicy: { network: "off", readableScope: "workspace" },
         }),
       })
     )

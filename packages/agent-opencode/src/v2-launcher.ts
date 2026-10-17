@@ -194,6 +194,7 @@ export async function launchOpenCodeV2Service(
     await host.spawn({
       id,
       command: config.process?.command ?? "opencode",
+      sandboxPolicy: config.sandboxPolicy,
       args: ["serve", ...(config.process?.args ?? []), "--hostname=127.0.0.1", "--port=0"],
       cwd,
       env: {

@@ -313,13 +313,56 @@ describe("useExternalAgentStore addAgentFromPreset", () => {
     const cogniaModel = { providerId: "openai", modelId: "gpt-5" }
     const id = useExternalAgentStore.getState().addAgentFromPreset("codex", {
       name: "Codex (strict)",
+      sandboxPolicy: {
+        network: "allowlist",
+        allowedHosts: ["api.example.com"],
+        readableScope: "workspace",
+      },
       codexOptions: { sandboxMode: "readOnly" },
       cogniaModel,
     })
     const agent = useExternalAgentStore.getState().getAgent(id!)
     expect(agent?.name).toBe("Codex (strict)")
+    expect(agent?.sandboxPolicy).toEqual({
+      network: "allowlist",
+      allowedHosts: ["api.example.com"],
+      readableScope: "workspace",
+    })
+    useExternalAgentStore.getState().updateAgent(id!, { sandboxPolicy: { network: "off" } })
+    expect(
+      useExternalAgentStore
+        .getState()
+        .exportAgents()
+        .find((entry) => entry.id === id)?.sandboxPolicy
+    ).toEqual({ network: "off" })
+    expect(() =>
+      useExternalAgentStore
+        .getState()
+        .updateAgent(id!, { sandboxPolicy: { allowedHosts: ["bad/path"] } })
+    ).toThrow("allowed host")
+
     expect(agent?.codexOptions).toEqual({ sandboxMode: "readOnly" })
     expect(agent?.cogniaModel).toMatchObject(cogniaModel)
+    const saved = useExternalAgentStore.getState().getAgent(id!)!
+    expect(() =>
+      useExternalAgentStore
+        .getState()
+        .replaceAgentConfig(id!, { ...saved, sandboxPolicy: { allowedHosts: ["bad/path"] } })
+    ).toThrow("allowed host")
+    expect(() =>
+      useExternalAgentStore
+        .getState()
+        .importAgents([{ ...saved, sandboxPolicy: { allowedHosts: ["bad/path"] } }])
+    ).toThrow("allowed host")
+    useExternalAgentStore
+      .getState()
+      .importAgents([
+        { ...saved, sandboxPolicy: { network: "allowlist", allowedHosts: ["api.example.com"] } },
+      ])
+    expect(useExternalAgentStore.getState().getAgent(id!)?.sandboxPolicy).toEqual({
+      network: "allowlist",
+      allowedHosts: ["api.example.com"],
+    })
   })
 
   it("normalizes an already-attached validity snapshot", () => {

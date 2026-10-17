@@ -61505,6 +61505,33 @@
                   "null"
                 ]
               },
+              "sandboxPolicy": {
+                "type": "object",
+                "properties": {
+                  "network": {
+                    "type": "string",
+                    "enum": [
+                      "full",
+                      "allowlist",
+                      "off"
+                    ]
+                  },
+                  "allowedHosts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "readableScope": {
+                    "type": "string",
+                    "enum": [
+                      "home",
+                      "workspace"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
               "framing": {
                 "type": "string",
                 "enum": [
@@ -89866,5 +89893,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "91768ecbc2286c095e346a85838cc761db04a0d2902c505dbd1a597694c16863"
+  "catalogHash": "c3230d86e5fe802ada4406024e8f8995e1609554329718f3561941d7eec3bed5"
 }

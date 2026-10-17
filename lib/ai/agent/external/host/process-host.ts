@@ -13,6 +13,7 @@
  * in `agent-transport` (placement) and in the host behind the plane.
  */
 
+import { validateExternalAgentSandboxPolicy } from "@cognia/agent-contracts/external-agent"
 import type {
   AgentProcessExitEvent,
   AgentProcessHost,
@@ -62,6 +63,7 @@ export function createProcessPlaneHost(
       return isAvailable()
     },
     spawn: async (spec) => {
+      validateExternalAgentSandboxPolicy(spec.sandboxPolicy)
       const env = spec.env ? { ...spec.env } : undefined
       if (env) {
         delete env.COGNIA_AGENT_CODEX_WRITABLE_ROOTS
@@ -87,6 +89,7 @@ export function createProcessPlaneHost(
             : env
               ? { env }
               : {}),
+          ...(spec.sandboxPolicy !== undefined ? { sandboxPolicy: spec.sandboxPolicy } : {}),
           ...(spec.framing ? { framing: spec.framing } : {}),
         },
       })

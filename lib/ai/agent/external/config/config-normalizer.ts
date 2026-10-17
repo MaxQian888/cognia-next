@@ -1,3 +1,4 @@
+import { validateExternalAgentSandboxPolicy } from "@cognia/agent-contracts/external-agent"
 import { nanoid } from "nanoid"
 import { supportsExternalAgents } from "../agent-transport"
 import {
@@ -694,6 +695,7 @@ export function normalizeExternalAgentConfigInput(
     runtimeIsTauri?: boolean
   }
 ): ExternalAgentConfig {
+  validateExternalAgentSandboxPolicy(input.sandboxPolicy)
   const now = options?.now ?? new Date()
   const protocol = input.protocol
   const metadata: Record<string, unknown> = {
@@ -742,6 +744,7 @@ export function normalizeExternalAgentConfigInput(
     autoApprovePatterns: input.autoApprovePatterns,
     requireApprovalFor: input.requireApprovalFor,
     codexOptions: input.codexOptions,
+    sandboxPolicy: input.sandboxPolicy,
     cogniaModel: normalizeCogniaModelBinding(input.cogniaModel),
     timeout: input.timeout ?? DEFAULT_TIMEOUT,
     retryConfig: {

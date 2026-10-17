@@ -57,6 +57,15 @@ maxCpuSeconds: { type: "integer", minimum: 0 },
 maxMemoryMb: { type: "integer", minimum: 0 },
 ```
 
+## 外部 Agent 使用独立的进程策略
+
+以上工具采用逐次调用的策略。本地启动的外部 Agent 则使用保存的 `sandboxPolicy`：网络为
+`full`（默认）、`allowlist` 或 `off`，可读范围为 `home`（默认）或 `workspace`。外部 Agent 的
+空允许列表等效于关闭网络，与要求非空主机列表的 `sandbox_bash` 不同。两条路径共用处理
+CONNECT 与 absolute-form HTTP 的过滤代理。外部 Agent 策略由 macOS 和 Linux launcher
+执行，在 Windows 上不生效。主机语法、范围例外、生命周期及协议限制见
+[外部 Agent 进程策略](./os-backends#外部-agent-进程策略)。
+
 ## Linux 网络 allowlist
 
 `sandbox_bash` 的 `network: "allowlist"` 要求非空 `networkHosts`。Linux 通过独立 network

@@ -50,7 +50,8 @@ pub fn code_sandbox_scope(scratch: &Path, node_root: &Path, sidecar_root: &Path)
             canonical_for_policy(node_root),
             canonical_for_policy(sidecar_root),
         ],
-        network: false,
+        network: cognia_exec_sandbox::types::NetworkPolicy::Off,
+        ..Default::default()
     }
 }
 
@@ -175,7 +176,7 @@ mod tests {
     fn scope_denies_network_unconditionally() {
         // Tools are reached over IPC, never a socket, so there is no
         // configuration in which a run_code child should have egress.
-        assert!(!scope().network);
+        assert_eq!(scope().network, cognia_exec_sandbox::types::NetworkPolicy::Off);
     }
 
     #[test]

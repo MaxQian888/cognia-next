@@ -2418,6 +2418,7 @@ pub(crate) mod tests {
             env: HashMap::from([("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string())]),
             cwd: Some(CWD.to_string()),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: Some(SandboxPlacement::Container {
                 hosted_tool_host_lease_ids: Vec::new(),
                 provider: None,

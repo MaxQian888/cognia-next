@@ -814,6 +814,7 @@ mod tests {
             cwd: None,
             env: Default::default(),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: placed.then(|| SandboxPlacement::Container {
                 hosted_tool_host_lease_ids: Vec::new(),
                 provider: None,

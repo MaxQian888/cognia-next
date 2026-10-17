@@ -258,6 +258,7 @@ pub struct SpawnPolicy {
     operator_commands: Vec<String>,
     operator_env: Vec<String>,
     operator_config_error: Option<PolicyViolation>,
+    network_ceiling: crate::process::ExternalAgentSandboxPolicy,
 }
 
 impl SpawnPolicy {
@@ -269,7 +270,32 @@ impl SpawnPolicy {
             operator_commands: Vec::new(),
             operator_env: Vec::new(),
             operator_config_error: None,
+            network_ceiling: Default::default(),
         }
+    }
+
+    /// Set by the host, never by a spawn request. Remote clients may only narrow it.
+    pub fn with_network_ceiling(mut self, policy: crate::process::ExternalAgentSandboxPolicy) -> Result<Self, PolicyViolation> {
+        policy.validate().map_err(PolicyViolation)?;
+        self.network_ceiling = policy;
+        Ok(self)
+    }
+
+    fn validate_sandbox_policy(&self, config: &ExternalAgentSpawnConfig, remote: bool) -> Result<(), PolicyViolation> {
+        use crate::process::SandboxNetworkMode;
+        config.sandbox_policy.validate().map_err(PolicyViolation)?;
+        if !remote && config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) != Some("1") { return Ok(()); }
+        let request = &config.sandbox_policy;
+        let permitted = match (self.network_ceiling.network, request.network) {
+            (_, SandboxNetworkMode::Off) | (SandboxNetworkMode::Full, _) => true,
+            (SandboxNetworkMode::Allowlist, SandboxNetworkMode::Allowlist) => request.allowed_hosts.iter().all(|host|
+                self.network_ceiling.allowed_hosts.iter().any(|allowed| allowed.trim().eq_ignore_ascii_case(host.trim()))),
+            _ => false,
+        };
+        if !permitted {
+            return Err(PolicyViolation("sandboxPolicy cannot widen the host network policy".into()));
+        }
+        Ok(())
     }
 
     /// Also admit this host's own managed execution roots. See
@@ -349,6 +375,7 @@ impl SpawnPolicy {
         &self,
         mut config: ExternalAgentSpawnConfig,
     ) -> Result<ValidatedSpawn, PolicyViolation> {
+        self.validate_sandbox_policy(&config, true)?;
         self.validate_command(&config.command, &config.args)?;
         crate::devin_mcp_config::validate_target(&config.command, &config.args, &config.env)
             .map_err(PolicyViolation)?;
@@ -392,6 +419,7 @@ impl SpawnPolicy {
         &self,
         mut config: ExternalAgentSpawnConfig,
     ) -> Result<ValidatedSpawn, PolicyViolation> {
+        self.validate_sandbox_policy(&config, false)?;
         self.validate_command(&config.command, &config.args)?;
         crate::devin_mcp_config::validate_target(&config.command, &config.args, &config.env)
             .map_err(PolicyViolation)?;
@@ -877,6 +905,26 @@ fn filter_env_with_additions(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn sandbox_remote_policy_cannot_widen_host_ceiling() {
+        use crate::process::{ExternalAgentSandboxPolicy, SandboxNetworkMode};
+        let (_tmp, policy) = policy(false);
+        let policy = policy.with_network_ceiling(ExternalAgentSandboxPolicy {
+            network: SandboxNetworkMode::Allowlist,
+            allowed_hosts: vec!["api.example.com".into()],
+            ..Default::default()
+        }).unwrap();
+        let mut cfg = config("codex", &[]);
+        assert!(policy.validate(cfg.clone()).unwrap_err().0.contains("cannot widen"));
+        cfg.sandbox_policy.network = SandboxNetworkMode::Allowlist;
+        cfg.sandbox_policy.allowed_hosts = vec!["api.example.com".into()];
+        assert!(policy.validate(cfg.clone()).is_ok());
+        cfg.sandbox_policy.allowed_hosts.push("evil.example".into());
+        assert!(policy.validate(cfg.clone()).is_err());
+        cfg.sandbox_policy.network = SandboxNetworkMode::Off;
+        assert!(policy.validate(cfg).is_ok());
+    }
+
+    #[test]
     fn workspace_port_allowlist_does_not_open_other_cognia_keys() {
         let (_tmp, policy) = policy(false);
         let mut cfg = config("claude", &[]);
@@ -904,6 +952,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         }
     }

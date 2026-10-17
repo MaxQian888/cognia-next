@@ -230,9 +230,13 @@ describe("CodexAppServerAdapter", () => {
       ...config,
       defaultPermissionMode: "acceptEdits",
       codexOptions: { writableRoots: ["/extra", "relative", "/etc"] },
+      sandboxPolicy: { network: "off", readableScope: "workspace" },
     })
     expect(native.spawnExternalAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ extraWritableRoots: ["/extra"] })
+      expect.objectContaining({
+        extraWritableRoots: ["/extra"],
+        sandboxPolicy: { network: "off", readableScope: "workspace" },
+      })
     )
     expect(testLogger.warn).toHaveBeenCalledWith(
       "Ignoring Codex writable root",

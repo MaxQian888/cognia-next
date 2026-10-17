@@ -1,3 +1,5 @@
+import { validateExternalAgentSandboxPolicy } from "@cognia/agent-contracts"
+import { resolveAgentSearchPath } from "./agent-path"
 import { validateCodexWritableRoots } from "@cognia/agent-codex/app-server-client"
 import fs from "node:fs"
 import os from "node:os"
@@ -234,6 +236,7 @@ export function buildSandboxLauncherArgs(
   isolation: StateIsolationPlan | null = null
 ): string[] {
   if (!config.cwd) throw new Error("external-agent sandbox requires a working directory")
+  validateExternalAgentSandboxPolicy(config.sandboxPolicy)
   qoderConfigRoot(config, homedir)
   clineConfigRoot(config, homedir)
   kimiConfigRoot(config, homedir)
@@ -284,14 +287,23 @@ export function buildSandboxLauncherArgs(
     "--cwd",
     config.cwd,
     ...writable.flatMap((root) => ["--writable", root]),
-    ...(!botIsolation ? ["--readable", effectiveHome] : []),
+    ...(!botIsolation
+      ? config.sandboxPolicy?.readableScope === "workspace"
+        ? [
+            "--workspace-readable",
+            ...workspaceToolchainReadableRoots(config.command, homedir).flatMap((root) => [
+              "--readable",
+              root,
+            ]),
+          ]
+        : ["--readable", effectiveHome]
+      : []),
     ...(!botIsolation && devinOriginalConfigRoot(config)
       ? ["--readable", devinOriginalConfigRoot(config)!]
       : []),
     ...(taskHome
       ? [
-          "--readable",
-          homedir,
+          ...(config.sandboxPolicy?.readableScope === "workspace" ? [] : ["--readable", homedir]),
           ...[
             ".codex",
             ".claude",
@@ -313,11 +325,72 @@ export function buildSandboxLauncherArgs(
           ].flatMap((relative) => ["--deny-readable", path.join(homedir, relative)]),
         ]
       : []),
-    "--network",
+    ...(config.sandboxPolicy?.network === "off"
+      ? []
+      : config.sandboxPolicy?.network === "allowlist"
+        ? (config.sandboxPolicy.allowedHosts ?? []).flatMap((host) => ["--network-allow", host])
+        : ["--network"]),
     "--",
     config.command,
     ...(config.args ?? []),
   ]
+}
+
+/** Match the native wrapper: exact install prefixes, never the whole home. */
+export function workspaceToolchainReadableRoots(command: string, home: string): string[] {
+  const roots = new Set(
+    [".local/bin", ".cargo/bin", ".rustup/toolchains", ".gitconfig", ".config/git"].map((root) =>
+      path.join(home, root)
+    )
+  )
+  if (command === "npx") roots.add(path.join(home, ".npm"))
+  const broadRoots = new Set([home, path.join(home, ".local"), path.join(home, ".cargo")])
+  try {
+    const canonicalHome = fs.realpathSync(home)
+    for (const root of [
+      canonicalHome,
+      path.join(canonicalHome, ".local"),
+      path.join(canonicalHome, ".cargo"),
+    ])
+      broadRoots.add(root)
+  } catch {
+    /* A not-yet-created home still has lexical scope guards. */
+  }
+  for (const binary of [command, "node"]) {
+    const candidates = path.isAbsolute(binary)
+      ? [binary]
+      : resolveAgentSearchPath()
+          .split(path.delimiter)
+          .map((dir) => path.join(dir, binary))
+    const found = candidates.find((candidate) => {
+      try {
+        return fs.statSync(candidate).isFile()
+      } catch {
+        return false
+      }
+    })
+    if (!found) continue
+    const executables = [found]
+    try {
+      executables.push(fs.realpathSync(found))
+    } catch {
+      /* Lexical install path remains readable. */
+    }
+    for (const executable of executables) {
+      const parent = path.dirname(executable)
+      let prefix = path.basename(parent) === "bin" ? path.dirname(parent) : parent
+      for (let dir = parent; dir !== path.dirname(dir); dir = path.dirname(dir)) {
+        if (path.basename(dir) === "node_modules") {
+          prefix = dir
+          break
+        }
+      }
+      if ([home, path.join(home, ".local"), path.join(home, ".cargo")].includes(prefix))
+        prefix = parent
+      if (prefix !== home && prefix !== path.parse(prefix).root) roots.add(prefix)
+    }
+  }
+  return [...roots]
 }
 
 /** Aider searches cwd, Git ancestors and home even with explicit --config.
@@ -525,6 +598,7 @@ export async function resolveSandboxedExternalAgentLaunch(
         `(macOS Seatbelt or Linux bubblewrap), and Cognia never runs them unsandboxed.`
     )
   }
+  validateExternalAgentSandboxPolicy(config.sandboxPolicy)
   const launcher = findSandboxLauncher(runtime)
   if (!launcher) {
     throw new Error(

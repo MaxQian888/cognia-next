@@ -116,6 +116,41 @@ describe("applyVerdict", () => {
 })
 
 describe("create", () => {
+  it("preserves sandbox policy and rejects invalid hosts before storing", async () => {
+    const sandboxPolicy = {
+      network: "allowlist" as const,
+      allowedHosts: ["api.example.com"],
+      readableScope: "workspace" as const,
+    }
+    const record = await createHostExternalAgentConfig({ config: config({ sandboxPolicy }) }, ready)
+    expect(record.config.sandboxPolicy).toEqual(sandboxPolicy)
+    await expect(
+      createHostExternalAgentConfig(
+        { config: config({ sandboxPolicy: { allowedHosts: ["bad/path"] } }) },
+        ready
+      )
+    ).rejects.toThrow("allowed host")
+    await expect(
+      updateHostExternalAgentConfig(
+        {
+          configId: record.configId,
+          expectedRevision: record.revision,
+          patch: { sandboxPolicy: { allowedHosts: ["bad:443"] } },
+        },
+        ready
+      )
+    ).rejects.toThrow("allowed host")
+    const updated = await updateHostExternalAgentConfig(
+      {
+        configId: record.configId,
+        expectedRevision: record.revision,
+        patch: { sandboxPolicy: { network: "off" } },
+      },
+      ready
+    )
+    expect(updated.config.sandboxPolicy).toEqual({ network: "off" })
+  })
+
   it("stores a ready config enabled", async () => {
     const record = await createHostExternalAgentConfig({ config: config() }, ready)
     expect(record.lifecycleStatus).toBe("ready")

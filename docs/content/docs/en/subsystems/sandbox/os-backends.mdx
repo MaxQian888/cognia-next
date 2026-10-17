@@ -321,6 +321,52 @@ future optional per-SID Firewall follow-up; it is no longer in the critical path
 - `MockSandboxBackend` (`mock.rs`) — records every `(command, policy)` for assertions, returns a
   canned result (LIFO override via `set_next_result`); `health().backend == "mock"`.
 
+## External-agent process policy
+
+Process-transport external agents (including Codex, Claude Code, OpenCode, Pi and Aider) carry
+`sandboxPolicy` in their saved `ExternalAgentConfig`. Desktop and CLI pass this typed policy through
+the process host to `cognia-external-agent-launcher`; it is not an environment-variable hint.
+The agent editor shows these controls beside the agent-specific sandbox options.
+
+| Setting | Default | Effect on macOS and Linux |
+| --- | --- | --- |
+| `network: "full"` | Yes | Existing unrestricted networking (`--network`). |
+| `network: "allowlist"`, `allowedHosts` | No | Only the listed destinations through the shared filtering proxy (`--network-allow` per host). An empty list is effectively off. |
+| `network: "off"` | No | No outbound network. |
+| `readableScope: "home"` | Yes | Existing home-directory read access. |
+| `readableScope: "workspace"` | No | Workspace, agent state, resolved command/toolchain installation roots, package-runner cache and read-only Git configuration; no blanket home-directory read. |
+
+Protected credential deny floors and Aider's implicit-config denies remain in every mode. Bot
+isolation retains its stricter filesystem scope. A remote client cannot use this policy to widen
+the Host's spawn authorization. The default Host network ceiling remains `full`; a configured
+allowlist ceiling conservatively admits only the same allowlist patterns (case-insensitive, with
+outer whitespace ignored), a subset of those patterns, or `off`. It does not infer narrower domain
+patterns from a wildcard. An `off` ceiling admits only `off`. Agent-native permissions (for example Codex's sandbox mode) can
+restrict access further; they do not replace the outer process policy.
+
+On macOS the launcher supervises the child, starts a TCP proxy before launch and pins SBPL outbound
+TCP to that proxy's loopback port. Off preserves only the existing tool-host Unix-socket exception.
+On Linux, allowlisting uses the existing private network namespace and Unix-socket bridge, with a
+run-bound Ready/Go handshake and target seccomp; off uses `--unshare-net`. The launcher inherits
+stdio, forwards termination signals, waits for the child, shuts down the proxy and propagates the
+child's status. Proxy or bridge setup failure stops launch; it never falls back to full networking.
+The launcher sets uppercase and lowercase proxy variables after caller environment values and
+clears bypass settings. Unsetting those variables in the child cannot restore direct networking.
+
+Allowed hosts accept exact DNS names, exact IP literals and leading `*.domain` patterns. Wildcards
+match subdomains but not the domain itself. Schemes, paths, ports, trailing-dot patterns and wildcard
+IP patterns are invalid. The shared proxy supports HTTPS `CONNECT` tunnels and absolute-form HTTP
+requests, not SOCKS, UDP or arbitrary direct sockets. DNS resolution remains on the Host; private,
+loopback, link-local and metadata destinations stay blocked even when named in the allowlist.
+Tools that ignore HTTP proxy variables, need unsupported Unix IPC on Linux, or require extra files
+outside workspace scope may fail. Include provider, authentication and package-download hosts when
+needed; `off` also prevents online model calls and package downloads.
+
+**Windows has no external-agent OS sandbox today.** The existing strict launch gate refuses local
+external-agent processes on Windows; it does not run them unsandboxed. Both policy fields are saved
+but inert, and the editor labels and disables them there. The Windows one-shot runner described
+above is a separate execution path and does not enable external-agent launches.
+
 ## The second door — `cognia-sandbox-exec`
 
 `run_confined` is a plain `async fn` with no Tauri parameters, but for a long time its only caller

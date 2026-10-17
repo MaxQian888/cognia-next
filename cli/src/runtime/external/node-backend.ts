@@ -1,3 +1,7 @@
+import {
+  validateExternalAgentSandboxPolicy,
+  type ExternalAgentProcessSandboxPolicy,
+} from "@cognia/agent-contracts"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { EventEmitter } from "node:events"
 import fs from "node:fs"
@@ -51,6 +55,31 @@ export interface NodeExternalAgentSpawnConfig {
   env?: Record<string, string>
   /** Defaults to `"line"`; only `pi-rpc` opts into `"raw"`. */
   framing?: ExternalAgentStdoutFraming
+  /** Inert on Windows, which has no external-agent OS sandbox. */
+  sandboxPolicy?: ExternalAgentProcessSandboxPolicy
+}
+
+/** Same conservative subset rule as Rust SpawnPolicy; never interprets a request as authority. */
+export function validateSandboxPolicyCeiling(
+  request: ExternalAgentProcessSandboxPolicy | undefined,
+  ceiling: ExternalAgentProcessSandboxPolicy
+): void {
+  validateExternalAgentSandboxPolicy(request)
+  validateExternalAgentSandboxPolicy(ceiling)
+  const requested = request?.network ?? "full"
+  const maximum = ceiling.network ?? "full"
+  if (maximum === "full" || requested === "off") return
+  if (
+    maximum === "allowlist" &&
+    requested === "allowlist" &&
+    (request?.allowedHosts ?? []).every((host) =>
+      (ceiling.allowedHosts ?? []).some(
+        (allowed) => allowed.trim().toLowerCase() === host.trim().toLowerCase()
+      )
+    )
+  )
+    return
+  throw new Error("sandboxPolicy cannot widen the host network policy")
 }
 
 export interface ExternalAgentLaunch {
@@ -78,6 +107,8 @@ export type ExternalAgentLaunchResolver = (
 export interface NodeExternalAgentBackendOptions {
   workspacesRoot?: string
   allowSmokeAgent?: boolean
+  /** Host-owned ceiling; spawn requests can only narrow it. Defaults to full. */
+  sandboxPolicy?: ExternalAgentProcessSandboxPolicy
   resolveLaunch?: ExternalAgentLaunchResolver
   /** Where per-configuration state roots resolve (ADR-0216). Defaults to this process's host. */
   stateIsolationHost?: StateIsolationHost
@@ -468,6 +499,7 @@ export class NodeExternalAgentBackend {
   private readonly workspacesRoot: string
   private readonly fixedWorkspaceBoundary: boolean
   private selectedWorkspaceRoot?: string
+  private readonly networkCeiling: ExternalAgentProcessSandboxPolicy
   private readonly allowSmokeAgent: boolean
   private readonly resolveLaunch: ExternalAgentLaunchResolver
   private readonly stateIsolationHost: StateIsolationHost
@@ -478,6 +510,11 @@ export class NodeExternalAgentBackend {
     this.workspacesRoot = path.resolve(
       options.workspacesRoot ?? process.env.COGNIA_WORKSPACES_DIR ?? process.cwd()
     )
+    validateExternalAgentSandboxPolicy(options.sandboxPolicy)
+    this.networkCeiling = {
+      ...options.sandboxPolicy,
+      allowedHosts: options.sandboxPolicy?.allowedHosts?.slice(),
+    }
     this.allowSmokeAgent = options.allowSmokeAgent ?? process.env.COGNIA_SMOKE_AGENT === "1"
     this.resolveLaunch = options.resolveLaunch ?? defaultResolveLaunch
     this.stateIsolationHost = options.stateIsolationHost ?? defaultStateIsolationHost()
@@ -600,6 +637,7 @@ export class NodeExternalAgentBackend {
 
   private async spawn(config: NodeExternalAgentSpawnConfig): Promise<string> {
     if (this.processes.has(config.id)) throw new Error(`agent already running: ${config.id}`)
+    validateSandboxPolicyCeiling(config.sandboxPolicy, this.networkCeiling)
     validateCommand(config, this.allowSmokeAgent, this.workspacesRoot)
     const root = this.selectedWorkspaceRoot ?? this.workspacesRoot
     if (this.selectedWorkspaceRoot && fs.realpathSync(root) !== root) {

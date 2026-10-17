@@ -92,6 +92,42 @@ pub enum ExternalAgentStdoutFraming {
     Raw,
 }
 
+/// OS sandbox policy. Windows external agents have no OS sandbox; these fields
+/// are inert there and do not claim network or filesystem enforcement.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExternalAgentSandboxPolicy {
+    #[serde(default)]
+    pub network: SandboxNetworkMode,
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
+    #[serde(default)]
+    pub readable_scope: SandboxReadableScope,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxNetworkMode {
+    #[default]
+    Full,
+    Allowlist,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxReadableScope {
+    #[default]
+    Home,
+    Workspace,
+}
+
+impl ExternalAgentSandboxPolicy {
+    pub fn validate(&self) -> Result<(), String> {
+        cognia_exec_sandbox::launcher::validate_network_allowlist(&self.allowed_hosts)
+    }
+}
+
 /// Configuration for spawning an external agent
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ExternalAgentSpawnConfig {
@@ -117,6 +153,8 @@ pub struct ExternalAgentSpawnConfig {
     /// path unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<crate::sandbox_routing_backend::SandboxPlacement>,
+    #[serde(default, rename = "sandboxPolicy")]
+    pub sandbox_policy: ExternalAgentSandboxPolicy,
 }
 
 /// State of an external agent process
@@ -864,6 +902,19 @@ mod tests {
     }
 
     #[test]
+    fn sandbox_policy_wire_defaults_and_camel_case() {
+        let mut value = serde_json::json!({"id":"agent", "command":"codex"});
+        let legacy: ExternalAgentSpawnConfig = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(legacy.sandbox_policy, ExternalAgentSandboxPolicy::default());
+        value["sandboxPolicy"] = serde_json::json!({"network":"allowlist", "allowedHosts":["api.example.com"], "readableScope":"workspace"});
+        let config: ExternalAgentSpawnConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(config.sandbox_policy.network, SandboxNetworkMode::Allowlist);
+        assert_eq!(config.sandbox_policy.readable_scope, SandboxReadableScope::Workspace);
+        assert_eq!(serde_json::to_value(config).unwrap()["sandboxPolicy"]["allowedHosts"], serde_json::json!(["api.example.com"]));
+        assert!(serde_json::from_value::<ExternalAgentSandboxPolicy>(serde_json::json!({"network":"bogus"})).is_err());
+    }
+
+    #[test]
     fn workspace_env_applies_after_cleared_gateway_environment() {
         let mut command = Command::new("fixture");
         command.env_clear().env("PORT", "user-port");
@@ -1036,6 +1087,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         }
     }
@@ -1241,6 +1293,7 @@ mod tests {
                 ]),
                 cwd: Some(workspace.path().to_string_lossy().into_owned()),
                 framing: Default::default(),
+                sandbox_policy: Default::default(),
                 sandbox: None,
             };
             manager.spawn(config, sink.clone()).await.unwrap();
@@ -1486,6 +1539,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         };
         mgr.spawn(cfg, sink.clone()).await.expect("spawn");

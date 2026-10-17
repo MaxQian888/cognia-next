@@ -792,6 +792,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       args: config.process!.args ?? [],
       env,
       cwd: config.process!.cwd,
+      sandboxPolicy: config.sandboxPolicy,
       extraWritableRoots: this.launchedWritableRoots,
       ...(Array.isArray(config.metadata?.cogniaCodexWritableCeiling)
         ? { writableCeiling: config.metadata.cogniaCodexWritableCeiling as string[] }

@@ -6,6 +6,12 @@ import { EventEmitter } from "node:events"
 import { PassThrough } from "node:stream"
 
 import { EXTERNAL_AGENT_RUNTIMES } from "@/lib/ai/agent/external/config/install-catalog"
+import * as installCatalog from "@/lib/ai/agent/external/config/install-catalog"
+
+jest.mock("@/lib/ai/agent/external/config/install-catalog", () => {
+  const actual = jest.requireActual("@/lib/ai/agent/external/config/install-catalog")
+  return { ...actual, findRuntimeById: jest.fn(actual.findRuntimeById) }
+})
 
 import type { AgentPathRuntime } from "./agent-path"
 import {
@@ -185,6 +191,13 @@ describe("probeRuntimeVersion", () => {
 
   it("omits the executable digest for a package runner", async () => {
     // The resolved file is `npx`; its digest is not the runtime's identity.
+    // Pin a package-runner fixture: the real Codex ACP catalog now uses its
+    // native executable, whose digest must be recorded instead.
+    const entry = installCatalog.findRuntimeById("codex-acp")!
+    jest.mocked(installCatalog.findRuntimeById).mockReturnValueOnce({
+      ...entry,
+      systemCommand: "npx",
+    })
     const child = fakeChild()
     const probing = probeRuntimeVersion("codex-acp", {
       ...withChild(child),

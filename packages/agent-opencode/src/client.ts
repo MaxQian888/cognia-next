@@ -584,6 +584,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       this.processHost.spawn({
         id,
         command,
+        sandboxPolicy: config.sandboxPolicy,
         args,
         env: config.process?.env,
         cwd: config.process?.cwd,

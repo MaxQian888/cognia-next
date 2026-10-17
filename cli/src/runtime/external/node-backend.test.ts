@@ -13,6 +13,7 @@ import {
   isDshLauncherInvocation,
   NodeExternalAgentBackend,
   validateCommand,
+  validateSandboxPolicyCeiling,
 } from "./node-backend"
 import {
   EXTERNAL_AGENT_BINARY_ALLOWLIST,
@@ -1120,5 +1121,28 @@ describe("Codex wrapper transport hint", () => {
         { COGNIA_AGENT_CODEX_WRITABLE_CEILING: '["/ceiling"]' }
       )
     ).not.toHaveProperty("COGNIA_AGENT_CODEX_WRITABLE_CEILING")
+  })
+})
+
+describe("sandbox policy host ceiling", () => {
+  it("permits only narrowing remote and bot policies", () => {
+    const ceiling = { network: "allowlist" as const, allowedHosts: ["api.example.com"] }
+    expect(() => validateSandboxPolicyCeiling(undefined, ceiling)).toThrow("cannot widen")
+    expect(() =>
+      validateSandboxPolicyCeiling(
+        { network: "allowlist", allowedHosts: ["api.example.com"] },
+        ceiling
+      )
+    ).not.toThrow()
+    expect(() =>
+      validateSandboxPolicyCeiling(
+        { network: "allowlist", allowedHosts: ["evil.example"] },
+        ceiling
+      )
+    ).toThrow("cannot widen")
+    expect(() => validateSandboxPolicyCeiling({ network: "off" }, ceiling)).not.toThrow()
+    expect(() => validateSandboxPolicyCeiling({ network: "full" }, { network: "off" })).toThrow(
+      "cannot widen"
+    )
   })
 })

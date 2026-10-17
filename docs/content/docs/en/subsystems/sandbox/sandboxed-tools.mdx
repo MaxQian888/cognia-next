@@ -60,6 +60,16 @@ maxCpuSeconds: { type: "integer", minimum: 0 },
 maxMemoryMb: { type: "integer", minimum: 0 },
 ```
 
+## External agents use a separate process policy
+
+The tools above apply a per-call policy. A locally spawned external agent instead uses its saved
+`sandboxPolicy`: network `full` (default), `allowlist` or `off`, and readable scope `home` (default)
+or `workspace`. An empty external-agent allowlist means no network; unlike `sandbox_bash`, it does
+not require a non-empty host list. The same filtering proxy handles CONNECT and absolute-form HTTP
+for both paths. External-agent policies are enforced by the launcher on macOS and Linux and are
+inert on Windows. See [external-agent process policy](./os-backends#external-agent-process-policy)
+for host syntax, scope exceptions, lifecycle, and protocol limitations.
+
 ## Linux network allowlists
 
 For `sandbox_bash`, `network: "allowlist"` requires a non-empty `networkHosts` list. Linux enforces

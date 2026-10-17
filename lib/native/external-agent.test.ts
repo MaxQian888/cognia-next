@@ -55,6 +55,21 @@ beforeEach(() => {
 })
 
 describe("external-agent commands", () => {
+  it("forwards sandbox policy unchanged and refuses malformed policies", async () => {
+    const cfg = {
+      id: "a",
+      command: "codex",
+      sandboxPolicy: { network: "off" as const, readableScope: "workspace" as const },
+    }
+    await spawnExternalAgent(cfg)
+    expect(mockedInvoke).toHaveBeenCalledWith("spawn_external_agent", { config: cfg })
+    mockedInvoke.mockClear()
+    await expect(
+      spawnExternalAgent({ ...cfg, sandboxPolicy: { allowedHosts: ["example.com:443"] } })
+    ).rejects.toThrow("allowed host")
+    expect(mockedInvoke).not.toHaveBeenCalled()
+  })
+
   it("spawnExternalAgent forwards config", async () => {
     mockedInvoke.mockResolvedValueOnce("agent-1")
     const cfg = { id: "a", command: "sh" }
@@ -592,6 +607,7 @@ describe("the spawn request contract accepts every field the config carries", ()
       "framing",
       "id",
       "sandbox",
+      "sandboxPolicy",
     ])
   })
 

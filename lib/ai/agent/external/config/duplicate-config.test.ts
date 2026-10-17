@@ -19,6 +19,11 @@ const source: ExternalAgentConfig = {
   autoApprovePatterns: ["Read*"],
   requireApprovalFor: ["Bash"],
   codexOptions: { sandboxMode: "readOnly", writableRoots: ["/repo"] },
+  sandboxPolicy: {
+    network: "allowlist",
+    allowedHosts: ["api.example.com"],
+    readableScope: "workspace",
+  },
   timeout: 90_000,
   retryConfig: {
     maxRetries: 1,
@@ -55,6 +60,11 @@ describe("externalAgentDuplicateInput", () => {
       autoApprovePatterns: ["Read*"],
       requireApprovalFor: ["Bash"],
       codexOptions: { sandboxMode: "readOnly", writableRoots: ["/repo"] },
+      sandboxPolicy: {
+        network: "allowlist",
+        allowedHosts: ["api.example.com"],
+        readableScope: "workspace",
+      },
       timeout: 90_000,
       retryConfig: source.retryConfig,
       tags: ["review"],
@@ -79,6 +89,8 @@ describe("externalAgentDuplicateInput", () => {
 
   it("deep-copies nested values so editing the copy never edits the source", () => {
     const input = externalAgentDuplicateInput(source, "copy")
+    input.sandboxPolicy?.allowedHosts?.push("other.example.com")
+    expect(source.sandboxPolicy?.allowedHosts).toEqual(["api.example.com"])
     input.process?.args?.push("--extra")
     input.codexOptions?.writableRoots?.push("/other")
     expect(source.process?.args).toEqual(["app-server"])

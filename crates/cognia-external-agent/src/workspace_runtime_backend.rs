@@ -1092,6 +1092,7 @@ mod tests {
             env: HashMap::from([("TOKEN".into(), "secret".into())]),
             cwd: Some(cwd.into()),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         }
     }

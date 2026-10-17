@@ -10,6 +10,11 @@ import { AgentEditorDialog, isApprovalEntryValid } from "./agent-editor-dialog"
 import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import messages from "@/i18n/messages/en.json"
+import externalAgentManage from "@/i18n/messages/en/externalAgentManage.json"
+
+// Use the split-source strings without regenerating aggregate locale files.
+Object.assign(messages.externalAgentManage.editor, externalAgentManage.editor)
 
 // The routing plane is real: the dialog subscribes to it, so a test can attach
 // a remote Host under an open dialog and watch the picker follow.
@@ -128,6 +133,79 @@ async function withAgent(patch: Record<string, unknown>, body: () => Promise<voi
 }
 
 describe("AgentEditorDialog", () => {
+  it("loads, edits and saves the external process sandbox policy", async () => {
+    await withAgent(
+      {
+        sandboxPolicy: {
+          network: "allowlist",
+          allowedHosts: ["api.example.com"],
+          readableScope: "workspace",
+        },
+      },
+      async () => {
+        const onSave = jest.fn().mockResolvedValue(true)
+        render(
+          <AgentEditorDialog
+            open
+            editingAgentId="agent-1"
+            onOpenChange={jest.fn()}
+            onSave={onSave}
+          />
+        )
+        expect(screen.getByRole("combobox", { name: "Sandbox network" })).toHaveValue("allowlist")
+        expect(screen.getByRole("combobox", { name: "Readable files" })).toHaveValue("workspace")
+        fireEvent.change(screen.getByRole("textbox", { name: "Allowed hosts" }), {
+          target: { value: " api.example.com \n*.example.org\n" },
+        })
+        await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+        expect(onSave).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sandboxPolicy: {
+              network: "allowlist",
+              allowedHosts: ["api.example.com", "*.example.org"],
+              readableScope: "workspace",
+            },
+          })
+        )
+      }
+    )
+  })
+
+  it("refuses an invalid sandbox host before saving", async () => {
+    const onSave = jest.fn()
+    render(
+      <AgentEditorDialog open editingAgentId="agent-1" onOpenChange={jest.fn()} onSave={onSave} />
+    )
+    fireEvent.change(screen.getByRole("combobox", { name: "Sandbox network" }), {
+      target: { value: "allowlist" },
+    })
+    fireEvent.change(screen.getByRole("textbox", { name: "Allowed hosts" }), {
+      target: { value: "https://example.com" },
+    })
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      externalAgentManage.editor.sandboxAllowedHostsInvalid
+    )
+  })
+
+  it("does not show process sandbox controls for an existing network service", async () => {
+    await withAgent(
+      { transport: "http", protocol: "opencode", metadata: { autoSpawnServer: false } },
+      async () => {
+        render(
+          <AgentEditorDialog
+            open
+            editingAgentId="agent-1"
+            onOpenChange={jest.fn()}
+            onSave={jest.fn()}
+          />
+        )
+        expect(screen.queryByRole("combobox", { name: "Sandbox network" })).not.toBeInTheDocument()
+      }
+    )
+  })
+
   it("loads and saves explicit Codex workspace access options", async () => {
     await withAgent(
       {

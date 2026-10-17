@@ -1,4 +1,8 @@
-import { catalogModelCapabilities } from "./external-agent"
+import {
+  catalogModelCapabilities,
+  isValidExternalAgentSandboxHost,
+  validateExternalAgentSandboxPolicy,
+} from "./external-agent"
 
 describe("catalogModelCapabilities", () => {
   it("projects a Pi/OMP model record", () => {
@@ -27,5 +31,60 @@ describe("catalogModelCapabilities", () => {
 
   it("returns undefined for a record that says nothing", () => {
     expect(catalogModelCapabilities({})).toBeUndefined()
+  })
+})
+
+describe("external agent sandbox policy", () => {
+  it.each([
+    "api.example.com",
+    "*.example.com",
+    "localhost",
+    " EXAMPLE.com ",
+    "8.8.8.8",
+    "2001:4860:4860::8888",
+    "::ffff:8.8.8.8",
+  ])("accepts matcher-supported host %s", (host) => {
+    expect(isValidExternalAgentSandboxHost(host)).toBe(true)
+  })
+  it.each([
+    "",
+    "*",
+    "*example.com",
+    "*.8.8.8.8",
+    "https://example.com",
+    "example.com/path",
+    "example.com:443",
+    "user@example.com",
+    "a..b",
+    "-a.com",
+    "a_.com",
+    "a\u0000.com",
+    "[::1]",
+    "::1%lo0",
+    "example.com.",
+  ])("rejects malformed host %s", (host) => {
+    expect(isValidExternalAgentSandboxHost(host)).toBe(false)
+  })
+  it.each([
+    undefined,
+    {},
+    { network: "full" },
+    { network: "off" },
+    { network: "allowlist", allowedHosts: [] },
+    { network: "allowlist", allowedHosts: ["*.example.com"], readableScope: "workspace" },
+  ])("accepts supported policy %j", (policy) => {
+    expect(() => validateExternalAgentSandboxPolicy(policy)).not.toThrow()
+  })
+  it.each([
+    null,
+    [],
+    { unsupported: true },
+    { network: "invalid" },
+    { readableScope: "all" },
+    { allowedHosts: "example.com" },
+    { allowedHosts: [2] },
+    { allowedHosts: ["https://example.com"] },
+  ])("rejects policy without widening %j", (policy) => {
+    expect(() => validateExternalAgentSandboxPolicy(policy)).toThrow()
   })
 })

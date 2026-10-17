@@ -764,6 +764,7 @@ mod tests {
             env: HashMap::from([("OPENAI_API_KEY".into(), "sk-test".into())]),
             cwd: Some("/workspaces/ws-1".into()),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: placement,
         }
     }

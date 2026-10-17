@@ -351,6 +351,7 @@ describe("processToolFloor", () => {
 
 interface FakeHost extends ProcessPlane {
   spawns: Array<{
+    sandboxPolicy?: ExternalAgentConfig["sandboxPolicy"]
     id: string
     command: string
     args: string[]
@@ -490,6 +491,7 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
       }
       if (name === "spawn_external_agent") {
         const config = args.config as {
+          sandboxPolicy?: ExternalAgentConfig["sandboxPolicy"]
           id: string
           command: string
           args?: string[]
@@ -497,6 +499,7 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
           env?: Record<string, string>
         }
         spawns.push({
+          sandboxPolicy: config.sandboxPolicy,
           id: config.id,
           command: config.command,
           args: config.args ?? [],
@@ -697,6 +700,7 @@ describe("credential diagnostics", () => {
     const host = createFakeHost()
     const withEnv: ExternalAgentConfig = {
       ...config,
+      sandboxPolicy: { network: "off", readableScope: "workspace" },
       process: { command: "pi", args: ["--mode", "rpc"], env: { DEEPSEEK_API_KEY: "k" } },
     }
     const adapter = new PiRpcClientAdapter(piDeps(host))
@@ -705,6 +709,11 @@ describe("credential diagnostics", () => {
     host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
     await connecting
     expect(host.spawns[0].env).toEqual({ DEEPSEEK_API_KEY: "k" })
+    expect(host.spawns[0].sandboxPolicy).toEqual(withEnv.sandboxPolicy)
+    await adapter.createSession()
+    expect(host.spawns.find((spawn) => spawn.args.includes("--session-id"))?.sandboxPolicy).toEqual(
+      withEnv.sandboxPolicy
+    )
     await adapter.disconnect()
   })
 })

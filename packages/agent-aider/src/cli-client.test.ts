@@ -150,12 +150,12 @@ beforeEach(() => {
 })
 
 it("uses the official one-shot CLI and keeps instructions out of argv and environment", async () => {
-  const adapter = await connected()
+  const adapter = await connected({ ...config, sandboxPolicy: { network: "off" } })
   const session = await adapter.createSession({ systemPrompt: "Use descriptive names" })
   const result = await adapter.execute(session.id, message())
   expect(result.success).toBe(true)
   expect(result.finalResponse).toBe("Updated")
-  expect(mockSpawned[0]).toMatchObject({ cwd, framing: "raw" })
+  expect(mockSpawned[0]).toMatchObject({ cwd, framing: "raw", sandboxPolicy: { network: "off" } })
   expect(mockSpawned[0].args).toEqual(
     expect.arrayContaining([
       "--message-file",

@@ -1549,6 +1549,86 @@ export function normalizeCogniaModelBinding(
 export type ExternalAgentStateIsolation = "shared" | "isolated"
 
 /**
+ * Outer OS sandbox policy for process transports. Defaults: full network and
+ * home-readable scope. Windows does not OS-sandbox external agents: these
+ * fields are persisted but inert there, not an enforcement guarantee.
+ */
+export interface ExternalAgentProcessSandboxPolicy {
+  network?: "full" | "allowlist" | "off"
+  allowedHosts?: string[]
+  readableScope?: "home" | "workspace"
+}
+
+/** Syntax parity with cognia-net/egress.rs; exact IP literals are supported. */
+export function isValidExternalAgentSandboxHost(value: string): boolean {
+  const pattern = value.trim()
+  const wildcard = pattern.startsWith("*.")
+  const host = wildcard ? pattern.slice(2) : pattern
+  if (!wildcard && host.includes(":")) {
+    // URL's bracketed IPv6 parser rejects ports, zone ids and malformed literals.
+    if (!/^[0-9a-fA-F:.]+$/.test(host)) return false
+    try {
+      return new URL(`http://[${host}]/`).hostname.startsWith("[")
+    } catch {
+      return false
+    }
+  }
+  if (!host || host.length > 253 || host.endsWith(".")) return false
+  if (
+    wildcard &&
+    /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(host) &&
+    host.split(".").every((part) => Number(part) <= 255 && String(Number(part)) === part)
+  ) {
+    return false
+  }
+  return host
+    .split(".")
+    .every(
+      (label) =>
+        label.length > 0 &&
+        label.length <= 63 &&
+        /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(label)
+    )
+}
+
+/** Reject malformed policy instead of silently widening a restrictive request. */
+export function validateExternalAgentSandboxPolicy(
+  value: unknown
+): asserts value is ExternalAgentProcessSandboxPolicy | undefined {
+  if (value === undefined) return
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid external agent sandbox policy")
+  }
+  const policy = value as Record<string, unknown>
+  if (
+    Object.keys(policy).some((key) => !["network", "allowedHosts", "readableScope"].includes(key))
+  ) {
+    throw new Error("Unknown external agent sandbox policy field")
+  }
+  if (
+    policy.network !== undefined &&
+    !["full", "allowlist", "off"].includes(policy.network as string)
+  ) {
+    throw new Error("Invalid external agent sandbox network mode")
+  }
+  if (
+    policy.readableScope !== undefined &&
+    !["home", "workspace"].includes(policy.readableScope as string)
+  ) {
+    throw new Error("Invalid external agent sandbox readable scope")
+  }
+  if (
+    policy.allowedHosts !== undefined &&
+    (!Array.isArray(policy.allowedHosts) ||
+      policy.allowedHosts.some(
+        (host) => typeof host !== "string" || !isValidExternalAgentSandboxHost(host)
+      ))
+  ) {
+    throw new Error("Invalid external agent sandbox allowed host")
+  }
+}
+
+/**
  * Complete external agent configuration
  */
 export interface ExternalAgentConfig {
@@ -1596,6 +1676,8 @@ export interface ExternalAgentConfig {
   /** Tools requiring manual approval */
   requireApprovalFor?: string[]
 
+  /** Outer OS sandbox restrictions; inert on Windows. */
+  sandboxPolicy?: ExternalAgentProcessSandboxPolicy
   /** Codex app-server specific defaults (sandbox / reasoning options) */
   codexOptions?: CodexAgentOptions
 
@@ -1677,6 +1759,7 @@ export interface CreateExternalAgentInput {
   defaultPermissionMode?: AcpPermissionMode
   autoApprovePatterns?: string[]
   requireApprovalFor?: string[]
+  sandboxPolicy?: ExternalAgentProcessSandboxPolicy
   codexOptions?: CodexAgentOptions
   timeout?: number
   retryConfig?: Partial<ExternalAgentRetryConfig>
@@ -1711,6 +1794,7 @@ export interface UpdateExternalAgentInput {
   defaultPermissionMode?: AcpPermissionMode
   autoApprovePatterns?: string[]
   requireApprovalFor?: string[]
+  sandboxPolicy?: ExternalAgentProcessSandboxPolicy
   codexOptions?: CodexAgentOptions
   timeout?: number
   retryConfig?: Partial<ExternalAgentRetryConfig>

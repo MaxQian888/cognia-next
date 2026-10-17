@@ -406,6 +406,7 @@ describe("updateConfig", () => {
     { protocol: "a2a" },
     { transport: "http" },
     { protocol: "a2a", transport: "http" },
+    { sandboxPolicy: { network: "off", readableScope: "workspace" } },
   ])("persists and rebuilds the adapter for %j", async (updates) => {
     const { service, manager, store } = build({}, [stdioConfig()])
     await service.connect("agent-1")

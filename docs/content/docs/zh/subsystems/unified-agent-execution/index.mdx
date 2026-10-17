@@ -51,6 +51,22 @@ stdio 外部 agent 需要一张进程表。能提供进程表的运行时有三�
 
 最后这一条不是可选项。`spawn_external_agent` 声明的是 `capability: "process.spawn"`，已配对设备只能通过单独的 Agent Control 授权（`GrantKind::AgentControl`）持有它；只查能力特性、不查授权的客户端，会给出一个 Host 只会回 403 的「运行」按钮。Host 通过 `external-agent.process-plane` 这个 feature 逐个操作地声明这个面，因此「先上了 spawn、还没上探测」的构建也能被准确描述。
 
+## 外部 Agent 沙箱策略
+
+对于进程传输的 Agent，`ExternalAgentConfig.sandboxPolicy` 随配置持久化，经过适配器、
+`AgentProcessSpawnSpec` 及桌面端或 CLI 启动配置传入共享 Rust launcher。字段缺省时保持网络
+`full`、可读范围 `home`。选择 `allowlist` 并填写完整主机或 `*.domain` 模式，或选择 `off`，
+可以收紧出站访问；空允许列表等效于关闭网络。选择 `workspace` 可去掉整个主目录的读取权限，
+同时保留 Agent 状态、所需工具链目录及 Git 配置。凭据拒绝规则与 Bot 隔离仍然生效。这层外部
+策略独立于 Codex 自身的沙箱权限，作用于整个新启动的进程树，不约束已经运行的远程
+HTTP/WebSocket Agent 服务。
+
+launcher 在 macOS 和 Linux 上执行策略，在 Agent 启动前创建代理或桥接，初始化失败时拒绝
+启动，并随子进程退出清理。共享代理支持 CONNECT 与 absolute-form HTTP，阻止内部及元数据
+地址，不提供 SOCKS 或 UDP。**Windows 缺少外部 Agent 所需的操作系统沙箱，现有严格检查会
+拒绝本地进程启动。已保存的策略字段不生效，编辑器会明确标注。** 平台约束与兼容性限制见
+[外部 Agent 进程策略](../sandbox/os-backends#外部-agent-进程策略)。
+
 ## 宿主上已经装了哪些 agent CLI
 
 `external_agent_detect_runtimes` 读的是真正会跑子进程的那台机器，一次调用覆盖整份目录，「添加 Agent」的预设选择处会为每个预设打上对应标记。它不会安装任何东西：目录里探测命令是 `npx -y <package> --version` 的运行时，会被报成 `package-runner` 而不是被下载下来。那种情况下不联网安装就无法确定它是否存在，而为了画一个标记不值得付这个代价。版本字符串在客户端用目录声明的解析器读出，认证结论仍然由 `assessRuntimeVersion` 给出。

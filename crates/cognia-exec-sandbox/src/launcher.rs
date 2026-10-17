@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 use crate::protected::{protected_entries_under, ProtKind};
 use crate::sbpl;
+use crate::types::NetworkPolicy;
 
 /// Host-owned paths for a Linux allowlist launch. Never constructed from target
 /// env or argv. The backend retains all three sources until the child is reaped.
@@ -143,7 +144,7 @@ pub fn render_linux_network_launch(
 }
 
 /// Filesystem + network scope for a sandboxed interactive launch.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchScope {
     /// Directory the child starts in (bound writable + `--chdir`).
     pub cwd: String,
@@ -155,9 +156,40 @@ pub struct LaunchScope {
     /// Host-selected credential/state roots hidden from this task. Explicit
     /// writable descendants (the task's own home) remain accessible.
     pub denied_readable: Vec<String>,
-    /// Allow network egress. Interactive dev shells usually need it
-    /// (`git`, `npm`); the caller decides.
-    pub network: bool,
+    /// Require the declared read roots instead of the legacy global read base.
+    pub restrict_readable: bool,
+    /// Allowlist launches require a host-owned proxy and supervisor.
+    pub network: NetworkPolicy,
+}
+
+/// Validate configuration using the same hostname grammar and wildcard semantics
+/// as the shared proxy. IP literals are accepted for exact entries only; the
+/// proxy still rejects private, metadata, and otherwise non-public destinations.
+pub fn validate_network_allowlist(hosts: &[String]) -> Result<(), String> {
+    for pattern in hosts {
+        let trimmed = pattern.trim();
+        let (host, wildcard) = match trimmed.strip_prefix("*.") {
+            Some(host) => (host, true),
+            None => (trimmed, false),
+        };
+        if !cognia_net::egress::is_valid_hostname(host)
+            || host.ends_with('.')
+            || (wildcard && host.parse::<std::net::IpAddr>().is_ok())
+        {
+            return Err(format!("invalid network allowlist host: {pattern:?}"));
+        }
+    }
+    Ok(())
+}
+
+/// Filesystem confinement plus exactly one host-owned filtering proxy port.
+/// Unlike the network-only prefix, this retains all credential deny floors.
+pub fn sandbox_exec_proxy_prefix(scope: &LaunchScope, proxy_port: u16) -> Vec<String> {
+    let mut confined = scope.clone();
+    confined.network = NetworkPolicy::Off;
+    let mut launch = sandbox_exec_prefix(&confined);
+    push_loopback_proxy_network_rule(&mut launch[2], proxy_port);
+    launch
 }
 
 /// Read-only system paths every program needs to dynamically link. Kept in
@@ -276,7 +308,7 @@ pub fn bwrap_prefix(bwrap: &str, scope: &LaunchScope, empty_dir: &Path) -> Vec<S
         args.push(scope.cwd.clone());
     }
 
-    if scope.network {
+    if matches!(scope.network, NetworkPolicy::On) {
         args.push("--share-net".to_string());
     } else {
         args.push("--unshare-net".to_string());
@@ -284,6 +316,49 @@ pub fn bwrap_prefix(bwrap: &str, scope: &LaunchScope, empty_dir: &Path) -> Vec<S
 
     args.push("--".to_string());
     args
+}
+
+/// Compose the interactive filesystem prefix with the existing S5 network
+/// bridge. User binds cannot shadow its reserved helper or IPC mounts.
+pub fn bwrap_bridge_launch(
+    bwrap: &str,
+    scope: &LaunchScope,
+    empty_dir: &Path,
+    bridge: &LinuxBridgeLaunchSpec,
+    target: &[String],
+) -> Result<Vec<String>, String> {
+    if !matches!(scope.network, NetworkPolicy::Allowlist { .. }) {
+        return Err("Linux bridge requires an allowlist policy".into());
+    }
+    let reserved = Path::new(LINUX_EGRESS_DIR);
+    for path in std::iter::once(&scope.cwd)
+        .chain(&scope.readable)
+        .chain(&scope.writable)
+        .chain(&scope.denied_readable)
+    {
+        let path = Path::new(path);
+        if !path.is_absolute()
+            || path
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+            || path.starts_with(reserved)
+            || reserved.starts_with(path)
+        {
+            return Err(format!(
+                "scope path '{}' collides with reserved Linux bridge IPC",
+                path.display()
+            ));
+        }
+    }
+    let mut launch = bwrap_prefix(bwrap, scope, empty_dir);
+    // Replace the ordinary network flag and final separator, after every user
+    // bind and protection mount. This renderer never emits --share-net here.
+    launch.truncate(launch.len() - 2);
+    launch.extend(
+        render_linux_network_launch(&scope.network, Some(bridge), target)
+            .map_err(|error| error.to_string())?,
+    );
+    Ok(launch)
 }
 
 /// Render the macOS `sandbox-exec` launch prefix:
@@ -326,7 +401,11 @@ pub fn render_sbpl(scope: &LaunchScope) -> String {
     // Process metadata, service lookup and the global read allow, shared with
     // `macos.rs` so the one-shot and interactive profiles cannot disagree about
     // whether a confined binary can load. Writes and network stay scoped below.
-    sbpl::push_loadability_base(&mut out);
+    if scope.restrict_readable {
+        sbpl::push_scoped_loadability_base(&mut out);
+    } else {
+        sbpl::push_loadability_base(&mut out);
+    }
     out.push_str("(allow file-read*\n");
     for p in MACOS_RO_SYSTEM {
         out.push_str(&format!("  (subpath \"{}\")\n", escape_sbpl(p)));
@@ -427,10 +506,24 @@ pub fn render_sbpl(scope: &LaunchScope) -> String {
             .collect();
         sbpl::push_app_store_carveouts(&mut out, &declared);
     }
-    if scope.network {
+    if matches!(scope.network, NetworkPolicy::On) {
         out.push_str("(allow network*)\n");
     } else {
         out.push_str("(deny network*)\n");
+        // Preserve the existing tool-host IPC channel without opening arbitrary
+        // host Unix sockets (SSH agents, Docker, or sibling agent state).
+        for root in &writable {
+            if Path::new(root)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| name.starts_with("cognia-toolhost-"))
+            {
+                out.push_str(&format!(
+                    "(allow network-outbound (remote unix-socket (subpath \"{}\")))\n",
+                    escape_sbpl(root)
+                ));
+            }
+        }
     }
     out
 }
@@ -556,6 +649,97 @@ fn push_secret_read_denies(out: &mut String, readable: &[String]) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn network_host_validation_uses_the_shared_matcher_grammar() {
+        for host in [
+            "api.example.com",
+            "*.example.com",
+            "API.EXAMPLE.COM",
+            "8.8.8.8",
+            "2606:4700:4700::1111",
+        ] {
+            assert!(
+                super::validate_network_allowlist(&[host.into()]).is_ok(),
+                "{host}"
+            );
+        }
+        for host in [
+            "",
+            "*",
+            "*.",
+            "*.8.8.8.8",
+            "example.com.",
+            "https://example.com",
+            "example.com/path",
+            "example.com:443",
+            "bad_host",
+            "a..b",
+            "evil\n.com",
+        ] {
+            assert!(
+                super::validate_network_allowlist(&[host.into()]).is_err(),
+                "{host}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_reads_and_allowlist_proxy_keep_credential_floors() {
+        let scope = super::LaunchScope {
+            cwd: "/work".into(),
+            readable: vec!["/opt/toolchain".into()],
+            restrict_readable: true,
+            network: crate::types::NetworkPolicy::Allowlist {
+                hosts: vec!["example.com".into()],
+            },
+            ..Default::default()
+        };
+        let profile = super::sandbox_exec_proxy_prefix(&scope, 32123)[2].clone();
+        assert!(!profile.contains("(allow file-read*)\n"));
+        assert!(profile.contains("(allow file-read-metadata)"));
+        assert!(profile.contains("(subpath \"/opt/toolchain\")"));
+        assert!(profile.contains("localhost:32123"));
+        assert!(!profile.contains("(allow network*)"));
+        assert!(profile.contains("(deny file-read* (subpath \"/work/.ssh\"))"));
+    }
+
+    #[test]
+    fn bridge_launch_is_unshared_and_rejects_reserved_scope_roots() {
+        let mut scope = super::LaunchScope {
+            cwd: "/workspace".into(),
+            network: crate::types::NetworkPolicy::Allowlist {
+                hosts: vec!["example.com".into()],
+            },
+            ..Default::default()
+        };
+        let bridge = super::LinuxBridgeLaunchSpec {
+            helper: "/host/helper".into(),
+            proxy_socket: "/host/proxy.sock".into(),
+            control_socket: "/host/control.sock".into(),
+            as_pid_1: true,
+        };
+        let launch = super::bwrap_bridge_launch(
+            "/bin/bwrap",
+            &scope,
+            std::path::Path::new("/empty"),
+            &bridge,
+            &["agent".into()],
+        )
+        .unwrap();
+        assert!(launch.contains(&"--unshare-net".into()));
+        assert!(!launch.contains(&"--share-net".into()));
+        assert!(launch.ends_with(&["--linux-netns-bridge".into(), "--".into(), "agent".into()]));
+        scope.readable.push("/run".into());
+        assert!(super::bwrap_bridge_launch(
+            "bwrap",
+            &scope,
+            std::path::Path::new("/empty"),
+            &bridge,
+            &["agent".into()]
+        )
+        .is_err());
+    }
+
     #[cfg(unix)]
     #[test]
     fn linux_allowlist_requires_owned_bridge_and_never_shares_network() {
@@ -740,7 +924,8 @@ mod tests {
             writable: vec!["/work/project".to_string()],
             denied_readable: vec![],
             readable: vec!["/home/u".to_string()],
-            network: true,
+            network: NetworkPolicy::On,
+            restrict_readable: false,
         }
     }
 
@@ -787,7 +972,8 @@ mod tests {
         let on = bwrap_prefix("bwrap", &scope(), &empty());
         assert!(on.iter().any(|s| s == "--share-net"));
         let off_scope = LaunchScope {
-            network: false,
+            network: NetworkPolicy::Off,
+            restrict_readable: false,
             ..scope()
         };
         let off = bwrap_prefix("bwrap", &off_scope, &empty());
@@ -839,7 +1025,8 @@ mod tests {
             writable: vec![ws.to_string_lossy().into_owned()],
             readable: vec![],
             denied_readable: vec![],
-            network: true,
+            network: NetworkPolicy::On,
+            restrict_readable: false,
         });
         let deny = format!("(deny file-read* (literal \"{}\"))", store.display());
         // Emitted rules carry the canonical spelling (`Cognia` on disk), not
@@ -919,7 +1106,8 @@ mod tests {
         assert!(prof.contains("(subpath \"/home/u\")"));
         assert!(prof.contains("(allow network*)"));
         let off = render_sbpl(&LaunchScope {
-            network: false,
+            network: NetworkPolicy::Off,
+            restrict_readable: false,
             ..scope()
         });
         assert!(off.contains("(deny network*)"));
@@ -932,7 +1120,8 @@ mod tests {
             writable: vec!["/a".to_string(), "/b".to_string(), "/b".to_string()],
             denied_readable: vec![],
             readable: vec![],
-            network: false,
+            network: NetworkPolicy::Off,
+            restrict_readable: false,
         };
         assert_eq!(writable_set(&s), vec!["/a".to_string(), "/b".to_string()]);
     }

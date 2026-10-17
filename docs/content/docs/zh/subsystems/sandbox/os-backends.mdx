@@ -277,6 +277,47 @@ NetworkPolicy::Allowlist { hosts: _ } => match proxy_port {
 
 因为它调用的是同一个 `run_confined`，CLI 会话拿到的约束与桌面逐字节一致，而不是第二份实现：可用性闸、路径规范化、禁写根地板、env 清洗、失败即拒绝的网络约束、过滤代理、seccomp、rlimit 和输出截断，全都还在 Rust 侧发生。渲染端通过 `lib/sandbox/os-exec-bridge` 注册它，见[执行总览](./execution-overview)。
 
+## 外部 Agent 进程策略
+
+使用进程传输的外部 Agent（包括 Codex、Claude Code、OpenCode、Pi 和 Aider）在已保存的
+`ExternalAgentConfig` 中携带 `sandboxPolicy`。桌面端与 CLI 都将这个类型化策略经过进程宿主
+传给 `cognia-external-agent-launcher`，而不是借助环境变量提示。Agent 编辑器在 Agent 自身的
+沙箱选项旁显示这些设置。
+
+| 设置 | 默认值 | 在 macOS 和 Linux 上的效果 |
+| --- | --- | --- |
+| `network: "full"` | 是 | 保持现有的无限制网络访问（`--network`）。 |
+| `network: "allowlist"`、`allowedHosts` | 否 | 只能通过共享过滤代理访问列出的目标（每个主机一个 `--network-allow`）。空列表等效于关闭网络。 |
+| `network: "off"` | 否 | 禁止出站网络。 |
+| `readableScope: "home"` | 是 | 保持现有的主目录读取权限。 |
+| `readableScope: "workspace"` | 否 | 工作区、Agent 状态、解析后的命令及工具链安装目录、包运行器缓存和只读 Git 配置；不再授予整个主目录的读取权限。 |
+
+所有模式都保留受保护凭据的拒绝规则及 Aider 隐式配置拒绝规则。Bot 隔离继续采用更严格的
+文件范围。远程客户端不能通过这个策略扩大 Host 的进程启动授权。Host 的默认网络上限仍为
+`full`；配置允许列表上限时，只保守接受同样的模式或其子集（忽略大小写及首尾空白），或
+`off`，不会根据通配符推断更窄的域名模式。`off` 上限只接受 `off`。Agent 自身的权限设置
+（例如 Codex 的 sandbox mode）可以进一步收紧权限，但不能替代外层进程策略。
+
+在 macOS 上，launcher 监督子进程，在启动前创建 TCP 代理，并通过 SBPL 将出站 TCP 锁定到
+代理的回环端口。关闭网络时仅保留现有工具宿主 Unix socket 例外。在 Linux 上，允许列表
+复用私有网络命名空间和 Unix socket 桥接，通过绑定本次运行的 Ready/Go 握手及目标 seccomp
+规则启动；关闭网络则使用 `--unshare-net`。launcher 继承标准输入输出、转发终止信号、等待
+子进程、关闭代理，并传递子进程退出状态。代理或桥接初始化失败会阻止启动，绝不退回完全
+网络访问。launcher 在调用方环境变量之后设置大小写代理变量，并清除绕过代理的设置；子进程
+删除这些变量也无法恢复网络直连。
+
+允许列表支持完整 DNS 主机名、完整 IP 地址和开头为 `*.domain` 的模式。通配符只匹配子域，
+不包含域名本身。协议、路径、端口、末尾带点的模式和 IP 通配符均不合法。共享代理支持 HTTPS
+`CONNECT` 隧道及 absolute-form HTTP 请求，不支持 SOCKS、UDP 或任意直连 socket。DNS 由 Host
+解析；即使允许列表包含相应地址，也会阻止私有、回环、链路本地及元数据目标。不遵循 HTTP
+代理变量、依赖 Linux 下不受支持的 Unix IPC，或需要工作区范围外文件的工具可能无法运行。
+按需加入模型提供方、认证及下载包所需主机；`off` 同样会阻止在线模型调用和包下载。
+
+**Windows 目前没有外部 Agent 所需的操作系统沙箱。** 现有严格启动检查会拒绝 Windows 上的
+本地外部 Agent 进程，不会在无沙箱状态下运行。两个策略字段会被保存但不生效，编辑器会
+明确说明并禁用这些控件。上文的 Windows 单次执行 runner 是独立执行路径，不会启用外部
+Agent 进程启动。
+
 ## 实现状态汇总
 
 | 后端        | `health().backend`（实际） | 状态                   | 真实 OS 执行？                                                                 |

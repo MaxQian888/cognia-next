@@ -1222,6 +1222,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const spawnSpec: AgentProcessSpawnSpec = {
       id: config.id,
       command: config.process.command,
+      sandboxPolicy: config.sandboxPolicy,
       args: finalArgs,
       env: finalEnv,
       cwd: config.process.cwd,

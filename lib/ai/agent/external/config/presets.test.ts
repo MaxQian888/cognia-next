@@ -539,7 +539,9 @@ describe("explicit Codex ACP and native options", () => {
         defaultReasoningEffort: "high",
         reasoningSummary: "concise",
       }
-      const config = createAgentFromPreset(id, { codexOptions })!
+      const sandboxPolicy = { network: "off" as const, readableScope: "workspace" as const }
+      const config = createAgentFromPreset(id, { codexOptions, sandboxPolicy })!
+      expect(config.sandboxPolicy).toEqual(sandboxPolicy)
       expect(config.codexOptions).toEqual(codexOptions)
       expect(config.codexOptions?.networkAccess).toBe(false)
       expect(createAgentFromPreset(id)!.codexOptions).toBeUndefined()

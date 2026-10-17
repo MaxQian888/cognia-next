@@ -484,6 +484,26 @@ describe("projectExternalAgentReadinessMetadata", () => {
 })
 
 describe("normalizeExternalAgentConfigInput", () => {
+  it("preserves sandbox policy and rejects malformed hosts", () => {
+    const input = {
+      name: "Agent",
+      protocol: "acp" as const,
+      transport: "stdio" as const,
+      sandboxPolicy: {
+        network: "allowlist" as const,
+        allowedHosts: ["*.example.com"],
+        readableScope: "workspace" as const,
+      },
+    }
+    expect(normalizeExternalAgentConfigInput(input).sandboxPolicy).toEqual(input.sandboxPolicy)
+    expect(() =>
+      normalizeExternalAgentConfigInput({
+        ...input,
+        sandboxPolicy: { allowedHosts: ["https://example.com"] },
+      })
+    ).toThrow("allowed host")
+  })
+
   it("creates a config with sane defaults from a minimal input", () => {
     const cfg = normalizeExternalAgentConfigInput({
       name: "  Test  ",
@@ -498,6 +518,7 @@ describe("normalizeExternalAgentConfigInput", () => {
     expect(cfg.id).toBeTruthy()
     expect(cfg.validitySnapshot).toBeDefined()
     expect(cfg.enabled).toBe(true)
+    expect(cfg.sandboxPolicy).toBeUndefined()
   })
 
   it("clamps the default permission mode to one the protocol can enforce", () => {

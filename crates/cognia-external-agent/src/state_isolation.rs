@@ -525,6 +525,7 @@ mod tests {
                 .collect(),
             cwd: Some("/work".into()),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         }
     }

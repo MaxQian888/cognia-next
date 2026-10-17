@@ -517,6 +517,7 @@ mod tests {
             env: HashMap::from([(crate::devin_mcp_config::PAYLOAD_ENV.into(), "[]".into())]),
             cwd: None,
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         };
         let result = spawn_with_events(&Remote, RecordingAgentEmitter::new(), config).await;
@@ -564,6 +565,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: Some(
                 crate::sandbox_routing_backend::SandboxPlacement::Container {
                     hosted_tool_host_lease_ids: Vec::new(),
@@ -638,6 +640,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         };
         let result = spawn_with_events(backend.as_ref(), emitter.clone(), config).await;
@@ -662,6 +665,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         };
         crate::spawn_authority::with_remote_origin(
@@ -732,6 +736,7 @@ mod tests {
             env: HashMap::new(),
             cwd: Some(tmp.path().display().to_string()),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         };
 

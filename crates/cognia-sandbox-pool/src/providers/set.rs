@@ -761,6 +761,7 @@ mod tests {
             env: StdHashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: Some(SandboxPlacement::Container {
                 hosted_tool_host_lease_ids: leases,
                 provider: provider.map(str::to_string),

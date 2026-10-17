@@ -101,7 +101,8 @@ pub fn python_host_scope(
         writable: vec![scratch],
         readable,
         denied_readable: Vec::new(),
-        network: true,
+        network: cognia_exec_sandbox::types::NetworkPolicy::On,
+        ..Default::default()
     }
 }
 
@@ -815,7 +816,7 @@ mod tests {
         assert!(scope.readable.iter().any(|r| r == "/tmp/cognia-xyz"));
         // venv prefix bound so site-packages resolves.
         assert!(scope.readable.iter().any(|r| r == "/home/u/.venv"));
-        assert!(scope.network);
+        assert_eq!(scope.network, cognia_exec_sandbox::types::NetworkPolicy::On);
         assert!(!scope.writable.is_empty());
     }
 

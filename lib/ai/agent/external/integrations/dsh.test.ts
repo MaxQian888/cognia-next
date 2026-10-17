@@ -52,6 +52,32 @@ describe("DeepSeek Harness host wiring", () => {
     expect(host.spawn).not.toHaveBeenCalled()
   })
 
+  it("carries the configuration sandbox policy through the DSH transport", async () => {
+    const sandboxPolicy = { network: "off" as const, readableScope: "workspace" as const }
+    const host: AgentProcessHost = {
+      available: true,
+      spawn: jest.fn(async () => {
+        throw new Error("recorded spawn")
+      }),
+      send: jest.fn(),
+      kill: jest.fn(),
+      commandExists: jest.fn(),
+      onStdoutLine: jest.fn(async () => () => {}),
+      onStdoutRaw: jest.fn(async () => () => {}),
+      onStderr: jest.fn(async () => () => {}),
+      onExit: jest.fn(async () => () => {}),
+    }
+    const adapter = createDshSdkAdapterFactory(host)()
+    await expect(
+      adapter.connect({
+        ...config,
+        sandboxPolicy,
+        process: { command: "node", args: ["harness.js"], env: { DEEPSEEK_API_KEY: "key" } },
+      })
+    ).rejects.toThrow("recorded spawn")
+    expect(host.spawn).toHaveBeenCalledWith(expect.objectContaining({ sandboxPolicy }))
+  })
+
   it("defaults to the local process host so a paired browser is not offered DSH", async () => {
     mockLocal = false
     const adapter = createDshSdkAdapterFactory()()

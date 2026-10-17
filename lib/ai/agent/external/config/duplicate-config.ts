@@ -86,6 +86,7 @@ export function externalAgentDuplicateInput(
     autoApprovePatterns: source.autoApprovePatterns,
     requireApprovalFor: source.requireApprovalFor,
     codexOptions: source.codexOptions,
+    sandboxPolicy: source.sandboxPolicy,
     timeout: source.timeout,
     retryConfig: source.retryConfig,
     maxConcurrentSessions: source.maxConcurrentSessions,

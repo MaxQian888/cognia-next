@@ -56,6 +56,7 @@ const config = {
   id: "oc",
   protocol: "opencode-v2",
   process: { command: "opencode", cwd: "/workspace" },
+  sandboxPolicy: { network: "off" },
 } as ExternalAgentConfig
 const servers = [
   {
@@ -112,6 +113,7 @@ describe("OpenCode V2 session-owned services", () => {
       placement
     )
     expect(invoke.mock.calls[0][1].config.id).toMatch(/^oc:opencode-v2:/)
+    expect(invoke.mock.calls[0][1].config.sandboxPolicy).toEqual(config.sandboxPolicy)
     await service.close()
   })
 

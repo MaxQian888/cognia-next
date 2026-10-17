@@ -319,6 +319,191 @@ impl Network {
     }
 }
 
+/// Environment variable naming a file through which a host hands its
+/// effective upstream proxy policy (a JSON `ProxyConfig`, which may carry the
+/// proxy password) to a standalone sandbox process: the external-agent
+/// launcher's proxy supervisor and `cognia-sandbox-exec`. Those processes
+/// never run the desktop's `proxy_apply`, so without it every upstream dial
+/// would fail with `ProxyNotInitialized`. A file rather than the value itself,
+/// because a process's exec-time environment stays readable to other
+/// processes of the same user. The variable is removed and the file deleted
+/// at startup, before the sandboxed command exists.
+pub const UPSTREAM_POLICY_ENV: &str = "COGNIA_SANDBOX_UPSTREAM_PROXY_FILE";
+
+/// The host's live upstream policy, serialized for [`write_upstream_policy_file`].
+/// `Ok(None)` when this process has none (a standalone process then derives
+/// one from its environment); `Err` when the host's policy is blocked, which
+/// must refuse an allowlisted launch rather than let it dial around the block.
+pub fn host_upstream_policy() -> Result<Option<String>, String> {
+    use cognia_net::proxy_config::{self, ProxyErrorCode};
+    match proxy_config::current() {
+        Ok(config) => serde_json::to_string(&config)
+            .map(Some)
+            .map_err(|error| format!("upstream proxy policy: {error}")),
+        Err(error) if error.code == ProxyErrorCode::ProxyNotInitialized => Ok(None),
+        Err(error) => Err(format!("upstream proxy policy is blocked: {error}")),
+    }
+}
+
+/// Write `policy` to a fresh owner-only file under `dir` (created 0700) and
+/// return its path for [`UPSTREAM_POLICY_ENV`]. Files a launcher never
+/// consumed (a spawn that failed) are pruned after ten minutes.
+pub fn write_upstream_policy_file(dir: &std::path::Path, policy: &str) -> io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let stale = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|modified| modified.elapsed().ok())
+                .is_some_and(|age| age > Duration::from_secs(600));
+            if stale {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    // tempfile creates the file with a random name, O_EXCL and mode 0600.
+    let mut file = tempfile::Builder::new()
+        .prefix("upstream-")
+        .suffix(".json")
+        .tempfile_in(dir)?;
+    file.write_all(policy.as_bytes())?;
+    let (_, path) = file.keep().map_err(|error| error.error)?;
+    Ok(path)
+}
+
+/// Remove [`UPSTREAM_POLICY_ENV`] from this process's environment and consume
+/// the file it names. Call once at startup, before any thread or child is
+/// spawned. `Err` when a named file is unusable: the caller refuses to run.
+pub fn take_upstream_policy_env() -> Result<Option<String>, String> {
+    let Some(path) = std::env::var_os(UPSTREAM_POLICY_ENV) else {
+        return Ok(None);
+    };
+    std::env::remove_var(UPSTREAM_POLICY_ENV);
+    let path = std::path::PathBuf::from(path);
+    let result = read_owned_policy_file(&path);
+    let _ = std::fs::remove_file(&path);
+    result.map(Some)
+}
+
+fn read_owned_policy_file(path: &std::path::Path) -> Result<String, String> {
+    use std::io::Read;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| format!("upstream proxy policy file: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let meta = file
+            .metadata()
+            .map_err(|error| format!("upstream proxy policy file: {error}"))?;
+        // SAFETY: getuid has no preconditions.
+        let uid = unsafe { libc::getuid() };
+        if !meta.is_file() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
+            return Err("upstream proxy policy file must be a private file owned by this user".into());
+        }
+    }
+    let mut policy = String::new();
+    file.take(64 * 1024)
+        .read_to_string(&mut policy)
+        .map_err(|error| format!("upstream proxy policy file: {error}"))?;
+    Ok(policy)
+}
+
+/// Install the upstream policy of a standalone sandbox process: the one the
+/// host provided, else the conventional proxy variables of the inherited
+/// environment (read before the sandbox overrides them), else direct. An
+/// unusable provided or environment policy is an error: the caller exits
+/// before starting the command.
+pub fn install_upstream_policy(
+    provided: Option<&str>,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Result<(), String> {
+    use cognia_net::proxy_config::{self, ProxyConfig};
+    let config = match provided {
+        Some(raw) => serde_json::from_str::<ProxyConfig>(raw)
+            .map_err(|error| format!("invalid {UPSTREAM_POLICY_ENV}: {error}"))?,
+        None => ProxyConfig::from_environment(lookup)
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default(),
+    };
+    proxy_config::apply_current(config).map_err(|error| error.to_string())
+}
+
+/// Record an unusable upstream policy so allowlisted dials fail closed with
+/// the reason instead of reporting an uninitialized policy.
+pub fn block_upstream_policy(reason: &str) {
+    use cognia_net::proxy_config::{self, ProxyError, ProxyErrorCode};
+    proxy_config::block_current(ProxyError::new(ProxyErrorCode::ProxyInvalidConfig, reason));
+}
+
+enum DialFailure {
+    TimedOut,
+    Refused,
+}
+
+/// Alternate address families in resolver order, so a host whose first answer
+/// is unreachable over IPv6 still gets an IPv4 attempt (and vice versa).
+fn interleave_families(addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let Some(first) = addresses.first().copied() else {
+        return addresses;
+    };
+    let (preferred, other): (Vec<_>, Vec<_>) = addresses
+        .into_iter()
+        .partition(|addr| addr.is_ipv6() == first.is_ipv6());
+    let mut ordered = Vec::with_capacity(preferred.len() + other.len());
+    let (mut preferred, mut other) = (preferred.into_iter(), other.into_iter());
+    loop {
+        let (a, b) = (preferred.next(), other.next());
+        if a.is_none() && b.is_none() {
+            break;
+        }
+        ordered.extend(a.into_iter().chain(b));
+    }
+    ordered
+}
+
+/// Try every vetted address within one dial budget. Each attempt gets an even
+/// share of what is left, so one blackholed address cannot use it all.
+async fn dial_any(
+    network: &Network,
+    host: &str,
+    port: u16,
+    vetted: &[SocketAddr],
+    budget: Duration,
+) -> Result<ProxyStream, DialFailure> {
+    let deadline = Instant::now() + budget;
+    let mut timed_out = false;
+    for (index, addr) in vetted.iter().enumerate() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            timed_out = true;
+            break;
+        }
+        let share = left / (vetted.len() - index) as u32;
+        match timeout(share, network.dial(host, port, *addr)).await {
+            Ok(Ok(upstream)) => return Ok(upstream),
+            Ok(Err(_)) => {}
+            Err(_) => timed_out = true,
+        }
+    }
+    Err(if timed_out { DialFailure::TimedOut } else { DialFailure::Refused })
+}
+
 async fn dial_upstream(host: &str, port: u16, vetted: SocketAddr) -> io::Result<ProxyStream> {
     use cognia_net::proxy_config::{self, ProxyRouteSummary};
     let config = proxy_config::current().map_err(io::Error::other)?;
@@ -715,21 +900,25 @@ where
         Err(_) => return reject(&mut client, "504 Gateway Timeout", policy.header_timeout).await,
         Ok(Err(_)) => return reject(&mut client, "502 Bad Gateway", policy.header_timeout).await,
     };
-    let Some(vetted) = addresses
-        .into_iter()
-        .find(|addr| !is_forbidden_dest_ip(&addr.ip()))
-    else {
+    let vetted = interleave_families(
+        addresses
+            .into_iter()
+            .filter(|addr| !is_forbidden_dest_ip(&addr.ip()))
+            .collect(),
+    );
+    if vetted.is_empty() {
         return reject(&mut client, "403 Forbidden", policy.header_timeout).await;
-    };
-    let upstream = match timeout(
-        policy.dial_timeout,
-        network.dial(&request.host, request.port, vetted),
-    )
-    .await
+    }
+    let upstream = match dial_any(network, &request.host, request.port, &vetted, policy.dial_timeout)
+        .await
     {
-        Ok(Ok(upstream)) => upstream,
-        Err(_) => return reject(&mut client, "504 Gateway Timeout", policy.header_timeout).await,
-        Ok(Err(_)) => return reject(&mut client, "502 Bad Gateway", policy.header_timeout).await,
+        Ok(upstream) => upstream,
+        Err(DialFailure::TimedOut) => {
+            return reject(&mut client, "504 Gateway Timeout", policy.header_timeout).await
+        }
+        Err(DialFailure::Refused) => {
+            return reject(&mut client, "502 Bad Gateway", policy.header_timeout).await
+        }
     };
     let (activity, _) = watch::channel(Instant::now());
     let mut client = ProgressStream {
@@ -972,6 +1161,7 @@ mod tests {
         upstreams: Mutex<VecDeque<ProxyStream>>,
         resolutions: AtomicUsize,
         dials: Mutex<Vec<SocketAddr>>,
+        refused: Vec<IpAddr>,
         resolve_delay: Duration,
         dial_delay: Duration,
     }
@@ -983,6 +1173,7 @@ mod tests {
                 upstreams: Mutex::new(VecDeque::new()),
                 resolutions: AtomicUsize::new(0),
                 dials: Mutex::new(Vec::new()),
+                refused: Vec::new(),
                 resolve_delay: Duration::ZERO,
                 dial_delay: Duration::ZERO,
             }
@@ -1015,6 +1206,9 @@ mod tests {
 
         async fn dial(&self, _: &str, _: u16, vetted: SocketAddr) -> io::Result<ProxyStream> {
             self.dials.lock().unwrap().push(vetted);
+            if self.refused.contains(&vetted.ip()) {
+                return Err(io::Error::from(ErrorKind::ConnectionRefused));
+            }
             if !self.dial_delay.is_zero() {
                 tokio::time::sleep(self.dial_delay).await;
             }
@@ -1093,6 +1287,60 @@ mod tests {
             vec!["93.184.216.34:443".parse::<SocketAddr>().unwrap()]
         );
         origin_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unreachable_first_family_falls_back_to_the_next_address() {
+        // A host whose first answer is IPv6 on a machine without an IPv6 route
+        // must still be reached over IPv4 instead of failing with 502.
+        let mut fake = FakeNetwork::new(&["2606:4700:10::6814:179a", "2606:4700:10::ac42:93f3", "104.20.23.154"]);
+        fake.refused = vec![
+            "2606:4700:10::6814:179a".parse().unwrap(),
+            "2606:4700:10::ac42:93f3".parse().unwrap(),
+        ];
+        let fake = Arc::new(fake);
+        let mut origin = fake.upstream();
+        let origin_task = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            origin.read_to_end(&mut bytes).await.unwrap();
+            assert_eq!(bytes, b"ping");
+        });
+        let bytes = response(b"CONNECT allowed.test:443 HTTP/1.1\r\n\r\nping", &fake).await;
+        assert!(bytes.starts_with(b"HTTP/1.1 200"), "{}", String::from_utf8_lossy(&bytes));
+        let dials: Vec<String> = fake.dials.lock().unwrap().iter().map(|a| a.to_string()).collect();
+        assert_eq!(
+            dials,
+            vec!["[2606:4700:10::6814:179a]:443", "104.20.23.154:443"],
+            "families alternate, so IPv4 is the second attempt"
+        );
+        origin_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn every_address_refused_is_a_bad_gateway() {
+        let mut fake = FakeNetwork::new(&["2606:4700:10::6814:179a", "104.20.23.154"]);
+        fake.refused = vec![
+            "2606:4700:10::6814:179a".parse().unwrap(),
+            "104.20.23.154".parse().unwrap(),
+        ];
+        let fake = Arc::new(fake);
+        let bytes = response(b"CONNECT allowed.test:443 HTTP/1.1\r\n\r\n", &fake).await;
+        assert!(bytes.starts_with(b"HTTP/1.1 502"));
+        assert_eq!(fake.dials.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn families_interleave_starting_with_the_first_answer() {
+        let addrs = |list: &[&str]| -> Vec<SocketAddr> { list.iter().map(|a| a.parse().unwrap()).collect() };
+        assert_eq!(
+            interleave_families(addrs(&["1.1.1.1:443", "1.0.0.1:443", "[::1]:443"])),
+            addrs(&["1.1.1.1:443", "[::1]:443", "1.0.0.1:443"])
+        );
+        assert_eq!(
+            interleave_families(addrs(&["[::1]:443", "[::2]:443", "1.1.1.1:443"])),
+            addrs(&["[::1]:443", "1.1.1.1:443", "[::2]:443"])
+        );
+        assert!(interleave_families(Vec::new()).is_empty());
     }
 
     #[tokio::test]
@@ -1909,6 +2157,82 @@ mod tests {
         .unwrap();
         assert!(dial_upstream("api.github.com", 443, vetted).await.is_ok());
 
+        // 4. A standalone process installs the host-provided policy verbatim,
+        //    which round-trips through `host_upstream_policy`.
+        let manual = ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Http,
+            host: "127.0.0.1".to_string(),
+            port: closed,
+            bypass: vec![],
+            ..ProxyConfig::default()
+        };
+        let provided = serde_json::to_string(&manual).unwrap();
+        install_upstream_policy(Some(&provided), |_| None).unwrap();
+        assert_eq!(host_upstream_policy().unwrap().as_deref(), Some(provided.as_str()));
+        assert!(dial_upstream("api.github.com", 443, vetted).await.is_err());
+
+        // 5. Without a provided policy the inherited proxy variables apply,
+        //    and with none of them the route is direct.
+        install_upstream_policy(None, |name| {
+            (name == "HTTPS_PROXY").then(|| format!("http://127.0.0.1:{closed}"))
+        })
+        .unwrap();
+        assert!(dial_upstream("api.github.com", 443, vetted).await.is_err());
+        install_upstream_policy(None, |_| None).unwrap();
+        assert!(dial_upstream("api.github.com", 443, vetted).await.is_ok());
+
+        // 6. An unparseable provided policy or proxy variable is an error, and
+        //    a blocked policy is reported (refusing an allowlisted launch).
+        assert!(install_upstream_policy(Some("{not json"), |_| None).is_err());
+        assert!(install_upstream_policy(None, |name| {
+            (name == "HTTPS_PROXY").then(|| "ftp://proxy.invalid".to_string())
+        })
+        .is_err());
+        block_upstream_policy("unusable proxy variable");
+        assert!(host_upstream_policy().is_err());
+        assert!(dial_upstream("api.github.com", 443, vetted).await.is_err());
+
         apply_current(ProxyConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn upstream_policy_file_is_private_consumed_and_deleted() {
+        // Only this test touches the variable, so the process-wide env is safe.
+        let dir = tempfile::tempdir().unwrap();
+        let policy_dir = dir.path().join("policies");
+        let path = write_upstream_policy_file(&policy_dir, r#"{"mode":"off"}"#).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(std::fs::metadata(&policy_dir).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        std::env::set_var(UPSTREAM_POLICY_ENV, &path);
+        assert_eq!(take_upstream_policy_env().unwrap().as_deref(), Some(r#"{"mode":"off"}"#));
+        assert!(std::env::var_os(UPSTREAM_POLICY_ENV).is_none());
+        assert!(!path.exists(), "the policy file is deleted once read");
+        assert_eq!(take_upstream_policy_env().unwrap(), None);
+
+        // A missing, symlinked or group-readable file is refused (and still
+        // never left behind for the sandboxed command).
+        std::env::set_var(UPSTREAM_POLICY_ENV, dir.path().join("missing.json"));
+        assert!(take_upstream_policy_env().is_err());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let loose = dir.path().join("loose.json");
+            std::fs::write(&loose, "{}").unwrap();
+            std::fs::set_permissions(&loose, std::fs::Permissions::from_mode(0o644)).unwrap();
+            std::env::set_var(UPSTREAM_POLICY_ENV, &loose);
+            assert!(take_upstream_policy_env().is_err());
+            assert!(!loose.exists());
+            let target = write_upstream_policy_file(&policy_dir, "{}").unwrap();
+            let link = dir.path().join("link.json");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            std::env::set_var(UPSTREAM_POLICY_ENV, &link);
+            assert!(take_upstream_policy_env().is_err());
+        }
+        assert!(std::env::var_os(UPSTREAM_POLICY_ENV).is_none());
     }
 }

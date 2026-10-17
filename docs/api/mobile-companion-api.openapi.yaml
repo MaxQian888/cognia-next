@@ -114367,6 +114367,25 @@ paths:
                       type:
                         - string
                         - "null"
+                    sandboxPolicy:
+                      type: object
+                      properties:
+                        network:
+                          type: string
+                          enum:
+                            - full
+                            - allowlist
+                            - off
+                        allowedHosts:
+                          type: array
+                          items:
+                            type: string
+                        readableScope:
+                          type: string
+                          enum:
+                            - home
+                            - workspace
+                      additionalProperties: false
                     framing:
                       type: string
                       enum:

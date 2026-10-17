@@ -489,6 +489,7 @@ mod tests {
                 (WRAPPED_ENV.into(), "1".into()),
             ]),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         }
     }

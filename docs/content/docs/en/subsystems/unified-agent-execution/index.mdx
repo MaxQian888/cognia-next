@@ -77,6 +77,24 @@ checks the feature but not the grant offers a Run button the Host answers with
 403. A Host declares the plane as the `external-agent.process-plane` feature,
 per operation, so a build that ships spawn before detection is describable.
 
+## External-agent sandbox policy
+
+For process-transport agents, `ExternalAgentConfig.sandboxPolicy` persists with the configuration
+and passes through the adapter, `AgentProcessSpawnSpec`, and desktop or CLI spawn config to the
+shared Rust launcher. Missing fields preserve network `full` and readable scope `home`. Choose
+`allowlist` with exact hosts or `*.domain` patterns, or `off`, to narrow outbound access; an empty
+allowlist is off. Choose `workspace` to remove blanket home reads while retaining agent state,
+required toolchain roots and Git configuration. Credential denies and bot isolation still apply.
+This outer policy is independent of Codex's native sandbox permissions and applies to the whole
+spawned process tree. It does not constrain an already running remote HTTP/WebSocket agent service.
+
+The launcher enforces the policy on macOS and Linux, starts its proxy/bridge before the agent,
+fails closed on setup errors and shuts down with the child. The shared proxy supports CONNECT and
+absolute-form HTTP, blocks internal/metadata addresses, and does not provide SOCKS or UDP.
+**Windows lacks an external-agent OS sandbox, so the existing strict gate refuses local process
+launches. Saved policy fields are inert and labelled as such in the editor.** See [external-agent process policy](../sandbox/os-backends#external-agent-process-policy)
+for platform enforcement and compatibility limits.
+
 ## Which agent CLIs a host already has
 
 `external_agent_detect_runtimes` reads the machine that would run the child, in

@@ -768,6 +768,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     try {
       await this.processHost.spawn({
         id: probeId,
+        sandboxPolicy: config.sandboxPolicy,
         command,
         args,
         cwd: config.process?.cwd,
@@ -1040,6 +1041,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       const spawnConfig: { config: AgentProcessSpawnSpec } = {
         config: {
           id: agentId,
+          sandboxPolicy: this._config.sandboxPolicy,
           command: this._config.process?.command ?? "pi",
           args,
           cwd,
@@ -2593,6 +2595,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
 
       await this.processHost.spawn({
         id: probeId,
+        sandboxPolicy: config.sandboxPolicy,
         command: config.process?.command ?? "pi",
         args: ["--mode", "rpc", "--no-session", ...extensionPolicyArgs(this.extensionPolicy())],
         cwd: config.process?.cwd,

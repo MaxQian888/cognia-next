@@ -3016,6 +3016,7 @@ mod tests {
             env,
             cwd: Some("/workspaces/ws-1".into()),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         }
     }
@@ -4235,6 +4236,7 @@ mod docker_integration {
             env: HashMap::new(),
             cwd: Some(tmp.path().display().to_string()),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         };
         let id = spawn_with_events(backend.as_ref(), emitter.clone(), spawn)
@@ -4298,6 +4300,7 @@ mod docker_integration {
             env: HashMap::new(),
             cwd: Some(tmp.path().display().to_string()),
             framing: Default::default(),
+            sandbox_policy: Default::default(),
             sandbox: None,
         };
         spawn_with_events(backend.as_ref(), emitter.clone(), spawn)
@@ -4409,6 +4412,7 @@ mod docker_integration {
                 env: HashMap::new(),
                 cwd: Some(tmp.path().display().to_string()),
                 framing: Default::default(),
+                sandbox_policy: Default::default(),
                 sandbox: None,
             },
             running,

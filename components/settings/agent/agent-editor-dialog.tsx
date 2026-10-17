@@ -60,6 +60,11 @@ import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 import { useAccounts } from "@/lib/subscription/core/hooks"
 import { isTauri } from "@/lib/platform/detect"
+import { detectOsFamily } from "@/lib/platform/os"
+import {
+  isValidExternalAgentSandboxHost,
+  type ExternalAgentProcessSandboxPolicy,
+} from "@cognia/agent-contracts/external-agent"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
 import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
@@ -78,6 +83,7 @@ import {
   type PiExtensionPolicy,
 } from "@cognia/agent-pi/rpc-client"
 import { PiPluginPackagesField } from "./pi-plugin-packages-field"
+import { ExternalAgentSandboxPolicyField } from "./external-agent-sandbox-policy-field"
 import {
   useExternalAgentStore,
   type LifecycleExternalAgentConfig,
@@ -130,6 +136,7 @@ interface AgentFormData {
   processArgs: string
   processCwd: string
   processEnv?: Record<string, string>
+  sandboxPolicy?: ExternalAgentProcessSandboxPolicy
   // Network config (for http/websocket)
   networkEndpoint: string
   /**
@@ -655,6 +662,7 @@ export function AgentEditorDialog({
       processArgs: agent.process?.args?.map(shellQuote).join(" ") || "",
       processCwd: agent.process?.cwd || "",
       processEnv: agent.process?.env,
+      sandboxPolicy: agent.sandboxPolicy,
       networkEndpoint: agent.network?.endpoint || "",
       networkApiKey: agent.network?.apiKey || "",
       defaultPermissionMode: agent.defaultPermissionMode || "default",
@@ -735,6 +743,13 @@ export function AgentEditorDialog({
     const usesProcess =
       formData.transport === "stdio" ||
       (formData.protocol === "opencode" && formData.opencodeAutoSpawn)
+    const allowedHosts = formData.sandboxPolicy?.allowedHosts
+      ?.map((host) => host.trim())
+      .filter(Boolean)
+    if (usesProcess && allowedHosts?.some((host) => !isValidExternalAgentSandboxHost(host))) {
+      toast.error(tManage("sandboxAllowedHostsInvalid"))
+      return
+    }
     const processArgs = managedDsh ? [] : tokenizeShellCommand(formData.processArgs)
     if (usesProcess && processArgs === null) {
       toast.error(t("argumentsInvalid"))
@@ -789,6 +804,11 @@ export function AgentEditorDialog({
       description: formData.description.trim(),
       defaultPermissionMode: formData.defaultPermissionMode,
       stateIsolation: effectiveStateIsolation,
+      ...(usesProcess && formData.sandboxPolicy
+        ? {
+            sandboxPolicy: { ...formData.sandboxPolicy, allowedHosts },
+          }
+        : {}),
       // Complete lists every time: an emptied list is the clear.
       requireApprovalFor: formData.requireApprovalFor,
       autoApprovePatterns: formData.autoApprovePatterns,
@@ -1844,6 +1864,14 @@ export function AgentEditorDialog({
             </SelectContent>
           </Select>
         </div>
+
+        {launchesProcess && (
+          <ExternalAgentSandboxPolicyField
+            value={formData.sandboxPolicy}
+            onChange={(sandboxPolicy) => setFormData({ ...formData, sandboxPolicy })}
+            platform={localPaths ? detectOsFamily() : "unknown"}
+          />
+        )}
 
         {/* Codex app-server options — sandbox + reasoning defaults applied at
             thread/start (sandbox) and turn/start (sandboxPolicy/effort/summary).

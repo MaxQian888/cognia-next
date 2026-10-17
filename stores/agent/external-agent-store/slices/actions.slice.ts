@@ -1,3 +1,4 @@
+import { validateExternalAgentSandboxPolicy } from "@cognia/agent-contracts/external-agent"
 import type { StoreApi } from "zustand"
 import { nanoid } from "nanoid"
 import { loggers } from "@cognia/logging"
@@ -170,6 +171,7 @@ export const createExternalAgentActionsSlice = (
         // model-bound variant from a preset must get that variant, not the
         // preset's defaults.
         codexOptions: presetConfig.codexOptions,
+        sandboxPolicy: presetConfig.sandboxPolicy,
         cogniaModel: presetConfig.cogniaModel,
         timeout: presetConfig.timeout,
         retryConfig: presetConfig.retryConfig,
@@ -218,6 +220,7 @@ export const createExternalAgentActionsSlice = (
   },
 
   updateAgent: (id: string, updates: UpdateExternalAgentInput): void => {
+    validateExternalAgentSandboxPolicy(updates.sandboxPolicy)
     set((state) => {
       const agent = state.agents[id]
       if (!agent) return state
@@ -240,6 +243,7 @@ export const createExternalAgentActionsSlice = (
         autoApprovePatterns: updates.autoApprovePatterns ?? agent.autoApprovePatterns,
         requireApprovalFor: updates.requireApprovalFor ?? agent.requireApprovalFor,
         codexOptions: updates.codexOptions ?? agent.codexOptions,
+        sandboxPolicy: updates.sandboxPolicy ?? agent.sandboxPolicy,
         cogniaModel: updates.cogniaModel === undefined ? agent.cogniaModel : updates.cogniaModel,
         stateIsolation: updates.stateIsolation ?? agent.stateIsolation,
         // `null` is the clear (follow the active account), like `cogniaModel`.
@@ -291,6 +295,7 @@ export const createExternalAgentActionsSlice = (
   },
 
   replaceAgentConfig: (id, config): void => {
+    validateExternalAgentSandboxPolicy(config.sandboxPolicy)
     set((state) => {
       const existing = state.agents[id]
       if (!existing) return state
@@ -582,6 +587,7 @@ export const createExternalAgentActionsSlice = (
   // ========================================
 
   importAgents: (agents: ExternalAgentConfig[]): void => {
+    for (const agent of agents) validateExternalAgentSandboxPolicy(agent.sandboxPolicy)
     set((state) => {
       const newAgents = { ...state.agents }
       const newStatus = { ...state.connectionStatus }

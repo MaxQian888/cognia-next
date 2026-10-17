@@ -15,10 +15,110 @@ import {
   resolveSandboxedExternalAgentLaunch,
   sandboxLauncherUnavailableMessage,
   sandboxSupportsPlatform,
+  workspaceToolchainReadableRoots,
 } from "./sandbox-launcher"
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 
 describe("external-agent sandbox launcher", () => {
+  it("resolves symlinked toolchain roots without exposing local share", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "sandbox-toolchain-"))
+    try {
+      const modules = path.join(home, ".nvm/versions/node/v22/lib/node_modules")
+      const executable = path.join(modules, "agent/bin/agent")
+      fs.mkdirSync(path.dirname(executable), { recursive: true })
+      fs.writeFileSync(executable, "#!/bin/sh\n", { mode: 0o755 })
+      const bin = path.join(home, ".local/bin")
+      fs.mkdirSync(bin, { recursive: true })
+      const link = path.join(bin, "codex")
+      fs.symlinkSync(executable, link)
+      const roots = workspaceToolchainReadableRoots(link, home)
+      expect(roots).toContain(bin)
+      expect(roots).toContain(fs.realpathSync(modules))
+      expect(roots).not.toContain(path.join(home, ".local"))
+      expect(roots).not.toContain(fs.realpathSync(path.join(home, ".local")))
+      expect(roots).not.toContain(home)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("mirrors native policy modes across platforms and bot isolation", async () => {
+    for (const platform of ["darwin", "linux", "win32"] as const) {
+      for (const network of ["full", "allowlist", "off"] as const) {
+        for (const bot of [false, true]) {
+          for (const readableScope of ["home", "workspace"] as const) {
+            const config = {
+              id: "policy",
+              command: "codex",
+              cwd: "/work/project",
+              sandboxPolicy: {
+                network,
+                allowedHosts: ["api.example.com", "*.example.org"],
+                readableScope,
+              },
+              env: bot ? { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" } : {},
+            }
+            const promise = resolveSandboxedExternalAgentLaunch(config, {
+              platform,
+              homedir: "/home/dev",
+              candidates: ["/launcher"],
+              isExecutable: () => true,
+              ensureDir: () => {},
+              ensureFile: () => {},
+              supportsBotIsolation: () => true,
+            })
+            if (platform === "win32") {
+              await expect(promise).rejects.toThrow()
+              continue
+            }
+            const { args } = await promise
+            const pairs = args.slice(0, -1).map((arg, index) => [arg, args[index + 1]])
+            expect(args.includes("--network")).toBe(network === "full")
+            expect(pairs.filter(([arg]) => arg === "--network-allow")).toHaveLength(
+              network === "allowlist" ? 2 : 0
+            )
+            expect(
+              pairs.some(([flag, value]) => flag === "--readable" && value === "/home/dev")
+            ).toBe(!bot && readableScope === "home")
+            expect(args.includes("--workspace-readable")).toBe(
+              !bot && readableScope === "workspace"
+            )
+            if (bot) expect(pairs).toContainEqual(["--deny-readable", "/home/dev"])
+          }
+        }
+      }
+    }
+  })
+
+  it("keeps git/toolchain reads and Aider credential denies with empty allowlist", () => {
+    const args = buildSandboxLauncherArgs(
+      {
+        id: "a",
+        command: "aider",
+        cwd: "/work/project",
+        sandboxPolicy: { network: "allowlist", readableScope: "workspace" },
+      },
+      "/home/dev"
+    )
+    const pairs = args.slice(0, -1).map((arg, index) => [arg, args[index + 1]])
+    for (const root of ["/home/dev/.gitconfig", "/home/dev/.config/git", "/home/dev/.cargo/bin"])
+      expect(pairs).toContainEqual(["--readable", root])
+    expect(pairs).toContainEqual(["--deny-readable", "/home/dev/.aider.conf.yml"])
+    expect(args).not.toContain("--network")
+    expect(args).not.toContain("--network-allow")
+    expect(() =>
+      buildSandboxLauncherArgs(
+        {
+          id: "a",
+          command: "codex",
+          cwd: "/work",
+          sandboxPolicy: { allowedHosts: ["https://example.com"] },
+        },
+        "/home/dev"
+      )
+    ).toThrow()
+  })
+
   it("rejects foreign drive paths on the POSIX hosts supported by the wrapper", () => {
     const report = jest.spyOn(console, "warn").mockImplementation(() => {})
     try {

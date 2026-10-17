@@ -105,6 +105,83 @@ pub async fn host_handshake(
     .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Linux bridge handshake timed out"))?
 }
 
+/// Pin and authenticate the external-agent helper before releasing Go. The
+/// socket directory alone is insufficient for same-UID sibling runs: kernel
+/// peer credentials must identify a descendant in this bwrap's new namespace.
+#[cfg(target_os = "linux")]
+pub fn pin_external_agent_peer(
+    peer: &UnixStream,
+    bwrap_pid: i32,
+) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::unix::fs::MetadataExt;
+    let credentials = peer.peer_cred()?;
+    if credentials.uid() != unsafe { libc::geteuid() } {
+        return Err(protocol_error("bridge peer UID mismatch"));
+    }
+    let pid = credentials
+        .pid()
+        .ok_or_else(|| protocol_error("bridge peer PID missing"))?;
+    let namespace = std::fs::File::open(format!("/proc/{pid}/ns/pid"))?;
+    let outer = std::fs::File::open(format!("/proc/{bwrap_pid}/ns/pid"))?;
+    let identity = |file: &std::fs::File| -> io::Result<_> {
+        let metadata = file.metadata()?;
+        Ok((metadata.dev(), metadata.ino()))
+    };
+    let peer_ns = identity(&namespace)?;
+    let outer_ns = identity(&outer)?;
+    let verify = || {
+        verify_external_agent_lineage(pid, bwrap_pid, peer_ns, outer_ns, |current| {
+            let status = std::fs::read_to_string(format!("/proc/{current}/status"))?;
+            let parent = status
+                .lines()
+                .find_map(|line| line.strip_prefix("PPid:"))
+                .and_then(|value| value.trim().parse().ok())
+                .ok_or_else(|| protocol_error("bridge parent PID missing"))?;
+            let metadata = std::fs::metadata(format!("/proc/{current}/ns/pid"))?;
+            Ok((parent, (metadata.dev(), metadata.ino())))
+        })
+    };
+    verify()?;
+    let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let pinned = unsafe { OwnedFd::from_raw_fd(raw as i32) };
+    verify()?;
+    Ok(pinned)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn verify_external_agent_lineage(
+    mut pid: i32,
+    root: i32,
+    peer_namespace: (u64, u64),
+    root_namespace: (u64, u64),
+    mut process: impl FnMut(i32) -> io::Result<(i32, (u64, u64))>,
+) -> io::Result<()> {
+    if pid == root || peer_namespace == root_namespace {
+        return Err(protocol_error("bridge has not entered a new PID namespace"));
+    }
+    let mut reached_outer = false;
+    for _ in 0..4096 {
+        if pid == root {
+            return Ok(());
+        }
+        if pid <= 1 {
+            break;
+        }
+        let (parent, namespace) = process(pid)?;
+        if namespace == root_namespace {
+            reached_outer = true;
+        } else if namespace != peer_namespace || reached_outer {
+            return Err(protocol_error("bridge descendant PID namespace mismatch"));
+        }
+        pid = parent;
+    }
+    Err(protocol_error("bridge peer does not belong to this run"))
+}
+
 /// Descriptor transfer occurs after Go and before Started. Bwrap never sees
 /// either pipe end. All descriptors remain CLOEXEC except target fd 0.
 #[cfg(target_os = "linux")]
@@ -234,10 +311,17 @@ mod descriptors {
                 .await
                 .unwrap();
             assert_eq!(&ready, b"ready");
-            let error = tokio::time::timeout(Duration::from_secs(1), writer.write_all(&[0; 65536]))
-                .await
-                .expect("EPIPE must not depend on target exit or the idle deadline")
-                .unwrap_err();
+            // A concurrently forked test child can hold a duplicate of the
+            // read end until it execs; EPIPE must still arrive within a short
+            // bounded window, long before the target exits or idles out.
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            let error = loop {
+                match tokio::time::timeout(Duration::from_millis(200), writer.write_all(&[0; 4096])).await {
+                    Ok(Err(error)) => break error,
+                    _ if tokio::time::Instant::now() < deadline => {}
+                    _ => panic!("EPIPE must not depend on target exit or the idle deadline"),
+                }
+            };
             assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
             assert!(target.try_wait().unwrap().is_none());
             target.kill().await.unwrap();
@@ -262,10 +346,14 @@ mod descriptors {
                 0
             );
             drop(received);
-            let error = tokio::time::timeout(Duration::from_secs(1), writer.write_all(&[0; 65536]))
-                .await
-                .expect("closing the only reader must wake the writer")
-                .unwrap_err();
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            let error = loop {
+                match tokio::time::timeout(Duration::from_millis(200), writer.write_all(&[0; 4096])).await {
+                    Ok(Err(error)) => break error,
+                    _ if tokio::time::Instant::now() < deadline => {}
+                    _ => panic!("closing the last reader must surface EPIPE"),
+                }
+            };
             assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
         }
     }
@@ -464,6 +552,7 @@ mod supervisor {
         let mut term = signal(SignalKind::terminate())?;
         let mut interrupt = signal(SignalKind::interrupt())?;
         let mut hangup = signal(SignalKind::hangup())?;
+        let mut quit = signal(SignalKind::quit())?;
         let filter =
             crate::seccomp::build_allowlist_target_filter().map_err(protocol_error_owned)?;
         let mut limit: libc::rlimit = unsafe { std::mem::zeroed() };
@@ -561,6 +650,7 @@ mod supervisor {
                 _ = term.recv() => { signal_group(pid, libc::SIGTERM); deadline.get_or_insert(tokio::time::Instant::now() + Duration::from_secs(2)); }
                 _ = interrupt.recv() => { signal_group(pid, libc::SIGINT); deadline.get_or_insert(tokio::time::Instant::now() + Duration::from_secs(2)); }
                 _ = hangup.recv() => { signal_group(pid, libc::SIGHUP); deadline.get_or_insert(tokio::time::Instant::now() + Duration::from_secs(2)); }
+                _ = quit.recv() => { signal_group(pid, libc::SIGQUIT); deadline.get_or_insert(tokio::time::Instant::now() + Duration::from_secs(2)); }
                 _ = tick.tick() => {}
             }
             if relay_task.is_finished()
@@ -686,12 +776,20 @@ mod supervisor {
                     break;
                 }
             }
-            let error = helper
-                .stdin
-                .take()
-                .unwrap()
-                .write_all(b"payload")
-                .unwrap_err();
+            // Another test thread forking at the wrong moment can hold a
+            // duplicate of the pipe's read end until its child execs, so
+            // allow a short, bounded window before the write must fail.
+            let mut stdin = helper.stdin.take().unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let error = loop {
+                match stdin.write_all(b"payload") {
+                    Err(error) => break error,
+                    Ok(()) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    }
+                    Ok(()) => panic!("supervisor kept the target's stdin open"),
+                }
+            };
             assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
             assert!(helper.wait().unwrap().success());
         }
@@ -738,6 +836,30 @@ pub fn run_helper(target: Vec<String>) -> io::Result<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn external_agent_handshake_rejects_other_runs_and_nested_namespaces() {
+        let root_ns = (1, 1);
+        let child_ns = (1, 2);
+        assert!(
+            super::verify_external_agent_lineage(12, 10, child_ns, root_ns, |pid| {
+                Ok((pid - 1, if pid == 12 { child_ns } else { root_ns }))
+            })
+            .is_ok()
+        );
+        assert!(
+            super::verify_external_agent_lineage(12, 10, root_ns, root_ns, |_| unreachable!())
+                .is_err()
+        );
+        assert!(
+            super::verify_external_agent_lineage(12, 10, child_ns, root_ns, |_| Ok((1, child_ns)))
+                .is_err()
+        );
+        assert!(
+            super::verify_external_agent_lineage(12, 10, child_ns, root_ns, |_| Ok((11, (1, 3))))
+                .is_err()
+        );
+    }
+
     use super::*;
 
     #[cfg(target_os = "linux")]

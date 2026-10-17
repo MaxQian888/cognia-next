@@ -179,6 +179,7 @@ const RUNTIME_AFFECTING_KEYS = [
   "process",
   "network",
   "codexOptions",
+  "sandboxPolicy",
   "timeout",
   "retryConfig",
   // Both change the spawn env: the state root the runtime's home variables
