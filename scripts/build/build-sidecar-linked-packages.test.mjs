@@ -1,17 +1,58 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { basename, join, resolve } from "node:path"
 import { test } from "node:test"
 import ts from "typescript"
 
 import {
   collectSidecarCogniaSpecifiers,
   linkedPackageDirs,
+  materializeLinkedPackages,
   resolveFromSidecar,
   runtimeCogniaSpecifiers,
   sidecarRoot,
   unshippableResolutions,
 } from "./build-sidecar-linked-packages.mjs"
+
+test("materializeLinkedPackages replaces workspace links without copying development dependencies", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "cognia-linked-staging-"))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const source = join(root, "packages", "redact")
+  const sidecar = join(root, "sidecar")
+  const destination = join(sidecar, "node_modules", "@cognia", "redact")
+  mkdirSync(join(source, "dist"), { recursive: true })
+  mkdirSync(join(source, "node_modules", "development-only"), { recursive: true })
+  mkdirSync(join(sidecar, "node_modules", "@cognia"), { recursive: true })
+  writeFileSync(join(source, "package.json"), JSON.stringify({ name: "@cognia/redact" }))
+  writeFileSync(join(source, "dist", "index.js"), "export const version = 1")
+  writeFileSync(join(source, "node_modules", "development-only", "index.js"), "unused")
+  symlinkSync(source, destination, process.platform === "win32" ? "junction" : "dir")
+
+  const packages = [{ name: "@cognia/redact", dir: source }]
+  materializeLinkedPackages(packages, sidecar)
+  assert.equal(lstatSync(destination).isSymbolicLink(), false)
+  assert.equal(existsSync(join(destination, "node_modules")), false)
+  assert.equal(readFileSync(join(destination, "dist", "index.js"), "utf8"), "export const version = 1")
+  assert.equal(existsSync(join(source, "node_modules", "development-only", "index.js")), true)
+
+  writeFileSync(join(source, "dist", "index.js"), "export const version = 2")
+  materializeLinkedPackages(packages, sidecar)
+  assert.equal(readFileSync(join(destination, "dist", "index.js"), "utf8"), "export const version = 2")
+})
+
+test("materializeLinkedPackages refuses an unrelated installed package", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "cognia-linked-staging-"))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const source = join(root, "source")
+  const destination = join(root, "node_modules", "@cognia", "redact")
+  mkdirSync(source, { recursive: true })
+  mkdirSync(destination, { recursive: true })
+  writeFileSync(join(source, "package.json"), JSON.stringify({ name: "@cognia/redact" }))
+  writeFileSync(join(destination, "package.json"), JSON.stringify({ name: "unrelated" }))
+  assert.throws(() => materializeLinkedPackages([{ name: "@cognia/redact", dir: source }], root), /unexpected package/)
+  assert.equal(JSON.parse(readFileSync(join(destination, "package.json"), "utf8")).name, "unrelated")
+})
 
 test("linkedPackageDirs keeps only link: dependencies, resolved against the sidecar", () => {
   const dirs = linkedPackageDirs(
@@ -22,8 +63,8 @@ test("linkedPackageDirs keeps only link: dependencies, resolved against the side
     "/repo/sidecar"
   )
   assert.deepEqual(dirs, [
-    { name: "@cognia/redact", dir: "/repo/packages/redact" },
-    { name: "@cognia/extra", dir: "/repo/packages/extra" },
+    { name: "@cognia/redact", dir: resolve("/repo/packages/redact") },
+    { name: "@cognia/extra", dir: resolve("/repo/packages/extra") },
   ])
 })
 
@@ -92,7 +133,7 @@ test("the sidecar tsconfig maps exactly the linked packages to their source, for
   const mapped = new Set(Object.keys(paths).map((key) => key.replace(/\/\*$/, "")))
   assert.deepEqual([...mapped].sort(), linked.map(({ name }) => name).sort())
   for (const { name, dir } of linked) {
-    const srcRel = `../packages/${dir.split("/").at(-1)}/src/`
+    const srcRel = `../packages/${basename(dir)}/src/`
     assert.ok(paths[name]?.[0]?.startsWith(srcRel), `${name} maps into ${srcRel}`)
     assert.ok(paths[`${name}/*`]?.[0] === `${srcRel}*`, `${name}/* maps to ${srcRel}*`)
   }

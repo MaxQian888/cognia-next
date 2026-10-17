@@ -142,6 +142,13 @@ test("buildCatalog discovers folder skills, sorted by id", () => {
       catalog.map((e) => e.id),
       ["alpha", "zeta"]
     )
+    assert.deepEqual(
+      catalog.map((e) => e.canonicalId),
+      ["builtin:alpha", "builtin:zeta"]
+    )
+    const loader = renderBodyLoaderModule(catalog)
+    assert.ok(loader.includes('import("./bodies/alpha.generated")'))
+    assert.ok(loader.includes('import("./bodies/zeta.generated")'))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

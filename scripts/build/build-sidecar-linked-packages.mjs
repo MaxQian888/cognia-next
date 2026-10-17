@@ -16,7 +16,7 @@
 //
 // Runs from the root postinstall, `predev`, `prebuild`, and `sidecar:test`.
 
-import { readFileSync, readdirSync } from "node:fs"
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
@@ -39,6 +39,39 @@ export function linkedPackageDirs(manifest, root = sidecarRoot) {
   return Object.entries(deps)
     .filter(([, spec]) => typeof spec === "string" && spec.startsWith("link:"))
     .map(([name, spec]) => ({ name, dir: resolve(root, spec.slice("link:".length)) }))
+}
+
+/**
+ * Stage linked packages without their checkout's development dependency trees.
+ * Their sidecar Node exports are compiled above. Following workspace junctions
+ * through node_modules instead recursively copies unrelated packages and gives
+ * WiX v3 source paths longer than Windows' legacy path limit.
+ */
+export function materializeLinkedPackages(packages, root = sidecarRoot) {
+  for (const { name, dir } of packages) {
+    const destination = join(root, "node_modules", name)
+    const parent = dirname(destination)
+    mkdirSync(parent, { recursive: true })
+    const temporary = mkdtempSync(join(parent, ".cognia-stage-"))
+    try {
+      cpSync(dir, temporary, {
+        recursive: true,
+        preserveTimestamps: true,
+        filter: (source) => !source.slice(dir.length).split(/[\\/]/).includes("node_modules"),
+      })
+      if (existsSync(destination)) {
+        const installed = lstatSync(destination)
+        if (!installed.isSymbolicLink()) {
+          const pkg = JSON.parse(readFileSync(join(destination, "package.json"), "utf8"))
+          if (pkg.name !== name) throw new Error(`[${LABEL}] refusing to replace unexpected package at ${destination}`)
+        }
+        rmSync(destination, { recursive: true, force: true })
+      }
+      renameSync(temporary, destination)
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  }
 }
 
 /**
@@ -118,6 +151,8 @@ function main() {
     linked.map((pkg) => pkg.dir),
     { label: LABEL, repoRoot, run }
   )
+
+  if (process.platform === "win32") materializeLinkedPackages(linked)
 
   const specifiers = collectSidecarCogniaSpecifiers()
   const bad = unshippableResolutions(resolveFromSidecar(specifiers))

@@ -71,7 +71,7 @@ pub fn affinity_outcome(excluded: bool, applied: bool) -> AffinityOutcome {
 fn verify<R: Runtime>(window: &WebviewWindow<R>, excluded: bool) -> Result<(), String> {
     use windows::Win32::UI::WindowsAndMessaging::{
         GetWindowDisplayAffinity, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_MONITOR,
-        WDA_NONE, WINDOW_DISPLAY_AFFINITY,
+        WDA_NONE,
     };
 
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
@@ -80,13 +80,13 @@ fn verify<R: Runtime>(window: &WebviewWindow<R>, excluded: bool) -> Result<(), S
     } else {
         WDA_NONE
     };
-    let mut actual = WINDOW_DISPLAY_AFFINITY::default();
+    let mut actual = 0_u32;
     // SAFETY: `hwnd` is a live window handle owned by this process and `actual`
     // is a stack out-param of the required type.
     if unsafe { GetWindowDisplayAffinity(hwnd, &mut actual) }.is_err() {
         return Err("could not read the window's display affinity".into());
     }
-    match affinity_outcome(excluded, actual == want) {
+    match affinity_outcome(excluded, actual == want.0) {
         AffinityOutcome::Satisfied => Ok(()),
         AffinityOutcome::Failed(message) => Err(message.into()),
         AffinityOutcome::FallBackToBlackout => {

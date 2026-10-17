@@ -1,4 +1,9 @@
-# The sidecar is installed with --ignore-workspace, so pnpm does not inherit
+# Tauri copies node_modules/**/* as resources. Use real files rather than the
+# virtual store's peer-dependency symlinks, which can break that traversal.
+# pnpm 11 no longer reads node-linker from .npmrc.
+nodeLinker: hoisted
+
+# The sidecar is installed separately, so pnpm does not inherit
 # the repository root's build policy. Keep every dependency script decision
 # explicit here: pnpm 11 fails installs when an encountered build is undecided.
 allowBuilds:

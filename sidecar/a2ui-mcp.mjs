@@ -206,7 +206,7 @@ function negotiateProtocolVersion(clientVersion) {
   return A2UI_MCP_PREFERRED_PROTOCOL_VERSION;
 }
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/util.js
+// sidecar/node_modules/zod/v4/core/util.js
 var util_exports = {};
 __export(util_exports, {
   BIGINT_FORMAT_RANGES: () => BIGINT_FORMAT_RANGES,
@@ -1049,7 +1049,7 @@ function constantCatch(value) {
   return fn;
 }
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/core.js
+// sidecar/node_modules/zod/v4/core/core.js
 var _a;
 var _zodDesc = { value: void 0, enumerable: false };
 var _E = "captureStackTrace" in Error ? Error : null;
@@ -1167,7 +1167,7 @@ function config(newConfig) {
   return globalConfig;
 }
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/errors.js
+// sidecar/node_modules/zod/v4/core/errors.js
 function _getMessage() {
   const internals = this._zod;
   internals.message ?? (internals.message = JSON.stringify(internals.def, jsonStringifyReplacer, 2));
@@ -1282,7 +1282,7 @@ function formatError(error2, mapper = (issue2) => issue2.message) {
   return fieldErrors;
 }
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/parse.js
+// sidecar/node_modules/zod/v4/core/parse.js
 function finalizeParams(callee, params) {
   return { callee: params?.callee ?? callee, Err: params?.Err };
 }
@@ -1430,7 +1430,7 @@ var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
   return _safeParseAsync(_Err)(schema, value, _ctx);
 };
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/regexes.js
+// sidecar/node_modules/zod/v4/core/regexes.js
 var cuid = /^[cC][0-9a-z]{6,}$/;
 var cuid2 = /^[0-9a-z]+$/;
 var ulid = /^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$/;
@@ -1489,7 +1489,7 @@ var _null = /^null$/i;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/checks.js
+// sidecar/node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
   var _a3;
   inst._zod ?? (inst._zod = {});
@@ -1809,7 +1809,7 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
   };
 });
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/doc.js
+// sidecar/node_modules/zod/v4/core/doc.js
 var Doc = class {
   constructor(args = [], closed = {}) {
     this.content = [];
@@ -1850,14 +1850,14 @@ ${content.join("\n")}
   }
 };
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/versions.js
+// sidecar/node_modules/zod/v4/core/versions.js
 var version = {
   major: 4,
   minor: 6,
   patch: 5
 };
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/schemas.js
+// sidecar/node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
   var _a3;
   inst ?? (inst = {});
@@ -3500,7 +3500,7 @@ function handleRefineResult(result, payload, input, inst) {
   }
 }
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/memoizer.js
+// sidecar/node_modules/zod/v4/core/memoizer.js
 var $ZodCyclicError = class extends Error {
   constructor() {
     super(`Cannot parse a reference cycle that closes through a transform`);
@@ -3774,7 +3774,7 @@ function isBackEdge(ctx, value) {
   return backEdges !== void 0 && isRef(value) && backEdges.has(value);
 }
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/locales/en.js
+// sidecar/node_modules/zod/v4/locales/en.js
 var error = () => {
   const Sizable = {
     string: { unit: "characters", verb: "to have" },
@@ -3899,7 +3899,7 @@ function en_default() {
   };
 }
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/registries.js
+// sidecar/node_modules/zod/v4/core/registries.js
 var _a2;
 var $ZodRegistry = class {
   constructor() {
@@ -3947,7 +3947,7 @@ function registry() {
 (_a2 = globalThis).__zod_globalRegistry ?? (_a2.__zod_globalRegistry = registry());
 var globalRegistry = globalThis.__zod_globalRegistry;
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/api.js
+// sidecar/node_modules/zod/v4/core/api.js
 function snapshotChecks(def) {
   if (def.checks)
     def.checks = [...def.checks];
@@ -4474,7 +4474,7 @@ function _check(fn, params) {
   return ch;
 }
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/to-json-schema.js
+// sidecar/node_modules/zod/v4/core/to-json-schema.js
 function assignProps(target, ...sources) {
   for (const source of sources) {
     for (const key of Reflect.ownKeys(source)) {
@@ -5004,7 +5004,7 @@ var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) =
   return finalize(ctx, schema);
 };
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/json-schema-processors.js
+// sidecar/node_modules/zod/v4/core/json-schema-processors.js
 var narrowMin = (agg, key, value) => {
   if (agg[key] === void 0 || value > agg[key])
     agg[key] = value;
@@ -5542,7 +5542,7 @@ var optionalProcessor = (schema, ctx, _json, params) => {
   seen.ref = def.innerType;
 };
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/errors.js
+// sidecar/node_modules/zod/v4/classic/errors.js
 var _installedErrorProtos = /* @__PURE__ */ new WeakSet([Object.prototype, Error.prototype]);
 function _lazyMethod(proto, key, make) {
   Object.defineProperty(proto, key, {
@@ -5587,7 +5587,7 @@ var ZodRealError = /* @__PURE__ */ $constructor("ZodError", initializer2, void 0
   Parent: Error
 });
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/parse.js
+// sidecar/node_modules/zod/v4/classic/parse.js
 var parse = /* @__PURE__ */ _parse(ZodRealError);
 var parseAsync = /* @__PURE__ */ _parseAsync(ZodRealError);
 var safeParse = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -5601,7 +5601,7 @@ var safeDecode = /* @__PURE__ */ _safeDecode(ZodRealError);
 var safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 var safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/schemas.js
+// sidecar/node_modules/zod/v4/classic/schemas.js
 function _ensureDefaultLocale() {
   if (!globalConfig.localeError)
     config(en_default());
@@ -6545,7 +6545,7 @@ function preprocess(fn, schema) {
   });
 }
 
-// sidecar/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/iso.js
+// sidecar/node_modules/zod/v4/classic/iso.js
 var iso_exports = {};
 __export(iso_exports, {
   ZodISODate: () => ZodISODate,
@@ -6570,7 +6570,7 @@ function duration2(params) {
   return _isoDuration(ZodISODuration, params);
 }
 
-// sidecar/node_modules/.pnpm/@modelcontextprotocol+sdk@1.30.1_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
+// sidecar/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
 var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
 var JSONRPC_VERSION = "2.0";

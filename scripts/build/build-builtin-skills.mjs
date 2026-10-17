@@ -215,7 +215,7 @@ export function buildCatalog(dir = SKILLS_DIR) {
   const entries = globSync("*/SKILL.md", { cwd: dir, nodir: true })
     .sort()
     .map((relative) => {
-      const name = relative.split("/")[0]
+      const name = path.dirname(relative)
       const full = path.join(dir, name)
       const entry = parseSkillFile(name, readFileSync(path.join(dir, relative), "utf8"))
       const resources = collectResources(full)

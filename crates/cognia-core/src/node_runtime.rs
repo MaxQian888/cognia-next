@@ -66,11 +66,22 @@ fn probe_node(path: &Path) -> Result<(String, (u64, u64, u64)), NodeRuntimeError
     probe_node_with_timeout(path, NODE_PROBE_TIMEOUT)
 }
 
+fn background_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut command = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    command
+}
+
 fn probe_node_with_timeout(
     path: &Path,
     timeout: Duration,
 ) -> Result<(String, (u64, u64, u64)), NodeRuntimeError> {
-    let mut command = std::process::Command::new(path);
+    let mut command = background_command(path);
     command
         .arg("--version")
         .stdin(Stdio::null())
@@ -154,7 +165,7 @@ fn terminate_probe_process_tree(child: &mut std::process::Child) {
     }
     #[cfg(windows)]
     {
-        if let Ok(mut taskkill) = std::process::Command::new("taskkill")
+        if let Ok(mut taskkill) = background_command("taskkill")
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -303,6 +314,39 @@ mod tests {
         assert_eq!(parse_node_version("v28.0.0"), Some((28, 0, 0)));
         assert_eq!(parse_node_version("26.3.1"), None);
         assert_eq!(parse_node_version("v26.3"), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_probe_children_have_no_console_window() {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("console-window.ps1");
+        std::fs::write(
+            &script,
+            r#"Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ProbeConsole { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'
+Write-Output ([ProbeConsole]::GetConsoleWindow().ToInt64())
+"#,
+        )
+        .unwrap();
+        let powershell = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let output = background_command(powershell)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(script)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "0");
     }
 
     #[test]

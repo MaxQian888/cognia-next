@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -48,6 +48,53 @@ fn parse_node_major(version_output: &str) -> Option<u32> {
     let trimmed = version_output.trim();
     let without_v = trimmed.strip_prefix('v').unwrap_or(trimmed);
     without_v.split('.').next()?.parse::<u32>().ok()
+}
+
+fn background_command(program: &Path) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    command
+}
+
+fn node_resource_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(std::path::Component::Prefix(prefix)) = path.components().next() {
+        use std::path::Prefix;
+        let mut normalized = match prefix.kind() {
+            Prefix::VerbatimDisk(drive) => PathBuf::from(format!("{}:", drive as char)),
+            Prefix::VerbatimUNC(server, share) => {
+                let mut root = std::ffi::OsString::from(r"\\");
+                root.push(server);
+                root.push(r"\");
+                root.push(share);
+                PathBuf::from(root)
+            }
+            _ => return path.to_path_buf(),
+        };
+        normalized.extend(path.components().skip(1));
+        return normalized;
+    }
+    path.to_path_buf()
+}
+
+fn sidecar_command(node_executable: &Path, script: &Path) -> Result<Command, String> {
+    // Node's CLI realpath resolution rejects canonical Windows `\\?\` paths
+    // with EISDIR, including paths derived from its working directory.
+    let script = node_resource_path(script);
+    let cwd = script
+        .parent()
+        .ok_or_else(|| "sidecar script has no parent dir".to_string())?;
+    let mut command = background_command(&node_resource_path(node_executable));
+    command
+        .arg(&script)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    Ok(command)
 }
 
 /// Hand the sidecar the confinement wrapper for `run_code` children, when this
@@ -242,7 +289,7 @@ impl SidecarState {
         if self.node_version_ok.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let output = Command::new(node_executable)
+        let output = background_command(node_executable)
             .arg("--version")
             .output()
             .await
@@ -543,13 +590,7 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
         .ok_or_else(|| "sidecar script has no parent dir".to_string())?
         .to_path_buf();
 
-    let mut cmd = Command::new(&node_executable);
-    cmd.arg(&script)
-        .current_dir(&cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    let mut cmd = sidecar_command(&node_executable, &script)?;
     cognia_exec_sandbox::proc_group::apply_process_group(&mut cmd);
 
     // Inject the host-resolved provider credentials (OAuth bearer → API key;
@@ -571,15 +612,6 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
     // to exec through instead. When this host has no backend the variable stays
     // unset, and the sidecar then refuses to register `run_code` at all.
     apply_code_sandbox_env(&mut cmd, &node_executable, &cwd);
-
-    // On Windows, prevent a console window from popping up when the parent app
-    // has no console (e.g. a release build). tokio::process::Command exposes
-    // `creation_flags` directly on Windows, so no extra import is needed.
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
 
     let mut child = cmd.spawn().map_err(|e| {
         format!(
@@ -912,6 +944,74 @@ pub async fn restart_sidecar_for_config(state: SidecarState) -> Result<(), Strin
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[cfg(windows)]
+    #[test]
+    fn node_resource_paths_preserve_drive_unc_and_non_verbatim_paths() {
+        for (input, expected) in [
+            (
+                r"\\?\D:\app with spaces\测试\agent-host.mjs",
+                r"D:\app with spaces\测试\agent-host.mjs",
+            ),
+            (
+                r"\\?\UNC\server\share\app\agent-host.mjs",
+                r"\\server\share\app\agent-host.mjs",
+            ),
+            (r"D:\app\agent-host.mjs", r"D:\app\agent-host.mjs"),
+            (
+                r"\\server\share\app\agent-host.mjs",
+                r"\\server\share\app\agent-host.mjs",
+            ),
+            (r"\\?\Volume{test}\app", r"\\?\Volume{test}\app"),
+            ("node", "node"),
+        ] {
+            assert_eq!(node_resource_path(Path::new(input)), Path::new(expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn sidecar_entrypoint_starts_from_canonical_resource_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("sidecar with spaces 测试");
+        std::fs::create_dir(&directory).unwrap();
+        let script = directory.join("agent-host.mjs");
+        std::fs::write(&script, "console.log('sidecar-entrypoint-ready')").unwrap();
+        let script = script.canonicalize().unwrap();
+        let node = std::env::var_os("COGNIA_TEST_NODE").unwrap_or_else(|| "node".into());
+        let output = tokio::time::timeout(
+            Duration::from_secs(10),
+            sidecar_command(Path::new(&node), &script).unwrap().output(),
+        )
+        .await
+        .expect("Node entrypoint timed out")
+        .expect("Node runtime must be installed to test sidecar startup");
+        assert!(
+            output.status.success(),
+            "Node could not start the canonical resource path: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "sidecar-entrypoint-ready"
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn sidecar_background_children_have_no_console_window() {
+        let output = background_command(Path::new("powershell.exe"))
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Add-Type -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow();' -Name ConsoleProbe -Namespace Cognia; [Cognia.ConsoleProbe]::GetConsoleWindow().ToInt64()",
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "0");
+    }
 
     #[test]
     fn old_generation_cleanup_preserves_successor_holds() {

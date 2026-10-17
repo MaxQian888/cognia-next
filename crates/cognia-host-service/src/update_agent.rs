@@ -199,6 +199,16 @@ pub async fn call(
         .map_err(|_| "the deploy agent did not answer in time".to_owned())?
 }
 
+/// Compose deploy agents use a Unix socket, not the desktop update transport.
+#[cfg(not(unix))]
+pub async fn call(
+    _socket: &Path,
+    _request: &AgentRequest,
+    _timeout: Duration,
+) -> Result<AgentResponse, String> {
+    Err("Compose deploy-agent updates require Unix domain sockets".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +294,30 @@ mod tests {
             .unwrap_err()
             .contains("newline"));
         assert_eq!(read(Vec::new()).await.unwrap(), None);
+    }
+
+    #[cfg(not(unix))]
+    #[tokio::test]
+    async fn call_rejects_a_transport_not_supported_on_this_platform() {
+        let tmp = tempfile::tempdir().unwrap();
+        for request in [
+            AgentRequest::Status,
+            AgentRequest::Update(UpdateRequest {
+                channel: "stable".into(),
+                bucket: 1,
+                manual: false,
+                current_version: "1.4.0".into(),
+                expect_version: "1.5.0".into(),
+            }),
+        ] {
+            let error = call(&tmp.path().join("agent.sock"), &request, Duration::ZERO)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error,
+                "Compose deploy-agent updates require Unix domain sockets"
+            );
+        }
     }
 
     #[cfg(unix)]
