@@ -54,7 +54,41 @@ commit 与检查点覆盖层，再从快照镜像创建容器。新运行时重�
 随后才能释放检查点的 Git 引用和 blob。任何操作都不能运行
 `docker system prune`，也不能删除其他部署的镜像。
 
-预览撤销钩子是独立预览任务的接入点。预览监听器、链接和 UI 不属于 phase 1a。
+Phase 1a 提供预览撤销钩子。Phase 1b 在提供预览服务前把授权接入该钩子；
+删除必须先撤销相关预览，才能继续清理产物。
+
+## Phase 1b：本机所有者预览授权
+
+预览权限是 Host 在同一工作区账本中持有的带版本授权。它绑定 project、
+workspace、provider、container、运行时 generation、已批准端口、端口租约
+和本机所有者。固定端口必须经过批准；`workspace-lease-offset` 根据目标
+工作区的 ADR-0229 租约解析，因此分叉使用自己的新端口块，不继承源授权。
+
+Capability 至少使用 256 bit 操作系统随机数。只存储哈希，以恒定时间校验；
+内存中的进程 secret 让 Host 重启后的旧 capability 失效。授权默认有效
+15 分钟，最多 1 小时。复制得到的 bootstrap 凭据只能兑换一次，有效期
+60 秒。打开授权时获取新的 bootstrap 凭据。
+
+预览监听器与 Companion API 分离，只绑定 loopback。每个授权使用自己的
+`p-<id>.localhost` 主机名。计划中的 `127.0.0.1` 每授权独立端口回退暂不可用：
+端口隔离 origin，但不能隔离应用 cookie。Host 拒绝该模式，UI 禁用该选项，
+直到具备独立 cookie 存储或另行验证的主机名替代方案。无法解析该主机名的
+目标在本阶段不能使用预览。预览凭据不会转发给服务。精确 Host 校验拒绝其他
+主机名，包括 DNS rebinding 尝试。
+
+`/__cognia_bootstrap#<token>` 将凭据放在 HTTP URL 之外。页面通过 POST
+提交 fragment，并从导航历史清除它，兑换 HttpOnly、host-only、
+SameSite=Strict cookie 后导航到 `/`。Bootstrap 响应不能缓存。持久化浏览
+历史和 dock 标签页必须排除 bootstrap URL。
+
+每个 HTTP 请求与 upgrade 都重新检查归属、授权状态、运行时 generation
+和端口批准。撤销与过期还会取消活动 HTTP body、SSE 和 WebSocket。转发
+复用 `environment_ports.rs`，通过 `open_port` 访问服务；包括 `network=none`
+运行时在内，都不会发布 Docker 端口。
+
+已配对设备 audience 明确保留为尚未启用的 phase 2 variant。Phase 1b
+拒绝该 variant，不提供匿名公开或已配对设备预览访问。UI 标注“将在 phase 2
+推出”。单独持有 capability 不能扩大所有者权限边界。
 
 ## Provider 与 Host 契约
 

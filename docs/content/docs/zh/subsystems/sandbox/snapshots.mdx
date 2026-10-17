@@ -31,7 +31,7 @@ Docker driver 使用运行时获取凭据确认归属。在此功能上线前创
 | `sandbox_snapshot_fork`    | `request` 包含 `snapshotId`、`taskId`、`sessionId`                                       | 新工作区与容器                                   |
 | `sandbox_snapshot_restore` | 分叉请求加可选 `workspaceId`                                                             | 恢复后的工作区与容器，`restoredInPlace` 标明结果 |
 
-TypeScript 适配器位于 `lib/sandbox/`。响应包含分叉的 `portLease`，后续预览
+TypeScript 适配器位于 `lib/sandbox/`。响应包含分叉的 `portLease`，预览
 client 可以据此解析工作区端口偏移，无须保留源工作区的端口块。
 
 ## 捕获与失败恢复
@@ -92,8 +92,60 @@ mutex；发布结果时重新校验日志状态和当前预算，因此大规模
 删除镜像。Git 引用和 blob 在镜像删除后释放。清理限定于当前部署，绝不执行
 `docker system prune`。
 
-预览链接、监听器与 UI 独立交付。Phase 1a 提供它们需要的撤销钩子和稳定的
-快照、分叉身份。
+## 本机预览链接
+
+Settings 与工作区概览中的 Runtime environment 区域复用快照和预览面板。
+快照面板支持创建检查点并填写可选工作区相对排除路径，显示创建时间、镜像
+大小、固定状态及 phase，并提供固定、删除、分叉和符合条件的恢复操作。
+预算用量由 Host 账本提供，包含检查点存储；UI 只累加镜像大小会低估用量。
+忙碌或超预算错误保持可见，不会丢弃当前列表。
+
+预览链接仅服务于本机所有者。已配对设备选项被禁用，标注将在 phase 2 推出；
+Host 同样拒绝该 audience。没有匿名公开链接。
+
+桌面命令通过可信本地 IPC 执行。Headless 所有者使用经过认证、仅接受
+loopback 的内部 service plane；已配对设备 RPC 不能调用这些命令。
+Create/open 响应包含临时凭据，因此不写入持久化幂等回执。Headless 打开
+操作返回 bootstrap URL；桌面 UI 将该 URL 交给嵌入式浏览器。
+
+| 命令 | 输入 | 结果 |
+| --- | --- | --- |
+| `sandbox_preview_context` | `projectId` | Host 持有的运行时目标、已批准端口和快照预算用量 |
+| `sandbox_preview_create` | `request` 包含目标、端口、audience 和可选 `expiresInSeconds` | 授权和一次性 bootstrap URL |
+| `sandbox_preview_list` | `projectId`，可选 `workspaceId`、`pageSize`、`pageToken` | 不含凭据的授权元数据分页 |
+| `sandbox_preview_revoke` | `grantId` | 已撤销且 revision 更新的授权 |
+| `sandbox_preview_open` | `grantId` | 供嵌入式浏览器使用的新 bootstrap URL |
+
+TypeScript 适配器为 `lib/sandbox/previews.ts`，hook 位于 `hooks/sandbox/`。
+UI 提供 5 分钟、15 分钟、30 分钟和 1 小时有效期、实时倒计时、仅复制一次、在嵌入式
+浏览器打开和撤销操作。打开复用已有的嵌入式浏览器请求流程；当前界面无法
+打开该面板时显示错误，不会静默改用其他浏览器。
+
+`PreviewGrantV1` 在 `task-workspaces.sqlite` 中记录目标运行时 generation、
+解析后的端口、端口租约、audience、过期时间和 revision。固定端口必须由
+目标当前的 environment spec 批准。`workspace-lease-offset` 根据该工作区
+自己的租约解析，因此新分叉使用新的端口块。快照清理在释放产物前调用已接入
+的预览撤销器。
+
+链接通过 URL fragment 携带仅可兑换一次、有效期 60 秒的凭据：
+`/__cognia_bootstrap#<token>`。Bootstrap 页面通过 POST 将其兑换为
+HttpOnly、host-only、SameSite=Strict cookie，清除 fragment 后导航到 `/`。
+Token 不出现在 URL query 或列表响应中。持久化浏览历史和 dock 标签页
+排除 bootstrap 页面。授权默认有效 15 分钟，最长 1 小时；进程重启后凭据
+失效，即使账本仍保留元数据。
+
+预览流量使用独立于 Companion 的 loopback 监听器，origin 是
+`http://p-<id>.localhost:<port>`。精确 Host 匹配防止其他名称访问该授权。
+计划中的 `http://127.0.0.1:<per-grant-port>` 兼容模式在 UI 中禁用，Host
+也会拒绝：cookie 在不同端口之间共享，无法隔离应用会话。无法解析
+`*.localhost` 的目标暂不支持，需独立存储或另行验证的主机名替代方案。
+每个请求和 WebSocket upgrade 都重新检查授权和运行时权限；撤销和过期
+会终止活动响应，包括 SSE 和升级后的流。已有的 `open_port` 转发无需发布
+Docker 端口，也适用于 `network=none`。
+
+Client 使用共享分页适配器收集所有列表页；结果不完整或 cursor 重复时拒绝
+返回。重新打开授权会替换尚未兑换的 bootstrap 凭据，之前复制的 URL 随即
+不能再兑换。
 
 ## Provider 与验证
 
@@ -113,7 +165,14 @@ cargo check --offline -p cognia-task-workspace -p cognia-sandbox-pool --tests
 准确调用命令。这些测试需要 daemon，与编译和 fake 测试证据分开报告。
 往返测试使用 `COGNIA_TEST_SNAPSHOT_IMAGE` 指定的预加载镜像（默认
 `alpine:3.20`），不会拉取镜像。
-需要绑定 socket 的测试不能在限制 socket 的沙盒中执行。两类测试均不验证
-独立交付的预览 UI。
+需要绑定 socket 的测试不能在限制 socket 的沙盒中执行。
+
+2026-10-17 已在 macOS 26.5 上验证：系统解析器把任意 `*.localhost`（包括多级
+子域名）解析到 `127.0.0.1` 和 `::1`，因此 macOS 系统 WebView 能解析每个授权的
+主机名；Chromium 自身也会解析 `*.localhost`。预览监听器测试（包括独立的回环
+origin）已在 Host 上用真实 socket 运行。尚未验证：Windows 上的 WebView2、Linux
+上的 WebKitGTK，以及在原生应用内完整走一遍创建、兑换、打开、撤销（Tauri
+agent-debug bridge 不可用）。数字主机名回退仍不可用。单元测试和离线 Rust 编译
+不能证明原生 cookie 行为。
 
 参见 [ADR-0231](/docs/adr/0231-sandbox-snapshots-join-rootfs-and-workspace)。

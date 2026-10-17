@@ -58,6 +58,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { ProjectEnvironmentRuntimeDeclaration } from "@/components/settings/project-environment-runtime-declaration"
 import { ProjectEnvironmentRuntimeTrace } from "@/components/settings/project-environment-runtime-trace"
+import { SandboxManagementPanels } from "@/components/settings/sandbox-management-panels"
 import {
   defaultRuntimeSelection,
   useProjectRuntimeEnvironment,
@@ -591,6 +592,8 @@ export function ProjectEnvironmentRuntime({
       ) : null}
 
       <ProjectEnvironmentRuntimeTrace preview={state.preview} catalog={catalog} />
+
+      {state.poolEnabled ? <SandboxManagementPanels projectId={projectId} /> : null}
 
       {state.ports && state.ports.length > 0 ? (
         <div className="space-y-2 border-t pt-3" data-testid="runtime-ports">

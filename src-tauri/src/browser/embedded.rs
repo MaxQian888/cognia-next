@@ -315,10 +315,14 @@ fn handle_embed_navigation(app: &AppHandle, pane_label: &str, url_str: &str) -> 
         return handle_navigation(app, pane_label, url_str);
     }
 
-    let _ = app.emit(
-        "browser://navigated",
-        serde_json::json!({ "paneId": pane_label, "url": url_str }),
-    );
+    // Recreating a WebView for a proxy-route change must not broadcast the
+    // one-shot bootstrap fragment before the page exchanges it.
+    if !super::commands::is_preview_bootstrap(url_str) {
+        let _ = app.emit(
+            "browser://navigated",
+            serde_json::json!({ "paneId": pane_label, "url": url_str }),
+        );
+    }
     let next_app = app.clone();
     let next_pane_label = pane_label.to_string();
     tauri::async_runtime::spawn(async move {
@@ -1549,6 +1553,17 @@ pub async fn browser_embed_destroy(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(desktop)]
+    #[test]
+    fn preview_bootstrap_keeps_fragment_for_navigation_but_suppresses_events() {
+        let raw = "http://p-grant.localhost:1234/__cognia_bootstrap#one-shot-secret";
+        let super::EmbedNavRoute::Routed(target) = super::classify_embed_navigation(raw) else {
+            panic!("bootstrap must reach the preview listener");
+        };
+        assert_eq!(target.fragment(), Some("one-shot-secret"));
+        assert!(super::super::commands::is_preview_bootstrap(raw));
+    }
+
     use super::*;
 
     #[test]

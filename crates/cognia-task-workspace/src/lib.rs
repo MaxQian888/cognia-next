@@ -27,6 +27,8 @@ mod sensitive;
 mod service;
 mod snapshot;
 mod sandbox_snapshot;
+mod sandbox_preview;
+pub use sandbox_preview::*;
 pub use sandbox_snapshot::*;
 mod store;
 mod tracking;

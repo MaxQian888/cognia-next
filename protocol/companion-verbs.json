@@ -95,6 +95,7 @@
     "fire": "Fire a trigger manually.",
     "focus": "Give keyboard focus to a surface.",
     "forget": "Delete a memory or key on purpose.",
+    "fork": "Start an independent copy of a resource from a saved state.",
     "forward": "Forward a message or log to a sink.",
     "generate": "Generate a key or artifact.",
     "getattr": "Read a Python attribute.",

@@ -192,6 +192,15 @@ describe("page tabs", () => {
 })
 
 describe("persistence", () => {
+  it("keeps the bootstrap token for navigation but omits it from persisted tabs", () => {
+    const url = "http://p-grant.localhost:42000/__cognia_bootstrap#capability-secret"
+    useDockTabsStore.getState().addPageTab("s1", page("a", url))
+    expect(selectActivePageTab(useDockTabsStore.getState(), "s1")?.url).toBe(url)
+    const saved = window.localStorage.getItem("cognia-dock-tabs-v1") ?? ""
+    expect(saved).not.toContain("capability-secret")
+    expect(saved).not.toContain("__cognia_bootstrap")
+  })
+
   it("restores a previously corrupted address as New Tab without losing the tab or its engine", async () => {
     window.localStorage.setItem(
       "cognia-dock-tabs-v1",

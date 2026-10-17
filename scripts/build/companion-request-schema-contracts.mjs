@@ -413,12 +413,37 @@ const schemas = {
     error: z.string().nullable().optional(),
     teamRunId: z.string().nullable().optional(),
   }) }),
+  sandbox_preview_context: z.object({ projectId: z.string().min(1) }),
+  sandbox_preview_create: z.object({ request: z.object({
+    originMode: z.enum(["localhost", "loopback"]).optional().describe("localhost uses a grant-specific hostname. loopback is inert and refused until application cookies can be isolated across grants."),
+    projectId: z.string().min(1), workspaceId: z.string().min(1),
+    provider: z.string().min(1), containerId: z.string().min(1),
+    port: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("fixed"), port: z.number().int().min(1).max(65535) }),
+      z.object({ kind: z.literal("workspace-lease-offset"), offset: z.number().int().min(0).max(65535) }),
+    ]),
+    expiresInSeconds: z.number().int().min(1).max(3600).nullable().optional(),
+    // Paired-device audience is deliberately inert in phase 1b. The Rust wire
+    // type carries it for phase 2, but the callable request contract refuses it.
+    audience: z.object({ kind: z.literal("localOwner") }).nullable().optional(),
+  }) }),
+  sandbox_preview_list: z.object({
+    pageSize: z.number().int().min(1).max(1000).nullable().optional(),
+    pageToken: z.string().nullable().optional(),
+    projectId: z.string().min(1), workspaceId: z.string().min(1).nullable().optional(),
+  }),
+  sandbox_preview_revoke: z.object({ grantId: z.string().min(1) }),
+  sandbox_preview_open: z.object({ grantId: z.string().min(1) }),
   sandbox_snapshot_create: z.object({ request: z.object({
     projectId: z.string().min(1), workspaceId: z.string().min(1),
     provider: z.string().min(1), containerId: z.string().min(1),
     exclusions: stringArray.optional(),
   }) }),
-  sandbox_snapshot_list: z.object({ projectId: z.string().min(1) }),
+  sandbox_snapshot_list: z.object({
+    pageSize: z.number().int().min(1).max(1000).nullable().optional(),
+    pageToken: z.string().nullable().optional(),
+    projectId: z.string().min(1),
+  }),
   sandbox_snapshot_get: z.object({ snapshotId: z.string().min(1) }),
   sandbox_snapshot_delete: z.object({ snapshotId: z.string().min(1) }),
   sandbox_snapshot_pin: z.object({ snapshotId: z.string().min(1), pinned: z.boolean() }),

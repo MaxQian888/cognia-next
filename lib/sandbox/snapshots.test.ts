@@ -29,6 +29,7 @@ it("forwards declared exclusions without filtering ignored or generated content"
 })
 
 it("uses snapshot IDs for reads and mutations, leaving ownership to the host", async () => {
+  call.mockResolvedValue({ items: [] })
   await sandboxSnapshotList("project")
   await sandboxSnapshotGet("snapshot")
   await sandboxSnapshotPin("snapshot", true)
@@ -59,4 +60,18 @@ it("preserves labelled busy and provider refusals for callers", async () => {
       sandboxSnapshotFork({ snapshotId: "s", taskId: "t", sessionId: "c" })
     ).rejects.toBe(refusal)
   }
+})
+
+it("pages through every snapshot instead of truncating the list", async () => {
+  call
+    .mockResolvedValueOnce({ items: [{ snapshotId: "first" }], nextPageToken: "opaque" })
+    .mockResolvedValueOnce({ items: [{ snapshotId: "last" }] })
+  expect(await sandboxSnapshotList("project")).toEqual([
+    { snapshotId: "first" },
+    { snapshotId: "last" },
+  ])
+  expect(call).toHaveBeenLastCalledWith("sandbox_snapshot_list", {
+    projectId: "project",
+    pageToken: "opaque",
+  })
 })

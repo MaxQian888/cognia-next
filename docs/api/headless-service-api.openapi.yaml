@@ -137152,6 +137152,1660 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/sandbox_preview_context:
+    post:
+      operationId: internalRpcSandboxPreviewContext
+      tags:
+        - headless-rpc
+      summary: sandbox_preview_context (workspace.read)
+      description: "Loopback service-token command. Target: service; risk: low."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - projectId
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  targets:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        workspaceId:
+                          type: string
+                        provider:
+                          type: string
+                        containerId:
+                          type: string
+                        executionRoot:
+                          type: string
+                        workspaceState:
+                          description: |-
+                            Managed workspace lifecycle state. Transitions outside the Registry's
+                            controlled paths are rejected fail-closed.
+
+                            Legal transitions (all others error):
+
+                            - `Provisioning → Active | Removing`
+                            - `Active → Archived | Conflict | Removing`
+                            - `Archived → Restorable | Removing`
+                            - `Restorable → Active | Removing`
+                            - `Conflict → Active | Removing`   (via `ConflictResolution`)
+                            - `Removing → Removed`
+
+                            `Removed` is terminal.
+                          enum:
+                            - provisioning
+                            - active
+                            - archived
+                            - conflict
+                            - restorable
+                            - removing
+                            - removed
+                          type: string
+                        portLease:
+                          anyOf:
+                            - additionalProperties: false
+                              properties:
+                                basePort:
+                                  format: uint32
+                                  minimum: 0
+                                  type: integer
+                                canonicalRoot:
+                                  type: string
+                                createdAt:
+                                  format: int64
+                                  type: integer
+                                leaseId:
+                                  type: string
+                                namespaceKey:
+                                  type: string
+                                portCount:
+                                  format: uint32
+                                  minimum: 0
+                                  type: integer
+                                registryWorkspaceId:
+                                  type:
+                                    - string
+                                    - "null"
+                                subjectKey:
+                                  type: string
+                                subjectKind:
+                                  enum:
+                                    - registry
+                                    - desktop-session
+                                    - project-root
+                                  type: string
+                                updatedAt:
+                                  format: int64
+                                  type: integer
+                              required:
+                                - basePort
+                                - canonicalRoot
+                                - createdAt
+                                - leaseId
+                                - namespaceKey
+                                - portCount
+                                - registryWorkspaceId
+                                - subjectKey
+                                - subjectKind
+                                - updatedAt
+                              type: object
+                            - type: "null"
+                        ports:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              containerId:
+                                type: string
+                              projectId:
+                                type: string
+                              port:
+                                type: integer
+                                minimum: 1
+                                maximum: 65535
+                              label:
+                                type: string
+                              path:
+                                type: string
+                            required:
+                              - containerId
+                              - projectId
+                              - port
+                              - path
+                      required:
+                        - workspaceId
+                        - provider
+                        - containerId
+                        - executionRoot
+                        - workspaceState
+                        - portLease
+                        - ports
+                  snapshotUsageBytes:
+                    type: integer
+                    minimum: 0
+                  sandboxSnapshotBudgetBytes:
+                    type: integer
+                    minimum: 0
+                required:
+                  - targets
+                  - snapshotUsageBytes
+                  - sandboxSnapshotBudgetBytes
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sandbox_preview_create:
+    post:
+      operationId: internalRpcSandboxPreviewCreate
+      tags:
+        - headless-rpc
+      summary: sandbox_preview_create (workspace.write)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                request:
+                  type: object
+                  properties:
+                    originMode:
+                      description: localhost uses a grant-specific hostname. loopback is inert and refused until application cookies can be
+                        isolated across grants.
+                      type: string
+                      enum:
+                        - localhost
+                        - loopback
+                    projectId:
+                      type: string
+                      minLength: 1
+                    workspaceId:
+                      type: string
+                      minLength: 1
+                    provider:
+                      type: string
+                      minLength: 1
+                    containerId:
+                      type: string
+                      minLength: 1
+                    port:
+                      oneOf:
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: fixed
+                            port:
+                              type: integer
+                              minimum: 1
+                              maximum: 65535
+                          required:
+                            - kind
+                            - port
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: workspace-lease-offset
+                            offset:
+                              type: integer
+                              minimum: 0
+                              maximum: 65535
+                          required:
+                            - kind
+                            - offset
+                          additionalProperties: false
+                    expiresInSeconds:
+                      anyOf:
+                        - type: integer
+                          minimum: 1
+                          maximum: 3600
+                        - type: "null"
+                    audience:
+                      anyOf:
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: localOwner
+                          required:
+                            - kind
+                          additionalProperties: false
+                        - type: "null"
+                  required:
+                    - projectId
+                    - workspaceId
+                    - provider
+                    - containerId
+                    - port
+                  additionalProperties: false
+              required:
+                - request
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  grant:
+                    type: object
+                    additionalProperties: false
+                    description: Local-owner grant metadata. Capability and session hashes and plaintext tokens are never exposed by
+                      list/revoke.
+                    properties:
+                      version:
+                        const: 1
+                      id:
+                        type: string
+                      projectId:
+                        type: string
+                      workspaceId:
+                        type: string
+                      provider:
+                        type: string
+                      containerId:
+                        type: string
+                      runtimeGeneration:
+                        type: string
+                      port:
+                        oneOf:
+                          - type: object
+                            properties:
+                              kind:
+                                const: fixed
+                              port:
+                                type: integer
+                                minimum: 1
+                                maximum: 65535
+                            required:
+                              - kind
+                              - port
+                          - type: object
+                            properties:
+                              kind:
+                                const: workspace-lease-offset
+                              offset:
+                                type: integer
+                                minimum: 0
+                                maximum: 65535
+                            required:
+                              - kind
+                              - offset
+                      resolvedPort:
+                        type: integer
+                        minimum: 1
+                        maximum: 65535
+                      portLease:
+                        anyOf:
+                          - additionalProperties: false
+                            properties:
+                              basePort:
+                                format: uint32
+                                minimum: 0
+                                type: integer
+                              canonicalRoot:
+                                type: string
+                              createdAt:
+                                format: int64
+                                type: integer
+                              leaseId:
+                                type: string
+                              namespaceKey:
+                                type: string
+                              portCount:
+                                format: uint32
+                                minimum: 0
+                                type: integer
+                              registryWorkspaceId:
+                                type:
+                                  - string
+                                  - "null"
+                              subjectKey:
+                                type: string
+                              subjectKind:
+                                enum:
+                                  - registry
+                                  - desktop-session
+                                  - project-root
+                                type: string
+                              updatedAt:
+                                format: int64
+                                type: integer
+                            required:
+                              - basePort
+                              - canonicalRoot
+                              - createdAt
+                              - leaseId
+                              - namespaceKey
+                              - portCount
+                              - registryWorkspaceId
+                              - subjectKey
+                              - subjectKind
+                              - updatedAt
+                            type: object
+                          - type: "null"
+                      audience:
+                        description: Phase 1b permits localOwner only. pairedDevice is an inert phase 2 wire variant and is refused by the Host.
+                        oneOf:
+                          - type: object
+                            properties:
+                              kind:
+                                const: localOwner
+                            required:
+                              - kind
+                          - type: object
+                            properties:
+                              kind:
+                                const: pairedDevice
+                              deviceId:
+                                type: string
+                            required:
+                              - kind
+                              - deviceId
+                      createdAt:
+                        type: integer
+                        format: int64
+                      expiresAt:
+                        type: integer
+                        format: int64
+                      revision:
+                        type: integer
+                        minimum: 1
+                      revoked:
+                        type: boolean
+                      origin:
+                        type: string
+                    required:
+                      - version
+                      - id
+                      - projectId
+                      - workspaceId
+                      - provider
+                      - containerId
+                      - runtimeGeneration
+                      - port
+                      - resolvedPort
+                      - portLease
+                      - audience
+                      - createdAt
+                      - expiresAt
+                      - revision
+                      - revoked
+                      - origin
+                  bootstrapUrl:
+                    type: string
+                    description: Ephemeral one-shot 60-second URL with the capability in its fragment. Never persist or log it.
+                required:
+                  - grant
+                  - bootstrapUrl
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sandbox_preview_list:
+    post:
+      operationId: internalRpcSandboxPreviewList
+      tags:
+        - headless-rpc
+      summary: sandbox_preview_list (workspace.read)
+      description: "Loopback service-token command. Target: service; risk: low."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pageSize:
+                  anyOf:
+                    - type: integer
+                      minimum: 1
+                      maximum: 1000
+                    - type: "null"
+                pageToken:
+                  type:
+                    - string
+                    - "null"
+                projectId:
+                  type: string
+                  minLength: 1
+                workspaceId:
+                  anyOf:
+                    - type: string
+                      minLength: 1
+                    - type: "null"
+              required:
+                - projectId
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      description: Local-owner grant metadata. Capability and session hashes and plaintext tokens are never exposed by
+                        list/revoke.
+                      properties:
+                        version:
+                          const: 1
+                        id:
+                          type: string
+                        projectId:
+                          type: string
+                        workspaceId:
+                          type: string
+                        provider:
+                          type: string
+                        containerId:
+                          type: string
+                        runtimeGeneration:
+                          type: string
+                        port:
+                          oneOf:
+                            - type: object
+                              properties:
+                                kind:
+                                  const: fixed
+                                port:
+                                  type: integer
+                                  minimum: 1
+                                  maximum: 65535
+                              required:
+                                - kind
+                                - port
+                            - type: object
+                              properties:
+                                kind:
+                                  const: workspace-lease-offset
+                                offset:
+                                  type: integer
+                                  minimum: 0
+                                  maximum: 65535
+                              required:
+                                - kind
+                                - offset
+                        resolvedPort:
+                          type: integer
+                          minimum: 1
+                          maximum: 65535
+                        portLease:
+                          anyOf:
+                            - additionalProperties: false
+                              properties:
+                                basePort:
+                                  format: uint32
+                                  minimum: 0
+                                  type: integer
+                                canonicalRoot:
+                                  type: string
+                                createdAt:
+                                  format: int64
+                                  type: integer
+                                leaseId:
+                                  type: string
+                                namespaceKey:
+                                  type: string
+                                portCount:
+                                  format: uint32
+                                  minimum: 0
+                                  type: integer
+                                registryWorkspaceId:
+                                  type:
+                                    - string
+                                    - "null"
+                                subjectKey:
+                                  type: string
+                                subjectKind:
+                                  enum:
+                                    - registry
+                                    - desktop-session
+                                    - project-root
+                                  type: string
+                                updatedAt:
+                                  format: int64
+                                  type: integer
+                              required:
+                                - basePort
+                                - canonicalRoot
+                                - createdAt
+                                - leaseId
+                                - namespaceKey
+                                - portCount
+                                - registryWorkspaceId
+                                - subjectKey
+                                - subjectKind
+                                - updatedAt
+                              type: object
+                            - type: "null"
+                        audience:
+                          description: Phase 1b permits localOwner only. pairedDevice is an inert phase 2 wire variant and is refused by the Host.
+                          oneOf:
+                            - type: object
+                              properties:
+                                kind:
+                                  const: localOwner
+                              required:
+                                - kind
+                            - type: object
+                              properties:
+                                kind:
+                                  const: pairedDevice
+                                deviceId:
+                                  type: string
+                              required:
+                                - kind
+                                - deviceId
+                        createdAt:
+                          type: integer
+                          format: int64
+                        expiresAt:
+                          type: integer
+                          format: int64
+                        revision:
+                          type: integer
+                          minimum: 1
+                        revoked:
+                          type: boolean
+                        origin:
+                          type: string
+                      required:
+                        - version
+                        - id
+                        - projectId
+                        - workspaceId
+                        - provider
+                        - containerId
+                        - runtimeGeneration
+                        - port
+                        - resolvedPort
+                        - portLease
+                        - audience
+                        - createdAt
+                        - expiresAt
+                        - revision
+                        - revoked
+                        - origin
+                  nextPageToken:
+                    type: string
+                required:
+                  - items
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sandbox_preview_open:
+    post:
+      operationId: internalRpcSandboxPreviewOpen
+      tags:
+        - headless-rpc
+      summary: sandbox_preview_open (workspace.write)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grantId:
+                  type: string
+                  minLength: 1
+              required:
+                - grantId
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  grant:
+                    type: object
+                    additionalProperties: false
+                    description: Local-owner grant metadata. Capability and session hashes and plaintext tokens are never exposed by
+                      list/revoke.
+                    properties:
+                      version:
+                        const: 1
+                      id:
+                        type: string
+                      projectId:
+                        type: string
+                      workspaceId:
+                        type: string
+                      provider:
+                        type: string
+                      containerId:
+                        type: string
+                      runtimeGeneration:
+                        type: string
+                      port:
+                        oneOf:
+                          - type: object
+                            properties:
+                              kind:
+                                const: fixed
+                              port:
+                                type: integer
+                                minimum: 1
+                                maximum: 65535
+                            required:
+                              - kind
+                              - port
+                          - type: object
+                            properties:
+                              kind:
+                                const: workspace-lease-offset
+                              offset:
+                                type: integer
+                                minimum: 0
+                                maximum: 65535
+                            required:
+                              - kind
+                              - offset
+                      resolvedPort:
+                        type: integer
+                        minimum: 1
+                        maximum: 65535
+                      portLease:
+                        anyOf:
+                          - additionalProperties: false
+                            properties:
+                              basePort:
+                                format: uint32
+                                minimum: 0
+                                type: integer
+                              canonicalRoot:
+                                type: string
+                              createdAt:
+                                format: int64
+                                type: integer
+                              leaseId:
+                                type: string
+                              namespaceKey:
+                                type: string
+                              portCount:
+                                format: uint32
+                                minimum: 0
+                                type: integer
+                              registryWorkspaceId:
+                                type:
+                                  - string
+                                  - "null"
+                              subjectKey:
+                                type: string
+                              subjectKind:
+                                enum:
+                                  - registry
+                                  - desktop-session
+                                  - project-root
+                                type: string
+                              updatedAt:
+                                format: int64
+                                type: integer
+                            required:
+                              - basePort
+                              - canonicalRoot
+                              - createdAt
+                              - leaseId
+                              - namespaceKey
+                              - portCount
+                              - registryWorkspaceId
+                              - subjectKey
+                              - subjectKind
+                              - updatedAt
+                            type: object
+                          - type: "null"
+                      audience:
+                        description: Phase 1b permits localOwner only. pairedDevice is an inert phase 2 wire variant and is refused by the Host.
+                        oneOf:
+                          - type: object
+                            properties:
+                              kind:
+                                const: localOwner
+                            required:
+                              - kind
+                          - type: object
+                            properties:
+                              kind:
+                                const: pairedDevice
+                              deviceId:
+                                type: string
+                            required:
+                              - kind
+                              - deviceId
+                      createdAt:
+                        type: integer
+                        format: int64
+                      expiresAt:
+                        type: integer
+                        format: int64
+                      revision:
+                        type: integer
+                        minimum: 1
+                      revoked:
+                        type: boolean
+                      origin:
+                        type: string
+                    required:
+                      - version
+                      - id
+                      - projectId
+                      - workspaceId
+                      - provider
+                      - containerId
+                      - runtimeGeneration
+                      - port
+                      - resolvedPort
+                      - portLease
+                      - audience
+                      - createdAt
+                      - expiresAt
+                      - revision
+                      - revoked
+                      - origin
+                  bootstrapUrl:
+                    type: string
+                    description: Ephemeral one-shot 60-second URL with the capability in its fragment. Never persist or log it.
+                required:
+                  - grant
+                  - bootstrapUrl
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sandbox_preview_revoke:
+    post:
+      operationId: internalRpcSandboxPreviewRevoke
+      tags:
+        - headless-rpc
+      summary: sandbox_preview_revoke (workspace.write)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grantId:
+                  type: string
+                  minLength: 1
+              required:
+                - grantId
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                description: Local-owner grant metadata. Capability and session hashes and plaintext tokens are never exposed by
+                  list/revoke.
+                properties:
+                  version:
+                    const: 1
+                  id:
+                    type: string
+                  projectId:
+                    type: string
+                  workspaceId:
+                    type: string
+                  provider:
+                    type: string
+                  containerId:
+                    type: string
+                  runtimeGeneration:
+                    type: string
+                  port:
+                    oneOf:
+                      - type: object
+                        properties:
+                          kind:
+                            const: fixed
+                          port:
+                            type: integer
+                            minimum: 1
+                            maximum: 65535
+                        required:
+                          - kind
+                          - port
+                      - type: object
+                        properties:
+                          kind:
+                            const: workspace-lease-offset
+                          offset:
+                            type: integer
+                            minimum: 0
+                            maximum: 65535
+                        required:
+                          - kind
+                          - offset
+                  resolvedPort:
+                    type: integer
+                    minimum: 1
+                    maximum: 65535
+                  portLease:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          basePort:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          canonicalRoot:
+                            type: string
+                          createdAt:
+                            format: int64
+                            type: integer
+                          leaseId:
+                            type: string
+                          namespaceKey:
+                            type: string
+                          portCount:
+                            format: uint32
+                            minimum: 0
+                            type: integer
+                          registryWorkspaceId:
+                            type:
+                              - string
+                              - "null"
+                          subjectKey:
+                            type: string
+                          subjectKind:
+                            enum:
+                              - registry
+                              - desktop-session
+                              - project-root
+                            type: string
+                          updatedAt:
+                            format: int64
+                            type: integer
+                        required:
+                          - basePort
+                          - canonicalRoot
+                          - createdAt
+                          - leaseId
+                          - namespaceKey
+                          - portCount
+                          - registryWorkspaceId
+                          - subjectKey
+                          - subjectKind
+                          - updatedAt
+                        type: object
+                      - type: "null"
+                  audience:
+                    description: Phase 1b permits localOwner only. pairedDevice is an inert phase 2 wire variant and is refused by the Host.
+                    oneOf:
+                      - type: object
+                        properties:
+                          kind:
+                            const: localOwner
+                        required:
+                          - kind
+                      - type: object
+                        properties:
+                          kind:
+                            const: pairedDevice
+                          deviceId:
+                            type: string
+                        required:
+                          - kind
+                          - deviceId
+                  createdAt:
+                    type: integer
+                    format: int64
+                  expiresAt:
+                    type: integer
+                    format: int64
+                  revision:
+                    type: integer
+                    minimum: 1
+                  revoked:
+                    type: boolean
+                  origin:
+                    type: string
+                required:
+                  - version
+                  - id
+                  - projectId
+                  - workspaceId
+                  - provider
+                  - containerId
+                  - runtimeGeneration
+                  - port
+                  - resolvedPort
+                  - portLease
+                  - audience
+                  - createdAt
+                  - expiresAt
+                  - revision
+                  - revoked
+                  - origin
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/sandbox_snapshot_create:
     post:
       operationId: internalRpcSandboxSnapshotCreate
@@ -138169,6 +139823,16 @@ paths:
             schema:
               type: object
               properties:
+                pageSize:
+                  anyOf:
+                    - type: integer
+                      minimum: 1
+                      maximum: 1000
+                    - type: "null"
+                pageToken:
+                  type:
+                    - string
+                    - "null"
                 projectId:
                   type: string
                   minLength: 1
@@ -138181,69 +139845,77 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: object
-                  additionalProperties: false
-                  properties:
-                    snapshotId:
-                      type: string
-                    deploymentId:
-                      type: string
-                    projectId:
-                      type: string
-                    taskId:
-                      type: string
-                    workspaceRoot:
-                      type: string
-                    runtime: {}
-                    exclusions:
-                      type: array
-                      items:
-                        type: string
-                    checkpointId:
-                      type:
-                        - string
-                        - "null"
-                    imageId:
-                      type:
-                        - string
-                        - "null"
-                    imageBytes:
-                      type: integer
-                      format: uint64
-                      minimum: 0
-                    phase:
-                      type: string
-                      enum:
-                        - preparing
-                        - workspaceCaptured
-                        - imageCommitted
-                        - ready
-                        - tombstoned
-                    createdAt:
-                      type: integer
-                      format: int64
-                    expiresAt:
-                      type: integer
-                      format: int64
-                    pinned:
-                      type: boolean
-                  required:
-                    - snapshotId
-                    - deploymentId
-                    - projectId
-                    - taskId
-                    - workspaceRoot
-                    - runtime
-                    - exclusions
-                    - checkpointId
-                    - imageId
-                    - imageBytes
-                    - phase
-                    - createdAt
-                    - expiresAt
-                    - pinned
+                type: object
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        snapshotId:
+                          type: string
+                        deploymentId:
+                          type: string
+                        projectId:
+                          type: string
+                        taskId:
+                          type: string
+                        workspaceRoot:
+                          type: string
+                        runtime: {}
+                        exclusions:
+                          type: array
+                          items:
+                            type: string
+                        checkpointId:
+                          type:
+                            - string
+                            - "null"
+                        imageId:
+                          type:
+                            - string
+                            - "null"
+                        imageBytes:
+                          type: integer
+                          format: uint64
+                          minimum: 0
+                        phase:
+                          type: string
+                          enum:
+                            - preparing
+                            - workspaceCaptured
+                            - imageCommitted
+                            - ready
+                            - tombstoned
+                        createdAt:
+                          type: integer
+                          format: int64
+                        expiresAt:
+                          type: integer
+                          format: int64
+                        pinned:
+                          type: boolean
+                      required:
+                        - snapshotId
+                        - deploymentId
+                        - projectId
+                        - taskId
+                        - workspaceRoot
+                        - runtime
+                        - exclusions
+                        - checkpointId
+                        - imageId
+                        - imageBytes
+                        - phase
+                        - createdAt
+                        - expiresAt
+                        - pinned
+                  nextPageToken:
+                    type: string
+                required:
+                  - items
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.
           content:
@@ -200311,6 +201983,11 @@ components:
           - revoke_push_token
           - room_send
           - room_stop
+          - sandbox_preview_context
+          - sandbox_preview_create
+          - sandbox_preview_list
+          - sandbox_preview_open
+          - sandbox_preview_revoke
           - sandbox_snapshot_create
           - sandbox_snapshot_delete
           - sandbox_snapshot_fork
@@ -200818,10 +202495,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 899
-  generatedRequestSchemaCount: 899
+  internalCommandCount: 904
+  generatedRequestSchemaCount: 904
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 899
+  contractRequestSchemaCount: 904
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 899
+  generatedResponseSchemaCount: 904
   loopbackOnly: true

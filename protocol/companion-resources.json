@@ -1034,7 +1034,9 @@
     "sandbox": {
       "children": {
         "health": {},
-        "remote": {}
+        "preview": {},
+        "remote": {},
+        "snapshot": {}
       }
     },
     "scheduler": {

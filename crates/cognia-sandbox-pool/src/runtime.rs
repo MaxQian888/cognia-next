@@ -187,6 +187,21 @@ fn task_shell_unsupported() -> SandboxSpawnError {
 
 #[async_trait]
 pub trait SandboxRuntimeControl: Send + Sync {
+    /// Preview admission requires both the Host workspace receipt and an actual
+    /// running incarnation identity. Providers without this contract fail closed.
+    async fn preview_runtime_generation(
+        &self,
+        _provider: &str,
+        _container: &str,
+        _project: &str,
+        _root: &str,
+    ) -> Result<String, SandboxSpawnError> {
+        Err(SandboxSpawnError::refused(
+            "preview_provider_unsupported",
+            "Provider has no preview incarnation contract",
+        ))
+    }
+
     fn snapshot_capabilities(&self, _provider: &str) -> SnapshotCapabilities {
         SnapshotCapabilities::default()
     }

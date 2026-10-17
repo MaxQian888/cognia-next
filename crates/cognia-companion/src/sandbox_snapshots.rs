@@ -12,7 +12,7 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::OnceCell;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -60,11 +60,80 @@ pub trait SnapshotPreviewRevoker: Send + Sync {
     async fn revoke_snapshot(&self, deployment_id: &str, snapshot_id: &str) -> Result<(), String>;
 }
 
+/// Non-blocking claims on one workspace or snapshot. A key is either shared
+/// by any number of holders or held exclusively; a conflicting claim fails at
+/// once with `snapshot_busy` instead of queueing behind a long capture.
+#[derive(Default)]
+struct Claims {
+    held: parking_lot::Mutex<std::collections::HashMap<String, i64>>,
+}
+
+const EXCLUSIVE: i64 = -1;
+
+struct Claim<'a> {
+    claims: &'a Claims,
+    keys: Vec<String>,
+}
+
+impl Claims {
+    /// Take every `(key, exclusive)` claim or none of them.
+    fn take(&self, wanted: &[(String, bool)]) -> Result<Claim<'_>, String> {
+        let mut held = self.held.lock();
+        for (key, exclusive) in wanted {
+            match held.get(key) {
+                None => {}
+                Some(&EXCLUSIVE) => {
+                    return Err(format!("snapshot_busy: {key} has a snapshot operation in progress"))
+                }
+                Some(_) if *exclusive => {
+                    return Err(format!("snapshot_busy: {key} has a snapshot operation in progress"))
+                }
+                Some(_) => {}
+            }
+        }
+        for (key, exclusive) in wanted {
+            let entry = held.entry(key.clone()).or_insert(0);
+            *entry = if *exclusive { EXCLUSIVE } else { *entry + 1 };
+        }
+        Ok(Claim {
+            claims: self,
+            keys: wanted.iter().map(|(key, _)| key.clone()).collect(),
+        })
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        let mut held = self.claims.held.lock();
+        for key in &self.keys {
+            if let Some(count) = held.get_mut(key) {
+                if *count == EXCLUSIVE || *count <= 1 {
+                    held.remove(key);
+                } else {
+                    *count -= 1;
+                }
+            }
+        }
+    }
+}
+
+fn workspace_key(id: &str) -> String {
+    format!("workspace {id}")
+}
+
+fn snapshot_key(id: &str) -> String {
+    format!("snapshot {id}")
+}
+
 pub struct SnapshotService {
     workspaces: Arc<TaskWorkspaceService>,
     runtime: Arc<dyn SandboxRuntimeControl>,
     deployment: String,
-    operation: Mutex<()>,
+    /// Recovery and maintenance hold this exclusively, so they never observe
+    /// an operation of this process mid-flight; normal operations share it and
+    /// serialize only through `claims`, per workspace and per snapshot.
+    gate: tokio::sync::RwLock<()>,
+    claims: Claims,
     initialized: OnceCell<()>,
     previews: RwLock<Option<Arc<dyn SnapshotPreviewRevoker>>>,
 }
@@ -79,6 +148,7 @@ pub fn installed() -> Result<Arc<SnapshotService>, String> {
 }
 
 pub fn install(workspaces: Arc<TaskWorkspaceService>, pool: PoolServices) -> Result<(), String> {
+    let previews = super::sandbox_previews::install(workspaces.clone(), pool.clone())?;
     let Some(runtime) = pool.runtime else {
         return Ok(());
     };
@@ -88,9 +158,10 @@ pub fn install(workspaces: Arc<TaskWorkspaceService>, pool: PoolServices) -> Res
         workspaces,
         runtime,
         deployment: pool.status.deployment_id().into(),
-        operation: Mutex::new(()),
+        gate: tokio::sync::RwLock::new(()),
+        claims: Claims::default(),
         initialized: OnceCell::new(),
-        previews: RwLock::new(None),
+        previews: RwLock::new(previews.map(|service| service as Arc<dyn SnapshotPreviewRevoker>)),
     });
     *SERVICE.write() = Some(service.clone());
     handle.spawn(async move {
@@ -126,7 +197,7 @@ impl SnapshotService {
     pub async fn initialize(&self) -> Result<(), String> {
         self.initialized
             .get_or_try_init(|| async {
-                let _guard = self.operation.lock().await;
+                let _gate = self.gate.write().await;
                 self.recover().await
             })
             .await
@@ -154,7 +225,8 @@ impl SnapshotService {
         pinned: bool,
     ) -> Result<SandboxSnapshotRecord, String> {
         self.initialize().await?;
-        let _guard = self.operation.lock().await;
+        let _gate = self.gate.read().await;
+        let _claim = self.claims.take(&[(snapshot_key(snapshot_id), false)])?;
         self.workspaces
             .pin_sandbox_snapshot(&self.deployment, snapshot_id, pinned)
     }
@@ -164,7 +236,10 @@ impl SnapshotService {
         request: CreateSandboxSnapshot,
     ) -> Result<SandboxSnapshotRecord, String> {
         self.initialize().await?;
-        let _guard = self.operation.lock().await;
+        let _gate = self.gate.read().await;
+        let _claim = self
+            .claims
+            .take(&[(workspace_key(&request.workspace_id), true)])?;
         if !self
             .runtime
             .snapshot_capabilities(&request.provider)
@@ -450,8 +525,8 @@ impl SnapshotService {
             }
         }
 
-        // Host operation UUIDs cannot still be executing under this process-wide
-        // operation lock. Successful materialization already owns a durable fork
+        // Host operation UUIDs cannot still be executing while recovery holds
+        // the gate exclusively. Successful materialization already owns a durable fork
         // reference, including a crash before the container ID was journaled.
         for record in self.workspaces.list_sandbox_snapshots(&self.deployment)? {
             for (kind, owner) in self
@@ -479,7 +554,8 @@ impl SnapshotService {
 
     pub async fn delete(&self, snapshot_id: &str) -> Result<SandboxSnapshotRecord, String> {
         self.initialize().await?;
-        let _guard = self.operation.lock().await;
+        let _gate = self.gate.read().await;
+        let _claim = self.claims.take(&[(snapshot_key(snapshot_id), true)])?;
         let tombstone = self
             .workspaces
             .tombstone_sandbox_snapshot(&self.deployment, snapshot_id)?;
@@ -489,7 +565,7 @@ impl SnapshotService {
 
     pub async fn maintenance(&self) -> Result<(), String> {
         self.initialize().await?;
-        let _guard = self.operation.lock().await;
+        let _gate = self.gate.write().await;
         self.recover().await?;
         let now = chrono::Utc::now().timestamp_millis();
         for record in self.workspaces.list_sandbox_snapshots(&self.deployment)? {
@@ -563,7 +639,12 @@ impl SnapshotService {
         request: RestoreSandboxSnapshot,
     ) -> Result<ForkedSandboxSnapshot, String> {
         self.initialize().await?;
-        let _guard = self.operation.lock().await;
+        let _gate = self.gate.read().await;
+        let mut wanted = vec![(snapshot_key(&request.snapshot_id), false)];
+        if let Some(target) = request.workspace_id.as_deref() {
+            wanted.push((workspace_key(target), true));
+        }
+        let _claim = self.claims.take(&wanted)?;
         let snapshot = self.get(&request.snapshot_id)?;
         if snapshot.phase != SnapshotOperationPhase::Ready {
             return Err("snapshot_not_ready: snapshot must be ready to fork or restore".into());
@@ -775,6 +856,44 @@ impl SnapshotService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn snapshot_maintenance_revokes_live_preview_before_releasing_artifacts() {
+        let fixture = crate::sandbox_previews::tests::Fixture::new();
+        let workspaces = fixture.workspaces();
+        workspaces.begin_sandbox_snapshot(&BeginSandboxSnapshot {
+            snapshot_id:"018ef64a-84d0-7000-8000-000000000002".into(),deployment_id:"deployment".into(),project_id:"project".into(),task_id:"snapshot-task".into(),
+            workspace_root:fixture.dir.path().join("workspace").to_string_lossy().into(),
+            runtime:serde_json::json!({"provider":"local","imageName":"cognia-snapshot-deployment:test"}),exclusions:Vec::new(),
+        }).unwrap();
+        let service = SnapshotService {
+            workspaces: workspaces.clone(),
+            runtime: fixture.runtime(),
+            deployment: "deployment".into(),
+            gate: tokio::sync::RwLock::new(()),
+            claims: Claims::default(),
+            initialized: OnceCell::new(),
+            previews: RwLock::new(None),
+        };
+        service.set_preview_revoker(fixture.service.clone());
+        let mut cancellation = fixture.cancellation();
+        service.maintenance().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), cancellation.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(*cancellation.borrow());
+        assert!(
+            workspaces
+                .preview_grant("deployment", &fixture.record.grant.id)
+                .unwrap()
+                .grant
+                .revoked
+        );
+        assert!(workspaces
+            .get_sandbox_snapshot("deployment", "018ef64a-84d0-7000-8000-000000000002")
+            .unwrap()
+            .is_none());
+    }
     #[test]
     fn snapshot_requests_reject_caller_owned_paths_and_image_identity() {
         let mut value = serde_json::json!({"projectId":"p", "workspaceId":"w", "provider":"local", "containerId":"c"});

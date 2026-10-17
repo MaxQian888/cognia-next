@@ -31,6 +31,14 @@ describe("browserHistoryKey", () => {
 })
 
 describe("recordBrowserVisit", () => {
+  it("never persists preview bootstrap capabilities in browsing history", async () => {
+    for (const host of ["p-grant.localhost:42000", "127.0.0.1:42001"]) {
+      await recordBrowserVisit(`http://${host}/__cognia_bootstrap#capability-secret`)
+      await recordBrowserVisit(`http://${host}/__cognia_bootstrap`)
+    }
+    expect(await getDb().browserHistory.count()).toBe(0)
+  })
+
   it("adds one row per address", async () => {
     await recordBrowserVisit("https://example.com", 1_000)
     const rows = await getDb().browserHistory.toArray()

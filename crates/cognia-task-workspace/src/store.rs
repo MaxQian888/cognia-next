@@ -120,6 +120,7 @@ impl WorkspaceStore {
         crate::best_of_n::migrate(&store.connection)?;
         store.apply_provenance_migration()?;
         crate::sandbox_snapshot::migrate(&store.connection)?;
+        crate::sandbox_preview::migrate(&store.connection)?;
         Ok(store)
     }
 

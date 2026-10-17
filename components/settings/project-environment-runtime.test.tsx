@@ -20,6 +20,12 @@ const setDraft = jest.fn((next: ProjectRuntimeSelection | undefined) => {
 const approve = jest.fn()
 const revoke = jest.fn()
 
+jest.mock("./sandbox-management-panels", () => ({
+  SandboxManagementPanels: ({ projectId }: { projectId: string }) => (
+    <div data-testid="sandbox-management" data-project-id={projectId} />
+  ),
+}))
+
 jest.mock("@/hooks/sandbox/use-project-runtime-environment", () => {
   const actual = jest.requireActual("@/hooks/sandbox/use-project-runtime-environment")
   return {
@@ -168,6 +174,13 @@ function renderPanel(over: Partial<Parameters<typeof ProjectEnvironmentRuntime>[
 }
 
 describe("ProjectEnvironmentRuntime", () => {
+  it("wires snapshot and preview panels to this project when the Host pool is enabled", async () => {
+    await act(async () => {
+      renderPanel()
+    })
+    expect(screen.getByTestId("sandbox-management")).toHaveAttribute("data-project-id", "prj1")
+  })
+
   it("limits the runtime selection's promise to external agents in both locales", () => {
     renderPanel()
     // The description is the manager's section heading now (asserted in its

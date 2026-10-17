@@ -604,6 +604,11 @@ pub trait SandboxDockerApi: ContainerApi {
 
     /// Persistent runtime operations. A driver lacking these capabilities
     /// refuses persistent placement; it cannot silently run an ephemeral job.
+    /// A running incarnation identity supplied by the runtime, not its labels.
+    /// Unsupported drivers cannot issue preview grants.
+    async fn runtime_generation(&self, _id: &str) -> Result<Option<String>, String> {
+        Err("preview_runtime_generation_unsupported".into())
+    }
     async fn inspect_runtime(&self, _id: &str) -> Result<Option<RuntimeContainerState>, String> {
         Err("persistent runtime inspection is unavailable".into())
     }
@@ -1855,6 +1860,13 @@ pub mod bollard_api {
         }
     }
 
+    fn preview_runtime_generation(info: ContainerInspectResponse) -> Option<String> {
+        info.state
+            .filter(|state| state.running == Some(true))
+            .and_then(|state| state.started_at)
+            .filter(|value| !value.is_empty())
+    }
+
     fn runtime_stop_result(result: Result<(), bollard::errors::Error>) -> Result<(), String> {
         match result {
             Ok(())
@@ -2076,6 +2088,14 @@ pub mod bollard_api {
                     status_code: 404, ..
                 }) => Ok(()),
                 Err(error) => Err(format!("snapshot image remove failed: {error}")),
+            }
+        }
+
+        async fn runtime_generation(&self, id: &str) -> Result<Option<String>, String> {
+            match self.docker.inspect_container(id, None).await {
+                Ok(info) => Ok(preview_runtime_generation(info)),
+                Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => Ok(None),
+                Err(error) => Err(format!("inspect runtime generation failed: {error}")),
             }
         }
 
@@ -2544,6 +2564,23 @@ pub mod bollard_api {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn preview_generation_tracks_daemon_restart_and_refuses_stopped_or_missing_state() {
+            let inspected = |running: bool, started: &str| {
+                serde_json::from_value(serde_json::json!({
+                    "State": { "Running": running, "StartedAt": started },
+                    "Config": { "Labels": { "cognia.generation": "forged" } }
+                })).unwrap()
+            };
+            let before = preview_runtime_generation(inspected(true, "2026-10-17T01:00:00Z"));
+            let after = preview_runtime_generation(inspected(true, "2026-10-17T01:01:00Z"));
+            assert_eq!(before.as_deref(), Some("2026-10-17T01:00:00Z"));
+            assert_ne!(before, after);
+            assert_eq!(preview_runtime_generation(inspected(false, "2026-10-17T01:01:00Z")), None);
+            assert_eq!(preview_runtime_generation(inspected(true, "")), None);
+            assert_eq!(preview_runtime_generation(ContainerInspectResponse::default()), None);
+        }
 
         #[test]
         fn runtime_stop_is_idempotent_only_for_stopped_or_missing_containers() {

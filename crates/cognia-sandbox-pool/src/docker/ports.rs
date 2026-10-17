@@ -60,6 +60,24 @@ impl DockerSandboxBackend {
 
 #[async_trait]
 impl SandboxRuntimeControl for DockerSandboxBackend {
+    async fn preview_runtime_generation(
+        &self,
+        provider: &str,
+        container: &str,
+        project: &str,
+        root: &str,
+    ) -> Result<String, SandboxSpawnError> {
+        if provider != "local" || self.remote.is_some() {
+            return Err(unavailable("Preview requires a local runtime"));
+        }
+        let source = self.checkpoint_source(container, project, root).await?;
+        if !source.was_running {
+            return Err(unavailable("Runtime is stopped"));
+        }
+        self.api.runtime_generation(container).await.map_err(unavailable)?
+            .ok_or_else(|| unavailable("Runtime has no running generation"))
+    }
+
     fn snapshot_capabilities(&self, _provider: &str) -> crate::runtime::SnapshotCapabilities {
         self.checkpoint_capabilities()
     }

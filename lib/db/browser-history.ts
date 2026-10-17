@@ -21,6 +21,7 @@
  */
 
 import { getDb } from "./schema"
+import { isSandboxPreviewBootstrapUrl } from "@/lib/security/redact-credentials"
 
 /** Rows kept before the oldest are trimmed. */
 export const MAX_BROWSER_HISTORY_ROWS = 500
@@ -44,6 +45,7 @@ export function browserHistoryKey(url: string): string | null {
     return null
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
+  if (isSandboxPreviewBootstrapUrl(url)) return null
   return parsed.toString()
 }
 

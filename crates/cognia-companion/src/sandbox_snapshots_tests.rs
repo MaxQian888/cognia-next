@@ -102,7 +102,8 @@ impl Fixture {
             workspaces: self.workspaces.clone(),
             runtime: self.runtime.clone(),
             deployment: deployment.into(),
-            operation: Mutex::new(()),
+            gate: tokio::sync::RwLock::new(()),
+            claims: Claims::default(),
             initialized: OnceCell::new(),
             previews: RwLock::new(None),
         }
@@ -334,6 +335,66 @@ fn snapshot_records_match_the_generated_host_response_contract() {
         assert!(contract.validate_output(command, &invalid).is_err());
     }
     contract
-        .validate_output("sandbox_snapshot_list", &serde_json::json!([value]))
+        .validate_output("sandbox_snapshot_list", &serde_json::json!({"items": [value]}))
         .unwrap();
+}
+
+#[test]
+fn claims_share_or_exclude_per_key_and_release_on_drop() {
+    let claims = Claims::default();
+    let reader = claims.take(&[(snapshot_key("s"), false)]).unwrap();
+    let second_reader = claims.take(&[(snapshot_key("s"), false)]).unwrap();
+    assert!(claims
+        .take(&[(snapshot_key("s"), true)])
+        .err()
+        .expect("a writer conflicts with readers")
+        .starts_with("snapshot_busy"));
+    drop(reader);
+    assert!(claims.take(&[(snapshot_key("s"), true)]).is_err());
+    drop(second_reader);
+    let writer = claims.take(&[(snapshot_key("s"), true)]).unwrap();
+    assert!(claims.take(&[(snapshot_key("s"), false)]).is_err());
+    // A failed multi-key claim takes nothing, so it cannot strand a key.
+    assert!(claims
+        .take(&[(workspace_key("w"), true), (snapshot_key("s"), false)])
+        .is_err());
+    assert!(claims.take(&[(workspace_key("w"), true)]).is_ok());
+    drop(writer);
+    assert!(claims.take(&[(snapshot_key("s"), false)]).is_ok());
+}
+
+#[tokio::test]
+async fn a_busy_workspace_refuses_at_once_and_never_blocks_another_workspace() {
+    let fixture = Fixture::new();
+    let service = Arc::new(fixture.service("deployment"));
+    service.initialize().await.unwrap();
+    // Workspace A is mid-snapshot (the claim a long capture would hold).
+    let held = service
+        .claims
+        .take(&[(workspace_key("workspace-a"), true)])
+        .unwrap();
+    let request = |workspace: &str| CreateSandboxSnapshot {
+        project_id: "project".into(),
+        workspace_id: workspace.into(),
+        provider: "local".into(),
+        container_id: "container".into(),
+        exclusions: Vec::new(),
+    };
+    let same = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        service.create(request("workspace-a")),
+    )
+    .await
+    .expect("a same-workspace conflict must not wait");
+    assert!(same.unwrap_err().starts_with("snapshot_busy"));
+    // Workspace B proceeds past the claim while A is still held; it fails
+    // later for its own reason (it is not registered), never as busy.
+    let other = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        service.create(request("workspace-b")),
+    )
+    .await
+    .expect("another workspace must not wait for workspace A");
+    assert!(!other.unwrap_err().starts_with("snapshot_busy"));
+    drop(held);
 }

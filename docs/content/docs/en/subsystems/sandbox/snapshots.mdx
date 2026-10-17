@@ -35,7 +35,7 @@ created before this feature must be acquired again before it can be snapshotted.
 | `sandbox_snapshot_restore` | Fork request plus optional `workspaceId`                                                    | Restored workspace and container; `restoredInPlace` identifies the outcome |
 
 The TypeScript adapter lives under `lib/sandbox/`. The response includes the
-fork's `portLease`, so a later preview client can resolve a workspace-relative
+fork's `portLease`, so the preview client can resolve a workspace-relative
 port offset without retaining the source workspace's port block.
 
 ## Capture and failure recovery
@@ -105,8 +105,71 @@ hook, and removes the image only after runtime, fork and in-flight references
 are gone. Checkpoint pins and blobs are released after image removal. Cleanup
 is scoped to the current deployment and never invokes `docker system prune`.
 
-Preview links, preview listeners and UI are a separate delivery. Phase 1a
-provides the revocation hook and stable snapshot/fork identities they need.
+## Local preview links
+
+The Runtime environment section in Settings and the workspace overview shares
+the snapshot and preview panels. Snapshot controls create checkpoints with
+optional workspace-relative exclusions, show age, image size, pinning and
+phase, and expose pin, delete, fork and permitted restore operations. Budget
+usage comes from the Host ledger, including checkpoint storage; summing image
+sizes in the UI would undercount it. Busy and over-budget failures remain
+visible without discarding the current list.
+
+Preview links serve the local owner on this machine. The paired-device option
+is disabled and labelled as coming in phase 2; the Host also rejects that
+audience. There are no anonymous public links.
+
+Desktop commands run through trusted local IPC. A headless owner uses the
+authenticated, loopback-only internal service plane; paired-device RPC cannot
+invoke these commands. Create/open responses contain transient credentials
+and are excluded from durable idempotency receipts. Headless opening returns
+the bootstrap URL; the desktop UI hands that URL to the embedded browser.
+
+| Command | Input | Result |
+| --- | --- | --- |
+| `sandbox_preview_context` | `projectId` | Host-owned runtime targets, approved ports and snapshot budget usage |
+| `sandbox_preview_create` | `request` with target, port, audience and optional `expiresInSeconds` | Grant and one-shot bootstrap URL |
+| `sandbox_preview_list` | `projectId`, optional `workspaceId`, `pageSize`, `pageToken` | Page of grant metadata without credentials |
+| `sandbox_preview_revoke` | `grantId` | Revoked grant with updated revision |
+| `sandbox_preview_open` | `grantId` | Fresh bootstrap URL for the embedded browser |
+
+The TypeScript adapter is `lib/sandbox/previews.ts`; hooks live under
+`hooks/sandbox/`. The UI offers 5-minute, 15-minute, 30-minute and one-hour expiry choices,
+a live countdown, copy-once access, embedded-browser opening and revocation.
+Opening uses the existing embedded-browser request flow. If that surface
+cannot open a pane, the failure is visible rather than silently opening a
+different browser.
+
+`PreviewGrantV1` records the target runtime generation, resolved port, port
+lease, audience, expiry and revision in `task-workspaces.sqlite`. A fixed port
+must be approved by the target's current environment spec. A
+`workspace-lease-offset` is resolved against that workspace's own lease, so a
+new fork follows its new block. Snapshot cleanup invokes the installed preview
+revoker before releasing artifacts.
+
+The link contains a one-shot, 60-second credential in the URL fragment:
+`/__cognia_bootstrap#<token>`. The bootstrap page exchanges it by POST for an
+HttpOnly, host-only, SameSite=Strict cookie, clears the fragment, and navigates
+to `/`. Tokens never appear in URL queries or list responses. Saved browsing
+history and persisted dock tabs exclude bootstrap pages. The grant lasts
+15 minutes by default and cannot exceed one hour; process restart invalidates
+its credentials even though metadata remains in the ledger.
+
+Preview traffic uses a dedicated loopback listener, separate from Companion.
+The origin is `http://p-<id>.localhost:<port>`. Exact Host matching prevents
+alternate names from reaching a grant. The planned compatibility mode
+`http://127.0.0.1:<per-grant-port>` is disabled in the UI and rejected by the
+Host: cookies are shared across ports, so that mode cannot isolate application
+sessions. Targets unable to resolve `*.localhost` remain unsupported until
+an isolated-storage or separately validated hostname alternative is available.
+Each request and WebSocket upgrade
+rechecks the grant and runtime authority; revocation and expiry terminate live
+responses, including SSE and upgraded streams. The existing `open_port` relay
+works without Docker port publishing, including with `network=none`.
+
+The client collects every list page using the shared paging adapter and refuses
+an incomplete or repeated-cursor result. Reopening a grant replaces any
+unredeemed bootstrap credential; an older copied URL then cannot be redeemed.
 
 ## Providers and verification
 
@@ -128,7 +191,16 @@ Real-Docker round-trip tests are marked
 exact invocation. They require a daemon and are separate from compile and fake
 test evidence. The round-trip test uses the preloaded image named by
 `COGNIA_TEST_SNAPSHOT_IMAGE` (default `alpine:3.20`) and never pulls it.
-Tests that bind sockets cannot run in a socket-restricted
-sandbox. Neither set of tests verifies the separate preview UI.
+Tests that bind sockets cannot run in a socket-restricted sandbox.
+
+Verified on 2026-10-17 (macOS 26.5): the system resolver maps any
+`*.localhost` name, nested ones included, to `127.0.0.1` and `::1`, so the
+macOS system WebView resolves per-grant hostnames; Chromium resolves
+`*.localhost` itself. The preview listener tests, including the dedicated
+loopback origin, ran against real sockets on the Host. Not yet verified:
+WebView2 on Windows, WebKitGTK on Linux, and a full create/redeem/open/revoke
+pass inside the native app (the Tauri agent-debug bridge was unavailable).
+The numeric-host fallback stays unavailable. Unit tests and offline Rust
+compilation do not prove native cookie behavior.
 
 See [ADR-0231](/docs/adr/0231-sandbox-snapshots-join-rootfs-and-workspace).

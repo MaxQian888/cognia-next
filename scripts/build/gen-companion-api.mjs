@@ -14,7 +14,7 @@ import {
   remoteCommandNames,
   renderKnownCommandsRust,
 } from "./lib/companion-known-commands.mjs"
-import { DISPATCH_SOURCES, hasArm } from "../gates/check-command-grammar.mjs"
+import { DISPATCH_SOURCES, hasArm, isEphemeralPreviewCommand } from "../gates/check-command-grammar.mjs"
 import {
   COMPANION_SOURCES,
   requireCompanionSources,
@@ -235,7 +235,9 @@ export function validateCommandCoverage(manifest, dispatchArms) {
       continue
     }
     descriptors.set(command.name, command)
-    if (command.operation !== "read" && command.idempotency !== "required") {
+    // Preview bootstrap capabilities must never enter durable replay receipts.
+    // Only these two loopback service commands are allowed this exception.
+    if (command.operation !== "read" && command.idempotency !== "required" && !isEphemeralPreviewCommand(command)) {
       errors.push(`mutation must use durable idempotency: ${command.name}`)
     }
     if (
@@ -649,7 +651,7 @@ const HOST_CATEGORIES = [
       "Git, files, terminals, browsers, media processing, code-server, language servers, and the container image a project runs in.",
     skill: "cognia-host-development",
     pattern:
-      /^(browser_|codeserver_|environment_|sandbox_snapshot_|file_|fs_|git_|github_workspace_|plugin_media_|video_|project_environment_|project_mutate$|code_snapshot_|code_checkout_|code_result_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
+      /^(browser_|codeserver_|environment_|sandbox_snapshot_|sandbox_preview_|file_|fs_|git_|github_workspace_|plugin_media_|video_|project_environment_|project_mutate$|code_snapshot_|code_checkout_|code_result_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
   },
   {
     id: "system",
@@ -702,6 +704,7 @@ const HOST_RESOURCE_ALIASES = [
   [/^files_library_/, "files-library"],
   [/^project_environment_/, "project-environments"],
   [/^sandbox_snapshot_/, "sandbox-snapshots"],
+  [/^sandbox_preview_/, "sandbox-previews"],
   [/^scheduled_task_/, "scheduled-tasks"],
   [/^(?:skill_|skills_)/, "skills"],
   [/^task_resource_/, "task-resources"],

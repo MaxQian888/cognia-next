@@ -65,8 +65,48 @@ in-flight operation references it. Only then may checkpoint pins and blobs be
 released. No operation runs `docker system prune` or deletes another
 deployment's image.
 
-The preview revocation hook is the integration point for the separate preview
-job. Preview listeners, links and UI are outside phase 1a.
+Phase 1a supplies the preview revocation hook. Phase 1b connects preview grants
+to that hook before serving them; deletion must revoke related previews before
+artifact cleanup can proceed.
+
+## Phase 1b: local-owner preview grants
+
+Preview access is a Host-owned, versioned grant in the same workspace ledger.
+It binds a project and workspace, provider, container, runtime generation,
+approved port and port lease to the local owner. A fixed port must be approved;
+a `workspace-lease-offset` resolves against the target workspace's ADR-0229
+lease. A fork therefore uses its new block and receives no source grants.
+
+Capabilities use at least 256 bits of operating-system randomness. Only their
+hashes are stored, verification is constant-time, and an in-memory process
+secret invalidates them on Host restart. The grant lasts 15 minutes by default
+and at most one hour. The copied bootstrap credential is single-use and valid
+for 60 seconds. Opening a grant obtains a fresh bootstrap credential.
+
+The preview listener is separate from the Companion API and binds loopback
+only. Each grant has its own `p-<id>.localhost` hostname. The planned
+`127.0.0.1` per-grant-port fallback is unavailable: ports isolate origins but
+do not isolate application cookies. The Host refuses that mode and the UI
+disables it until isolated cookie storage or a separately validated hostname
+alternative is available. A target unable to resolve the hostname cannot use
+previews in this phase. Preview credentials are never forwarded to services.
+Exact Host validation rejects alternate hosts, including rebinding attempts.
+
+`/__cognia_bootstrap#<token>` keeps the credential out of HTTP URLs. The page
+POSTs the fragment, clears it from navigation history, and exchanges it for an
+HttpOnly, host-only, SameSite=Strict cookie before navigating to `/`. Bootstrap
+responses must not be cached. Saved browser visits and persisted dock tabs
+must exclude bootstrap URLs.
+
+Each HTTP request and upgrade rechecks ownership, grant status, runtime
+generation and port approval. Revocation and expiry also cancel live HTTP
+bodies, SSE and WebSockets. Forwarding reuses `environment_ports.rs` over
+`open_port`; no Docker port is published, including for `network=none` runtimes.
+
+Paired-device audience remains an explicitly inert phase 2 variant. Phase 1b
+refuses it and exposes no anonymous public or paired-device preview access.
+The UI labels it as coming in phase 2. A capability alone must not broaden the
+owner boundary.
 
 ## Provider and host contract
 

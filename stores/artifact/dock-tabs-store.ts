@@ -37,6 +37,7 @@ import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import { pruneByLastUsed } from "@/stores/context-workbench/context-workbench-store"
 import { isBrowserErrorUrl } from "@/lib/browser/protocol"
+import { isSandboxPreviewBootstrapUrl } from "@/lib/security/redact-credentials"
 
 /** A tab's identity across kinds: `panel:<panelId>`, `artifact:<artifactId>` or `page:<tabId>`. */
 export type DockTabKey = `panel:${string}` | `artifact:${string}` | `page:${string}`
@@ -341,7 +342,19 @@ export const useDockTabsStore = create<DockTabsState>()(
             ?.bySession
         ),
       }),
-      partialize: (state) => ({ bySession: pruneByLastUsed(state.bySession) }),
+      partialize: (state) => ({
+        bySession: Object.fromEntries(
+          Object.entries(pruneByLastUsed(state.bySession)).map(([id, entry]) => [
+            id,
+            {
+              ...entry,
+              pages: entry.pages.map((page) =>
+                isSandboxPreviewBootstrapUrl(page.url) ? { ...page, url: "", title: "" } : page
+              ),
+            },
+          ])
+        ),
+      }),
       merge: (persisted, current) => ({
         ...current,
         bySession: pruneByLastUsed(

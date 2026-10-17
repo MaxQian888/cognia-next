@@ -1325,6 +1325,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     // deployment facts (`host.observe` / `host.admin`); the approvals and the
     // egress grants are workspace-scoped and carry their own ADR-0149
     // authority check on top of the capability.
+    "sandbox_preview_context",
+    "sandbox_preview_create",
+    "sandbox_preview_list",
+    "sandbox_preview_revoke",
+    "sandbox_preview_open",
     "sandbox_snapshot_create",
     "sandbox_snapshot_list",
     "sandbox_snapshot_get",
@@ -1712,6 +1717,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // ADR-0059 W2: the brain's runtimes as they are now.
     "host_runtime_status",
     // Runtime environments — every read is a projection of stored state.
+    "sandbox_preview_context",
+    "sandbox_preview_list",
     "sandbox_snapshot_list",
     "sandbox_snapshot_get",
     "environment_delivery_list",
@@ -2563,6 +2570,12 @@ fn inject_caller_device_grants(
 /// `mcp_oauth_*`.
 #[cfg(test)]
 const SERVICE_ONLY_COMMANDS: &[&str] = &[
+    "sandbox_preview_context",
+    "sandbox_preview_create",
+    "sandbox_preview_list",
+    "sandbox_preview_revoke",
+    "sandbox_preview_open",
+
     "best_of_n_candidate_progress",
     "best_of_n_recover",
     // ADR-0059 R12 — the brain manages the public webhook ingress registry.

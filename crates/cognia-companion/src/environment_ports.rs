@@ -27,7 +27,7 @@ pub async fn handler(
     relay(project, container, port, tail, request).await
 }
 
-fn strip_private_headers(headers: &mut HeaderMap, request: bool) {
+pub(crate) fn strip_private_headers(headers: &mut HeaderMap, request: bool) {
     // Connection can nominate additional hop-by-hop fields. Never let a
     // project service receive host credentials or a caller-injected identity.
     let connection: Vec<String> = headers
@@ -98,7 +98,7 @@ async fn relay(
     if !authorized(&context, &project).await {
         return StatusCode::FORBIDDEN.into_response();
     }
-    relay_request_inner(project, container, port, request, Some(context)).await
+    relay_request_inner(project, container, port, request, Some(context), None).await
 }
 
 /// Native local relay: the caller binds one fixed workspace/port on a separate
@@ -110,20 +110,54 @@ pub async fn local_relay(
     port: u16,
     request: Request,
 ) -> Response {
-    relay_request_inner(project, container, port, request, None).await
+    relay_request_inner(project, container, port, request, None, None).await
+}
+
+/// The preview grant owns cancellation until the last HTTP body or upgraded
+/// stream finishes. Reuses the exact same admission and exec forwarder.
+pub(crate) async fn preview_relay(
+    project: String,
+    container: String,
+    port: u16,
+    request: Request,
+    cancellation: tokio::sync::watch::Receiver<bool>,
+) -> Response {
+    relay_request_inner(project, container, port, request, None, Some(cancellation)).await
 }
 
 async fn relay_request_inner(
     project: String,
     container: String,
     port: u16,
-    mut request: Request,
+    request: Request,
     context: Option<DeviceContext>,
+    preview_cancel: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Response {
-    let remote = context.is_some();
     let Some(runtime) = super::environment_pool::installed().and_then(|pool| pool.runtime) else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
+    forward_request(
+        runtime,
+        project,
+        container,
+        port,
+        request,
+        context,
+        preview_cancel,
+    )
+    .await
+}
+
+async fn forward_request(
+    runtime: Arc<dyn cognia_sandbox_pool::runtime::SandboxRuntimeControl>,
+    project: String,
+    container: String,
+    port: u16,
+    mut request: Request,
+    context: Option<DeviceContext>,
+    preview_cancel: Option<tokio::sync::watch::Receiver<bool>>,
+) -> Response {
+    let remote = context.is_some();
     let stream = match runtime.open_port(&project, &container, port).await {
         Ok(stream) => stream,
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
@@ -192,6 +226,17 @@ async fn relay_request_inner(
         // The runtime owns continuous spec/port admission for its stream.
         // This layer adds device/workspace authority only, avoiding a second
         // Docker inspect and policy lookup for every connection every tick.
+        if let Some(mut preview_cancel) = preview_cancel {
+            if *preview_cancel.borrow() {
+                cancel_tx.send_replace(true);
+                return;
+            }
+            tokio::select! {
+                _ = cancel_tx.closed() => {},
+                _ = preview_cancel.changed() => { cancel_tx.send_replace(true); }
+            }
+            return;
+        }
         let Some(context) = context else {
             cancel_tx.closed().await;
             return;
@@ -220,11 +265,13 @@ async fn relay_request_inner(
             _ = connection_cancel.changed() => {},
         }
     });
-    let mut response =
-        match tokio::time::timeout(Duration::from_secs(60), sender.send_request(request)).await {
-            Ok(Ok(response)) => response,
-            _ => return StatusCode::BAD_GATEWAY.into_response(),
-        };
+    let mut response = match tokio::select! {
+        response = tokio::time::timeout(Duration::from_secs(60), sender.send_request(request)) => response,
+        _ = cancel_rx.changed() => return StatusCode::GONE.into_response(),
+    } {
+        Ok(Ok(response)) => response,
+        _ => return StatusCode::BAD_GATEWAY.into_response(),
+    };
     strip_private_headers(response.headers_mut(), false);
     if response.status() == StatusCode::SWITCHING_PROTOCOLS {
         let upstream_upgrade = hyper::upgrade::on(&mut response);
@@ -280,5 +327,192 @@ mod tests {
         }
         assert_eq!(headers["upgrade"], "websocket");
         assert_eq!(headers["content-type"], "text/plain");
+    }
+}
+
+#[cfg(test)]
+mod preview_stream_tests {
+    use super::*;
+    use cognia_external_agent::sandbox_routing_backend::SandboxSpawnError;
+    use cognia_sandbox_pool::runtime::{RuntimePort, SandboxRuntimeControl};
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::{
+        tungstenite::{protocol::Role, Message},
+        WebSocketStream,
+    };
+    struct Runtime;
+    #[async_trait::async_trait]
+    impl SandboxRuntimeControl for Runtime {
+        async fn list_ports(&self, _: &str) -> Result<Vec<RuntimePort>, SandboxSpawnError> {
+            Ok(Vec::new())
+        }
+        async fn port_allowed(&self, _: &str, _: &str, _: u16) -> Result<bool, SandboxSpawnError> {
+            Ok(true)
+        }
+        async fn open_port(
+            &self,
+            _: &str,
+            _: &str,
+            _: u16,
+        ) -> Result<tokio::io::DuplexStream, SandboxSpawnError> {
+            let (client, server) = tokio::io::duplex(4096);
+            tokio::spawn(async move {
+                let app = hyper::service::service_fn(
+                    |mut request: hyper::Request<hyper::body::Incoming>| async move {
+                        if request.headers().contains_key("upgrade") {
+                            let accept =
+                                tokio_tungstenite::tungstenite::handshake::derive_accept_key(
+                                    request.headers()["sec-websocket-key"].as_bytes(),
+                                );
+                            let upgrade = hyper::upgrade::on(&mut request);
+                            tokio::spawn(async move {
+                                if let Ok(stream) = upgrade.await {
+                                    let mut websocket = WebSocketStream::from_raw_socket(
+                                        TokioIo::new(stream),
+                                        Role::Server,
+                                        None,
+                                    )
+                                    .await;
+                                    while let Some(Ok(message)) = websocket.next().await {
+                                        if websocket.send(message).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
+                            Ok::<_, std::convert::Infallible>(
+                                axum::http::Response::builder()
+                                    .status(101)
+                                    .header("connection", "upgrade")
+                                    .header("upgrade", "websocket")
+                                    .header("sec-websocket-accept", accept)
+                                    .body(Body::empty())
+                                    .unwrap(),
+                            )
+                        } else {
+                            let stream = futures_util::stream::once(async {
+                                Ok::<_, std::io::Error>(bytes::Bytes::from_static(
+                                    b"data: ready\n\n",
+                                ))
+                            });
+                            let stream = futures_util::StreamExt::chain(
+                                stream,
+                                futures_util::stream::pending(),
+                            );
+                            Ok(axum::http::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from_stream(stream))
+                                .unwrap())
+                        }
+                    },
+                );
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(server), app)
+                    .with_upgrades()
+                    .await;
+            });
+            Ok(client)
+        }
+    }
+    async fn connection(
+        cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> hyper::client::conn::http1::SendRequest<Body> {
+        let (client, server) = tokio::io::duplex(4096);
+        tokio::spawn(async move {
+            let app = hyper::service::service_fn(
+                move |request: hyper::Request<hyper::body::Incoming>| {
+                    let cancel = cancel.clone();
+                    async move {
+                        Ok::<_, std::convert::Infallible>(
+                            forward_request(
+                                Arc::new(Runtime),
+                                "project".into(),
+                                "container".into(),
+                                3000,
+                                request.map(Body::new),
+                                None,
+                                Some(cancel),
+                            )
+                            .await,
+                        )
+                    }
+                },
+            );
+            let _ = hyper::server::conn::http1::Builder::new()
+                .serve_connection(TokioIo::new(server), app)
+                .with_upgrades()
+                .await;
+        });
+        let (sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(client))
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            let _ = connection.with_upgrades().await;
+        });
+        sender
+    }
+    #[tokio::test]
+    async fn preview_revocation_closes_a_live_sse_body_without_sockets() {
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
+        let mut sender = connection(receiver).await;
+        let response = sender
+            .send_request(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut stream = Body::new(response.into_body()).into_data_stream();
+        assert_eq!(
+            futures_util::StreamExt::next(&mut stream)
+                .await
+                .unwrap()
+                .unwrap(),
+            "data: ready\n\n"
+        );
+        cancel.send_replace(true);
+        let closed = tokio::time::timeout(
+            Duration::from_secs(1),
+            futures_util::StreamExt::next(&mut stream),
+        )
+        .await
+        .unwrap();
+        assert!(closed.is_none_or(|chunk| chunk.is_err()));
+    }
+    #[tokio::test]
+    async fn preview_revocation_closes_an_upgraded_websocket_without_sockets() {
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
+        let mut sender = connection(receiver).await;
+        let mut response = sender
+            .send_request(
+                Request::builder()
+                    .uri("/")
+                    .header("connection", "upgrade")
+                    .header("upgrade", "websocket")
+                    .header("sec-websocket-version", "13")
+                    .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert_eq!(
+            response.headers()["sec-websocket-accept"],
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+        let stream = TokioIo::new(hyper::upgrade::on(&mut response).await.unwrap());
+        let mut websocket = WebSocketStream::from_raw_socket(stream, Role::Client, None).await;
+        websocket
+            .send(Message::Text("preview ping".into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            websocket.next().await.unwrap().unwrap(),
+            Message::Text("preview ping".into())
+        );
+        cancel.send_replace(true);
+        let result = tokio::time::timeout(Duration::from_secs(1), websocket.next())
+            .await
+            .unwrap();
+        assert!(result.is_none_or(|message| message.is_err()));
     }
 }

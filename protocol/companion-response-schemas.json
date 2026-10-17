@@ -1,6 +1,139 @@
 {
   "schemaVersion": 1,
   "$defs": {
+    "PreviewPort": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "fixed" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          },
+          "required": ["kind", "port"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "workspace-lease-offset" },
+            "offset": { "type": "integer", "minimum": 0, "maximum": 65535 }
+          },
+          "required": ["kind", "offset"]
+        }
+      ]
+    },
+    "PreviewAudience": {
+      "description": "Phase 1b permits localOwner only. pairedDevice is an inert phase 2 wire variant and is refused by the Host.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "kind": { "const": "localOwner" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "properties": { "kind": { "const": "pairedDevice" }, "deviceId": { "type": "string" } },
+          "required": ["kind", "deviceId"]
+        }
+      ]
+    },
+    "PreviewGrantV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Local-owner grant metadata. Capability and session hashes and plaintext tokens are never exposed by list/revoke.",
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "workspaceId": { "type": "string" },
+        "provider": { "type": "string" },
+        "containerId": { "type": "string" },
+        "runtimeGeneration": { "type": "string" },
+        "port": { "$ref": "#/$defs/PreviewPort" },
+        "resolvedPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "portLease": { "anyOf": [{ "$ref": "#/$defs/WorkspacePortLease" }, { "type": "null" }] },
+        "audience": { "$ref": "#/$defs/PreviewAudience" },
+        "createdAt": { "type": "integer", "format": "int64" },
+        "expiresAt": { "type": "integer", "format": "int64" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "revoked": { "type": "boolean" },
+        "origin": { "type": "string" }
+      },
+      "required": [
+        "version",
+        "id",
+        "projectId",
+        "workspaceId",
+        "provider",
+        "containerId",
+        "runtimeGeneration",
+        "port",
+        "resolvedPort",
+        "portLease",
+        "audience",
+        "createdAt",
+        "expiresAt",
+        "revision",
+        "revoked",
+        "origin"
+      ]
+    },
+    "SandboxPreviewContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/SandboxPreviewTarget" } },
+        "snapshotUsageBytes": { "type": "integer", "minimum": 0 },
+        "sandboxSnapshotBudgetBytes": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["targets", "snapshotUsageBytes", "sandboxSnapshotBudgetBytes"]
+    },
+    "SandboxPreviewTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "provider": { "type": "string" },
+        "containerId": { "type": "string" },
+        "executionRoot": { "type": "string" },
+        "workspaceState": { "$ref": "#/$defs/WorkspaceState" },
+        "portLease": { "anyOf": [{ "$ref": "#/$defs/WorkspacePortLease" }, { "type": "null" }] },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "containerId": { "type": "string" },
+              "projectId": { "type": "string" },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "label": { "type": "string" },
+              "path": { "type": "string" }
+            },
+            "required": ["containerId", "projectId", "port", "path"]
+          }
+        }
+      },
+      "required": [
+        "workspaceId",
+        "provider",
+        "containerId",
+        "executionRoot",
+        "workspaceState",
+        "portLease",
+        "ports"
+      ]
+    },
+    "CreatedSandboxPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grant": { "$ref": "#/$defs/PreviewGrantV1" },
+        "bootstrapUrl": {
+          "type": "string",
+          "description": "Ephemeral one-shot 60-second URL with the capability in its fragment. Never persist or log it."
+        }
+      },
+      "required": ["grant", "bootstrapUrl"]
+    },
     "SandboxSnapshotRecord": {
       "type": "object",
       "additionalProperties": false,
@@ -13492,10 +13625,28 @@
     }
   },
   "commands": {
+    "sandbox_preview_context": { "$ref": "#/$defs/SandboxPreviewContext" },
+    "sandbox_preview_create": { "$ref": "#/$defs/CreatedSandboxPreview" },
+    "sandbox_preview_open": { "$ref": "#/$defs/CreatedSandboxPreview" },
+    "sandbox_preview_list": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/PreviewGrantV1" } },
+        "nextPageToken": { "type": "string" }
+      },
+      "required": ["items"]
+    },
+    "sandbox_preview_revoke": { "$ref": "#/$defs/PreviewGrantV1" },
     "sandbox_snapshot_create": { "$ref": "#/$defs/SandboxSnapshotRecord" },
     "sandbox_snapshot_list": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/SandboxSnapshotRecord" }
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/SandboxSnapshotRecord" } },
+        "nextPageToken": { "type": "string" }
+      },
+      "required": ["items"]
     },
     "sandbox_snapshot_get": { "$ref": "#/$defs/SandboxSnapshotRecord" },
     "sandbox_snapshot_delete": { "$ref": "#/$defs/SandboxSnapshotRecord" },

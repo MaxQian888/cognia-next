@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { loggers } from "@cognia/logging"
 
 import { recordBrowserVisit } from "@/lib/db/browser-history"
+import { isSandboxPreviewBootstrapUrl } from "@/lib/security/redact-credentials"
 
 export interface BrowserHistory {
   /** The back/forward stack, oldest first. */
@@ -106,7 +107,7 @@ export function useBrowserHistory(key?: string): BrowserHistory {
 
   const push = useCallback(
     (url: string) => {
-      if (!url) return
+      if (!url || isSandboxPreviewBootstrapUrl(url)) return
       const prev = stackRef.current
       if (prev.entries[prev.index] === url) return
       const entries = [...prev.entries.slice(0, prev.index + 1), url]
@@ -117,7 +118,7 @@ export function useBrowserHistory(key?: string): BrowserHistory {
 
   const replace = useCallback(
     (url: string) => {
-      if (!url) return
+      if (!url || isSandboxPreviewBootstrapUrl(url)) return
       const prev = stackRef.current
       if (prev.index < 0) {
         commit({ entries: [url], index: 0 })

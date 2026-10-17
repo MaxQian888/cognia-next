@@ -24,6 +24,7 @@ use cognia_environment::catalog::CatalogEntry;
 
 use super::*;
 use crate::companion_api::environment_pool::{self as pool, EnvironmentServiceError, PoolServices};
+use crate::companion_api::sandbox_previews::{self, CreateSandboxPreview};
 use crate::companion_api::sandbox_snapshots::{
     self, CreateSandboxSnapshot, ForkSandboxSnapshot, RestoreSandboxSnapshot,
 };
@@ -31,7 +32,22 @@ use crate::companion_api::workspace_access::{
     acting_person, require_approval_authority, require_environment_authority,
 };
 
+/// Phase 1b admits trusted desktop IPC and the authenticated loopback service
+/// principal. Paired-device previews remain inert until phase 2.
+const LOCAL_PREVIEW_COMMANDS: &[&str] = &[
+    "sandbox_preview_context",
+    "sandbox_preview_create",
+    "sandbox_preview_list",
+    "sandbox_preview_revoke",
+    "sandbox_preview_open",
+];
+
 pub(super) const COMMANDS: &[&str] = &[
+    "sandbox_preview_context",
+    "sandbox_preview_create",
+    "sandbox_preview_list",
+    "sandbox_preview_revoke",
+    "sandbox_preview_open",
     "sandbox_snapshot_create",
     "sandbox_snapshot_list",
     "sandbox_snapshot_get",
@@ -179,6 +195,10 @@ pub(super) async fn dispatch(
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let _ = state;
+    if LOCAL_PREVIEW_COMMANDS.contains(&name) {
+        require_preview_service_scope(scope)?;
+        return dispatch_local_preview(name, args).await;
+    }
     dispatch_arm(name, args, host, device_id, tenant_id, scope).await
 }
 
@@ -212,6 +232,12 @@ pub async fn environment_local_call(
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let host = super::super::dispatch_host::DispatchHost::Tauri(app);
+        if LOCAL_PREVIEW_COMMANDS.contains(&name.as_str()) {
+            return runtime.block_on(dispatch_local_preview(
+                &name,
+                args.unwrap_or_else(|| Value::Object(Default::default())),
+            ));
+        }
         runtime.block_on(dispatch_arm(
             &name,
             args.unwrap_or_else(|| Value::Object(Default::default())),
@@ -224,6 +250,100 @@ pub async fn environment_local_call(
     .await
     .map_err(|error| RpcError::new("environment_command_failed", error.to_string()))?
     .map_err(|(_, Json(error))| error)
+}
+
+fn preview_error(name: &str, error: String) -> (StatusCode, Json<RpcError>) {
+    let code = error
+        .split(':')
+        .next()
+        .map(str::trim)
+        .filter(|code| code.starts_with("preview_") || *code == "sandbox_pool_disabled")
+        .unwrap_or("preview_operation_failed");
+    let status = match code {
+        "preview_not_found" => StatusCode::NOT_FOUND,
+        "preview_expired" | "preview_revoked" | "preview_expired_or_revoked" => StatusCode::GONE,
+        "preview_local_owner_required" | "preview_paired_device_phase_2" => StatusCode::FORBIDDEN,
+        "sandbox_pool_disabled" | "preview_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    (
+        status,
+        Json(RpcError::new(code, format!("{name}: {error}"))),
+    )
+}
+
+fn require_preview_service_scope(scope: Option<&str>) -> Result<(), (StatusCode, Json<RpcError>)> {
+    if scope == Some("service") {
+        Ok(())
+    } else {
+        Err(RpcError::forbidden("preview commands require local owner IPC or the loopback service principal; paired devices are inert until phase 2"))
+    }
+}
+
+/// Desktop IPC and the authenticated loopback service share these arms. The
+/// network path checks service scope before entry; a device id never grants
+/// owner authority. The service itself also re-checks the Host owner policy.
+async fn dispatch_local_preview(
+    name: &str,
+    args: Value,
+) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    let service = sandbox_previews::installed().map_err(|error| preview_error(name, error))?;
+    match name {
+        "sandbox_preview_context" => {
+            let project_id: String = required(&args, "projectId")?;
+            to_json(
+                service
+                    .context(&project_id)
+                    .await
+                    .map_err(|error| preview_error(name, error))?,
+            )
+        }
+        "sandbox_preview_create" => {
+            let request: CreateSandboxPreview = required(&args, "request")?;
+            to_json(
+                service
+                    .create(request)
+                    .await
+                    .map_err(|error| preview_error(name, error))?,
+            )
+        }
+        "sandbox_preview_list" => {
+            let project_id: String = required(&args, "projectId")?;
+            let workspace_id: Option<String> = optional(&args, "workspaceId")?;
+            let records = service
+                .list(&project_id, workspace_id.as_deref())
+                .map_err(|error| preview_error(name, error))?;
+            to_json(
+                cognia_problem::paging::Page::slice_all(
+                    records,
+                    &page_request(&args)?,
+                    cognia_problem::paging::DEFAULT_PAGE_SIZE,
+                )
+                .map_err(paging_error)?,
+            )
+        }
+        "sandbox_preview_revoke" => {
+            let grant_id: String = required(&args, "grantId")?;
+            to_json(
+                service
+                    .revoke(&grant_id)
+                    .await
+                    .map_err(|error| preview_error(name, error))?,
+            )
+        }
+        "sandbox_preview_open" => {
+            let grant_id: String = required(&args, "grantId")?;
+            // The local UI immediately hands this single-use URL to the existing
+            // embedded browser pane. Never persist or log the returned token.
+            to_json(
+                service
+                    .open(&grant_id)
+                    .await
+                    .map_err(|error| preview_error(name, error))?,
+            )
+        }
+        other => Err(RpcError::unknown_command(other)),
+    }
 }
 
 async fn dispatch_arm(
@@ -269,11 +389,17 @@ async fn dispatch_arm(
         "sandbox_snapshot_list" => {
             let project_id: String = required(&args, "projectId")?;
             require_environment_authority(name, &project_id, tenant_id, false).await?;
+            let records = snapshots(name)
+                .await?
+                .list(&project_id)
+                .map_err(|error| snapshot_error(name, error))?;
             to_json(
-                snapshots(name)
-                    .await?
-                    .list(&project_id)
-                    .map_err(|error| snapshot_error(name, error))?,
+                cognia_problem::paging::Page::slice_all(
+                    records,
+                    &page_request(&args)?,
+                    cognia_problem::paging::DEFAULT_PAGE_SIZE,
+                )
+                .map_err(paging_error)?,
             )
         }
         "sandbox_snapshot_get" => {
@@ -700,6 +826,35 @@ mod tests {
     }
 
     #[test]
+    fn preview_commands_require_local_service_scope_not_a_device_identity() {
+        for scope in [None, Some("device"), Some("local"), Some("owner")] {
+            assert!(require_preview_service_scope(scope).is_err());
+        }
+        assert!(require_preview_service_scope(Some("service")).is_ok());
+        for command in LOCAL_PREVIEW_COMMANDS {
+            assert!(COMMANDS.contains(command), "{command}");
+            assert!(super::super::is_service_only_command(command), "{command}");
+        }
+    }
+
+    #[test]
+    fn preview_refusals_preserve_revocation_and_inert_phase_2_codes() {
+        for (code, status) in [
+            ("preview_expired", StatusCode::GONE),
+            ("preview_revoked", StatusCode::GONE),
+            ("preview_expired_or_revoked", StatusCode::GONE),
+            ("preview_not_found", StatusCode::NOT_FOUND),
+            ("preview_local_owner_required", StatusCode::FORBIDDEN),
+            ("preview_paired_device_phase_2", StatusCode::FORBIDDEN),
+        ] {
+            let (actual, Json(error)) =
+                preview_error("sandbox_preview_create", format!("{code}: refused"));
+            assert_eq!(actual, status);
+            assert_eq!(error.code, code);
+        }
+    }
+
+    #[test]
     fn snapshot_refusals_preserve_busy_and_provider_codes() {
         for (code, expected) in [
             ("snapshot_busy", StatusCode::CONFLICT),
@@ -786,11 +941,13 @@ pub async fn sandbox_snapshot_create(
 pub async fn sandbox_snapshot_list(
     app: tauri::AppHandle,
     project_id: String,
+    page_size: Option<u32>,
+    page_token: Option<String>,
 ) -> Result<Value, RpcError> {
     environment_local_call(
         app,
         "sandbox_snapshot_list".into(),
-        Some(serde_json::json!({"projectId": project_id})),
+        Some(serde_json::json!({"projectId": project_id, "pageSize": page_size, "pageToken": page_token})),
     )
     .await
 }
@@ -852,6 +1009,76 @@ pub async fn sandbox_snapshot_restore(
         app,
         "sandbox_snapshot_restore".into(),
         Some(serde_json::json!({"request": request})),
+    )
+    .await
+}
+
+/// Desktop-local shells bypass remote dispatch. The loopback service contract
+/// also forbids receipts for create/open: capability plaintext is never stored.
+#[tauri::command]
+pub async fn sandbox_preview_create(
+    app: tauri::AppHandle,
+    request: CreateSandboxPreview,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_preview_create".into(),
+        Some(serde_json::json!({"request": request})),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn sandbox_preview_list(
+    app: tauri::AppHandle,
+    project_id: String,
+    workspace_id: Option<String>,
+    page_size: Option<u32>,
+    page_token: Option<String>,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_preview_list".into(),
+        Some(serde_json::json!({"projectId": project_id, "workspaceId": workspace_id, "pageSize": page_size, "pageToken": page_token})),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn sandbox_preview_revoke(
+    app: tauri::AppHandle,
+    grant_id: String,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_preview_revoke".into(),
+        Some(serde_json::json!({"grantId": grant_id})),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn sandbox_preview_open(
+    app: tauri::AppHandle,
+    grant_id: String,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_preview_open".into(),
+        Some(serde_json::json!({"grantId": grant_id})),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn sandbox_preview_context(
+    app: tauri::AppHandle,
+    project_id: String,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_preview_context".into(),
+        Some(serde_json::json!({"projectId": project_id})),
     )
     .await
 }

@@ -144,6 +144,12 @@ pub(crate) fn classify_navigation(url_str: &str) -> NavDisposition {
     NavDisposition::Block
 }
 
+/// Bootstrap fragments are bearer credentials. Allow the actual navigation,
+/// but keep this transient page out of renderer events and browsing history.
+pub(crate) fn is_preview_bootstrap(url_str: &str) -> bool {
+    url::Url::parse(url_str).is_ok_and(|url| url.path() == "/__cognia_bootstrap")
+}
+
 /// Emit `browser://navigated`.
 ///
 /// `kind` separates a real document load (`"document"`) from a same-document
@@ -152,6 +158,9 @@ pub(crate) fn classify_navigation(url_str: &str) -> NavDisposition {
 /// of a navigation and therefore once per hop of a redirect chain — is used for
 /// address-bar sync only. `intent` is one of {@link NAV_INTENTS}.
 fn emit_navigated(app: &AppHandle, pane_label: &str, url_str: &str, kind: &str, intent: &str) {
+    if is_preview_bootstrap(url_str) {
+        return;
+    }
     let _ = app.emit(
         "browser://navigated",
         serde_json::json!({
@@ -164,6 +173,9 @@ fn emit_navigated(app: &AppHandle, pane_label: &str, url_str: &str, kind: &str, 
 }
 
 fn emit_loaded(app: &AppHandle, pane_label: &str, url_str: &str) {
+    if is_preview_bootstrap(url_str) {
+        return;
+    }
     let _ = app.emit(
         "browser://loaded",
         serde_json::json!({ "paneId": pane_label, "url": url_str }),
@@ -182,6 +194,9 @@ fn emit_snapshot_dirty(
     mutations: Option<u64>,
     reason: &str,
 ) {
+    if is_preview_bootstrap(url_str) {
+        return;
+    }
     let _ = app.emit(
         "browser://snapshot",
         serde_json::json!({
@@ -266,6 +281,27 @@ pub(crate) fn handle_navigation(app: &AppHandle, pane_label: &str, url_str: &str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn preview_bootstrap_navigation_is_allowed_but_not_reported() {
+        for raw in [
+            "http://p-grant.localhost:1234/__cognia_bootstrap#secret",
+            "http://127.0.0.1:1234/__cognia_bootstrap#secret",
+            "http://p-grant.localhost:1234/__cognia_bootstrap",
+        ] {
+            assert!(super::is_preview_bootstrap(raw));
+            assert_eq!(
+                super::classify_navigation(raw),
+                super::NavDisposition::AllowAndReport
+            );
+        }
+        assert!(!super::is_preview_bootstrap(
+            "http://p-grant.localhost:1234/"
+        ));
+        assert!(!super::is_preview_bootstrap(
+            "http://localhost:3000/docs#__cognia_bootstrap"
+        ));
+    }
+
     use super::*;
 
     /// ADR-0127 push sentinels classify to their own dispositions and are

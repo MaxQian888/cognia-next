@@ -199,6 +199,7 @@ test("classifies host commands into one stable domain", () => {
   assert.equal(classifyHostCommand("git_status"), "development")
   assert.equal(classifyHostCommand("sandbox_snapshot_create"), "development")
   assert.equal(classifyHostCommand("sandbox_snapshot_list"), "development")
+  assert.equal(classifyHostCommand("sandbox_preview_create"), "development")
   assert.equal(classifyHostCommand("host_capabilities"), "system")
   assert.equal(classifyHostCommand("video_analyze"), "development")
   assert.equal(classifyHostCommand("plugin_media_export_video"), "development")
@@ -214,6 +215,7 @@ test("derives stable resources without copying the RPC tree", () => {
   assert.equal(hostResourceForCommand("remote_notification_publish"), "notifications")
   assert.equal(hostResourceForCommand("project_environment_execute"), "project-environments")
   assert.equal(hostResourceForCommand("sandbox_snapshot_fork"), "sandbox-snapshots")
+  assert.equal(hostResourceForCommand("sandbox_preview_open"), "sandbox-previews")
   assert.equal(hostResourceForCommand("video_get_info"), "media")
   assert.equal(hostResourceForCommand("plugin_media_read_chunk"), "media")
 })
@@ -895,6 +897,58 @@ test("keeps pet geometry and reviewed cogpack file trees on the local client", (
     assert.deepEqual(command.transports, ["internal"])
     assert.equal(headlessDispositions.get(name)?.disposition, "local-only")
   }
+})
+
+test("preview phase 1b admits only local service commands without capability receipts", () => {
+  const inspected = inspectCommittedContract()
+  for (const verb of ["context", "create", "list", "open", "revoke"]) {
+    const name = `sandbox_preview_${verb}`
+    const command = inspected.manifest.commands.find((entry) => entry.name === name)
+    assert.ok(command, `${name} must be inventoried`)
+    assert.equal(command.target, "service")
+    assert.deepEqual(command.transports, ["internal"])
+    assert.equal(inspected.headlessDispositions.has(name), false)
+    assert.equal(inspected.remoteNames.has(name), true)
+    assert.equal(inspected.desiredPublicSpec.paths[`/api/_rpc/${name}`], undefined)
+    assert.ok(inspected.desiredHeadlessSpec.paths[`/internal/_rpc/${name}`])
+    if (verb === "create" || verb === "open") assert.equal(command.idempotency, "forbidden")
+  }
+})
+
+test("ephemeral preview receipt exemption cannot admit other mutations or devices", () => {
+  const local = {
+    name: "sandbox_preview_create", arm: "sandbox_preview_create", target: "service", operation: "write",
+    idempotency: "forbidden", transports: ["internal"],
+  }
+  const arms = new Set(["sandbox_preview_create"])
+  assert.deepEqual(validateCommandCoverage({ commands: [local] }, arms), [])
+  for (const patch of [
+    { name: "secret_create" }, { target: "execution" }, { target: "client" }, { transports: ["http"] },
+  ]) {
+    const command = { ...local, ...patch }
+    const errors = validateCommandCoverage({ commands: [command] }, arms)
+    assert.ok(errors.includes(`mutation must use durable idempotency: ${command.name}`))
+  }
+})
+
+test("preview request contract bounds expiry and refuses inert paired-device audience", () => {
+  const schemas = buildCompanionRequestSchemaContracts()
+  const validate = new Ajv2020().compile(schemas.get("sandbox_preview_create"))
+  const request = {
+    projectId: "project", workspaceId: "workspace", provider: "docker", containerId: "container",
+    port: { kind: "fixed", port: 3000 },
+  }
+  assert.equal(validate({ request }), true)
+  assert.equal(validate({ request: { ...request, originMode: "localhost" } }), true)
+  assert.equal(validate({ request: { ...request, originMode: "loopback" } }), true)
+  assert.equal(validate({ request: { ...request, originMode: "public" } }), false)
+  assert.equal(validate({ request: { ...request, expiresInSeconds: 3600 } }), true)
+  assert.equal(validate({ request: { ...request, expiresInSeconds: 3601 } }), false)
+  assert.equal(validate({ request: { ...request, expiresInSeconds: 0 } }), false)
+  assert.equal(validate({ request: { ...request, port: { kind: "fixed", port: 0 } } }), false)
+  assert.equal(validate({ request: { ...request, port: { kind: "workspace-lease-offset", offset: 0 } } }), true)
+  assert.equal(validate({ request: { ...request, audience: { kind: "localOwner" } } }), true)
+  assert.equal(validate({ request: { ...request, audience: { kind: "pairedDevice", deviceId: "phone" } } }), false)
 })
 
 test("rejects versioned committed RPC paths instead of silently migrating them", () => {

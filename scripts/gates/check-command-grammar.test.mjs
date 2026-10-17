@@ -1,10 +1,12 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import childProcess from "node:child_process"
 import { syncBuiltinESMExports } from "node:module"
 import test from "node:test"
 
 import {
   auditContract,
+  isEphemeralPreviewCommand,
   hasArm,
   listClientFiles,
   resolveVerb,
@@ -405,4 +407,48 @@ test("R8 keeps the policy invariants the Rust loader used to assert", () => {
 
 test("wireName joins with a dot", () => {
   assert.equal(wireName("team.task", "cancel"), "team.task.cancel")
+})
+
+test("R8 previews exempt only named loopback service capability issuers from receipts", () => {
+  const grant = command({
+    name: "sandbox_preview_create",
+    target: "service",
+    transports: ["internal"],
+    idempotency: "forbidden",
+  })
+  assert.equal(isEphemeralPreviewCommand(grant), true)
+  const failures = auditContract({ commands: [grant], resources, verbs, renames: {} }).failures
+  assert.equal(
+    failures.some((failure) => failure.includes("mutations require idempotency")),
+    false
+  )
+  for (const change of [
+    { name: "other_secret_create" },
+    { target: "client" },
+    { target: "execution" },
+    { transports: ["http"] },
+    { transports: ["internal", "websocket"] },
+  ]) {
+    const denied = { ...grant, ...change }
+    assert.equal(isEphemeralPreviewCommand(denied), false)
+    assert.ok(
+      auditContract({ commands: [denied], resources, verbs, renames: {} }).failures.some(
+        (failure) => failure.includes("mutations require idempotency")
+      )
+    )
+  }
+})
+
+test("preview descriptors satisfy the resource vocabulary and paging grammar", () => {
+  const read = (name) =>
+    JSON.parse(readFileSync(new URL(`../../protocol/${name}`, import.meta.url), "utf8"))
+  const manifest = read("companion-commands.json")
+  const tree = read("companion-resources.json")
+  const result = auditContract({
+    commands: manifest.commands.filter((entry) => entry.name.startsWith("sandbox_preview_")),
+    resources: tree.resources ?? tree,
+    verbs: read("companion-verbs.json"),
+    renames: {},
+  })
+  assert.deepEqual(result.failures, [])
 })

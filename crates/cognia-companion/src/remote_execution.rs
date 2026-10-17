@@ -1343,6 +1343,130 @@ mod tests {
     }
 
     #[test]
+    fn preview_commands_admit_only_loopback_service_and_never_replay_capabilities() {
+        for command in [
+            "sandbox_preview_context",
+            "sandbox_preview_create",
+            "sandbox_preview_list",
+            "sandbox_preview_open",
+            "sandbox_preview_revoke",
+        ] {
+            let descriptor =
+                super::super::command_manifest::descriptor(command).expect("preview command");
+            assert_eq!(descriptor.target, CommandTarget::Service);
+            assert!(transport_admits(
+                true,
+                ExecutionTransport::Internal,
+                descriptor
+            ));
+            for transport in [
+                ExecutionTransport::Internal,
+                ExecutionTransport::Http,
+                ExecutionTransport::WebSocket,
+                ExecutionTransport::WebRtc,
+            ] {
+                assert!(
+                    !transport_admits(false, transport, descriptor),
+                    "{command} admits a paired device"
+                );
+                if transport != ExecutionTransport::Internal {
+                    assert!(!transport_admits(true, transport, descriptor));
+                }
+            }
+            if matches!(command, "sandbox_preview_create" | "sandbox_preview_open") {
+                assert_eq!(descriptor.idempotency, CommandIdempotency::Forbidden);
+                assert!(protocol_idempotency_key(
+                    command,
+                    &execution_request("service", None).principal,
+                    "http",
+                    Some(&json!(1))
+                )
+                .is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn preview_output_contracts_accept_real_grants_and_ephemeral_bootstrap_responses() {
+        use crate::sandbox_previews::{
+            CreatedSandboxPreview, SandboxPreviewContext, SandboxPreviewTarget,
+        };
+        use cognia_task_workspace::{PreviewAudience, PreviewGrantV1, PreviewPort, WorkspaceState};
+        let grant = PreviewGrantV1 {
+            version: 1,
+            id: "grant".into(),
+            project_id: "project".into(),
+            workspace_id: "workspace".into(),
+            provider: "local".into(),
+            container_id: "container".into(),
+            runtime_generation: "generation".into(),
+            port: PreviewPort::Fixed { port: 3000 },
+            resolved_port: 3000,
+            port_lease: None,
+            audience: PreviewAudience::LocalOwner,
+            created_at: 1_000,
+            expires_at: 901_000,
+            revision: 1,
+            revoked: false,
+            origin: "http://p-grant.localhost:12345".into(),
+        };
+        let created = serde_json::to_value(CreatedSandboxPreview {
+            grant: grant.clone(),
+            bootstrap_url: format!("{}/__cognia_bootstrap#ephemeral", grant.origin),
+        })
+        .unwrap();
+        let context = SandboxPreviewContext {
+            targets: vec![SandboxPreviewTarget {
+                workspace_id: grant.workspace_id.clone(),
+                provider: grant.provider.clone(),
+                container_id: grant.container_id.clone(),
+                execution_root: "/workspace".into(),
+                ports: vec![cognia_sandbox_pool::runtime::RuntimePort {
+                    container_id: grant.container_id.clone(),
+                    project_id: grant.project_id.clone(),
+                    port: 3000,
+                    label: None,
+                    path: "/".into(),
+                }],
+                workspace_state: WorkspaceState::Active,
+                port_lease: None,
+            }],
+            snapshot_usage_bytes: 0,
+            sandbox_snapshot_budget_bytes: 1_073_741_824,
+        };
+        for (command, value) in [
+            (
+                "sandbox_preview_context",
+                serde_json::to_value(context).unwrap(),
+            ),
+            ("sandbox_preview_create", created.clone()),
+            ("sandbox_preview_open", created),
+            (
+                "sandbox_preview_list",
+                serde_json::to_value(cognia_problem::paging::Page::from_offset(
+                    vec![grant.clone()],
+                    0,
+                    false,
+                ))
+                .unwrap(),
+            ),
+            (
+                "sandbox_preview_revoke",
+                serde_json::to_value(grant).unwrap(),
+            ),
+        ] {
+            validate_contract_value(
+                "preview-contract",
+                command,
+                &value,
+                cognia_headless_contract::ContractDirection::Output,
+                cognia_headless_contract::ContractPlane::Service,
+            )
+            .unwrap_or_else(|error| panic!("{command}: {error:?}"));
+        }
+    }
+
+    #[test]
     fn internal_transport_requires_service_principal() {
         let descriptor = super::super::command_manifest::descriptor("claude_send").unwrap();
         let mut service = execution_request("service", None);

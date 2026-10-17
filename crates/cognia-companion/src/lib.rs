@@ -65,6 +65,7 @@ pub use cognia_companion_bus::dispatchers;
 /// API serves about it (ADR-0182).
 pub mod environment_pool;
 pub mod sandbox_snapshots;
+pub mod sandbox_previews;
 pub mod environment_ports;
 /// The desktop's remote sandbox settings and pool install (ADR-0221).
 pub mod remote_sandboxes;

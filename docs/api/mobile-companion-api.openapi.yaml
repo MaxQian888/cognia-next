@@ -104598,6 +104598,16 @@ paths:
             schema:
               type: object
               properties:
+                pageSize:
+                  anyOf:
+                    - type: integer
+                      minimum: 1
+                      maximum: 1000
+                    - type: "null"
+                pageToken:
+                  type:
+                    - string
+                    - "null"
                 projectId:
                   type: string
                   minLength: 1

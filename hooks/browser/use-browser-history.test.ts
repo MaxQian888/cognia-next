@@ -19,6 +19,16 @@ describe("useBrowserHistory", () => {
   // The stack is a position and dies with the pane; the places visited are
   // what the history menu lists, so each arrival is written through.
   describe("visit recording", () => {
+    it("does not retain or record one-shot preview bootstrap pages", () => {
+      const { result } = renderHook(() => useBrowserHistory("preview"))
+      act(() => result.current.push("http://p-grant.localhost:42000/__cognia_bootstrap#secret"))
+      act(() => result.current.replace("http://127.0.0.1:42001/__cognia_bootstrap#secret"))
+      expect(result.current.entries).toEqual([])
+      expect(record).not.toHaveBeenCalled()
+      act(() => result.current.push("http://p-grant.localhost:42000/"))
+      expect(result.current.entries).toEqual(["http://p-grant.localhost:42000/"])
+    })
+
     it("records each page the pane arrives at", () => {
       const { result } = renderHook(() => useBrowserHistory())
       act(() => result.current.push("https://a.example/"))

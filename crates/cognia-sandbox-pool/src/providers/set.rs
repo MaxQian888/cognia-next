@@ -435,6 +435,18 @@ fn unsupported() -> SandboxSpawnError {
 
 #[async_trait]
 impl SandboxRuntimeControl for ProviderSet {
+    async fn preview_runtime_generation(
+        &self,
+        provider: &str,
+        container: &str,
+        project: &str,
+        root: &str,
+    ) -> Result<String, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .preview_runtime_generation(provider, container, project, root)
+            .await
+    }
+
     fn snapshot_capabilities(&self, provider: &str) -> crate::runtime::SnapshotCapabilities {
         self.task_shell_runtime(provider)
             .map(|runtime| runtime.snapshot_capabilities(provider))

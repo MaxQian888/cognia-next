@@ -137,6 +137,17 @@ export function vocabularyOf(verbs) {
   return new Set([...Object.keys(verbs.standard ?? {}), ...Object.keys(verbs.custom ?? {})])
 }
 
+/** Bootstrap capability plaintext cannot be written to durable replay receipts. */
+export function isEphemeralPreviewCommand(command) {
+  return (
+    ["sandbox_preview_create", "sandbox_preview_open"].includes(command.name) &&
+    command.target === "service" &&
+    command.idempotency === "forbidden" &&
+    command.transports?.length === 1 &&
+    command.transports[0] === "internal"
+  )
+}
+
 /**
  * Pure audit over already-loaded inputs. Returns { failures, reports }, each a
  * list of strings prefixed by the rule id.
@@ -274,7 +285,7 @@ export function auditContract({
     // R8
     if (typeof c.capability !== "string" || c.capability.length === 0)
       failures.push(`R8 ${label}: capability is empty`)
-    if (c.operation !== "read" && c.idempotency !== "required")
+    if (c.operation !== "read" && c.idempotency !== "required" && !isEphemeralPreviewCommand(c))
       failures.push(`R8 ${label}: mutations require idempotency`)
     if (
       (c.target === "client" || c.target === "service") &&

@@ -33,6 +33,16 @@ const SENSITIVE_FIELD_PATTERN =
 const BEARER_TOKEN_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
+const PREVIEW_BOOTSTRAP_FRAGMENT_PATTERN = /(\/__cognia_bootstrap(?:\?[^#\s]*)?#)[^\s"'<>]+/g
+
+/** One-shot preview credentials must never become saved navigation targets. */
+export function isSandboxPreviewBootstrapUrl(value: string): boolean {
+  try {
+    return new URL(value).pathname === "/__cognia_bootstrap"
+  } catch {
+    return false
+  }
+}
 
 /** Query keys whose value is a credential wherever the URL came from. */
 export const SENSITIVE_QUERY_KEYS: ReadonlySet<string> = new Set([
@@ -57,6 +67,7 @@ export const SENSITIVE_QUERY_KEYS: ReadonlySet<string> = new Set([
  */
 export function redactCredentialText(value: string): string {
   return value
+    .replace(PREVIEW_BOOTSTRAP_FRAGMENT_PATTERN, "$1[REDACTED]")
     .replace(BEARER_TOKEN_PATTERN, "Bearer [REDACTED]")
     .replace(JWT_PATTERN, "[REDACTED_JWT]")
     .replace(SENSITIVE_FIELD_PATTERN, "$1[REDACTED]")

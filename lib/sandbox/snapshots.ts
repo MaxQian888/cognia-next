@@ -1,5 +1,6 @@
 /** Cold filesystem snapshots. The Host owns all paths, image identities and leases. */
 import { transport } from "@/lib/tauri/transport-instance"
+import { collectPages, type Page } from "@/lib/tauri/companion-paging"
 import type { TaskWorkspace, WorkspacePortLease } from "@/lib/task-workspace/types"
 
 export type SandboxSnapshotPhase =
@@ -59,7 +60,14 @@ export function sandboxSnapshotCreate(request: CreateSandboxSnapshot): Promise<S
 }
 
 export function sandboxSnapshotList(projectId: string): Promise<SandboxSnapshot[]> {
-  return transport.call("sandbox_snapshot_list", { projectId })
+  return collectPages(
+    (pageToken) =>
+      transport.call<Page<SandboxSnapshot>>("sandbox_snapshot_list", {
+        projectId,
+        ...(pageToken === undefined ? {} : { pageToken }),
+      }),
+    { requireComplete: true }
+  )
 }
 
 export function sandboxSnapshotGet(snapshotId: string): Promise<SandboxSnapshot> {

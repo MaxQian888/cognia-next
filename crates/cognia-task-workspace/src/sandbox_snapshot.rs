@@ -269,6 +269,12 @@ pub(crate) fn canonical_lock_root(root: &Path) -> Result<PathBuf, String> {
 }
 
 impl TaskWorkspaceService {
+    /// The same deployment-wide accounting used to admit snapshot writes.
+    /// Tombstoned artifacts remain charged until cleanup releases them.
+    pub fn sandbox_snapshot_usage_bytes(&self, deployment: &str) -> Result<u64, String> {
+        deployment_bytes(&self.store.lock().connection, deployment)
+    }
+
     /// Normal acquisitions share a canonical workspace fence. Snapshot reservation
     /// takes it exclusively without waiting, then the durable journal owns the fence.
     pub(crate) fn lock_cold_workspace_acquisition(
@@ -1784,6 +1790,50 @@ mod tests {
             .put_run(&run, &crate::snapshot::WorkspaceSnapshot::default())
             .unwrap();
         input
+    }
+
+    #[test]
+    fn sandbox_snapshot_usage_includes_checkpoints_and_retained_tombstones_per_deployment() {
+        let (_data, _root, service, request) = fixture();
+        assert_eq!(
+            service
+                .sandbox_snapshot_usage_bytes(&request.deployment_id)
+                .unwrap(),
+            0
+        );
+        let checkpoint = ready(&service, &request);
+        let expected = checkpoint.total_bytes + 64;
+        assert!(checkpoint.total_bytes > 0);
+        assert_eq!(
+            service
+                .sandbox_snapshot_usage_bytes(&request.deployment_id)
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            service
+                .sandbox_snapshot_usage_bytes("other-deployment")
+                .unwrap(),
+            0
+        );
+        service
+            .tombstone_sandbox_snapshot(&request.deployment_id, &request.snapshot_id)
+            .unwrap();
+        assert_eq!(
+            service
+                .sandbox_snapshot_usage_bytes(&request.deployment_id)
+                .unwrap(),
+            expected
+        );
+        service
+            .release_sandbox_snapshot(&request.deployment_id, &request.snapshot_id)
+            .unwrap();
+        assert_eq!(
+            service
+                .sandbox_snapshot_usage_bytes(&request.deployment_id)
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

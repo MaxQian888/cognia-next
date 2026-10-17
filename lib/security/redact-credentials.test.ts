@@ -1,4 +1,24 @@
-import { redactCredentialText, redactCredentialUrl } from "./redact-credentials"
+import {
+  isSandboxPreviewBootstrapUrl,
+  redactCredentialText,
+  redactCredentialUrl,
+} from "./redact-credentials"
+
+it("recognizes preview bootstrap pages without classifying ordinary fragments as secrets", () => {
+  expect(
+    isSandboxPreviewBootstrapUrl("http://p-grant.localhost:42000/__cognia_bootstrap#secret")
+  ).toBe(true)
+  expect(isSandboxPreviewBootstrapUrl("http://127.0.0.1:42001/__cognia_bootstrap")).toBe(true)
+  expect(isSandboxPreviewBootstrapUrl("http://localhost:3000/page#heading")).toBe(false)
+  expect(isSandboxPreviewBootstrapUrl("not a url")).toBe(false)
+})
+
+it("redacts a preview fragment in URLs and diagnostic text", () => {
+  const url = "http://p-grant.localhost:42000/__cognia_bootstrap#capability-secret"
+  expect(redactCredentialUrl(url)).not.toContain("capability-secret")
+  expect(redactCredentialText(`navigation failed: ${url}`)).not.toContain("capability-secret")
+  expect(redactCredentialUrl("http://localhost:3000/page#heading")).toContain("#heading")
+})
 
 it("replaces a bare bearer token", () => {
   expect(redactCredentialText("sent Bearer abc.def-123 upstream")).toBe(
