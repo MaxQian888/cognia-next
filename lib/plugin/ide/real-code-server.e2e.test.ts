@@ -39,7 +39,11 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { createInterface } from "node:readline"
 
-import type { CodeServerBrokerNotification, CodeServerBrokerRequest } from "@/lib/codeserver/client"
+import type {
+  CodeServerBrokerNotification,
+  CodeServerBrokerRequest,
+  CodeServerProxyArtifact,
+} from "@/lib/codeserver/client"
 import { TauriLspClientAdapter } from "@/lib/plugin/lsp/lsp-client-adapter-tauri"
 import fixtureHandlers from "@/plugins/pro-ide-fixture/src/index"
 import type { Plugin, PluginManifest } from "@/types/plugin"
@@ -49,6 +53,8 @@ import { IDE_CAPABILITY_CATALOG } from "./catalog"
 import { normalizeIdeManifest } from "./manifest"
 import { ManagedProtocolRuntime } from "./protocol-runtime"
 import { collectProxyAssets } from "./proxy-manager"
+import { buildCodeServerSettings } from "@/lib/codeserver/theme/build-settings"
+import { DEFAULT_FALLBACKS } from "@/lib/appearance/vscode-theme/token-mapping"
 
 const REPO = join(__dirname, "..", "..", "..")
 const CODE_SERVER_BIN = process.env.COGNIA_CODE_SERVER_BIN
@@ -71,8 +77,8 @@ const debug = (line: string) => {
 // Dormant by design without a binary; the name says so in every report.
 const describeReal = CODE_SERVER_BIN ? describe : describe.skip
 const SUITE = CODE_SERVER_BIN
-  ? "managed Pro IDE against a real code-server"
-  : "managed Pro IDE against a real code-server (skipped: set COGNIA_CODE_SERVER_BIN)"
+  ? "%s Pro IDE against a real code-server"
+  : "%s Pro IDE against a real code-server (skipped: set COGNIA_CODE_SERVER_BIN)"
 
 jest.setTimeout(300_000)
 
@@ -235,7 +241,7 @@ const until = async (condition: () => boolean, label: string, timeoutMs = 60_000
 
 // ── The suite ───────────────────────────────────────────────────────────────
 
-describeReal(SUITE, () => {
+describeReal.each(["managed", "native"] as const)(SUITE, (profile) => {
   const startedAt = performance.now()
   const workspace = mkdtempSync(join(tmpdir(), "cognia-pro-ide-e2e-ws-"))
   const dataDir = mkdtempSync(join(tmpdir(), "cognia-pro-ide-e2e-data-"))
@@ -244,8 +250,10 @@ describeReal(SUITE, () => {
   ) as PluginManifest
   let host: HostProcess
   let sidecar: SidecarProcess
-  let browser: { close(): Promise<void> }
+  let browser: import("@playwright/test").Browser
+  let page: import("@playwright/test").Page
   let ready: { root: string; port: number; hostId: string; relayPath: string; relayOrigin: string }
+  let committedArtifact: CodeServerProxyArtifact
   let connected = false
   let coldReadinessMs = 0
   const brokerErrors: string[] = []
@@ -255,6 +263,12 @@ describeReal(SUITE, () => {
   const file = (name: string) => join(ready.root, name)
 
   beforeAll(async () => {
+    const settings = buildCodeServerSettings({ colors: DEFAULT_FALLBACKS.dark, variant: "dark" })
+    for (const targetProfile of ["managed", "native"]) {
+      const userDir = join(dataDir, "code-server", "profiles", targetProfile, "user-data", "User")
+      mkdirSync(userDir, { recursive: true })
+      writeFileSync(join(userDir, "settings.json"), JSON.stringify(settings))
+    }
     writeFileSync(join(workspace, "sample.txt"), "first line\nsecond line\n")
     writeFileSync(join(workspace, "a.cfx"), "fixture source\n")
     writeFileSync(join(workspace, "main.cfx"), "program\n")
@@ -271,7 +285,7 @@ describeReal(SUITE, () => {
       })
     )
 
-    host = new HostProcess(["--data-dir", dataDir, "--root", workspace], {
+    host = new HostProcess(["--data-dir", dataDir, "--root", workspace, "--profile", profile], {
       ...process.env,
       COGNIA_CODE_SERVER_BIN: CODE_SERVER_BIN,
       COGNIA_CODE_SERVER_AGENT_VSIX: BROKER_VSIX,
@@ -420,14 +434,14 @@ describeReal(SUITE, () => {
     const { chromium } = await import("@playwright/test")
     const launched = await chromium.launch({ headless: true })
     browser = launched
-    const page = await launched.newPage()
+    page = await launched.newPage()
     page.on("console", (message) => debug(`workbench ${message.type()}: ${message.text()}`))
     await page.goto(`http://127.0.0.1:${ready.port}/?folder=${encodeURIComponent(ready.root)}`)
     await until(() => connected, "the broker extension to connect", 120_000)
     coldReadinessMs = performance.now() - startedAt
 
     const normalized = normalizeIdeManifest(manifest.id, manifest).manifest
-    const artifact = await host.call("buildProxy", {
+    const artifact = await host.call<CodeServerProxyArtifact>("buildProxy", {
       request: {
         pluginId: manifest.id,
         pluginVersion: manifest.version,
@@ -442,6 +456,7 @@ describeReal(SUITE, () => {
       },
     })
     expect(await host.call("installProxy", { artifact })).toBe(true)
+    committedArtifact = artifact
   })
 
   afterAll(async () => {
@@ -461,6 +476,15 @@ describeReal(SUITE, () => {
   afterEach(() => {
     // A provider that failed in the runtime fails the family that called it.
     expect(brokerErrors.splice(0)).toEqual([])
+  })
+
+  it("shows the explorer on the right without Restricted Mode", async () => {
+    const sidebar = await page.locator(".part.sidebar").boundingBox()
+    const editor = await page.locator(".part.editor").boundingBox()
+    expect(sidebar).not.toBeNull()
+    expect(editor).not.toBeNull()
+    expect(sidebar!.x).toBeGreaterThan(editor!.x)
+    expect(await page.getByRole("button", { name: /Restricted Mode:/ }).count()).toBe(0)
   })
 
   it("serves a CodeLens from the plugin, and its click lands in the plugin's command", async () => {
@@ -640,6 +664,38 @@ describeReal(SUITE, () => {
     mkdirSync(dirname(PERF_OUT), { recursive: true })
     writeFileSync(PERF_OUT, `${JSON.stringify(result, null, 2)}\n`)
     expect(result.emptyRpcP95Ms).toBeGreaterThan(0)
+  })
+
+  it("keeps a committed Cognia plugin when switching into the other fresh profile", async () => {
+    const nextProfile = profile === "managed" ? "native" : "managed"
+    connected = false
+    const next = await host.call<{ port: number }>("ensure", {
+      root: ready.root,
+      profile: nextProfile,
+    })
+    const page = await browser.newPage()
+    await page.goto(`http://127.0.0.1:${next.port}/?folder=${encodeURIComponent(ready.root)}`)
+    await until(() => connected, "the other profile's Cognia broker to connect", 120_000)
+    await host.call("request", {
+      root: ready.root,
+      method: "managedProxyHandshake",
+      params: {
+        pluginId: committedArtifact.pluginId,
+        pluginVersion: committedArtifact.pluginVersion,
+        manifestHash: committedArtifact.manifestHash,
+        catalogHash: committedArtifact.catalogHash,
+        platformVersion: committedArtifact.platformVersion,
+      },
+    })
+    expect(
+      await probe({
+        action: "command",
+        command: `${NS}.ping`,
+        args: [{ path: file("sample.txt") }],
+      })
+    ).toEqual({ ok: true, path: file("sample.txt") })
+    expect(await probe({ action: "scm", id: `${NS}.fixture-scm` })).toMatchObject({ count: 1 })
+    await page.close()
   })
 })
 

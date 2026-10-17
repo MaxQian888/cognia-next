@@ -318,9 +318,9 @@ it.each(["install-failed", "registration-failed", "protocol-incompatible"])(
   }
 )
 
-it("does not watch broker issues in the native profile, which has no broker", () => {
+it("watches Cognia broker issues in the native extension profile", () => {
   render(<CodeServerPane root="/work/proj" ownerId="dock" profile="native" onRevoked={jest.fn()} />)
-  expect(brokerIssues.enabled).toBe(false)
+  expect(brokerIssues.enabled).toBe(true)
 })
 
 it("always renders the reserved region the webview is positioned over", () => {

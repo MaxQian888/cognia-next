@@ -1,8 +1,8 @@
 /**
  * Where a browser can reach a running workbench, if anywhere.
  *
- * The desktop shell embeds code-server in a native child webview and never
- * needs this. A browser cannot: the workbench answers on a loopback port on
+ * The desktop shell embeds code-server in a native child webview. A browser
+ * cannot: the workbench answers on a loopback port on
  * the HOST, and the only other way in is `/ide/relay/{id}/`, which sits behind
  * `require_device_access` and therefore needs a bearer token on every request.
  * An iframe cannot attach one and neither can a top-level navigation, so for
@@ -31,11 +31,18 @@ export type WebWorkbenchTarget =
 
 export interface WebWorkbenchInput {
   status: CodeServerStatus | null
+  /** Selected project or worktree, rather than code-server's last opened folder. */
+  root: string
   /**
    * Base URL of the Host this shell is paired with, or `null` when this shell
    * IS the host and runs the workbench in-process.
    */
   hostBaseUrl: string | null
+}
+
+/** Explicit selection takes precedence over code-server's profile-wide saved folder. */
+export function codeServerWorkbenchUrl(port: number, root: string): string {
+  return `http://127.0.0.1:${port}/?folder=${encodeURIComponent(root)}`
 }
 
 /**
@@ -57,6 +64,7 @@ export function hostIsThisMachine(hostBaseUrl: string | null): boolean {
 
 export function resolveWebWorkbenchTarget({
   status,
+  root,
   hostBaseUrl,
 }: WebWorkbenchInput): WebWorkbenchTarget {
   if (!status?.running) return { kind: "unavailable", reason: "not-running" }
@@ -73,5 +81,5 @@ export function resolveWebWorkbenchTarget({
   // The literal, not the endpoint's own hostname: the port was disclosed
   // because the Host is on this machine, so `127.0.0.1` is the address that
   // is true regardless of what name the pairing was made under.
-  return { kind: "embed", url: `http://127.0.0.1:${status.port}/` }
+  return { kind: "embed", url: codeServerWorkbenchUrl(status.port, root) }
 }

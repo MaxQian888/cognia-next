@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { runInNewContext } from "node:vm"
 import { validateIdeManifestSchema } from "./manifest-schema"
 
 const base = {
@@ -6,6 +9,44 @@ const base = {
 }
 
 describe("validateIdeManifestSchema", () => {
+  it("loads the generated validator in a context that forbids eval and Function", () => {
+    const file =
+      require.resolve("@/packages/plugin-sdk/contract/ide-manifest-validator.generated.cjs")
+    const commonjsModule = { exports: {} }
+    runInNewContext(
+      readFileSync(file, "utf8"),
+      {
+        module: commonjsModule,
+        exports: commonjsModule.exports,
+        require: createRequire(file),
+        URL,
+      },
+      { contextCodeGeneration: { strings: false, wasm: false } }
+    )
+    const validate = commonjsModule.exports as (value: unknown) => boolean
+    expect(validate(base)).toBe(true)
+    expect(validate({ ...base, targets: [] })).toBe(false)
+  })
+
+  it("validates installed IDE manifests when runtime code generation is forbidden", () => {
+    jest.isolateModules(() => {
+      const blocked = jest.spyOn(globalThis, "Function").mockImplementation(() => {
+        throw new EvalError("Content Security Policy forbids dynamic code generation")
+      })
+      try {
+        const { validateIdeManifestSchema: validate } =
+          jest.requireActual<typeof import("./manifest-schema")>("./manifest-schema")
+        expect(validate(base)).toEqual([])
+        expect(validate({ ...base, targets: [] })).toEqual(
+          expect.arrayContaining([expect.objectContaining({ keyword: "minItems" })])
+        )
+        expect(blocked).not.toHaveBeenCalled()
+      } finally {
+        blocked.mockRestore()
+      }
+    })
+  })
+
   it("accepts stable Code 1.128 contribution shapes", () => {
     expect(
       validateIdeManifestSchema({

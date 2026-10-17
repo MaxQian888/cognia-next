@@ -7,6 +7,7 @@ import { type RefObject, useCallback, useEffect, useRef, useState } from "react"
 import { useElementRect } from "@/hooks/browser/use-element-rect"
 import { useRegionVisibility } from "@/hooks/browser/use-region-visibility"
 import type { ElementRect } from "@/lib/browser/protocol"
+import { codeServerWorkbenchUrl } from "@/lib/codeserver/web-embed"
 import {
   CODESERVER_EVENTS,
   type CodeServerDownloadProgress,
@@ -100,7 +101,7 @@ export function useCodeServerPane(
 
   const rectRef = useRef<ElementRect | null>(null)
   const visibleRef = useRef(visible)
-  const url = port != null ? `http://127.0.0.1:${port}/` : null
+  const url = port != null ? codeServerWorkbenchUrl(port, root) : null
   const urlRef = useRef(url)
 
   // Keep the revoke callback current without re-claiming on every render.
@@ -181,7 +182,7 @@ export function useCodeServerPane(
         const status = await codeServerClient.ensure(root, profile)
         if (cancelled) return
         const nextPort = status.port ?? null
-        urlRef.current = nextPort != null ? `http://127.0.0.1:${nextPort}/` : null
+        urlRef.current = nextPort != null ? codeServerWorkbenchUrl(nextPort, root) : null
         setPort(nextPort)
         setProgress(null)
         setPhase("ready")

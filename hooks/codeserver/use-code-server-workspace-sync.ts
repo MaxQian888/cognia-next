@@ -302,7 +302,8 @@ export function useCodeServerWorkspaceSync(enabled: boolean, root: string): void
         issuesEmpty: t("issuesEmpty"),
         plansEmpty: t("plansEmpty"),
         runsEmpty: t("runsEmpty"),
-        statusText: t("statusText"),
+        // The snapshot builder substitutes the filtered open-issue count.
+        statusText: t.raw("statusText"),
         statusTooltip: t("statusTooltip"),
         disconnected: t("disconnected"),
         noCustomActions: t("noCustomActions"),

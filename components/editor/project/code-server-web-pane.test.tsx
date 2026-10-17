@@ -53,10 +53,12 @@ jest.mock("@/hooks/codeserver/use-code-server-project-opener", () => ({
 jest.mock("./code-server-web-frame", () => ({
   CodeServerWebFrame: ({
     status,
+    root,
     hostBaseUrl,
     onEmbeddedChange,
   }: {
     status: { running?: boolean; port?: number } | null
+    root: string
     hostBaseUrl: string | null
     onEmbeddedChange?: (embedded: boolean) => void
   }) => {
@@ -64,6 +66,7 @@ jest.mock("./code-server-web-frame", () => ({
     return (
       <div
         data-testid="web-frame"
+        data-root={root}
         data-running={String(status?.running ?? false)}
         data-port={status?.port ?? ""}
         data-host={hostBaseUrl ?? "self"}
@@ -105,11 +108,13 @@ describe("CodeServerWebPane", () => {
     expect(frame).toHaveAttribute("data-running", "true")
     expect(frame).toHaveAttribute("data-port", "8321")
     expect(frame).toHaveAttribute("data-host", "self")
+    expect(frame).toHaveAttribute("data-root", "/repo")
   })
 
   it("passes the profile the user picked through to the host", async () => {
     render(<CodeServerWebPane root="/repo" profile="native" />)
     await waitFor(() => expect(ensure).toHaveBeenCalledWith("/repo", "native"))
+    expect(await screen.findByTestId("web-frame")).toHaveAttribute("data-root", "/repo")
   })
 
   it("waits for the host answer before pointing a frame at loopback", async () => {
@@ -240,13 +245,13 @@ it("wires settings, language, workspace and editor events for a managed web pane
   expect(mockWorkspaceNavigation).toHaveBeenLastCalledWith(true, "/repo")
 })
 
-it("keeps broker hooks disabled for the native extension profile", async () => {
+it("enables Cognia broker hooks for the native extension profile", async () => {
   render(<CodeServerWebPane root="/repo" profile="native" />)
   await waitFor(() => expect(screen.getByTestId("web-frame")).toBeInTheDocument())
-  expect(mockWorkspaceSync).toHaveBeenLastCalledWith(false, "/repo")
-  expect(mockEditorEvents).toHaveBeenLastCalledWith(false, "/repo")
-  expect(mockChatBridge).toHaveBeenLastCalledWith(false, "/repo")
-  expect(mockWorkspaceNavigation).toHaveBeenLastCalledWith(false, "/repo")
+  expect(mockWorkspaceSync).toHaveBeenLastCalledWith(true, "/repo")
+  expect(mockEditorEvents).toHaveBeenLastCalledWith(true, "/repo")
+  expect(mockChatBridge).toHaveBeenLastCalledWith(true, "/repo")
+  expect(mockWorkspaceNavigation).toHaveBeenLastCalledWith(true, "/repo")
 })
 
 it("fails closed when the host identity cannot be resolved and re-resolves on retry", async () => {

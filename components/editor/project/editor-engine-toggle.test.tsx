@@ -353,11 +353,11 @@ describe("agent operations in VS Code", () => {
     mockBrokerProgress.mockClear()
   })
 
-  it("listens only while the managed Pro IDE is the live engine", () => {
+  it("listens while either Pro IDE profile is the live engine", () => {
     renderToggle({ value: "monaco" })
     expect(mockBrokerProgress).toHaveBeenLastCalledWith(false, "/work/proj")
     renderToggle({ value: "codeserver", proIdeProfile: "native" })
-    expect(mockBrokerProgress).toHaveBeenLastCalledWith(false, "/work/proj")
+    expect(mockBrokerProgress).toHaveBeenLastCalledWith(true, "/work/proj")
     renderToggle({ value: "codeserver", proIdeSupport: "unsupported" })
     expect(mockBrokerProgress).toHaveBeenLastCalledWith(false, "/work/proj")
     renderToggle({ value: "codeserver" })
@@ -404,9 +404,9 @@ describe("a managed workbench running without its broker", () => {
     mockBrokerStatusHook.mockClear()
   })
 
-  it("asks only for the managed Pro IDE", () => {
+  it("asks for both Pro IDE profiles", () => {
     renderToggle({ value: "codeserver", proIdeProfile: "native" })
-    expect(mockBrokerStatusHook).toHaveBeenLastCalledWith(false, "/work/proj")
+    expect(mockBrokerStatusHook).toHaveBeenLastCalledWith(true, "/work/proj")
     renderToggle({ value: "codeserver" })
     expect(mockBrokerStatusHook).toHaveBeenLastCalledWith(true, "/work/proj")
   })

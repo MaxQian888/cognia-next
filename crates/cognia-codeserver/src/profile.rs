@@ -1,9 +1,8 @@
 //! Isolated code-server profiles.
 //!
-//! Managed extensions and native Open VSX extensions cannot safely share an
-//! extension host: both execute with the host user's privileges. Keep their
-//! user data and extension directories physically separate and never issue
-//! broker credentials to the native profile.
+//! Both profiles support the Cognia broker and generated plugin proxies. Keep
+//! their user data and extension directories separate so choosing Open VSX
+//! extensions does not replace the managed profile's curated extension set.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -11,14 +10,14 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// The two mutually exclusive code-server trust domains.
+/// The two code-server extension profiles.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum IdeProfile {
     /// Pinned Cognia broker and generated proxy extensions only.
     #[default]
     Managed,
-    /// User-selected Open VSX extensions, without Cognia broker credentials.
+    /// Cognia integration plus user-selected Open VSX extensions.
     Native,
 }
 
@@ -31,7 +30,7 @@ impl IdeProfile {
     }
 
     pub const fn allows_broker(self) -> bool {
-        matches!(self, Self::Managed)
+        matches!(self, Self::Managed | Self::Native)
     }
 }
 
@@ -335,9 +334,9 @@ mod tests {
     }
 
     #[test]
-    fn only_managed_profile_may_receive_broker_credentials() {
+    fn both_extension_profiles_support_cognia_broker() {
         assert!(IdeProfile::Managed.allows_broker());
-        assert!(!IdeProfile::Native.allows_broker());
+        assert!(IdeProfile::Native.allows_broker());
     }
 
     #[test]

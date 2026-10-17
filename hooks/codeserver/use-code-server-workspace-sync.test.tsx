@@ -3,7 +3,12 @@
  */
 import "fake-indexeddb/auto"
 
-const mockTranslate = (key: string) => key
+const mockTranslate = Object.assign(
+  jest.fn((key: string) => key),
+  {
+    raw: jest.fn((key: string) => key),
+  }
+)
 jest.mock("next-intl", () => ({
   useTranslations: () => mockTranslate,
 }))
@@ -71,6 +76,8 @@ import { listIssueRuns } from "@/lib/db/issue-runs"
 
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { useCodeServerWorkspaceSync } from "./use-code-server-workspace-sync"
+import enPanelMessages from "@/i18n/messages/en/proIdePanel.json"
+import zhPanelMessages from "@/i18n/messages/zh-CN/proIdePanel.json"
 
 const issue = (over: Record<string, unknown> = {}) => ({
   id: "i1",
@@ -83,6 +90,8 @@ const issue = (over: Record<string, unknown> = {}) => ({
 })
 
 beforeEach(() => {
+  mockTranslate.mockReset().mockImplementation((key: string) => key)
+  mockTranslate.raw.mockReset().mockImplementation((key: string) => key)
   mockEditorEventHandlers = []
   push.mockReset().mockResolvedValue(undefined)
   mockHost = null
@@ -99,6 +108,32 @@ it("pushes a snapshot once the pane is ready", () => {
   const [root, snapshot] = push.mock.calls[0]!
   expect(root).toBe("/repo")
   expect(snapshot.groups.map((g: { id: string }) => g.id)).toEqual(["issues", "plans", "runs"])
+})
+
+it.each([
+  ["en", enPanelMessages, 0, "Cognia: 0 open"],
+  ["en", enPanelMessages, 1, "Cognia: 1 open"],
+  ["en", enPanelMessages, 2, "Cognia: 2 open"],
+  ["zh-CN", zhPanelMessages, 0, "Cognia：0 项未完成"],
+  ["zh-CN", zhPanelMessages, 1, "Cognia：1 项未完成"],
+  ["zh-CN", zhPanelMessages, 2, "Cognia：2 项未完成"],
+] as const)("localizes the %s status template (case %#)", (_locale, messages, count, expected) => {
+  const lookup = (key: string) => messages[key as keyof typeof messages]
+  mockTranslate.mockImplementation((key) => {
+    if (key === "statusText") throw new Error('Missing intl context variable "count"')
+    return lookup(key)
+  })
+  mockTranslate.raw.mockImplementation(lookup)
+  issuesValue = [
+    ...Array.from({ length: count }, (_, index) => issue({ id: `open-${index}` })),
+    issue({ id: "done", status: "done" }),
+    issue({ id: "canceled", status: "canceled" }),
+  ]
+
+  renderHook(() => useCodeServerWorkspaceSync(true, "/repo"))
+
+  expect(push).toHaveBeenCalledWith("/repo", expect.objectContaining({ statusText: expected }))
+  expect(mockTranslate.raw).toHaveBeenCalledWith("statusText")
 })
 
 it("pushes the unchanged snapshot again as soon as the extension reconnects", async () => {

@@ -11,13 +11,7 @@
 
 import { useTranslations } from "next-intl"
 import { GitBranchIcon } from "lucide-react"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ProjectRoot } from "./use-project-editor"
 
 interface Props {
@@ -40,32 +34,37 @@ export function ProjectRootSwitcher({
   const followed = followedRoot?.trim() || null
   if (roots.length <= 1) return null
   return (
-    <Select value={rootKey} onValueChange={onSelect}>
-      <SelectTrigger
-        className={
-          // Compact: 12rem when the row has room, giving way down to 6rem in a
-          // narrow dock toolbar before anything else on the row has to wrap.
-          density === "touch"
-            ? "h-10 w-full gap-2 text-sm"
-            : "h-7 w-48 min-w-24 shrink gap-1 text-xs"
-        }
+    // The system picker paints above native child webviews without marking the
+    // editor aria-hidden, unlike Radix Select's modal DOM portal.
+    <div
+      className={
+        // Compact: 12rem when the row has room, giving way down to 6rem in a
+        // narrow dock toolbar before anything else on the row has to wrap.
+        density === "touch" ? "relative w-full" : "relative w-48 min-w-24 shrink"
+      }
+    >
+      <NativeSelect
+        value={rootKey}
+        onChange={(event) => onSelect(event.target.value)}
+        wrapperClassName="w-full"
+        className={density === "touch" ? "h-10 pl-8 text-sm" : "h-7 pl-8 text-xs"}
         aria-label={t("rootLabel")}
         data-testid="project-root-switcher"
       >
-        <GitBranchIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
         {roots.map((r) => (
-          <SelectItem key={r.key} value={r.key} className="text-xs">
+          <NativeSelectOption key={r.key} value={r.key}>
             {r.key === followed
               ? t("rootFollowing", { name: r.isMain ? t("rootMain") : r.label })
               : r.isMain
                 ? t("rootMain")
                 : r.label}
-          </SelectItem>
+          </NativeSelectOption>
         ))}
-      </SelectContent>
-    </Select>
+      </NativeSelect>
+      <GitBranchIcon
+        className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
+        aria-hidden="true"
+      />
+    </div>
   )
 }

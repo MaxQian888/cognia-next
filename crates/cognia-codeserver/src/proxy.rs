@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::File;
 use std::io::{Cursor, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
@@ -82,6 +82,77 @@ pub(super) fn activation_marker_selects(
     artifact: &ProxyArtifact,
 ) -> bool {
     marker_contents.map(str::trim) == Some(artifact.sha256.as_str())
+}
+
+/// One committed selection shared by both extension profiles. Staged artifacts
+/// never become active merely because a different profile is opened.
+pub(super) fn committed_proxy_marker(root: &Path, plugin_id: &str) -> PathBuf {
+    root.join("committed-proxies").join(format!(
+        "{}.sha256",
+        hex::encode(Sha256::digest(plugin_id.as_bytes()))
+    ))
+}
+
+pub(super) async fn read_activation_marker(path: &Path) -> Result<Option<String>, String> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(contents) => Ok(Some(contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("read proxy activation {}: {error}", path.display())),
+    }
+}
+
+pub(super) async fn write_activation_marker(
+    path: &Path,
+    contents: Option<&str>,
+) -> Result<(), String> {
+    if let Some(contents) = contents {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|error| format!("create proxy activation directory: {error}"))?;
+        }
+        let path = path.to_path_buf();
+        let contents = contents.to_owned();
+        tokio::task::spawn_blocking(move || super::profile::atomic_write_text(&path, &contents))
+            .await
+            .map_err(|error| format!("write proxy activation task: {error}"))?
+    } else {
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!(
+                "remove proxy activation {}: {error}",
+                path.display()
+            )),
+        }
+    }
+}
+
+pub(super) async fn selected_proxy_hash(
+    root: &Path,
+    extensions_dir: &Path,
+    plugin_id: &str,
+) -> Result<Option<String>, String> {
+    if let Some(hash) = read_activation_marker(&committed_proxy_marker(root, plugin_id)).await? {
+        return Ok(Some(hash));
+    }
+    // Upgrade from per-profile ledgers, including a fresh native profile whose
+    // plugin was previously committed while only the managed profile was live.
+    let own = super::process::managed_proxy_marker(extensions_dir, plugin_id);
+    if let Some(hash) = read_activation_marker(&own).await? {
+        return Ok(Some(hash));
+    }
+    for profile in [
+        super::profile::IdeProfile::Managed,
+        super::profile::IdeProfile::Native,
+    ] {
+        let paths = super::profile::ProfilePaths::new(root, profile);
+        let marker = super::process::managed_proxy_marker(&paths.extensions_dir, plugin_id);
+        if let Some(hash) = read_activation_marker(&marker).await? {
+            return Ok(Some(hash));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(feature = "tauri-host")]
@@ -1093,6 +1164,48 @@ pub(crate) fn proxy_name(plugin_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn fresh_native_profile_inherits_only_committed_plugin_selection() {
+        use super::super::profile::{IdeProfile, ProfilePaths};
+        let root = tempfile::tempdir().unwrap();
+        let native = ProfilePaths::new(root.path(), IdeProfile::Native);
+        let managed = ProfilePaths::new(root.path(), IdeProfile::Managed);
+        assert_eq!(
+            selected_proxy_hash(root.path(), &native.extensions_dir, "acme")
+                .await
+                .unwrap(),
+            None
+        );
+        write_activation_marker(
+            &super::super::process::managed_proxy_marker(&managed.extensions_dir, "acme"),
+            Some("old-committed"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            selected_proxy_hash(root.path(), &native.extensions_dir, "acme")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("old-committed")
+        );
+        write_activation_marker(
+            &committed_proxy_marker(root.path(), "acme"),
+            Some("new-committed"),
+        )
+        .await
+        .unwrap();
+        for paths in [&managed, &native] {
+            assert_eq!(
+                selected_proxy_hash(root.path(), &paths.extensions_dir, "acme")
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some("new-committed")
+            );
+        }
+    }
 
     #[test]
     fn deterministic_vsix_bytes_are_content_addressable() {

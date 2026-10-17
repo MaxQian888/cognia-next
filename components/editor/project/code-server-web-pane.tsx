@@ -140,7 +140,7 @@ function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
   // just as embeddable — which is exactly what the iframe beside this decides.
   // Asking the narrower question left every same-machine paired browser with a
   // visible, working IDE that no file jump ever landed in.
-  const targetKind = resolveWebWorkbenchTarget({ status, hostBaseUrl }).kind
+  const targetKind = resolveWebWorkbenchTarget({ status, root, hostBaseUrl }).kind
   // Framing is the half the target cannot answer: code-server may refuse it,
   // and then the frame shows an "open in a tab" link instead. Start from the
   // target so the opener is live on the first render the frame is shown, and
@@ -150,7 +150,6 @@ function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
     []
   )
   const embedded = phase === "ready" && hostResolved && targetKind === "embed" && !framingRefused
-  const managed = embedded && profile === "managed"
   useCodeServerProjectOpener({ root, enabled: embedded, beforeOpen })
   useCodeServerSettingsSync(phase === "ready", profile)
   useCodeServerLocaleSync(
@@ -161,10 +160,10 @@ function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
     },
     profile
   )
-  useCodeServerWorkspaceSync(managed, root)
-  useCodeServerWorkspaceNavigation(managed, root)
-  useCodeServerEditorEvents(managed, root)
-  useCodeServerChatBridge(managed, root)
+  useCodeServerWorkspaceSync(embedded, root)
+  useCodeServerWorkspaceNavigation(embedded, root)
+  useCodeServerEditorEvents(embedded, root)
+  useCodeServerChatBridge(embedded, root)
 
   if (phase === "error") {
     return (
@@ -193,6 +192,7 @@ function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
   return (
     <div className="h-full w-full overflow-hidden" data-testid="code-server-web-pane">
       <CodeServerWebFrame
+        root={root}
         status={status}
         hostBaseUrl={hostBaseUrl}
         onEmbeddedChange={onEmbeddedChange}

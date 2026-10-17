@@ -272,7 +272,7 @@ impl RemoteCodeServerState {
         super::proxy::list_artifacts_at_root(&self.data_dir.join("code-server"))
     }
 
-    /// Transactionally activate a verified proxy in every live managed
+    /// Transactionally activate a verified proxy in every live extension profile and
     /// workspace on this host. A failed handshake restores the previously
     /// marked proxy (or removes a first install), then rebuilds each affected
     /// extension-host generation before returning an error.
@@ -283,73 +283,111 @@ impl RemoteCodeServerState {
         let cache_root = self.data_dir.join("code-server");
         super::proxy::verify_artifact_at_root(&cache_root, artifact)?;
         let _guard = self.operation_lock.lock().await;
-        let roots = {
+        let workspaces = {
             let mut instances = self.instances.lock().await;
             instances
                 .iter_mut()
                 .filter_map(|(root, instance)| {
-                    (instance.profile == IdeProfile::Managed && instance.is_alive())
-                        .then(|| root.clone())
+                    (instance.profile.allows_broker() && instance.is_alive())
+                        .then(|| (root.clone(), instance.profile))
                 })
                 .collect::<Vec<_>>()
         };
-        if roots.is_empty() {
+        if workspaces.is_empty() {
             return Ok(false);
         }
-
         let binary = resolve_preloaded_binary(&self.data_dir)?;
-        let paths = ProfilePaths::new(&cache_root, IdeProfile::Managed);
-        let marker = managed_proxy_marker(&paths.extensions_dir, &artifact.plugin_id);
-        let previous_sha = tokio::fs::read_to_string(&marker).await.ok();
-        let previous = previous_sha.as_deref().and_then(|sha| {
-            self.list_proxies()
-                .ok()?
-                .into_iter()
-                .find(|candidate| candidate.sha256 == sha.trim())
-        });
-
-        install_remote_proxy(&binary, &paths, artifact).await?;
+        let targets =
+            super::process::group_proxy_targets(workspaces.into_iter().map(|(root, profile)| {
+                let paths = ProfilePaths::new(&cache_root, profile);
+                (
+                    root,
+                    binary.clone(),
+                    paths.extensions_dir,
+                    paths.user_data_dir,
+                )
+            }));
+        let artifacts = self.list_proxies()?;
+        let committed_marker =
+            super::proxy::committed_proxy_marker(&cache_root, &artifact.plugin_id);
+        let previous_commit = super::proxy::read_activation_marker(&committed_marker).await?;
+        let mut previous = Vec::new();
+        for target in &targets {
+            previous.push(
+                super::proxy::read_activation_marker(&managed_proxy_marker(
+                    &target.extensions_dir,
+                    &artifact.plugin_id,
+                ))
+                .await?,
+            );
+        }
         let channel = super::agent_channel::global();
-        if let Err(error) = activate_remote_proxy(&channel, &roots, artifact).await {
-            if let Some(previous) = previous {
-                install_remote_proxy(&binary, &paths, &previous)
+        let result = super::process::run_proxy_transaction(
+            targets.len(),
+            |index| {
+                let target = &targets[index];
+                let channel = &channel;
+                async move {
+                    let paths = ProfilePaths {
+                        extensions_dir: target.extensions_dir.clone(),
+                        user_data_dir: target.user_data_dir.clone(),
+                    };
+                    stage_remote_proxy(&target.binary, &paths, artifact).await?;
+                    activate_remote_proxy(channel, &target.roots, artifact).await
+                }
+            },
+            || async {
+                for target in &targets {
+                    super::proxy::write_activation_marker(
+                        &managed_proxy_marker(&target.extensions_dir, &artifact.plugin_id),
+                        Some(&artifact.sha256),
+                    )
+                    .await?;
+                }
+                super::proxy::write_activation_marker(&committed_marker, Some(&artifact.sha256))
                     .await
-                    .map_err(|rollback| {
-                        format!(
-                            "proxy {} handshake failed ({error}); rollback install failed: {rollback}",
-                            artifact.plugin_id
-                        )
-                    })?;
-                activate_remote_proxy_after_restart(&channel, &roots, &previous)
-                    .await
-                    .map_err(|rollback| {
-                        format!(
-                            "proxy {} handshake failed ({error}); rollback verification failed: {rollback}",
-                            artifact.plugin_id
-                        )
-                    })?;
-            } else {
-                uninstall_remote_proxy(&binary, &paths, &artifact.plugin_id)
-                    .await
-                    .map_err(|rollback| {
-                        format!(
-                            "proxy {} handshake failed ({error}); uninstall rollback failed: {rollback}",
-                            artifact.plugin_id
-                        )
-                    })?;
-                restart_remote_extension_hosts(&channel, &roots)
-                    .await
-                    .map_err(|rollback| {
-                        format!(
-                            "proxy {} handshake failed ({error}); extension-host cleanup failed: {rollback}",
-                            artifact.plugin_id
-                        )
-                    })?;
-            }
-            return Err(format!(
-                "proxy {} activation handshake failed and was rolled back: {error}",
-                artifact.plugin_id
-            ));
+            },
+            |index| {
+                let target = &targets[index];
+                let previous = &previous[index];
+                let artifacts = &artifacts;
+                let channel = &channel;
+                let committed_marker = &committed_marker;
+                let previous_commit = &previous_commit;
+                async move {
+                    let paths = ProfilePaths {
+                        extensions_dir: target.extensions_dir.clone(),
+                        user_data_dir: target.user_data_dir.clone(),
+                    };
+                    super::proxy::write_activation_marker(
+                        committed_marker,
+                        previous_commit.as_deref(),
+                    )
+                    .await?;
+                    super::process::restore_proxy_marker(
+                        &target.extensions_dir,
+                        &artifact.plugin_id,
+                        previous.as_deref(),
+                    )
+                    .await?;
+                    let previous = previous.as_deref().and_then(|sha| {
+                        artifacts
+                            .iter()
+                            .find(|candidate| candidate.sha256 == sha.trim())
+                    });
+                    if let Some(previous) = previous {
+                        stage_remote_proxy(&target.binary, &paths, previous).await?;
+                        activate_remote_proxy_after_restart(channel, &target.roots, previous).await
+                    } else {
+                        uninstall_remote_proxy(&target.binary, &paths, &artifact.plugin_id).await?;
+                        restart_remote_extension_hosts(channel, &target.roots).await
+                    }
+                }
+            },
+        )
+        .await;
+        if let Err(failure) = result {
+            return Err(failure.message(&artifact.plugin_id));
         }
         Ok(true)
     }
@@ -862,7 +900,7 @@ fn code_server_args(
     root: &str,
     port: u16,
     paths: &ProfilePaths,
-    profile: IdeProfile,
+    _profile: IdeProfile,
 ) -> Vec<String> {
     let mut args = vec![
         "--bind-addr".to_string(),
@@ -871,10 +909,8 @@ fn code_server_args(
         "none".to_string(),
         "--disable-telemetry".to_string(),
         "--disable-update-check".to_string(),
+        "--disable-workspace-trust".to_string(),
     ];
-    if profile == IdeProfile::Managed {
-        args.push("--disable-workspace-trust".to_string());
-    }
     args.extend([
         "--session-socket".to_string(),
         super::process::session_socket_path(&paths.user_data_dir)
@@ -967,8 +1003,19 @@ async fn install_managed_extensions(
     match super::proxy::list_artifacts_at_root(&cache_root) {
         Ok(artifacts) => {
             for artifact in artifacts {
-                let marker = managed_proxy_marker(&paths.extensions_dir, &artifact.plugin_id);
-                let marker_contents = tokio::fs::read_to_string(&marker).await.ok();
+                let marker_contents = match super::proxy::selected_proxy_hash(
+                    &cache_root,
+                    &paths.extensions_dir,
+                    &artifact.plugin_id,
+                )
+                .await
+                {
+                    Ok(selected) => selected,
+                    Err(error) => {
+                        log::warn!("remote proxy selection: {error}");
+                        continue;
+                    }
+                };
                 if !super::proxy::activation_marker_selects(marker_contents.as_deref(), &artifact) {
                     continue;
                 }
@@ -991,19 +1038,39 @@ async fn install_remote_proxy(
     artifact: &super::proxy::ProxyArtifact,
 ) -> Result<(), String> {
     let marker = managed_proxy_marker(&paths.extensions_dir, &artifact.plugin_id);
+    let installed_marker =
+        super::process::installed_proxy_marker(&paths.extensions_dir, &artifact.plugin_id);
     if tokio::fs::read_to_string(&marker)
         .await
         .ok()
         .as_deref()
         .map(str::trim)
         == Some(artifact.sha256.as_str())
+        && tokio::fs::read_to_string(&installed_marker)
+            .await
+            .ok()
+            .as_deref()
+            == Some(artifact.sha256.as_str())
     {
         return Ok(());
     }
-    install_vsix(binary, Path::new(&artifact.vsix_path), paths).await?;
+    stage_remote_proxy(binary, paths, artifact).await?;
     tokio::fs::write(&marker, &artifact.sha256)
         .await
         .map_err(|error| format!("proxy {} marker write failed: {error}", artifact.plugin_id))
+}
+
+async fn stage_remote_proxy(
+    binary: &str,
+    paths: &ProfilePaths,
+    artifact: &super::proxy::ProxyArtifact,
+) -> Result<(), String> {
+    install_vsix(binary, Path::new(&artifact.vsix_path), paths).await?;
+    super::proxy::write_activation_marker(
+        &super::process::installed_proxy_marker(&paths.extensions_dir, &artifact.plugin_id),
+        Some(&artifact.sha256),
+    )
+    .await
 }
 
 async fn uninstall_remote_proxy(
@@ -1036,6 +1103,11 @@ async fn uninstall_remote_proxy(
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
+    super::proxy::write_activation_marker(
+        &super::process::installed_proxy_marker(&paths.extensions_dir, plugin_id),
+        None,
+    )
+    .await?;
     match tokio::fs::remove_file(managed_proxy_marker(&paths.extensions_dir, plugin_id)).await {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -1615,13 +1687,13 @@ mod tests {
     }
 
     #[test]
-    fn managed_profile_grants_full_workspace_access_but_native_keeps_trust() {
+    fn both_profiles_grant_full_workspace_access() {
         let paths = ProfilePaths::new(Path::new("/srv/cognia/code-server"), IdeProfile::Managed);
         let managed = code_server_args("/work/proj", 43117, &paths, IdeProfile::Managed);
         let native = code_server_args("/work/proj", 43117, &paths, IdeProfile::Native);
 
         assert!(managed.iter().any(|arg| arg == "--disable-workspace-trust"));
-        assert!(!native.iter().any(|arg| arg == "--disable-workspace-trust"));
+        assert!(native.iter().any(|arg| arg == "--disable-workspace-trust"));
     }
 
     #[test]

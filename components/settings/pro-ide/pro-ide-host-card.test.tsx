@@ -28,8 +28,10 @@ jest.mock("@/lib/tauri/companion-endpoint", () => ({
 // The frame's own embed-or-explain logic has its own suite; here it only has to
 // show which Host it was handed.
 jest.mock("@/components/editor/project/code-server-web-frame", () => ({
-  CodeServerWebFrame: ({ hostBaseUrl }: { hostBaseUrl: string | null }) => (
-    <div data-testid="frame-host">{hostBaseUrl ?? "self"}</div>
+  CodeServerWebFrame: ({ hostBaseUrl, root }: { hostBaseUrl: string | null; root: string }) => (
+    <div data-testid="frame-host" data-root={root}>
+      {hostBaseUrl ?? "self"}
+    </div>
   ),
 }))
 
@@ -197,6 +199,7 @@ describe("<ProIdeHostCard />", () => {
     status.mockResolvedValue({ running: true, port: 41234, version: "1.0.0" })
     render(<ProIdeHostCard />)
     await waitFor(() => expect(screen.getByTestId("pro-ide-host-frame")).toBeInTheDocument())
+    expect(screen.getByTestId("frame-host")).toHaveAttribute("data-root", "/srv/repo")
     // The sentence is gone: the frame says the same thing more precisely, and
     // on a host-local browser it says nothing because the workbench is there.
     expect(screen.queryByTestId("pro-ide-host-where")).not.toBeInTheDocument()

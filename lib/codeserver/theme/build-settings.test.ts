@@ -125,6 +125,18 @@ describe("buildCodeServerColorCustomizations", () => {
 })
 
 describe("buildCodeServerSettings", () => {
+  it("places the file explorer on the right to match the Monaco workbench", () => {
+    const settings = buildCodeServerSettings({ colors: dark(), variant: "dark" })
+    expect(settings["workbench.sideBar.location"]).toBe("right")
+    expect(CODESERVER_MANAGED_SETTING_KEYS).toContain("workbench.sideBar.location")
+  })
+
+  it("opens the app-selected workspace without VS Code Restricted Mode", () => {
+    const settings = buildCodeServerSettings({ colors: dark(), variant: "dark" })
+    expect(settings["security.workspace.trust.enabled"]).toBe(false)
+    expect(CODESERVER_MANAGED_SETTING_KEYS).toContain("security.workspace.trust.enabled")
+  })
+
   it("inherits syntax colors from the matching base theme", () => {
     expect(buildCodeServerSettings({ colors: dark(), variant: "dark" })).toMatchObject({
       "workbench.colorTheme": "Default Dark Modern",

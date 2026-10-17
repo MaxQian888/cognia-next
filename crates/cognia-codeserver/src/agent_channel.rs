@@ -223,7 +223,7 @@ pub enum BrokerDisabledReason {
 ///
 /// Carried on every status so the desktop and a companion host describe the
 /// same degraded state the same way: the workbench runs, the broker does not.
-/// `None` for the native profile, which never has a broker.
+/// Available for both managed and native-extension profiles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrokerStatus {
@@ -2580,7 +2580,10 @@ mod tests {
                 reason: Some(R::AdminDisabled)
             })
         );
-        assert_eq!(broker_status_from(IdeProfile::Native, true, None), None);
+        assert_eq!(
+            broker_status_from(IdeProfile::Native, true, None),
+            status(true, None)
+        );
         assert_eq!(
             serde_json::to_value(status(false, None)).unwrap(),
             serde_json::json!({ "enabled": false, "reason": "admin-disabled" })

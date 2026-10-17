@@ -191,12 +191,12 @@ export function ProIdeHostCard() {
               loopback. Everything else gets the sentence below instead, which
               is the honest answer rather than a frame that would sit blank.
             */}
-            {running ? (
+            {running && root ? (
               <div
                 className="h-[60vh] min-h-80 overflow-hidden rounded-stage border"
                 data-testid="pro-ide-host-frame"
               >
-                <CodeServerWebFrame status={status} hostBaseUrl={hostBaseUrl} />
+                <CodeServerWebFrame root={root} status={status} hostBaseUrl={hostBaseUrl} />
               </div>
             ) : (
               <p className="text-xs text-muted-foreground" data-testid="pro-ide-host-where">

@@ -84,6 +84,102 @@ struct RunningInstance {
     watchdog: Option<tokio::task::JoinHandle<()>>,
 }
 
+/// Workspaces sharing one extension installation. Different profiles must be
+/// installed separately, even when they use the same code-server binary.
+#[derive(Debug, Clone)]
+pub(super) struct ProxyTarget {
+    pub roots: Vec<String>,
+    pub binary: String,
+    pub extensions_dir: PathBuf,
+    pub user_data_dir: PathBuf,
+}
+
+pub(super) fn group_proxy_targets(
+    rows: impl IntoIterator<Item = (String, String, PathBuf, PathBuf)>,
+) -> Vec<ProxyTarget> {
+    let mut groups: Vec<ProxyTarget> = Vec::new();
+    for (root, binary, extensions_dir, user_data_dir) in rows {
+        if let Some(group) = groups.iter_mut().find(|group| {
+            group.binary == binary
+                && group.extensions_dir == extensions_dir
+                && group.user_data_dir == user_data_dir
+        }) {
+            group.roots.push(root);
+        } else {
+            groups.push(ProxyTarget {
+                roots: vec![root],
+                binary,
+                extensions_dir,
+                user_data_dir,
+            });
+        }
+    }
+    groups
+}
+
+#[derive(Debug)]
+pub(super) struct ProxyTransactionFailure {
+    pub cause: String,
+    pub rollback_errors: Vec<String>,
+}
+
+impl ProxyTransactionFailure {
+    pub fn message(&self, plugin_id: &str) -> String {
+        if self.rollback_errors.is_empty() {
+            format!(
+                "proxy {plugin_id} activation failed and was rolled back: {}",
+                self.cause
+            )
+        } else {
+            format!(
+                "proxy {plugin_id} activation failed ({}); rollback failed: {}",
+                self.cause,
+                self.rollback_errors.join("; ")
+            )
+        }
+    }
+}
+
+/// A profile may already hold an older Dev Mode build, so rollback includes
+/// every profile, even one not reached by the failed update.
+pub(super) async fn run_proxy_transaction<I, IF, C, CF, R, RF>(
+    target_count: usize,
+    mut install: I,
+    commit: C,
+    mut rollback: R,
+) -> Result<(), ProxyTransactionFailure>
+where
+    I: FnMut(usize) -> IF,
+    IF: std::future::Future<Output = Result<(), String>>,
+    C: FnOnce() -> CF,
+    CF: std::future::Future<Output = Result<(), String>>,
+    R: FnMut(usize) -> RF,
+    RF: std::future::Future<Output = Result<(), String>>,
+{
+    let result = async {
+        for index in 0..target_count {
+            install(index).await?;
+        }
+        commit().await
+    }
+    .await;
+    match result {
+        Ok(()) => Ok(()),
+        Err(cause) => {
+            let mut rollback_errors = Vec::new();
+            for index in 0..target_count {
+                if let Err(error) = rollback(index).await {
+                    rollback_errors.push(format!("profile {index}: {error}"));
+                }
+            }
+            Err(ProxyTransactionFailure {
+                cause,
+                rollback_errors,
+            })
+        }
+    }
+}
+
 impl RunningInstance {
     /// Whether the child is still running (has not exited).
     fn is_alive(&mut self) -> bool {
@@ -149,6 +245,21 @@ pub struct CodeServerState {
 impl CodeServerState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[cfg(any(feature = "tauri-host", test))]
+    fn record_failed_proxy_transaction(
+        &self,
+        plugin_id: &str,
+        sha: &str,
+        failure: &ProxyTransactionFailure,
+    ) {
+        if failure.rollback_errors.is_empty() {
+            self.lock_temporary_proxies().remove(plugin_id);
+        } else {
+            self.lock_temporary_proxies()
+                .insert(plugin_id.to_string(), sha.to_string());
+        }
     }
 
     fn lock_temporary_proxies(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, String>> {
@@ -559,9 +670,7 @@ impl CodeServerState {
         self.download_cancel.cancel();
     }
 
-    /// Install a freshly generated proxy into a live managed profile. With no
-    /// live managed instance the verified artifact remains staged and the next
-    /// launch installs it before code-server starts.
+    /// Install a verified Cognia proxy in every live extension profile.
     #[cfg(feature = "tauri-host")]
     pub async fn install_proxy_artifact(
         &self,
@@ -570,121 +679,128 @@ impl CodeServerState {
     ) -> Result<bool, String> {
         super::proxy::verify_artifact(app, artifact)?;
         let _guard = self.operation_lock.lock().await;
-        let targets = {
-            let mut map = self.instances.lock().await;
-            map.iter_mut()
-                .filter_map(|(root, instance)| {
-                    (instance.profile == IdeProfile::Managed && instance.is_reusable()).then(|| {
-                        (
-                            root.clone(),
-                            instance.binary_path.clone(),
-                            instance.extensions_dir.clone(),
-                            instance.user_data_dir.clone(),
-                        )
-                    })
-                })
-                .collect::<Vec<_>>()
-        };
-        let Some((_, binary, extensions_dir, user_data_dir)) = targets.first() else {
+        let targets = self.managed_proxy_targets().await;
+        if targets.is_empty() {
             return Ok(false);
-        };
-        let roots = targets
-            .iter()
-            .map(|(root, _, _, _)| root.clone())
-            .collect::<Vec<_>>();
-        let marker = managed_proxy_marker(extensions_dir, &artifact.plugin_id);
-        let previous_sha = tokio::fs::read_to_string(&marker).await.ok();
-        let previous = if let Some(previous_sha) = previous_sha.as_deref() {
-            let app = app.clone();
-            tokio::task::spawn_blocking(move || super::proxy::list_artifacts(&app))
-                .await
-                .map_err(|error| format!("list rollback proxies task: {error}"))??
-                .into_iter()
-                .find(|candidate| candidate.sha256 == previous_sha)
-        } else {
-            None
-        };
-        install_one_managed_proxy(binary, extensions_dir, user_data_dir, artifact).await?;
-        let channel = super::agent_channel::global();
-        if let Err(error) = activate_managed_proxy(&channel, &roots, artifact).await {
-            if let Some(previous) = previous {
-                install_one_managed_proxy(binary, extensions_dir, user_data_dir, &previous)
-                    .await
-                    .map_err(|rollback| {
-                        format!(
-                            "proxy {} handshake failed ({error}); rollback failed: {rollback}",
-                            artifact.plugin_id
-                        )
-                    })?;
-                restart_and_verify_proxies(&channel, &roots, &previous)
-                    .await
-                    .map_err(|rollback| {
-                        format!(
-                            "proxy {} handshake failed ({error}); old proxy reinstall succeeded but verification failed: {rollback}",
-                            artifact.plugin_id
-                        )
-                    })?;
-            } else {
-                uninstall_managed_proxy(
-                    binary,
-                    extensions_dir,
-                    user_data_dir,
-                    &artifact.plugin_id,
-                )
-                .await
-                .map_err(|rollback| {
-                    format!(
-                        "proxy {} handshake failed ({error}); uninstall rollback failed: {rollback}",
-                        artifact.plugin_id
-                    )
-                })?;
-                restart_managed_extension_hosts(&channel, &roots)
-                    .await
-                    .map_err(|rollback| {
-                        format!(
-                            "proxy {} handshake failed ({error}); uninstall succeeded but extension-host cleanup failed: {rollback}",
-                            artifact.plugin_id
-                        )
-                    })?;
-            }
-            return Err(format!(
-                "proxy {} activation handshake failed and was rolled back: {error}",
-                artifact.plugin_id
-            ));
         }
-        // Committed now: a Dev Mode build of it no longer needs undoing.
+        self.install_proxy_targets(app, &targets, artifact, ProxyInstall::Commit)
+            .await?;
         self.lock_temporary_proxies().remove(&artifact.plugin_id);
         Ok(true)
     }
 
-    /// The managed instances a proxy goes into, and their shared install dirs.
+    /// Group by installation directories, never by the first live workspace.
     #[cfg(feature = "tauri-host")]
-    async fn managed_proxy_targets(&self) -> Option<(Vec<String>, String, PathBuf, PathBuf)> {
+    async fn managed_proxy_targets(&self) -> Vec<ProxyTarget> {
         let mut map = self.instances.lock().await;
-        let targets = map
-            .iter_mut()
-            .filter_map(|(root, instance)| {
-                // `is_reusable` polls the child (`try_wait`), hence `iter_mut`.
-                (instance.profile == IdeProfile::Managed && instance.is_reusable()).then(|| {
-                    (
-                        root.clone(),
-                        instance.binary_path.clone(),
-                        instance.extensions_dir.clone(),
-                        instance.user_data_dir.clone(),
-                    )
-                })
+        group_proxy_targets(map.iter_mut().filter_map(|(root, instance)| {
+            (instance.profile.allows_broker() && instance.is_reusable()).then(|| {
+                (
+                    root.clone(),
+                    instance.binary_path.clone(),
+                    instance.extensions_dir.clone(),
+                    instance.user_data_dir.clone(),
+                )
             })
-            .collect::<Vec<_>>();
-        let (_, binary, extensions_dir, user_data_dir) = targets.first()?.clone();
-        let roots = targets.into_iter().map(|(root, ..)| root).collect();
-        Some((roots, binary, extensions_dir, user_data_dir))
+        }))
     }
 
-    /// Managed IDE Dev Mode: install `artifact` into every running managed
-    /// instance and activate it live, without making it the committed proxy.
-    /// No activation marker is written, so a restart or a new instance still
-    /// gets the committed one, and [`Self::restore_committed_proxies`] puts it
-    /// back when Dev Mode ends. A failed handshake restores at once.
+    /// Stage across profiles before advancing the shared committed selection.
+    #[cfg(feature = "tauri-host")]
+    async fn install_proxy_targets(
+        &self,
+        app: &tauri::AppHandle,
+        targets: &[ProxyTarget],
+        artifact: &super::proxy::ProxyArtifact,
+        mode: ProxyInstall,
+    ) -> Result<(), String> {
+        let cache_root = download::code_server_root(app).map_err(|error| error.to_string())?;
+        let committed_marker =
+            super::proxy::committed_proxy_marker(&cache_root, &artifact.plugin_id);
+        let previous_commit = super::proxy::read_activation_marker(&committed_marker).await?;
+        let mut previous = Vec::new();
+        for target in targets {
+            previous.push(
+                super::proxy::read_activation_marker(&managed_proxy_marker(
+                    &target.extensions_dir,
+                    &artifact.plugin_id,
+                ))
+                .await?,
+            );
+        }
+        let channel = super::agent_channel::global();
+        let result = run_proxy_transaction(
+            targets.len(),
+            |index| {
+                let target = &targets[index];
+                let channel = &channel;
+                async move {
+                    install_managed_proxy_package(
+                        &target.binary,
+                        &target.extensions_dir,
+                        &target.user_data_dir,
+                        artifact,
+                        ProxyInstall::Temporary,
+                    )
+                    .await?;
+                    activate_managed_proxy(channel, &target.roots, artifact).await
+                }
+            },
+            || async {
+                if mode == ProxyInstall::Commit {
+                    for target in targets {
+                        super::proxy::write_activation_marker(
+                            &managed_proxy_marker(&target.extensions_dir, &artifact.plugin_id),
+                            Some(&artifact.sha256),
+                        )
+                        .await?;
+                    }
+                    super::proxy::write_activation_marker(
+                        &committed_marker,
+                        Some(&artifact.sha256),
+                    )
+                    .await?;
+                }
+                Ok(())
+            },
+            |index| {
+                let target = &targets[index];
+                let previous = &previous[index];
+                let committed_marker = &committed_marker;
+                let previous_commit = &previous_commit;
+                async move {
+                    super::proxy::write_activation_marker(
+                        committed_marker,
+                        previous_commit.as_deref(),
+                    )
+                    .await?;
+                    restore_proxy_marker(
+                        &target.extensions_dir,
+                        &artifact.plugin_id,
+                        previous.as_deref(),
+                    )
+                    .await?;
+                    self.restore_one_committed_proxy(
+                        app,
+                        &target.roots,
+                        &target.binary,
+                        &target.extensions_dir,
+                        &target.user_data_dir,
+                        &artifact.plugin_id,
+                    )
+                    .await
+                }
+            },
+        )
+        .await;
+        if let Err(failure) = result {
+            self.record_failed_proxy_transaction(&artifact.plugin_id, &artifact.sha256, &failure);
+            return Err(failure.message(&artifact.plugin_id));
+        }
+        Ok(())
+    }
+
+    /// Install a Dev Mode build in both profiles without changing committed markers.
     #[cfg(feature = "tauri-host")]
     pub async fn install_temporary_proxy_artifact(
         &self,
@@ -693,50 +809,18 @@ impl CodeServerState {
     ) -> Result<bool, String> {
         super::proxy::verify_artifact(app, artifact)?;
         let _guard = self.operation_lock.lock().await;
-        let Some((roots, binary, extensions_dir, user_data_dir)) =
-            self.managed_proxy_targets().await
-        else {
+        let targets = self.managed_proxy_targets().await;
+        if targets.is_empty() {
             return Ok(false);
-        };
-        install_managed_proxy_package(
-            &binary,
-            &extensions_dir,
-            &user_data_dir,
-            artifact,
-            ProxyInstall::Temporary,
-        )
-        .await?;
+        }
+        self.install_proxy_targets(app, &targets, artifact, ProxyInstall::Temporary)
+            .await?;
         self.lock_temporary_proxies()
             .insert(artifact.plugin_id.clone(), artifact.sha256.clone());
-        let channel = super::agent_channel::global();
-        if let Err(error) = activate_managed_proxy(&channel, &roots, artifact).await {
-            let restored = self
-                .restore_one_committed_proxy(
-                    app,
-                    &roots,
-                    &binary,
-                    &extensions_dir,
-                    &user_data_dir,
-                    &artifact.plugin_id,
-                )
-                .await;
-            return Err(match restored {
-                Ok(()) => format!(
-                    "temporary proxy {} handshake failed and the committed proxy was restored: {error}",
-                    artifact.plugin_id
-                ),
-                Err(restore) => format!(
-                    "temporary proxy {} handshake failed ({error}); restoring the committed proxy failed: {restore}",
-                    artifact.plugin_id
-                ),
-            });
-        }
         Ok(true)
     }
 
-    /// Put the committed proxy back for every plugin running a Dev Mode build,
-    /// or remove the proxy of a plugin that never had one committed. Returns
-    /// the plugins it restored. Called when Dev Mode is switched off.
+    /// Restore every profile before clearing a plugin's pending Dev Mode build.
     #[cfg(feature = "tauri-host")]
     pub async fn restore_committed_proxies(
         &self,
@@ -747,27 +831,35 @@ impl CodeServerState {
         if pending.is_empty() {
             return Ok(pending);
         }
-        let Some((roots, binary, extensions_dir, user_data_dir)) =
-            self.managed_proxy_targets().await
-        else {
-            // Nothing running: the next instance installs committed proxies only.
+        let targets = self.managed_proxy_targets().await;
+        if targets.is_empty() {
             self.lock_temporary_proxies().clear();
             return Ok(pending);
-        };
+        }
         let mut failures = Vec::new();
         for plugin_id in &pending {
-            if let Err(error) = self
-                .restore_one_committed_proxy(
-                    app,
-                    &roots,
-                    &binary,
-                    &extensions_dir,
-                    &user_data_dir,
-                    plugin_id,
-                )
-                .await
-            {
-                failures.push(format!("{plugin_id}: {error}"));
+            let mut restored = true;
+            for target in &targets {
+                if let Err(error) = self
+                    .restore_one_committed_proxy(
+                        app,
+                        &target.roots,
+                        &target.binary,
+                        &target.extensions_dir,
+                        &target.user_data_dir,
+                        plugin_id,
+                    )
+                    .await
+                {
+                    restored = false;
+                    failures.push(format!(
+                        "{plugin_id} ({}): {error}",
+                        target.extensions_dir.display()
+                    ));
+                }
+            }
+            if restored {
+                self.lock_temporary_proxies().remove(plugin_id);
             }
         }
         if failures.is_empty() {
@@ -790,7 +882,6 @@ impl CodeServerState {
         user_data_dir: &Path,
         plugin_id: &str,
     ) -> Result<(), String> {
-        self.lock_temporary_proxies().remove(plugin_id);
         let marker = managed_proxy_marker(extensions_dir, plugin_id);
         let committed_sha = tokio::fs::read_to_string(&marker).await.ok();
         let committed = match committed_sha {
@@ -1144,7 +1235,7 @@ pub struct CodeServerStatus {
     pub port: Option<u16>,
     pub version: String,
     pub profile: Option<IdeProfile>,
-    /// Whether agent drive is available (managed profile only); see
+    /// Whether Cognia agent drive is available in this profile; see
     /// [`super::agent_channel::BrokerStatus`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broker: Option<super::agent_channel::BrokerStatus>,
@@ -1340,16 +1431,16 @@ pub async fn install_language_pack(
 
 /// Build the code-server argv. Pure so the flag set is unit-tested. Loopback
 /// bind + `--auth none` keep it reachable only from this machine; workspace
-/// telemetry is disabled. The managed profile runs with full workspace access:
-/// its bundled Cognia broker is part of the editor contract and must activate
-/// on startup. The native third-party-extension profile retains Workspace Trust.
+/// telemetry is disabled. Both profiles open the app-selected workspace with
+/// full editor access; profile isolation controls the broker separately from
+/// VS Code Workspace Trust.
 #[cfg(any(feature = "tauri-host", test))]
 fn code_server_args(
     root: &str,
     port: u16,
     user_data_dir: &Path,
     extensions_dir: &Path,
-    profile: IdeProfile,
+    _profile: IdeProfile,
 ) -> Vec<String> {
     let mut args = vec![
         "--bind-addr".to_string(),
@@ -1358,10 +1449,8 @@ fn code_server_args(
         "none".to_string(),
         "--disable-telemetry".to_string(),
         "--disable-update-check".to_string(),
+        "--disable-workspace-trust".to_string(),
     ];
-    if profile == IdeProfile::Managed {
-        args.push("--disable-workspace-trust".to_string());
-    }
     args.extend([
         "--session-socket".to_string(),
         session_socket_path(user_data_dir)
@@ -1669,6 +1758,13 @@ async fn install_managed_proxy_extensions(
     extensions_dir: &Path,
     user_data_dir: &Path,
 ) {
+    let cache_root = match download::code_server_root(app) {
+        Ok(root) => root,
+        Err(error) => {
+            log::warn!("code-server proxy selection root: {error}");
+            return;
+        }
+    };
     let app = app.clone();
     let artifacts =
         match tokio::task::spawn_blocking(move || super::proxy::list_artifacts(&app)).await {
@@ -1687,8 +1783,19 @@ async fn install_managed_proxy_extensions(
         // Transactional updates deliberately build the next proxy before the
         // package commit; only the hash recorded by a successful activation
         // handshake may be installed on process start.
-        let marker = managed_proxy_marker(extensions_dir, &artifact.plugin_id);
-        let marker_contents = tokio::fs::read_to_string(&marker).await.ok();
+        let marker_contents = match super::proxy::selected_proxy_hash(
+            &cache_root,
+            extensions_dir,
+            &artifact.plugin_id,
+        )
+        .await
+        {
+            Ok(selected) => selected,
+            Err(error) => {
+                log::warn!("code-server proxy selection: {error}");
+                continue;
+            }
+        };
         if !super::proxy::activation_marker_selects(marker_contents.as_deref(), &artifact) {
             continue;
         }
@@ -1744,8 +1851,14 @@ async fn install_managed_proxy_package(
     mode: ProxyInstall,
 ) -> Result<(), String> {
     let marker = managed_proxy_marker(extensions_dir, &artifact.plugin_id);
+    let installed_marker = installed_proxy_marker(extensions_dir, &artifact.plugin_id);
     if mode == ProxyInstall::Commit
         && tokio::fs::read_to_string(&marker).await.ok().as_deref()
+            == Some(artifact.sha256.as_str())
+        && tokio::fs::read_to_string(&installed_marker)
+            .await
+            .ok()
+            .as_deref()
             == Some(artifact.sha256.as_str())
     {
         return Ok(());
@@ -1774,6 +1887,7 @@ async fn install_managed_proxy_package(
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
+    super::proxy::write_activation_marker(&installed_marker, Some(&artifact.sha256)).await?;
     if mode != ProxyInstall::Commit {
         return Ok(());
     }
@@ -1782,8 +1896,7 @@ async fn install_managed_proxy_package(
         .map_err(|error| format!("proxy {} marker write failed: {error}", artifact.plugin_id))
 }
 
-#[cfg(any(feature = "tauri-host", test))]
-fn managed_proxy_marker(extensions_dir: &Path, plugin_id: &str) -> PathBuf {
+pub(super) fn managed_proxy_marker(extensions_dir: &Path, plugin_id: &str) -> PathBuf {
     extensions_dir.join(format!(
         ".cognia-proxy-{}",
         plugin_id
@@ -1795,6 +1908,23 @@ fn managed_proxy_marker(extensions_dir: &Path, plugin_id: &str) -> PathBuf {
             })
             .collect::<String>()
     ))
+}
+
+pub(super) fn installed_proxy_marker(extensions_dir: &Path, plugin_id: &str) -> PathBuf {
+    let name = managed_proxy_marker(extensions_dir, plugin_id);
+    name.with_extension("installed")
+}
+
+pub(super) async fn restore_proxy_marker(
+    extensions_dir: &Path,
+    plugin_id: &str,
+    previous: Option<&str>,
+) -> Result<(), String> {
+    super::proxy::write_activation_marker(
+        &managed_proxy_marker(extensions_dir, plugin_id),
+        previous,
+    )
+    .await
 }
 
 #[cfg(feature = "tauri-host")]
@@ -1829,6 +1959,8 @@ async fn uninstall_managed_proxy(
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
+    super::proxy::write_activation_marker(&installed_proxy_marker(extensions_dir, plugin_id), None)
+        .await?;
     let marker = managed_proxy_marker(extensions_dir, plugin_id);
     match tokio::fs::remove_file(marker).await {
         Ok(()) => Ok(()),
@@ -2073,6 +2205,168 @@ mod tests {
         .contains("port range exhausted"));
     }
 
+    #[tokio::test]
+    async fn failed_dev_mode_update_restores_even_unattempted_profiles() {
+        use std::cell::RefCell;
+        for failed_profile in [0, 1] {
+            let packages = &RefCell::new(vec!["temporary-a", "temporary-a"]);
+            let committed = &RefCell::new(false);
+            let state = CodeServerState::new();
+            state
+                .lock_temporary_proxies()
+                .insert("acme".into(), "temporary-a".into());
+            let failure = run_proxy_transaction(
+                2,
+                |index| async move {
+                    packages.borrow_mut()[index] = "temporary-b";
+                    if index == failed_profile {
+                        Err("activation failed".into())
+                    } else {
+                        Ok(())
+                    }
+                },
+                || async {
+                    *committed.borrow_mut() = true;
+                    Ok(())
+                },
+                |index| async move {
+                    packages.borrow_mut()[index] = "committed";
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap_err();
+            state.record_failed_proxy_transaction("acme", "temporary-b", &failure);
+            assert_eq!(*packages.borrow(), vec!["committed", "committed"]);
+            assert!(!*committed.borrow());
+            assert!(failure.rollback_errors.is_empty());
+            assert!(!state.lock_temporary_proxies().contains_key("acme"));
+        }
+    }
+
+    #[tokio::test]
+    async fn partial_marker_commit_failure_restores_all_packages_and_markers() {
+        use std::cell::RefCell;
+        let directory = tempfile::tempdir().unwrap();
+        let markers = &[
+            directory.path().join("managed"),
+            directory.path().join("native"),
+        ];
+        for marker in markers {
+            super::super::proxy::write_activation_marker(marker, Some("old"))
+                .await
+                .unwrap();
+        }
+        let packages = &RefCell::new(vec!["old", "old"]);
+        let failure = run_proxy_transaction(
+            2,
+            |index| async move {
+                packages.borrow_mut()[index] = "new";
+                Ok(())
+            },
+            || async {
+                super::super::proxy::write_activation_marker(&markers[0], Some("new")).await?;
+                Err("second marker write failed".into())
+            },
+            |index| async move {
+                packages.borrow_mut()[index] = "old";
+                super::super::proxy::write_activation_marker(&markers[index], Some("old")).await
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(failure.cause, "second marker write failed");
+        assert!(failure.rollback_errors.is_empty());
+        assert_eq!(*packages.borrow(), vec!["old", "old"]);
+        for marker in markers {
+            assert_eq!(std::fs::read_to_string(marker).unwrap(), "old");
+        }
+    }
+
+    #[tokio::test]
+    async fn rollback_failure_keeps_dev_mode_cleanup_pending_and_tries_other_profiles() {
+        use std::cell::RefCell;
+        let restored = &RefCell::new(Vec::new());
+        let failure = run_proxy_transaction(
+            2,
+            |_| async { Err("install failed".into()) },
+            || async { panic!("must not commit a failed install") },
+            |index| async move {
+                restored.borrow_mut().push(index);
+                if index == 0 {
+                    Err("rollback install failed".into())
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .await
+        .unwrap_err();
+        let state = CodeServerState::new();
+        state.record_failed_proxy_transaction("acme", "new", &failure);
+        assert_eq!(*restored.borrow(), vec![0, 1]);
+        assert_eq!(failure.rollback_errors.len(), 1);
+        assert_eq!(
+            state
+                .lock_temporary_proxies()
+                .get("acme")
+                .map(String::as_str),
+            Some("new")
+        );
+    }
+
+    #[test]
+    fn plugin_installs_group_roots_by_profile_directories() {
+        let managed = ProfilePaths::new(Path::new("/code-server"), IdeProfile::Managed);
+        let native = ProfilePaths::new(Path::new("/code-server"), IdeProfile::Native);
+        let groups = group_proxy_targets([
+            (
+                "/work/managed".into(),
+                "code-server".into(),
+                managed.extensions_dir.clone(),
+                managed.user_data_dir.clone(),
+            ),
+            (
+                "/work/native-a".into(),
+                "code-server".into(),
+                native.extensions_dir.clone(),
+                native.user_data_dir.clone(),
+            ),
+            (
+                "/work/native-b".into(),
+                "code-server".into(),
+                native.extensions_dir.clone(),
+                native.user_data_dir.clone(),
+            ),
+        ]);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].roots, vec!["/work/managed"]);
+        assert_eq!(groups[0].extensions_dir, managed.extensions_dir);
+        assert_eq!(groups[1].roots, vec!["/work/native-a", "/work/native-b"]);
+        assert_eq!(groups[1].extensions_dir, native.extensions_dir);
+    }
+
+    #[tokio::test]
+    async fn marker_rollback_restores_previous_selection_or_removes_a_first_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let managed = dir.path().join("managed");
+        let native = dir.path().join("native");
+        std::fs::create_dir_all(&managed).unwrap();
+        std::fs::create_dir_all(&native).unwrap();
+        std::fs::write(managed_proxy_marker(&managed, "acme"), "new").unwrap();
+        std::fs::write(managed_proxy_marker(&native, "acme"), "new").unwrap();
+        restore_proxy_marker(&managed, "acme", Some("old"))
+            .await
+            .unwrap();
+        restore_proxy_marker(&native, "acme", None).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(managed_proxy_marker(&managed, "acme")).unwrap(),
+            "old"
+        );
+        assert!(!managed_proxy_marker(&native, "acme").exists());
+        restore_proxy_marker(&native, "acme", None).await.unwrap();
+    }
+
     #[test]
     fn locale_is_read_out_of_argv_json() {
         assert_eq!(
@@ -2177,7 +2471,7 @@ mod tests {
     }
 
     #[test]
-    fn native_args_preserve_workspace_trust() {
+    fn native_args_grant_full_workspace_access() {
         let args = code_server_args(
             "/work/proj",
             43117,
@@ -2186,7 +2480,7 @@ mod tests {
             IdeProfile::Native,
         );
 
-        assert!(!args.iter().any(|a| a == "--disable-workspace-trust"));
+        assert!(args.iter().any(|a| a == "--disable-workspace-trust"));
     }
 
     #[test]

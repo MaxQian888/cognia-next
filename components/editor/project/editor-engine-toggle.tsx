@@ -120,16 +120,16 @@ export function EditorEngineToggle({
 
   // What the agent is waiting on inside VS Code. Shown here rather than over
   // the pane because the desktop workbench is a native webview that paints
-  // above any DOM laid over its region. Only the managed profile has a broker.
+  // above any DOM laid over its region. Both profiles have a Cognia broker.
   const brokerOperations = useCodeServerBrokerProgress(
-    value === "codeserver" && proIdeSupported && proIdeProfile === "managed",
+    value === "codeserver" && proIdeSupported,
     projectRoot
   )
   const [currentOperation] = brokerOperations
   // The workbench keeps running when its broker cannot; say so here, or the
   // Cognia features inside VS Code just silently do nothing.
   const brokerStatus = useCodeServerBrokerStatus(
-    value === "codeserver" && proIdeSupported && proIdeProfile === "managed",
+    value === "codeserver" && proIdeSupported,
     projectRoot
   )
   const brokerOffReason = brokerStatus && !brokerStatus.enabled ? brokerStatus.reason : undefined
@@ -288,8 +288,8 @@ export function EditorEngineToggle({
       ) : null}
 
       {/* The two profiles are separate processes with separate extension and
-          user-data directories, and only the managed one holds Cognia broker
-          credentials — so this is a trust-domain switch, not a preference.
+          user-data directories. Both include Cognia integration; native adds
+          the user's Open VSX extensions.
           Rendered next to the engine switch because it answers the same
           question ("which editor am I looking at"), and only while Pro IDE is
           the live engine: it means nothing to Monaco. */}

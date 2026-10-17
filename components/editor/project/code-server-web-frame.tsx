@@ -37,6 +37,8 @@ export const FRAME_LOAD_BUDGET_MS = 12_000
 
 export interface CodeServerWebFrameProps {
   status: CodeServerStatus | null
+  /** Selected project or worktree to open in the frame and fallback tab. */
+  root: string
   /** `null` when this shell is the host. */
   hostBaseUrl: string | null
   className?: string
@@ -55,13 +57,14 @@ export interface CodeServerWebFrameProps {
 
 export function CodeServerWebFrame({
   status,
+  root,
   hostBaseUrl,
   className,
   loadBudgetMs = FRAME_LOAD_BUDGET_MS,
   onEmbeddedChange,
 }: CodeServerWebFrameProps) {
   const t = useTranslations("projectEditor.proIde.webFrame")
-  const target: WebWorkbenchTarget = resolveWebWorkbenchTarget({ status, hostBaseUrl })
+  const target: WebWorkbenchTarget = resolveWebWorkbenchTarget({ status, root, hostBaseUrl })
   const embedUrl = target.kind === "embed" ? target.url : null
 
   /**

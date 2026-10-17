@@ -37,7 +37,7 @@ jest.mock("@/hooks/browser/use-element-rect", () => ({
   },
 }))
 jest.mock("@/hooks/browser/use-region-visibility", () => ({
-  useRegionVisibility: () => mockVisible,
+  useRegionVisibility: jest.fn(() => mockVisible),
 }))
 jest.mock("@/lib/codeserver/client", () => ({
   CODESERVER_EVENTS: {
@@ -55,6 +55,7 @@ jest.mock("@/lib/codeserver/pane-manager", () => ({
 }))
 
 import { codeServerClient } from "@/lib/codeserver/client"
+import { useRegionVisibility } from "@/hooks/browser/use-region-visibility"
 import {
   claimCodeServerPane,
   releaseCodeServerPane,
@@ -111,6 +112,10 @@ beforeEach(() => {
   mockVisible = true
   mockIsTauri = true
   mockRemoteHostActive = false
+  jest
+    .mocked(useRegionVisibility)
+    .mockReset()
+    .mockImplementation(() => mockVisible)
   listeners.clear()
   paneOwner = null
   client.supported.mockReset().mockResolvedValue(true)
@@ -152,7 +157,7 @@ it("ensures code-server and claims the shared pane at the loopback port", async 
   expect(claim).toHaveBeenCalledWith({
     ownerId: OWNER,
     root: ROOT,
-    url: "http://127.0.0.1:43117/",
+    url: "http://127.0.0.1:43117/?folder=%2Fwork%2Fproj",
     rect: RECT,
     onRevoked: expect.any(Function),
   })
@@ -176,7 +181,7 @@ it("re-claims with the new url when the selected project root changes", async ()
   expect(claim).toHaveBeenLastCalledWith({
     ownerId: OWNER,
     root: "/work/other",
-    url: "http://127.0.0.1:43118/",
+    url: "http://127.0.0.1:43118/?folder=%2Fwork%2Fother",
     rect: RECT,
     onRevoked: expect.any(Function),
   })
@@ -331,6 +336,42 @@ it("parks the webview whenever the pane is not ready", async () => {
   expect(setVisible).toHaveBeenCalledWith(OWNER, false)
 })
 
+it("parks and restores the native IDE when the real visibility hook sees a Next.js overlay", async () => {
+  jest
+    .mocked(useRegionVisibility)
+    .mockImplementation(
+      jest.requireActual("@/hooks/browser/use-region-visibility").useRegionVisibility
+    )
+  const region = document.createElement("div")
+  document.body.appendChild(region)
+  const portal = document.createElement("nextjs-portal")
+  const shadow = portal.attachShadow({ mode: "open" })
+  document.body.appendChild(portal)
+  const paneOptions = options()
+  const paneRef = { current: region }
+  const { result, unmount } = renderHook(() => useCodeServerPane(paneRef, paneOptions))
+  await flush()
+  deliverRect()
+  await flush()
+  expect(result.current.mounted).toBe(true)
+  setVisible.mockClear()
+
+  await act(async () => {
+    shadow.innerHTML = '<div data-nextjs-dialog-overlay data-rendered="true"></div>'
+  })
+  expect(setVisible).toHaveBeenLastCalledWith(OWNER, false)
+
+  await act(async () => {
+    shadow.replaceChildren()
+  })
+  expect(setVisible).toHaveBeenLastCalledWith(OWNER, true)
+  expect(claim).toHaveBeenCalledTimes(1)
+  expect(release).not.toHaveBeenCalled()
+  unmount()
+  region.remove()
+  portal.remove()
+})
+
 it("reports an unknown fraction when the download size is not advertised", async () => {
   const pending = deferred<{ running: boolean; port: number; version: string }>()
   client.ensure.mockReturnValue(pending.promise)
@@ -424,7 +465,7 @@ it("recovers onto the replacement instance when retried after a watchdog exit", 
   expect(claim).toHaveBeenLastCalledWith({
     ownerId: OWNER,
     root: ROOT,
-    url: "http://127.0.0.1:43201/",
+    url: "http://127.0.0.1:43201/?folder=%2Fwork%2Fproj",
     rect: RECT,
     onRevoked: expect.any(Function),
   })
@@ -504,6 +545,21 @@ describe("restart", () => {
 })
 
 describe("trust-domain profile", () => {
+  it.each(["managed", "native"] as const)(
+    "opens the selected worktree explicitly in %s mode",
+    async (profile) => {
+      const root = "/work/ai worktrees/fe9049fb2becd464d95808ef"
+      renderHook(() => useCodeServerPane(ref, options({ root, profile })))
+      await flush()
+      deliverRect()
+      await flush()
+
+      expect(client.ensure).toHaveBeenCalledWith(root, profile)
+      const url = new URL(claim.mock.lastCall?.[0].url)
+      expect(url.searchParams.get("folder")).toBe(root)
+    }
+  )
+
   it("serves the root from the requested profile", async () => {
     renderHook(() => useCodeServerPane(ref, options({ profile: "native" })))
     await flush()
@@ -532,7 +588,7 @@ describe("trust-domain profile", () => {
     expect(claim).toHaveBeenLastCalledWith({
       ownerId: OWNER,
       root: ROOT,
-      url: "http://127.0.0.1:43119/",
+      url: "http://127.0.0.1:43119/?folder=%2Fwork%2Fproj",
       rect: RECT,
       onRevoked: expect.any(Function),
     })

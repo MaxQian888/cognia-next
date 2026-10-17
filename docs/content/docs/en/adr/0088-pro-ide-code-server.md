@@ -200,10 +200,12 @@ are native processes on the same host.
 
 ## Known debt
 
-- **The native ecosystem is intentionally separate.** Open VSX extensions run
-  only in Native Extensions IDE. Managed proxies are generated from Cognia
-  plugins and never accept third-party entrypoints. Sharing extension state or
-  credentials across those trust domains remains explicitly unsupported.
+- **Both profiles include Cognia integration.** Managed IDE loads the curated
+  built-ins and signed Cognia plugin proxies. Native Extensions IDE adds Open
+  VSX extensions alongside its own Cognia broker and signed proxies. Settings,
+  extension directories, and broker sessions remain separate. Both open the
+  selected workspace with Workspace Trust disabled; live proxy updates install
+  and activate in every running profile and roll back together on failure.
 - **Pinned Code upgrades remain a release operation.** The managed platform
   now has signed, transactional plugin/proxy updates, but changing
   code-server/Code itself still requires archive digest refresh, catalog/schema

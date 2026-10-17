@@ -120,17 +120,17 @@ export function CodeServerPane({
   )
   // Republish the extension's pushed editor changes as the app's active-editor
   // signal, so "what the user is looking at" stays live without anyone polling.
-  useCodeServerEditorEvents(phase === "ready" && profile === "managed", root)
+  useCodeServerEditorEvents(phase === "ready", root)
   // Bridge the extension's context-menu actions (Add to Chat, Explain, Fix…)
   // into the app's chat composer so they appear as staged context chips.
-  useCodeServerChatBridge(phase === "ready" && profile === "managed", root)
+  useCodeServerChatBridge(phase === "ready", root)
   // Feeds the extension's status bar item and side-bar trees. Gated on `ready`
   // only: pushing before the workbench is up just fails, and the live queries
   // re-push as soon as it is. Ungated on host, because the snapshot rides the
   // same execution-targeted command as the rest of the agent drive.
-  useCodeServerWorkspaceSync(phase === "ready" && profile === "managed", root)
+  useCodeServerWorkspaceSync(phase === "ready", root)
   // …and the way back: a plan, run or issue clicked in that side bar opens here.
-  useCodeServerWorkspaceNavigation(phase === "ready" && profile === "managed", root)
+  useCodeServerWorkspaceNavigation(phase === "ready", root)
   // Broker problems used to be a log line. A replayed credential is a warning
   // the user can act on (something in this workbench read it); the others say
   // why agent drive is off while the workbench itself keeps running.
@@ -142,7 +142,7 @@ export function CodeServerPane({
     },
     [t]
   )
-  useCodeServerBrokerIssues(profile === "managed", root, handleBrokerIssue)
+  useCodeServerBrokerIssues(true, root, handleBrokerIssue)
   // `ready` only means code-server answers; the native webview lands a beat
   // later. Holding the placeholder until it is actually mounted removes the
   // flash of bare background in between.

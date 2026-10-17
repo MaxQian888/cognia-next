@@ -174,9 +174,9 @@
     "openLocalVsCode": "用本机 VS Code 打开",
     "profileLabel": "扩展配置",
     "profileManaged": "托管",
-    "profileManagedTooltip": "仅加载锁定的内置扩展、Cognia broker 和已签名的生成代理。智能体驱动、聊天上下文和插件 IDE 能力都依赖此配置。",
+    "profileManagedTooltip": "加载锁定的内置扩展和 Cognia 插件，支持智能体驱动、聊天上下文和插件 IDE 能力。",
     "profileNative": "扩展",
-    "profileNativeTooltip": "加载你自己的 Open VSX 扩展，运行在独立进程中，拥有独立的设置和扩展目录。它不会拿到 Cognia broker 凭据，因此这里没有智能体驱动和插件 IDE 能力。",
+    "profileNativeTooltip": "同时支持 Cognia 插件和你自己的 Open VSX 扩展，包括智能体驱动和聊天上下文。设置与扩展目录独立于托管模式。",
     "profileSwitchRestarts": "切换配置会启动另一个 VS Code。已打开的编辑器和终端会留在原配置里。",
     "relayGrant": {
       "approve": "允许",

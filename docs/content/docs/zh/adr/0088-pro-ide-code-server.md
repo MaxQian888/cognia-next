@@ -109,7 +109,7 @@ code-server 运行在临时 loopback 端口上并带 `--auth none`。这一点�
 
 ## 已知债务
 
-- **Native 生态有意隔离。** Open VSX 扩展只在 Native Extensions IDE 运行；managed proxy 只由 Cognia 插件生成，且不接受第三方 entrypoint。跨越两个信任域共享扩展 state 或凭据仍明确不支持。
+- **两种模式都支持 Cognia 集成。** 托管模式加载内置扩展和已签名的 Cognia 插件代理；扩展模式在自己的 Cognia broker 和已签名代理之外，支持 Open VSX 扩展。两种模式保留独立的设置、扩展目录和 broker 会话，打开选定工作区时均关闭 VS Code Workspace Trust。插件在线更新会安装到所有运行中的配置，全部激活成功后再提交；失败时一起回滚。
 - **固定 Code 升级仍是 release operation。** Managed platform 已支持签名、事务化 plugin/proxy 更新，但升级 code-server/Code 本身仍需刷新 archive digest、对比 catalog/schema、重生成 fixture 并执行完整 E2E matrix。
 - **多用户机器的暴露面**，见决策 6。
 - **`components/ui/progress.tsx` 从未把 `value` 转发给 Radix root**，因此 App 里每一个 `<Progress>` 对辅助技术都自称"不确定进度"。这是既有的、全仓范围的问题。Pro IDE 的下载进度条现已带标签，会按名称播报，但不会播报百分比。

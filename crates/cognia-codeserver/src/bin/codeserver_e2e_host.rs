@@ -81,6 +81,10 @@ enum Command {
         #[serde(default)]
         params: Value,
     },
+    Ensure {
+        root: String,
+        profile: IdeProfile,
+    },
     BuildProxy {
         request: ProxyBuildRequest,
     },
@@ -238,6 +242,11 @@ async fn run(command: Command, state: &Arc<RemoteCodeServerState>) -> Result<Val
             method,
             params,
         } => channel.send(&root, &method, params).await,
+        Command::Ensure { root, profile } => {
+            state.ensure(&root, profile, DEVICE).await?;
+            let port = state.loopback_port(&root, DEVICE).await;
+            Ok(json!({ "port": port }))
+        }
         Command::BuildProxy { request } => state
             .build_proxy(request)
             .and_then(|artifact| serde_json::to_value(artifact).map_err(|e| e.to_string())),
@@ -309,6 +318,17 @@ fn argument(args: &[String], name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("missing {name} <value>"))
 }
 
+fn profile_argument(args: &[String]) -> Result<IdeProfile, String> {
+    if !args.iter().any(|arg| arg == "--profile") {
+        return Ok(IdeProfile::Managed);
+    }
+    match argument(args, "--profile")?.as_str() {
+        "managed" => Ok(IdeProfile::Managed),
+        "native" => Ok(IdeProfile::Native),
+        other => Err(format!("unknown IDE profile: {other}")),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
@@ -319,6 +339,7 @@ async fn main() -> Result<(), String> {
     }
     let data_dir = PathBuf::from(argument(&args, "--data-dir")?);
     let root = argument(&args, "--root")?;
+    let profile = profile_argument(&args)?;
 
     let bus = EventBus::new();
     agent_channel::global().attach_event_bus(Arc::clone(&bus));
@@ -357,7 +378,7 @@ async fn main() -> Result<(), String> {
     });
 
     let started = Instant::now();
-    let status = state.ensure(&root, IdeProfile::Managed, DEVICE).await?;
+    let status = state.ensure(&root, profile, DEVICE).await?;
     let ensure_ms = started.elapsed().as_millis() as u64;
     let canonical = std::fs::canonicalize(&root)
         .map_err(|error| error.to_string())?
@@ -409,6 +430,30 @@ async fn main() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_both_profiles_and_rejects_unknown_ones() {
+        assert_eq!(profile_argument(&[]).unwrap(), IdeProfile::Managed);
+        assert_eq!(
+            profile_argument(&["--profile".into(), "native".into()]).unwrap(),
+            IdeProfile::Native
+        );
+        assert_eq!(
+            profile_argument(&["--profile".into(), "managed".into()]).unwrap(),
+            IdeProfile::Managed
+        );
+        assert!(profile_argument(&["--profile".into(), "unknown".into()]).is_err());
+        assert!(profile_argument(&["--profile".into()]).is_err());
+        assert!(matches!(
+            serde_json::from_value::<Command>(
+                json!({ "op": "ensure", "root": "/w", "profile": "native" })
+            ),
+            Ok(Command::Ensure {
+                profile: IdeProfile::Native,
+                ..
+            })
+        ));
+    }
 
     #[test]
     fn commands_parse_from_the_driver_s_wire_shape() {
