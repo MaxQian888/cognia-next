@@ -121,13 +121,13 @@ export interface PetTwinAwarenessSettings {
 
 export interface PetSettings {
   /**
-   * Master switch — when false the widget never mounts. Summoning the desktop
+   * Master switch — when false the pet runtime never mounts. Summoning the desktop
    * overlay (hotkey, tray, ⌘K, the overlay switch, the agent's `pet_show`)
    * turns it back on; hiding the overlay never turns it off (ADR-0058 D9).
    * Desktop app only: web and mobile never host the pet, whatever this says.
    */
   enabled: boolean
-  /** Dock corner for the floating widget. */
+  /** Legacy in-app widget position, retained for persisted settings compatibility. */
   anchor: PetAnchor
   /** Override `prefers-reduced-motion`. */
   motion: PetMotionPreference
@@ -198,7 +198,7 @@ export const DEFAULT_PET_WANDER: PetWanderSettings = {
 }
 
 export const DEFAULT_PET_DESKTOP_OVERLAY: PetDesktopOverlaySettings = {
-  enabled: false,
+  enabled: true,
   clickThrough: false,
   size: 128,
   position: null,

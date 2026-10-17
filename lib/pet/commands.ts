@@ -70,10 +70,10 @@ export async function toggleDesktopPetWindow(): Promise<boolean> {
  * click, and on a never-hatched install it rendered nothing at all, an
  * invisible always-on-top window. The writes are ordered on purpose:
  *
- * 1. Switch the pet on BEFORE the window exists, leaving `desktopPet.enabled`
- *    alone. Writing both first would let `PetMount`'s cold-start reconcile
- *    (it opens the overlay when both are set and no window exists) race this
- *    function into a second open.
+ * 1. Probe the native window, then switch the pet on. Hold the window intent
+ *    false while creating a new window so the default-on overlay reconcile
+ *    cannot compete with this summon. Keep an existing window's intent true
+ *    so enabling its controller never hides it.
  * 2. Open the window.
  * 3. Persist both flags against the persisted record. `saveSettings`
  *    replaces `petSettings` whole, and the native `pet://state-changed` echo
@@ -86,12 +86,24 @@ export async function openDesktopPetWindow(): Promise<boolean> {
   if (!isTauri()) return false
   const initial = useSettingsStore.getState().settings?.petSettings ?? DEFAULT_PET_SETTINGS
   const desktop = initial.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
+  const alreadyOpen = await isPetWindowOpen()
 
   if (!initial.enabled) {
-    await updatePetSettings((latest) => (latest.enabled ? latest : { ...latest, enabled: true }))
+    await updatePetSettings((latest) =>
+      latest.enabled
+        ? latest
+        : {
+            ...latest,
+            enabled: true,
+            desktopPet: {
+              ...(latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY),
+              enabled: alreadyOpen,
+            },
+          }
+    )
   }
 
-  if (!(await isPetWindowOpen())) {
+  if (!alreadyOpen) {
     const opened = await openPetWindow({
       ...overlayWindowSize(desktop.size),
       x: desktop.position?.x,

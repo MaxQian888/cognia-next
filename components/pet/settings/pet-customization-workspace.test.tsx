@@ -27,6 +27,10 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 const destroyPetWindow = jest.fn().mockResolvedValue(true)
+const openDesktopPetWindow = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/pet/commands", () => ({
+  openDesktopPetWindow: () => openDesktopPetWindow(),
+}))
 jest.mock("@/lib/tauri/pet-window", () => ({
   destroyPetWindow: () => destroyPetWindow(),
 }))
@@ -195,7 +199,25 @@ describe("PetCustomizationWorkspace", () => {
 })
 
 describe("the master switch", () => {
+  it("summons the independent pet when enabled, including after it was hidden", () => {
+    settingsValue = {
+      petSettings: {
+        ...DEFAULT_PET_SETTINGS,
+        enabled: false,
+        desktopPet: { enabled: false, clickThrough: false, size: 128 },
+      },
+    }
+    openDesktopPetWindow.mockClear()
+    save.mockClear()
+    render(<PetCustomizationWorkspace />)
+    fireEvent.click(screen.getByRole("switch", { name: /enable pet/i }))
+    expect(openDesktopPetWindow).toHaveBeenCalledTimes(1)
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it("destroys the desktop window and clears its intent when the pet is turned off", async () => {
+    settingsValue = { petSettings: { ...DEFAULT_PET_SETTINGS, enabled: true } }
+    destroyPetWindow.mockClear()
     // It used to write `enabled: false` and nothing else, which unmounted the
     // controller and the bridge but left the always-on-top sprite sitting on
     // the desktop, frozen, with no visible way to be rid of it.

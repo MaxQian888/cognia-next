@@ -11,15 +11,13 @@ import {
   FieldLabel,
   FieldTitle,
 } from "@/components/ui/field"
-import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { PetModelManager } from "@/components/settings/pet/pet-model-manager"
 import { PetSpritePackManager } from "@/components/settings/pet/pet-sprite-pack-manager"
 import { useCubismCoreAvailable } from "@/hooks/pet/use-active-live2d-model"
-import type { PetAnchor, PetMotionPreference, PetSettings, PetSkinId } from "@/types/pet"
+import type { PetMotionPreference, PetSettings, PetSkinId } from "@/types/pet"
 
-const ANCHORS: PetAnchor[] = ["bottom-right", "bottom-left", "top-right", "top-left"]
 const MOTIONS: PetMotionPreference[] = ["auto", "full", "reduced"]
 const SKINS: PetSkinId[] = ["svg", "live2d", "sprite-v2"]
 
@@ -43,26 +41,6 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
 
   return (
     <FieldGroup>
-      <Field orientation="responsive">
-        <FieldTitle id="pet-anchor-label">{t("anchor.label")}</FieldTitle>
-        <ToggleGroup
-          id="pet-anchor"
-          type="single"
-          value={pet.anchor}
-          variant="outline"
-          size="sm"
-          className="flex-wrap justify-start"
-          aria-labelledby="pet-anchor-label"
-          onValueChange={(anchor) => anchor && patch({ anchor: anchor as PetAnchor })}
-        >
-          {ANCHORS.map((anchor) => (
-            <ToggleGroupItem key={anchor} value={anchor}>
-              {t(`anchor.options.${anchor}`)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </Field>
-
       <Field orientation="responsive">
         <FieldTitle id="pet-motion-label">{t("motion.label")}</FieldTitle>
         <ToggleGroup
@@ -132,21 +110,6 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
         <PetModelManager settings={pet} onPatch={patch} coreReady={coreReady} />
       ) : null}
       {skinId === "sprite-v2" ? <PetSpritePackManager settings={pet} onPatch={patch} /> : null}
-
-      <Field>
-        <FieldLabel htmlFor="pet-size">{t("size.label", { size: pet.size })}</FieldLabel>
-        {/* Two size sliders exist (this one and the desktop pet's); each says
-            which pet it sizes so neither reads as the broken twin. */}
-        <FieldDescription>{t("size.description")}</FieldDescription>
-        <Slider
-          id="pet-size"
-          min={64}
-          max={144}
-          step={8}
-          value={[pet.size]}
-          onValueChange={([size]) => patch({ size })}
-        />
-      </Field>
     </FieldGroup>
   )
 }

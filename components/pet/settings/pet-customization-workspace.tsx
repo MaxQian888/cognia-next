@@ -47,6 +47,7 @@ import { toPetAssetDiagnostics } from "@/lib/pet/live2d/compatibility-diagnostic
 import { getPetSkinRuntime } from "@/lib/pet/skin-runtime"
 import { useSettingsStore } from "@/stores/settings"
 import { destroyPetWindow } from "@/lib/tauri/pet-window"
+import { openDesktopPetWindow } from "@/lib/pet/commands"
 import {
   DEFAULT_PET_DESKTOP_OVERLAY,
   DEFAULT_PET_SETTINGS,
@@ -91,11 +92,11 @@ export function PetCustomizationWorkspace() {
    * from here unmounted the controller and the cross-window bridge but left
    * the always-on-top sprite sitting on the desktop, frozen and unresponsive,
    * with no visible way to get rid of it. The nested desktop intent is cleared
-   * too, so re-enabling later does not silently re-summon it.
+   * too. Explicitly enabling the pet summons its independent window again.
    */
   const setPetEnabled = (enabled: boolean) => {
     if (enabled) {
-      patch({ enabled })
+      void openDesktopPetWindow()
       return
     }
     void destroyPetWindow()

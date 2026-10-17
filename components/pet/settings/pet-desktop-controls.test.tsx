@@ -71,7 +71,12 @@ describe("PetDesktopControls", () => {
 
   it("enabling summons through the single summon path, not a second opener", () => {
     const patch = jest.fn()
-    render(<PetDesktopControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)
+    render(
+      <PetDesktopControls
+        pet={withDesktop({ enabled: false, clickThrough: false, size: 128, position: null })}
+        patch={patch}
+      />
+    )
     fireEvent.click(document.getElementById("pet-desktop-enabled") as HTMLButtonElement)
     expect(openDesktopPetWindow).toHaveBeenCalledTimes(1)
     // A second persist here would race the summon's own ordered writes.
@@ -87,7 +92,7 @@ describe("PetDesktopControls", () => {
         patch={jest.fn()}
       />
     )
-    expect(screen.getByText(/floating desktop pet/i)).toBeInTheDocument()
+    expect(screen.getByText(/independent desktop window/i)).toBeInTheDocument()
   })
 
   it("disabling destroys the overlay window and records the intent", () => {

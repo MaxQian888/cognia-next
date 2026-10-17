@@ -181,6 +181,21 @@ An audit of the overlay and popup found several defects in how the windows were 
 
 `plugins/pet-daily-quests` adopts all of it: it checks availability before claiming and pays out through `pluginReward`. The author guide is `plugin-dev/pet`.
 
+### D14 — Independent desktop window is the only pet surface (2026-10-17)
+
+The in-app widget made the pet disappear with the main window and duplicated
+position and size controls. The desktop pet now renders only in the existing
+transparent, always-on-top `pet` window. `PetMount` keeps the controller, voice,
+appearance and cross-window bridge running in the main window without mounting
+`PetWidget`.
+
+The independent window is enabled by default. Explicitly enabling the pet uses
+`openDesktopPetWindow`, the same summon path as the tray, shortcuts and desktop
+switch. A persisted hidden desktop window stays hidden; hiding it or failing to
+open it never creates an in-app fallback. Legacy anchor and widget-size fields
+remain readable for settings compatibility but have no controls in the product.
+The existing desktop size control remains the single sizing control.
+
 ## Consequences
 
 - The pet subsystem's real architecture is now discoverable without spelunking through two stale specs and the source tree.

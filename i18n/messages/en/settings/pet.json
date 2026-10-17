@@ -1,13 +1,4 @@
 {
-  "anchor": {
-    "label": "Position",
-    "options": {
-      "bottom-left": "Bottom left",
-      "bottom-right": "Bottom right",
-      "top-left": "Top left",
-      "top-right": "Top right"
-    }
-  },
   "careAlerts": {
     "description": "Send a gentle notification when your pet becomes unwell from neglect.",
     "label": "Care alerts"
@@ -34,7 +25,7 @@
     "hotkeyLink": "Configure a global hotkey to show/hide the desktop pet",
     "size": {
       "label": "Desktop pet size ({size}px)",
-      "description": "Size of the floating desktop pet. The in-app pet has its own size under Appearance."
+      "description": "Size of the pet in its independent desktop window."
     },
     "title": "Desktop pet",
     "wander": {
@@ -71,7 +62,7 @@
     }
   },
   "enabled": {
-    "description": "Show the floating pet widget.",
+    "description": "Enable the pet and open its independent desktop window.",
     "label": "Enable pet"
   },
   "gaze": {
@@ -282,10 +273,6 @@
     "profileScope": "This resets pet progress and history, not the settings on this page.",
     "done": "Pet profile reset. A fresh egg is waiting.",
     "failed": "Couldn't reset the pet profile. Try again."
-  },
-  "size": {
-    "label": "Size ({size}px)",
-    "description": "Size of the in-app pet in the corner of this window. The floating desktop pet is sized separately."
   },
   "skin": {
     "label": "Skin",

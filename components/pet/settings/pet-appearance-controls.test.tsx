@@ -19,22 +19,20 @@ beforeEach(() => {
 })
 
 describe("PetAppearanceControls", () => {
-  it("patches anchor, motion, skin, and size", () => {
+  it("patches motion and skin", () => {
     const patch = jest.fn()
     render(<PetAppearanceControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)
-    fireEvent.click(screen.getByRole("radio", { name: /top left/i }))
-    expect(patch).toHaveBeenCalledWith({ anchor: "top-left" })
     fireEvent.click(screen.getByRole("radio", { name: /reduced/i }))
     expect(patch).toHaveBeenCalledWith({ motion: "reduced" })
     fireEvent.click(screen.getByRole("radio", { name: /live2d model/i }))
     expect(patch).toHaveBeenCalledWith({ skinId: "live2d" })
-    fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" })
-    expect(patch).toHaveBeenCalledWith({ size: expect.any(Number) })
   })
 
-  it("says which pet the size slider sizes", () => {
+  it("does not offer positioning or sizing for a pet inside the app window", () => {
     render(<PetAppearanceControls pet={DEFAULT_PET_SETTINGS} patch={jest.fn()} />)
-    expect(screen.getByText(/in-app pet/i)).toBeInTheDocument()
+    expect(screen.queryByRole("radio", { name: /top left/i })).toBeNull()
+    expect(screen.queryByRole("slider")).toBeNull()
+    expect(screen.queryByText(/in-app pet/i)).toBeNull()
   })
 
   it("enables gaze following by default and lets the user disable it", () => {

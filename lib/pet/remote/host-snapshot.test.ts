@@ -98,7 +98,7 @@ describe("projectPetPresentation", () => {
     expect(projectPetPresentation(withSpeak, false).chatEnabled).toBe(false)
     expect(projectPetPresentation(enabled, true)).toMatchObject({
       requestedSkinId: "svg",
-      desktopVisible: false,
+      desktopVisible: true,
       llmSpeakEnabled: false,
       chatEnabled: false,
     })

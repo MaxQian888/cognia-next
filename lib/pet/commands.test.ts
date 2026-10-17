@@ -145,7 +145,7 @@ describe("openDesktopPetWindow (summon ⇒ enable, ADR-0058 D9)", () => {
     })
   })
 
-  it("switches a disabled pet on BEFORE opening, without touching desktopPet yet", async () => {
+  it("switches a disabled pet on BEFORE opening, holding its window intent closed", async () => {
     isPetWindowOpen.mockResolvedValue(false)
     settingsValue = {
       petSettings: { enabled: false, desktopPet: { enabled: false, clickThrough: false } },
@@ -168,6 +168,24 @@ describe("openDesktopPetWindow (summon ⇒ enable, ADR-0058 D9)", () => {
     expect(openPetWindow.mock.invocationCallOrder[0]).toBeLessThan(save.mock.invocationCallOrder[1])
   })
 
+  it.each([true, false])(
+    "does not let default visibility race a summon when window opening returns %s",
+    async (opened) => {
+      settingsValue = { petSettings: { enabled: false } }
+      isPetWindowOpen.mockResolvedValue(false)
+      openPetWindow.mockImplementation(async () => {
+        expect(settingsValue).toMatchObject({
+          petSettings: { enabled: true, desktopPet: { enabled: false } },
+        })
+        return opened
+      })
+      expect(await openDesktopPetWindow()).toBe(opened)
+      expect(settingsValue).toMatchObject({
+        petSettings: { enabled: true, desktopPet: { enabled: opened } },
+      })
+    }
+  )
+
   it("saves once when the pet is already on", async () => {
     isPetWindowOpen.mockResolvedValue(false)
     await openDesktopPetWindow()
@@ -183,6 +201,9 @@ describe("openDesktopPetWindow (summon ⇒ enable, ADR-0058 D9)", () => {
     settingsValue = { petSettings: { enabled: false } }
     expect(await openDesktopPetWindow()).toBe(true)
     expect(openPetWindow).not.toHaveBeenCalled()
+    // Enabling the controller must not transiently hide an existing window:
+    // PetMount follows the persisted visibility intent.
+    expect(save.mock.calls[0][0].petSettings.desktopPet.enabled).toBe(true)
     expect((settingsValue as { petSettings: { enabled: boolean } }).petSettings.enabled).toBe(true)
   })
 

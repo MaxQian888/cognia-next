@@ -165,7 +165,7 @@ describe("PetMount", () => {
     expect(usePetEventBus).toHaveBeenCalledWith(false, undefined)
   })
 
-  it("renders the widget and initializes when enabled", () => {
+  it("initializes the pet without rendering a widget in the main window", () => {
     settingsValue = {
       petSettings: {
         enabled: true,
@@ -175,12 +175,14 @@ describe("PetMount", () => {
         size: 96,
       },
     }
-    const { getByTestId } = render(<PetMount />)
-    expect(getByTestId("pet-widget")).toBeInTheDocument()
+    const { container } = render(<PetMount />)
+    expect(container).toBeEmptyDOMElement()
+    expect(petWidgetProps).not.toHaveBeenCalled()
+    expect(petMainRuntimeProps).toHaveBeenCalled()
     expect(usePetEventBus).toHaveBeenCalledWith(true, undefined)
   })
 
-  it("threads the active character id into the widget", () => {
+  it("threads the active character id into the headless main-window runtime", () => {
     settingsValue = {
       petSettings: {
         enabled: true,
@@ -192,7 +194,7 @@ describe("PetMount", () => {
     }
     useActiveCharacterId.mockReturnValue("char-7")
     render(<PetMount />)
-    expect(petWidgetProps).toHaveBeenCalledWith(
+    expect(petMainRuntimeProps).toHaveBeenCalledWith(
       expect.objectContaining({ activeCharacterId: "char-7" })
     )
   })
@@ -509,13 +511,14 @@ describe("PetMount — desktop surfaces and window lifecycle", () => {
     isTauri.mockReturnValue(true)
   })
 
-  it("mounts the main-window runtime alongside the widget", () => {
+  it("keeps the main-window runtime mounted without a widget", () => {
     settingsValue = ENABLED_SETTINGS
     useActiveCharacterId.mockReturnValue("char-3")
     render(<PetMount />)
     expect(petMainRuntimeProps).toHaveBeenCalledWith(
       expect.objectContaining({ activeCharacterId: "char-3" })
     )
+    expect(petWidgetProps).not.toHaveBeenCalled()
   })
 
   it("hides the in-app widget while the pet is out on the desktop, keeping the runtime", () => {
@@ -526,10 +529,30 @@ describe("PetMount — desktop surfaces and window lifecycle", () => {
     expect(petMainRuntimeProps).toHaveBeenCalled()
   })
 
-  it("shows the widget again once the desktop pet is put away", () => {
+  it("keeps a hidden desktop pet hidden without an in-app fallback", () => {
     settingsValue = desktopSettings({ enabled: false })
-    const { getByTestId } = render(<PetMount />)
-    expect(getByTestId("pet-widget")).toBeInTheDocument()
+    const { container } = render(<PetMount />)
+    expect(container).toBeEmptyDOMElement()
+    expect(petWidgetProps).not.toHaveBeenCalled()
+    expect(openPetWindow).not.toHaveBeenCalled()
+    expect(petMainRuntimeProps).toHaveBeenCalled()
+  })
+
+  it("opens the independent window by default when the pet is enabled", async () => {
+    settingsValue = ENABLED_SETTINGS
+    const { container } = render(<PetMount />)
+    await waitFor(() => expect(openPetWindow).toHaveBeenCalledTimes(1))
+    expect(container).toBeEmptyDOMElement()
+    expect(petWidgetProps).not.toHaveBeenCalled()
+  })
+
+  it("does not fall back to an in-app pet when the native window cannot open", async () => {
+    settingsValue = desktopSettings({ enabled: true })
+    openPetWindow.mockResolvedValueOnce(false)
+    const { container } = render(<PetMount />)
+    await waitFor(() => expect(openPetWindow).toHaveBeenCalled())
+    expect(container).toBeEmptyDOMElement()
+    expect(petWidgetProps).not.toHaveBeenCalled()
   })
 
   it("follows pet-settings writes from the other windows and stops on unmount", () => {
@@ -597,6 +620,23 @@ describe("PetMount — desktop surfaces and window lifecycle", () => {
     settingsValue = desktopSettings({ enabled: false }, { enabled: false })
     isPetWindowOpen.mockResolvedValue(true)
     const { rerender } = render(<PetMount />)
+    settingsValue = desktopSettings({ enabled: false })
+    rerender(<PetMount />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(closePetWindow).not.toHaveBeenCalled()
+    expect(destroyPetWindow).not.toHaveBeenCalled()
+  })
+
+  it("does not hide a summon while enabling a legacy pet without desktop preferences", async () => {
+    settingsValue = {
+      petSettings: { ...ENABLED_SETTINGS.petSettings, enabled: false },
+    }
+    const { rerender } = render(<PetMount />)
+    // Summon holds the new window's intent off until its native open finishes.
+    // A native probe can resolve after that open has claimed the window.
+    isPetWindowOpen.mockResolvedValue(true)
     settingsValue = desktopSettings({ enabled: false })
     rerender(<PetMount />)
     await act(async () => {

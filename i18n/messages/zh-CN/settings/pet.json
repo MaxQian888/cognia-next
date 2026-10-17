@@ -1,13 +1,4 @@
 {
-  "anchor": {
-    "label": "位置",
-    "options": {
-      "bottom-left": "左下",
-      "bottom-right": "右下",
-      "top-left": "左上",
-      "top-right": "右上"
-    }
-  },
   "careAlerts": {
     "description": "当宠物因疏于照顾而变得不适时，发送一条温和的通知。",
     "label": "照护提醒"
@@ -34,7 +25,7 @@
     "hotkeyLink": "配置显示/隐藏桌宠的全局快捷键",
     "size": {
       "label": "桌宠大小（{size}px）",
-      "description": "桌面上悬浮宠物的大小。应用内宠物的大小在“外观”中单独设置。"
+      "description": "独立桌面窗口中宠物的大小。"
     },
     "title": "桌面宠物",
     "wander": {
@@ -71,7 +62,7 @@
     }
   },
   "enabled": {
-    "description": "显示浮动宠物挂件。",
+    "description": "启用宠物并打开独立的桌面宠物窗口。",
     "label": "启用宠物"
   },
   "gaze": {
@@ -282,10 +273,6 @@
     "profileScope": "此操作只重置宠物进度与历史，不会重置本页配置。",
     "done": "宠物档案已重置，一枚新蛋正在等你。",
     "failed": "宠物档案重置失败，请重试。"
-  },
-  "size": {
-    "label": "大小（{size}px）",
-    "description": "应用内宠物在窗口角落里的大小。桌面悬浮宠物的大小单独设置。"
   },
   "skin": {
     "label": "皮肤",

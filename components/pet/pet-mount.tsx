@@ -1,9 +1,8 @@
 // App-wide mount point for the pet. Reads the pet settings, gates the whole
 // subsystem on `enabled`, wires the event bus, lazily ensures the profile
 // exists (resolving / persisting the deterministic account seed), owns the
-// desktop overlay's lifecycle from the main window, and decides which surface
-// shows the pet: the in-app widget, or — while the desktop overlay is out —
-// the overlay alone. Mounted once by the app runtime.
+// independent desktop window's lifecycle. The main window hosts the controller
+// without rendering a pet widget. Mounted once by the app runtime.
 
 "use client"
 
@@ -39,7 +38,6 @@ import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
 import { onPetConsoleRequest } from "@/lib/pet/console-request"
 import { startPetSettingsFollower, updatePetSettings } from "@/lib/pet/settings-sync"
 import { PetMainRuntime } from "./pet-main-runtime"
-import { PetWidget } from "./pet-widget"
 
 export function PetMount() {
   const t = useTranslations("pet")
@@ -50,7 +48,7 @@ export function PetMount() {
   const activeCharacterId = useActiveCharacterId()
 
   // Resolve the window role once: the shared root layout mounts PetMount in
-  // every webview, but the controller (event bus + XP awards) and the widget
+  // every webview, but the controller (event bus + XP awards)
   // must live only in the main window. The whole decision (window role, host,
   // and the user's setting) belongs to `resolvePetAvailability`, so the command
   // registry, the agent tools, and the access gate answer it exactly the way
@@ -58,11 +56,11 @@ export function PetMount() {
   const role = useMemo(() => getPetWindowRole(), [])
   const platform = usePlatform()
 
-  const widgetEnabled = isPetAvailable({ enabled, role, platform })
+  const petEnabled = isPetAvailable({ enabled, role, platform })
   // The main desktop window, where the global-hotkey to command dispatch
   // lives. Structurally allowed here and running under Tauri, but deliberately
   // independent of `enabled`: a chord the user bound to the toggle-window
-  // command must still summon the pet when the widget is currently off, so
+  // command must still summon the pet when it is currently off, so
   // this asks the predicate with the setting held on.
   const isMainDesktopWindow = isPetAvailable({ enabled: true, role, platform }) && isTauri()
   const desktopPet = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
@@ -75,18 +73,18 @@ export function PetMount() {
     return startPetSettingsFollower()
   }, [isMainDesktopWindow])
 
-  usePetEventBus(widgetEnabled, pet.twinAwareness)
+  usePetEventBus(petEnabled, pet.twinAwareness)
   // User-activity signal (Smart-Moving): feeds the proactive idle trigger and
   // pings the overlay's wander gate over the bridge (throttled).
-  useActivityTracker(widgetEnabled)
+  useActivityTracker(petEnabled)
   // Gentle care notification when the pet first becomes unwell (main window only).
-  usePetCareAlert(widgetEnabled)
+  usePetCareAlert(petEnabled)
   // Turns a refused interaction into a bubble so a cooldown is legible instead
   // of looking like a dead button or a dead hotkey.
-  usePetInteractionRefusal(widgetEnabled)
+  usePetInteractionRefusal(petEnabled)
 
   useEffect(() => {
-    if (!widgetEnabled) return
+    if (!petEnabled) return
     let cancelled = false
     void (async () => {
       const accountId = await ensurePetAccountId(settings, save)
@@ -96,7 +94,7 @@ export function PetMount() {
     return () => {
       cancelled = true
     }
-  }, [widgetEnabled, settings, save])
+  }, [petEnabled, settings, save])
 
   // Main window owns the cross-window bridge: it broadcasts the controller's
   // visual-state/bubble/one-shots and replays overlay interactions (including
@@ -110,17 +108,17 @@ export function PetMount() {
   // the main window (the agent's pet_show, a command) that cannot hold the
   // router themselves. The shared availability gate limits this to Tauri.
   useEffect(() => {
-    if (!widgetEnabled) return
+    if (!petEnabled) return
     return onPetConsoleRequest(({ tab }) => router.push(tab ? `/pet?tab=${tab}` : "/pet"))
-  }, [widgetEnabled, router])
+  }, [petEnabled, router])
 
   useEffect(() => {
-    if (!widgetEnabled || !isTauri()) return
+    if (!petEnabled || !isTauri()) return
     const dispose = startMainPetBridge({
       onOpenConsole: (tab) => router.push(`/pet?tab=${tab}`),
     })
     return dispose
-  }, [widgetEnabled, router])
+  }, [petEnabled, router])
 
   // Every pet command (the window toggle and feed/play/pet/…) backs a global
   // hotkey or a tray entry, so all of them are registered on the main desktop
@@ -166,7 +164,7 @@ export function PetMount() {
   // applying the change that triggered it — hence `position` is an input to
   // the FIRST open only and is deliberately not a dependency here.
   useEffect(() => {
-    if (!isMainDesktopWindow || !widgetEnabled || !desktopPet.enabled) return
+    if (!isMainDesktopWindow || !petEnabled || !desktopPet.enabled) return
     let cancelled = false
     void isPetWindowOpen().then((open) => {
       if (cancelled || open) return
@@ -189,7 +187,7 @@ export function PetMount() {
     desktopPet.enabled,
     desktopPet.size,
     isMainDesktopWindow,
-    widgetEnabled,
+    petEnabled,
   ])
 
   // Size reaches an open overlay live through a native resize that keeps the
@@ -197,7 +195,7 @@ export function PetMount() {
   // render only records the size the window was opened (or will open) with.
   const appliedSizeRef = useRef(desktopPet.size)
   useEffect(() => {
-    if (!isMainDesktopWindow || !widgetEnabled || !desktopPet.enabled) return
+    if (!isMainDesktopWindow || !petEnabled || !desktopPet.enabled) return
     if (appliedSizeRef.current === desktopPet.size) return
     appliedSizeRef.current = desktopPet.size
     let cancelled = false
@@ -209,7 +207,7 @@ export function PetMount() {
     return () => {
       cancelled = true
     }
-  }, [desktopPet.enabled, desktopPet.size, isMainDesktopWindow, widgetEnabled])
+  }, [desktopPet.enabled, desktopPet.size, isMainDesktopWindow, petEnabled])
 
   // Tear the overlay down when the pet is switched off by ANY route, not only
   // the two switches that call `destroyPetWindow` themselves: a settings
@@ -233,7 +231,10 @@ export function PetMount() {
       })
       return
     }
-    if (enabled && wasDesktopEnabled && !desktopPet.enabled) {
+    // Enabling a legacy record can replace the default-on desktop intent
+    // with the summon's temporary false. Only an already-enabled pet can
+    // turn its window off; enabling must never hide the window being opened.
+    if (wasEnabled && enabled && wasDesktopEnabled && !desktopPet.enabled) {
       void isPetWindowOpen().then((open) => {
         if (open) void closePetWindow()
       })
@@ -243,7 +244,7 @@ export function PetMount() {
   // Click-through has a dedicated native command that does not reveal or raise
   // the window, so it is reconciled live too.
   useEffect(() => {
-    if (!isMainDesktopWindow || !widgetEnabled || !desktopPet.enabled) return
+    if (!isMainDesktopWindow || !petEnabled || !desktopPet.enabled) return
     let cancelled = false
     void isPetWindowOpen().then((open) => {
       if (cancelled || !open) return
@@ -252,7 +253,7 @@ export function PetMount() {
     return () => {
       cancelled = true
     }
-  }, [desktopPet.clickThrough, desktopPet.enabled, isMainDesktopWindow, widgetEnabled])
+  }, [desktopPet.clickThrough, desktopPet.enabled, isMainDesktopWindow, petEnabled])
 
   // Keep PetSettings in sync with NATIVE window mutations the renderer didn't
   // initiate (a native close, the tray's click-through recovery): the Rust
@@ -279,15 +280,6 @@ export function PetMount() {
     })
   }, [isMainDesktopWindow])
 
-  if (!widgetEnabled) return null
-  return (
-    <>
-      <PetMainRuntime settings={pet} activeCharacterId={activeCharacterId} />
-      {/* One pet on screen at a time: while it is out on the desktop the
-          overlay is the pet, and the widget would be a second copy of it. */}
-      {desktopPet.enabled && isMainDesktopWindow ? null : (
-        <PetWidget settings={pet} activeCharacterId={activeCharacterId} />
-      )}
-    </>
-  )
+  if (!petEnabled) return null
+  return <PetMainRuntime settings={pet} activeCharacterId={activeCharacterId} />
 }
