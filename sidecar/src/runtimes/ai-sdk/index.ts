@@ -71,6 +71,12 @@ import {
 } from "../../providers/provider-protocol.ts"
 import { sanitizeToolMessagePairs } from "../../context/tool-message-pairing.ts"
 import { buildMcpLogEvent } from "../../mcp/client/log.ts"
+import {
+  tighterToolLimit,
+  toolDefinitionLimitFor,
+  toolLimitFromError,
+} from "../../policy/tool-count-limit.ts"
+import { TOOL_NAMES_BY_CATEGORY } from "../../policy/tool-catalog/catalog.ts"
 
 // Bounded retries for a transport/stream failure before any output was
 // produced — the non-ledger counterpart of the reserved-attempt budget.
@@ -404,7 +410,83 @@ export function dispatchAiSdk({
   /** @type {Record<string, unknown> | undefined} */
   let toolsCache: ToolSet | undefined
   let toolSearchController: ReturnType<typeof createAiSdkToolSearchController> = null
+  // The session's tool map before ToolSearch wraps it, so a cap learned from a
+  // provider rejection can rebuild the controller over the same tools.
+  let baseTools: ToolSet | undefined
+  // Most tools one request may carry: the protocol's documented cap, tightened
+  // by any lower one an upstream reports when it rejects a request.
+  let toolLimit = toolDefinitionLimitFor(protocol)
+  let warnedToolLimit: number | null = null
+  // The system message naming the tools a cap deferred (kept in the leading
+  // system block, which compaction preserves).
+  let deferredToolsMessage: ConversationMessage | null = null
   const repairToolCallFn = createToolCallRepair()
+
+  /** Tools the next request will carry. */
+  const sentToolCount = () =>
+    toolSearchController
+      ? toolSearchController.activeToolNames().length
+      : Object.keys(toolsCache ?? {}).length
+
+  /** Replace the deferred-tools system message (or drop it when `text` is null). */
+  function setDeferredToolsMessage(text: string | null) {
+    const previous = deferredToolsMessage
+    if (previous) {
+      const at = conversation.findIndex(
+        (message) =>
+          message === previous ||
+          (message.role === "system" && message.content === previous.content)
+      )
+      if (at >= 0) conversation.splice(at, 1)
+    }
+    deferredToolsMessage = text ? { role: "system", content: text } : null
+    if (!deferredToolsMessage) return
+    let at = 0
+    while (at < conversation.length && conversation[at]!.role === "system") at += 1
+    conversation.splice(at, 0, deferredToolsMessage)
+  }
+
+  /**
+   * Build (or tighten) the ToolSearch controller so no request carries more
+   * than `toolLimit` tools. Deferred loading is the user's choice
+   * (`toolSearchEnabled`) until the session owns more tools than the provider
+   * accepts; then it is forced, with the core file and shell tools kept
+   * resident and the rest named in a system message and loaded on demand.
+   */
+  async function capToolSurface() {
+    if (!baseTools) return
+    const total = Object.keys(baseTools).length
+    const overLimit = toolLimit !== null && total > toolLimit
+    if (toolSearchController) {
+      if (toolLimit !== null) toolSearchController.setMaxActiveTools(toolLimit)
+    } else if (agentScopedSendOptions.toolSearchEnabled === true || overLimit) {
+      const { createAiSdkToolSearchController } =
+        await import("../../tools/adapters/ai-sdk-tool-search.ts")
+      toolSearchController = createAiSdkToolSearchController({
+        tools: baseTools,
+        sendOptions: agentScopedSendOptions,
+        toolNameAliases,
+        force: overLimit,
+        maxActiveTools: toolLimit,
+        residentTools:
+          agentScopedSendOptions.toolSearchEnabled === true
+            ? []
+            : (TOOL_NAMES_BY_CATEGORY.coreFiles ?? []),
+      })
+      if (toolSearchController) toolsCache = toolSearchController.tools
+    }
+    if (!overLimit || !toolSearchController || toolLimit === null) return
+    setDeferredToolsMessage(toolSearchController.deferredToolsPrompt())
+    if (warnedToolLimit === toolLimit) return
+    warnedToolLimit = toolLimit
+    const deferredCount = toolSearchController.deferredToolNames().length
+    const message =
+      `${provider}${sendOptions.model ? `/${sendOptions.model}` : ""} accepts at most ` +
+      `${toolLimit} tool definitions per request and this session has ${total}. ` +
+      `${total - deferredCount} stay loaded; the other ${deferredCount} load on demand through ToolSearch.`
+    log("warn", message)
+    emit({ type: "runtime_warning", sessionId, code: "tool_surface_capped", message })
+  }
   // Doom-loop guards owned by this session (the tool gate's + the MCP gate's).
   // The tools map is built once, so the guards live for the whole multi-turn
   // session; reset them per turn so a legitimate identical call repeated ACROSS
@@ -832,16 +914,8 @@ export function dispatchAiSdk({
           // and merged, so discovery can only activate tools the session already
           // owns. The controller persists for this sidecar session, retaining
           // discovered tools across manual-loop legs and user turns.
-          if (agentScopedSendOptions.toolSearchEnabled === true) {
-            const { createAiSdkToolSearchController } =
-              await import("../../tools/adapters/ai-sdk-tool-search.ts")
-            toolSearchController = createAiSdkToolSearchController({
-              tools: toolsCache,
-              sendOptions: agentScopedSendOptions,
-              toolNameAliases,
-            })
-            if (toolSearchController) toolsCache = toolSearchController.tools
-          }
+          baseTools = toolsCache
+          await capToolSurface()
         }
       }
 
@@ -937,7 +1011,7 @@ export function dispatchAiSdk({
             logicalStepId,
             estimatedInputTokens: Math.max(
               lastInputTokens,
-              estimatePromptTokens(messagesForSend) + Object.keys(toolsCache ?? {}).length * 200
+              estimatePromptTokens(messagesForSend) + sentToolCount() * 200
             ),
             maxOutputTokens:
               typeof modelParams.maxOutputTokens === "number" ? modelParams.maxOutputTokens : null,
@@ -1090,6 +1164,20 @@ export function dispatchAiSdk({
         // or a socket hangup) is still booked as UNKNOWN — it is retried, but
         // never assumed free.
         if (streamError && !legProducedOutput && !cancelled) {
+          // An upstream that caps tools below the protocol's documented limit
+          // names its cap in the rejection. Tighten to it and resend; the cap
+          // only ever shrinks, so this cannot loop.
+          const reportedToolLimit = toolLimitFromError(errorToMessage(streamError))
+          if (reportedToolLimit !== null && sentToolCount() > reportedToolLimit && baseTools) {
+            reportOpenAttempt({
+              status: "failed",
+              errorClass: "invalid_request",
+              reason: errorToMessage(streamError),
+            })
+            toolLimit = tighterToolLimit(toolLimit, reportedToolLimit)
+            await capToolSurface()
+            if (!cancelled && !closing && sentToolCount() <= reportedToolLimit) continue
+          }
           const contextOverflow =
             classifyProviderError(errorToMessage(streamError)) === "context-window-exceeded"
           const errorClass = contextOverflow ? "invalid_request" : classifyCallError(streamError)

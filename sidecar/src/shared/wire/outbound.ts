@@ -21,6 +21,7 @@ export type OutboundFrame =
   | { type: "agent_event"; sessionId: string; envelope: AgentEventEnvelope }
   | { type: "ready"; sdkVersion?: string; sidecarVersion?: string }
   | { type: "log"; level: "info" | "warn" | "error"; message: string }
+  | { type: "runtime_warning"; sessionId: string; code: string; message: string }
   | { type: "session_ended"; sessionId: string; turnId?: string; error?: string; result?: unknown }
   | {
       type: "control_response"

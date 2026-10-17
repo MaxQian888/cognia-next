@@ -206,3 +206,142 @@ test("select: and alwaysLoadTools accept the cognia name of a tool renamed for t
   assert.deepEqual(output.missing, undefined)
   assert.ok(controller!.prepareStep().activeTools.includes("ocr_extract"))
 })
+
+/** `count` deferrable tools named `t000`…, plus any extra named tools. */
+function manyTools(count: number, extra: Record<string, Tool> = {}): Record<string, Tool> {
+  const tools: Record<string, Tool> = { ...extra }
+  for (let i = 0; i < count; i += 1) {
+    tools[`t${String(i).padStart(3, "0")}`] = fakeTool(`Plugin capability ${i}`)
+  }
+  return tools
+}
+
+test("a tool cap forces the controller on even when tool search is off", () => {
+  const controller = createAiSdkToolSearchController({
+    tools: manyTools(200),
+    force: true,
+    maxActiveTools: 128,
+  })
+  assert.ok(controller, "forced by the cap")
+  assert.equal(controller!.maxActiveTools(), 128)
+  assert.ok(controller!.prepareStep().activeTools.length <= 128)
+  assert.equal(controller!.deferredToolNames().length, 200)
+})
+
+test("forced resident tools stay loaded under the cap, after always-load tools", () => {
+  const read = fakeTool("Read a file")
+  markAiSdkToolSource(read, { serverName: "cognia-tools", alwaysLoad: true })
+  const controller = createAiSdkToolSearchController({
+    tools: manyTools(200, { read, write: fakeTool("Write"), edit: fakeTool("Edit") }),
+    force: true,
+    maxActiveTools: 128,
+    residentTools: ["write", "edit", "not_owned"],
+  })
+  assert.deepEqual(controller!.prepareStep().activeTools, [
+    AI_SDK_TOOL_SEARCH_NAME,
+    "edit",
+    "read",
+    "write",
+  ])
+  assert.ok(!controller!.deferredToolNames().includes("write"))
+  assert.ok(!controller!.deferredToolNames().includes("not_owned"), "unowned names are ignored")
+})
+
+test("a cap smaller than the resident set keeps the highest-priority prefix and room to discover", async () => {
+  const always: Record<string, Tool> = {}
+  for (const name of ["a1", "a2", "a3"]) {
+    always[name] = markAiSdkToolSource(fakeTool(name), { alwaysLoad: true })
+  }
+  const controller = createAiSdkToolSearchController({
+    tools: manyTools(20, {
+      ...always,
+      core1: fakeTool("c1"),
+      core2: fakeTool("c2"),
+      core3: fakeTool("c3"),
+    }),
+    force: true,
+    // 10 slots: ToolSearch + 4 for discovery headroom leaves 5 resident.
+    maxActiveTools: 10,
+    // Caller order is priority order: core3 is last, so it is the one dropped.
+    residentTools: ["core2", "core1", "core3"],
+  })
+  assert.deepEqual(controller!.prepareStep().activeTools, [
+    AI_SDK_TOOL_SEARCH_NAME,
+    "a1",
+    "a2",
+    "a3",
+    "core1",
+    "core2",
+  ])
+  assert.ok(controller!.deferredToolNames().includes("core3"), "the end of the list is dropped")
+  const output = await search(controller, { query: "select:t000,t001,t002,t003", limit: 8 })
+  assert.deepEqual(output.activated, ["t000", "t001", "t002", "t003"])
+  assert.equal(controller!.prepareStep().activeTools.length, 10)
+})
+
+test("discovery past the cap unloads the least recently activated tools", async () => {
+  const controller = createAiSdkToolSearchController({
+    tools: manyTools(30),
+    force: true,
+    maxActiveTools: 5,
+  })
+  // 5 slots: ToolSearch + headroom of 2 leaves 2 resident (none here) → 4 discoverable.
+  await search(controller, { query: "select:t000,t001" })
+  await search(controller, { query: "select:t002,t003" })
+  // Touch t000 again so t001 becomes the least recently used.
+  await search(controller, { query: "select:t000" })
+  const output = (await search(controller, { query: "select:t004" })) as SearchOutput & {
+    unloaded?: string[]
+  }
+  assert.deepEqual(output.activated, ["t004"])
+  assert.deepEqual(output.unloaded, ["t001"])
+  assert.deepEqual(controller!.prepareStep().activeTools, [
+    AI_SDK_TOOL_SEARCH_NAME,
+    "t000",
+    "t002",
+    "t003",
+    "t004",
+  ])
+})
+
+test("setMaxActiveTools only tightens, demoting resident tools and unloading discoveries", async () => {
+  const controller = createAiSdkToolSearchController({
+    tools: manyTools(40),
+    force: true,
+    maxActiveTools: 30,
+    residentTools: ["t000", "t001", "t002", "t003", "t004", "t005"],
+  })
+  await search(controller, { query: "select:t010,t011,t012" })
+  assert.equal(controller!.prepareStep().activeTools.length, 10)
+
+  controller!.setMaxActiveTools(6)
+  // 6 slots: ToolSearch + headroom 2 → 3 resident; discoveries fill the rest.
+  const active = controller!.prepareStep().activeTools
+  assert.equal(active.length, 6)
+  assert.deepEqual(active.slice(0, 4), [AI_SDK_TOOL_SEARCH_NAME, "t000", "t001", "t002"])
+  assert.ok(controller!.deferredToolNames().includes("t005"), "demoted tools become deferred")
+
+  controller!.setMaxActiveTools(50)
+  assert.equal(controller!.maxActiveTools(), 6, "a looser limit never widens the cap")
+})
+
+test("deferredToolsPrompt names every deferred tool and the cap", () => {
+  const controller = createAiSdkToolSearchController({
+    tools: manyTools(3, { write: fakeTool("Write") }),
+    force: true,
+    maxActiveTools: 128,
+    residentTools: ["write"],
+  })
+  const prompt = controller!.deferredToolsPrompt()!
+  assert.match(prompt, /at most 128 tool definitions/)
+  assert.match(prompt, /select:<name>/)
+  assert.match(prompt, /t000, t001, t002\.$/)
+  assert.ok(!prompt.includes("write"))
+
+  const uncapped = createAiSdkToolSearchController({
+    tools: { write: fakeTool("Write") },
+    sendOptions: { toolSearchEnabled: true },
+  })
+  assert.equal(uncapped!.maxActiveTools(), null)
+  assert.match(uncapped!.deferredToolsPrompt()!, /not loaded into this conversation up front/)
+})

@@ -127,6 +127,27 @@ test("canonicalEventFromWireMessage maps the remaining kinds", () => {
   })
 })
 
+test("a runtime warning becomes a canonical warning hosts can show", () => {
+  assert.deepEqual(
+    canonicalEventFromWireMessage({
+      type: "runtime_warning",
+      sessionId: "s1",
+      code: "tool_surface_capped",
+      message: "openai/gpt-x accepts at most 128 tool definitions per request",
+    }),
+    {
+      kind: "warning",
+      code: "tool_surface_capped",
+      message: "openai/gpt-x accepts at most 128 tool definitions per request",
+    }
+  )
+  assert.deepEqual(canonicalEventFromWireMessage({ type: "runtime_warning", sessionId: "s1" }), {
+    kind: "warning",
+    code: "runtime_warning",
+    message: "",
+  })
+})
+
 test("a raw SDK message is projected semantically, not swallowed as a diagnostic", () => {
   // Before the exhaustive mapping every `type: "event"` except compact_boundary
   // became `{ kind: "diagnostic" }`, which is how 30 of the 39 union members

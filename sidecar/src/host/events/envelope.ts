@@ -75,6 +75,16 @@ export function canonicalEventsFromWireMessage(
           message: String(msg.reason ?? "permission waiter interrupted"),
         },
       ]
+    case "runtime_warning":
+      // A runtime adjusted the turn on the user's behalf (for example capping
+      // the tool surface a provider would otherwise reject).
+      return [
+        {
+          kind: "warning",
+          code: String(msg.code ?? "runtime_warning"),
+          message: String(msg.message ?? ""),
+        },
+      ]
     case "session_ended": {
       // A `session_ended` that carries the SDK `result` frame was emitted BY
       // that frame (the Anthropic rail ends the turn on it). The frame went out

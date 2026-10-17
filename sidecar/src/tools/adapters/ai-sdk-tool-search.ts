@@ -6,6 +6,11 @@
 // keep only essential tools resident, then activates permitted tools after the
 // model discovers them through ToolSearch. It only sees the already-filtered,
 // permission-gated tool map, so discovery cannot reintroduce denied tools.
+//
+// It is also how a session stays under a provider's per-request tool cap
+// (`maxActiveTools`): the dispatcher forces the controller on when the session
+// owns more tools than the cap allows, keeps the most important ones resident,
+// and unloads the least recently discovered tool when discovery would cross it.
 
 import { tool } from "ai"
 import type { ToolSet } from "ai"
@@ -30,9 +35,17 @@ export interface ToolSearchSendOptions {
 export interface AiSdkToolSearchController {
   /** Every tool plus ToolSearch, in sorted-key order. */
   tools: ToolSet
-  /** ToolSearch, the resident tools, and every tool it has activated so far. */
+  /** ToolSearch, the resident tools, and the tools discovery has activated. */
   activeToolNames(): string[]
   prepareStep(): { activeTools: string[] }
+  /** Tools that start deferred (not resident), sorted; discoverable by ToolSearch. */
+  deferredToolNames(): string[]
+  /** Model-facing instructions naming the deferred tools, or null when none are. */
+  deferredToolsPrompt(): string | null
+  /** The cap on active tools (ToolSearch included), or null when uncapped. */
+  maxActiveTools(): number | null
+  /** Tighten the cap, demoting resident tools and unloading discoveries to fit. */
+  setMaxActiveTools(limit: number): void
 }
 
 const TOOL_SOURCE = new WeakMap<object, AiSdkToolSource>()
@@ -74,6 +87,14 @@ function scoreCandidate(name: string, description: unknown, query: string): numb
   return hits.length * 20 + nameHits * 10 + (hits.length === terms.length ? 100 : 0)
 }
 
+/**
+ * Discovery slots kept free under a cap, so a session whose resident tools
+ * alone would fill it can still load a tool on demand.
+ */
+function discoveryHeadroom(cap: number): number {
+  return Math.min(8, Math.floor((cap - 1) / 2))
+}
+
 function searchCandidates(
   tools: ToolSet,
   query: string,
@@ -93,19 +114,31 @@ function searchCandidates(
 
 /**
  * Build one session-scoped ToolSearch controller, or null when the send has
- * not enabled deferred tool loading.
+ * not enabled deferred tool loading and `force` is not set.
  */
 export function createAiSdkToolSearchController({
   tools,
   sendOptions = {},
   toolNameAliases = undefined,
+  force = false,
+  maxActiveTools = null,
+  residentTools = [],
 }: {
   tools?: ToolSet | null | undefined
   sendOptions?: ToolSearchSendOptions
   /** Model-facing name → cognia name, for tools renamed for the provider. */
   toolNameAliases?: ReadonlyMap<string, string> | null | undefined
+  /** Build even though the send did not enable tool search (a tool cap needs it). */
+  force?: boolean
+  /** Most tools one request may carry, ToolSearch included; null for no cap. */
+  maxActiveTools?: number | null
+  /**
+   * Tools to keep resident after the always-load ones, in priority order. A
+   * cap that cannot hold every resident tool drops the end of this list first.
+   */
+  residentTools?: Iterable<string>
 }): AiSdkToolSearchController | null {
-  if (sendOptions.toolSearchEnabled !== true) return null
+  if (sendOptions.toolSearchEnabled !== true && !force) return null
   // Map keys are the provider-safe names the model will call; `alwaysLoadTools`
   // and `select:` requests may still use the cognia name they were written with.
   const aliases: ReadonlyMap<string, string> =
@@ -123,8 +156,9 @@ export function createAiSdkToolSearchController({
   const alwaysLoadTools = new Set<string>(
     Array.isArray(sendOptions.alwaysLoadTools) ? sendOptions.alwaysLoadTools : []
   )
-  const active = new Set([AI_SDK_TOOL_SEARCH_NAME])
-
+  // Resident candidates in priority order: always-load tools first, then the
+  // caller's resident list. Under a cap only a prefix of this stays resident.
+  const residentOrder: string[] = []
   for (const name of availableNames) {
     const value = available[name]!
     const source = TOOL_SOURCE.get(value) ?? { serverName: inferredServerName(name) }
@@ -134,9 +168,38 @@ export function createAiSdkToolSearchController({
       configuredToolMatches(alwaysLoadTools, name, source) ||
       configuredToolMatches(alwaysLoadTools, restoreToolName(aliases, name), source)
     ) {
-      active.add(name)
+      residentOrder.push(name)
     }
   }
+  const extraResident = new Set<string>()
+  for (const requested of residentTools) {
+    const name = Object.hasOwn(available, requested) ? requested : modelToolName(aliases, requested)
+    if (Object.hasOwn(available, name) && !residentOrder.includes(name)) extraResident.add(name)
+  }
+  residentOrder.push(...extraResident)
+
+  let cap: number | null = null
+  let resident = new Set<string>(residentOrder)
+  // Discovered tools, least recently activated first.
+  const discovered: string[] = []
+
+  const applyCap = (): string[] => {
+    if (cap === null) return []
+    const residentCap = Math.max(0, cap - 1 - discoveryHeadroom(cap))
+    if (resident.size > residentCap) resident = new Set(residentOrder.slice(0, residentCap))
+    const unloaded: string[] = []
+    while (discovered.length > 0 && 1 + resident.size + discovered.length > cap) {
+      unloaded.push(discovered.shift()!)
+    }
+    return unloaded
+  }
+  const setCap = (limit: number | null) => {
+    if (limit === null) return
+    const next = Math.max(1, Math.floor(limit))
+    cap = cap === null ? next : Math.min(cap, next)
+    applyCap()
+  }
+  setCap(maxActiveTools)
 
   const searchTool = tool({
     description:
@@ -181,9 +244,24 @@ export function createAiSdkToolSearchController({
         )
       }
 
-      const activated = matches.map((entry) => entry.name).sort()
-      for (const name of activated) active.add(name)
-      return JSON.stringify({ query, matches, activated, ...(missing.length ? { missing } : {}) })
+      const requested = matches.map((entry) => entry.name).sort()
+      for (const name of requested) {
+        if (resident.has(name)) continue
+        const at = discovered.indexOf(name)
+        if (at >= 0) discovered.splice(at, 1)
+        discovered.push(name)
+      }
+      const unloaded = applyCap()
+      const activated = requested.filter((name) => resident.has(name) || discovered.includes(name))
+      return JSON.stringify({
+        query,
+        matches,
+        activated,
+        ...(missing.length ? { missing } : {}),
+        // Under a tool cap, loading these unloaded the least recently used ones;
+        // ToolSearch loads them again when they are needed.
+        ...(unloaded.length ? { unloaded: unloaded.sort() } : {}),
+      })
     },
   })
 
@@ -192,11 +270,31 @@ export function createAiSdkToolSearchController({
       a < b ? -1 : a > b ? 1 : 0
     )
   )
-  const activeToolNames = () => Object.keys(allTools).filter((name) => active.has(name))
+  const activeToolNames = () =>
+    Object.keys(allTools).filter(
+      (name) => name === AI_SDK_TOOL_SEARCH_NAME || resident.has(name) || discovered.includes(name)
+    )
+  const deferredToolNames = () => availableNames.filter((name) => !resident.has(name))
 
   return {
     tools: allTools,
     activeToolNames,
     prepareStep: () => ({ activeTools: activeToolNames() }),
+    deferredToolNames,
+    deferredToolsPrompt: () => {
+      const names = deferredToolNames()
+      if (names.length === 0) return null
+      const why =
+        cap === null
+          ? "Some tools are not loaded into this conversation up front."
+          : `This provider accepts at most ${cap} tool definitions per request, so some tools are not loaded up front.`
+      return [
+        why,
+        `Before calling one of them, load it with ${AI_SDK_TOOL_SEARCH_NAME} using "select:<name>[,<name>]", or search by capability with a short query.`,
+        `Tools available through ${AI_SDK_TOOL_SEARCH_NAME}: ${names.join(", ")}.`,
+      ].join(" ")
+    },
+    maxActiveTools: () => cap,
+    setMaxActiveTools: (limit) => setCap(limit),
   }
 }

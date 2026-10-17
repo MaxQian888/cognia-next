@@ -3547,3 +3547,139 @@ test("auto-compaction triggers on the last call's prompt, not the leg's summed u
     false
   )
 })
+
+/** `count` external MCP tools named `mcp__big__t000`…, for tool-cap tests. */
+function bigMcpServer(count: number) {
+  const tools: Record<string, unknown> = {}
+  for (let i = 0; i < count; i += 1) {
+    tools[`mcp__big__t${String(i).padStart(3, "0")}`] = {
+      description: `Remote capability ${i}`,
+      execute: async () => "ok",
+    }
+  }
+  return async () => ({ tools, close: async () => {} }) as never
+}
+
+test("an OpenAI session over the 128-tool cap defers the rest behind ToolSearch and says so", async () => {
+  const { events, emit } = captureEmit()
+  const captured = capturingStream([{ type: "finish", finishReason: "stop" }])
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "tool-cap-session",
+    firstPrompt: "edit the ledger",
+    sendOptions: {
+      model: "deepseek-v4.1-flash-free",
+      systemPrompt: "BASE SYSTEM PROMPT",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { coreFiles: true },
+      mcpServers: { big: { command: "big-server" } },
+    },
+    emit,
+    log: () => {},
+    streamText: captured.fn,
+    buildMcpTools: bigMcpServer(190),
+  })
+
+  await waitForEvent(events, (event) => event.type === "session_ended")
+  const call = captured.calls[0]!
+  assert.ok(call.tools.ToolSearch, "ToolSearch is forced on")
+  const active = call.prepareStep().activeTools
+  assert.ok(active.length <= 128, `request carries ${active.length} tools`)
+  for (const core of ["read", "write", "edit", "bash", "grep"]) {
+    assert.ok(active.includes(core), `${core} stays loaded`)
+  }
+  assert.ok(!active.includes("mcp__big__t000"), "external tools load on demand")
+
+  const prompt = JSON.stringify([call.instructions, call.messages])
+  assert.ok(prompt.indexOf("BASE SYSTEM PROMPT") < prompt.indexOf("mcp__big__t189"))
+  assert.match(prompt, /at most 128 tool definitions/)
+
+  const warning = events.find((event) => event.type === "runtime_warning")
+  assert.equal(warning?.code, "tool_surface_capped")
+  assert.match(String(warning?.message), /at most 128 tool definitions/)
+  assert.equal(events.filter((event) => event.type === "runtime_warning").length, 1)
+  assert.equal(events.find((event) => event.type === "session_ended")?.error, undefined)
+
+  await call.tools.ToolSearch.execute({ query: "select:mcp__big__t007" })
+  assert.ok(call.prepareStep().activeTools.includes("mcp__big__t007"))
+})
+
+test("an OpenAI session under the cap keeps its flat tool map", async () => {
+  const { events, emit } = captureEmit()
+  const captured = capturingStream([{ type: "finish", finishReason: "stop" }])
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "tool-under-cap-session",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { coreFiles: true },
+    },
+    emit,
+    log: () => {},
+    streamText: captured.fn,
+  })
+
+  await waitForEvent(events, (event) => event.type === "session_ended")
+  const call = captured.calls[0]!
+  assert.equal(call.tools.ToolSearch, undefined)
+  assert.equal(call.prepareStep, undefined)
+  assert.equal(
+    events.some((event) => event.type === "runtime_warning"),
+    false
+  )
+})
+
+test("a lower tool cap named in a rejection is learned and the request is resent under it", async () => {
+  const { events, emit } = captureEmit()
+  const calls: TestStreamArgs[] = []
+  const activeCounts: number[] = []
+  dispatchAiSdk({
+    provider: "opencode-local",
+    sessionId: "tool-learned-cap-session",
+    firstPrompt: "edit the ledger",
+    sendOptions: {
+      model: "deepseek-v4.1-flash-free",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { coreFiles: true },
+      mcpServers: { big: { command: "big-server" } },
+    },
+    emit,
+    log: () => {},
+    streamText: (args: Record<string, unknown>) => {
+      const call = streamArgs(args)
+      calls.push(call)
+      activeCounts.push(
+        typeof call.prepareStep === "function"
+          ? call.prepareStep().activeTools.length
+          : Object.keys(call.tools ?? {}).length
+      )
+      return makeFakeStream(
+        calls.length === 1
+          ? [
+              {
+                type: "error",
+                error: {
+                  message:
+                    "[unsupported_request] tools must contain at most 40 function definitions.",
+                },
+              },
+            ]
+          : [
+              { type: "text-delta", id: "reply", text: "done" },
+              { type: "finish", finishReason: "stop" },
+            ]
+      )()
+    },
+    buildMcpTools: bigMcpServer(60),
+  })
+
+  await waitForEvent(events, (event) => event.type === "session_ended")
+  assert.equal(calls.length, 2, "rejected once, resent once")
+  assert.ok(activeCounts[0]! > 40, "the first request was over the upstream's cap")
+  assert.ok(activeCounts[1]! <= 40, `the resend carries ${activeCounts[1]} tools`)
+  assert.equal(events.find((event) => event.type === "session_ended")?.error, undefined)
+  const warning = events.find((event) => event.type === "runtime_warning")
+  assert.match(String(warning?.message), /at most 40 tool definitions/)
+})
