@@ -104,6 +104,16 @@ test("mobile production disables the service worker before export pruning", () =
   assert.equal(serwist.disable, true)
 })
 
+test("shared web/desktop export defers service-worker registration and online reload to the web runtime", () => {
+  let serwist
+  config({ NODE_ENV: "production" }, (options) => {
+    serwist = options
+  })
+  assert.equal(serwist.disable, false, "the web PWA still receives its worker")
+  assert.equal(serwist.register, false, "Tauri must not auto-register a network worker")
+  assert.equal(serwist.reloadOnOnline, false, "native windows must not reload on connectivity changes")
+})
+
 test("bundle analysis is opt-in and preserves the mobile webpack configuration", () => {
   for (const analyze of [undefined, "true"]) {
     const next = config({

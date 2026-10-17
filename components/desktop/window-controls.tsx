@@ -188,7 +188,11 @@ export function WindowControls({ className }: { className?: string }) {
   }
 
   return (
-    <div className={cn("flex items-center", className)} data-testid="window-controls">
+    <div
+      className={cn("flex items-center", className)}
+      data-window-controls
+      data-testid="window-controls"
+    >
       <WindowButton onClick={run("minimize")} aria-label={t("minimize")}>
         <MinusIcon className="size-3.5" />
       </WindowButton>

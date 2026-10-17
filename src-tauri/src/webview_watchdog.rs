@@ -68,6 +68,11 @@ pub const BOOT_REVEAL_GRACE: Duration = Duration::from_secs(8);
 /// Environment switch that re-arms heartbeat recovery in a debug build.
 pub const HEARTBEAT_RECOVERY_ENV: &str = "COGNIA_WEBVIEW_WATCHDOG";
 
+/// Remove an old browser PWA worker from the native asset origin before it
+/// can strand the desktop on offline.html. Native evaluation is required:
+/// that fallback page contains neither React nor the normal boot initializers.
+pub const NATIVE_SERVICE_WORKER_RECOVERY: &str = include_str!("native-service-worker-recovery.js");
+
 /// Pure decision: should the heartbeat-timeout reload loop run at all?
 ///
 /// Not in a debug build. `pnpm tauri dev` serves the page from `next dev`, and
@@ -223,6 +228,10 @@ impl WebviewWatchdog {
         self.inner.lock().unwrap().renderer_revealed = true;
     }
 
+    pub fn renderer_revealed(&self) -> bool {
+        self.inner.lock().unwrap().renderer_revealed
+    }
+
     /// Decide whether the one-shot boot safety net should reveal the window.
     pub fn poll_boot_reveal(&self, now: Instant, visible: bool) -> BootRevealAction {
         let inner = self.inner.lock().unwrap();
@@ -336,7 +345,18 @@ pub fn webview_heartbeat(state: tauri::State<'_, WebviewWatchdog>, url: Option<S
 /// Disarm the boot-time force-show fallback after the renderer successfully
 /// calls `show()` for the main window.
 #[tauri::command]
-pub fn webview_acknowledge_boot_reveal(state: tauri::State<'_, WebviewWatchdog>) {
+pub fn webview_acknowledge_boot_reveal(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, WebviewWatchdog>,
+) {
+    #[cfg(windows)]
+    if window.label() == "main" && window.is_decorated().unwrap_or(false) {
+        if let Err(error) = window.set_decorations(false) {
+            log::warn!("webview-watchdog: restoring custom window frame failed: {error}");
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = window;
     state.acknowledge_boot_reveal();
 }
 
@@ -672,14 +692,33 @@ mod tests {
     #[test]
     fn renderer_reveal_ack_survives_later_hide_to_tray() {
         let wd = WebviewWatchdog::new();
+        assert!(!wd.renderer_revealed());
         let loaded = Instant::now();
         assert!(wd.record_initial_load_finished(loaded));
         wd.acknowledge_boot_reveal();
+        assert!(wd.renderer_revealed());
 
         assert_eq!(
             wd.poll_boot_reveal(loaded + BOOT_REVEAL_GRACE, false),
             BootRevealAction::Idle
         );
+    }
+
+    #[test]
+    fn queued_boot_fallback_rechecks_a_late_renderer_ack() {
+        let wd = WebviewWatchdog::new();
+        let loaded = Instant::now();
+        wd.record_initial_load_finished(loaded);
+        let deadline = loaded + BOOT_REVEAL_GRACE;
+        assert_eq!(
+            wd.poll_boot_reveal(deadline, false),
+            BootRevealAction::Reveal
+        );
+
+        // An acknowledgment can arrive while the fallback waits for the GUI
+        // thread. Its decision there must use the current state.
+        wd.acknowledge_boot_reveal();
+        assert_eq!(wd.poll_boot_reveal(deadline, false), BootRevealAction::Idle);
     }
 
     #[test]

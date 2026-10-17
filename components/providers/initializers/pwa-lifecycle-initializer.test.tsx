@@ -16,6 +16,10 @@ jest.mock("@/lib/telemetry/events/track-event", () => ({
 }))
 
 const toastInfo = jest.fn()
+const registrationWarn = jest.fn()
+jest.mock("@cognia/logging", () => ({
+  loggers: { shell: { warn: (...args: unknown[]) => registrationWarn(...args) } },
+}))
 jest.mock("sonner", () => ({
   toast: { info: (...a: unknown[]) => toastInfo(...a) },
 }))
@@ -29,6 +33,8 @@ jest.mock("@/lib/i18n/runtime-translator", () => ({
 }))
 
 import { PwaLifecycleInitializer } from "./pwa-lifecycle-initializer"
+
+const registerWorker = jest.fn().mockResolvedValue(undefined)
 
 interface SwStub {
   controller: object | null
@@ -69,6 +75,9 @@ beforeEach(() => {
   trackEventMock.mockClear()
   toastInfo.mockClear()
   runtimeNamespace.mockClear()
+  registerWorker.mockClear()
+  registrationWarn.mockClear()
+  Object.assign(window, { serwist: { register: registerWorker } })
 })
 
 describe("<PwaLifecycleInitializer />", () => {
@@ -77,12 +86,22 @@ describe("<PwaLifecycleInitializer />", () => {
     const { container } = render(<PwaLifecycleInitializer />)
     expect(container).toBeEmptyDOMElement()
     expect(attachMock).toHaveBeenCalledTimes(1)
+    expect(registerWorker).toHaveBeenCalledTimes(1)
   })
 
-  it("is a no-op off the web shell", () => {
-    detectPlatformMock.mockReturnValue("tauri")
+  it.each(["tauri", "capacitor"])("does not register a PWA worker in %s", (platform) => {
+    detectPlatformMock.mockReturnValue(platform)
     render(<PwaLifecycleInitializer />)
     expect(attachMock).not.toHaveBeenCalled()
+    expect(registerWorker).not.toHaveBeenCalled()
+  })
+
+  it("keeps a failed web registration from rejecting into app startup", async () => {
+    stubServiceWorker(null)
+    registerWorker.mockRejectedValueOnce(new Error("registration unavailable"))
+    render(<PwaLifecycleInitializer />)
+    await waitFor(() => expect(registrationWarn).toHaveBeenCalledTimes(1))
+    expect(attachMock).toHaveBeenCalledTimes(1)
   })
 
   it("reports app.pwa.installed on the appinstalled event", () => {

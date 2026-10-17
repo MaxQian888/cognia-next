@@ -7,6 +7,7 @@ import { getRuntimeTranslator } from "@/lib/i18n/runtime-translator"
 import { attachInstallListeners } from "@/lib/pwa/install-state"
 import { detectPlatform } from "@/lib/platform/detect"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
+import { loggers } from "@cognia/logging"
 
 /**
  * PWA lifecycle wiring for the web shell (web only — no-ops elsewhere):
@@ -28,6 +29,16 @@ export function PwaLifecycleInitializer() {
   useEffect(() => {
     if (detectPlatform() !== "web") return
     const detach = attachInstallListeners()
+    // The export is shared with Tauri. Only the browser may install a network
+    // worker; a native window must keep loading its packaged local assets.
+    const serwist = (window as Window & { serwist?: { register: () => Promise<unknown> } }).serwist
+    void serwist?.register().catch((error: unknown) => {
+      loggers.shell.warn("PWA worker registration failed", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+    const onOnline = () => window.location.reload()
+    window.addEventListener("online", onOnline)
 
     const onInstalled = () => void trackEvent("app.pwa.installed", {})
     window.addEventListener("appinstalled", onInstalled)
@@ -47,6 +58,7 @@ export function PwaLifecycleInitializer() {
     return () => {
       detach()
       window.removeEventListener("appinstalled", onInstalled)
+      window.removeEventListener("online", onOnline)
       container?.removeEventListener("controllerchange", onControllerChange)
     }
   }, [])

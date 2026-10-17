@@ -105,6 +105,18 @@ pub fn effective_close_behavior(stored: CloseBehavior, host_mode: bool) -> Close
     }
 }
 
+/// A renderer that never painted cannot answer the close-confirmation event.
+pub fn close_behavior_for_renderer(
+    effective: CloseBehavior,
+    renderer_revealed: bool,
+) -> CloseBehavior {
+    if effective == CloseBehavior::Ask && !renderer_revealed {
+        CloseBehavior::Quit
+    } else {
+        effective
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct HostModeFile {
     enabled: bool,
@@ -293,6 +305,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unrevealed_renderer_never_waits_for_a_close_dialog() {
+        for behavior in [CloseBehavior::Ask, CloseBehavior::Quit, CloseBehavior::Tray] {
+            assert_eq!(close_behavior_for_renderer(behavior, true), behavior);
+            assert_eq!(
+                close_behavior_for_renderer(behavior, false),
+                if behavior == CloseBehavior::Ask {
+                    CloseBehavior::Quit
+                } else {
+                    behavior
+                }
+            );
+            assert_eq!(
+                close_behavior_for_renderer(effective_close_behavior(behavior, true), false),
+                CloseBehavior::Tray
+            );
+        }
+    }
+
+    #[test]
     fn parse_maps_known_values() {
         assert_eq!(CloseBehavior::parse("ask"), CloseBehavior::Ask);
         assert_eq!(CloseBehavior::parse("tray"), CloseBehavior::Tray);
@@ -320,7 +351,10 @@ mod tests {
 
     #[test]
     fn only_the_login_entry_argument_marks_a_login_launch() {
-        assert!(launched_at_login(["/Applications/Cognia.app", "--autostart"]));
+        assert!(launched_at_login([
+            "/Applications/Cognia.app",
+            "--autostart"
+        ]));
         assert!(!launched_at_login(["/Applications/Cognia.app"]));
         assert!(!launched_at_login(["cognia", "/path/--autostart"]));
     }

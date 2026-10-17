@@ -1,6 +1,7 @@
 import { defaultMessages, startupMessages, loadMessages } from "./messages"
 import enMessages from "./messages/en.json"
 import { defaultLocale } from "./config"
+import { CONVERSATION_SORT_BY_OPTIONS } from "@/lib/chat/conversation-filters"
 
 describe("i18n message loaders", () => {
   it("exposes only the startup subset as defaultMessages", () => {
@@ -27,6 +28,23 @@ describe("i18n message loaders", () => {
     // @ts-expect-error exercising the defensive fallback with an invalid locale
     await expect(loadMessages("fr")).resolves.toBe(enMessages)
   })
+
+  it.each(["en", "zh-CN"] as const)(
+    "provides %s sidebar and filter labels for every conversation sort option",
+    async (locale) => {
+      const messages = await loadMessages(locale)
+      for (const option of CONVERSATION_SORT_BY_OPTIONS) {
+        expect(messages.desktop.channelList.sortBy.options).toHaveProperty(
+          option,
+          expect.stringMatching(/\S/)
+        )
+        expect(messages.conversationFilters.sort.options).toHaveProperty(
+          option,
+          expect.stringMatching(/\S/)
+        )
+      }
+    }
+  )
 
   it("provides labels for every plugin scheduled-job filter", async () => {
     const zh = await loadMessages("zh-CN")
@@ -71,5 +89,18 @@ it.each(["en", "zh-CN"] as const)(
     expect(startup).not.toHaveProperty("settings")
     expect(startup).not.toHaveProperty("chat")
     expect(JSON.stringify(startup).length).toBeLessThan(JSON.stringify(full).length / 10)
+  }
+)
+
+it.each(["en", "zh-CN"] as const)(
+  "provides %s window controls before the full catalog is loaded",
+  async (locale) => {
+    const full = await loadMessages(locale)
+    const controls = startupMessages[locale].desktop.titleBar
+    expect(Object.keys(controls).sort()).toEqual(["close", "maximize", "minimize", "restore"])
+    for (const [key, value] of Object.entries(controls)) {
+      expect(value).toBe(full.desktop.titleBar[key as keyof typeof full.desktop.titleBar])
+      expect(value).toMatch(/\S/)
+    }
   }
 )

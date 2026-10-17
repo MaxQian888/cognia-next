@@ -5,6 +5,7 @@ import { useSyncExternalStore } from "react"
 
 import { isTauri } from "@/lib/native/utils"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
+import { WindowControls } from "@/components/desktop/window-controls"
 
 /**
  * Client-mount probe via `useSyncExternalStore` (not `useState` + effect, which
@@ -92,6 +93,11 @@ export function WindowLivenessInitializers() {
 
   return (
     <>
+      {/* Account, loading and cloud sign-in screens can replace the shell.
+          CSS hides this fallback whenever a screen owns its window controls. */}
+      <div data-window-controls-fallback className="fixed top-0 right-0 z-50 flex bg-background">
+        <WindowControls className="native-window-controls-fallback" />
+      </div>
       <WindowShowInitializer />
       <WebviewHeartbeatInitializer />
       <SelectionToolbarRestoreInitializer />

@@ -178,7 +178,13 @@ pub(crate) fn main_window(app: &App) {
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             let behavior = handle.state::<WindowBehavior>();
-            match behavior.effective_close_behavior() {
+            let revealed = handle
+                .state::<webview_watchdog::WebviewWatchdog>()
+                .renderer_revealed();
+            match crate::window_behavior::close_behavior_for_renderer(
+                behavior.effective_close_behavior(),
+                revealed,
+            ) {
                 // "Quit" means the app, not this one window. Tauri only exits
                 // when the LAST window closes, and the desktop pet, its popup,
                 // the fleet island and the other overlays are windows too, so

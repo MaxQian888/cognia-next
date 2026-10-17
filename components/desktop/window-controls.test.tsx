@@ -157,6 +157,7 @@ describe("WindowControls", () => {
     setPlatform("Win32")
     const user = userEvent.setup()
     render(<WindowControls />)
+    expect(await screen.findByTestId("window-controls")).toHaveAttribute("data-window-controls")
     await waitFor(() => expect(screen.getByLabelText("minimize")).toBeInTheDocument())
 
     await user.click(screen.getByLabelText("minimize"))

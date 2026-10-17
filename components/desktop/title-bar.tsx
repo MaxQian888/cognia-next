@@ -725,6 +725,7 @@ export function TitleBar() {
         ref={barRef}
         data-tauri-drag-region
         data-app-chrome
+        data-window-controls={windowChrome ? true : undefined}
         data-testid="title-bar"
         onDoubleClick={(e) => {
           if (!windowChrome) return

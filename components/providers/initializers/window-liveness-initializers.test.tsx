@@ -1,4 +1,7 @@
-import { render, act } from "@testing-library/react"
+import { render, act, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { NextIntlClientProvider } from "next-intl"
+import { startupMessages } from "@/i18n/messages"
 
 import { WindowLivenessInitializers } from "./window-liveness-initializers"
 
@@ -26,6 +29,27 @@ const isTauriMock = jest.fn()
 jest.mock("@/lib/native/utils", () => ({
   isTauri: () => isTauriMock(),
 }))
+jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+const minimize = jest.fn().mockResolvedValue(undefined)
+const toggleMaximize = jest.fn().mockResolvedValue(undefined)
+const close = jest.fn().mockResolvedValue(undefined)
+jest.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    minimize,
+    toggleMaximize,
+    close,
+    isMaximized: async () => false,
+    onResized: async () => () => {},
+  }),
+}))
+
+function renderLiveness() {
+  return render(
+    <NextIntlClientProvider locale="en" messages={startupMessages.en}>
+      <WindowLivenessInitializers />
+    </NextIntlClientProvider>
+  )
+}
 
 let mockPetRole: "main" | "web" | "overlay" | "popup" | "island" | "selection-toolbar" = "main"
 jest.mock("@/lib/pet/window-role", () => ({
@@ -36,15 +60,33 @@ jest.mock("@/lib/pet/window-role", () => ({
 
 describe("WindowLivenessInitializers", () => {
   beforeEach(() => {
+    jest.clearAllMocks()
     isTauriMock.mockReset()
     mockPetRole = "main"
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" })
+  })
+
+  it("keeps window controls usable before the account and cloud sign-in gates pass", async () => {
+    isTauriMock.mockReturnValue(true)
+    const user = userEvent.setup()
+    const { container } = renderLiveness()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close" })).toBeEnabled())
+    await user.click(screen.getByRole("button", { name: "Minimize" }))
+    await user.click(screen.getByRole("button", { name: "Maximize" }))
+    await user.click(screen.getByRole("button", { name: "Close" }))
+    expect(minimize).toHaveBeenCalledTimes(1)
+    expect(toggleMaximize).toHaveBeenCalledTimes(1)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(
+      container.querySelector("[data-window-controls-fallback] [data-window-controls]")
+    ).toHaveClass("native-window-controls-fallback")
   })
 
   it("renders nothing on web (isTauri() === false)", async () => {
     isTauriMock.mockReturnValue(false)
     let container!: HTMLElement
     await act(async () => {
-      container = render(<WindowLivenessInitializers />).container
+      container = renderLiveness().container
     })
     expect(container.querySelectorAll('[data-testid="liveness-child"]')).toHaveLength(0)
   })
@@ -53,7 +95,7 @@ describe("WindowLivenessInitializers", () => {
     isTauriMock.mockReturnValue(true)
     let container!: HTMLElement
     await act(async () => {
-      container = render(<WindowLivenessInitializers />).container
+      container = renderLiveness().container
     })
     expect(mountedModules(container)).toEqual([
       "exit-confirmation-dialog",
@@ -74,7 +116,7 @@ describe("WindowLivenessInitializers", () => {
     isTauriMock.mockReturnValue(true)
     let container!: HTMLElement
     await act(async () => {
-      container = render(<WindowLivenessInitializers />).container
+      container = renderLiveness().container
     })
     expect(mountedModules(container)).toContain("exit-confirmation-dialog")
   })
@@ -86,7 +128,7 @@ describe("WindowLivenessInitializers", () => {
       mockPetRole = role
       let container!: HTMLElement
       await act(async () => {
-        container = render(<WindowLivenessInitializers />).container
+        container = renderLiveness().container
       })
       expect(container.querySelectorAll('[data-testid="liveness-child"]')).toHaveLength(0)
     }

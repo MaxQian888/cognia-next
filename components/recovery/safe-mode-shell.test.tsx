@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
@@ -7,6 +7,26 @@ import { RECOVERY_ORDER, type RecoveryStateV1 } from "@cognia/logging"
 import messages from "@/i18n/messages/en.json"
 
 import { SAFE_MODE_SUBSYSTEMS, SafeModeShell } from "./safe-mode-shell"
+
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
+const minimize = jest.fn().mockResolvedValue(undefined)
+const toggleMaximize = jest.fn().mockResolvedValue(undefined)
+const close = jest.fn().mockResolvedValue(undefined)
+jest.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    minimize,
+    toggleMaximize,
+    close,
+    isMaximized: async () => false,
+    onResized: async () => () => {},
+  }),
+}))
+
+beforeEach(() => {
+  jest.clearAllMocks()
+  isTauriMock.mockReturnValue(false)
+})
 
 function state(overrides: Partial<RecoveryStateV1> = {}): RecoveryStateV1 {
   return {
@@ -40,6 +60,23 @@ function renderShell(props: Partial<React.ComponentProps<typeof SafeModeShell>> 
 }
 
 describe("SafeModeShell", () => {
+  it("keeps Windows window controls usable while recovery is probing", async () => {
+    isTauriMock.mockReturnValue(true)
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" })
+    const user = userEvent.setup()
+    renderShell({ probing: true })
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: messages.desktop.titleBar.close })).toBeEnabled()
+    )
+    await user.click(screen.getByRole("button", { name: messages.desktop.titleBar.minimize }))
+    await user.click(screen.getByRole("button", { name: messages.desktop.titleBar.maximize }))
+    await user.click(screen.getByRole("button", { name: messages.desktop.titleBar.close }))
+    expect(minimize).toHaveBeenCalledTimes(1)
+    expect(toggleMaximize).toHaveBeenCalledTimes(1)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("safe-mode-window-bar")).toHaveAttribute("data-tauri-drag-region")
+  })
+
   it("explains why the app is in diagnostics mode", () => {
     renderShell()
     expect(screen.getByRole("heading", { name: messages.safeMode.title })).toBeInTheDocument()

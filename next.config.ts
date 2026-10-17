@@ -73,7 +73,10 @@ const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME || new Date().toISOString()
 
 // Wave 4 / ADR-0026 — Serwist PWA.
 //
-// Enabled on web + Tauri builds; disabled on Capacitor mobile because the
+// Generated in the shared web/Tauri export, but registered only by the web
+// runtime. Desktop assets come from Tauri's local protocol; a network service
+// worker cannot fetch those assets reliably inside WebView2.
+// Disabled on Capacitor mobile because the
 // iOS WKWebView serves content from the `capacitor://localhost` custom
 // scheme, which standard ServiceWorker registration rejects. The mobile
 // shell relies on the Dexie-first SyncOrchestrator (lib/sync/companion-sync.ts)
@@ -119,8 +122,9 @@ const PRECACHE_PUBLIC_PATTERNS = [
 const withSerwist = withSerwistInit({
   swSrc: "app/sw.ts",
   swDest: "public/sw.js",
+  register: false,
   cacheOnNavigation: true,
-  reloadOnOnline: true,
+  reloadOnOnline: false,
   disable: disableSerwist,
   globPublicPatterns: PRECACHE_PUBLIC_PATTERNS,
   // Keep the general 2 MiB budget for optional model runtimes while admitting

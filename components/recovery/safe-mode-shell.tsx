@@ -17,6 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { settingsHref } from "@/lib/settings/deep-link"
+import { GuideWindowBar } from "@/components/guide/guide-window-bar"
 import type { RecoveryRetryAction } from "@/lib/tauri/recovery"
 
 /**
@@ -77,7 +78,10 @@ export function SafeModeShell({ state, probing, onRetry, secretStoreNotice }: Sa
         ))
 
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-3xl flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex min-h-svh w-full max-w-3xl flex-col gap-6 px-4 pt-20 pb-10">
+      <div className="fixed inset-x-0 top-0 z-50 bg-background">
+        <GuideWindowBar wordmark={t("title")} testIdPrefix="safe-mode" />
+      </div>
       <header className="flex items-start gap-3">
         <AlertTriangle className="mt-1 size-6 shrink-0 text-amber-500" aria-hidden />
         <div className="space-y-1">

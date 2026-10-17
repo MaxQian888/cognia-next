@@ -445,6 +445,7 @@ test("outside Tauri it is a plain application bar: no window controls, no menuba
   expect(screen.getByTestId("title-bar")).toHaveClass("h-[var(--chrome-h)]")
   expect(screen.queryByLabelText("desktop.titleBar.minimize")).toBeNull()
   expect(screen.queryByLabelText("desktop.titleBar.close")).toBeNull()
+  expect(screen.getByTestId("title-bar")).not.toHaveAttribute("data-window-controls")
   expect(screen.queryByText("desktop.menu.file.label")).toBeNull()
   expect(screen.queryByTestId("title-bar-hamburger")).toBeNull()
 })
@@ -473,6 +474,7 @@ test("clicking minimize/maximize/close routes to the Tauri window API and logs",
   await waitFor(() =>
     expect(screen.getByLabelText("desktop.titleBar.minimize")).toBeInTheDocument()
   )
+  expect(screen.getByTestId("title-bar")).toHaveAttribute("data-window-controls", "true")
   await user.click(screen.getByLabelText("desktop.titleBar.minimize"))
   await waitFor(() => expect(minimize).toHaveBeenCalled())
   expect(logInfo).toHaveBeenCalledWith("title-bar minimize")
@@ -490,6 +492,7 @@ test("hides menubar and window controls on Mac (system menu owns them)", async (
   render(<TitleBar />)
   await waitFor(() => expect(screen.queryByLabelText("desktop.titleBar.minimize")).toBeNull())
   expect(screen.queryByLabelText("desktop.titleBar.close")).toBeNull()
+  expect(screen.getByTestId("title-bar")).not.toHaveAttribute("data-window-controls")
   expect(screen.queryByText("desktop.menu.file.label")).toBeNull()
 })
 

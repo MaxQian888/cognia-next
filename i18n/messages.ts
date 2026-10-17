@@ -15,6 +15,8 @@ import enSplash from "./messages/en/mobile/splash.json"
 import zhSplash from "./messages/zh-CN/mobile/splash.json"
 import enBarcodeScanner from "./messages/en/mobile/barcodeScanner.json"
 import zhBarcodeScanner from "./messages/zh-CN/mobile/barcodeScanner.json"
+import enDesktop from "./messages/en/desktop.json"
+import zhDesktop from "./messages/zh-CN/desktop.json"
 import { defaultLocale, type Locale } from "./config"
 
 export type Messages = typeof en
@@ -24,6 +26,14 @@ export const startupMessages = {
   en: {
     account: enAccount,
     common: enCommon,
+    desktop: {
+      titleBar: {
+        minimize: enDesktop.titleBar.minimize,
+        maximize: enDesktop.titleBar.maximize,
+        restore: enDesktop.titleBar.restore,
+        close: enDesktop.titleBar.close,
+      },
+    },
     loading: enLoading,
     diagnostics: enDiagnostics,
     exitDialog: enExit,
@@ -33,6 +43,14 @@ export const startupMessages = {
   "zh-CN": {
     account: zhAccount,
     common: zhCommon,
+    desktop: {
+      titleBar: {
+        minimize: zhDesktop.titleBar.minimize,
+        maximize: zhDesktop.titleBar.maximize,
+        restore: zhDesktop.titleBar.restore,
+        close: zhDesktop.titleBar.close,
+      },
+    },
     loading: zhLoading,
     diagnostics: zhDiagnostics,
     exitDialog: zhExit,

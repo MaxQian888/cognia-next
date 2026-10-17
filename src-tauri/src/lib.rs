@@ -542,6 +542,10 @@ pub fn run() {
                 return;
             }
 
+            if let Err(error) = webview.eval(webview_watchdog::NATIVE_SERVICE_WORKER_RECOVERY) {
+                log::warn!("native asset service-worker recovery could not run: {error}");
+            }
+
             let watchdog = webview.state::<webview_watchdog::WebviewWatchdog>();
             if !watchdog.record_initial_load_finished(std::time::Instant::now()) {
                 return;
@@ -550,18 +554,31 @@ pub fn run() {
             let handle = webview.app_handle().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(webview_watchdog::BOOT_REVEAL_GRACE).await;
-                let Some(window) = handle.get_webview_window("main") else {
-                    return;
-                };
-                let visible = window.is_visible().unwrap_or(true);
-                let watchdog = handle.state::<webview_watchdog::WebviewWatchdog>();
-                if watchdog.poll_boot_reveal(std::time::Instant::now(), visible)
-                    == webview_watchdog::BootRevealAction::Reveal
-                {
-                    log::warn!(
-                        "main window still hidden 8s after document load; force-showing (renderer never signaled first paint)"
-                    );
-                    window_utils::bring_window_to_front(&window);
+                let main_thread_handle = handle.clone();
+                // Decide and reveal on the GUI thread so a late renderer ack
+                // cannot remove the frame just before this fallback adds it.
+                if let Err(error) = handle.run_on_main_thread(move || {
+                    let Some(window) = main_thread_handle.get_webview_window("main") else {
+                        return;
+                    };
+                    let visible = window.is_visible().unwrap_or(true);
+                    let watchdog = main_thread_handle.state::<webview_watchdog::WebviewWatchdog>();
+                    if watchdog.poll_boot_reveal(std::time::Instant::now(), visible)
+                        == webview_watchdog::BootRevealAction::Reveal
+                    {
+                        log::warn!(
+                            "main window still hidden 8s after document load; force-showing (renderer never signaled first paint)"
+                        );
+                        // React owns the normal controls. If it never starts,
+                        // Windows must still provide a usable native frame.
+                        #[cfg(windows)]
+                        if let Err(error) = window.set_decorations(true) {
+                            log::warn!("boot fallback window frame could not be shown: {error}");
+                        }
+                        window_utils::bring_window_to_front(&window);
+                    }
+                }) {
+                    log::warn!("boot fallback could not reach the main thread: {error}");
                 }
             });
         })

@@ -5,7 +5,8 @@
  * Compiled by `@serwist/next` at build time. The `swSrc` config in
  * `next.config.ts` points here; `swDest` is `public/sw.js`. Disabled for
  * Capacitor mobile builds (the iOS WKWebView's `capacitor://localhost`
- * scheme rejects SW registration); enabled on web + Tauri.
+ * scheme rejects SW registration). The shared export emits it for the web
+ * PWA only; Tauri loads packaged assets and must not register this worker.
  *
  * Runtime caching strategy:
  *   - **NetworkFirst** for `/api/_rpc/sync_pull` — the sync orchestrator

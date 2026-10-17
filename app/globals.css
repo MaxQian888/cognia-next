@@ -5464,3 +5464,9 @@ body[data-edge-resizing] iframe {
 body[data-edge-resizing] :is(#conversation-sidebar, [data-shell-edge-panel]) {
   transition: none !important;
 }
+
+/* The frameless desktop keeps controls while a gate replaces the app shell. */
+body:has([data-window-controls]:not(.native-window-controls-fallback))
+  [data-window-controls-fallback] {
+  display: none;
+}
