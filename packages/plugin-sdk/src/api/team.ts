@@ -13,6 +13,8 @@
  */
 
 export type {
+  PluginBestOfNStartInput,
+  PluginBestOfNStartResult,
   PluginTeamAPI,
   PluginTeamCreateInput,
   PluginTeamDuplicateInput,
@@ -24,6 +26,8 @@ export type {
   PluginTeamTeammateCreateInput,
   PluginTeamTeammatePatch,
 } from "@/lib/plugin/api/team-api"
+
+export type { BestOfNPublicCandidate, BestOfNPublicRun } from "@/lib/best-of-n/public-run"
 
 export type {
   AgentTaskComment,

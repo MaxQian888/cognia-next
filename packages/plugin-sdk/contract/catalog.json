@@ -11965,6 +11965,54 @@
           "resourceEffect": {
             "kind": "none"
           }
+        },
+        {
+          "id": "team.startBestOfN",
+          "name": "startBestOfN",
+          "requiredPermissions": ["agent:dispatch"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "team.getBestOfN",
+          "name": "getBestOfN",
+          "requiredPermissions": ["team:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "team.listBestOfN",
+          "name": "listBestOfN",
+          "requiredPermissions": ["team:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "team.cancelBestOfN",
+          "name": "cancelBestOfN",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
         }
       ]
     },

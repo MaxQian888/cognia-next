@@ -2434,6 +2434,18 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.team.stop": {
     kind: "none",
   },
+  "ctx.team.startBestOfN": {
+    kind: "none",
+  },
+  "ctx.team.getBestOfN": {
+    kind: "none",
+  },
+  "ctx.team.listBestOfN": {
+    kind: "none",
+  },
+  "ctx.team.cancelBestOfN": {
+    kind: "none",
+  },
   "ctx.templates.register": {
     kind: "returned-disposer",
   },

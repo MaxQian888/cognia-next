@@ -79,7 +79,7 @@ Contract `1.3.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.sites` | 5 | `database:read` | frontend, hybrid | internal |
 | `ctx.storage` | 12 | None | frontend, hybrid, python | internal |
 | `ctx.subscription` | 7 | `subscription:read` | frontend, hybrid | sensitive |
-| `ctx.team` | 30 | `team:write`, `team:read`, `agent:dispatch`, `agent:control` | frontend, hybrid, python | sensitive |
+| `ctx.team` | 34 | `team:write`, `team:read`, `agent:dispatch`, `agent:control` | frontend, hybrid, python | sensitive |
 | `ctx.templates` | 18 | `templates:contribute`, `templates:read`, `templates:library:write`, `templates:instantiate` | frontend, hybrid, python | internal |
 | `ctx.terminal` | 11 | `terminal:safety`, `terminal:spawn`, `terminal:kill`, `terminal:completion`, `terminal:write` | frontend, hybrid | internal |
 | `ctx.theme` | 16 | `theme:write`, `theme:read` | frontend, hybrid | internal |
@@ -1211,6 +1211,10 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `team.pause` | `agent:control` | medium | Yes | frontend, hybrid, python |
 | `team.resume` | `agent:control` | medium | Yes | frontend, hybrid, python |
 | `team.stop` | `agent:control` | medium | Yes | frontend, hybrid, python |
+| `team.startBestOfN` | `agent:dispatch` | medium | No | frontend, hybrid, python |
+| `team.getBestOfN` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.listBestOfN` | `team:read` | medium | Yes | frontend, hybrid, python |
+| `team.cancelBestOfN` | `agent:control` | medium | Yes | frontend, hybrid, python |
 
 ## `ctx.templates`
 

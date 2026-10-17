@@ -16080,6 +16080,62 @@ API_NAMESPACE_CONTRACTS = [
                     "kind": "none",
                 },
             },
+            {
+                "id": "team.startBestOfN",
+                "name": "startBestOfN",
+                "requiredPermissions": [
+                    "agent:dispatch",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "team.getBestOfN",
+                "name": "getBestOfN",
+                "requiredPermissions": [
+                    "team:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "team.listBestOfN",
+                "name": "listBestOfN",
+                "requiredPermissions": [
+                    "team:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "team.cancelBestOfN",
+                "name": "cancelBestOfN",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
         ],
     },
     {

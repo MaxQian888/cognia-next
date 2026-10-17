@@ -94,6 +94,45 @@ jest.mock("@/lib/templates/runtime", () => ({
   }),
 }))
 
+const bestOfN = {
+  canManage: true,
+  prepare: jest.fn(),
+  start: jest.fn(),
+  cancel: jest.fn(),
+  run: jest.fn(),
+  rows: [] as unknown[],
+}
+jest.mock("@/lib/best-of-n/projection", () => ({
+  canManageBestOfNRuns: () => bestOfN.canManage,
+  getBestOfNRun: (...a: unknown[]) => bestOfN.run(...a),
+}))
+jest.mock("@/lib/best-of-n/entry", () => ({
+  prepareBestOfNChat: (...a: unknown[]) => bestOfN.prepare(...a),
+  startPreparedBestOfN: (...a: unknown[]) => bestOfN.start(...a),
+}))
+jest.mock("@/lib/best-of-n/service", () => ({
+  cancelBestOfN: (...a: unknown[]) => bestOfN.cancel(...a),
+}))
+jest.mock("@/lib/db/schema", () => ({
+  ...jest.requireActual("@/lib/db/schema"),
+  getDb: () => ({ bestOfNRuns: { toArray: async () => bestOfN.rows } }),
+}))
+const bestOfNGroup = (groupId: string, createdAt: number) => ({
+  groupId,
+  phase: "running",
+  n: 2,
+  baseSha: "base",
+  targetRef: "best-of-n/r",
+  targetIsNew: true,
+  selectedCandidateId: null,
+  archiveStatus: "pending",
+  error: null,
+  createdAt,
+  ownerId: "owner",
+  version: 3,
+  candidates: [],
+})
+
 const PLUGIN = "tracker-sync"
 
 const seed = () => {
@@ -359,6 +398,94 @@ describe("createTeamAPI", () => {
       managerPause.mockRejectedValueOnce(new Error("no live run"))
       const api = createTeamAPI(PLUGIN)
       expect(await api.pause(team.id)).toEqual({ ok: false, reason: "no live run" })
+    })
+  })
+
+  describe("best-of-N", () => {
+    beforeEach(() => {
+      bestOfN.canManage = true
+      bestOfN.prepare.mockReset().mockResolvedValue({ targetRef: "best-of-n/new" })
+      bestOfN.start.mockReset().mockResolvedValue(bestOfNGroup("g1", 1))
+      bestOfN.cancel.mockReset().mockResolvedValue(bestOfNGroup("g1", 1))
+      bestOfN.run.mockReset()
+      bestOfN.rows = []
+    })
+
+    it("starts onto a new result branch only, through the composer's preview and start", async () => {
+      guard.registerPlugin(PLUGIN, ["agent:dispatch"])
+      const api = createTeamAPI(PLUGIN)
+      const result = await api.startBestOfN({
+        sessionId: "s",
+        prompt: "fix",
+        agents: ["session", "codex", "session"],
+      })
+      expect(bestOfN.prepare).toHaveBeenCalledWith("s", "fix", 3, ["session", "codex", "session"])
+      expect(bestOfN.start).toHaveBeenCalledWith(expect.anything(), {
+        targetRef: "best-of-n/new",
+        targetIsNew: true,
+      })
+      expect(result.ok).toBe(true)
+      expect(JSON.stringify(result)).not.toContain("owner")
+    })
+
+    it("observes from the synced projection, newest first", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read"])
+      bestOfN.rows = [{ group: bestOfNGroup("old", 1) }, { group: bestOfNGroup("new", 2) }]
+      bestOfN.run
+        .mockResolvedValueOnce({ group: bestOfNGroup("g1", 1) })
+        .mockResolvedValueOnce(undefined)
+      const api = createTeamAPI(PLUGIN)
+      expect((await api.listBestOfN()).map((run) => run.groupId)).toEqual(["new", "old"])
+      expect((await api.getBestOfN("g1"))?.groupId).toBe("g1")
+      expect(await api.getBestOfN("missing")).toBeNull()
+    })
+
+    it("gates start on agent:dispatch, cancel on agent:control and reads on team:read", () => {
+      guard.registerPlugin(PLUGIN, ["team:write"])
+      const api = createTeamAPI(PLUGIN)
+      expect(() => api.startBestOfN({ sessionId: "s", prompt: "p" })).toThrow(PermissionError)
+      expect(() => api.cancelBestOfN("g1")).toThrow(PermissionError)
+      expect(() => api.getBestOfN("g1")).toThrow(PermissionError)
+      expect(() => api.listBestOfN()).toThrow(PermissionError)
+    })
+
+    it("has no way to select or publish a winner, whatever the permissions", () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write", "agent:dispatch", "agent:control"])
+      const api = createTeamAPI(PLUGIN) as unknown as Record<string, unknown>
+      for (const name of Object.keys(api).concat(Object.getOwnPropertyNames(api)))
+        expect(name).not.toMatch(/select|pick|publish|approve|judge/i)
+      for (const name of ["selectBestOfN", "pickBestOfN", "publishBestOfN", "archiveBestOfN"])
+        expect(api[name]).toBeUndefined()
+    })
+
+    it("refuses start and cancel away from the executing desktop Host", async () => {
+      guard.registerPlugin(PLUGIN, ["agent:dispatch", "agent:control"])
+      bestOfN.canManage = false
+      const api = createTeamAPI(PLUGIN)
+      expect(await api.startBestOfN({ sessionId: "s", prompt: "p" })).toEqual({
+        ok: false,
+        reason: "host_unavailable",
+      })
+      expect(await api.cancelBestOfN("g1")).toEqual({ ok: false, reason: "host_unavailable" })
+      expect(bestOfN.prepare).not.toHaveBeenCalled()
+      expect(bestOfN.cancel).not.toHaveBeenCalled()
+    })
+
+    it("reports refusals as values", async () => {
+      guard.registerPlugin(PLUGIN, ["agent:dispatch", "agent:control"])
+      const api = createTeamAPI(PLUGIN)
+      expect(await api.startBestOfN({ sessionId: "s", prompt: "p", n: 5 })).toEqual({
+        ok: false,
+        reason: "invalid_count",
+      })
+      bestOfN.prepare.mockRejectedValueOnce(new Error("unknownAgent"))
+      expect(await api.startBestOfN({ sessionId: "s", prompt: "p" })).toEqual({
+        ok: false,
+        reason: "unknownAgent",
+      })
+      expect(await api.cancelBestOfN("g1")).toEqual({ ok: true })
+      bestOfN.cancel.mockRejectedValueOnce(new Error("version conflict"))
+      expect(await api.cancelBestOfN("g1")).toEqual({ ok: false, reason: "version conflict" })
     })
   })
 

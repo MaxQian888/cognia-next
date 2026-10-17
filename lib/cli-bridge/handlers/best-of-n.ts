@@ -10,37 +10,13 @@
  */
 
 import type { BestOfNGroup } from "@/types/best-of-n"
+import type { BestOfNPublicCandidate, BestOfNPublicRun } from "@/lib/best-of-n/public-run"
 
 export type BestOfNCliAction =
   "list" | "status" | "start" | "cancel" | "select" | "publish" | "archive"
 
-export interface BestOfNCliCandidate {
-  index: number
-  candidateId: string
-  status: string
-  runtime: "cognia" | "external"
-  agent: string
-  model: string | null
-  headSha: string | null
-  hasChanges: boolean
-  /** Null is unknown, never free. */
-  costUsd: number | null
-  error: string | null
-}
-
-export interface BestOfNCliRun {
-  groupId: string
-  phase: string
-  n: number
-  baseSha: string
-  targetRef: string
-  targetIsNew: boolean
-  selectedCandidateId: string | null
-  archiveStatus: string
-  error: string | null
-  createdAt: number
-  candidates: BestOfNCliCandidate[]
-}
+export type BestOfNCliCandidate = BestOfNPublicCandidate
+export type BestOfNCliRun = BestOfNPublicRun
 
 export type BestOfNCliResult =
   | { ok: true; runs: BestOfNCliRun[] }
@@ -58,34 +34,8 @@ export type BestOfNCliResult =
 const string = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null)
 
 export async function projectCliRun(group: BestOfNGroup): Promise<BestOfNCliRun> {
-  const { describeBestOfNAgent } = await import("@/lib/best-of-n/agents")
-  return {
-    groupId: group.groupId,
-    phase: group.phase,
-    n: group.n,
-    baseSha: group.baseSha,
-    targetRef: group.targetRef,
-    targetIsNew: group.targetIsNew,
-    selectedCandidateId: group.selectedCandidateId,
-    archiveStatus: group.archiveStatus,
-    error: group.error,
-    createdAt: group.createdAt,
-    candidates: group.candidates.map((candidate) => {
-      const runtime = describeBestOfNAgent(candidate.agent)
-      return {
-        index: candidate.index + 1,
-        candidateId: candidate.candidateId,
-        status: candidate.status,
-        runtime: runtime.kind,
-        agent: runtime.kind === "external" ? (runtime.configId ?? "unknown") : runtime.agentId,
-        model: candidate.agent.model ?? null,
-        headSha: candidate.headSha,
-        hasChanges: candidate.hasChanges,
-        costUsd: candidate.costUsd,
-        error: candidate.error,
-      }
-    }),
-  }
+  const { toPublicBestOfNRun } = await import("@/lib/best-of-n/public-run")
+  return toPublicBestOfNRun(group)
 }
 
 function candidateId(group: BestOfNGroup, raw: unknown): string | null {

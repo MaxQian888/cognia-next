@@ -40,6 +40,7 @@
 import { loggers } from "@cognia/logging"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { toPublicBestOfNRun, type BestOfNPublicRun } from "@/lib/best-of-n/public-run"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import type { TaskMoveError } from "@/lib/ai/agent/team/gates/task-move-guard"
 import type { SubAgentPriority } from "@/types/agent/sub-agent"
@@ -160,6 +161,24 @@ export interface PluginTeamRunControlResult {
   reason?: string
   /** The run id, when starting produced one. */
   runId?: string
+}
+
+/** Starting best-of-N attempts from a plugin. Always onto a new result branch. */
+export interface PluginBestOfNStartInput {
+  /** A direct agent conversation; its repository, commit and agent are the base. */
+  sessionId: string
+  prompt: string
+  /** 2–4. Defaults to the number of `agents`, else 2. */
+  n?: number
+  /** One per attempt: `session`, an external agent configuration id, or a preset id. */
+  agents?: string[]
+}
+
+export interface PluginBestOfNStartResult {
+  ok: boolean
+  /** Present when `ok` is false: `host_unavailable`, `invalid_count`, or the refusal. */
+  reason?: string
+  run?: BestOfNPublicRun
 }
 
 /** Agent-Team board API exposed to plugins. */
@@ -302,6 +321,23 @@ export interface PluginTeamAPI {
   resume(teamId: string): Promise<PluginTeamRunControlResult>
   /** Stop a run for good. Requires `agent:control`. */
   stop(teamId: string): Promise<PluginTeamRunControlResult>
+
+  // ------------------------------------------------------------ best-of-N
+  // Start and observe only. Choosing and publishing a winner is a person's
+  // decision (ADR-0230): there is no select or publish here, and none may be
+  // added. Reads come from the synced projection, so they work on every
+  // platform; start and cancel need the executing desktop Host.
+  /**
+   * Start independent attempts on a new result branch. Spends tokens, so it
+   * takes `agent:dispatch`, like {@link start}. Never moves an existing branch.
+   */
+  startBestOfN(input: PluginBestOfNStartInput): Promise<PluginBestOfNStartResult>
+  /** One run, or `null`. Requires `team:read`. */
+  getBestOfN(groupId: string): Promise<BestOfNPublicRun | null>
+  /** Every run this device knows, newest first. Requires `team:read`. */
+  listBestOfN(): Promise<BestOfNPublicRun[]>
+  /** Stop every attempt of a run. Requires `agent:control`. */
+  cancelBestOfN(groupId: string): Promise<PluginTeamRunControlResult>
 }
 
 /**
@@ -641,6 +677,48 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
     pause: async (teamId) => runControl(teamId, "pause"),
     resume: async (teamId) => runControl(teamId, "resume"),
     stop: async (teamId) => runControl(teamId, "shutdown"),
+
+    // best-of-N: start and observe only
+    startBestOfN: async (input) => {
+      const { canManageBestOfNRuns } = await import("@/lib/best-of-n/projection")
+      if (!canManageBestOfNRuns()) return { ok: false, reason: "host_unavailable" }
+      const n = input.n ?? input.agents?.length ?? 2
+      if (n !== 2 && n !== 3 && n !== 4) return { ok: false, reason: "invalid_count" }
+      try {
+        const { prepareBestOfNChat, startPreparedBestOfN } = await import("@/lib/best-of-n/entry")
+        const prepared = await prepareBestOfNChat(input.sessionId, input.prompt, n, input.agents)
+        const group = await startPreparedBestOfN(prepared, {
+          targetRef: prepared.targetRef,
+          targetIsNew: true,
+        })
+        return { ok: true, run: toPublicBestOfNRun(group) }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : "dispatch_error" }
+      }
+    },
+    getBestOfN: async (groupId) => {
+      const { getBestOfNRun } = await import("@/lib/best-of-n/projection")
+      const run = await getBestOfNRun(groupId)
+      return run ? toPublicBestOfNRun(run.group) : null
+    },
+    listBestOfN: async () => {
+      const { getDb } = await import("@/lib/db/schema")
+      const runs = await getDb().bestOfNRuns.toArray()
+      return runs
+        .map((run) => toPublicBestOfNRun(run.group))
+        .sort((a, b) => b.createdAt - a.createdAt)
+    },
+    cancelBestOfN: async (groupId) => {
+      const { canManageBestOfNRuns } = await import("@/lib/best-of-n/projection")
+      if (!canManageBestOfNRuns()) return { ok: false, reason: "host_unavailable" }
+      try {
+        const { cancelBestOfN } = await import("@/lib/best-of-n/service")
+        await cancelBestOfN(groupId)
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : "dispatch_error" }
+      }
+    },
   }
 
   return createGuardedAPI(pluginId, api, {
@@ -683,5 +761,9 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
     pause: "agent:control",
     resume: "agent:control",
     stop: "agent:control",
+    startBestOfN: "agent:dispatch",
+    getBestOfN: "team:read",
+    listBestOfN: "team:read",
+    cancelBestOfN: "agent:control",
   })
 }
