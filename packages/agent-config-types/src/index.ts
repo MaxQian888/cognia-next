@@ -2704,6 +2704,12 @@ export interface ChatSession {
   sdkSessionStorage?: { backend: "filesystem" | "host-sqlite"; workspace?: string | null }
   /** Nonsecret, agent-scoped native session link for isolated gateway task resume. */
   externalAgentSession?: { agentId: string; sessionId: string }
+  /** Original Host identities captured before delivery admission; no transport credentials. */
+  deliverySourceHosts?: Array<{
+    kind: "local" | "remote"
+    hostId: string
+    endpointIdentity?: string
+  }>
   /**
    * Which models each external agent runs on in THIS conversation, keyed by
    * the local agent id or the Host configuration id.

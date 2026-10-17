@@ -101,7 +101,7 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "executionRuns".to_string(),
             description: "Canonical execution summaries (read-only remote-safe projection; private event rows remain on the executing host)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         SyncTableDescriptor {
             name: "twinProfile".to_string(),
@@ -368,7 +368,7 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         SyncTableDescriptor {
             name: "executionRunBindings".to_string(),
             description: "Run-to-conversation delivery bindings behind the Inbox delegation chips (cursored on updatedAt; controls travel back as run RPCs)".to_string(),
-            has_tombstones: false,
+            has_tombstones: true,
         },
         // Conversation folders: the sections the sidebar files conversations
         // into. Writes travel back as `folder.*` HostState intents.
@@ -532,6 +532,9 @@ mod tests {
             "petAchievements",
             "petInventory",
             "petCharacterBindings",
+            // Deleting a managed-desktop session removes its run projections.
+            "executionRuns",
+            "executionRunBindings",
         ] {
             assert_eq!(by_name.get(name), Some(&true), "{name} must tombstone");
         }
@@ -539,7 +542,6 @@ mod tests {
             "settings",
             "terminalHistory",
             "connectorHeartbeats",
-            "executionRuns",
             "petActivityLog",
             // A deleted goal's tombstone carries its events; the log has none.
             "goalEvents",

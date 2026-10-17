@@ -11,6 +11,13 @@ import {
 import { useSessionStatus, useSessionPendingApprovals, useSessionErrorMessage } from "@/stores/chat"
 import { useExternalElicitationStore } from "@/stores/agent/external-elicitation-store"
 
+jest.mock("@/components/agent-runs/managed-desktop-results", () => ({
+  ManagedDesktopResults: jest.fn(({ conversationId }: { conversationId: string }) => (
+    <section aria-label="acceptance-history">{conversationId}</section>
+  )),
+}))
+import { ManagedDesktopResults } from "@/components/agent-runs/managed-desktop-results"
+
 jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string, values?: Record<string, unknown>) =>
     `${ns}.${key}${values ? JSON.stringify(values) : ""}`,
@@ -270,4 +277,21 @@ it("marks open questions apart from subtasks, as the compact card does", () => {
   const [question, subtask] = screen.getAllByRole("listitem")
   expect(question.querySelector("svg")?.getAttribute("class")).toContain("text-warning")
   expect(subtask.querySelector("svg")?.getAttribute("class")).toContain("text-info")
+})
+
+it("discovers acceptance by source conversation without any retained coding run or journal", () => {
+  const source = { ...session, deliverySourceHosts: [{ kind: "local" as const, hostId: "host" }] }
+  const view = render(<SessionOverviewPanel {...props} session={source} messages={[]} />)
+  expect(screen.getByRole("region", { name: "acceptance-history" })).toHaveTextContent("one")
+  expect(jest.mocked(ManagedDesktopResults).mock.calls.at(-1)?.[0]).toEqual({
+    conversationId: "one",
+  })
+  view.rerender(
+    <SessionOverviewPanel {...props} session={{ ...source, id: "two" }} messages={[]} />
+  )
+  expect(jest.mocked(ManagedDesktopResults).mock.calls.at(-1)?.[0]).toEqual({
+    conversationId: "two",
+  })
+  view.rerender(<SessionOverviewPanel {...props} session={session} />)
+  expect(screen.queryByRole("region", { name: "acceptance-history" })).not.toBeInTheDocument()
 })

@@ -459,7 +459,12 @@ fn copy_consistent_tree(root: &Path, current: &Path, destination: &Path) -> Resu
         if relative
             .components()
             .next()
-            .is_some_and(|component| component.as_os_str() == "backups")
+            .is_some_and(|component| {
+                let name = component.as_os_str();
+                // ADR-0233: owner-private acceptance evidence has no implicit
+                // backup/export destination, including encrypted Host backups.
+                name == "backups" || name == "managed-desktop-evidence"
+            })
         {
             continue;
         }
@@ -827,6 +832,25 @@ mod tests {
         let mut tampered = envelope;
         *tampered.last_mut().unwrap() ^= 1;
         assert!(decrypt_archive(&tampered, &key).is_err());
+    }
+
+    #[test]
+    fn archive_excludes_acceptance_metadata_images_and_pending_evidence_files() {
+        let source = tempfile::tempdir().unwrap();
+        let evidence = source.path().join("managed-desktop-evidence");
+        fs::create_dir_all(evidence.join("staging")).unwrap();
+        fs::write(evidence.join("index.enc"), b"private decisions").unwrap();
+        fs::write(evidence.join("staging/frame.enc"), b"private screenshot").unwrap();
+        fs::write(source.path().join("config.json"), b"{}").unwrap();
+        let built = build_archive(source.path(), "private-evidence", "key-v1").unwrap();
+        assert_eq!(built.manifest.files.len(), 1);
+        assert_eq!(built.manifest.files[0].path, "config.json");
+        let decoder = flate2::read::GzDecoder::new(built.archive_bytes.as_slice());
+        let mut archive = tar::Archive::new(decoder);
+        for entry in archive.entries().unwrap() {
+            let entry = entry.unwrap();
+            assert!(!entry.path().unwrap().to_string_lossy().contains("managed-desktop-evidence"));
+        }
     }
 
     #[test]

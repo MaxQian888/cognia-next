@@ -481,9 +481,15 @@
         "capture": "无法获取桌面画面，控制权已释放。",
         "control": "无法获取或续期控制权，请重新接管。",
         "input": "无法确认输入是否成功，控制权已释放；请检查画面后再重试。",
-        "release": "无法确认控制权是否已释放；控制权将在 15 秒内自动过期。"
+        "release": "无法确认控制权是否已释放；控制权将在 15 秒内自动过期。",
+        "session": "账户或 Host 连接已变化。请关闭并重新打开桌面以继续查看，准备好后再明确接管。"
       },
-      "doubleClick": "双击模式"
+      "doubleClick": "双击模式",
+      "quarantined": "输入清理状态不确定，暂不可控制",
+      "otherController": "其他用户正在控制",
+      "agentDormant": "任务与 agent 控制保持 dormant，直到交接功能完成。",
+      "mobileObservation": "移动端仅支持查看，桌面输入已禁用。",
+      "qualificationRequired": "云桌面查看与控制需要另行授权并通过 GUI smoke 验证。"
     },
     "deleteConfirmTitle": "删除 {name}？",
     "deleteConfirmDescription": "此操作将永久删除容器及其内部存储的所有文件，挂载的主机目录中的文件会保留。请先导出需要保留的文件。",

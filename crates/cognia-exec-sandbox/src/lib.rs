@@ -20,8 +20,12 @@
 //! unchanged. The three launcher binaries live here now; their output names
 //! are unchanged.
 
+#[cfg(target_os = "linux")]
+pub mod desktop;
 pub mod env;
 pub mod filesystem_plan;
+#[cfg(target_os = "linux")]
+pub mod importer;
 pub mod launcher;
 pub mod limits;
 #[cfg(target_os = "linux")]

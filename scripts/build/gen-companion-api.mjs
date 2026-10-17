@@ -39,6 +39,8 @@ const RESPONSE_SCHEMA_CATALOG_PATH = "protocol/companion-response-schemas.json"
 const HEADLESS_DISPOSITIONS_PATH = "protocol/headless-command-dispositions.json"
 const ZOD_REQUEST_SCHEMA_PATH = "scripts/build/companion-request-schema-contracts.mjs"
 const RPC_DISPATCH_SOURCE_PATHS = [
+  "crates/cognia-companion-rpc/src/managed_desktops.rs",
+  "crates/cognia-companion-rpc/src/managed_desktop_results.rs",
   ...[
     "chat",
     "codex_app",
@@ -620,7 +622,7 @@ const HOST_CATEGORIES = [
     // become `scheduledTasks`, and its executors are the workflow
     // orchestrator, a Squad or one agent turn. `agents` is about runtimes and
     // sessions, which a Bot never owns.
-    pattern: /^(workflow_|scheduled_task_|automation_|background_|bot_)/,
+    pattern: /^(workflow_|scheduled_task_|automation_|managed_desktop_|background_|bot_)/,
   },
   {
     id: "connectors",
@@ -869,11 +871,13 @@ function renderHeadlessContractIdentity(catalog) {
 function renderBridgeFixture(source, catalog) {
   const fixture = JSON.parse(source)
   fixture.protocol = BRIDGE_PROTOCOL_VERSION
-  for (const frame of Object.values(fixture.frames ?? {})) frame.v = BRIDGE_PROTOCOL_VERSION
-  for (const name of ["hello", "helloAck", "helloRefused"]) {
-    fixture.frames[name].protocol = BRIDGE_PROTOCOL_VERSION
-    fixture.frames[name].catalogHash = catalog.catalogHash
-    fixture.frames[name].contractVersion = catalog.schemaVersion
+  for (const frame of Object.values(fixture.frames ?? {})) {
+    frame.v = BRIDGE_PROTOCOL_VERSION
+    if (["hello", "hello_ack", "hello_refused"].includes(frame.type)) {
+      frame.protocol = BRIDGE_PROTOCOL_VERSION
+      frame.catalogHash = catalog.catalogHash
+      frame.contractVersion = catalog.schemaVersion
+    }
   }
   return `${JSON.stringify(fixture, null, 2)}\n`
 }
@@ -1013,7 +1017,7 @@ export function extractCommandArgumentSchemas(source) {
   // `#[tauri::command]` wrappers share, so the function is `pub` and named for
   // what it does rather than for the RPC table it happens to serve. The arms
   // themselves are the same shape, which is all this scan reads.
-  const dispatchStart = ["pub(super) async fn dispatch(", "pub async fn dispatch_sftp("]
+  const dispatchStart = ["pub(super) async fn dispatch(", "pub async fn dispatch(", "pub async fn dispatch_sftp("]
     .map((marker) => source.indexOf(marker))
     .find((index) => index >= 0)
   if (dispatchStart === undefined) {

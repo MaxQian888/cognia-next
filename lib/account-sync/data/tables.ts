@@ -142,6 +142,8 @@ const SESSION_FIELDS = {
   externalAgentSession: "local",
   externalAgentModels: "local",
   externalAgentGatewaySessions: "local",
+  // Delivery authority is tied to the original local Host configuration.
+  deliverySourceHosts: "local",
   forkedFromSdkSessionId: "local",
   attachedChild: "local",
   spawnedTask: "local",

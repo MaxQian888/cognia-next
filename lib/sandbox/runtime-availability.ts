@@ -8,6 +8,8 @@ import { getMicrovmExec, subscribeMicrovmAvailability } from "@/lib/sandbox/micr
 import type { SandboxCapabilities, SandboxConnectionRow } from "@/types/sandbox"
 import { hasSandboxConnectionLifecycleAdapter } from "./connection-lifecycle"
 
+import { hasCurrentManagedDesktopQualification } from "./connection-capabilities"
+
 export type SandboxAvailabilityReason =
   | "available"
   | "probe-required"
@@ -86,7 +88,13 @@ export function projectSandboxConnectionCapabilities(
     Object.fromEntries(
       Object.entries(row.capabilities).map(([operation, enabled]) => [
         operation,
-        adapterAvailable && enabled,
+        adapterAvailable &&
+          enabled &&
+          !(
+            row.config.provider === "e2b" &&
+            operation === "create" &&
+            !hasCurrentManagedDesktopQualification(row.config)
+          ),
       ])
     )
   ) as SandboxCapabilities

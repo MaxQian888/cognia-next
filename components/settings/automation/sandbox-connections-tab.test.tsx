@@ -22,6 +22,9 @@ jest.mock("@/hooks/automation/use-sandbox-connections", () => ({
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+jest.mock("./managed-desktop-settings", () => ({
+  ManagedDesktopSettings: () => <div data-testid="managed-desktop-settings" />,
+}))
 jest.mock("./sandbox-desktop-viewer", () => ({ SandboxDesktopViewer: () => null }))
 
 import { SandboxConnectionsTab } from "@/components/settings/automation/sandbox-connections-tab"
@@ -95,7 +98,7 @@ test("add flow creates a connection with the typed name", async () => {
   fireEvent.click(screen.getByText("Save"))
   await waitFor(() =>
     expect(actions.create).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "lab", image: "cognia-cua-desktop:0.3.46-1" })
+      expect.objectContaining({ name: "lab", image: "cognia-cua-desktop:0.3.46-2" })
     )
   )
 })
@@ -195,4 +198,24 @@ test("renders bare inside a host that already titles it", () => {
   expect(screen.queryByText("home")).toBeInTheDocument()
   expect(document.querySelector('[data-slot="card"]')).toBeNull()
   expect(screen.getByTestId("sandbox-manage-c1")).toBeInTheDocument()
+})
+
+test("wires the managed desktop settings into the existing registry", () => {
+  renderTab()
+  expect(screen.getByTestId("managed-desktop-settings")).toBeInTheDocument()
+})
+
+test("remote managed-only presentation never offers or reads local Docker connections", () => {
+  connections = [dockerRow({ name: "local Docker must stay local" })]
+  render(
+    <NextIntlClientProvider locale="en" messages={en as Record<string, unknown>}>
+      <SandboxConnectionsTab
+        managedOnly
+        managedDesktopTarget={{ kind: "remote", hostId: "host-b" }}
+      />
+    </NextIntlClientProvider>
+  )
+  expect(screen.getByTestId("managed-desktop-settings")).toBeInTheDocument()
+  expect(screen.queryByText("local Docker must stay local")).not.toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "Add connection" })).not.toBeInTheDocument()
 })

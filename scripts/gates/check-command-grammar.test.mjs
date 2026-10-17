@@ -54,6 +54,16 @@ const resources = {
   git: {},
   browser: { children: { page: {} } },
 }
+
+test("managed desktop dispatch in the owning crate is audited", () => {
+  const gate = readFileSync(new URL("./check-command-grammar.mjs", import.meta.url), "utf8")
+  assert.ok(gate.includes("crates/cognia-companion-rpc/src/managed_desktops.rs"))
+  const source = readFileSync(
+    new URL("../../crates/cognia-companion-rpc/src/managed_desktops.rs", import.meta.url),
+    "utf8"
+  )
+  assert.equal(hasArm(source, "managed_desktop_create"), true)
+})
 const verbs = {
   standard: { list: "Page through a collection.", get: "Read one record." },
   custom: {

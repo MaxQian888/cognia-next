@@ -90,6 +90,11 @@
  *   account-generation event filtering. Rust owns gateway lock/switch/vault
  *   invalidation even without a renderer; the headless gateway owns its own
  *   host projection and never mounts this account-scoped UI bridge.
+ * - `managed-desktop-lifecycle` — ADR-0233 cloud resource journals, deadlines
+ *   and destroy retries belong to the native Host service in cognia-automation.
+ *   cognia-companion/server boot starts its reconciler independently of the
+ *   renderer or Node brain; registering a second sweeper here would duplicate
+ *   ownership. The TypeScript client is an explicit Host RPC caller only.
  * - `sandbox-session-runtime` — owns only immutable in-memory placement refs.
  *   Plugin deactivation drains existing E2B owners; the registered
  *   `plugin-runtime` teardown emits `APP_CLOSING` and force-disposes active and

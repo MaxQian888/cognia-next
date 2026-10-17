@@ -1094,6 +1094,7 @@ pub async fn rpc_handler(
         .get("idempotency-key")
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
+    let private_evidence = name.starts_with("managed_desktop_results_");
     let request = super::remote_execution::ExecutionRequest::new(
         name,
         args,
@@ -1116,7 +1117,7 @@ pub async fn rpc_handler(
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned),
     );
-    match super::remote_execution::execute(&state, request).await {
+    let response = match super::remote_execution::execute(&state, request).await {
         Ok(super::remote_execution::ExecutionOutcome::Completed {
             request_id,
             operation_id,
@@ -1158,7 +1159,8 @@ pub async fn rpc_handler(
             observation.finish(super::metrics::RpcOutcome::Error { saturated });
             error.into_response()
         }
-    }
+    };
+    private_evidence_response(private_evidence, response)
 }
 
 /// Loopback Headless RPC adapter. Authentication is provided by
@@ -1183,6 +1185,7 @@ pub async fn internal_rpc_handler(
         .get("idempotency-key")
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
+    let private_evidence = name.starts_with("managed_desktop_results_");
     let request = super::remote_execution::ExecutionRequest::new(
         name,
         args,
@@ -1196,7 +1199,7 @@ pub async fn internal_rpc_handler(
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned),
     );
-    match super::remote_execution::execute(&state, request).await {
+    let response = match super::remote_execution::execute(&state, request).await {
         Ok(super::remote_execution::ExecutionOutcome::Completed {
             operation_id,
             result,
@@ -1234,7 +1237,8 @@ pub async fn internal_rpc_handler(
             observation.finish(super::metrics::RpcOutcome::Error { saturated });
             error.into_response()
         }
-    }
+    };
+    private_evidence_response(private_evidence, response)
 }
 
 fn completed_rpc_response(
@@ -3840,5 +3844,27 @@ mod tests {
             super::super::command_manifest::CATALOG_HASH
         );
         assert_eq!(body["catalogUrl"], "/api/catalog");
+    }
+}
+
+// Private evidence is returned inline through authenticated RPC, never a cached
+// media URL. Apply the same header on both public and loopback HTTP transports.
+fn private_evidence_response(private: bool, mut response: Response) -> Response {
+    if private {
+        response.headers_mut().insert(axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-store"));
+    }
+    response
+}
+
+#[cfg(test)]
+mod private_evidence_tests {
+    use super::*;
+    #[test]
+    fn evidence_http_reads_never_inherit_media_cache_policy() {
+        let response = private_evidence_response(true, StatusCode::OK.into_response());
+        assert_eq!(response.headers().get(axum::http::header::CACHE_CONTROL).unwrap(), "no-store");
+        assert!(private_evidence_response(false, StatusCode::OK.into_response()).headers()
+            .get(axum::http::header::CACHE_CONTROL).is_none());
     }
 }

@@ -227,6 +227,7 @@
     "0229-per-workspace-port-leases",
     "0230-best-of-n-attempts-share-a-frozen-base",
     "0231-sandbox-snapshots-join-rootfs-and-workspace",
-    "0232-a-long-run-shows-an-estimate-never-a-budget"
+    "0232-a-long-run-shows-an-estimate-never-a-budget",
+    "0233-a-managed-desktop-accepts-a-delivered-commit"
   ]
 }

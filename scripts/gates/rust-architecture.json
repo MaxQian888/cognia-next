@@ -17,6 +17,8 @@
     "cognia-host-service": "foundation",
     "cognia-update-catalog": "foundation",
 
+    "cognia-e2b": "platform",
+    "cognia-desktop-guest": "platform",
     "cognia-jobs": "platform",
     "cognia-sidecar": "platform",
     "cognia-environment": "platform",
@@ -77,6 +79,8 @@
     "cognia-core -> cognia-problem",
     "cognia-companion-rpc -> cognia-companion",
     "cognia-sidecar -> cognia-exec-sandbox",
+    "cognia-desktop-guest -> cognia-exec-sandbox",
+    "cognia-e2b -> cognia-desktop-guest",
     "cognia-sidecar -> cognia-hooks",
     "cognia-sidecar -> cognia-companion-security",
     "cognia-secrets -> cognia-core",

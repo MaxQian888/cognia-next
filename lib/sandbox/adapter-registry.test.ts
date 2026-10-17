@@ -57,7 +57,7 @@ describe("sandboxAdapterFactoryFor", () => {
     // A pair appearing here without a working adapter would let the UI enable
     // controls that cannot run, which is the failure mode the capability
     // contract exists to prevent.
-    expect(adapterPairs()).toEqual(["docker:computer-server"])
+    expect(adapterPairs()).toEqual(["docker:computer-server", "e2b:computer-server"])
   })
 })
 
@@ -98,7 +98,7 @@ describe("providers that are declared but not implemented", () => {
     expect(hasSandboxAdapter(row)).toBe(false)
   })
 
-  it("lists docker as the only implemented pair", () => {
-    expect(adapterPairs()).toEqual(["docker:computer-server"])
+  it("lists lifecycle adapters while deferred providers stay absent", () => {
+    expect(adapterPairs()).toEqual(["docker:computer-server", "e2b:computer-server"])
   })
 })

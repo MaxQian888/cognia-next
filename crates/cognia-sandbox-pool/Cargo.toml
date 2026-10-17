@@ -38,11 +38,12 @@ kubernetes = ["dep:kube", "dep:k8s-openapi"]
 # E2B also fetches the agent bundle from its registry itself (the template
 # build copies its filesystem), so it links the registry transport, and the
 # Host's proxy policy for every call it makes.
-e2b = ["dep:flate2", "cognia-environment/registry"]
+e2b = ["dep:cognia-e2b", "dep:flate2", "cognia-environment/registry"]
 
 [dependencies]
 cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
 cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
+cognia-e2b = { path = "../cognia-e2b", optional = true }
 # `store` only: the registry HTTP transport (and the reqwest it pulls) belongs
 # to the metadata reader in `cognia-environment`, not to a driver that hands
 # every pull to the daemon. `registry::auth` is not behind that feature.

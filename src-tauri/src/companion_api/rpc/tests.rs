@@ -1550,6 +1550,38 @@ fn connector_keyring_arms_are_step_up_not_service_only() {
     }
 }
 
+#[test]
+fn managed_desktop_mutations_require_admin_leases_but_observation_does_not() {
+    for name in cognia_companion_rpc::managed_desktops::COMMANDS {
+        let mutation = matches!(*name,
+            "managed_desktop_authorize" | "managed_desktop_prepare_template" |
+            "managed_desktop_create" | "managed_desktop_connect" | "managed_desktop_delete" |
+            "managed_desktop_control_acquire" | "managed_desktop_control_renew" |
+            "managed_desktop_control_release" | "managed_desktop_control_input");
+        assert_eq!(STEP_UP_COMMANDS.contains(name), mutation, "{name}");
+        assert!(KNOWN_COMMANDS.contains(name), "{name}");
+        let descriptor = crate::companion_api::command_manifest::descriptor(name).unwrap();
+        assert_eq!(descriptor.capability, if mutation { "host.admin" } else { "host.observe" });
+    }
+}
+
+#[tokio::test]
+async fn managed_desktop_dispatch_refuses_missing_invalid_and_revoked_leases() {
+    let state = test_state();
+    let host = headless_host();
+    let device = "managed-desktop-lease-test";
+    let lease = super::super::admin_lease::issue(device,
+        vec!["managed_desktop_create".into()], Some(600), true).unwrap();
+    super::super::admin_lease::revoke_device(device);
+    for token in [None, Some("invalid"), Some(lease.token.as_str())] {
+        let mut args = json!({"providerConfigId":"p","quoteId":"q","authorizationId":"a","idempotencyKey":"once"});
+        if let Some(token) = token { args["adminLease"] = json!(token); }
+        let error = dispatch("managed_desktop_create", args, &state, &host, device,
+            Some("tenant"), Some("device")).await.unwrap_err();
+        assert!(error.1.0.message.contains("admin lease"));
+    }
+}
+
 /// ADR-0153 — the approver side must not need the thing it grants.
 ///
 /// `host_consent_respond` answers the request that unblocks

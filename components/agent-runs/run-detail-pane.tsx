@@ -40,6 +40,7 @@ import { formatDuration } from "@/lib/scheduler/format-utils"
 import { cn } from "@/lib/utils"
 import { isSquadRun, RunCoordinationTab } from "./run-coordination-tab"
 import { RunReportTab } from "./run-report-tab"
+import { ManagedDesktopResults } from "./managed-desktop-results"
 import { RunOperationsTab } from "./run-operations-tab"
 import { RunNotificationsTab } from "./run-notifications-tab"
 import { useExecutionRunDetail } from "@/hooks/agent-runs/use-execution-run-detail"
@@ -396,6 +397,7 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
         ) : null}
 
         <TabsContent value="overview" className="pt-2">
+          <ManagedDesktopResults runId={row.runId} taskId={row.taskId} />
           <InspectRow label={t("detail.kind")} value={t(`kind.${runKindLabelKey(row)}`)} />
           <InspectRow label={t("detail.status")} value={t(`status.${row.status}`)} />
           <InspectRow

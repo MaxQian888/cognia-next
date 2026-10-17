@@ -687,6 +687,7 @@ commands.allow = [
   "list_pi_sessions",
   "logs_list_files",
   "logs_query",
+  "managed_desktop_local_call",
   "mcp_oauth_authenticate",
   "mcp_oauth_clear",
   "mcp_oauth_load_entry",

@@ -1759,22 +1759,30 @@ dependencies = [
 name = "cognia-automation"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "async-trait",
  "base64 0.23.1",
  "bytes",
  "cc",
  "chrono",
  "cognia-core",
+ "cognia-desktop-guest",
+ "cognia-e2b",
+ "cognia-environment",
  "cognia-exec-sandbox",
  "cognia-instrument",
+ "cognia-net",
+ "cognia-secrets",
  "core-foundation 0.10.1",
  "core-graphics",
  "dirs 7.0.0",
  "ed25519-dalek 3.0.0",
  "enigo",
  "foreign-types 0.5.0",
+ "fs2",
  "futures-util",
  "hex",
+ "libc",
  "log",
  "objc2",
  "objc2-app-kit",
@@ -1785,6 +1793,7 @@ dependencies = [
  "parking_lot",
  "rand 0.10.3",
  "regex",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -2177,18 +2186,22 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "base64 0.23.1",
  "chrono",
  "cognia-agent-state",
+ "cognia-automation",
  "cognia-codeserver",
  "cognia-companion",
  "cognia-connectors",
  "cognia-core",
+ "cognia-environment",
  "cognia-exec-sandbox",
  "cognia-external-agent",
  "cognia-gateway",
  "cognia-hooks",
  "cognia-jobs",
  "cognia-mcp-server",
+ "cognia-net",
  "cognia-observability",
  "cognia-ocr",
  "cognia-plugin-runtime",
@@ -2348,6 +2361,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-desktop-guest"
+version = "0.1.0"
+dependencies = [
+ "cognia-exec-sandbox",
+ "hex",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "uuid",
+]
+
+[[package]]
 name = "cognia-docker-proxy"
 version = "0.1.0"
 dependencies = [
@@ -2363,6 +2389,24 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "cognia-e2b"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "cognia-desktop-guest",
+ "cognia-net",
+ "reqwest 0.13.5",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "url",
  "uuid",
 ]
@@ -3138,6 +3182,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "cognia-core",
+ "cognia-e2b",
  "cognia-environment",
  "cognia-exec-sandbox",
  "cognia-external-agent",
@@ -5871,6 +5916,16 @@ dependencies = [
  "io-lifetimes 2.0.4",
  "rustix 1.1.5",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]

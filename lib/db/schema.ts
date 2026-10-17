@@ -435,7 +435,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 244
+export const CURRENT_SCHEMA_VERSION = 245
 
 /**
  * The immutable cumulative v240 schema baseline.
@@ -1049,11 +1049,16 @@ const SESSION_LIST_SOURCE_SCHEMA = {
   sessions: `${SCHEMA_V240.sessions}, __cogniaEncryptedContent.iv`,
 }
 
+const MANAGED_DESKTOP_DELETION_SCHEMA = {
+  managedDesktopDeletionOutbox: "id, phase, createdAt, ownerAccountId",
+}
+
 export const CURRENT_SCHEMA: Record<string, string | null> = {
   ...SCHEMA_V240,
   ...SESSION_LIST_SCHEMA,
   ...SESSION_LIST_SOURCE_SCHEMA,
   bestOfNRuns: "&id, parentSessionId, parentMessageId, updatedAt",
+  ...MANAGED_DESKTOP_DELETION_SCHEMA,
 }
 
 let databaseConnectionSequence = 0
@@ -1099,6 +1104,10 @@ export class CogniaDB extends Dexie {
   trustedWorkspaces!: Table<TrustedWorkspace, string>
   backupHistory!: Table<BackupHistoryRow, string>
   // v114 — unified semantic execution journal and IM presentation state.
+  managedDesktopDeletionOutbox!: Table<
+    import("@/lib/automation/managed-desktop-result-deletion").ManagedDesktopDeletionRow,
+    string
+  >
   executionRuns!: Table<ExecutionRun, string>
   executionRunEvents!: Table<RunEvent, string>
   executionRunBindings!: Table<ExecutionRunBinding, string>

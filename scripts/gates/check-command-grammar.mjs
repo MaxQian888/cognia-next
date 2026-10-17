@@ -61,6 +61,8 @@ export const PROTOCOL = {
 /** Every file whose `match name { "literal" => ... }` arms answer a command. */
 export const DISPATCH_SOURCES = [
   COMPANION_SOURCES.rpcRouter,
+  "crates/cognia-companion-rpc/src/managed_desktops.rs",
+  "crates/cognia-companion-rpc/src/managed_desktop_results.rs",
   ...[
     "chat",
     "codex_app",

@@ -70,6 +70,26 @@ pub fn load_policy_state() -> PolicyState {
     PolicyState::try_new(raw).unwrap_or_default()
 }
 
+/// Cloud control must not erase a configured policy when its file is corrupt.
+/// A missing file still denotes the existing empty policy default.
+pub fn load_policy_state_strict() -> Result<PolicyState, String> {
+    let path = policy_path().ok_or_else(|| "automation_policy_unavailable".to_string())?;
+    load_policy_path_strict(&path)
+}
+
+fn load_policy_path_strict(path: &Path) -> Result<PolicyState, String> {
+    let json = match fs::read_to_string(path) {
+        Ok(json) => json,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(PolicyState::default())
+        }
+        Err(_) => return Err("automation_policy_unavailable".into()),
+    };
+    let policy =
+        serde_json::from_str(&json).map_err(|_| "automation_policy_invalid".to_string())?;
+    PolicyState::try_new(policy).map_err(|_| "automation_policy_invalid".into())
+}
+
 /// Best-effort persist of the per-action policy.
 pub fn save_policy(policy: &Policy) {
     let Some(path) = policy_path() else {
@@ -146,6 +166,21 @@ mod tests {
         // Default is the safe, everything-off state.
         assert!(!back.enabled);
         assert_eq!(back.per_surface.mcp.tier, Tier::Off);
+    }
+
+    #[test]
+    fn cloud_policy_load_distinguishes_absence_from_corruption() {
+        let dir = tmpdir();
+        let path = dir.join("policy.json");
+        assert!(load_policy_path_strict(&path).unwrap().is_empty());
+        fs::write(&path, "not json").unwrap();
+        assert_eq!(
+            load_policy_path_strict(&path).err().unwrap(),
+            "automation_policy_invalid"
+        );
+        fs::write(&path, r#"{"allowedProcessNames":["browser"]}"#).unwrap();
+        assert!(!load_policy_path_strict(&path).unwrap().is_empty());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

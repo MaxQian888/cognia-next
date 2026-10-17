@@ -21,6 +21,7 @@ import type {
   SandboxLifecycleOperation,
 } from "@/types/sandbox"
 import { buildDockerSandboxAdapter, type DockerAdapterOutcome } from "./docker-adapter"
+import { buildE2bSandboxAdapter, type ManagedDesktopAdapterOptions } from "./e2b-adapter"
 import type { SandboxProviderAdapter } from "./lifecycle-contract"
 
 /** Builds the adapter for one row and one operation. */
@@ -28,7 +29,8 @@ export type SandboxAdapterFactory = (
   row: SandboxConnectionRow,
   client: SandboxClient,
   outcome: DockerAdapterOutcome,
-  operation: SandboxLifecycleOperation
+  operation: SandboxLifecycleOperation,
+  options?: ManagedDesktopAdapterOptions
 ) => SandboxProviderAdapter
 
 type PairKey = `${SandboxConnectionProvider}:${SandboxConnectionDriver}`
@@ -44,6 +46,8 @@ function pairKey(provider: SandboxConnectionProvider, driver: SandboxConnectionD
  */
 const ADAPTERS: Partial<Record<PairKey, SandboxAdapterFactory>> = {
   "docker:computer-server": buildDockerSandboxAdapter,
+  "e2b:computer-server": (row, _client, outcome, _operation, options) =>
+    buildE2bSandboxAdapter(row, outcome, options),
 }
 
 /** The adapter factory for a row, or null when the pair has none. */

@@ -546,6 +546,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "sourceId": {
+          "type": "string"
         }
       },
       "required": [
@@ -13471,6 +13474,712 @@
       "required": ["sha256", "sizeBytes", "snapshotId"],
       "type": "object"
     },
+    "ManagedDesktopAcceptanceResult": {
+      "type": "object",
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/ManagedDesktopAcceptanceBinding"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManagedDesktopEvidenceArtifact"
+          }
+        },
+        "agentVerdict": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "idempotencyKey": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": ["passed", "failed", "inconclusive", "cancelled"]
+                    },
+                    "criteria": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "criterionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": ["passed", "failed", "incomplete"]
+                          },
+                          "artifactIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "maxItems": 100
+                          }
+                        },
+                        "required": ["criterionId", "outcome", "artifactIds"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "summary": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["idempotencyKey", "principalId", "outcome", "criteria", "summary"],
+                  "additionalProperties": false
+                },
+                "recordedAt": {
+                  "type": "integer"
+                }
+              },
+              "required": ["input", "recordedAt"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "systemOutcome": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "enum": ["passed", "failed", "inconclusive", "cancelled"]
+                },
+                "reasonCode": {
+                  "type": "string"
+                },
+                "recordedAt": {
+                  "type": "integer"
+                }
+              },
+              "required": ["outcome", "reasonCode", "recordedAt"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "humanApprovals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "revision": {
+                "type": "integer"
+              },
+              "input": {
+                "type": "object",
+                "properties": {
+                  "expectedRevision": {
+                    "type": "integer"
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "principalId": {
+                    "type": "string"
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": ["approved", "rejected"]
+                  }
+                },
+                "required": ["expectedRevision", "idempotencyKey", "principalId", "decision"],
+                "additionalProperties": false
+              },
+              "recordedAt": {
+                "type": "integer"
+              }
+            },
+            "required": ["revision", "input", "recordedAt"],
+            "additionalProperties": false
+          }
+        },
+        "cleanupPending": {
+          "type": "boolean"
+        },
+        "evidenceLimitReached": {
+          "type": "boolean"
+        },
+        "captureAttempts": {
+          "type": "integer"
+        },
+        "reservedBytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "binding",
+        "createdAt",
+        "artifacts",
+        "agentVerdict",
+        "systemOutcome",
+        "humanApprovals",
+        "cleanupPending",
+        "evidenceLimitReached",
+        "captureAttempts",
+        "reservedBytes"
+      ],
+      "additionalProperties": false
+    },
+    "ManagedDesktopEvidenceArtifact": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "criterionId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["checkpoint", "failure"]
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "capturedAt": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "criterionId",
+        "kind",
+        "mimeType",
+        "sha256",
+        "bytes",
+        "width",
+        "height",
+        "capturedAt"
+      ],
+      "additionalProperties": false
+    },
+    "ManagedDesktopAcceptanceBinding": {
+      "type": "object",
+      "properties": {
+        "acceptanceId": {
+          "type": "string"
+        },
+        "ownerAccountId": {
+          "type": "string"
+        },
+        "hostId": {
+          "type": "string"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "parentRunId": {
+          "type": "string"
+        },
+        "originRunRef": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deliveryId": {
+          "type": "string"
+        },
+        "deliveryRevision": {
+          "type": "integer"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "desktopId": {
+          "type": "string"
+        },
+        "desktopGeneration": {
+          "type": "integer"
+        },
+        "manifestDigest": {
+          "type": "string"
+        },
+        "agentPrincipalId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "requiredEvidence": {
+                "type": "boolean"
+              }
+            },
+            "required": ["id", "text", "requiredEvidence"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "acceptanceId",
+        "ownerAccountId",
+        "hostId",
+        "sourceId",
+        "sessionId",
+        "taskId",
+        "parentRunId",
+        "originRunRef",
+        "deliveryId",
+        "deliveryRevision",
+        "commit",
+        "desktopId",
+        "desktopGeneration",
+        "manifestDigest",
+        "agentPrincipalId",
+        "criteria"
+      ],
+      "additionalProperties": false
+    },
+    "ManagedDesktopControlFrame": {
+      "type": "object",
+      "properties": {
+        "frameId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "fence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expiresAt": {
+          "type": "integer"
+        },
+        "screenshot": {
+          "type": "object",
+          "properties": {
+            "bytes": {
+              "type": "string",
+              "maxLength": 67108864
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            },
+            "capturedAt": {
+              "type": "integer"
+            },
+            "format": {
+              "type": "string",
+              "enum": ["png", "jpeg"]
+            },
+            "sourceWidth": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sourceHeight": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": ["bytes", "width", "height", "capturedAt", "format"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["frameId", "fence", "expiresAt", "screenshot"],
+      "additionalProperties": false
+    },
+    "ManagedDesktopControlLease": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "fence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expiresAt": {
+          "type": "integer"
+        }
+      },
+      "required": ["token", "fence", "expiresAt"],
+      "additionalProperties": false
+    },
+    "ManagedDesktopControlStatus": {
+      "type": "object",
+      "properties": {
+        "qualified": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["dormant", "observer", "controlled", "quarantined", "unavailable"]
+        },
+        "controllerKind": {
+          "type": ["string", "null"],
+          "enum": ["human", "agent", null]
+        },
+        "controllerIsSelf": {
+          "type": "boolean"
+        },
+        "leaseExpiresAt": {
+          "type": ["integer", "null"]
+        },
+        "fence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "canAcquire": {
+          "type": "boolean"
+        },
+        "agentControlDormant": {
+          "const": true
+        }
+      },
+      "required": [
+        "qualified",
+        "state",
+        "controllerKind",
+        "controllerIsSelf",
+        "leaseExpiresAt",
+        "fence",
+        "canAcquire",
+        "agentControlDormant"
+      ],
+      "additionalProperties": false
+    },
+    "ManagedDesktopHealth": {
+      "type": "object",
+      "properties": {
+        "reachable": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["creating", "running", "deleting", "destroyRetrying", "destroyed", "error"]
+        },
+        "desktop": {
+          "$ref": "#/$defs/ManagedDesktop"
+        },
+        "errorCode": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["reachable", "state", "desktop", "errorCode"],
+      "additionalProperties": false,
+      "x-cognia-wire-source": "crates/cognia-automation/src/cua_sandbox/managed/contracts.rs"
+    },
+    "ManagedDesktopConfigSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ownerPrincipalId": {
+          "type": "string"
+        },
+        "hostId": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "qualification": {
+          "type": "string"
+        },
+        "reason": {
+          "type": ["string", "null"]
+        },
+        "maxConcurrent": {
+          "type": "integer"
+        },
+        "maxLifetimeSeconds": {
+          "type": "integer"
+        },
+        "idleTimeoutSeconds": {
+          "type": "integer"
+        },
+        "region": {
+          "type": ["string", "null"]
+        },
+        "cpuCount": {
+          "type": "integer"
+        },
+        "memoryMb": {
+          "type": "integer"
+        },
+        "template": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManagedDesktopTemplate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "templateState": {
+          "type": ["string", "null"],
+          "enum": ["registering", "registered", "building", "ready", "unknown", "failed", null]
+        },
+        "canPrepareTemplate": {
+          "type": "boolean"
+        },
+        "canCreate": {
+          "type": "boolean"
+        },
+        "isolationTier": {
+          "type": "string",
+          "enum": ["container", "gvisor", "vm"]
+        },
+        "egressTier": {
+          "type": "string",
+          "enum": ["off", "on", "allowlist"]
+        },
+        "egressEnforcement": {
+          "type": "string"
+        },
+        "guiQualified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "ownerPrincipalId",
+        "hostId",
+        "enabled",
+        "qualification",
+        "reason",
+        "maxConcurrent",
+        "maxLifetimeSeconds",
+        "idleTimeoutSeconds",
+        "region",
+        "cpuCount",
+        "memoryMb",
+        "template",
+        "templateState",
+        "canPrepareTemplate",
+        "canCreate",
+        "isolationTier",
+        "egressTier",
+        "egressEnforcement",
+        "guiQualified"
+      ],
+      "additionalProperties": false,
+      "x-cognia-wire-source": "crates/cognia-automation/src/cua_sandbox/managed/contracts.rs"
+    },
+    "ManagedDesktopAuthorization": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "integer"
+        }
+      },
+      "required": ["id", "expiresAt"],
+      "additionalProperties": false,
+      "x-cognia-wire-source": "crates/cognia-automation/src/cua_sandbox/managed/contracts.rs"
+    },
+    "ManagedDesktopQuote": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "providerConfigId": {
+          "type": "string"
+        },
+        "configRevision": {
+          "type": "integer"
+        },
+        "lifetimeSeconds": {
+          "type": "integer"
+        },
+        "expiresAt": {
+          "type": "integer"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "hourlyRateMicros": {
+          "type": "integer"
+        },
+        "maximumComputeCostMicros": {
+          "type": "integer"
+        },
+        "priceObservedAt": {
+          "type": "integer"
+        },
+        "region": {
+          "type": ["string", "null"]
+        },
+        "cpuCount": {
+          "type": "integer"
+        },
+        "memoryMb": {
+          "type": "integer"
+        },
+        "bindingDigest": {
+          "type": "string"
+        },
+        "ownerPrincipalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "providerConfigId",
+        "configRevision",
+        "lifetimeSeconds",
+        "expiresAt",
+        "currency",
+        "hourlyRateMicros",
+        "maximumComputeCostMicros",
+        "priceObservedAt",
+        "region",
+        "cpuCount",
+        "memoryMb",
+        "bindingDigest",
+        "ownerPrincipalId"
+      ],
+      "additionalProperties": false,
+      "x-cognia-wire-source": "crates/cognia-automation/src/cua_sandbox/managed/contracts.rs"
+    },
+    "ManagedDesktop": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "providerConfigId": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["creating", "running", "deleting", "destroyRetrying", "destroyed", "error"]
+        },
+        "deadlineAt": {
+          "type": "integer"
+        },
+        "idleTimeoutSeconds": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        },
+        "lastErrorCode": {
+          "type": ["string", "null"]
+        },
+        "cleanupAttempts": {
+          "type": "integer"
+        },
+        "qualification": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "providerConfigId",
+        "generation",
+        "state",
+        "deadlineAt",
+        "idleTimeoutSeconds",
+        "createdAt",
+        "updatedAt",
+        "lastErrorCode",
+        "cleanupAttempts",
+        "qualification"
+      ],
+      "additionalProperties": false,
+      "x-cognia-wire-source": "crates/cognia-automation/src/cua_sandbox/managed/contracts.rs"
+    },
+    "ManagedDesktopTemplate": {
+      "type": "object",
+      "properties": {
+        "templateId": {
+          "type": "string"
+        },
+        "buildId": {
+          "type": "string"
+        },
+        "imageDigest": {
+          "type": "string"
+        },
+        "recipeRevision": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        }
+      },
+      "required": ["templateId", "buildId", "imageDigest", "recipeRevision", "protocol"],
+      "additionalProperties": false,
+      "x-cognia-wire-source": "crates/cognia-automation/src/cua_sandbox/managed/contracts.rs"
+    },
     "PortSubjectKind": {
       "enum": ["registry", "desktop-session", "project-root"],
       "type": "string"
@@ -15710,6 +16419,257 @@
     },
     "lsp_host_request": {
       "$ref": "#/$defs/StringResult"
+    },
+    "managed_desktop_results_read_evidence": {
+      "type": "object",
+      "properties": {
+        "mimeType": {
+          "type": "string",
+          "enum": ["image/png", "image/jpeg"]
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "base64": {
+          "type": "string"
+        },
+        "cacheControl": {
+          "type": "string",
+          "const": "no-store"
+        }
+      },
+      "required": ["mimeType", "sha256", "base64", "cacheControl"],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_prepare_delete": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["prepared", "committed", "aborted"]
+        },
+        "cleanupPending": {
+          "type": "boolean"
+        },
+        "taskIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["operationId", "state", "cleanupPending", "taskIds"],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_get_results": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ManagedDesktopAcceptanceResult"
+      }
+    },
+    "managed_desktop_results_get_result": {
+      "$ref": "#/$defs/ManagedDesktopAcceptanceResult"
+    },
+    "managed_desktop_results_complete": {
+      "$ref": "#/$defs/ManagedDesktopAcceptanceResult"
+    },
+    "managed_desktop_results_commit_delete": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["prepared", "committed", "aborted"]
+        },
+        "cleanupPending": {
+          "type": "boolean"
+        },
+        "taskIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["operationId", "state", "cleanupPending", "taskIds"],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_capture": {
+      "$ref": "#/$defs/ManagedDesktopEvidenceArtifact"
+    },
+    "managed_desktop_results_approve": {
+      "$ref": "#/$defs/ManagedDesktopAcceptanceResult"
+    },
+    "managed_desktop_results_abort_delete": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["prepared", "committed", "aborted"]
+        },
+        "cleanupPending": {
+          "type": "boolean"
+        },
+        "taskIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["operationId", "state", "cleanupPending", "taskIds"],
+      "additionalProperties": false
+    },
+    "managed_desktop_quote": {
+      "$ref": "#/$defs/ManagedDesktopQuote"
+    },
+    "managed_desktop_prepare_template": {
+      "$ref": "#/$defs/ManagedDesktopConfigSummary"
+    },
+    "managed_desktop_list_configs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ManagedDesktopConfigSummary"
+      }
+    },
+    "managed_desktop_list": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ManagedDesktop"
+      }
+    },
+    "managed_desktop_health": {
+      "$ref": "#/$defs/ManagedDesktopHealth"
+    },
+    "managed_desktop_handoff_source_host": {
+      "type": "object",
+      "properties": {
+        "hostId": {
+          "type": "string"
+        }
+      },
+      "required": ["hostId"],
+      "additionalProperties": false
+    },
+    "managed_desktop_handoff_revoke_source": {
+      "type": "null"
+    },
+    "managed_desktop_handoff_prepare": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "deliveryId": {
+          "type": "string"
+        },
+        "deliveryRevision": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["commit", "bundle"]
+        },
+        "commit": {
+          "type": "string"
+        },
+        "quote": {
+          "$ref": "#/$defs/ManagedDesktopQuote"
+        },
+        "expiresAt": {
+          "type": "integer"
+        },
+        "executionEnabled": {
+          "type": "boolean",
+          "const": false
+        },
+        "dormantReason": {
+          "type": "string",
+          "const": "managed_desktop_handoff_requires_results_qualification"
+        }
+      },
+      "required": [
+        "id",
+        "deliveryId",
+        "deliveryRevision",
+        "mode",
+        "commit",
+        "quote",
+        "expiresAt",
+        "executionEnabled",
+        "dormantReason"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_handoff_deliveries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "modes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["commit", "bundle"]
+            }
+          },
+          "createdAt": {
+            "type": "integer"
+          }
+        },
+        "required": ["id", "revision", "commit", "branch", "modes", "createdAt"],
+        "additionalProperties": false
+      }
+    },
+    "managed_desktop_delete": {
+      "$ref": "#/$defs/ManagedDesktop"
+    },
+    "managed_desktop_create": {
+      "$ref": "#/$defs/ManagedDesktop"
+    },
+    "managed_desktop_control_status": {
+      "$ref": "#/$defs/ManagedDesktopControlStatus"
+    },
+    "managed_desktop_control_renew": {
+      "$ref": "#/$defs/ManagedDesktopControlLease"
+    },
+    "managed_desktop_control_release": {
+      "type": "null"
+    },
+    "managed_desktop_control_input": {
+      "type": "null"
+    },
+    "managed_desktop_control_frame": {
+      "$ref": "#/$defs/ManagedDesktopControlFrame"
+    },
+    "managed_desktop_control_acquire": {
+      "$ref": "#/$defs/ManagedDesktopControlLease"
+    },
+    "managed_desktop_connect": {
+      "$ref": "#/$defs/ManagedDesktop"
+    },
+    "managed_desktop_authorize": {
+      "$ref": "#/$defs/ManagedDesktopAuthorization"
     },
     "mcp_oauth_authenticate": {
       "$ref": "#/$defs/McpOAuthAuthResult"

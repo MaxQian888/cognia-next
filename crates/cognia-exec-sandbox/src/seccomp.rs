@@ -253,6 +253,131 @@ pub fn install_target_filter(bpf: &BpfProgram) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Mandatory desktop filter, installed by bwrap only AFTER namespace setup.
+/// Unlike the generic one-shot backend, callers must propagate every error.
+/// Namespace creation via `clone` is denied without denying ordinary process
+/// or thread creation. `clone3` takes a pointer classic BPF cannot inspect;
+/// ENOSYS makes libc fall back to the inspectable `clone` syscall.
+pub fn build_desktop_filter() -> Result<BpfProgram, String> {
+    let mut rules: std::collections::BTreeMap<i64, Vec<SeccompRule>> = blocked_syscall_numbers()
+        .into_iter()
+        .map(|nr| (nr, vec![]))
+        .collect();
+    let namespace_rules = DESKTOP_CLONE_NAMESPACE_FLAGS
+        .iter()
+        .map(|flag| {
+            let condition = SeccompCondition::new(
+                0,
+                SeccompCmpArgLen::Qword,
+                SeccompCmpOp::MaskedEq(*flag),
+                *flag,
+            )
+            .map_err(|e| format!("invalid desktop clone condition: {e:?}"))?;
+            SeccompRule::new(vec![condition])
+                .map_err(|e| format!("invalid desktop clone rule: {e:?}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    rules.insert(libc::SYS_clone, namespace_rules);
+    let arch = std::env::consts::ARCH
+        .try_into()
+        .map_err(|e| format!("unsupported desktop seccomp arch: {e:?}"))?;
+    let primary = SeccompFilter::new(
+        rules,
+        SeccompAction::Allow,
+        SeccompAction::Errno(libc::EPERM as u32),
+        arch,
+    )
+    .map_err(|e| format!("invalid desktop seccomp filter: {e:?}"))?;
+    let mut primary: BpfProgram = primary
+        .try_into()
+        .map_err(|e| format!("failed to compile desktop seccomp: {e:?}"))?;
+    let fallback = SeccompFilter::new(
+        [(libc::SYS_clone3, vec![])].into(),
+        SeccompAction::Allow,
+        SeccompAction::Errno(libc::ENOSYS as u32),
+        arch,
+    )
+    .map_err(|e| format!("invalid desktop clone3 filter: {e:?}"))?;
+    let fallback: BpfProgram = fallback
+        .try_into()
+        .map_err(|e| format!("failed to compile desktop clone3 filter: {e:?}"))?;
+    // seccompiler gives a filter one match action. Chain its ALLOW exits to
+    // the second filter to preserve both distinct errno results on one FD.
+    // Existing relative jumps and architecture-kill exits stay unchanged.
+    let primary_len = primary.len();
+    for (index, instruction) in primary.iter_mut().enumerate() {
+        if instruction.code == 0x06 && instruction.k == libc::SECCOMP_RET_ALLOW {
+            instruction.code = 0x05; // BPF_JMP | BPF_JA
+            instruction.k = (primary_len - index - 1) as u32;
+        }
+    }
+    primary.extend(fallback);
+    // x32 shares AUDIT_ARCH_X86_64 but uses a different syscall-number ABI.
+    // seccompiler validates the audit architecture only; accepting that ABI
+    // would bypass the native-number deny list above. The desktop image is
+    // native 64-bit, so kill x32 calls rather than translating them.
+    #[cfg(target_arch = "x86_64")]
+    {
+        let mut native_only = vec![
+            seccompiler::sock_filter {
+                code: 0x20,
+                jt: 0,
+                jf: 0,
+                k: 0,
+            },
+            seccompiler::sock_filter {
+                code: 0x45,
+                jt: 0,
+                jf: 1,
+                k: 0x40000000,
+            },
+            seccompiler::sock_filter {
+                code: 0x06,
+                jt: 0,
+                jf: 0,
+                k: libc::SECCOMP_RET_KILL_PROCESS,
+            },
+        ];
+        native_only.extend(primary);
+        primary = native_only;
+    }
+    Ok(primary)
+}
+
+const DESKTOP_CLONE_NAMESPACE_FLAGS: &[u64] = &[
+    libc::CLONE_NEWNS as u64,
+    libc::CLONE_NEWCGROUP as u64,
+    libc::CLONE_NEWUTS as u64,
+    libc::CLONE_NEWIPC as u64,
+    libc::CLONE_NEWUSER as u64,
+    libc::CLONE_NEWPID as u64,
+    libc::CLONE_NEWNET as u64,
+    0x00000080, // CLONE_NEWTIME (Linux 5.6); unavailable in older libc headers.
+];
+
+/// A mandatory desktop filter cannot leak into a concurrent unrelated exec.
+/// The launcher explicitly duplicates this CLOEXEC descriptor to its fixed FD.
+pub fn park_desktop_filter() -> std::io::Result<std::fs::File> {
+    use std::io::{Seek, SeekFrom, Write};
+    let filter = build_desktop_filter().map_err(std::io::Error::other)?;
+    let bytes = program_bytes(&filter);
+    if bytes.is_empty() {
+        return Err(std::io::Error::other(
+            "empty mandatory desktop seccomp filter",
+        ));
+    }
+    // SAFETY: constant NUL-terminated name, fresh owned descriptor.
+    let raw = unsafe { libc::memfd_create(c"cognia-desktop-seccomp".as_ptr(), libc::MFD_CLOEXEC) };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: memfd_create returned a new descriptor owned by this function.
+    let mut file = unsafe { std::fs::File::from_raw_fd(raw) };
+    file.write_all(&bytes)?;
+    file.seek(SeekFrom::Start(0))?;
+    Ok(file)
+}
+
 /// The descriptor number the compiled program is handed to `bwrap` on.
 ///
 /// Any number clear of the three stdio descriptors works. `dup2` onto it in
@@ -563,6 +688,115 @@ mod tests {
         })
         .join()
         .unwrap();
+    }
+
+
+    // Interpret the small classic-BPF instruction set seccompiler emits. This
+    // tests errno and clone argument behavior without installing a permanent
+    // filter on the Rust test runner itself.
+    fn evaluate_desktop(program: &BpfProgram, syscall: i64, flags: u64, arch: u32) -> u32 {
+        let mut data = [0_u8; 64];
+        data[..4].copy_from_slice(&(syscall as i32).to_ne_bytes());
+        data[4..8].copy_from_slice(&arch.to_ne_bytes());
+        data[16..24].copy_from_slice(&flags.to_ne_bytes());
+        let mut accumulator = 0_u32;
+        let mut pc = 0;
+        for _ in 0..program.len() * 2 {
+            let instruction = &program[pc];
+            match instruction.code {
+                0x20 => {
+                    let offset = instruction.k as usize;
+                    accumulator = u32::from_ne_bytes(data[offset..offset + 4].try_into().unwrap());
+                }
+                0x54 => accumulator &= instruction.k,
+                0x05 => pc += instruction.k as usize,
+                0x15 | 0x25 | 0x35 | 0x45 => {
+                    let matched = match instruction.code {
+                        0x15 => accumulator == instruction.k,
+                        0x25 => accumulator > instruction.k,
+                        0x35 => accumulator >= instruction.k,
+                        _ => accumulator & instruction.k != 0,
+                    };
+                    pc += if matched {
+                        instruction.jt
+                    } else {
+                        instruction.jf
+                    } as usize;
+                }
+                0x06 => return instruction.k,
+                other => panic!("unsupported BPF instruction {other:#x}"),
+            }
+            pc += 1;
+        }
+        panic!("BPF filter did not terminate");
+    }
+
+    fn native_audit_arch() -> u32 {
+        match std::env::consts::ARCH {
+            "x86_64" => 0xc000003e,
+            "aarch64" => 0xc00000b7,
+            "riscv64" => 0xc00000f3,
+            other => panic!("unsupported test architecture {other}"),
+        }
+    }
+
+    #[test]
+    fn desktop_filter_denies_namespace_creation_but_preserves_threads() {
+        let filter = build_desktop_filter().unwrap();
+        let arch = native_audit_arch();
+        let denied = libc::SECCOMP_RET_ERRNO | libc::EPERM as u32;
+        for flag in DESKTOP_CLONE_NAMESPACE_FLAGS {
+            assert_eq!(evaluate_desktop(&filter, libc::SYS_clone, *flag, arch), denied);
+        }
+        let thread_flags = (libc::CLONE_VM
+            | libc::CLONE_FS
+            | libc::CLONE_FILES
+            | libc::CLONE_SIGHAND
+            | libc::CLONE_THREAD
+            | libc::CLONE_SYSVSEM) as u64;
+        assert_eq!(
+            evaluate_desktop(&filter, libc::SYS_clone, thread_flags, arch),
+            libc::SECCOMP_RET_ALLOW
+        );
+        assert_eq!(
+            evaluate_desktop(&filter, libc::SYS_clone, libc::SIGCHLD as u64, arch),
+            libc::SECCOMP_RET_ALLOW
+        );
+        assert_eq!(
+            evaluate_desktop(&filter, libc::SYS_clone3, 0, arch),
+            libc::SECCOMP_RET_ERRNO | libc::ENOSYS as u32
+        );
+        assert_eq!(
+            evaluate_desktop(&filter, libc::SYS_getpid, 0, arch),
+            libc::SECCOMP_RET_ALLOW
+        );
+        for syscall in blocked_syscall_numbers() {
+            assert_eq!(evaluate_desktop(&filter, syscall, 0, arch), denied);
+        }
+        assert_ne!(
+            evaluate_desktop(&filter, libc::SYS_getpid, 0, 0),
+            libc::SECCOMP_RET_ALLOW
+        );
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(
+            evaluate_desktop(&filter, libc::SYS_unshare | 0x40000000, 0, arch),
+            libc::SECCOMP_RET_KILL_PROCESS
+        );
+    }
+
+    #[test]
+    fn generic_filter_still_allows_clone3_and_desktop_memfd_is_cloexec() {
+        use std::os::fd::AsRawFd;
+        let generic = build_filter().unwrap();
+        assert_eq!(
+            evaluate_desktop(&generic, libc::SYS_clone3, 0, native_audit_arch()),
+            libc::SECCOMP_RET_ALLOW
+        );
+        let parked = park_desktop_filter().unwrap();
+        // SAFETY: reads flags for a valid descriptor owned by parked.
+        let flags = unsafe { libc::fcntl(parked.as_raw_fd(), libc::F_GETFD) };
+        assert!(flags >= 0);
+        assert_ne!(flags & libc::FD_CLOEXEC, 0);
     }
 
     #[test]

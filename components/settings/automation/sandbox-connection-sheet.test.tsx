@@ -9,6 +9,12 @@ import {
   type SandboxConnectionActions,
 } from "@/components/settings/automation/sandbox-connection-sheet"
 
+jest.mock("./managed-desktop-settings", () => ({
+  ManagedDesktopSettings: ({ target }: { target: { hostId?: string } }) => (
+    <div data-testid="managed-settings" data-host={target.hostId} />
+  ),
+}))
+
 jest.mock("./sandbox-desktop-viewer", () => ({
   SandboxDesktopViewer: ({ connectionId, enabled }: { connectionId: string; enabled: boolean }) => (
     <div data-testid="desktop-viewer" data-connection={connectionId} data-enabled={enabled} />
@@ -273,4 +279,33 @@ test("every lifecycle state has a label in both locales", () => {
     }
     expect(Object.keys(labels).sort()).toEqual([...states].sort())
   }
+})
+
+it("routes imported E2B references to managed Host settings without a local viewer or actions", () => {
+  const a = actions()
+  render(
+    <NextIntlClientProvider locale="en" messages={en as Record<string, unknown>}>
+      <SandboxConnectionSheet
+        connection={row({
+          provider: "e2b",
+          config: {
+            provider: "e2b",
+            target: { kind: "remote", hostId: "owner-host" },
+            providerConfigId: "byo",
+            qualification: "unqualified",
+          },
+          capabilities: defaultSandboxCapabilities("e2b", "computer-server"),
+        })}
+        open
+        onOpenChange={jest.fn()}
+        desktop
+        actions={a}
+        onError={jest.fn()}
+      />
+    </NextIntlClientProvider>
+  )
+  expect(screen.getByTestId("managed-settings")).toHaveAttribute("data-host", "owner-host")
+  expect(screen.queryByTestId("desktop-viewer")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("sandbox-action-create")).not.toBeInTheDocument()
+  expect(a.provision).not.toHaveBeenCalled()
 })

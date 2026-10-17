@@ -12438,6 +12438,993 @@
       },
       "additionalProperties": false
     },
+    "managed_desktop_authorize": {
+      "type": "object",
+      "properties": {
+        "providerConfigId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "quoteId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "prepareTemplate"
+          ]
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "admin_lease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "providerConfigId",
+        "quoteId",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_connect": {
+      "type": "object",
+      "properties": {
+        "desktopId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "admin_lease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "desktopId",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_control_acquire": {
+      "type": "object",
+      "properties": {
+        "desktopId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "takeover": {
+          "type": "boolean"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "admin_lease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "desktopId",
+        "generation",
+        "takeover"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_control_frame": {
+      "type": "object",
+      "properties": {
+        "desktopId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "desktopId",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_control_input": {
+      "type": "object",
+      "properties": {
+        "desktopId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "fence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "frameId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "point": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "integer",
+                  "minimum": -2147483648,
+                  "maximum": 2147483647
+                },
+                "y": {
+                  "type": "integer",
+                  "minimum": -2147483648,
+                  "maximum": 2147483647
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "click"
+                },
+                "button": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "left",
+                    "right",
+                    "middle",
+                    null
+                  ]
+                },
+                "count": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 3
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "drag"
+                },
+                "to": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "integer",
+                      "minimum": -2147483648,
+                      "maximum": 2147483647
+                    },
+                    "y": {
+                      "type": "integer",
+                      "minimum": -2147483648,
+                      "maximum": 2147483647
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "additionalProperties": false
+                },
+                "opts": {
+                  "type": "object",
+                  "properties": {
+                    "button": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "left",
+                        "right",
+                        "middle",
+                        null
+                      ]
+                    },
+                    "durationMs": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2000
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "steps": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 60
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "kind",
+                "to"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "scroll"
+                },
+                "opts": {
+                  "type": "object",
+                  "properties": {
+                    "dx": {
+                      "type": "integer",
+                      "minimum": -2147483648,
+                      "maximum": 2147483647
+                    },
+                    "dy": {
+                      "type": "integer",
+                      "minimum": -2147483648,
+                      "maximum": 2147483647
+                    }
+                  },
+                  "required": [],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "pressKey"
+                },
+                "chord": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "kind",
+                "chord"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "typeText"
+                },
+                "text": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "kind",
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "admin_lease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "desktopId",
+        "generation",
+        "token",
+        "fence",
+        "frameId",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_control_release": {
+      "type": "object",
+      "properties": {
+        "desktopId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "fence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "admin_lease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "desktopId",
+        "generation",
+        "token",
+        "fence"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_control_renew": {
+      "type": "object",
+      "properties": {
+        "desktopId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "fence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "admin_lease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "desktopId",
+        "generation",
+        "token",
+        "fence"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_control_status": {
+      "type": "object",
+      "properties": {
+        "desktopId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "desktopId",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_create": {
+      "type": "object",
+      "properties": {
+        "providerConfigId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "quoteId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "authorizationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "admin_lease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "providerConfigId",
+        "quoteId",
+        "authorizationId",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_delete": {
+      "type": "object",
+      "properties": {
+        "desktopId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "admin_lease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "desktopId",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_handoff_deliveries": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "managed_desktop_handoff_prepare": {
+      "type": "object",
+      "properties": {
+        "deliveryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "deliveryRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "commit",
+            "bundle"
+          ]
+        },
+        "providerConfigId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "lifetimeSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "criteria": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "acceptanceFiles": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "argv": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      },
+      "required": [
+        "deliveryId",
+        "deliveryRevision",
+        "mode",
+        "providerConfigId",
+        "lifetimeSeconds",
+        "criteria",
+        "acceptanceFiles",
+        "argv"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_handoff_revoke_source": {
+      "type": "object",
+      "properties": {
+        "conversationIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      },
+      "required": [
+        "conversationIds"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_handoff_source_host": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "managed_desktop_health": {
+      "type": "object",
+      "properties": {
+        "desktopId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "desktopId",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_list": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "managed_desktop_list_configs": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "managed_desktop_prepare_template": {
+      "type": "object",
+      "properties": {
+        "providerConfigId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "quoteId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "authorizationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "admin_lease": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "providerConfigId",
+        "quoteId",
+        "authorizationId",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_quote": {
+      "type": "object",
+      "properties": {
+        "providerConfigId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "lifetimeSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "providerConfigId",
+        "lifetimeSeconds"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_abort_delete": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_approve": {
+      "type": "object",
+      "properties": {
+        "acceptanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "rejected"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "acceptanceId",
+        "expectedRevision",
+        "decision",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_capture": {
+      "type": "object",
+      "properties": {
+        "acceptanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "artifactId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "criterionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "checkpoint",
+            "failure"
+          ]
+        }
+      },
+      "required": [
+        "acceptanceId",
+        "artifactId",
+        "criterionId",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_commit_delete": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_complete": {
+      "type": "object",
+      "properties": {
+        "acceptanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "inconclusive",
+            "cancelled"
+          ]
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "criterionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "incomplete"
+                ]
+              },
+              "artifactIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "maxItems": 100
+              }
+            },
+            "required": [
+              "criterionId",
+              "outcome",
+              "artifactIds"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 50
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "acceptanceId",
+        "idempotencyKey",
+        "outcome",
+        "criteria",
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_get_result": {
+      "type": "object",
+      "properties": {
+        "acceptanceId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "acceptanceId"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_get_results": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "conversationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "taskId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_prepare_delete": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "conversationIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "maxItems": 1000
+        },
+        "taskIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "maxItems": 1000
+        },
+        "acceptanceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "managed_desktop_results_read_evidence": {
+      "type": "object",
+      "properties": {
+        "acceptanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "artifactId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "acceptanceId",
+        "artifactId"
+      ],
+      "additionalProperties": false
+    },
     "mcp_oauth_authenticate": {
       "type": "object",
       "required": [

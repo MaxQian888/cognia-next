@@ -28,7 +28,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::time::Instant;
 
-use super::api::{AliasLookup, ApiClient, ApiError, BuildInfo};
+use super::api::{AliasLookup, ApiClient, ApiError, BuildInfo, SpawnErrorExt};
 use super::bundle::{prepare_rootfs, BundleSource, BUNDLE_TREE};
 use crate::remote::START_MARKER;
 

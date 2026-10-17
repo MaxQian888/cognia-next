@@ -5123,3 +5123,39 @@ it("indexes the disposable Best-of-N summary by parent chat bindings", async () 
     await db.delete()
   }
 })
+
+schemaIt(
+  "v245 adds durable desktop deletion outbox without changing existing history",
+  async () => {
+    const name = "cognia-desktop-deletion-v245"
+    await Dexie.delete(name)
+    const previousSchema = { ...CURRENT_SCHEMA }
+    delete previousSchema.managedDesktopDeletionOutbox
+    const previous = new Dexie(name)
+    previous.version(244).stores(previousSchema)
+    await previous.table("executionRuns").put({ id: "existing-run", title: "Keep history" })
+    previous.close()
+    const current = new CogniaDB(name)
+    try {
+      await current.open()
+      expect(current.verno).toBe(245)
+      expect(await current.executionRuns.get("existing-run")).toMatchObject({
+        title: "Keep history",
+      })
+      expect(
+        current.managedDesktopDeletionOutbox.schema.indexes.map((index) => index.name)
+      ).toEqual(["phase", "createdAt", "ownerAccountId"])
+      await current.managedDesktopDeletionOutbox.put({
+        id: "pending",
+        phase: "committed",
+        createdAt: 1,
+      } as never)
+      current.close()
+      await current.open()
+      expect(await current.managedDesktopDeletionOutbox.get("pending")).toBeDefined()
+    } finally {
+      current.close()
+      await Dexie.delete(name)
+    }
+  }
+)

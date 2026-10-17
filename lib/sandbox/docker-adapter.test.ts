@@ -3,6 +3,7 @@ import { sandboxClient } from "@/lib/automation/sandbox-client"
 import { defaultSandboxCapabilities } from "./connection-capabilities"
 import {
   buildDockerSandboxAdapter,
+  DEFAULT_DOCKER_SANDBOX_IMAGE,
   lifecycleStateFromDocker,
   policyInputFromConfig,
   requireDockerConfig,
@@ -133,4 +134,8 @@ test("a running container does not imply a usable desktop or execution channel",
   expect(report).toMatchObject({ reachable: false, state: "running" })
   expect(report.error).toContain("desktop capture")
   expect(outcome.health).toBe(false)
+})
+
+it("pins the authenticated computer-server recipe revision", () => {
+  expect(DEFAULT_DOCKER_SANDBOX_IMAGE).toBe("cognia-cua-desktop:0.3.46-2")
 })

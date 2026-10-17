@@ -5,12 +5,15 @@ import { useSandboxDesktop } from "@/hooks/automation/use-sandbox-desktop"
 import { SandboxDesktopViewer } from "./sandbox-desktop-viewer"
 
 jest.mock("@/hooks/automation/use-sandbox-desktop")
-jest.mock("./sandbox-file-transfer", () => ({ SandboxFileTransfer: () => null }))
+jest.mock("./sandbox-file-transfer", () => ({
+  SandboxFileTransfer: () => <div role="region" aria-label="File transfer" />,
+}))
 const useDesktop = jest.mocked(useSandboxDesktop)
 const frame = { bytes: "aA==", width: 800, height: 600, capturedAt: 42, format: "png" as const }
 function state(overrides = {}) {
   return {
     frame,
+    status: null,
     controlling: false,
     acquiring: false,
     error: null,
@@ -209,4 +212,50 @@ test("wheel input scrolls only the controlled desktop, not the containing sheet"
   const readOnlyEvent = new WheelEvent("wheel", { deltaY: 10, bubbles: true, cancelable: true })
   fireEvent(img, readOnlyEvent)
   expect(readOnlyEvent.defaultPrevented).toBe(false)
+})
+
+test("managed viewer labels quarantine, disables takeover, and hides local transfer", () => {
+  const model = state({ status: { qualified: true, state: "quarantined", canAcquire: false } })
+  useDesktop.mockReturnValue(model)
+  render(
+    <NextIntlClientProvider locale="en" messages={{ automation: messages }}>
+      <SandboxDesktopViewer connectionId="managed" enabled openDesktop={jest.fn()} />
+    </NextIntlClientProvider>
+  )
+  expect(screen.getByRole("status")).toHaveTextContent(
+    messages.sandboxConnections.desktopViewer.quarantined
+  )
+  expect(screen.queryByRole("region", { name: "File transfer" })).not.toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Take control" })).toBeDisabled()
+  expect(
+    screen.getByText(messages.sandboxConnections.desktopViewer.agentDormant)
+  ).toBeInTheDocument()
+})
+
+test("managed mobile observation explicitly disables control", () => {
+  useDesktop.mockReturnValue(
+    state({ status: { qualified: true, state: "observer", canAcquire: true } })
+  )
+  render(
+    <NextIntlClientProvider locale="en" messages={{ automation: messages }}>
+      <SandboxDesktopViewer connectionId="managed" enabled openDesktop={jest.fn()} observeOnly />
+    </NextIntlClientProvider>
+  )
+  expect(
+    screen.getByText(messages.sandboxConnections.desktopViewer.mobileObservation)
+  ).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Take control" })).toBeDisabled()
+  expect(useDesktop).toHaveBeenLastCalledWith("managed", true, expect.any(Function), false)
+})
+
+test("managed take-control gesture requests explicit native takeover from observer mode", () => {
+  const model = state({ status: { qualified: true, state: "observer", canAcquire: true } })
+  useDesktop.mockReturnValue(model)
+  render(
+    <NextIntlClientProvider locale="en" messages={{ automation: messages }}>
+      <SandboxDesktopViewer connectionId="managed" enabled openDesktop={jest.fn()} />
+    </NextIntlClientProvider>
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Take control" }))
+  expect(model.acquire).toHaveBeenCalledWith(true)
 })

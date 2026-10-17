@@ -274,7 +274,7 @@ pub(super) async fn dispatch(
             let policy = host.remote_spawn_policy().map_err(RpcError::internal)?;
             let mut config: crate::external_agent::process::ExternalAgentSpawnConfig =
                 required(&args, "config")?;
-            let gateway_authority = super::gateway_plane::authorize_task_spawn(
+            let mut gateway_authority = super::gateway_plane::authorize_task_spawn(
                 state,
                 host,
                 device_id,
@@ -282,6 +282,7 @@ pub(super) async fn dispatch(
                 scope,
                 &mut config,
             )?;
+            let delivery_source_declaration = config.env.remove(cognia_external_agent::spawn_authority::DELIVERY_SOURCE_ENV);
             let mut summary = serde_json::json!({
                 "agent_id": config.id,
                 "command": config.command,
@@ -327,9 +328,33 @@ pub(super) async fn dispatch(
                     // One backend for both steps: the desktop's sandbox router
                     // can be installed between two reads (ADR-0221).
                     let backend = host.exec_backend();
-                    let hardened = host
+                    let mut hardened = host
                         .harden_spawn_config(validated.config, backend.as_ref())
                         .map_err(RpcError::internal)?;
+                    if let Some(declaration) = delivery_source_declaration {
+                        hardened.env.insert(cognia_external_agent::spawn_authority::DELIVERY_SOURCE_ENV.into(), declaration);
+                        let authority = gateway_authority.as_mut().ok_or_else(|| RpcError::forbidden("delivery_source_gateway_required"))?;
+                        let owner = if let Some(tenant) = tenant_id {
+                            crate::companion_api::host_identity::namespace_for_tenant(tenant)
+                        } else if scope == Some("service") {
+                            crate::companion_api::host_identity::current().ok().and_then(|binding| crate::companion_api::host_identity::namespace_for_tenant(&binding.remote_tenant_id))
+                        } else { None }.ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
+                        let directory = match host {
+                            super::super::dispatch_host::DispatchHost::Tauri(_) => host.data_dir().map_err(RpcError::internal)?.join("cognia"),
+                            super::super::dispatch_host::DispatchHost::Headless(_) => host.data_dir().map_err(RpcError::internal)?,
+                        };
+                        let task = authority.task_id.clone();
+                        let device = authority.device_id.clone().unwrap_or_else(|| device_id.to_owned());
+                        let (config, source) = tokio::task::spawn_blocking(move || {
+                            let host_id = crate::headless::deployment_id::resolve(&directory)?;
+                            let source = cognia_companion_rpc::delivery_admission::consume(
+                                &directory, &owner, &host_id, &device, &task, &mut hardened)?;
+                            Ok::<_, String>((hardened, source))
+                        }).await.map_err(|_| RpcError::internal("delivery_source_admission_failed".into()))?.map_err(RpcError::forbidden)?;
+                        hardened = config;
+                        authority.delivery_source = source;
+                        if !(authority.authorized)() { return Err(RpcError::forbidden("delivery_source_authority_revoked")); }
+                    }
                     cognia_external_agent::spawn_authority::with_remote_origin(
                         device_id,
                         cognia_external_agent::spawn_authority::with_gateway(
@@ -385,13 +410,59 @@ pub(super) async fn dispatch(
 
         "external_agent_delete_gateway_task" => {
             let task_id: String = required_aliased(&args, "task_id", "taskId")?;
-            crate::external_agent::commands::delete_gateway_task_for_device(
-                &task_id,
-                host.exec_backend().as_ref(),
-                (scope != Some("service")).then_some(device_id),
-            )
-            .await
-            .map_err(RpcError::internal)?;
+            let backend = host.exec_backend();
+            cognia_companion_rpc::delivery_admission::delete_with_source_fence(
+                async {
+                    crate::external_agent::commands::authorize_gateway_task_deletion(
+                        &task_id, backend.as_ref(), (scope != Some("service")).then_some(device_id),
+                    ).await.map_err(RpcError::internal)
+                },
+                async {
+                    let directory = match host {
+                        super::super::dispatch_host::DispatchHost::Tauri(_) => host.data_dir().map_err(RpcError::internal)?.join("cognia"),
+                        super::super::dispatch_host::DispatchHost::Headless(_) => host.data_dir().map_err(RpcError::internal)?,
+                    };
+                    let source_store = cognia_sandbox_pool::provenance::SourceStore::new(&directory);
+                    let reader = source_store.clone();
+                    let task = task_id.clone();
+                    let has_source = tokio::task::spawn_blocking(move || reader.has_task(&task))
+                        .await.map_err(|_| RpcError::internal("delivery_source_unavailable".into()))?
+                        .map_err(RpcError::internal)?;
+                    if !has_source { return Ok(()); }
+                    let owner = if let Some(tenant) = tenant_id {
+                        crate::companion_api::host_identity::namespace_for_tenant(tenant)
+                    } else if scope == Some("service") {
+                        crate::companion_api::host_identity::current().ok().and_then(|binding| crate::companion_api::host_identity::namespace_for_tenant(&binding.remote_tenant_id))
+                    } else { None }.ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
+                    let task = task_id.clone();
+                    let device = (scope != Some("service")).then(|| device_id.to_owned());
+                    tokio::task::spawn_blocking(move || {
+                        let host_id = crate::headless::deployment_id::resolve(&directory)?;
+                        source_store.revoke_owned_task(&owner, &host_id, &task, device.as_deref())
+                    }).await.map_err(|_| RpcError::internal("delivery_source_revocation_failed".into()))?
+                        .map_err(RpcError::forbidden)
+                },
+                async {
+                    let directory = match host {
+                        super::super::dispatch_host::DispatchHost::Tauri(_) => host.data_dir().map_err(RpcError::internal)?.join("cognia"),
+                        super::super::dispatch_host::DispatchHost::Headless(_) => host.data_dir().map_err(RpcError::internal)?,
+                    };
+                    let owner = tenant_id.and_then(crate::companion_api::host_identity::namespace_for_tenant)
+                        .or_else(|| (scope == Some("service")).then(|| crate::companion_api::host_identity::current().ok()
+                            .and_then(|b| crate::companion_api::host_identity::namespace_for_tenant(&b.remote_tenant_id))).flatten());
+                    let root = directory.clone();
+                    let host_id = tokio::task::spawn_blocking(move || crate::headless::deployment_id::resolve(&root))
+                        .await.map_err(|_| RpcError::internal("delivery_source_unavailable".into()))?.map_err(RpcError::internal)?;
+                    let admission = cognia_companion_rpc::managed_desktops::task_deletion_admission(
+                        cognia_companion_rpc::managed_desktops::Caller { device_id,tenant_id,scope,local:false },
+                        host_id.clone(),owner.clone());
+                    cognia_companion_rpc::managed_desktop_results::delete_task_history(&directory, owner, host_id, task_id.clone(),
+                        (scope != Some("service")).then(|| device_id.to_owned()), admission,
+                        crate::external_agent::commands::delete_gateway_task_for_device(
+                            &task_id, backend.as_ref(), (scope != Some("service")).then_some(device_id),
+                        )).await.map_err(RpcError::internal)
+                },
+            ).await?;
             super::super::audit::record_async(
                 "external_agent_gateway_task_deleted",
                 device_id,

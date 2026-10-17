@@ -772,6 +772,24 @@ export class ExternalAgentManager {
         originDeviceId,
         rebind,
       })
+      if (childPlacement?.workspace && typeof custom?.chatSessionId === "string") {
+        // Admission captures these owner-declared origin references exactly once.
+        // The Host mints independent source/run authority before spawning.
+        const { recordDeliverySourceHost } = await import("@/lib/sandbox/delivery-source-hosts")
+        const assertSourceHost = await recordDeliverySourceHost(custom.chatSessionId)
+        lease.assertCurrent?.()
+        assertSourceHost()
+        prepared.config.process!.env = {
+          ...prepared.config.process!.env,
+          COGNIA_DELIVERY_SOURCE: JSON.stringify({
+            conversationId: custom.chatSessionId,
+            originRunRef:
+              typeof custom.deliveryOriginRunRef === "string"
+                ? custom.deliveryOriginRunRef
+                : crypto.randomUUID(),
+          }),
+        }
+      }
       const cwd = this.buildSessionOptions(source, options).cwd
       if (cwd) prepared.config.process!.cwd = cwd
       if (spawnPlacementFor(agentId) !== placement)

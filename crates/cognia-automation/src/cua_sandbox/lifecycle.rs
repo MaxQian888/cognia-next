@@ -319,7 +319,7 @@ async fn docker(args: &[&str], what: &str) -> Result<String> {
 
 const IMAGE_ID_LABEL: &str = "cognia.cua.image-id";
 const IMAGE_REFERENCE_LABEL: &str = "cognia.cua.image-reference";
-pub const BUILTIN_DESKTOP_IMAGE: &str = "cognia-cua-desktop:0.3.46-1";
+pub const BUILTIN_DESKTOP_IMAGE: &str = "cognia-cua-desktop:0.3.46-2";
 
 fn builtin_image_context() -> Result<tempfile::TempDir> {
     let context = tempfile::Builder::new()

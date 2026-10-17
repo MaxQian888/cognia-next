@@ -36,6 +36,8 @@ import { DEFAULT_DOCKER_SANDBOX_IMAGE } from "@/lib/sandbox/docker-adapter"
 import { hasSandboxAdapter } from "@/lib/sandbox/adapter-registry"
 import type { SandboxHealthStatus } from "@/lib/db/sandbox-connections"
 import type { SandboxConnectionRow, SandboxLifecycleState } from "@/types/sandbox"
+import { ManagedDesktopSettings } from "./managed-desktop-settings"
+import type { ManagedDesktopTarget } from "@/lib/automation/managed-desktop-client"
 import { SandboxConnectionSheet } from "./sandbox-connection-sheet"
 
 function statusVariant(status: SandboxHealthStatus): "default" | "secondary" | "destructive" {
@@ -60,6 +62,8 @@ export function stateVariant(
 export function sandboxConnectionSummary(connection: SandboxConnectionRow): string {
   const config = connection.config
   switch (config.provider) {
+    case "e2b":
+      return config.providerConfigId
     case "docker":
       return `${config.image} · ${config.host}${config.port ? `:${config.port}` : ""}`
     case "cua-cloud": {
@@ -77,9 +81,21 @@ export interface SandboxConnectionsTabProps {
    * when the host already titles it, as the device console's section does.
    */
   framed?: boolean
+  /** Explicit managed desktop Host. Docker remains client-local. */
+  managedDesktopTarget?: ManagedDesktopTarget
+  /** Remote device consoles must not display this renderer's Docker registry. */
+  managedOnly?: boolean
 }
 
-export function SandboxConnectionsTab({ framed = true }: SandboxConnectionsTabProps = {}) {
+export function SandboxConnectionsTab(props: SandboxConnectionsTabProps = {}) {
+  if (props.managedOnly) return <ManagedDesktopSettings target={props.managedDesktopTarget} />
+  return <LocalSandboxConnectionsTab {...props} />
+}
+
+function LocalSandboxConnectionsTab({
+  framed = true,
+  managedDesktopTarget,
+}: SandboxConnectionsTabProps) {
   const t = useTranslations("automation.sandboxConnections")
   const { connections, create, remove, provision, start, suspend, resume, stop, refreshHealth } =
     useSandboxConnections()
@@ -308,6 +324,8 @@ export function SandboxConnectionsTab({ framed = true }: SandboxConnectionsTabPr
           {t("addConnection")}
         </Button>
       )}
+
+      <ManagedDesktopSettings target={managedDesktopTarget} />
 
       <SandboxConnectionSheet
         connection={selected}

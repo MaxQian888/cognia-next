@@ -90,3 +90,54 @@ it("does not infer allowlist support from filesystem confinement or a microVM ad
     { available: true, networkAllowlist }
   )
 })
+
+it("withholds unqualified E2B creation but retains cleanup and health", () => {
+  const row = connection({
+    provider: "e2b",
+    config: {
+      provider: "e2b",
+      target: { kind: "remote", hostId: "host" },
+      providerConfigId: "byo",
+      qualification: "unqualified",
+    },
+    capabilities: defaultSandboxCapabilities("e2b", "computer-server"),
+  })
+  expect(projectSandboxConnectionCapabilities(row, true)).toMatchObject({
+    create: false,
+    connect: true,
+    health: true,
+    delete: true,
+    gui: false,
+    workspaceExec: false,
+  })
+})
+
+it.each([undefined, 0, 1, 2, 3])(
+  "projects E2B evidence version %s without widening dormant operations",
+  (version) => {
+    const row = connection({
+      provider: "e2b",
+      config: {
+        provider: "e2b",
+        target: { kind: "local" },
+        providerConfigId: "byo",
+        qualification: "qualified",
+        qualificationEvidenceVersion: version,
+        workloadIsolationRevision: 1,
+        egressEnforcement: "provider-and-guest-kernel",
+      },
+      capabilities: defaultSandboxCapabilities("e2b", "computer-server"),
+    })
+    expect(projectSandboxConnectionCapabilities(row, true)).toMatchObject({
+      create: version === 2,
+      connect: true,
+      health: true,
+      delete: true,
+      gui: false,
+      workspaceRead: false,
+      workspaceExec: false,
+      suspend: false,
+      resume: false,
+    })
+  }
+)

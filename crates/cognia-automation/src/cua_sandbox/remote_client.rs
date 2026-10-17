@@ -26,10 +26,12 @@ type Job = (
     WsRequest,
     oneshot::Sender<Result<Value>>,
     tokio::time::Instant,
+    Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 );
 
 pub struct CuaRemoteClient {
     tx: mpsc::Sender<Job>,
+    admission: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 fn backend_err(msg: impl Into<String>) -> AutomationError {
@@ -51,56 +53,111 @@ impl CuaRemoteClient {
         if token.len() < 32 || token.len() > 256 {
             return Err(auth_denied("sandbox authentication token is missing or invalid; recreate with the secured desktop image"));
         }
-        let mut header = HeaderValue::from_str(token).map_err(|_| {
-            auth_denied("sandbox authentication token has an invalid header format")
-        })?;
-        header.set_sensitive(true);
-        let url = format!("ws://{host}:{port}/ws");
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-        let unauthenticated =
-            tokio::time::timeout_at(deadline, tokio_tungstenite::connect_async(&url))
-                .await
-                .map_err(|_| backend_err("cua authentication probe timed out"))?;
-        match unauthenticated {
-            Err(WsError::Http(response)) if matches!(response.status().as_u16(), 401 | 403) => {}
-            Ok((stream, _)) => {
-                // Closing this probe never sends a desktop command.
-                drop(stream);
-                return Err(auth_denied("sandbox desktop allows unauthenticated access; recreate with the secured desktop image"));
+        Self::connect_endpoint(format!("ws://{host}:{port}/ws"), token, None).await
+    }
+
+    /// Managed endpoints are constructed from validated provider metadata by
+    /// the Host, never supplied by a browser. Reuse the same command pump.
+    pub(crate) async fn connect_managed(
+        url: String,
+        guest: &str,
+        traffic: &str,
+    ) -> Result<Arc<Self>> {
+        if !url.starts_with("wss://") {
+            return Err(auth_denied("managed desktop requires TLS"));
+        }
+        Self::connect_endpoint(url, guest, Some(traffic)).await
+    }
+
+    async fn connect_endpoint(
+        url: String,
+        guest: &str,
+        traffic: Option<&str>,
+    ) -> Result<Arc<Self>> {
+        fn header(token: &str) -> Result<HeaderValue> {
+            if token.is_empty() || token.len() > 4096 {
+                return Err(auth_denied(
+                    "sandbox authentication token is missing or invalid",
+                ));
             }
-            Err(_) => {
-                return Err(backend_err(
-                    "sandbox desktop did not provide the required authentication challenge",
-                ))
+            let mut value = HeaderValue::from_str(token).map_err(|_| {
+                auth_denied("sandbox authentication token has an invalid header format")
+            })?;
+            value.set_sensitive(true);
+            Ok(value)
+        }
+        if guest.len() < 32 || guest.len() > 256 {
+            return Err(auth_denied(
+                "sandbox authentication token is missing or invalid",
+            ));
+        }
+        let guest = header(guest)?;
+        let traffic = traffic.map(header).transpose()?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        // Challenge both cloud ingress and guest auth. Never send input to a
+        // legacy endpoint that accepts either missing credential.
+        for edge in std::iter::once(None).chain(traffic.as_ref().map(Some)) {
+            let mut probe = url
+                .as_str()
+                .into_client_request()
+                .map_err(|_| backend_err("invalid sandbox WebSocket endpoint"))?;
+            if let Some(edge) = edge {
+                probe
+                    .headers_mut()
+                    .insert("e2b-traffic-access-token", edge.clone());
+            }
+            match tokio::time::timeout_at(deadline, tokio_tungstenite::connect_async(probe)).await {
+                Ok(Err(WsError::Http(response)))
+                    if matches!(response.status().as_u16(), 401 | 403) => {}
+                Ok(Ok((stream, _))) => {
+                    drop(stream);
+                    return Err(auth_denied("sandbox desktop allows unauthenticated access; recreate with the secured desktop image"));
+                }
+                _ => {
+                    return Err(backend_err(
+                        "sandbox desktop did not provide the required authentication challenge",
+                    ))
+                }
             }
         }
         let mut request = url
+            .as_str()
             .into_client_request()
             .map_err(|_| backend_err("invalid sandbox WebSocket endpoint"))?;
-        request.headers_mut().insert(AUTH_HEADER, header);
-        let (stream, _) =
-            tokio::time::timeout_at(deadline, tokio_tungstenite::connect_async(request))
-                .await
-                .map_err(|_| backend_err("cua authenticated connect timed out"))?
-                .map_err(|error| match error {
-                    WsError::Http(response) if matches!(response.status().as_u16(), 401 | 403) => {
-                        auth_denied(format!(
-                            "cua authenticated connect rejected (HTTP {})",
-                            response.status().as_u16()
-                        ))
-                    }
-                    WsError::Http(response) => backend_err(format!(
-                        "cua authenticated connect rejected (HTTP {})",
-                        response.status().as_u16()
-                    )),
-                    _ => backend_err("cua authenticated WebSocket connection failed"),
-                })?;
+        request.headers_mut().insert(AUTH_HEADER, guest);
+        if let Some(traffic) = traffic {
+            request
+                .headers_mut()
+                .insert("e2b-traffic-access-token", traffic);
+        }
+        let mut config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+        config.max_message_size = Some(12 * 1024 * 1024);
+        config.max_frame_size = Some(12 * 1024 * 1024);
+        let (stream, _) = tokio::time::timeout_at(
+            deadline,
+            tokio_tungstenite::connect_async_with_config(request, Some(config), false),
+        )
+        .await
+        .map_err(|_| backend_err("cua authenticated connect timed out"))?
+        .map_err(|error| match error {
+            WsError::Http(response) if matches!(response.status().as_u16(), 401 | 403) => {
+                auth_denied(format!(
+                    "cua authenticated connect rejected (HTTP {})",
+                    response.status().as_u16()
+                ))
+            }
+            _ => backend_err("cua authenticated WebSocket connection failed"),
+        })?;
         let (mut sink, mut source) = stream.split();
         let (tx, mut rx) = mpsc::channel::<Job>(32);
 
         tokio::spawn(async move {
-            while let Some((req, reply, deadline)) = rx.recv().await {
+            while let Some((req, reply, deadline, admission)) = rx.recv().await {
                 if reply.is_closed() || tokio::time::Instant::now() >= deadline {
+                    continue;
+                }
+                if admission.as_ref().is_some_and(|check| !check()) {
+                    let _ = reply.send(Err(auth_denied("sandbox input fence expired")));
                     continue;
                 }
                 let payload = match serde_json::to_string(&req) {
@@ -155,7 +212,19 @@ impl CuaRemoteClient {
             }
         });
 
-        Ok(Arc::new(Self { tx }))
+        Ok(Arc::new(Self {
+            tx,
+            admission: None,
+        }))
+    }
+
+    /// Each queued command checks its authority immediately before send. This
+    /// also fences later commands in a compound click/scroll/drag operation.
+    pub(crate) fn fenced(&self, admission: Arc<dyn Fn() -> bool + Send + Sync>) -> Arc<Self> {
+        Arc::new(Self {
+            tx: self.tx.clone(),
+            admission: Some(admission),
+        })
     }
 
     /// Send a request and await its response (30s timeout).
@@ -164,7 +233,7 @@ impl CuaRemoteClient {
         let (reply_tx, reply_rx) = oneshot::channel();
         tokio::time::timeout_at(deadline, async {
             self.tx
-                .send((req, reply_tx, deadline))
+                .send((req, reply_tx, deadline, self.admission.clone()))
                 .await
                 .map_err(|_| backend_err("cua client channel closed"))?;
             reply_rx
@@ -233,6 +302,126 @@ pub(crate) async fn accept_test_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cloud_handshake_challenges_both_auth_layers_and_keeps_secrets_out_of_url() {
+        const TRAFFIC: &str = "synthetic-provider-traffic-secret";
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            for index in 0..3 {
+                let (socket, _) = listener.accept().await.unwrap();
+                let accepted = tokio_tungstenite::accept_hdr_async(socket, move |
+                    request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                    response: tokio_tungstenite::tungstenite::handshake::server::Response,
+                | {
+                    assert_eq!(request.uri().path(), "/ws");
+                    assert!(request.uri().query().is_none());
+                    assert!(!request.uri().to_string().contains(TRAFFIC));
+                    assert!(!request.uri().to_string().contains(TEST_AUTH_TOKEN));
+                    let traffic = request.headers().get("e2b-traffic-access-token").and_then(|v| v.to_str().ok());
+                    let guest = request.headers().get(AUTH_HEADER).and_then(|v| v.to_str().ok());
+                    match index {
+                        0 => { assert!(traffic.is_none()); assert!(guest.is_none()); },
+                        1 => { assert_eq!(traffic, Some(TRAFFIC)); assert!(guest.is_none()); },
+                        2 => { assert_eq!(traffic, Some(TRAFFIC)); assert_eq!(guest, Some(TEST_AUTH_TOKEN)); return Ok(response); },
+                        _ => unreachable!(),
+                    }
+                    Err(tokio_tungstenite::tungstenite::http::Response::builder().status(401).body(Some("Unauthorized".into())).unwrap())
+                }).await;
+                if index < 2 {
+                    assert!(accepted.is_err());
+                } else {
+                    let mut stream = accepted.unwrap();
+                    let request = stream.next().await.unwrap().unwrap();
+                    assert!(request.to_text().unwrap().contains("screenshot"));
+                    stream
+                        .send(Message::Text("{\"status\":\"success\"}".into()))
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+        // Only this private fixture helper permits a local plaintext socket;
+        // production connect_managed rejects it before accessing the network.
+        let client = CuaRemoteClient::connect_endpoint(
+            format!("ws://127.0.0.1:{port}/ws"),
+            TEST_AUTH_TOKEN,
+            Some(TRAFFIC),
+        )
+        .await
+        .unwrap();
+        client
+            .call_simple("screenshot", serde_json::json!({}))
+            .await
+            .unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn queued_input_rechecks_fence_after_waiting_for_an_earlier_reply() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (started, received) = tokio::sync::oneshot::channel();
+        let (finish, blocked) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let mut stream = accept_test_client(&listener).await;
+            let _first = stream.next().await.unwrap().unwrap();
+            started.send(()).unwrap();
+            blocked.await.unwrap();
+            stream
+                .send(Message::Text("{\"status\":\"success\"}".into()))
+                .await
+                .unwrap();
+            // The stale second command must never reach the remote desktop.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), stream.next())
+                    .await
+                    .is_err()
+            );
+        });
+        let client = CuaRemoteClient::connect("127.0.0.1", port, TEST_AUTH_TOKEN)
+            .await
+            .unwrap();
+        let first_client = client.clone();
+        let first = tokio::spawn(async move {
+            first_client
+                .call_simple("screenshot", serde_json::json!({}))
+                .await
+        });
+        received.await.unwrap();
+        let allowed = Arc::new(AtomicBool::new(true));
+        let gate = allowed.clone();
+        let guarded = client.fenced(Arc::new(move || gate.load(Ordering::SeqCst)));
+        let queued = tokio::spawn(async move {
+            guarded
+                .call_simple("left_click", serde_json::json!({"x":1,"y":1}))
+                .await
+        });
+        tokio::task::yield_now().await;
+        allowed.store(false, Ordering::SeqCst);
+        finish.send(()).unwrap();
+        first.await.unwrap().unwrap();
+        assert!(queued
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("fence expired"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn managed_transport_rejects_plaintext_before_any_network_operation() {
+        assert!(CuaRemoteClient::connect_managed(
+            "ws://127.0.0.1:1/ws".into(),
+            TEST_AUTH_TOKEN,
+            TEST_AUTH_TOKEN
+        )
+        .await
+        .is_err());
+    }
 
     #[tokio::test]
     async fn missing_or_invalid_secret_is_rejected_before_network_access() {

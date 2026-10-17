@@ -184,6 +184,7 @@ export const CORE_TABLE_NAMES = [
   "executionRunEvents",
   "executionRunInterrupts",
   "executionRuns",
+  "managedDesktopDeletionOutbox",
   "externalAgentConfigHeads",
   "externalAgentConfigRevisions",
   "externalIdentities",
@@ -795,7 +796,7 @@ export const COMPANION_SYNC_DELETE_STRATEGY: Readonly<
   goalEvents: "retention-pruned",
   plans: "tombstoned",
   memories: "tombstoned",
-  executionRuns: "never-deleted",
+  executionRuns: "tombstoned",
   workflowRuns: "tombstoned",
   mcpServers: "tombstoned",
   terminalHistory: "retention-pruned",
@@ -829,7 +830,7 @@ export const COMPANION_SYNC_DELETE_STRATEGY: Readonly<
   platformIdentities: "tombstoned",
   connectorCallbackBindings: "retention-pruned",
   workflowDeployments: "never-deleted",
-  executionRunBindings: "never-deleted",
+  executionRunBindings: "tombstoned",
   sessionFolders: "tombstoned",
   // The profile singleton is deleted only by a pet reset, which tombstones it
   // along with every achievement, inventory row and binding it clears.
@@ -1044,6 +1045,7 @@ QUEUE_TABLES.add("notificationTimers")
 QUEUE_TABLES.add("notificationAggregateMembers")
 // Account sync (ADR-0215 phase 3): changes waiting to be pushed, pulled ops
 // waiting to be applied, and the capture/cursor state both are replayed from.
+QUEUE_TABLES.add("managedDesktopDeletionOutbox")
 QUEUE_TABLES.add("accountSyncOutbox")
 QUEUE_TABLES.add("accountSyncInbox")
 QUEUE_TABLES.add("accountSyncState")
@@ -1326,6 +1328,13 @@ function backupFor(
       rebuild: `Rebuild ${name} from its owning module.`,
     }
   }
+  if (name === "managedDesktopDeletionOutbox") {
+    return {
+      mode: "device-local",
+      reason:
+        "Unacknowledged evidence cleanup must survive restart and cannot be exported or restored on another Host.",
+    }
+  }
   if (role === "queue") {
     return { mode: "ephemeral", reason: "Operational work state is recovered or replayed locally." }
   }
@@ -1345,6 +1354,13 @@ const WORKFLOW_APP_ROW_EXPIRY: DataRetentionPolicy = {
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  managedDesktopDeletionOutbox: {
+    mode: "permanent",
+    enforcement: "central",
+    executorId: "managedDesktopDeletion",
+    reason:
+      "Replay acknowledged Host cleanup; never expire unacknowledged evidence deletion intents.",
+  },
   messageSyncClock: {
     mode: "permanent",
     enforcement: "explicit-delete",

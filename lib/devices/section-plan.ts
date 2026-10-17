@@ -142,6 +142,7 @@ const ORDER: Record<DeviceKind, readonly DeviceSectionId[]> = {
     "host-secrets",
     "host-updates",
     "host-runtimes",
+    "sandbox",
     "workspaces",
     "routing",
     "shell-tiers",
@@ -208,7 +209,7 @@ function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
     case "shell-tiers":
       return row.runtime.shellTiers.length > 0
     case "sandbox":
-      return row.runtime.sandbox.support === "supported"
+      return Boolean(managementRefOf(row)) || row.runtime.sandbox.support === "supported"
     case "workspaces":
       return row.runtime.workspaces.support !== "unsupported"
     case "identity":

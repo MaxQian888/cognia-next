@@ -17,11 +17,7 @@
  *     containers were created with `--rm`.
  */
 
-import type {
-  SandboxClient,
-  SandboxContainerState,
-  SandboxPolicyInput,
-} from "@/lib/automation/sandbox-client"
+import type { SandboxClient, SandboxPolicyInput } from "@/lib/automation/sandbox-client"
 import { MicrovmAdapterError } from "@cognia/plugin-sdk/api/sandbox"
 import type {
   DockerSandboxConfig,
@@ -40,16 +36,10 @@ import {
 } from "./lifecycle-contract"
 
 /** Built from the desktop recipe embedded in the native lifecycle module. */
-export const DEFAULT_DOCKER_SANDBOX_IMAGE = "cognia-cua-desktop:0.3.46-1"
+export const DEFAULT_DOCKER_SANDBOX_IMAGE = "cognia-cua-desktop:0.3.46-2"
 
 /** Side channel for values a lifecycle call discovers, e.g. the mapped port. */
-export interface DockerAdapterOutcome {
-  containerId?: string
-  port?: number
-  health?: boolean
-  /** Docker's own state, when the call read it. */
-  containerState?: SandboxContainerState | null
-}
+export type DockerAdapterOutcome = import("./lifecycle-contract").SandboxAdapterOutcome
 
 /**
  * Map Docker's `.State.Status` onto the provider-neutral lifecycle vocabulary.

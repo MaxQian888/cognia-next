@@ -1,0 +1,22 @@
+[package]
+name = "cognia-desktop-guest"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Fixed managed-desktop guest isolation supervisor and ingress relay"
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
+libc.workspace = true
+
+[lints]
+workspace = true

@@ -111,3 +111,15 @@ export async function deleteSessionsRouted(ids: readonly string[]): Promise<void
     await deleteSessionsWithTeardown(local, scope)
   }
 }
+
+/** Delete one desktop acceptance through the same captured history-write scope. */
+export async function deleteManagedDesktopAcceptanceRouted(
+  acceptanceId: string,
+  conversationId: string
+): Promise<void> {
+  const scope = captureWriteScope()
+  const { deleteManagedDesktopAcceptance } =
+    await import("@/lib/automation/managed-desktop-result-deletion")
+  scope.assertActive()
+  await deleteManagedDesktopAcceptance(acceptanceId, conversationId, scope)
+}

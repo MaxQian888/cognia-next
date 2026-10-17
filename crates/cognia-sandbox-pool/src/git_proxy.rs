@@ -167,6 +167,16 @@ impl GitProxy {
     /// carrying userinfo/query/fragment, invalid branch names), binds
     /// 127.0.0.1:0 and serves until dropped.
     pub async fn start(config: GitProxyConfig) -> Result<GitProxy, String> {
+        Self::start_with_access(config, GitProxyAccess::TaskBranch).await
+    }
+
+    /// Acceptance reconstruction grants fetch only. Both receive-pack discovery
+    /// and RPC are refused locally, before credentials or upstream are consulted.
+    pub async fn start_read_only(config: GitProxyConfig) -> Result<GitProxy, String> {
+        Self::start_with_access(config, GitProxyAccess::ReadOnly).await
+    }
+
+    async fn start_with_access(config: GitProxyConfig, access: GitProxyAccess) -> Result<GitProxy, String> {
         let base = validate_upstream(&config.upstream)?;
         if !is_valid_branch(&config.branch) {
             return Err(format!(
@@ -219,6 +229,7 @@ impl GitProxy {
         let (stop_tx, stop_rx) = watch::channel(false);
         let shared = Arc::new(Shared {
             client,
+            access,
             base,
             authorization,
             credential,
@@ -226,11 +237,11 @@ impl GitProxy {
             limiter: Arc::new(Semaphore::new(MAX_CONCURRENT_UPSTREAM)),
             stop: stop_rx.clone(),
         });
-        log::info!(
-            "git proxy: serving 127.0.0.1:{port} for {} (push limited to {})",
-            shared.base,
-            shared.branch_ref
-        );
+        if access == GitProxyAccess::ReadOnly {
+            log::info!("git proxy: read-only acceptance proxy listening on loopback");
+        } else {
+            log::info!("git proxy: serving 127.0.0.1:{port} for {} (task branch {})", shared.base, shared.branch_ref);
+        }
 
         let app = Router::new().fallback(handle).with_state(shared);
         let shutdown = stop_signal(stop_rx);
@@ -420,7 +431,15 @@ fn basic_authorization(token: &str) -> Result<HeaderValue, String> {
     Ok(value)
 }
 
+/// The code-task publisher and the GUI acceptance reader are distinct grants.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GitProxyAccess {
+    TaskBranch,
+    ReadOnly,
+}
+
 struct Shared {
+    access: GitProxyAccess,
     client: reqwest::Client,
     base: String,
     authorization: Option<HeaderValue>,
@@ -486,6 +505,11 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
         );
         return plain(StatusCode::NOT_FOUND, "not found\n");
     };
+    if shared.access == GitProxyAccess::ReadOnly
+        && matches!(route, Route::InfoRefs(Service::ReceivePack) | Route::Rpc(Service::ReceivePack))
+    {
+        return plain(StatusCode::FORBIDDEN, "read-only git proxy\n");
+    }
     let stop = stop_signal(shared.stop.clone());
     tokio::select! {
         response = serve(shared.clone(), route, request) => response,
@@ -640,10 +664,11 @@ async fn forward(
         Err(error) => {
             // Reqwest errors name the URL, which carries no credential, and
             // never the headers; the redactor is the backstop all the same.
-            log::warn!(
-                "git proxy: {url} failed: {}",
-                redact(&error.to_string(), shared.credential.as_ref())
-            );
+            if shared.access == GitProxyAccess::ReadOnly {
+                log::warn!("git proxy: read-only upstream request failed");
+            } else {
+                log::warn!("git proxy: {url} failed: {}", redact(&error.to_string(), shared.credential.as_ref()));
+            }
             return plain(
                 StatusCode::BAD_GATEWAY,
                 "the upstream git server is unreachable\n",
@@ -651,7 +676,9 @@ async fn forward(
         }
     };
     let status = upstream.status();
-    if status.is_redirection() {
+    if shared.access == GitProxyAccess::ReadOnly {
+        if !status.is_success() { log::debug!("git proxy: read-only upstream answered {status}"); }
+    } else if status.is_redirection() {
         log::warn!("git proxy: {url} answered {status}; redirects are not followed");
     } else if !status.is_success() {
         log::debug!("git proxy: {url} answered {status}");
@@ -2003,6 +2030,29 @@ mod tests {
         })
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn read_only_refuses_every_push_route_before_upstream() {
+        init_policy();
+        let upstream = FakeUpstream::start(FakeConfig::default()).await;
+        let proxy = GitProxy::start_read_only(GitProxyConfig {
+            upstream: upstream.url(), credential: Some("host-only-token".into()), branch: BRANCH.into(),
+        }).await.unwrap();
+        for (method, path, expected) in [
+            (Method::GET, "/repo.git/info/refs?service=git-receive-pack", 403),
+            (Method::POST, "/repo.git/git-receive-pack", 403),
+            (Method::GET, "/repo.git/info/refs?service=git-receive-pack&x=1", 404),
+            (Method::POST, "/repo.git/%67it-receive-pack", 404),
+            (Method::POST, "/other.git/git-receive-pack", 404),
+        ] {
+            let response = client().request(method, url(&proxy, path)).body("0000").send().await.unwrap();
+            assert_eq!(response.status().as_u16(), expected);
+        }
+        assert!(upstream.requests().is_empty());
+        let response = client().get(url(&proxy, "/repo.git/info/refs?service=git-upload-pack")).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(upstream.requests().len(), 1);
     }
 
     fn url(proxy: &GitProxy, path: &str) -> String {

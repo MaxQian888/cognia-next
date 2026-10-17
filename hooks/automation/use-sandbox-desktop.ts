@@ -1,21 +1,34 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { sandboxClient, type SandboxControlLease } from "@/lib/automation/sandbox-client"
+import {
+  sandboxClient,
+  type SandboxControlLease,
+  type SandboxDesktopFrame,
+  type SandboxDesktopSession,
+  type SandboxDesktopStatus,
+  type OpenSandboxDesktop,
+} from "@/lib/automation/sandbox-client"
 import type { Point, Screenshot, UiAction } from "@/lib/automation/types"
 
-export type SandboxDesktopError = "capture" | "control" | "input" | "release" | null
+export type SandboxDesktopError = "capture" | "control" | "input" | "release" | "session" | null
 const POLL_MS = 1_000
 const MAX_FRAME_AGE_MS = 5_000
 
 /** The session closure owns all timers and leases, including late async completions. */
-export function useSandboxDesktop(connectionId: string, enabled: boolean) {
+export function useSandboxDesktop(
+  connectionId: string,
+  enabled: boolean,
+  openDesktop?: OpenSandboxDesktop,
+  inputAllowed = true
+) {
+  const [status, setStatus] = useState<SandboxDesktopStatus | null>(null)
   const [frame, setFrame] = useState<Screenshot | null>(null)
   const [controlling, setControlling] = useState(false)
   const [acquiring, setAcquiring] = useState(false)
   const [error, setError] = useState<SandboxDesktopError>(null)
   const session = useRef<{
-    acquire: () => Promise<void>
+    acquire: (takeover?: boolean) => Promise<void>
     release: () => Promise<void>
     refresh: () => Promise<void>
     input: (action: UiAction, point: Point | null, capturedAt: number) => Promise<boolean>
@@ -27,7 +40,27 @@ export function useSandboxDesktop(connectionId: string, enabled: boolean) {
     let acquiringLease = false
     let generation = 0
     let capturing = false
+    let captureEpoch = 0
+    let managedMutation = false
+    let refreshPending = false
+    let consumedFrameId: string | undefined
     let currentFrame: Screenshot | null = null
+    let currentProof: SandboxDesktopFrame | null = null
+    let controlStatus: SandboxDesktopStatus | null = null
+    let invalidated = false
+    let detachInvalidated: (() => void) | undefined
+    let desktop: SandboxDesktopSession | null = openDesktop
+      ? null
+      : {
+          managed: false,
+          frame: async () => ({ screenshot: await sandboxClient.desktopFrame(connectionId) }),
+          acquire: () => sandboxClient.acquireControl(connectionId),
+          renew: (current) => sandboxClient.renewControl(connectionId, current.token),
+          release: (current) => sandboxClient.releaseControl(connectionId, current.token),
+          input: (current, _frame, point, action) =>
+            sandboxClient.controlInput(connectionId, current.token, point, action),
+          close: () => undefined,
+        }
     let receivedAt = 0
     let poll: ReturnType<typeof setTimeout> | undefined
     let renewal: ReturnType<typeof setTimeout> | undefined
@@ -35,7 +68,8 @@ export function useSandboxDesktop(connectionId: string, enabled: boolean) {
     let inputs: Promise<unknown> = Promise.resolve()
     // This transport talks to the client-local Tauri host. Losing an external
     // network connection does not make a local Docker desktop unavailable.
-    const visible = () => enabled && !document.hidden
+    const visible = () =>
+      enabled && !invalidated && !document.hidden && (!openDesktop || navigator.onLine)
 
     const release = async () => {
       generation += 1
@@ -49,7 +83,7 @@ export function useSandboxDesktop(connectionId: string, enabled: boolean) {
       }
       if (previous) {
         try {
-          await sandboxClient.releaseControl(connectionId, previous.token)
+          await desktop?.release(previous)
         } catch {
           // The backend lease also expires, so a disconnected viewer cannot
           // retain control indefinitely. Never reuse a locally released token.
@@ -65,7 +99,7 @@ export function useSandboxDesktop(connectionId: string, enabled: boolean) {
       expiry = setTimeout(() => void release(), Math.max(0, lease.expiresAt - Date.now()))
       renewal = setTimeout(async () => {
         try {
-          const next = await sandboxClient.renewControl(connectionId, token)
+          const next = await desktop!.renew(lease!)
           if (!alive || lease?.token !== token || !visible()) return
           lease = next
           scheduleRenewal()
@@ -78,45 +112,136 @@ export function useSandboxDesktop(connectionId: string, enabled: boolean) {
     }
 
     const refresh = async () => {
-      if (!alive || !visible() || capturing) return
+      if (!alive || !visible() || !desktop) return
+      if (capturing || managedMutation) {
+        refreshPending = true
+        return
+      }
+      refreshPending = false
+      const requestedCaptureEpoch = captureEpoch
       clearTimeout(poll)
       capturing = true
       try {
-        const next = await sandboxClient.desktopFrame(connectionId)
-        if (!alive || !visible()) return
+        const requestedGeneration = generation
+        if (desktop.status) {
+          controlStatus = await desktop.status()
+          if (
+            !alive ||
+            !visible() ||
+            generation !== requestedGeneration ||
+            captureEpoch !== requestedCaptureEpoch
+          )
+            return
+          setStatus(controlStatus)
+          if (
+            !controlStatus.qualified ||
+            ["dormant", "quarantined", "unavailable"].includes(controlStatus.state)
+          ) {
+            currentFrame = null
+            currentProof = null
+            setFrame(null)
+            if (lease) await release()
+            return
+          }
+          if (lease && (!controlStatus.controllerIsSelf || controlStatus.fence !== lease.fence)) {
+            await release()
+            return
+          }
+        }
+        const proof = await desktop.frame()
+        const next = proof.screenshot
+        if (
+          !alive ||
+          !visible() ||
+          generation !== requestedGeneration ||
+          captureEpoch !== requestedCaptureEpoch
+        )
+          return
+        if (
+          desktop.managed &&
+          (!proof.frameId ||
+            !Number.isFinite(proof.expiresAt) ||
+            proof.expiresAt! <= Date.now() ||
+            (lease && proof.fence !== lease.fence))
+        )
+          throw new Error("Invalid frame proof")
+        currentProof = proof
         if (!next.bytes || next.width <= 0 || next.height <= 0) throw new Error("Invalid frame")
         currentFrame = next
         receivedAt = Date.now()
         setFrame(next)
         setError((previous) => (previous === "capture" ? null : previous))
       } catch {
-        if (!alive) return
+        if (!alive || captureEpoch !== requestedCaptureEpoch) return
         currentFrame = null
         setFrame(null)
         await release()
         if (alive) setError("capture")
       } finally {
         capturing = false
-        if (alive && visible()) poll = setTimeout(() => void refresh(), POLL_MS)
+        if (alive && visible())
+          poll = setTimeout(() => void refresh(), refreshPending ? 0 : POLL_MS)
       }
     }
 
-    const acquire = async () => {
-      if (!alive || !visible() || lease || acquiringLease || !currentFrame) return
+    const acquire = async (takeover = false) => {
+      if (
+        !alive ||
+        !visible() ||
+        !inputAllowed ||
+        !desktop ||
+        lease ||
+        acquiringLease ||
+        !currentFrame ||
+        (desktop.managed && !controlStatus?.canAcquire)
+      )
+        return
       const requestedGeneration = generation
       acquiringLease = true
       setAcquiring(true)
       setError(null)
       try {
-        const next = await sandboxClient.acquireControl(connectionId)
+        const next = await desktop.acquire(takeover)
         if (!alive || !visible() || generation !== requestedGeneration) {
-          await sandboxClient.releaseControl(connectionId, next.token)
+          await desktop.release(next)
           return
         }
         lease = next
-        setControlling(true)
         scheduleRenewal()
+        if (desktop.managed) {
+          // Fence invalidates every observer frame. A capture begun before
+          // acquisition must never overwrite the fresh controller frame.
+          generation += 1
+          currentFrame = null
+          currentProof = null
+          setFrame(null)
+          const acquiredGeneration = generation
+          const proof = await desktop.frame()
+          if (
+            !alive ||
+            !visible() ||
+            generation !== acquiredGeneration ||
+            lease?.token !== next.token
+          )
+            return
+          if (
+            !proof.frameId ||
+            !Number.isFinite(proof.expiresAt) ||
+            proof.fence !== next.fence ||
+            proof.expiresAt! <= Date.now() ||
+            !proof.screenshot.bytes ||
+            proof.screenshot.width <= 0 ||
+            proof.screenshot.height <= 0
+          )
+            throw new Error("Invalid controller frame")
+          currentProof = proof
+          currentFrame = proof.screenshot
+          receivedAt = Date.now()
+          setFrame(proof.screenshot)
+        }
+        setControlling(true)
       } catch {
+        await release()
         if (alive) setError("control")
       } finally {
         acquiringLease = false
@@ -128,9 +253,13 @@ export function useSandboxDesktop(connectionId: string, enabled: boolean) {
       const token = lease?.token
       const requestedGeneration = generation
       const observedFrame = currentFrame
+      const observedProof = currentProof
+      const inputLease = lease
       // Validate the pixels the user acted on when accepting the event. A
       // newer capture must not discard already accepted keyboard input.
       if (
+        !inputAllowed ||
+        !observedProof ||
         !observedFrame ||
         observedFrame.capturedAt !== capturedAt ||
         Date.now() - receivedAt > MAX_FRAME_AGE_MS
@@ -154,7 +283,30 @@ export function useSandboxDesktop(connectionId: string, enabled: boolean) {
         )
           return false
         try {
-          await sandboxClient.controlInput(connectionId, token, point, action)
+          if (
+            !inputLease ||
+            !observedProof ||
+            !desktop ||
+            (desktop.managed &&
+              (observedProof.expiresAt! <= Date.now() || observedProof.fence !== inputLease.fence))
+          )
+            return false
+          if (desktop.managed) {
+            // The Host consumes every frame proof after one mutation. A queued
+            // event must not reuse that proof or adopt newer coordinates.
+            if (currentProof !== observedProof || observedProof.frameId === consumedFrameId)
+              return false
+            consumedFrameId = observedProof.frameId
+            currentProof = null
+            captureEpoch += 1
+            managedMutation = true
+          }
+          try {
+            await desktop.input(inputLease, observedProof, point, action)
+          } finally {
+            managedMutation = false
+          }
+          if (desktop.managed) await refresh()
           return true
         } catch {
           await release()
@@ -175,27 +327,65 @@ export function useSandboxDesktop(connectionId: string, enabled: boolean) {
       } else void refresh()
     }
     const blur = () => void release()
+    const invalidate = () => {
+      invalidated = true
+      clearTimeout(poll)
+      currentFrame = null
+      currentProof = null
+      if (alive) {
+        setFrame(null)
+        setStatus(null)
+        setError("session")
+      }
+      void release()
+    }
+    const networkChanged = () => {
+      if (openDesktop) visibilityChanged()
+    }
     session.current = { acquire, release, refresh, input }
     const initial = setTimeout(() => {
       setFrame(null)
       setControlling(false)
       setError(null)
-      void refresh()
+      setStatus(null)
+      if (openDesktop && enabled) {
+        void openDesktop()
+          .then((opened) => {
+            if (!alive) {
+              opened.close()
+              return
+            }
+            desktop = opened
+            detachInvalidated = opened.onInvalidated?.(invalidate)
+            void refresh()
+          })
+          .catch(() => {
+            if (alive) {
+              invalidate()
+              setError("capture")
+            }
+          })
+      } else void refresh()
     }, 0)
     document.addEventListener("visibilitychange", visibilityChanged)
     window.addEventListener("blur", blur)
+    window.addEventListener("offline", networkChanged)
+    window.addEventListener("online", networkChanged)
     return () => {
       alive = false
       session.current = null
       clearTimeout(initial)
       clearTimeout(poll)
-      void release()
+      void release().finally(() => desktop?.close())
+      detachInvalidated?.()
       document.removeEventListener("visibilitychange", visibilityChanged)
       window.removeEventListener("blur", blur)
+      window.removeEventListener("offline", networkChanged)
+      window.removeEventListener("online", networkChanged)
     }
-  }, [connectionId, enabled])
+  }, [connectionId, enabled, openDesktop, inputAllowed])
 
-  const acquire = useCallback(() => session.current?.acquire(), [])
+  const acquire = useCallback((takeover = false) => session.current?.acquire(takeover), [])
   const release = useCallback(() => session.current?.release(), [])
   const refresh = useCallback(() => session.current?.refresh(), [])
   const input = useCallback(
@@ -204,6 +394,7 @@ export function useSandboxDesktop(connectionId: string, enabled: boolean) {
     []
   )
   return {
+    status,
     frame: enabled ? frame : null,
     controlling: enabled && controlling,
     acquiring,

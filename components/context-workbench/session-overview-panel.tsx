@@ -6,6 +6,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import { useTranslations } from "next-intl"
 import { Settings2Icon } from "lucide-react"
 import { CompositionChip } from "@/components/agent/composition/composition-chip"
+import { ManagedDesktopResults } from "@/components/agent-runs/managed-desktop-results"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { RoomParticipantsChip } from "@/components/chat/room-participants-chip"
 import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
@@ -136,6 +137,9 @@ export function SessionOverviewPanel({
 
         <SessionCapabilitiesSection session={session} onManage={manage} />
         <SessionResultsSection session={session} messages={messages} onNavigate={onNavigate} />
+        {session.deliverySourceHosts?.length ? (
+          <ManagedDesktopResults conversationId={session.id} />
+        ) : null}
 
         <details className="border-t pt-4">
           <summary className="cursor-pointer text-sm font-medium">{t("technicalDetails")}</summary>

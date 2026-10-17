@@ -13,6 +13,8 @@
  * operation must fail loudly and must never execute on the user's own desktop.
  */
 
+import type { SandboxContainerState } from "@/lib/automation/sandbox-client"
+import type { ManagedDesktopResource } from "@/lib/automation/managed-desktop-client"
 import type { MicrovmRequest } from "@cognia/plugin-sdk/api/sandbox"
 import type {
   SandboxCapabilities,
@@ -21,7 +23,7 @@ import type {
   SandboxLifecycleOperation,
   SandboxLifecycleState,
 } from "@/types/sandbox"
-import { supportsSandboxOperation } from "./connection-capabilities"
+import { defaultSandboxCapabilities, supportsSandboxOperation } from "./connection-capabilities"
 
 /** Machine-readable refusal reasons. */
 export type SandboxCapabilityErrorCode =
@@ -35,6 +37,8 @@ export type SandboxCapabilityErrorCode =
   | "not-connected"
   /** The operation is refused in the connection's current lifecycle state. */
   | "invalid-state"
+  | "provider-unqualified"
+  | "authorization-required"
 
 export class SandboxCapabilityError extends Error {
   readonly code: SandboxCapabilityErrorCode
@@ -164,7 +168,11 @@ export function assertSandboxOperationAllowed(
   ctx: SandboxOperationContext,
   operation: SandboxLifecycleOperation
 ): void {
-  if (!supportsSandboxOperation(ctx.capabilities, operation)) {
+  if (
+    !supportsSandboxOperation(ctx.capabilities, operation) ||
+    (ctx.provider === "e2b" &&
+      !supportsSandboxOperation(defaultSandboxCapabilities(ctx.provider, ctx.driver), operation))
+  ) {
     throw new SandboxCapabilityError({
       code: "unsupported-operation",
       operation,
@@ -211,4 +219,13 @@ export async function runSandboxOperation<T>(
     })
   }
   return result
+}
+
+/** Provider-neutral discoveries; Docker fields remain compatible with existing callers. */
+export interface SandboxAdapterOutcome {
+  containerId?: string
+  port?: number
+  health?: boolean
+  containerState?: SandboxContainerState | null
+  managedDesktop?: ManagedDesktopResource
 }

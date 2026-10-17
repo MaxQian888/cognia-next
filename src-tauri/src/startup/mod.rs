@@ -120,6 +120,10 @@ pub(crate) const STEPS: &[Step] = &[
         run: services::agent_session_store,
     },
     Step {
+        name: "managed_desktops",
+        run: services::managed_desktops,
+    },
+    Step {
         name: "remote_sandboxes",
         run: services::remote_sandboxes,
     },
@@ -251,6 +255,7 @@ mod tests {
                 "a2ui_bridge",
                 "jobs_supervisor",
                 "agent_session_store",
+                "managed_desktops",
                 "remote_sandboxes",
                 "gateway_autostart",
                 "cli_bridge",

@@ -65,6 +65,14 @@ export interface RetentionTarget {
 const SETTLED_QUEUE_RETENTION_DAYS = 7
 
 const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
+  managedDesktopDeletion: {
+    policy: "row-expiry",
+    prune: async () => {
+      const { retryManagedDesktopResultDeletions } =
+        await import("@/lib/automation/managed-desktop-result-deletion")
+      return retryManagedDesktopResultDeletions()
+    },
+  },
   syncTombstones: {
     policy: "row-expiry",
     prune: () => pruneTombstones(),

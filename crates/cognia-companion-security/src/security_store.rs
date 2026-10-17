@@ -1553,6 +1553,38 @@ impl SecurityStore {
         )?)
     }
 
+    /// Reserve only an opaque request hash. The owning Host domain implements
+    /// retries and deletion fences; never retain its private response or create
+    /// an operation whose receipt could bypass that domain on replay.
+    pub fn bind_host_semantic_request(
+        &self, tenant_id: &str, device_id: &str, idempotency_key: &str,
+        request_hash: &str, now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(String, String)> = tx.query_row(
+            "SELECT request_hash, status FROM idempotency_records
+             WHERE tenant_id = ?1 AND device_id = ?2 AND idempotency_key = ?3",
+            params![tenant_id, device_id, idempotency_key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        if let Some((hash, status)) = existing {
+            return if hash == request_hash && status == "host-semantic" {
+                Ok(())
+            } else { Err(SecurityStoreError::IdempotencyConflict) };
+        }
+        tx.execute(
+            "INSERT INTO idempotency_records
+             (tenant_id, device_id, idempotency_key, request_hash, operation_id,
+              status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'host-semantic', ?6, ?6)",
+            params![tenant_id, device_id, idempotency_key, request_hash,
+                uuid::Uuid::new_v4().to_string(), now],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn begin_idempotent_operation(
         &self,
         tenant_id: &str,
@@ -1648,7 +1680,8 @@ impl SecurityStore {
             .query_row(
                 "SELECT operation_id, status, receipt_json, created_at, updated_at
                  FROM idempotency_records
-                 WHERE tenant_id = ?1 AND device_id = ?2 AND operation_id = ?3",
+                 WHERE tenant_id = ?1 AND device_id = ?2 AND operation_id = ?3
+                   AND status != 'host-semantic'",
                 params![tenant_id, device_id, operation_id],
                 |row| {
                     Ok((
@@ -2618,6 +2651,13 @@ fn default_capabilities_for_role(role: &str) -> &'static [&'static str] {
             "process.spawn",
             "secret.manage",
             "host.admin",
+            // ADR-0233 managed-desktop result and handoff writes: capture,
+            // approve and complete an acceptance, and the two-phase deletion.
+            // Separate from `host.admin` (create, connect, control a paid
+            // desktop) so a member can be trusted to review results without
+            // being able to start one. Owner-default because the owner already
+            // holds `host.admin`, which covers strictly more.
+            "host.execute",
             // ADR-0162 file transfer over a synchronized SSH profile. An owner
             // device already holds `terminal.open` and `process.spawn`, so it
             // could reach the same bytes through a shell; withholding the
@@ -2731,6 +2771,7 @@ pub fn is_assignable_device_capability(capability: &str) -> bool {
             | "scheduler.manage"
             | "secret.manage"
             | "host.admin"
+            | "host.execute"
             // Dormant: no command requires either (see the note in
             // `default_capabilities_for_role`). Accepted so an existing owner's
             // grant list still round-trips through `replace_capabilities`.
@@ -2923,6 +2964,7 @@ const MIGRATION_DEVICE_USER: &str = "device-user-v1";
 const MIGRATION_DEVICE_QUARANTINE: &str = "device-quarantine-v1";
 const MIGRATION_CLIENT_PLANE_GRANTS: &str = "client-plane-grants-v1";
 const MIGRATION_SSH_FILES_GRANT: &str = "ssh-files-grant-v1";
+const MIGRATION_HOST_EXECUTE_GRANT: &str = "host-execute-grant-v1";
 
 /// Steps 4-7 of the rebuild. The column list is spelled out rather than
 /// `SELECT *` so that a future column landing in a different position cannot
@@ -3016,6 +3058,7 @@ fn apply_schema_migrations(
     migrate_device_quarantine(conn, now, backup_target)?;
     migrate_client_plane_grants(conn, now)?;
     migrate_ssh_files_grant(conn, now)?;
+    migrate_host_execute_grant(conn, now)?;
     Ok(())
 }
 
@@ -3071,6 +3114,34 @@ fn migrate_ssh_files_grant(conn: &mut Connection, now: i64) -> Result<(), Securi
         upsert_capability_grant(&tx, &tenant_id, &device_id, "ssh.files", now)?;
     }
     mark_migration(&tx, MIGRATION_SSH_FILES_GRANT, now)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Give owner devices paired before ADR-0233 the `host.execute` grant.
+///
+/// Same shape and the same safety argument as [`migrate_ssh_files_grant`]:
+/// until this build `is_assignable_device_capability` rejected the name, so no
+/// device can have had it revoked on purpose. Members stay untouched.
+fn migrate_host_execute_grant(conn: &mut Connection, now: i64) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_HOST_EXECUTE_GRANT)? {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let devices: Vec<(String, String)> = {
+        let mut statement = tx.prepare(
+            "SELECT d.id, d.tenant_id FROM devices d
+             WHERE d.status IN ('active', 'suspended') AND d.role = 'owner'",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for (device_id, tenant_id) in devices {
+        upsert_capability_grant(&tx, &tenant_id, &device_id, "host.execute", now)?;
+    }
+    mark_migration(&tx, MIGRATION_HOST_EXECUTE_GRANT, now)?;
     tx.commit()?;
     Ok(())
 }
@@ -6178,6 +6249,28 @@ CREATE TABLE devices (
     }
 
     #[test]
+    fn host_semantic_bindings_reject_conflicts_without_private_receipts_or_operations() {
+        let store = SecurityStore::in_memory().unwrap();
+        store.bind_host_semantic_request("tenant", "device", "key", "hash", 100).unwrap();
+        store.bind_host_semantic_request("tenant", "device", "key", "hash", 101).unwrap();
+        assert!(matches!(store.bind_host_semantic_request("tenant", "device", "key", "changed", 102),
+            Err(SecurityStoreError::IdempotencyConflict)));
+        // Independent principals cannot collide; only hashes, never arguments,
+        // pixels, verdicts or approval snapshots are retained.
+        store.bind_host_semantic_request("tenant", "other-device", "key", "changed", 102).unwrap();
+        let (operation, receipt): (String, Option<String>) = store.conn.lock().query_row(
+            "SELECT operation_id, receipt_json FROM idempotency_records WHERE tenant_id = 'tenant' AND device_id = 'device'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert!(receipt.is_none());
+        assert!(store.operation("tenant", "device", &operation).unwrap().is_none());
+        let runs: i64 = store.conn.lock().query_row("SELECT COUNT(*) FROM runs", [], |row| row.get(0)).unwrap();
+        assert_eq!(runs, 0);
+        assert!(matches!(store.begin_idempotent_operation("tenant", "device", "host", "key", "other-command-hash", 103),
+            Err(SecurityStoreError::IdempotencyConflict)));
+    }
+
+    #[test]
     fn agent_worker_is_assignable_but_never_inherited_from_agent_control() {
         let store = SecurityStore::in_memory().unwrap();
         register(&store, "tenant-a", "owner-a", 100);
@@ -6784,6 +6877,48 @@ CREATE TABLE devices (
             .unwrap());
         assert!(!store
             .has_capability("tenant-a", "member-a", "ssh.files")
+            .unwrap());
+    }
+
+    /// An owner paired before ADR-0233 gets `host.execute` on upgrade, and a
+    /// member does not.
+    #[test]
+    fn the_host_execute_backfill_reaches_owners_and_stops_at_members() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "owner-a", 100);
+
+        {
+            let conn = store.conn.lock();
+            conn.execute(
+                "INSERT INTO devices (id, tenant_id, display_name, role, status, created_at, updated_at)
+                 VALUES ('member-a', 'tenant-a', 'Shared phone', 'member', 'active', 101, 101)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "DELETE FROM capability_grants WHERE capability = 'host.execute'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "DELETE FROM security_migrations WHERE key = ?1",
+                [MIGRATION_HOST_EXECUTE_GRANT],
+            )
+            .unwrap();
+        }
+        assert!(!store
+            .has_capability("tenant-a", "owner-a", "host.execute")
+            .unwrap());
+
+        {
+            let mut conn = store.conn.lock();
+            migrate_host_execute_grant(&mut conn, 200).unwrap();
+        }
+        assert!(store
+            .has_capability("tenant-a", "owner-a", "host.execute")
+            .unwrap());
+        assert!(!store
+            .has_capability("tenant-a", "member-a", "host.execute")
             .unwrap());
     }
 

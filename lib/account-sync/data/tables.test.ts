@@ -62,6 +62,11 @@ describe("account sync table policies", () => {
     expect(syncedFields(TABLE_POLICIES.sessions)).not.toContain("agentTurnOwner")
   })
 
+  it("keeps original delivery Host bindings device-local", () => {
+    expect(TABLE_POLICIES.sessions.fields.deliverySourceHosts).toBe("local")
+    expect(syncedFields(TABLE_POLICIES.sessions)).not.toContain("deliverySourceHosts")
+  })
+
   it("sync exactly the settings keys cleared as shared", () => {
     const shared = Object.entries(SETTINGS_SYNC)
       .filter(([, entry]) => entry.category === "shared")

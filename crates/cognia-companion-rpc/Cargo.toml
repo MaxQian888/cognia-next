@@ -13,6 +13,9 @@ test-support = ["cognia-companion/test-support", "cognia-secrets/test-inmemory"]
 tauri-host = ["dep:tauri"]
 
 [dependencies]
+cognia-net = { path = "../cognia-net" }
+cognia-automation = { path = "../cognia-automation" }
+cognia-environment = { path = "../cognia-environment", default-features = false, features = ["registry"] }
 cognia-codeserver = { path = "../cognia-codeserver" }
 cognia-scheduling = { path = "../cognia-scheduling" }
 cognia-mcp-server = { path = "../cognia-mcp-server" }
@@ -24,6 +27,7 @@ cognia-terminal = { path = "../cognia-terminal" }
 cognia-hooks = { path = "../cognia-hooks" }
 chrono.workspace = true
 cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
+base64.workspace = true
 axum.workspace = true
 parking_lot.workspace = true
 once_cell.workspace = true
@@ -48,6 +52,7 @@ cognia-connectors = { path = "../cognia-connectors" }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["rt", "process", "macros"] }
 wait-timeout = "0.2"
+tempfile.workspace = true
 # Terminal QR for `cognia-server pair` (ADR-0224 A2); no image backends.
 qrcode = { version = "0.14", default-features = false }
 tauri = { workspace = true, optional = true }

@@ -126,6 +126,7 @@ describe("planDeviceSections", () => {
       "host-secrets",
       "host-updates",
       "host-runtimes",
+      "sandbox",
       "workspaces",
       "routing",
       "identity",
@@ -137,7 +138,6 @@ describe("planDeviceSections", () => {
     ])
     expect(plan.notApplicable.map((entry) => entry.reasonKey)).toEqual([
       "access.notApplicable.remote-host",
-      "runtime.reason.sandboxIsClientLocal",
     ])
   })
 

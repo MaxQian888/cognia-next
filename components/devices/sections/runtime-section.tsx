@@ -8,8 +8,8 @@
  * `lib/tauri/transport-routing.ts`, not by a guess about the device:
  *
  *  * `cua_sandbox_*` are `target: "client"`, so **sandbox connections always
- *    belong to the machine running this renderer**. A remote Host's sandboxes
- *    are its own business and are not reachable from here at all.
+ *    belong to the machine running this renderer**. Managed cloud desktops
+ *    instead use the selected Host's explicit management channel (ADR-0233).
  *  * `task_workspace_environment_list` is `target: "execution"`, so it follows
  *    the active remote host. Rendering it under the local device while a Host
  *    is active would print that Host's worktrees under this machine's name.
@@ -59,7 +59,7 @@ import {
   writeExecutionAuthorityConfig,
 } from "@/lib/placement/authority"
 import type { DeviceRow } from "@/lib/devices/types"
-import { canOwnTiming } from "@/lib/devices/section-plan"
+import { canOwnTiming, managementRefOf } from "@/lib/devices/section-plan"
 import { openMachineShell } from "@/lib/sandbox/machine-shell"
 import type { SandboxConnectionRow, SandboxLifecycleState } from "@/types/sandbox"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
@@ -461,17 +461,26 @@ export function SandboxSection({ row }: { row: DeviceRow }) {
     [t]
   )
 
-  if (row.runtime.sandbox.support !== "supported") return null
+  const managedHost = managementRefOf(row)
+  if (!managedHost && row.runtime.sandbox.support !== "supported") return null
 
   return (
     <DeviceSection id="sandbox" title={t("runtime.sandbox")} icon={ContainerIcon} wide>
       <div className="space-y-4" data-testid="device-sandbox">
-        <MachineSummary
-          connections={row.runtime.sandbox.connections}
-          onOpenShell={onOpenShell}
-          shellAvailable={shellAvailable}
+        {managedHost ? null : (
+          <MachineSummary
+            connections={row.runtime.sandbox.connections}
+            onOpenShell={onOpenShell}
+            shellAvailable={shellAvailable}
+          />
+        )}
+        <SandboxConnectionsTab
+          framed={false}
+          managedOnly={Boolean(managedHost)}
+          managedDesktopTarget={
+            managedHost ? { kind: "remote", hostId: managedHost } : { kind: "local" }
+          }
         />
-        <SandboxConnectionsTab framed={false} />
       </div>
     </DeviceSection>
   )

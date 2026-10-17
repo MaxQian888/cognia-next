@@ -136,6 +136,7 @@ pub(super) fn authorize_task_spawn(
     let task_owned = task.to_owned();
     let secret = secret.clone();
     let authority = cognia_external_agent::spawn_authority::GatewayAuthority {
+        delivery_source: None,
         port: endpoint,
         device_id: Some(device.to_owned()),
         task_id: task.to_owned(),
@@ -202,6 +203,7 @@ fn authorize_host_task_spawn(
     let task_id = task.clone();
     Ok(Some(
         cognia_external_agent::spawn_authority::GatewayAuthority {
+            delivery_source: None,
             port,
             device_id: origin.clone(),
             task_id,

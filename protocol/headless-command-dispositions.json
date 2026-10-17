@@ -83,7 +83,8 @@
         "vector_cloud_query",
         "vector_cloud_scroll",
         "vector_cloud_truncate",
-        "vector_cloud_upsert"
+        "vector_cloud_upsert",
+        "managed_desktop_local_call"
       ],
       "commandReasons": {
         "vector_cloud_count": "Proxies HTTP calls to the operator's own cloud vector database. A Headless install configures that database directly and reaches it with its own credentials; the desktop command adds no capability the operator lacks.",
@@ -130,7 +131,8 @@
         "companion_list_device_grants": "Covered by GET /api/devices (companion_api/api.rs:287), which returns the same list_devices() rows this command projects — it differs only by folding each device's capability set into a control/agent_control/terminal boolean triple and by reading the hardcoded local tenant instead of the authenticated one. Same relationship as companion_list_workers to fleet_worker_list.",
         "environment_local_call": "The desktop's own entry to its environment plane (ADR-0221): it dispatches to the same arms a paired client reaches through the companion `environment_*` commands, which are the Headless surface. A Headless host serves those commands directly.",
         "remote_sandboxes_get": "Reads the desktop's remote sandbox settings (ADR-0221). A Headless install configures its providers in the operator's own file named by COGNIA_SANDBOX_PROVIDERS_FILE and reads their live state through environment_driver_status.",
-        "remote_sandboxes_set": "Writes the desktop's remote sandbox settings and credentials (ADR-0221). A Headless install configures its providers in the operator's own file named by COGNIA_SANDBOX_PROVIDERS_FILE, with credentials from its environment or files; no client edits a server's providers."
+        "remote_sandboxes_set": "Writes the desktop's remote sandbox settings and credentials (ADR-0221). A Headless install configures its providers in the operator's own file named by COGNIA_SANDBOX_PROVIDERS_FILE, with credentials from its environment or files; no client edits a server's providers.",
+        "managed_desktop_local_call": "Local IPC wrapper over the same authenticated managed_desktop_* Host commands; headless uses those commands and managed-desktops.json."
       }
     },
     {

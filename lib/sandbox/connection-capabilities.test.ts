@@ -1,12 +1,13 @@
 import type { SandboxConnectionDriver, SandboxConnectionProvider } from "@/types/sandbox"
 import {
   SANDBOX_LIFECYCLE_OPERATIONS,
+  hasCurrentManagedDesktopQualification,
   defaultSandboxCapabilities,
   narrowSandboxCapabilities,
   supportsSandboxOperation,
 } from "./connection-capabilities"
 
-const PROVIDERS: SandboxConnectionProvider[] = ["docker", "cua-cloud", "lume"]
+const PROVIDERS: SandboxConnectionProvider[] = ["docker", "e2b", "cua-cloud", "lume"]
 const DRIVERS: SandboxConnectionDriver[] = ["computer-server", "cua-driver"]
 
 describe("defaultSandboxCapabilities", () => {
@@ -134,5 +135,37 @@ describe("supportsSandboxOperation", () => {
     const caps = defaultSandboxCapabilities("docker", "computer-server")
     expect(supportsSandboxOperation(caps, "start")).toBe(true)
     expect(supportsSandboxOperation(caps, "connect")).toBe(false)
+  })
+})
+
+describe("hasCurrentManagedDesktopQualification", () => {
+  const current = {
+    qualification: "qualified" as const,
+    qualificationEvidenceVersion: 2,
+    workloadIsolationRevision: 1,
+    egressEnforcement: "provider-and-guest-kernel" as const,
+  }
+
+  it("accepts only the complete current Host projection", () => {
+    expect(hasCurrentManagedDesktopQualification(current)).toBe(true)
+  })
+
+  it.each([
+    { qualification: "unqualified" },
+    { qualificationEvidenceVersion: undefined },
+    { qualificationEvidenceVersion: null },
+    { qualificationEvidenceVersion: 0 },
+    { qualificationEvidenceVersion: 1 },
+    { qualificationEvidenceVersion: 3 },
+    { workloadIsolationRevision: undefined },
+    { workloadIsolationRevision: 0 },
+    { workloadIsolationRevision: 2 },
+    { egressEnforcement: undefined },
+    { egressEnforcement: "provider-enforced" },
+    { egressEnforcement: "unverified" },
+  ])("keeps legacy, missing or incompatible proof dormant: %j", (change) => {
+    expect(hasCurrentManagedDesktopQualification({ ...current, ...change } as typeof current)).toBe(
+      false
+    )
   })
 })

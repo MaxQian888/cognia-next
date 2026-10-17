@@ -437,7 +437,7 @@ fn limit_tree_depth(nodes: &mut [ElementInfo], remaining: u32) {
     }
 }
 
-fn validate_point(point: Point, width: u32, height: u32) -> Result<()> {
+pub(crate) fn validate_point(point: Point, width: u32, height: u32) -> Result<()> {
     if point.x < 0 || point.y < 0 || point.x as u32 >= width || point.y as u32 >= height {
         return Err(backend("remote input point is outside the desktop surface"));
     }
@@ -527,7 +527,7 @@ pub(crate) async fn deliver(
     }
     Ok(())
 }
-fn button_name(button: MouseButton) -> &'static str {
+pub(crate) fn button_name(button: MouseButton) -> &'static str {
     match button {
         MouseButton::Left => "left",
         MouseButton::Right => "right",

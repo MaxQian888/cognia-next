@@ -4,7 +4,44 @@ import type { Point, Screenshot, UiAction } from "@/lib/automation/types"
 export interface SandboxControlLease {
   token: string
   expiresAt: number
+  fence?: number
 }
+
+/** Bound viewer transport. Managed frames carry Host-issued proofs; local Docker does not. */
+export interface SandboxDesktopFrame {
+  screenshot: Screenshot
+  frameId?: string
+  fence?: number
+  expiresAt?: number
+}
+export interface SandboxDesktopStatus {
+  qualified: boolean
+  state: "dormant" | "observer" | "controlled" | "quarantined" | "unavailable"
+  controllerKind: "human" | "agent" | null
+  controllerIsSelf: boolean
+  leaseExpiresAt: number | null
+  fence: number
+  canAcquire: boolean
+  /** Task/agent delegation is dormant until ADR-0233 phase 3. */
+  agentControlDormant: true
+}
+export interface SandboxDesktopSession {
+  managed: boolean
+  status?(): Promise<SandboxDesktopStatus>
+  frame(): Promise<SandboxDesktopFrame>
+  acquire(takeover: boolean): Promise<SandboxControlLease>
+  renew(lease: SandboxControlLease): Promise<SandboxControlLease>
+  release(lease: SandboxControlLease): Promise<void>
+  input(
+    lease: SandboxControlLease,
+    frame: SandboxDesktopFrame,
+    point: Point | null,
+    action: UiAction
+  ): Promise<void>
+  onInvalidated?(handler: () => void): () => void
+  close(): void
+}
+export type OpenSandboxDesktop = () => Promise<SandboxDesktopSession>
 
 /** Dedicated binary transfer budget; ordinary command output keeps its own limit. */
 export const MAX_SANDBOX_TRANSFER_BYTES = 8 * 1024 * 1024
