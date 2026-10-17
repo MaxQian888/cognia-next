@@ -131,17 +131,56 @@ pub fn is_forbidden_dest_ip(ip: &IpAddr) -> bool {
 /// `(host, port)`. Returns `None` for any other method or a malformed
 /// authority.
 pub fn parse_connect_target(line: &str) -> Option<(String, u16)> {
-    let mut parts = line.split_whitespace();
+    let mut parts = line.split(' ');
     if !parts.next()?.eq_ignore_ascii_case("CONNECT") {
         return None;
     }
     let authority = parts.next()?;
-    let (host, port) = authority.rsplit_once(':')?;
-    let port: u16 = port.parse().ok()?;
-    if host.is_empty() {
+    if !matches!(parts.next()?, "HTTP/1.0" | "HTTP/1.1") || parts.next().is_some() {
         return None;
     }
-    Some((host.to_string(), port))
+    parse_authority(authority, None)
+}
+
+/// Parse a strict HTTP authority, returning a bare, canonical host and port.
+/// IPv6 literals require brackets; userinfo, escapes and empty/zero ports are
+/// rejected so the HTTP parser, allowlist and resolver agree on the target.
+pub fn parse_authority(authority: &str, default_port: Option<u16>) -> Option<(String, u16)> {
+    let (host, port) = if let Some(rest) = authority.strip_prefix('[') {
+        let (host, rest) = rest.split_once(']')?;
+        host.parse::<Ipv6Addr>().ok()?;
+        (
+            host,
+            if rest.is_empty() {
+                None
+            } else {
+                Some(rest.strip_prefix(':')?)
+            },
+        )
+    } else {
+        match authority.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        }
+    };
+    if !is_valid_hostname(host) {
+        return None;
+    }
+    let port = match port {
+        Some(port) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => {
+            port.parse().ok()?
+        }
+        Some(_) => return None,
+        None => default_port?,
+    };
+    if port == 0 {
+        return None;
+    }
+    let host = match host.parse::<IpAddr>() {
+        Ok(ip) => ip.to_string(),
+        Err(_) => host.trim_end_matches('.').to_ascii_lowercase(),
+    };
+    Some((host, port))
 }
 
 /// Cloud instance-metadata endpoints. A route to one of these hands an
@@ -412,6 +451,42 @@ mod tests {
         assert_eq!(parse_connect_target("CONNECT noport HTTP/1.1"), None);
         assert_eq!(parse_connect_target("CONNECT :443 HTTP/1.1"), None);
         assert_eq!(parse_connect_target("CONNECT host:notaport HTTP/1.1"), None);
+        for line in [
+            "CONNECT host:443",
+            "CONNECT host:443 HTTP/1.1 extra",
+            "CONNECT host:0 HTTP/1.1",
+            "CONNECT ::1:443 HTTP/1.1",
+            "CONNECT host:+443 HTTP/1.1",
+        ] {
+            assert_eq!(parse_connect_target(line), None, "{line}");
+        }
+        assert_eq!(
+            parse_connect_target("CONNECT [2606:4700:4700::1111]:443 HTTP/1.1"),
+            Some(("2606:4700:4700::1111".into(), 443))
+        );
+    }
+
+    #[test]
+    fn http_authority_is_strict_and_normalized() {
+        assert_eq!(
+            parse_authority("EXAMPLE.com.:80", Some(80)),
+            Some(("example.com".into(), 80))
+        );
+        assert_eq!(parse_authority("[::1]", Some(80)), Some(("::1".into(), 80)));
+        for value in [
+            "host:",
+            "host:0",
+            "user@host",
+            "host%00",
+            "host/path",
+            "host:80:90",
+            "[host]:80",
+            " host",
+            "host\r\n",
+            "::1",
+        ] {
+            assert_eq!(parse_authority(value, Some(80)), None, "{value}");
+        }
     }
 
     #[test]
