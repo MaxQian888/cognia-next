@@ -1180,6 +1180,15 @@ impl TaskWorkspaceService {
                 && changeset.state == ChangesetState::Integrating
             {
                 transition_changeset(&mut changeset, ChangesetState::Queued)?;
+                // A best-of-N winner has no queue to wait in. Return it to its
+                // reviewed state so a retry re-runs exact-head checks instead
+                // of being stuck in a state review refuses.
+                if self
+                    .is_best_of_n_changeset(&changeset)
+                    .map_err(IntegrationError::InvalidRequest)?
+                {
+                    transition_changeset(&mut changeset, ChangesetState::Approved)?;
+                }
                 updates.push(versioned(changeset)?);
             }
         }

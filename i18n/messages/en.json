@@ -5808,6 +5808,7 @@
     "failed": "Could not start best-of-N: {error}",
     "invalidPolicy": "The committed acceptance policy is invalid. Fix it before starting best-of-N.",
     "manualOnly": "You choose the winner manually. Picking early stops the other attempts. Publishing updates only the chosen local branch; nothing is pushed.",
+    "mixedBatch": "/best-of-n must be the whole message. Send it on its own, without other commands.",
     "needsCommit": "Commit the repository before starting best-of-N.",
     "needsRepository": "Select a Git working directory for this conversation.",
     "needsSession": "Open a direct agent chat first.",

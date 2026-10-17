@@ -2011,6 +2011,13 @@ function ComposerInner(props: InnerProps) {
         localActionInFlightRef.current = false
       }
     }
+    // Inside a mixed batch the general pipeline would hand `/best-of-n` only
+    // its own line and then send the remaining prose as an ordinary parent
+    // turn. Refuse the batch before any command in it runs.
+    if (segments.some((segment) => segment.kind === "command" && segment.name === "best-of-n")) {
+      toast.error(tBestOfN("mixedBatch"))
+      return false
+    }
 
     const lane = liveTurn ? "followUp" : "turn"
     if (lane === "followUp") {
@@ -2378,6 +2385,7 @@ function ComposerInner(props: InnerProps) {
     tTemplateParams,
     tCommands,
     tMemory,
+    tBestOfN,
     isDesktop,
     attachments,
     staged,

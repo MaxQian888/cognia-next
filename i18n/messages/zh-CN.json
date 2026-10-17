@@ -5808,6 +5808,7 @@
     "failed": "无法启动 Best-of-N：{error}",
     "invalidPolicy": "已提交的验收策略无效，请修复后再启动。",
     "manualOnly": "由你手动选择结果。提前选择会停止其他尝试。发布仅更新选定的本地分支，不会推送。",
+    "mixedBatch": "/best-of-n 必须单独作为整条消息发送，不能和其他命令一起发送。",
     "needsCommit": "请先提交仓库，再启动 Best-of-N。",
     "needsRepository": "请为当前对话选择 Git 工作目录。",
     "needsSession": "请先打开一个直接智能体对话。",

@@ -163,6 +163,7 @@ jest.mock("@/lib/chat/attachments/prepare", () => {
   return { ...actual, prepareComposerAttachments: jest.fn(actual.prepareComposerAttachments) }
 })
 
+import { toast } from "sonner"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { act } from "react"
 import type { ReactNode } from "react"
@@ -1763,5 +1764,42 @@ describe("Composer — best-of-N consumes exactly one send", () => {
     expect(startPreparedBestOfN).toHaveBeenCalledTimes(confirm ? 1 : 0)
     expect(onSend).not.toHaveBeenCalled()
     if (!confirm) await waitFor(() => expect(ta).toHaveValue("/best-of-n 2 fix this\nwith tests"))
+  })
+  it("refuses /best-of-n inside a mixed batch before any command or send runs", async () => {
+    const { startPreparedBestOfN } = await import("@/lib/best-of-n/entry")
+    jest.mocked(startPreparedBestOfN).mockClear()
+    const { registerSlashCommand, unregisterSlashCommand } =
+      await import("@/lib/slash-commands/registry")
+    const probe = jest.fn(async () => ({ message: "probe ran" }))
+    registerSlashCommand({ id: "test.probe", name: "probe", source: "plugin", handler: probe })
+    const onSend = jest.fn(async () => undefined)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const error = jest.spyOn(toast, "error")
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    const mixed = "/probe\n/best-of-n 2 fix bug\ninclude tests"
+    fireEvent.change(ta, { target: { value: mixed } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith(
+        "/best-of-n must be the whole message. Send it on its own, without other commands."
+      )
+    )
+    expect(probe).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(startPreparedBestOfN).not.toHaveBeenCalled()
+    expect(ta).toHaveValue(mixed)
+    error.mockRestore()
+    unregisterSlashCommand("test.probe")
   })
 })

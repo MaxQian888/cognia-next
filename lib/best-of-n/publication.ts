@@ -1,5 +1,5 @@
 import type { BestOfNGroup } from "@/types/best-of-n"
-import type { AgentChangeset, ChangesetCheck } from "@/lib/scm/types"
+import type { AgentChangeset, ChangesetCheck, IntegrationRun } from "@/lib/scm/types"
 import type { ScmHost } from "@/lib/scm/host"
 import type { ScmRuntime } from "@/lib/scm/runtime"
 import type { ChangesetReviewResult } from "@/lib/scm/review/review-changeset"
@@ -27,6 +27,14 @@ interface PublicationDeps {
   archiveSession(id: string): Promise<void>
   project(group: BestOfNGroup, sessionArchiveError?: string | null): Promise<unknown>
 }
+
+/** Runs that still hold their changesets `integrating`; abort is legal from each. */
+const HOLDING: ReadonlySet<IntegrationRun["state"]> = new Set([
+  "preparing",
+  "prepared",
+  "stale",
+  "conflicted",
+])
 
 function winner(group: BestOfNGroup) {
   const candidate = group.candidates.find((item) => item.candidateId === group.selectedCandidateId)
@@ -67,11 +75,34 @@ export function createBestOfNPublication(deps: PublicationDeps) {
       throw new Error("Best-of-N winner changeset no longer matches the recorded head and target")
     return changeset
   }
+  /**
+   * A refused publish (for example a dirty checked-out target) keeps its
+   * prepared integration, and a Host restart can leave one behind. Either
+   * leaves the winner `integrating`, which review refuses. Abort that run:
+   * the Host returns a best-of-N winner to its reviewed state, so the retry
+   * re-runs exact-head checks and prepares a fresh integration.
+   */
+  async function releaseHeldIntegration(group: BestOfNGroup, changeset: AgentChangeset) {
+    if (changeset.state !== "integrating") return changeset
+    const run = changeset.integrationId
+      ? await deps.scm.getIntegration(changeset.integrationId)
+      : null
+    if (!run || !HOLDING.has(run.state))
+      throw new Error(
+        `Best-of-N winner is held by integration ${changeset.integrationId ?? "unknown"}` +
+          (run ? ` (${run.state})` : "")
+      )
+    await deps.scm.abortIntegration(run.integrationId)
+    const released = await exactChangeset(group)
+    if (released.state === "integrating")
+      throw new Error(`Best-of-N winner is still held by integration ${run.integrationId}`)
+    return released
+  }
   async function checks(groupId: string, signal: AbortSignal): Promise<BestOfNCheckResult> {
     const group = await deps.get(groupId)
     if (group.phase !== "publishing")
       throw new Error("Best-of-N winner is not awaiting publication")
-    const changeset = await exactChangeset(group)
+    const changeset = await releaseHeldIntegration(group, await exactChangeset(group))
     const result = await deps.verify(group, changeset, signal)
     if (result.changeset.headSha !== group.selectedHeadSha)
       throw new Error("Best-of-N head changed while checks were running")
@@ -155,14 +186,24 @@ export function createBestOfNPublication(deps: PublicationDeps) {
           signal,
         })
         if (outcome.kind !== "published") {
+          // Give the winner back now so cancel and archive work while the
+          // person fixes the refusal. If this fails, the next checks retry it.
+          let releaseError: string | null = null
+          if (outcome.run && HOLDING.has(outcome.run.state)) {
+            try {
+              await deps.scm.abortIntegration(outcome.run.integrationId)
+            } catch (error) {
+              releaseError = error instanceof Error ? error.message : String(error)
+            }
+          }
           const group = await deps.get(groupId)
           await deps.project(group)
-          return { group, outcome, archiveError: null }
+          return { group, outcome, archiveError: null, releaseError }
         }
         let group = checked.group
         try {
           group = await deps.get(groupId)
-          return { ...(await archive(groupId)), outcome }
+          return { ...(await archive(groupId)), outcome, releaseError: null }
         } catch (error) {
           // In particular, a projection/database outage must not erase the
           // integration receipt. A subsequent refresh rebuilds it from Host.
@@ -170,6 +211,7 @@ export function createBestOfNPublication(deps: PublicationDeps) {
             group,
             outcome,
             archiveError: error instanceof Error ? error.message : String(error),
+            releaseError: null,
           }
         }
       }),

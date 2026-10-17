@@ -202,6 +202,23 @@ it("shows a blocked publication outcome and archives active attempts explicitly"
   fireEvent.click(screen.getByRole("button", { name: "archive" }))
   await waitFor(() => expect(archiveBestOfN).toHaveBeenCalledWith("group"))
 })
+it("keeps a failed integration release visible next to the blocked outcome", async () => {
+  row.group.phase = "publishing"
+  row.group.selectedCandidateId = "c1"
+  row.group.selectedHeadSha = "head1"
+  jest.mocked(publishBestOfNCandidate).mockResolvedValueOnce({
+    group: row.group,
+    archiveError: null,
+    releaseError: "abort refused",
+    outcome: { kind: "blocked", reason: "target_checked_out_dirty" },
+  } as never)
+  render(<BestOfNComparison groupId="group" />)
+  fireEvent.click(screen.getByRole("button", { name: "publish" }))
+  fireEvent.click(screen.getByRole("button", { name: "confirm" }))
+  await screen.findByText("actionFailed")
+  expect(screen.getByText(/"releaseError":"abort refused"/)).toBeInTheDocument()
+  expect(screen.getByText(/target_checked_out_dirty/)).toBeInTheDocument()
+})
 it("offers cleanup retry after Host workspace archive succeeds but session archive fails", () => {
   row.group.phase = "published"
   row.group.archiveStatus = "archived"

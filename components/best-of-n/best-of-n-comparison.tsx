@@ -112,7 +112,13 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
           result.outcome.kind !== "published"
         ) {
           setError(true)
-          setDiagnostic(JSON.stringify(result.outcome))
+          setDiagnostic(
+            JSON.stringify(
+              "releaseError" in result && typeof result.releaseError === "string"
+                ? { outcome: result.outcome, releaseError: result.releaseError }
+                : result.outcome
+            )
+          )
         }
       }
     } catch (cause) {

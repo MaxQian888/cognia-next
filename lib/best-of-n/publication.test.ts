@@ -1,7 +1,7 @@
 import { createBestOfNPublication } from "./publication"
 import { integrateChangesets } from "@/lib/scm/integration/orchestrator"
 import type { BestOfNGroup } from "@/types/best-of-n"
-import type { AgentChangeset, ChangesetCheck } from "@/lib/scm/types"
+import type { AgentChangeset, ChangesetCheck, IntegrationRun } from "@/lib/scm/types"
 import { defaultReviewPolicy } from "@/lib/scm/review/review-policy"
 
 function fixture() {
@@ -42,12 +42,22 @@ function fixture() {
     logTail: null,
     ranAt: 1,
   }
+  const runs = new Map<string, IntegrationRun>()
   const scm = {
     getChangeset: jest.fn(
       async (id: string) => changesets.find((item) => item.changesetId === id) ?? null
     ),
     recordChangesetReview: jest.fn(async () => changesets[0]),
     approveChangeset: jest.fn(async () => changesets[0]),
+    getIntegration: jest.fn(async (id: string) => runs.get(id) ?? null),
+    abortIntegration: jest.fn(async (id: string) => {
+      const run = runs.get(id)!
+      runs.set(id, { ...run, state: "aborted" })
+      // The Host returns a best-of-N winner to its reviewed state.
+      for (const item of changesets)
+        if (item.integrationId === id) Object.assign(item, { state: "approved" })
+      return runs.get(id)!
+    }),
   }
   const integrate = jest.fn(async () => {
     group = { ...group, phase: "published", integrationId: "integration" }
@@ -79,7 +89,7 @@ function fixture() {
     project: jest.fn(async () => undefined),
   }
   const api = createBestOfNPublication(deps as never)
-  return { api, deps, group: () => group, changesets, check, integrate }
+  return { api, deps, group: () => group, changesets, check, integrate, runs }
 }
 
 it("picks manually and shows exact-head checks without publishing", async () => {
@@ -199,4 +209,73 @@ it("the UI publication path cannot expand its selected winner into a losing chan
   expect(result.outcome.kind).toBe("blocked")
   expect(publishIntegration).not.toHaveBeenCalled()
   expect(f.deps.archive).not.toHaveBeenCalled()
+})
+
+it("releases an integration a dirty target refused, then the retry re-checks and publishes", async () => {
+  const f = fixture()
+  await f.api.pick("g", "c0")
+  f.integrate.mockImplementationOnce(async () => {
+    // Prepare moved the winner into the integration; publish was refused.
+    const run = { integrationId: "held", state: "prepared" } as IntegrationRun
+    f.runs.set("held", run)
+    Object.assign(f.changesets[0], { state: "integrating", integrationId: "held" })
+    return {
+      kind: "blocked",
+      analysis: {},
+      run,
+      dropped: [],
+      reason: "target_checked_out_dirty",
+    } as never
+  })
+  const refused = await f.api.publish("g")
+  expect(refused.outcome.kind).toBe("blocked")
+  expect(refused.releaseError).toBeNull()
+  expect(f.deps.scm.abortIntegration).toHaveBeenCalledWith("held")
+  expect(f.changesets[0].state).toBe("approved")
+  expect(f.deps.archive).not.toHaveBeenCalled()
+
+  // The person cleans the checked-out target and presses Publish again.
+  const verifiedBefore = f.deps.verify.mock.calls.length
+  expect((await f.api.publish("g")).outcome.kind).toBe("published")
+  expect(f.deps.verify.mock.calls.length).toBe(verifiedBefore + 1)
+  expect(f.integrate).toHaveBeenCalledTimes(2)
+})
+
+it("a retry releases an integration a Host restart left holding the winner", async () => {
+  const f = fixture()
+  await f.api.pick("g", "c0")
+  f.runs.set("orphan", { integrationId: "orphan", state: "stale" } as IntegrationRun)
+  Object.assign(f.changesets[0], { state: "integrating", integrationId: "orphan" })
+  const result = await f.api.checks("g")
+  expect(f.deps.scm.abortIntegration).toHaveBeenCalledWith("orphan")
+  expect(result.checks[0].headSha).toBe("head0")
+})
+
+it("never aborts a run that is publishing or already settled", async () => {
+  const f = fixture()
+  await f.api.pick("g", "c0")
+  f.runs.set("busy", { integrationId: "busy", state: "publishing" } as IntegrationRun)
+  Object.assign(f.changesets[0], { state: "integrating", integrationId: "busy" })
+  await expect(f.api.publish("g")).rejects.toThrow("held by integration busy (publishing)")
+  expect(f.deps.scm.abortIntegration).not.toHaveBeenCalled()
+  expect(f.integrate).not.toHaveBeenCalled()
+})
+
+it("reports a failed release without hiding the refusal", async () => {
+  const f = fixture()
+  await f.api.pick("g", "c0")
+  f.deps.scm.abortIntegration.mockRejectedValueOnce(new Error("abort refused"))
+  f.integrate.mockImplementationOnce(
+    async () =>
+      ({
+        kind: "blocked",
+        analysis: {},
+        run: { integrationId: "held", state: "prepared" },
+        dropped: [],
+        reason: "target_checked_out_dirty",
+      }) as never
+  )
+  const result = await f.api.publish("g")
+  expect(result.outcome.reason).toBe("target_checked_out_dirty")
+  expect(result.releaseError).toBe("abort refused")
 })

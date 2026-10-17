@@ -839,6 +839,12 @@ impl TaskWorkspaceService {
     ) -> Result<Option<String>, String> {
         guard(&self.store.lock().connection, changeset, target)
     }
+    pub(crate) fn is_best_of_n_changeset(
+        &self,
+        changeset: &AgentChangeset,
+    ) -> Result<bool, String> {
+        Ok(candidate_group(&self.store.lock().connection, changeset)?.is_some())
+    }
     pub(crate) fn record_best_of_n_integration(
         &self,
         changeset: &AgentChangeset,
@@ -972,7 +978,7 @@ pub(crate) fn frozen_capture(
 mod tests {
     use super::*;
     use crate::{
-        AcquireWorkspaceBundle, CaptureChangeset, ServiceConfig, WorkspaceBaseSpec,
+        AcquireWorkspaceBundle, CaptureChangeset, ChangesetState, ServiceConfig, WorkspaceBaseSpec,
         WorkspaceBundleRootInput, WorkspaceEnvironmentKind, WorkspaceOwnerType, WorkspaceRootRole,
     };
     struct Fixture {
@@ -1498,6 +1504,89 @@ mod tests {
             normalize(&mut actual);
             assert_eq!(actual, expected, "{name} response schema drift");
         }
+    }
+
+    #[test]
+    fn an_aborted_best_of_n_integration_returns_the_winner_to_review() {
+        let fixture = Fixture::new();
+        let group = fixture.start();
+        let group = fixture.provision(&group, 0);
+        let group = fixture.complete(&group, 0);
+        let candidate = &group.candidates[0];
+        let id = candidate.changeset_id.clone().unwrap();
+        let head = candidate.head_sha.clone().unwrap();
+        let review = || crate::ChangesetReview {
+            head_sha: head.clone(),
+            verdict: crate::ChangesetReviewVerdict::Approve,
+            reviewer: crate::ChangesetReviewer::Deterministic,
+            risk_tier: crate::ChangesetRiskTier::Low,
+            reasons: vec!["test review".into()],
+            findings: vec![],
+            requires_human_approval: false,
+            recorded_at: now_ms(),
+        };
+        fixture.service.mark_changeset_ready(&id).unwrap();
+        fixture
+            .service
+            .record_changeset_review(&id, review())
+            .unwrap();
+        let group = fixture
+            .service
+            .best_of_n_select(
+                BestOfNSelect {
+                    mutation: mutation(&group),
+                    candidate_id: candidate.candidate_id.clone(),
+                    head_sha: head.clone(),
+                },
+                BestOfNSelectionOrigin::InteractiveUser,
+            )
+            .unwrap();
+        let prepare = || crate::PrepareIntegration {
+            changeset_ids: vec![id.clone()],
+            required_checks: vec![],
+            target_ref: group.target_ref.clone(),
+            strategy: crate::IntegrationStrategy::Merge,
+            on_conflict: crate::IntegrationConflictPolicy::Stop,
+            provisioning: None,
+            integration_id: None,
+        };
+        let held = fixture.service.prepare_integration(prepare()).unwrap();
+        assert_eq!(
+            fixture.service.get_changeset(&id).unwrap().state,
+            ChangesetState::Integrating
+        );
+        fixture
+            .service
+            .abort_integration(&held.integration_id)
+            .unwrap();
+        // Not left `queued`: exact-head review is legal again before a retry.
+        assert_eq!(
+            fixture.service.get_changeset(&id).unwrap().state,
+            ChangesetState::Approved
+        );
+        fixture
+            .service
+            .record_changeset_review(&id, review())
+            .unwrap();
+        let run = fixture.service.prepare_integration(prepare()).unwrap();
+        let run = fixture
+            .service
+            .publish_integration(
+                &run.integration_id,
+                run.candidate_sha.as_ref().unwrap(),
+                vec![],
+            )
+            .unwrap();
+        let group = fixture
+            .service
+            .best_of_n_get(&group.group_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(group.phase, BestOfNPhase::Published);
+        assert_eq!(
+            group.integration_id.as_deref(),
+            Some(run.integration_id.as_str())
+        );
     }
 
     #[test]
