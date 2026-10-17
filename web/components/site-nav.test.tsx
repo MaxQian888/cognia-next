@@ -115,6 +115,40 @@ describe("SiteNav mobile sheet", () => {
     expect(document.body.style.overflow).not.toBe("hidden")
   })
 
+  it("renders the sheet outside the header so the header's backdrop filter cannot clip it", () => {
+    const { container } = renderNav()
+    fireEvent.click(screen.getByRole("button", { name: en.nav.openMenu }))
+    const sheet = document.getElementById("site-nav-sheet")
+    expect(sheet).not.toBeNull()
+    expect(sheet?.parentElement).toBe(document.body)
+    expect(container.querySelector("header")?.contains(sheet)).toBe(false)
+    expect(screen.getByRole("button", { name: en.nav.closeMenu })).toHaveAttribute(
+      "aria-controls",
+      "site-nav-sheet"
+    )
+  })
+
+  it("closes when a destination in the sheet is followed", () => {
+    renderNav()
+    fireEvent.click(screen.getByRole("button", { name: en.nav.openMenu }))
+    const sheet = document.getElementById("site-nav-sheet") as HTMLElement
+    fireEvent.click(within(sheet).getByRole("link", { name: new RegExp(en.nav.links[0].label) }))
+    expect(document.getElementById("site-nav-sheet")).toBeNull()
+    expect(screen.getByRole("button", { name: en.nav.openMenu })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    )
+  })
+
+  it("offers Download inside the sheet, where the bar hides it on phones", () => {
+    renderNav()
+    fireEvent.click(screen.getByRole("button", { name: en.nav.openMenu }))
+    const sheet = document.getElementById("site-nav-sheet") as HTMLElement
+    expect(
+      within(sheet).getByRole("link", { name: en.common.download.unavailable })
+    ).toBeInTheDocument()
+  })
+
   it("carries every primary destination, not a reduced subset", () => {
     renderNav()
     fireEvent.click(screen.getByRole("button", { name: en.nav.openMenu }))

@@ -138,6 +138,34 @@ describe("SignatureDemo", () => {
     expect(screen.getAllByText(DEMO_TASK.artifact.file).length).toBeGreaterThan(0)
   })
 
+  it("keeps the rail and its controls in one sticky strip above the panel on narrow viewports", () => {
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    const stepper = screen.getByRole("list", { name: en.home.signature.stepperLabel })
+    expect(stepper).toHaveClass("overflow-x-auto", "lg:flex-col")
+    expect(stepper.parentElement).toHaveClass("sticky", "top-16", "lg:top-28")
+    // The counter sits in the control row rather than on a line of its own.
+    expect(screen.getByText("Step 1 of 6").parentElement).toBe(
+      screen.getByRole("button", { name: en.home.signature.nextLabel }).parentElement
+    )
+  })
+
+  it("scrolls the horizontal rail to keep the current step in view", () => {
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    const stepper = screen.getByRole("list", { name: en.home.signature.stepperLabel })
+    const scrollTo = jest.fn()
+    Object.defineProperty(stepper, "scrollWidth", { configurable: true, value: 600 })
+    Object.defineProperty(stepper, "clientWidth", { configurable: true, value: 300 })
+    stepper.scrollTo = scrollTo
+    const target = stepper.children[4] as HTMLElement
+    Object.defineProperty(target, "offsetLeft", { configurable: true, value: 400 })
+    Object.defineProperty(target, "offsetWidth", { configurable: true, value: 80 })
+
+    fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(en.home.signature.steps[4].rail) })
+    )
+    expect(scrollTo).toHaveBeenLastCalledWith({ left: 290, behavior: "smooth" })
+  })
+
   it("offers no dead control inside the depicted checkpoint", () => {
     render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
     fireEvent.click(

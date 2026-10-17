@@ -46,6 +46,25 @@ describe("ConnectionFlow", () => {
     expect(container.querySelectorAll('[data-slot="animated-beam"]')).toHaveLength(5)
   })
 
+  it("draws beams only from md up, and a single centred spine below it", () => {
+    const { container } = render(
+      <ConnectionFlow copy={copy} nodeLabels={nodeLabels} approvalLabel="Approval boundary" />
+    )
+    for (const beam of container.querySelectorAll('[data-slot="animated-beam"]')) {
+      expect(beam).toHaveClass("hidden", "md:block")
+    }
+    expect(container.querySelector('[data-slot="connection-spine"]')).toHaveClass(
+      "left-1/2",
+      "md:hidden"
+    )
+  })
+
+  it("centres the source stack on narrow viewports", () => {
+    render(<ConnectionFlow copy={copy} nodeLabels={nodeLabels} />)
+    const source = screen.getByRole("button", { name: /Repository/ })
+    expect(source.parentElement).toHaveClass("items-center", "md:items-start")
+  })
+
   it("bounds the diagram's width so no path stretches to the shell edge", () => {
     render(<ConnectionFlow copy={copy} nodeLabels={nodeLabels} approvalLabel="Approval" />)
     expect(screen.getByRole("group", { name: copy.label })).toHaveClass("max-w-5xl")

@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import { useReducedMotion } from "motion/react"
 import { Icon, type IconName } from "@web/components/icon"
 import { TaskArtifact } from "@web/components/product/task-artifact"
@@ -161,6 +162,21 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
   const activeIndex = pinned ? pinIndex : rail.index
   const active = copy.steps[activeIndex]
 
+  // Below `lg` the rail is a horizontal strip that can be wider than the
+  // screen; keep the current step in view as autoplay or the buttons move it.
+  // Only the strip scrolls, never the page, so this cannot yank the reader.
+  const railRef = useRef<HTMLOListElement>(null)
+  useEffect(() => {
+    const list = railRef.current
+    if (!list || list.scrollWidth <= list.clientWidth) return
+    const item = list.children[activeIndex] as HTMLElement | undefined
+    if (!item || typeof list.scrollTo !== "function") return
+    list.scrollTo({
+      left: item.offsetLeft - (list.clientWidth - item.offsetWidth) / 2,
+      behavior: reduced ? "auto" : "smooth",
+    })
+  }, [activeIndex, reduced])
+
   return (
     <Section id="task" tone="surface">
       <SectionHeading
@@ -213,21 +229,34 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
           >
             <div
               data-pinned-stage={pinned ? "" : undefined}
-              className="grid w-full items-start gap-8 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] lg:gap-10"
+              className="grid w-full grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)] lg:gap-10"
             >
+              {/* Below `lg` the rail and its controls stick under the site bar
+               * as one compact strip, so the step being shown and the panel
+               * showing it stay on screen together. Stacked vertically they
+               * took a full phone screen, and every change happened below the
+               * fold where nobody could see it. */}
               <div
-                className={pinned ? "flex min-h-0 flex-col" : "lg:sticky lg:top-28 lg:self-start"}
+                className={
+                  pinned
+                    ? "flex min-h-0 flex-col"
+                    : "sticky top-16 z-20 -mx-5 border-b border-hairline bg-surface/95 px-5 py-3 backdrop-blur-sm lg:top-28 lg:mx-0 lg:self-start lg:border-b-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
+                }
               >
-                <ol aria-label={copy.stepperLabel} className="flex flex-col gap-px">
+                <ol
+                  ref={railRef}
+                  aria-label={copy.stepperLabel}
+                  className="relative flex gap-1 overflow-x-auto [scrollbar-width:none] lg:flex-col lg:gap-px lg:overflow-visible [&::-webkit-scrollbar]:hidden"
+                >
                   {copy.steps.map((step, index) => {
                     const current = index === activeIndex
                     return (
-                      <li key={step.key}>
+                      <li key={step.key} className="shrink-0">
                         <button
                           type="button"
                           onClick={() => (pinned ? scrollToIndex(index) : rail.goTo(index))}
                           aria-current={current ? "step" : undefined}
-                          className={`flex w-full items-baseline gap-3 border-l py-2.5 pl-4 text-left transition-colors ${
+                          className={`flex items-baseline gap-2 whitespace-nowrap border-b-2 px-2.5 py-2 text-left transition-colors lg:w-full lg:gap-3 lg:border-b-0 lg:border-l lg:px-0 lg:py-2.5 lg:pl-4 ${
                             current
                               ? "border-action text-ink"
                               : "border-hairline text-muted hover:text-ink"
@@ -237,7 +266,7 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
                             <Icon
                               name={STEP_ICON[step.key]}
                               size={14}
-                              className={current ? TONE_CLASS[step.tone] : undefined}
+                              className={`max-lg:hidden ${current ? TONE_CLASS[step.tone] : ""}`}
                             />
                           ) : null}
                           <span aria-hidden className={`text-xs ${TONE_CLASS[step.tone]}`}>
@@ -252,7 +281,7 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
                   })}
                 </ol>
 
-                <div className="mt-8 flex items-center gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-2 lg:mt-8">
                   <button
                     type="button"
                     onClick={() => (pinned ? scrollToIndex(activeIndex - 1) : rail.previous())}
@@ -260,7 +289,7 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
                     className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
                   >
                     <Icon name="previous" size={14} />
-                    {copy.previousLabel}
+                    <span className="max-lg:sr-only">{copy.previousLabel}</span>
                   </button>
                   {/* Autoplay only exists when the reader is not already driving.
                    * A play button that fights the scroll position would be a
@@ -281,14 +310,19 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
                     disabled={activeIndex === copy.steps.length - 1}
                     className="inline-flex items-center gap-1.5 rounded-control border border-hairline-strong px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
                   >
-                    {copy.nextLabel}
+                    <span className="max-lg:sr-only">{copy.nextLabel}</span>
                     <Icon name="next" size={14} />
                   </button>
-                </div>
 
-                <p aria-live="polite" className="mt-4 font-mono text-xs text-muted">
-                  {format(copy.stepOf, { current: activeIndex + 1, total: copy.steps.length })}
-                </p>
+                  {/* Beside the controls on a phone, where vertical room is
+                   * what the sticky strip costs; on its own line from `lg`. */}
+                  <p
+                    aria-live="polite"
+                    className="ml-auto font-mono text-xs text-muted lg:ml-0 lg:mt-2 lg:basis-full"
+                  >
+                    {format(copy.stepOf, { current: activeIndex + 1, total: copy.steps.length })}
+                  </p>
+                </div>
 
                 {/* Pinned, the page heading above has scrolled away, so the one
                  * task the whole site follows (spec §9) is restated beside the

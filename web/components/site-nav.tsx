@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
+import { createPortal } from "react-dom"
 import type { SiteCopy } from "@web/content/types"
 import type { ReleaseState } from "@web/lib/evidence"
 import { useDismissable } from "@web/hooks/use-dismissable"
@@ -48,6 +49,7 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
   const {
     open: sheetOpen,
     toggle: toggleSheet,
+    close: closeSheet,
     containerRef: sheetRef,
     triggerRef: sheetTriggerRef,
   } = useDismissable<HTMLDivElement>()
@@ -212,6 +214,7 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
             type="button"
             onClick={toggleSheet}
             aria-expanded={sheetOpen}
+            aria-controls={sheetOpen ? "site-nav-sheet" : undefined}
             className="inline-flex items-center gap-1.5 rounded-control border border-hairline px-3 py-2 text-sm text-ink lg:hidden"
           >
             {/* Beside the words, never instead of them: the label is what
@@ -223,53 +226,90 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
         </div>
       </nav>
 
-      {sheetOpen ? (
-        <div
-          ref={sheetRef}
-          className="fixed inset-0 top-16 z-40 overflow-y-auto bg-paper px-5 py-8 lg:hidden"
-        >
-          <ul className="flex flex-col gap-1">
-            {copy.nav.productMenu.items.map((item) => (
-              <li key={item.route}>
-                <SiteLink
-                  target={item}
-                  locale={locale}
-                  docsOrigin={docsOrigin}
-                  className="block border-b border-hairline py-4 text-lg text-ink"
-                />
-              </li>
-            ))}
-            {primaryLinks.map((link) => (
-              <li key={link.route}>
-                <SiteLink
-                  target={link}
-                  locale={locale}
-                  docsOrigin={docsOrigin}
-                  className="block border-b border-hairline py-4 text-lg text-ink"
-                />
-              </li>
-            ))}
-            <li>
-              <SiteLink
-                target={{ label: copy.nav.sourceLabel, href: REPO_URL }}
-                locale={locale}
-                docsOrigin={docsOrigin}
-                className="block border-b border-hairline py-4 text-lg text-ink"
-              />
-            </li>
-          </ul>
+      {/* Portalled to <body>: the header's `backdrop-filter` makes it the
+       * containing block for fixed descendants, so a sheet rendered inside it
+       * was sized to the 64px bar and its links spilled over the page. */}
+      {sheetOpen
+        ? createPortal(
+            <div
+              ref={sheetRef}
+              id="site-nav-sheet"
+              // Following a link must close the sheet: the nav survives
+              // client-side navigation, and an in-page anchor would otherwise
+              // land behind it.
+              onClick={(event) => {
+                if ((event.target as Element).closest("a")) closeSheet()
+              }}
+              className="fixed inset-x-0 bottom-0 top-16 z-40 overflow-y-auto overscroll-contain border-t border-hairline bg-paper px-5 py-8 lg:hidden"
+            >
+              <ul className="flex flex-col gap-1">
+                {copy.nav.productMenu.items.map((item) => (
+                  <li key={item.route}>
+                    <SiteLink
+                      target={item}
+                      locale={locale}
+                      docsOrigin={docsOrigin}
+                      className="flex items-center gap-3 border-b border-hairline py-4 text-lg text-ink"
+                    >
+                      {NAV_ICON[item.route] ? (
+                        <Icon name={NAV_ICON[item.route]} size={16} className="text-muted" />
+                      ) : null}
+                      {item.label}
+                    </SiteLink>
+                  </li>
+                ))}
+                {primaryLinks.map((link) => (
+                  <li key={link.route}>
+                    <SiteLink
+                      target={link}
+                      locale={locale}
+                      docsOrigin={docsOrigin}
+                      className="flex items-center gap-3 border-b border-hairline py-4 text-lg text-ink"
+                    >
+                      {NAV_ICON[link.route] ? (
+                        <Icon name={NAV_ICON[link.route]} size={16} className="text-muted" />
+                      ) : null}
+                      {link.label}
+                    </SiteLink>
+                  </li>
+                ))}
+                <li>
+                  <SiteLink
+                    target={{ label: copy.nav.sourceLabel, href: REPO_URL }}
+                    locale={locale}
+                    docsOrigin={docsOrigin}
+                    className="flex items-center gap-3 border-b border-hairline py-4 text-lg text-ink"
+                  >
+                    <Icon name="source" size={16} className="text-muted" />
+                    {copy.nav.sourceLabel}
+                  </SiteLink>
+                </li>
+              </ul>
 
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <LanguageSwitcher
-              locale={locale}
-              route={route}
-              copy={copy.nav}
-              docsOrigin={docsOrigin}
-            />
-            <ThemeToggle copy={copy.nav} />
-          </div>
-        </div>
-      ) : null}
+              {/* The bar hides Download below `sm`; the sheet is where it goes. */}
+              <div className="mt-8 sm:hidden">
+                <DownloadCta
+                  locale={locale}
+                  copy={copy.common}
+                  state={releaseState}
+                  variant="compact"
+                  docsOrigin={docsOrigin}
+                />
+              </div>
+
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <LanguageSwitcher
+                  locale={locale}
+                  route={route}
+                  copy={copy.nav}
+                  docsOrigin={docsOrigin}
+                />
+                <ThemeToggle copy={copy.nav} />
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </header>
   )
 }

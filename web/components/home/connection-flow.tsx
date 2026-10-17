@@ -42,8 +42,9 @@ const SourceNode = forwardRef<HTMLButtonElement, SourceNodeProps>(
       onMouseEnter={() => onActiveIndexChange?.(index)}
       onMouseLeave={() => onActiveIndexChange?.(null)}
       className={cn(
-        "relative z-10 flex w-full max-w-64 items-center gap-2.5 rounded-control border bg-surface px-3 py-2.5 text-left text-xs font-medium text-ink transition-colors",
-        active ? "border-action" : "border-hairline-strong hover:border-action/60"
+        "relative z-10 flex w-full max-w-sm items-center gap-2.5 rounded-control border bg-surface px-3 py-2.5 text-left text-xs font-medium text-ink transition-colors",
+        active ? "border-action" : "border-hairline-strong hover:border-action/60",
+        "md:max-w-64"
       )}
     >
       <Icon name={SOURCE_ICON[index] ?? "tool"} size={14} className="text-muted" />
@@ -81,9 +82,13 @@ const BEAM = {
  * and centring it keeps every path short enough to read as a connection.
  *
  * Finite animation (two passes), then static. Reduced motion renders the same
- * nodes joined by plain lines. Below `md` the sources stack above the
- * workbench and the beams still find them, because the paths are measured
- * from the live layout rather than drawn by hand.
+ * nodes joined by plain lines.
+ *
+ * Below `md` the three groups stack on one centred axis — sources, workbench,
+ * checkpoint — joined by a single vertical spine instead of beams. Beams
+ * measured centre-to-centre between stacked cards run *through* the cards
+ * above them, and with the sources left-aligned they crossed the stack at
+ * arbitrary angles and left half the frame empty.
  */
 export function ConnectionFlow({
   copy,
@@ -110,8 +115,16 @@ export function ConnectionFlow({
     >
       <div aria-hidden className="rhythm-lines pointer-events-none absolute inset-0 opacity-40" />
 
+      {/* The narrow-viewport spine. Behind the nodes (they sit at z-10 on a
+       * solid surface), so it only shows in the gaps between them. */}
+      <div
+        aria-hidden
+        data-slot="connection-spine"
+        className="pointer-events-none absolute inset-y-10 left-1/2 w-px -translate-x-1/2 bg-linear-to-b from-hairline-strong via-action/70 to-approval/70 md:hidden"
+      />
+
       {/* Source nodes */}
-      <div className="relative flex flex-col items-start gap-3 md:gap-4">
+      <div className="relative flex flex-col items-center gap-3 md:items-start md:gap-4">
         {nodeLabels[0] ? (
           <SourceNode
             ref={firstNodeRef}
@@ -162,7 +175,7 @@ export function ConnectionFlow({
       </div>
 
       {approvalLabel ? (
-        <div className="relative flex md:justify-start">
+        <div className="relative flex justify-center md:justify-start">
           <div
             ref={approvalRef}
             className="relative z-10 flex items-center gap-2.5 rounded-control border border-approval/70 bg-surface px-3 py-2.5 text-xs font-medium text-ink"
@@ -187,6 +200,7 @@ export function ConnectionFlow({
           curvature={24}
           gradientStartColor="var(--action)"
           gradientStopColor="var(--action)"
+          className="hidden md:block"
           delay={0}
           {...BEAM}
         />
@@ -199,6 +213,7 @@ export function ConnectionFlow({
           curvature={-24}
           gradientStartColor="var(--action)"
           gradientStopColor="var(--action)"
+          className="hidden md:block"
           delay={0.4}
           {...BEAM}
         />
@@ -211,6 +226,7 @@ export function ConnectionFlow({
           curvature={24}
           gradientStartColor="var(--action)"
           gradientStopColor="var(--action)"
+          className="hidden md:block"
           delay={0.8}
           {...BEAM}
         />
@@ -223,6 +239,7 @@ export function ConnectionFlow({
           curvature={-24}
           gradientStartColor="var(--action)"
           gradientStopColor="var(--action)"
+          className="hidden md:block"
           delay={1.2}
           {...BEAM}
         />
@@ -235,13 +252,17 @@ export function ConnectionFlow({
           toRef={approvalRef}
           gradientStartColor="var(--approval)"
           gradientStopColor="var(--approval)"
+          className="hidden md:block"
           delay={1.6}
           {...BEAM}
         />
       ) : null}
 
       {reduced ? (
-        <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>
+        <svg
+          className="pointer-events-none absolute inset-0 hidden h-full w-full md:block"
+          aria-hidden
+        >
           {[14, 38, 62, 86].slice(0, Math.min(nodeLabels.length, 4)).map((y) => (
             <line
               key={y}
