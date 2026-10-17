@@ -1,8 +1,8 @@
 {
-  "latestVersion": 239,
-  "schemaSha256": "f3a6a8e78c662dd012f5c32eb1a31df2275211da2978a25a8b7d4b5ec9444bd0",
-  "staticTableCount": 383,
-  "companionSyncTableCount": 56,
+  "latestVersion": 244,
+  "schemaSha256": "ac336b62ecff43b4eeefd842840bc1f489107d74d07562fdaa2464a57c15d7f6",
+  "staticTableCount": 385,
+  "companionSyncTableCount": 57,
   "companionSyncTables": [
     "adapterInstances",
     "agentTaskAttempts",
@@ -11,6 +11,7 @@
     "agentTeamTasks",
     "agentTeammates",
     "agentTeams",
+    "bestOfNRuns",
     "botDefinitions",
     "botEventDeliveries",
     "botInstallations",

@@ -74,6 +74,27 @@ unit-testable without a model in the loop. `ai-commit.ts` exposes `buildCommitSy
 model — and `stripFences()`, with `generateCommitMessage()` (`lib/git/ai-commit.ts:102`) as the only
 model-touching function. `ai-explain.ts` follows the same shape with `generateDiffExplanation()`.
 
+## Best-of-N comparison and publication
+
+Use `/best-of-n 2 <prompt>` (also 3 or 4) or the next-send composer chip. The
+shared start dialog shows the committed base, excluded uncommitted edits and
+an editable new result branch. Existing branches require explicit selection;
+this flow never pushes. `/best-of-n status`, `cancel`, and `pick <candidate>`
+operate on the session's latest run. The assistant card opens its comparison
+dock: progress, agent/model, files, checks, duration, summary and cost, preserving
+unknown costs. Diffs and changeset details are read-only.
+
+Picking manually can stop other attempts early; no-change results cannot be
+published. Publish is separate: check a fresh checkout of the recorded head,
+record user approval and integrate only that changeset with stop-on-conflict.
+Host guards reject losers even through generic SCM. Loser workspace/session
+cleanup is retryable without losing a successful publication. `bestOfNRuns`
+is a rebuildable Host projection mirrored read-only over Companion sync.
+Native confirmation keeps the lease alive without blocking candidate progress;
+changed business state requires fresh confirmation. Budget exhaustion does not
+override a subsequent explicit cancel, so cancelled runs remain archivable.
+See [ADR-0230](../adr/0230-best-of-n-attempts-share-a-frozen-base).
+
 ## Related
 
 <Cards>

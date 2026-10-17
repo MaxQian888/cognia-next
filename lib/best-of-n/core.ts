@@ -339,9 +339,45 @@ export function createBestOfNService(deps: {
       return acknowledgeStopped(await host.get(groupId))
     },
     async select(groupId: string, candidateId: string, headSha: string): Promise<BestOfNGroup> {
-      const group = await serialize(groupId, async (current) =>
-        host.select({ mutation: mutation(await claim(current)), candidateId, headSha })
+      const current = await serialize(groupId, claim)
+      // Native confirmation can remain open indefinitely. Do not hold the progress
+      // queue while waiting, or it also blocks the lease heartbeat. A lease-only
+      // recover preserves the business version bound to the native confirmation.
+      let renewing = false
+      let renewalError: unknown
+      const timer = setInterval(
+        () => {
+          if (renewing) return
+          renewing = true
+          void serialize(groupId, (latest) =>
+            latest.version === current.version && latest.ownerId === ownerId
+              ? claim(latest)
+              : Promise.resolve(latest)
+          )
+            .catch((error: unknown) => {
+              renewalError = error
+              clearInterval(timer)
+            })
+            .finally(() => {
+              renewing = false
+            })
+        },
+        Math.max(1, Math.min(deps.pollMs ?? 1_000, leaseDurationMs / 3))
       )
+      let group: BestOfNGroup
+      try {
+        // No automatic retry: a changed business version requires fresh approval.
+        group = await host.select({ mutation: mutation(current), candidateId, headSha })
+      } catch (error) {
+        if (renewalError)
+          throw new AggregateError(
+            [error, renewalError],
+            "Best-of-N selection and lease renewal failed"
+          )
+        throw error
+      } finally {
+        clearInterval(timer)
+      }
       running.get(groupId)?.abort.abort(new Error("Best-of-N winner selected"))
       await execution.stop(group)
       await running.get(groupId)?.completion

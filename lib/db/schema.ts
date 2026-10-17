@@ -435,7 +435,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 243
+export const CURRENT_SCHEMA_VERSION = 244
 
 /**
  * The immutable cumulative v240 schema baseline.
@@ -1053,6 +1053,7 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   ...SCHEMA_V240,
   ...SESSION_LIST_SCHEMA,
   ...SESSION_LIST_SOURCE_SCHEMA,
+  bestOfNRuns: "&id, parentSessionId, parentMessageId, updatedAt",
 }
 
 let databaseConnectionSequence = 0
@@ -1069,6 +1070,7 @@ interface LegacyRemoteControlRunStatusRow {
 }
 
 export class CogniaDB extends Dexie {
+  bestOfNRuns!: Table<import("@/types/best-of-n").BestOfNRunSummary, string>
   readonly connectionOwner: string
   readonly connectionId: string
   private readonly connectionCreatedAt: number
@@ -1638,7 +1640,7 @@ export class CogniaDB extends Dexie {
     this.version(240).stores(SCHEMA_V240).upgrade(backfillMessageSyncRevision)
     this.version(241).stores(SESSION_LIST_SCHEMA).upgrade(backfillSessionList)
     this.version(242).stores({}).upgrade(backfillSessionList)
-    this.version(243).stores(SESSION_LIST_SOURCE_SCHEMA)
+    this.version(CURRENT_SCHEMA_VERSION).stores(CURRENT_SCHEMA)
   }
 
   messageSyncClock!: Table<MessageSyncClock, "singleton">

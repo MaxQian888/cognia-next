@@ -196,3 +196,15 @@ it("ignores an eligibility response after unmount", async () => {
   unmount()
   await act(async () => finish({ eligible: true, gaps: [] }))
 })
+
+it("renders candidate evidence without review, approval or abandonment controls in read-only mode", async () => {
+  const changeset = makeChangeset()
+  const host = makeHost([changeset])
+  render(<ChangesetDetail changeset={changeset} host={host} projectId={null} readOnly />)
+  await screen.findByText("gaps.missingHumanApproval")
+  expect(screen.getByTestId("changeset-detail")).toHaveTextContent(changeset.title)
+  expect(screen.queryByTestId("changeset-review")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("changeset-approve")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("changeset-abandon")).not.toBeInTheDocument()
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+})

@@ -79,6 +79,7 @@ export const DOCK_SESSION_PANEL_META: Readonly<Record<string, DockPanelMeta>> = 
     icon: SearchCodeIcon,
     preferredMode: "wide",
   },
+  "best-of-n": { labelKey: "best-of-n-ui.title", icon: GitBranchIcon, preferredMode: "wide" },
   "source-control": { labelKey: "contextWorkbench.sourceControlPanel.title", icon: GitBranchIcon },
   comments: { labelKey: "contextWorkbench.comments", icon: MessageSquareIcon },
   "run-context": { labelKey: "contextWorkbench.runContext.title", icon: ListChecksIcon },

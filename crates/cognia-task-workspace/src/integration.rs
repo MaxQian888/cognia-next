@@ -828,14 +828,19 @@ impl TaskWorkspaceService {
             .iter()
             .map(|id| self.integration_changeset(id))
             .collect::<Result<Vec<_>, _>>()?;
+        let first = changesets
+            .first()
+            .ok_or_else(|| IntegrationError::InvalidRequest("no changesets".into()))?;
+        let root = Path::new(&first.repo_common_dir);
+        let target_ref = normalize_target_ref(root, &request.target_ref)?;
         for changeset in &changesets {
-            if self.guard_best_of_n_changeset(changeset, &request.target_ref).map_err(IntegrationError::InvalidRequest)?.is_some() && (changesets.len() != 1 || request.on_conflict != IntegrationConflictPolicy::Stop) {
+            if self.guard_best_of_n_changeset(changeset, &target_ref).map_err(IntegrationError::InvalidRequest)?.is_some() && (changesets.len() != 1 || request.on_conflict != IntegrationConflictPolicy::Stop) {
                 return Err(IntegrationError::InvalidRequest("best-of-N requires only the selected winner and stop on conflict".into()));
             }
         }
         let analysis = analyze_changesets(
             &changesets,
-            Some(&request.target_ref),
+            Some(&target_ref),
             merge_tree_supported(),
         )?;
         if !analysis.cycles.is_empty() {
@@ -843,9 +848,6 @@ impl TaskWorkspaceService {
                 cycles: analysis.cycles,
             });
         }
-        let first = &changesets[0];
-        let root = Path::new(&first.repo_common_dir);
-        let target_ref = normalize_target_ref(root, &request.target_ref)?;
         let expected_old_sha = git_text(root, &["rev-parse", &format!("{target_ref}^{{commit}}")])?;
         let previous = request
             .integration_id
@@ -4954,6 +4956,47 @@ mod tests {
             matches!(result, Err(IntegrationError::InvalidRequest(message)) if message.contains("best-of-N publish guard"))
         );
         assert!(fixture.service.list_integrations().unwrap().is_empty());
+    }
+
+    #[test]
+    fn best_of_n_prepare_normalizes_short_and_full_targets_before_winner_guard() {
+        let _ports = crate::ports::TestPortProbeGuard::vacant();
+        for target in ["main", "refs/heads/main"] {
+            for selected in [false, true] {
+                let fixture = Fixture::new();
+                let changeset = fixture.capture("candidate", &[("left.txt", "candidate\n")]);
+                let group = register_best_of_n_test_group(&fixture, &changeset, selected);
+                let original = fixture.target();
+                let mut request = fixture.request(
+                    &[&changeset],
+                    IntegrationStrategy::Merge,
+                    IntegrationConflictPolicy::Stop,
+                );
+                request.target_ref = target.into();
+                let result = fixture.service.prepare_integration(request);
+                if !selected {
+                    assert!(
+                        matches!(result, Err(IntegrationError::InvalidRequest(message)) if message.contains("best-of-N publish guard"))
+                    );
+                    assert!(fixture.service.list_integrations().unwrap().is_empty());
+                    assert_eq!(fixture.target(), original);
+                    continue;
+                }
+                let run = result.unwrap();
+                assert_eq!(run.target_ref, "refs/heads/main");
+                assert_eq!(run.items.len(), 1);
+                assert_eq!(run.items[0].changeset_id, changeset.changeset_id);
+                assert_eq!(run.items[0].head_sha, changeset.head_sha);
+                let published = fixture.publish(&run);
+                assert_eq!(published.state, IntegrationState::Published);
+                assert_eq!(published.target_ref, "refs/heads/main");
+                assert_eq!(fixture.target(), published.result_sha.unwrap());
+                assert_eq!(
+                    fixture.service.best_of_n_get(&group.group_id).unwrap().unwrap().phase,
+                    crate::BestOfNPhase::Published
+                );
+            }
+        }
     }
 
     #[test]

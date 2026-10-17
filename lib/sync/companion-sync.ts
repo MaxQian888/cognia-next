@@ -36,6 +36,7 @@ import type { RunStatus } from "@/types/workflow/visual"
 import { clearCursors, loadCursors, saveCursor } from "./cursor-store"
 import { sleep, whenIdle, yieldToMain } from "./scheduling"
 import { syncAdapterInstances } from "./handlers/adapter-instances"
+import { syncBestOfNRuns } from "./handlers/best-of-n-runs"
 import { syncAgentTeamBoard } from "./handlers/agent-team-board"
 import { syncAgentTaskAttempts, syncAgentTasks } from "./handlers/agent-tasks"
 import { syncAppSettings } from "./handlers/app-settings"
@@ -206,6 +207,7 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // the desktop task board (tasks + team-meta rows) so the mobile workspace
   // can render the kanban offline; controls travel back as Companion RPC.
   { table: "agentTeamBoard", stage: "interactive", run: syncAgentTeamBoard },
+  { table: "bestOfNRuns", stage: "interactive", run: syncBestOfNRuns },
   // Canonical, remote-safe run summaries. Detailed/private event rows remain
   // on the executing host and are never part of companion sync.
   { table: "executionRuns", stage: "interactive", run: syncExecutionRuns },
@@ -461,6 +463,7 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   mcpServers: syncDomain("tombstone"),
   terminalHistory: syncDomain("ttl", "confidential", "opaque"),
   agentTeamBoard: syncDomain("tombstone"),
+  bestOfNRuns: syncDomain("append-only", "confidential", "opaque"),
   // Deleting a template is user intent and has to reach the phone, or the `/`
   // menu keeps offering text the user removed. `recordChatTemplateUse` is the
   // one write left out of the cursor: counters, no content.

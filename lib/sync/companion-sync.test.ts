@@ -1930,3 +1930,9 @@ describe("SYNC_TABLE_DEPENDENCIES", () => {
     }
   })
 })
+
+it("registers Best-of-N in the interactive read-only sync mirror", () => {
+  expect(SYNC_HANDLER_TABLES).toContain("bestOfNRuns")
+  expect(syncTablesForStage("interactive")).toContain("bestOfNRuns")
+  expect(COMPANION_SYNC_DOMAINS.bestOfNRuns).toEqual(COMPANION_SYNC_DOMAINS.executionRuns)
+})

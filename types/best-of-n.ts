@@ -61,6 +61,8 @@ export interface BestOfNGroup {
   version: number
   ownerId: string
   ownerLeaseExpiresAt: number
+  /** Absent in legacy ledgers; explicit user cancellation overrides budget stops. */
+  cancelRequested?: boolean
   archiveStatus: string
   archiveError: string | null
   error: string | null
@@ -98,4 +100,22 @@ export interface BestOfNProgress {
   costUsd?: number | null
   error?: string
   teamRunId?: string
+}
+
+/** Disposable, read-only UI mirror; the Host ledger authorizes every mutation. */
+export interface BestOfNRunMetadata {
+  parentSessionId?: string
+  parentMessageId?: string
+  projectId?: string
+  requiredChecks?: string[]
+  /** Session cleanup is independent from successful integration and workspace cleanup. */
+  sessionArchiveError?: string | null
+  candidateChangesets?: Record<string, import("@/lib/scm/types").AgentChangeset>
+  summaries?: Record<string, string>
+}
+
+export interface BestOfNRunSummary extends BestOfNRunMetadata {
+  id: string
+  group: BestOfNGroup
+  updatedAt: number
 }

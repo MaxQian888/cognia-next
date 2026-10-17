@@ -36,6 +36,7 @@ describe("BUILTIN_SLASH_COMMANDS registry", () => {
       "help",
       "model",
       "agents",
+      "best-of-n",
       "mcp",
       "permissions",
       "init",

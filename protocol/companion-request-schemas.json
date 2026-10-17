@@ -16998,6 +16998,7 @@
             "mcpServers",
             "terminalHistory",
             "agentTeamBoard",
+            "bestOfNRuns",
             "agentTasks",
             "agentTaskAttempts",
             "chatTemplates",

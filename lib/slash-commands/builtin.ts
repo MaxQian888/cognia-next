@@ -31,6 +31,7 @@ import { dispatchSideChat } from "./actions/side-chat"
 import { dispatchGoalSubcommand } from "./actions/goal"
 import { dispatchPlanSubcommand } from "./actions/plan"
 import { dispatchIssueSubcommand } from "./actions/issue"
+import { handleBestOfN } from "./actions/best-of-n"
 import { dispatchSquadSubcommand } from "./actions/squad"
 import { dispatchPetSubcommand } from "./actions/pet"
 import { dispatchLoopSubcommand } from "./actions/loop"
@@ -52,6 +53,8 @@ export type SettingsTab = SettingsSectionId
 
 /** What the dispatcher hands an Action command's handler. */
 export interface SlashContext {
+  /** Interactive start preview shared by the slash command and one-shot chip. */
+  startBestOfN?: (prompt: string, n: 2 | 3 | 4) => Promise<boolean>
   isMobile?: boolean
   isAside?: boolean
   /** Cooperative cancellation supplied by the invoking host, when supported. */
@@ -568,6 +571,15 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       const result = await dispatchIssueSubcommand(ctx)
       ctx.pushSystemMessage(result.system)
     },
+  },
+  {
+    name: "best-of-n",
+    description: "/best-of-n [2|3|4] <prompt>",
+    scope: "builtin",
+    category: "chat",
+    argumentHint: "[2|3|4] <prompt> | status | cancel | pick <candidate>",
+    argumentOptions: ["2", "3", "4", "status", "cancel", "pick"],
+    handler: handleBestOfN,
   },
   {
     name: "squad",

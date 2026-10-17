@@ -72,6 +72,7 @@ export const CORE_TABLE_NAMES = [
   "agentTaskAttempts",
   "agentTasks",
   "agentTeamBoard",
+  "bestOfNRuns",
   "agentTeamCheckpoints",
   "agentTeamChildRuns",
   "agentTeamContentObjects",
@@ -584,6 +585,7 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "mcpServers",
   "terminalHistory",
   "agentTeamBoard",
+  "bestOfNRuns",
   "agentTasks",
   "agentTaskAttempts",
   // Saved chat templates. The `/` menu on a phone read a table nothing ever
@@ -709,6 +711,7 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "mcpServers",
   "terminalHistory",
   "agentTeamBoard",
+  "bestOfNRuns",
   "agentTasks",
   "agentTaskAttempts",
   "chatTemplates",
@@ -797,6 +800,7 @@ export const COMPANION_SYNC_DELETE_STRATEGY: Readonly<
   mcpServers: "tombstoned",
   terminalHistory: "retention-pruned",
   agentTeamBoard: "tombstoned",
+  bestOfNRuns: "never-deleted",
   agentTasks: "never-deleted",
   agentTaskAttempts: "never-deleted",
   chatTemplates: "tombstoned",
@@ -883,6 +887,7 @@ const CACHE_TABLES = new Set<CoreTableName>([
 ])
 
 const PROJECTION_TABLES = new Set<CoreTableName>([
+  "bestOfNRuns",
   "sessionList",
   // Account sync's per-field clocks (ADR-0215 phase 3): bookkeeping about the
   // rows they describe, which stay the record. Not rebuildable, but meaningless
@@ -1823,6 +1828,7 @@ const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentPro
   notificationTargets: "encrypted-content",
   notificationDeliveryIntents: "encrypted-content",
   runResultSummaries: "encrypted-content",
+  bestOfNRuns: "encrypted-content",
   // Ids, states, cursors, leases, hashes and error CODES (the types keep
   // messages out on purpose). Several are read on the reconcile sweep, where a
   // cipher round-trip would buy nothing.

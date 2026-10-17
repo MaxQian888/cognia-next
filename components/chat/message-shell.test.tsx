@@ -672,3 +672,26 @@ describe("Router + Fusion run card (ADR-0188)", () => {
     expect(screen.queryByTestId("router-fusion-bypass")).toBeNull()
   })
 })
+
+jest.mock("@/components/best-of-n/best-of-n-run-card", () => ({
+  BestOfNRunCard: ({ groupId, sessionId }: { groupId: string; sessionId: string }) => (
+    <div data-testid="best-of-n-card" data-group={groupId} data-session={sessionId} />
+  ),
+}))
+
+it("mounts best-of-N only on its parent assistant message", () => {
+  const parent = { ...message, metadata: { bestOfN: { groupId: "group", sessionId: "session" } } }
+  const view = render(
+    <MessageShell message={parent} display={resolveMessageDisplayOptions()}>
+      <p>parent</p>
+    </MessageShell>
+  )
+  expect(screen.getByTestId("best-of-n-card")).toHaveAttribute("data-group", "group")
+  expect(screen.getByTestId("best-of-n-card")).toHaveAttribute("data-session", "session")
+  view.rerender(
+    <MessageShell message={{ ...parent, role: "user" }} display={resolveMessageDisplayOptions()}>
+      <p>user</p>
+    </MessageShell>
+  )
+  expect(screen.queryByTestId("best-of-n-card")).not.toBeInTheDocument()
+})

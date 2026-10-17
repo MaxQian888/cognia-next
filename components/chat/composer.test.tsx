@@ -1,3 +1,19 @@
+jest.mock("@/lib/i18n/runtime-translator", () => ({
+  getRuntimeTranslator: async () => (key: string) => key,
+}))
+jest.mock("@/lib/best-of-n/entry", () => ({
+  prepareBestOfNChat: jest.fn(async (_sessionId: string, prompt: string, n: number) => ({
+    requestId: "bon-request",
+    prompt,
+    n,
+    baseSha: "abc",
+    dirty: true,
+    targetRef: "best-of-n/bon-request",
+    branches: ["main"],
+  })),
+  startPreparedBestOfN: jest.fn(async () => ({ groupId: "bon-group" })),
+}))
+
 // Coverage for the data-hooks integration point in composer — the inner
 // component now reads `useUpdateSession()` from the adapter and uses it to
 // persist permissionMode changes back to the session row. This test mounts
@@ -1686,4 +1702,66 @@ describe("plugin command progress and cancellation", () => {
       }
     }
   )
+})
+
+describe("Composer — best-of-N consumes exactly one send", () => {
+  it("uses the shared start preview then resets the chip before the next ordinary send", async () => {
+    const { startPreparedBestOfN } = await import("@/lib/best-of-n/entry")
+    jest.mocked(startPreparedBestOfN).mockClear()
+    const onSend = jest.fn(async () => undefined)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    fireEvent.change(screen.getByRole("combobox", { name: "Best-of-N for the next send" }), {
+      target: { value: "3" },
+    })
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: "try three approaches" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Start attempts" }))
+    await waitFor(() => expect(startPreparedBestOfN).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(onSend).not.toHaveBeenCalled()
+    expect(screen.getByRole("combobox", { name: "Best-of-N for the next send" })).toHaveValue("off")
+    fireEvent.change(ta, { target: { value: "ordinary follow-up" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    expect(startPreparedBestOfN).toHaveBeenCalledTimes(1)
+  })
+  it.each([true, false])("slash start consumes the parent send (confirm=%s)", async (confirm) => {
+    const { startPreparedBestOfN } = await import("@/lib/best-of-n/entry")
+    jest.mocked(startPreparedBestOfN).mockClear()
+    const onSend = jest.fn(async () => undefined)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: "/best-of-n 2 fix this\nwith tests" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: confirm ? "Start attempts" : "Cancel" })
+    )
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(startPreparedBestOfN).toHaveBeenCalledTimes(confirm ? 1 : 0)
+    expect(onSend).not.toHaveBeenCalled()
+    if (!confirm) await waitFor(() => expect(ta).toHaveValue("/best-of-n 2 fix this\nwith tests"))
+  })
 })

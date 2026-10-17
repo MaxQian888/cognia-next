@@ -25,13 +25,14 @@ interface Props {
   changeset: AgentChangeset
   host: ScmHost
   projectId: string | null
-  actions: Pick<
+  readOnly?: boolean
+  actions?: Pick<
     AgentChangesActions,
     "review" | "approve" | "requestChanges" | "abandon" | "busy" | "error"
   >
 }
 
-export function ChangesetDetail({ changeset, host, projectId, actions }: Props) {
+export function ChangesetDetail({ changeset, host, projectId, actions, readOnly = false }: Props) {
   const t = useTranslations("agentChanges")
   const noteId = useId()
   const [note, setNote] = useState("")
@@ -61,6 +62,7 @@ export function ChangesetDetail({ changeset, host, projectId, actions }: Props) 
   const currentEligibility = eligibility?.changeset === changeset ? eligibility : null
   const reasons = review?.reasons ?? []
   const confirmAction = async () => {
+    if (!actions || readOnly) return
     const result =
       confirm === "approve"
         ? await actions.approve(changeset)
@@ -216,103 +218,107 @@ export function ChangesetDetail({ changeset, host, projectId, actions }: Props) 
           </div>
         )}
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          disabled={actions.busy || !allowed.review}
-          onClick={() => void actions.review(changeset.changesetId)}
-          data-testid="changeset-review"
-        >
-          {t("actions.review")}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={actions.busy || !allowed.approve}
-          onClick={() => setConfirm("approve")}
-          data-testid="changeset-approve"
-        >
-          {t("actions.approve")}
-        </Button>
-        <Button
-          size="sm"
-          variant="destructive"
-          disabled={actions.busy || !allowed.abandon}
-          onClick={() => setConfirm("abandon")}
-          data-testid="changeset-abandon"
-        >
-          {t("actions.abandon")}
-        </Button>
-      </div>
-      <form
-        className="space-y-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!allowed.requestChanges || actions.busy || !note.trim()) return
-          void actions.requestChanges(changeset, note.trim()).then((result) => {
-            if (result) setNote("")
-          })
-        }}
-      >
-        <Label htmlFor={noteId}>{t("detail.changeNote")}</Label>
-        <Textarea
-          id={noteId}
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          disabled={actions.busy || !allowed.requestChanges}
-        />
-        <Button
-          size="sm"
-          type="submit"
-          variant="outline"
-          disabled={actions.busy || !allowed.requestChanges || !note.trim()}
-          data-testid="changeset-request-changes"
-        >
-          {t("actions.requestChanges")}
-        </Button>
-      </form>
-      <AlertDialog
-        open={confirm !== null}
-        onOpenChange={(open) => {
-          if (!open && !actions.busy) setConfirm(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirm === "approve" ? t("confirm.approveTitle") : t("confirm.abandonTitle")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirm === "approve"
-                ? t("confirm.approveDescription", { sha: changeset.headSha.slice(0, 8) })
-                : t("confirm.abandonDescription")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {confirm === "approve" && review?.requiresHumanApproval && (
-            <ul className="max-h-60 list-inside list-disc overflow-auto text-sm">
-              {reasons.map((code, index) => (
-                <li key={index}>{t(reviewReasonKey(code), { code })}</li>
-              ))}
-            </ul>
-          )}
-          {actions.error && <p role="alert">{t("errors.action")}</p>}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={actions.busy}>{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={
-                actions.busy || (confirm === "approve" ? !allowed.approve : !allowed.abandon)
-              }
-              onClick={(event) => {
-                event.preventDefault()
-                void confirmAction()
-              }}
-              data-testid="changeset-confirm"
+      {!readOnly && actions && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={actions.busy || !allowed.review}
+              onClick={() => void actions.review(changeset.changesetId)}
+              data-testid="changeset-review"
             >
-              {t("confirm.continue")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              {t("actions.review")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={actions.busy || !allowed.approve}
+              onClick={() => setConfirm("approve")}
+              data-testid="changeset-approve"
+            >
+              {t("actions.approve")}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={actions.busy || !allowed.abandon}
+              onClick={() => setConfirm("abandon")}
+              data-testid="changeset-abandon"
+            >
+              {t("actions.abandon")}
+            </Button>
+          </div>
+          <form
+            className="space-y-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (!allowed.requestChanges || actions.busy || !note.trim()) return
+              void actions.requestChanges(changeset, note.trim()).then((result) => {
+                if (result) setNote("")
+              })
+            }}
+          >
+            <Label htmlFor={noteId}>{t("detail.changeNote")}</Label>
+            <Textarea
+              id={noteId}
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              disabled={actions.busy || !allowed.requestChanges}
+            />
+            <Button
+              size="sm"
+              type="submit"
+              variant="outline"
+              disabled={actions.busy || !allowed.requestChanges || !note.trim()}
+              data-testid="changeset-request-changes"
+            >
+              {t("actions.requestChanges")}
+            </Button>
+          </form>
+          <AlertDialog
+            open={confirm !== null}
+            onOpenChange={(open) => {
+              if (!open && !actions.busy) setConfirm(null)
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {confirm === "approve" ? t("confirm.approveTitle") : t("confirm.abandonTitle")}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {confirm === "approve"
+                    ? t("confirm.approveDescription", { sha: changeset.headSha.slice(0, 8) })
+                    : t("confirm.abandonDescription")}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              {confirm === "approve" && review?.requiresHumanApproval && (
+                <ul className="max-h-60 list-inside list-disc overflow-auto text-sm">
+                  {reasons.map((code, index) => (
+                    <li key={index}>{t(reviewReasonKey(code), { code })}</li>
+                  ))}
+                </ul>
+              )}
+              {actions.error && <p role="alert">{t("errors.action")}</p>}
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={actions.busy}>{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={
+                    actions.busy || (confirm === "approve" ? !allowed.approve : !allowed.abandon)
+                  }
+                  onClick={(event) => {
+                    event.preventDefault()
+                    void confirmAction()
+                  }}
+                  data-testid="changeset-confirm"
+                >
+                  {t("confirm.continue")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
     </section>
   )
 }

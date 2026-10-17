@@ -288,3 +288,11 @@ describe("persistence", () => {
     expect(kept).not.toContain("stale")
   })
 })
+
+it("remembers the selected comparison independently for each conversation", () => {
+  useDockTabsStore.getState().setBestOfNGroup("s1", "g1")
+  useDockTabsStore.getState().setBestOfNGroup("s2", "g2")
+  useDockTabsStore.getState().setBestOfNGroup("s1", "g3")
+  expect(useDockTabsStore.getState().bySession.s1.bestOfNGroupId).toBe("g3")
+  expect(useDockTabsStore.getState().bySession.s2.bestOfNGroupId).toBe("g2")
+})

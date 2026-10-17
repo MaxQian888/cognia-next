@@ -99,6 +99,8 @@ export interface SessionDockTabs {
   pages: DockPageTab[]
   /** The page tab the browser panel shows. */
   activePageTabId: string | null
+  /** The comparison currently shown in this session's best-of-N panel. */
+  bestOfNGroupId?: string | null
   lastUsedAt: number
 }
 
@@ -131,6 +133,7 @@ export function orderDockTabs(
 }
 
 interface DockTabsState {
+  setBestOfNGroup: (sessionId: string, groupId: string) => void
   bySession: Record<string, SessionDockTabs>
   /**
    * Move `key` to `toIndex` within `currentOrder` — the strip as it is drawn,
@@ -221,6 +224,13 @@ export const useDockTabsStore = create<DockTabsState>()(
   persist(
     (set) => ({
       bySession: {},
+      setBestOfNGroup: (sessionId, groupId) =>
+        set((state) => ({
+          bySession: touch(state.bySession, sessionId, (entry) => ({
+            ...entry,
+            bestOfNGroupId: groupId,
+          })),
+        })),
       moveTab: (sessionId, currentOrder, key, toIndex) =>
         set((state) => {
           const from = currentOrder.indexOf(key)

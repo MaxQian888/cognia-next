@@ -56,7 +56,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(384)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(385)
     db.close()
   })
 
@@ -93,7 +93,7 @@ describe("DataTableCatalog", () => {
   })
 
   it("maps all 56 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(56)
+    expect(COMPANION_SYNC_TABLES.size).toBe(57)
     // The goal event log, so a paired phone's goal detail, judge notes and
     // `/goal status` read the desktop's history. It leaves with its goal's
     // tombstone and is capped per goal on both sides, so it has none of its own.
@@ -622,4 +622,15 @@ it("keeps the encrypted session list derived and outside both sync protocols", (
     accountSync: { mode: "none" },
     cleanupPolicy: "protected",
   })
+})
+
+it("classifies Best-of-N as an encrypted Host projection with a read-only paired mirror", () => {
+  expect(policyForTable("bestOfNRuns")).toMatchObject({
+    role: "projection",
+    contentProtection: "encrypted-content",
+    backupPolicy: { mode: "derived" },
+    syncPolicy: { mode: "companion-readonly" },
+    accountSync: { mode: "none" },
+  })
+  expect(COMPANION_SYNC_DELETE_STRATEGY.bestOfNRuns).toBe("never-deleted")
 })

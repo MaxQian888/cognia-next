@@ -9102,11 +9102,15 @@ paths:
                         - workspaceBundleId
                       type: object
                     type: array
+                  cancelRequested:
+                    default: false
+                    type: boolean
                 required:
                   - archiveError
                   - archiveStatus
                   - baseSha
                   - budgetPolicy
+                  - cancelRequested
                   - candidates
                   - checkoutHadUncommittedChanges
                   - createdAt
@@ -9508,11 +9512,15 @@ paths:
                         - workspaceBundleId
                       type: object
                     type: array
+                  cancelRequested:
+                    default: false
+                    type: boolean
                 required:
                   - archiveError
                   - archiveStatus
                   - baseSha
                   - budgetPolicy
+                  - cancelRequested
                   - candidates
                   - checkoutHadUncommittedChanges
                   - createdAt
@@ -9967,11 +9975,15 @@ paths:
                         - workspaceBundleId
                       type: object
                     type: array
+                  cancelRequested:
+                    default: false
+                    type: boolean
                 required:
                   - archiveError
                   - archiveStatus
                   - baseSha
                   - budgetPolicy
+                  - cancelRequested
                   - candidates
                   - checkoutHadUncommittedChanges
                   - createdAt
@@ -10352,11 +10364,15 @@ paths:
                             - workspaceBundleId
                           type: object
                         type: array
+                      cancelRequested:
+                        default: false
+                        type: boolean
                     required:
                       - archiveError
                       - archiveStatus
                       - baseSha
                       - budgetPolicy
+                      - cancelRequested
                       - candidates
                       - checkoutHadUncommittedChanges
                       - createdAt
@@ -10734,11 +10750,15 @@ paths:
                           - workspaceBundleId
                         type: object
                       type: array
+                    cancelRequested:
+                      default: false
+                      type: boolean
                   required:
                     - archiveError
                     - archiveStatus
                     - baseSha
                     - budgetPolicy
+                    - cancelRequested
                     - candidates
                     - checkoutHadUncommittedChanges
                     - createdAt
@@ -11140,11 +11160,15 @@ paths:
                         - workspaceBundleId
                       type: object
                     type: array
+                  cancelRequested:
+                    default: false
+                    type: boolean
                 required:
                   - archiveError
                   - archiveStatus
                   - baseSha
                   - budgetPolicy
+                  - cancelRequested
                   - candidates
                   - checkoutHadUncommittedChanges
                   - createdAt
@@ -11560,11 +11584,15 @@ paths:
                         - workspaceBundleId
                       type: object
                     type: array
+                  cancelRequested:
+                    default: false
+                    type: boolean
                 required:
                   - archiveError
                   - archiveStatus
                   - baseSha
                   - budgetPolicy
+                  - cancelRequested
                   - candidates
                   - checkoutHadUncommittedChanges
                   - createdAt
@@ -12020,11 +12048,15 @@ paths:
                         - workspaceBundleId
                       type: object
                     type: array
+                  cancelRequested:
+                    default: false
+                    type: boolean
                 required:
                   - archiveError
                   - archiveStatus
                   - baseSha
                   - budgetPolicy
+                  - cancelRequested
                   - candidates
                   - checkoutHadUncommittedChanges
                   - createdAt
@@ -151547,6 +151579,7 @@ paths:
                     - mcpServers
                     - terminalHistory
                     - agentTeamBoard
+                    - bestOfNRuns
                     - agentTasks
                     - agentTaskAttempts
                     - chatTemplates

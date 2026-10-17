@@ -150,6 +150,9 @@ pub struct BestOfNGroup {
     pub budget_policy: BestOfNBudgetPolicy,
     pub team_run_id: String,
     pub phase: BestOfNPhase,
+    /// Explicit user cancellation survives automatic budget-stop reconciliation.
+    #[serde(default)]
+    pub cancel_requested: bool,
     pub selected_candidate_id: Option<String>,
     pub selected_head_sha: Option<String>,
     pub integration_id: Option<String>,
@@ -259,7 +262,7 @@ fn settle_phase(group: &mut BestOfNGroup) {
     let all_done = group.candidates.iter().all(|c| c.status.terminal());
     if group.phase == BestOfNPhase::Cancelling {
         if all_done {
-            group.phase = if group
+            group.phase = if !group.cancel_requested && group
                 .error
                 .as_deref()
                 .is_some_and(|error| error.contains("budget exhausted"))
@@ -419,6 +422,7 @@ impl TaskWorkspaceService {
             budget_policy: request.budget_policy,
             team_run_id: format!("best-of-n:{id}"),
             phase: BestOfNPhase::Preparing,
+            cancel_requested: false,
             selected_candidate_id: None,
             selected_head_sha: None,
             integration_id: None,
@@ -481,10 +485,17 @@ impl TaskWorkspaceService {
         if !claim && group.owner_lease_expires_at <= now {
             return Err("best-of-N owner lease expired; recover before mutating".into());
         }
+        let previous = if claim { Some(encode(&group)?) } else { None };
         apply(&tx, &mut group)?;
+        let state_changed = match previous {
+            Some(previous) => previous != encode(&group)? || group.owner_id != mutation.owner_id,
+            None => true,
+        };
         group.owner_id = mutation.owner_id.clone();
         group.owner_lease_expires_at = expiry;
-        group.version += 1;
+        if state_changed {
+            group.version += 1;
+        }
         group.updated_at = now;
         save(&tx, &group)?;
         tx.commit().map_err(|e| e.to_string())?;
@@ -551,6 +562,7 @@ impl TaskWorkspaceService {
             ) {
                 return Err("cannot cancel a selected publication".into());
             }
+            group.cancel_requested = true;
             group.phase = BestOfNPhase::Cancelling;
             stop_remaining(group);
             settle_phase(group);
@@ -779,6 +791,9 @@ impl TaskWorkspaceService {
         })?;
         let mut errors = Vec::new();
         for candidate in &group.candidates {
+            if group.selected_candidate_id.as_deref() == Some(candidate.candidate_id.as_str()) {
+                continue;
+            }
             if let Some(id) = &candidate.workspace_bundle_id {
                 match self.get_workspace_bundle(id) {
                     Ok(Some(bundle)) => {
@@ -1232,6 +1247,80 @@ mod tests {
         assert_eq!(group.phase, BestOfNPhase::Cancelled);
     }
     #[test]
+    fn best_of_n_explicit_cancel_after_budget_stop_remains_cancelled_and_archives() {
+        for cancel_before_shutdown in [false, true] {
+            let fixture = Fixture::new();
+            let mut request = fixture.request();
+            request.candidates.push(request.candidates[0].clone());
+            let group = fixture.service.best_of_n_start(request).unwrap();
+            let group = fixture.provision(&group, 0);
+            let group = fixture.complete(&group, 0);
+            let mut request = progress(&group, 1, BestOfNCandidateStatus::Failed);
+            request.cost_usd = Some(1.0);
+            let mut group = fixture.service.best_of_n_candidate_progress(request).unwrap();
+            assert_eq!(group.phase, BestOfNPhase::Cancelling);
+            assert!(!group.cancel_requested);
+            if cancel_before_shutdown {
+                group = fixture.service.best_of_n_cancel(mutation(&group)).unwrap();
+                assert!(group.cancel_requested);
+                // Read the ledger again, as a new renderer or restarted Host would.
+                group = fixture.service.best_of_n_get(&group.group_id).unwrap().unwrap();
+                assert!(group.cancel_requested);
+            }
+            group = fixture.service.best_of_n_candidate_progress(progress(
+                &group, 2, BestOfNCandidateStatus::Cancelled,
+            )).unwrap();
+            if !cancel_before_shutdown {
+                assert_eq!(group.phase, BestOfNPhase::AwaitingSelection);
+                group = fixture.service.best_of_n_cancel(mutation(&group)).unwrap();
+            }
+            assert!(group.cancel_requested);
+            assert_eq!(group.phase, BestOfNPhase::Cancelled);
+            let group = fixture.service.best_of_n_recover(mutation(&group)).unwrap();
+            assert_eq!(group.phase, BestOfNPhase::Cancelled);
+            let group = fixture.service.best_of_n_archive(mutation(&group)).unwrap();
+            assert_eq!(group.phase, BestOfNPhase::Cancelled);
+            assert_eq!(group.archive_status, BestOfNArchiveStatus::Archived);
+        }
+    }
+
+    #[test]
+    fn best_of_n_legacy_payload_defaults_to_no_explicit_cancel() {
+        let fixture = Fixture::new();
+        let mut payload = serde_json::to_value(fixture.start()).unwrap();
+        payload.as_object_mut().unwrap().remove("cancelRequested");
+        let group: BestOfNGroup = serde_json::from_value(payload).unwrap();
+        assert!(!group.cancel_requested);
+    }
+
+    #[test]
+    fn best_of_n_heartbeat_preserves_business_version_but_recovery_changes_advance_it() {
+        let fixture = Fixture::new();
+        let group = fixture.start();
+        let mut heartbeat = mutation(&group);
+        heartbeat.lease_duration_ms = 120_000;
+        let renewed = fixture.service.best_of_n_recover(heartbeat).unwrap();
+        assert_eq!(renewed.version, group.version);
+        assert!(renewed.owner_lease_expires_at > group.owner_lease_expires_at);
+
+        let mut expired = renewed.clone();
+        expired.owner_lease_expires_at = 0;
+        save(&fixture.service.store.lock().connection, &expired).unwrap();
+        let mut takeover = mutation(&expired);
+        takeover.owner_id = "new-owner".into();
+        let claimed = fixture.service.best_of_n_recover(takeover).unwrap();
+        assert_eq!(claimed.version, renewed.version + 1);
+        assert_eq!(claimed.owner_id, "new-owner");
+
+        let active = fixture.provision(&claimed, 0);
+        let mut expired = active.clone();
+        expired.owner_lease_expires_at = 0;
+        save(&fixture.service.store.lock().connection, &expired).unwrap();
+        let recovered = fixture.service.best_of_n_recover(mutation(&expired)).unwrap();
+        assert_eq!(recovered.phase, BestOfNPhase::RecoveryRequired);
+        assert_eq!(recovered.version, active.version + 1);
+    }
+    #[test]
     fn best_of_n_selection_is_manual_exact_head_and_stops_losers() {
         let fixture = Fixture::new();
         let group = fixture.start();
@@ -1491,6 +1580,60 @@ mod tests {
             .best_of_n_candidate_progress(progress(&group, 1, BestOfNCandidateStatus::Cancelled))
             .unwrap();
         assert_eq!(group.phase, BestOfNPhase::Published);
+    }
+
+    #[test]
+    fn best_of_n_comparison_path_cannot_integrate_a_loser_or_archive_the_winner() {
+        let fixture = Fixture::new();
+        let group = fixture.start();
+        let group = fixture.provision(&group, 0);
+        let group = fixture.complete(&group, 0);
+        let group = fixture.provision(&group, 1);
+        let group = fixture.complete(&group, 1);
+        for candidate in &group.candidates {
+            let id = candidate.changeset_id.as_ref().unwrap();
+            fixture.service.mark_changeset_ready(id).unwrap();
+            fixture.service.record_changeset_review(id, crate::ChangesetReview {
+                head_sha: candidate.head_sha.clone().unwrap(),
+                verdict: crate::ChangesetReviewVerdict::Approve,
+                reviewer: crate::ChangesetReviewer::User,
+                risk_tier: crate::ChangesetRiskTier::Low,
+                reasons: vec![], findings: vec![], requires_human_approval: false,
+                recorded_at: now_ms(),
+            }).unwrap();
+        }
+        let group = fixture.service.best_of_n_select(BestOfNSelect {
+            mutation: mutation(&group),
+            candidate_id: group.candidates[0].candidate_id.clone(),
+            head_sha: group.candidates[0].head_sha.clone().unwrap(),
+        }, BestOfNSelectionOrigin::InteractiveUser).unwrap();
+        let winner = group.candidates[0].changeset_id.clone().unwrap();
+        let loser = group.candidates[1].changeset_id.clone().unwrap();
+        for ids in [vec![loser.clone()], vec![winner.clone(), loser]] {
+            let error = fixture.service.prepare_integration(crate::PrepareIntegration {
+                changeset_ids: ids,
+                required_checks: vec![], target_ref: group.target_ref.clone(),
+                strategy: crate::IntegrationStrategy::Merge,
+                on_conflict: crate::IntegrationConflictPolicy::Stop,
+                provisioning: None, integration_id: None,
+            }).unwrap_err();
+            assert!(error.to_string().contains("best-of-N"), "{error}");
+        }
+        let run = fixture.service.prepare_integration(crate::PrepareIntegration {
+            changeset_ids: vec![winner], required_checks: vec![], target_ref: group.target_ref.clone(),
+            strategy: crate::IntegrationStrategy::Merge,
+            on_conflict: crate::IntegrationConflictPolicy::Stop,
+            provisioning: None, integration_id: None,
+        }).unwrap();
+        fixture.service.publish_integration(&run.integration_id, run.candidate_sha.as_ref().unwrap(), vec![]).unwrap();
+        let group = fixture.service.best_of_n_get(&group.group_id).unwrap().unwrap();
+        let group = fixture.service.best_of_n_archive(mutation(&group)).unwrap();
+        assert_eq!(group.phase, BestOfNPhase::Published);
+        assert_eq!(group.archive_status, BestOfNArchiveStatus::Archived);
+        let winner_bundle = fixture.service.get_workspace_bundle(group.candidates[0].workspace_bundle_id.as_ref().unwrap()).unwrap().unwrap();
+        for lease in winner_bundle.leases {
+            assert!(Path::new(&lease.alias_path).is_dir());
+        }
     }
     #[test]
     fn best_of_n_recovery_resumes_branch_initialization_only_after_recorded_selection() {

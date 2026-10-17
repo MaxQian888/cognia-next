@@ -24,6 +24,7 @@
  * for the loop this used to be.
  */
 
+import { BestOfNComparisonPanel } from "@/components/best-of-n/best-of-n-comparison"
 import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   ActivityIcon,
@@ -212,6 +213,11 @@ function DockArtifactListPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>)
   return (
     <ArtifactList sessionId={activeSessionId ?? undefined} className="h-full" maxHeight="100%" />
   )
+}
+
+function DockBestOfNPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
+  const sessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  return <BestOfNComparisonPanel sessionId={sessionId} />
 }
 
 function DockBrowserPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
@@ -850,6 +856,7 @@ export function useSessionSurfacePanels({
       workspace: () => <DockWorkspacePanel key={key} inputs={inputs} />,
       files: () => <SessionFilesRenderer key={key} inputs={inputs} />,
       sourceControl: () => <SessionSourceControlRenderer key={key} inputs={inputs} />,
+      bestOfN: () => <DockBestOfNPanel key={key} inputs={inputs} />,
       comments: () => <SessionCommentsRenderer key={key} inputs={inputs} />,
       runContext: () => <DockRunContextPanel key={key} inputs={inputs} />,
       plan: () => <SessionPlanRenderer key={key} inputs={inputs} />,
@@ -979,6 +986,18 @@ export function useSessionSurfacePanels({
         preferredMode: "wide",
         getBadge: () => uncommittedChangeCount,
         renderer: renderers.workspace,
+      },
+      {
+        id: "best-of-n",
+        activity: "review",
+        labelKey: "best-of-n-ui.title",
+        icon: GitBranchIcon,
+        order: 29,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        scope: "session",
+        preferredMode: "wide",
+        renderer: renderers.bestOfN,
       },
       {
         id: "source-control",

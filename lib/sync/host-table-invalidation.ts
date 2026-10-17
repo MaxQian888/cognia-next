@@ -82,6 +82,7 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   mcpServers: "mcpServerSummaries",
   terminalHistory: "terminalHistory",
   agentTeamBoard: "agentTeamBoard",
+  bestOfNRuns: "bestOfNRuns",
   agentTasks: "agentTasks",
   agentTaskAttempts: "agentTaskAttempts",
   chatTemplates: "chatTemplates",

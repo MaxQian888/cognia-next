@@ -16,6 +16,7 @@ import type { MessageDisplayMetadataOptions } from "@/types/appearance"
 import { assistantBubbleClass, messageCardClass } from "@/lib/chat/message-bubble"
 import { runMetadataOf, type MessageRunMetadata } from "@/lib/chat/message-run-metadata"
 import { formatWorkedDuration } from "@/lib/chat/turn-fold"
+import { BestOfNRunCard } from "@/components/best-of-n/best-of-n-run-card"
 import { RouterFusionRunCard } from "@/components/router-fusion/router-fusion-run-card"
 import { RoutingIndicator } from "@/components/chat/routing-indicator"
 import { useSettingsStore } from "@/stores/settings"
@@ -440,6 +441,13 @@ export function MessageShell({
 
           {/* Router + Fusion run card (ADR-0188): only a turn that went through it
             carries `run.routerFusion`, so every other message renders as before. */}
+          {isAssistant &&
+          (message.metadata as { bestOfN?: { groupId: string; sessionId: string } } | undefined)
+            ?.bestOfN ? (
+            <BestOfNRunCard
+              {...(message.metadata as { bestOfN: { groupId: string; sessionId: string } }).bestOfN}
+            />
+          ) : null}
           {isAssistant && run?.routerFusion ? (
             <div className="mt-1.5 flex">
               <RouterFusionRunCard routerFusion={run.routerFusion} />

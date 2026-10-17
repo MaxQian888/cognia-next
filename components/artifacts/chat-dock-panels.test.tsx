@@ -718,7 +718,7 @@ describe("the selection composer inside the resource chat", () => {
 })
 
 describe("useSessionSurfacePanels", () => {
-  it("offers exactly the eighteen session-surface panels, in a stable order", () => {
+  it("offers exactly the nineteen session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     expect(panels.find((panel) => panel.id === "squad-context")?.icon).toBe(AgentTeamIcon)
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
@@ -730,6 +730,7 @@ describe("useSessionSurfacePanels", () => {
       [PROJECT_OVERVIEW_PANEL_ID, "workspace", 25],
       ["conversation-files", "workspace", 28],
       [WORKSPACE_PANEL_ID, "workspace", 30],
+      ["best-of-n", "review", 29],
       ["source-control", "workspace", 35],
       ["comments", "comments", 40],
       ["run-context", "inspect", 44],
@@ -1235,4 +1236,20 @@ describe("panel lifetime", () => {
     )
     expect(screen.getByTestId("chat-panel")).toHaveAttribute("data-context", "saved since")
   })
+})
+
+jest.mock("@/components/best-of-n/best-of-n-comparison", () => ({
+  BestOfNComparisonPanel: ({ sessionId }: { sessionId: string | null }) => (
+    <div data-testid="best-of-n-comparison" data-session={sessionId} />
+  ),
+}))
+
+it("registers best-of-N as a retained session comparison panel", () => {
+  const panel = panelById(collect(useSessionSurfacePanels, sessionInput()), "best-of-n")
+  expect(panel.scope).toBe("session")
+  expect(panel.retention).toBe("stateful")
+  expect(panel.preferredMode).toBe("wide")
+  const Renderer = panel.renderer
+  render(<Renderer />)
+  expect(screen.getByTestId("best-of-n-comparison")).toHaveAttribute("data-session", "s1")
 })

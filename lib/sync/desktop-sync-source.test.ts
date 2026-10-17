@@ -1835,3 +1835,19 @@ describe("the goal event log reader (goalEvents)", () => {
     expect(goals.deleted_ids).toEqual(["g1"])
   })
 })
+
+it("serves persisted Best-of-N summaries to paired devices with incremental timestamps", async () => {
+  const db = getDb()
+  await db.bestOfNRuns.clear()
+  const summary = {
+    id: "best-run",
+    updatedAt: 20,
+    parentMessageId: "parent",
+    group: { groupId: "best-run", version: 3, phase: "published" },
+  } as import("@/types/best-of-n").BestOfNRunSummary
+  await db.bestOfNRuns.put(summary)
+  const result = await readDexieDelta("bestOfNRuns", 10)
+  expect(result.rows).toEqual([summary])
+  expect(result.deleted_ids).toEqual([])
+  expect((await readDexieDelta("bestOfNRuns", 20)).rows).toEqual([])
+})

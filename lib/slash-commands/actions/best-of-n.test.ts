@@ -1,0 +1,101 @@
+import { handleBestOfN, parseBestOfNCommand } from "./best-of-n"
+import { BUILTIN_SLASH_COMMANDS, type SlashContext } from "../builtin"
+import {
+  canManageBestOfNRuns,
+  listBestOfNRuns,
+  refreshBestOfNRun,
+} from "@/lib/best-of-n/projection"
+import { cancelBestOfN } from "@/lib/best-of-n/service"
+import { pickBestOfNCandidate } from "@/lib/best-of-n/publication"
+jest.mock("@/lib/i18n/runtime-translator", () => ({
+  getRuntimeTranslator: async () => (key: string) => key,
+}))
+jest.mock("@/lib/best-of-n/projection", () => ({
+  canManageBestOfNRuns: jest.fn(() => true),
+  listBestOfNRuns: jest.fn(),
+  refreshBestOfNRun: jest.fn(),
+}))
+jest.mock("@/lib/best-of-n/service", () => ({ cancelBestOfN: jest.fn() }))
+jest.mock("@/lib/best-of-n/publication", () => ({ pickBestOfNCandidate: jest.fn() }))
+const group = {
+  groupId: "g",
+  phase: "running",
+  candidates: [
+    { candidateId: "c1", index: 0, status: "succeeded" },
+    { candidateId: "c2", index: 1, status: "running" },
+  ],
+}
+const ctx = (args: string) =>
+  ({
+    args,
+    activeSessionId: "s",
+    chatStatus: "idle",
+    pushSystemMessage: jest.fn(),
+    startBestOfN: jest.fn(async () => true),
+  }) as unknown as SlashContext
+beforeEach(() => {
+  jest.clearAllMocks()
+  jest.mocked(canManageBestOfNRuns).mockReturnValue(true)
+  jest
+    .mocked(listBestOfNRuns)
+    .mockResolvedValue([{ id: "g", updatedAt: 1, group: { ...group, createdAt: 1 } }] as never)
+  jest.mocked(refreshBestOfNRun).mockResolvedValue({ group } as never)
+})
+it("registers a real action and preserves multiline prompt with optional count", () => {
+  expect(BUILTIN_SLASH_COMMANDS.find((command) => command.name === "best-of-n")?.handler).toBe(
+    handleBestOfN
+  )
+  expect(parseBestOfNCommand("3 fix this\nwith tests")).toEqual({
+    kind: "start",
+    n: 3,
+    prompt: "fix this\nwith tests",
+  })
+  expect(parseBestOfNCommand("fix this")).toEqual({ kind: "start", n: 2, prompt: "fix this" })
+  for (const invalid of ["", "5 fix", "3", "pick", "pick 1 2", "status extra"])
+    expect(parseBestOfNCommand(invalid)).toEqual({ kind: "invalid" })
+})
+it("consumes start through the composer preview exactly once", async () => {
+  const context = ctx("4 fix")
+  await handleBestOfN(context)
+  expect(context.startBestOfN).toHaveBeenCalledTimes(1)
+  expect(context.startBestOfN).toHaveBeenCalledWith("fix", 4)
+  expect(context.pushSystemMessage).not.toHaveBeenCalled()
+})
+it("picks only a user-named candidate from this session's latest run", async () => {
+  await handleBestOfN(ctx("pick 1"))
+  expect(pickBestOfNCandidate).toHaveBeenCalledWith("g", "c1")
+  await handleBestOfN(ctx("pick foreign"))
+  expect(pickBestOfNCandidate).toHaveBeenCalledTimes(1)
+})
+it("allows status and cancel while candidates run", async () => {
+  const status = ctx("status")
+  await handleBestOfN(status)
+  expect(status.pushSystemMessage).toHaveBeenCalled()
+  await handleBestOfN(ctx("cancel"))
+  expect(cancelBestOfN).toHaveBeenCalledWith("g")
+})
+it("refuses start during streaming or with attachments", async () => {
+  const busy = ctx("2 fix")
+  busy.chatStatus = "streaming"
+  await handleBestOfN(busy)
+  expect(busy.startBestOfN).not.toHaveBeenCalled()
+  const attached = ctx("2 fix")
+  attached.stagedFiles = [{ id: "f", url: "blob:f", mediaType: "image/png" }]
+  await handleBestOfN(attached)
+  expect(attached.startBestOfN).not.toHaveBeenCalled()
+})
+
+it("paired observers read synced status and cannot cancel or pick", async () => {
+  jest.mocked(canManageBestOfNRuns).mockReturnValue(false)
+  const status = ctx("status")
+  await handleBestOfN(status)
+  expect(status.pushSystemMessage).toHaveBeenCalled()
+  expect(refreshBestOfNRun).not.toHaveBeenCalled()
+  for (const args of ["cancel", "pick 1"]) {
+    const context = ctx(args)
+    await handleBestOfN(context)
+    expect(context.pushSystemMessage).toHaveBeenCalledWith("unavailable")
+  }
+  expect(cancelBestOfN).not.toHaveBeenCalled()
+  expect(pickBestOfNCandidate).not.toHaveBeenCalled()
+})

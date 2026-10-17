@@ -242,6 +242,12 @@ export async function readDexieDelta(
       return readPlansDelta(since)
     case "memories":
       return readMemoriesDelta(since, contentDeps)
+    case "bestOfNRuns":
+      return finalizeDelta(
+        "bestOfNRuns",
+        await getDb().bestOfNRuns.where("updatedAt").above(since).toArray(),
+        since
+      )
     case "agentTeamBoard":
       return readAgentTeamBoardDelta(since)
     case "agentTasks":

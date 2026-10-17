@@ -59,6 +59,7 @@ describe("SYNC_TABLE_SOURCES", () => {
   it("routes the wire aliases to the tables the sync source actually reads", () => {
     // These three are the only names that differ, and each differs for a
     // reason: two wire aliases (ADR-0045) and one projection.
+    expect(SYNC_TABLE_SOURCES.bestOfNRuns).toBe("bestOfNRuns")
     expect(SYNC_TABLE_SOURCES.goals).toBe("chatGoals")
     expect(SYNC_TABLE_SOURCES.plans).toBe("agentPlans")
     expect(SYNC_TABLE_SOURCES.mcpServers).toBe("mcpServerSummaries")

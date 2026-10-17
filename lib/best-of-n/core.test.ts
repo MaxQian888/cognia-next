@@ -73,7 +73,8 @@ function fixture() {
     get: jest.fn(async (_groupId: string) => snapshot()),
     list: jest.fn(async () => [snapshot()]),
     recover: jest.fn(async (m) => {
-      cas(m)
+      expect(m.expectedVersion).toBe(group.version)
+      group.ownerLeaseExpiresAt = Date.now() + m.leaseDurationMs
       return snapshot()
     }),
     archive: jest.fn(async (m) => {
@@ -221,6 +222,89 @@ it("early human selection stops remaining attempts and preserves publishing", as
   expect(selected.phase).toBe("publishing")
   expect(selected.candidates[1].status).toBe("cancelled")
   expect((await handle.completion).selectedHeadSha).toBe("head0")
+})
+
+it.each([false, true])(
+  "renews the lease during a slow confirmation (active sibling: %s)",
+  async (activeSibling) => {
+    jest.useFakeTimers()
+    try {
+      const f = fixture()
+      f.input.budgetPolicy.maxDurationMs = 120_000
+      if (activeSibling) {
+        f.execution.execute.mockImplementation(async ({ candidate, signal }) => {
+          if (candidate.index === 0)
+            return { hasChanges: true, costUsd: 1, changesetId: "change0", headSha: "head0" }
+          return new Promise((_resolve, reject) =>
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+          )
+        })
+      }
+      const handle = await f.service.startBestOfN(f.input)
+      await jest.advanceTimersByTimeAsync(0)
+      if (!activeSibling) await handle.completion
+      const performSelect = f.host.select.getMockImplementation()!
+      let confirm!: () => void
+      f.host.select.mockImplementation(async (input) => {
+        await new Promise<void>((resolve) => {
+          confirm = resolve
+        })
+        if (f.snapshot().ownerLeaseExpiresAt <= Date.now()) throw new Error("lease expired")
+        return performSelect(input)
+      })
+      const selected = f.service.select("group", "c0", "head0")
+      await jest.advanceTimersByTimeAsync(0)
+      const businessVersion = f.snapshot().version
+      await jest.advanceTimersByTimeAsync(65_000)
+      expect(f.snapshot().ownerLeaseExpiresAt).toBeGreaterThan(Date.now())
+      expect(f.snapshot().version).toBe(businessVersion)
+      if (activeSibling) expect(f.snapshot().candidates[1].status).toBe("running")
+      confirm()
+      expect((await selected).phase).toBe("publishing")
+      await handle.completion
+      expect(jest.getTimerCount()).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  }
+)
+
+it("does not block candidate progress or retry stale native confirmation", async () => {
+  const f = fixture()
+  let finishSibling!: () => void
+  f.execution.execute.mockImplementation(async ({ candidate }) => {
+    if (candidate.index === 1)
+      await new Promise<void>((resolve) => {
+        finishSibling = resolve
+      })
+    return {
+      hasChanges: true,
+      costUsd: 1,
+      changesetId: `change${candidate.index}`,
+      headSha: `head${candidate.index}`,
+    }
+  })
+  const handle = await f.service.startBestOfN(f.input)
+  await until(() => f.snapshot().candidates[0].status === "succeeded" && Boolean(finishSibling))
+  let confirm!: () => void
+  f.host.select.mockImplementation(async ({ mutation }) => {
+    await new Promise<void>((resolve) => {
+      confirm = resolve
+    })
+    if (mutation.expectedVersion !== f.snapshot().version)
+      throw new Error("best-of-N version conflict")
+    return f.snapshot()
+  })
+  const selected = f.service.select("group", "c0", "head0")
+  const rejected = expect(selected).rejects.toThrow("best-of-N version conflict")
+  await until(() => Boolean(confirm))
+  finishSibling()
+  await until(() => f.snapshot().candidates[1].status === "succeeded")
+  confirm()
+  await rejected
+  await handle.completion
+  expect(f.host.select).toHaveBeenCalledTimes(1)
+  expect(f.snapshot().selectedCandidateId).toBeNull()
 })
 
 it("cancel aborts all candidates and waits for terminal acknowledgements", async () => {

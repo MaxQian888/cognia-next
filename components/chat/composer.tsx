@@ -311,6 +311,9 @@ import { useOcr } from "@/hooks/use-ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 import type { OcrResult } from "@/types/ocr"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
+import { BestOfNChip } from "./composer/best-of-n-chip"
+import { BestOfNStartDialog } from "./composer/best-of-n-start-dialog"
+import type { PreparedBestOfN } from "@/lib/best-of-n/entry"
 import { BottomToolbar } from "./composer/bottom-toolbar"
 import { Collapse } from "./composer/collapse"
 import { SkillChipRow } from "./composer/skill-chip-row"
@@ -1006,6 +1009,7 @@ function ComposerInner(props: InnerProps) {
   // enabling/disabling adds/removes its commands live.
   const pluginCommands = usePluginSlashCommands()
 
+  const tBestOfN = useTranslations("bestOfNEntry")
   const isAside = props.session?.kind === "resource-workbench"
   const slashCommands = useMemo(
     // Deduped by name — `record-skill` is declared by both the builtin table
@@ -1013,10 +1017,14 @@ function ComposerInner(props: InnerProps) {
     // an undeduped merge rendered duplicate React keys (and two identical
     // rows). Last-wins matches `commandMap`'s submit-time precedence below.
     () =>
-      mergeSlashCommands(BUILTIN_SLASH_COMMANDS, customCommands, pluginCommands).filter(
-        (command) => !isAside || !["btw", "side"].includes(command.name)
-      ),
-    [customCommands, pluginCommands, isAside]
+      mergeSlashCommands(BUILTIN_SLASH_COMMANDS, customCommands, pluginCommands)
+        .map((command) =>
+          command.name === "best-of-n"
+            ? { ...command, description: tBestOfN("description") }
+            : command
+        )
+        .filter((command) => !isAside || !["btw", "side"].includes(command.name)),
+    [customCommands, pluginCommands, isAside, tBestOfN]
   )
 
   // Name → command map for submit-time multi-command dispatch. Built from the
@@ -1921,6 +1929,7 @@ function ComposerInner(props: InnerProps) {
   const localActionInFlightRef = useRef(false)
   const submit = useCallback(async (): Promise<boolean> => {
     const text = textInput.value
+    if (localActionInFlightRef.current) return false
     // These local actions must remain available during a main-turn approval
     // wait. They never enter the main send lane or consume staged attachments.
     const asideCommand = text.trim().match(/^\/(btw|side)(?:\s+([\s\S]*))?$/)
@@ -1968,6 +1977,39 @@ function ComposerInner(props: InnerProps) {
         setActiveParamId(first.paramId)
       }
       return false
+    }
+
+    // Best-of-N owns the whole prompt, including subsequent lines. Letting the
+    // general command batch split it would also send the trailing prose as a
+    // second ordinary parent turn.
+    const bestOfNCommand = text.trim().match(/^\/best-of-n(?:\s+([\s\S]*))?$/)
+    if (bestOfNCommand) {
+      if (localActionInFlightRef.current) return false
+      const command = commandMap.get("best-of-n")
+      if (!command) return false
+      localActionInFlightRef.current = true
+      try {
+        const args = expandFoldedLinks(
+          expandPastes(bestOfNCommand[1] ?? "", pastedBlocks),
+          foldedLinks
+        )
+        const handled = await props.onCommand(command, args, {
+          files: attachments.files.flatMap((file) =>
+            file.id && file.url
+              ? [{ id: file.id, url: file.url, mediaType: file.mediaType ?? "" }]
+              : []
+          ),
+          consume: () => undefined,
+        })
+        if (handled && textInput.value === text) {
+          textInput.clear()
+          setPastedBlocks({})
+          setFoldedLinks({})
+        }
+        return handled
+      } finally {
+        localActionInFlightRef.current = false
+      }
     }
 
     const lane = liveTurn ? "followUp" : "turn"
@@ -2232,7 +2274,10 @@ function ComposerInner(props: InnerProps) {
           }
         )
         const remainingFiles = filesToSend.filter((file) => !file.id || !consumed.has(file.id))
-        if (cancelled) return false
+        if (cancelled) {
+          restoreInputAfterFailure()
+          return false
+        }
         useChatStore.getState().setPendingCommandOverrides(overrides)
         // A failed command in a batch used to vanish: `runSegments` isolates the
         // throw into `errors` precisely so the rest of the batch still runs, but
@@ -3930,11 +3975,61 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   useSidechatShortcut(session?.id, session?.kind === "resource-workbench")
 
+  const tBestOfN = useTranslations("bestOfNEntry")
+  const [bestOfNChoice, setBestOfNChoice] = useState<{ sessionId: string; n: 2 | 3 | 4 } | null>(
+    null
+  )
+  const bestOfNCount =
+    bestOfNChoice && bestOfNChoice.sessionId === session?.id ? bestOfNChoice.n : null
+  const [bestOfNStart, setBestOfNStart] = useState<{
+    prepared: PreparedBestOfN
+    resolve(value: boolean): void
+  } | null>(null)
+  const bestOfNStartRef = useRef(false)
+  const requestBestOfN = useCallback(
+    async (prompt: string, n: 2 | 3 | 4): Promise<boolean> => {
+      if (!session?.id || bestOfNStartRef.current) return false
+      if (["streaming", "awaiting_approval"].includes(status)) {
+        toast.error(tBestOfN("busy"))
+        return false
+      }
+      bestOfNStartRef.current = true
+      try {
+        const { prepareBestOfNChat } = await import("@/lib/best-of-n/entry")
+        const prepared = await prepareBestOfNChat(session.id, prompt, n)
+        return await new Promise<boolean>((resolve) => setBestOfNStart({ prepared, resolve }))
+      } catch (error) {
+        toast.error(
+          tBestOfN("failed", { error: error instanceof Error ? error.message : String(error) })
+        )
+        return false
+      } finally {
+        bestOfNStartRef.current = false
+      }
+    },
+    [session, status, tBestOfN]
+  )
+  useEffect(
+    () => () => {
+      bestOfNStart?.resolve(false)
+    },
+    [bestOfNStart]
+  )
+
   const handleSlashCommand = useCallback(
     async (cmd: SlashCommand, args: string, staged?: SlashStagedFiles): Promise<boolean> => {
       if (cmd.handler) {
+        if (cmd.name === "best-of-n" && staged?.files.length) {
+          toast.error(tBestOfN("textOnly"))
+          return false
+        }
+        let bestOfNAccepted = true
         const ctx: SlashContext = {
           args,
+          startBestOfN: async (prompt, n) => {
+            bestOfNAccepted = await requestBestOfN(prompt, n)
+            return bestOfNAccepted
+          },
           isAside: session?.kind === "resource-workbench",
           // The compact shell has no dock, so `/btw` reports desktop-only there too.
           isMobile: isMobileShell,
@@ -3960,6 +4055,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             if (!(await runPluginCommand(cmd, ctx))) return false
           } else {
             await cmd.handler(ctx)
+            if (!bestOfNAccepted) return false
           }
           // Registered command names only — never the argument string, which
           // is free user text.
@@ -4001,6 +4097,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       pushSystemMessage,
       tCommands,
       runPluginCommand,
+      requestBestOfN,
+      tBestOfN,
       isMobileShell,
     ]
   )
@@ -4184,6 +4282,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       route?: TurnRoute | null
     ) => {
       const trimmed = text.trim()
+      if (bestOfNCount) {
+        if (files.length || route) {
+          toast.error(tBestOfN("textOnly"))
+          return false
+        }
+        const started = await requestBestOfN(trimmed, bestOfNCount)
+        if (started) setBestOfNChoice(null)
+        return started
+      }
       // NOTE: `!shell` / `#memory` are NOT detected here any more. They are
       // first-line modes decided from the ORIGINAL input inside `ComposerInner`
       // (see `onSubmitShell` / `onSubmitMemory`); sniffing the prefix off this
@@ -4512,6 +4619,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     },
     [
       onSend,
+      bestOfNCount,
+      requestBestOfN,
+      tBestOfN,
       clearReferencedPaths,
       clearCitedRefs,
       clearContextSelections,
@@ -4642,6 +4752,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                   </Button>
                 </div>
               )}
+              {session?.kind === "direct" && !session.platformBinding && (
+                <BestOfNChip
+                  value={bestOfNCount}
+                  disabled={disabled || status === "streaming" || status === "awaiting_approval"}
+                  onChange={(n) => setBestOfNChoice(n ? { sessionId: session.id, n } : null)}
+                />
+              )}
               <ExternalAgentExtensionUi chatSessionId={session?.id} link={externalSessionLink}>
                 <ComposerInner
                   externalSessionLink={externalSessionLink}
@@ -4716,6 +4833,23 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         </TooltipProvider>
       </div>
 
+      {bestOfNStart && (
+        <BestOfNStartDialog
+          key={bestOfNStart.prepared.requestId}
+          prepared={bestOfNStart.prepared}
+          onCancel={() => {
+            bestOfNStart.resolve(false)
+            setBestOfNStart(null)
+          }}
+          onConfirm={async (target) => {
+            const { startPreparedBestOfN } = await import("@/lib/best-of-n/entry")
+            await startPreparedBestOfN(bestOfNStart.prepared, target)
+            setBestOfNChoice(null)
+            bestOfNStart.resolve(true)
+            setBestOfNStart(null)
+          }}
+        />
+      )}
       <ComposerCheatsheet open={cheatsheetOpen} onOpenChange={setCheatsheetOpen} />
 
       {/* Draft review dialog — shown when the session has pending connector drafts */}

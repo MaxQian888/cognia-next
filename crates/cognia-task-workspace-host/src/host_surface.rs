@@ -31,7 +31,7 @@ use cognia_task_workspace::{
 use cognia_task_workspace::{
     BestOfNCandidateProgress, BestOfNGroup, BestOfNMutation, StartBestOfN,
 };
-#[cfg(feature = "tauri-host")]
+#[cfg(any(feature = "tauri-host", test))]
 use cognia_task_workspace::BestOfNSelect;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -1368,6 +1368,12 @@ pub async fn best_of_n_select(
         return Err("best-of-N selection was not confirmed by the user".into());
     }
     blocking(move |service| {
+        // Candidate progress may have changed while the native dialog was open.
+        // Renewing only the lease leaves the confirmed business version intact.
+        let current = service
+            .best_of_n_get(&input.mutation.group_id)?
+            .ok_or("best-of-N group not found")?;
+        best_of_n_selection_confirmation(&current, &input)?;
         service.best_of_n_select(
             input,
             cognia_task_workspace::BestOfNSelectionOrigin::InteractiveUser,
@@ -2232,25 +2238,32 @@ mod tests {
         assert!(!select.contains("origin:"));
         assert!(select.contains("best_of_n_selection_confirmation(&group, &input)?"));
         assert!(select.contains(".show(move |approved|"));
-        assert!(select.find("receiver.await").unwrap() < select.find("service.best_of_n_select(").unwrap());
+        let approved = select.find("receiver.await").unwrap();
+        let refreshed = select.find(".best_of_n_get(&input.mutation.group_id)").unwrap();
+        let revalidated = select.find("best_of_n_selection_confirmation(&current, &input)?").unwrap();
+        let selected = select.find("service.best_of_n_select(").unwrap();
+        assert!(approved < refreshed && refreshed < revalidated && revalidated < selected);
     }
 
     #[test]
     fn best_of_n_native_confirmation_is_bound_to_authoritative_head_and_target() {
+        let candidate = serde_json::json!({
+            "candidateId":"candidate", "index":0,
+            "agent":{"agentId":"agent\nspoofed", "provider":null, "model":null},
+            "childSessionId":"child", "workspaceBundleId":"bundle", "physicalRoot":"/attempt",
+            "changesetId":"changeset", "headSha":"head", "status":"succeeded",
+            "hasChanges":true, "costUsd":null, "startedAt":0, "finishedAt":1, "error":null
+        });
         let group: super::BestOfNGroup = serde_json::from_value(serde_json::json!({
             "groupId":"group", "requestId":"request", "repositoryId":"repo",
             "repoCommonDir":"/repo/.git", "sourceRoot":"/repo", "baseSha":"base",
             "checkoutHadUncommittedChanges":false, "targetRef":"refs/heads/result",
             "targetIsNew":false, "n":2, "budgetPolicy":{"maxCostUsd":null,"maxDurationMs":null},
-            "teamRunId":"team", "phase":"awaitingSelection", "selectedCandidateId":null,
+            "teamRunId":"team", "phase":"awaitingSelection", "cancelRequested":false, "selectedCandidateId":null,
             "selectedHeadSha":null, "integrationId":null, "version":7, "ownerId":"owner",
             "ownerLeaseExpiresAt":1000, "archiveStatus":"pending", "archiveError":null,
             "error":null, "createdAt":0, "updatedAt":0,
-            "candidates":[{"candidateId":"candidate", "index":0,
-                "agent":{"agentId":"agent\nspoofed", "provider":null, "model":null},
-                "childSessionId":"child", "workspaceBundleId":"bundle", "physicalRoot":"/attempt",
-                "changesetId":"changeset", "headSha":"head", "status":"succeeded",
-                "hasChanges":true, "costUsd":null, "startedAt":0, "finishedAt":1, "error":null}]
+            "candidates":[candidate]
         })).unwrap();
         let input = super::BestOfNSelect {
             mutation: super::BestOfNMutation {
@@ -2263,6 +2276,13 @@ mod tests {
         assert!(text.contains("Head: \"head\""));
         assert!(text.contains("agent\\nspoofed"));
         assert!(!text.contains("agent\nspoofed"));
+        let mut renewed = group.clone();
+        renewed.owner_lease_expires_at += 60_000;
+        renewed.updated_at += 1_000;
+        assert_eq!(super::best_of_n_selection_confirmation(&renewed, &input).unwrap(), text);
+        let mut progressed = renewed;
+        progressed.version += 1;
+        assert!(super::best_of_n_selection_confirmation(&progressed, &input).is_err());
         let mut stale = input.clone();
         stale.mutation.expected_version -= 1;
         assert!(super::best_of_n_selection_confirmation(&group, &stale).is_err());

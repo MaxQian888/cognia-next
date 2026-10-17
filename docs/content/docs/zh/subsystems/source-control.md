@@ -67,6 +67,23 @@ lib/git/
 
 每个助手都拆为「纯提示词构造 + 一次生成调用」，因此其中真正有内容的部分无需模型即可做单元测试。`ai-commit.ts` 导出 `buildCommitSystemPrompt()`、`buildCommitUserPrompt()`、`clampDiff()`（在 diff 进入模型之前按字符预算截断）与 `stripFences()`，而 `generateCommitMessage()`（`lib/git/ai-commit.ts:102`）是唯一接触模型的函数。`ai-explain.ts` 采用同样的形态，对应 `generateDiffExplanation()`。
 
+## Best-of-N 比较与发布
+
+使用 `/best-of-n 2 <prompt>`（也支持 3、4）或仅作用于下一次发送的 composer
+chip。共用开始对话框展示已提交基线、不会携带未提交修改的提示，以及可编辑的
+新结果分支；已有分支必须显式选择，流程永不 push。`/best-of-n status`、
+`cancel`、`pick <candidate>` 操作当前会话最新运行。assistant card 打开
+比较 dock，展示进度、agent/model、文件、检查、时长、摘要和成本，未知成本
+保持未知。diff 和 changeset 详情只读。
+
+人工选择可提前停止其他尝试，无修改结果不可发布。发布是独立操作：在记录的
+head 上创建新 checkout 检查、记录用户审批，再以 stop-on-conflict 仅集成
+所选 changeset。Host 守卫也阻止通用 SCM 发布落选者。落选工作区/会话归档
+失败可独立重试，不影响发布成功。`bestOfNRuns` 为可重建 Host 投影，透过
+Companion sync 提供只读镜像。原生确认期间持续续租，不阻塞候选进展；业务状态
+变化需要重新确认。预算耗尽不会覆盖后续显式取消，取消后仍可归档。
+参见 [ADR-0230](../adr/0230-best-of-n-attempts-share-a-frozen-base)。
+
 ## 相关文档
 
 <Cards>

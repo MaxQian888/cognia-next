@@ -271,6 +271,11 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
         // `team_task_*` / `team_run_*` control RPCs, never as data writes.
         // Task/team deletions are tombstoned by the desktop projector.
         SyncTableDescriptor {
+            name: "bestOfNRuns".to_string(),
+            description: "Best-of-N Host-ledger summaries (read-only mirror; selection stays on the Host)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
             name: "agentTeamBoard".to_string(),
             description: "Agent-Team task board projection (read-only mirror; controls go through team_* RPCs)".to_string(),
             has_tombstones: true,
@@ -441,6 +446,8 @@ mod tests {
         assert!(r.contains("terminalHistory"));
         assert!(r.contains("settings"));
         assert!(r.contains("agentTeamBoard"));
+        assert!(r.contains("bestOfNRuns"));
+        assert!(!r.list().iter().find(|t| t.name == "bestOfNRuns").unwrap().has_tombstones);
         assert!(r.contains("agentTasks"));
         assert!(r.contains("agentTaskAttempts"));
         assert!(r.contains("chatTemplates"));

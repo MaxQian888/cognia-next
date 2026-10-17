@@ -174,3 +174,11 @@ describe("isWorkbenchPanelHidden / isDefaultWorkbenchPanelLayout", () => {
     expect(isDefaultWorkbenchPanelLayout({ order: [], hidden: ["memory"] })).toBe(false)
   })
 })
+
+it("keeps the best-of-N comparison available in the review panel customizer", () => {
+  expect(WORKBENCH_PANEL_CATALOG.find((panel) => panel.id === "best-of-n")).toEqual({
+    id: "best-of-n",
+    activity: "review",
+    labelKey: "best-of-n-ui.title",
+  })
+})

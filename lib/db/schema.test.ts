@@ -5067,10 +5067,10 @@ schemaIt("v243 indexes existing source IVs without re-encrypting v242 data", asy
   // opening the current physical version without triggering a downgrade.
   const oldWriter = new Dexie(name)
   oldWriter.use(createEncryptedContentMiddleware(name))
-  oldWriter.version(243).stores(previousSchema)
+  oldWriter.version(CURRENT_SCHEMA_VERSION).stores(previousSchema)
   try {
     await upgraded.open()
-    expect(upgraded.verno).toBe(243)
+    expect(upgraded.verno).toBe(CURRENT_SCHEMA_VERSION)
     expect(encrypt).not.toHaveBeenCalled()
     expect(decrypt).not.toHaveBeenCalled()
     await rawAfter.open()
@@ -5107,5 +5107,19 @@ schemaIt("v243 indexes existing source IVs without re-encrypting v242 data", asy
     oldWriter.close()
     await upgraded.delete()
     __resetAccountContentCipherForTesting()
+  }
+})
+
+it("indexes the disposable Best-of-N summary by parent chat bindings", async () => {
+  const db = new CogniaDB("best-of-n-schema", "test")
+  try {
+    await db.open()
+    expect(db.verno).toBe(CURRENT_SCHEMA_VERSION)
+    expect(db.bestOfNRuns.schema.primKey.name).toBe("id")
+    expect(db.bestOfNRuns.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["parentSessionId", "parentMessageId", "updatedAt"])
+    )
+  } finally {
+    await db.delete()
   }
 })
