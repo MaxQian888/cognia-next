@@ -32,6 +32,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { createSharedInstall, type SharedInstallOptions } from "@/lib/tauri/shared-install"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 import { toBridgeError, WasmBridgeError } from "./errors"
@@ -60,60 +61,56 @@ interface TauriBridge {
   invoke(name: string, args: Record<string, unknown>): Promise<unknown>
 }
 
-let installed = false
-
-export interface InstallWasmRendererOptions {
+export interface InstallWasmRendererOptions extends SharedInstallOptions {
   bridge?: TauriBridge
-  forceReinstall?: boolean
 }
 
-export async function installWasmRendererRequestSource(
-  opts: InstallWasmRendererOptions = {}
-): Promise<() => void> {
-  if (installed && !opts.forceReinstall) return () => {}
-  installed = true
+/**
+ * Listen for WASM plugins' renderer requests. Shared by every caller and released by the last one
+ * ({@link createSharedInstall}), so a StrictMode remount keeps it.
+ */
+export const installWasmRendererRequestSource = createSharedInstall<InstallWasmRendererOptions>(
+  async (opts) => {
+    let bridge: TauriBridge
+    if (opts.bridge) {
+      bridge = opts.bridge
+    } else {
+      try {
+        bridge = { listen, invoke }
+      } catch {
+        return null
+      }
+    }
 
-  let bridge: TauriBridge
-  if (opts.bridge) {
-    bridge = opts.bridge
-  } else {
-    try {
-      bridge = { listen, invoke }
-    } catch {
-      installed = false
-      return () => {}
+    const unlistenRequest = await bridge.listen<unknown>(WASM_RENDERER_REQUEST_EVENT, (event) => {
+      void handleRequest(event.payload, bridge)
+    })
+
+    const unlistenCancel = await bridge.listen<WasmRendererCancel>(
+      WASM_RENDERER_CANCEL_EVENT,
+      (event) => {
+        const frame = event.payload
+        if (!frame || typeof frame.requestId !== "string") return
+        cancelRequest(frame.requestId, frame.reason ?? "caller")
+      }
+    )
+
+    return () => {
+      // Guarded because this teardown runs inside a shared cleanup chain: the
+      // provider disposes several sources in sequence, so one throwing here
+      // would skip every teardown after it. A `listen` implementation that
+      // resolves to something other than a function (an older Tauri, a partial
+      // test double) is not worth taking the rest of the chain down for.
+      for (const unlisten of [unlistenRequest, unlistenCancel]) {
+        if (typeof unlisten === "function") safeUnlisten(unlisten)
+      }
+      // Anything still running belongs to a host that is going away. Settle as
+      // well as abort: the listeners are gone, so a handler that ignores its
+      // signal must not be able to emit a response through a dead bridge.
+      abortAll("unload", { settle: true })
     }
   }
-
-  const unlistenRequest = await bridge.listen<unknown>(WASM_RENDERER_REQUEST_EVENT, (event) => {
-    void handleRequest(event.payload, bridge)
-  })
-
-  const unlistenCancel = await bridge.listen<WasmRendererCancel>(
-    WASM_RENDERER_CANCEL_EVENT,
-    (event) => {
-      const frame = event.payload
-      if (!frame || typeof frame.requestId !== "string") return
-      cancelRequest(frame.requestId, frame.reason ?? "caller")
-    }
-  )
-
-  return () => {
-    installed = false
-    // Guarded because this teardown runs inside a shared cleanup chain: the
-    // provider disposes several sources in sequence, so one throwing here
-    // would skip every teardown after it. A `listen` implementation that
-    // resolves to something other than a function (an older Tauri, a partial
-    // test double) is not worth taking the rest of the chain down for.
-    for (const unlisten of [unlistenRequest, unlistenCancel]) {
-      if (typeof unlisten === "function") safeUnlisten(unlisten)
-    }
-    // Anything still running belongs to a host that is going away. Settle as
-    // well as abort: the listeners are gone, so a handler that ignores its
-    // signal must not be able to emit a response through a dead bridge.
-    abortAll("unload", { settle: true })
-  }
-}
+)
 
 async function sendResponse(bridge: TauriBridge, response: WasmRendererResponse): Promise<void> {
   try {

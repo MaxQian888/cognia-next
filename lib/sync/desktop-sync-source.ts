@@ -45,6 +45,7 @@ import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials
 import { getProvisionedTurnSnapshot } from "@/lib/signaling/provisioned-turn-state"
 import { useAccountStore } from "@/stores/account/account-store"
 import { listen } from "@tauri-apps/api/event"
+import { createSharedInstall, type SharedInstallOptions } from "@/lib/tauri/shared-install"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 import Dexie from "dexie"
@@ -90,19 +91,16 @@ interface TauriBridge {
   invoke(name: string, args: Record<string, unknown>): Promise<unknown>
 }
 
-let installed = false
-
-export interface InstallOptions {
+export interface InstallOptions extends SharedInstallOptions {
   /** Inject a Tauri bridge for tests; defaults to the dynamic real one. */
   bridge?: TauriBridge
-  /** Override the singleton-guard for tests. */
-  forceReinstall?: boolean
 }
 
-export async function installDesktopSyncSource(opts: InstallOptions = {}): Promise<() => void> {
-  if (installed && !opts.forceReinstall) return () => {}
-  installed = true
-
+/**
+ * Answer the Host's sync pulls. Shared by every caller and released by the last one
+ * ({@link createSharedInstall}), so a StrictMode remount keeps it.
+ */
+export const installDesktopSyncSource = createSharedInstall<InstallOptions>(async (opts) => {
   let bridge: TauriBridge
   if (opts.bridge) {
     bridge = opts.bridge
@@ -110,8 +108,7 @@ export async function installDesktopSyncSource(opts: InstallOptions = {}): Promi
     try {
       bridge = { listen, invoke }
     } catch {
-      installed = false
-      return () => {}
+      return null
     }
   }
 
@@ -120,10 +117,9 @@ export async function installDesktopSyncSource(opts: InstallOptions = {}): Promi
   })
 
   return () => {
-    installed = false
     safeUnlisten(unlisten)
   }
-}
+})
 
 async function respondToSyncRequest(
   request: SyncPullRequestEvent,
@@ -1509,7 +1505,7 @@ export function excludeLiveKeys(
   return deletedIds.filter((id) => !live.has(id))
 }
 
-/** Test-only — reset the install guard. */
+/** Test-only — forget the shared listener. */
 export function __resetInstalledForTests(): void {
-  installed = false
+  installDesktopSyncSource.reset()
 }

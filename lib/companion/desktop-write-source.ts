@@ -187,6 +187,7 @@ import {
   type UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
 import { listen } from "@tauri-apps/api/event"
+import { createSharedInstall, type SharedInstallOptions } from "@/lib/tauri/shared-install"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
@@ -223,21 +224,20 @@ interface TauriBridge {
   invoke(name: string, args: Record<string, unknown>): Promise<unknown>
 }
 
-let installed = false
 let hostStateAuthority: { key: string; service: HostStateService } | null = null
 let hostStateProjection = Promise.resolve()
 const hostStateOwnerId = `brain-${crypto.randomUUID()}`
 const hostStateRuntimeDispatcher = createAgentRpcHostStateDispatcher()
 
-export interface InstallOptions {
+export interface InstallOptions extends SharedInstallOptions {
   bridge?: TauriBridge
-  forceReinstall?: boolean
 }
 
-export async function installDesktopWriteSource(opts: InstallOptions = {}): Promise<() => void> {
-  if (installed && !opts.forceReinstall) return () => {}
-  installed = true
-
+/**
+ * Listen for the Host's bridged writes. Shared by every caller and released by
+ * the last one ({@link createSharedInstall}), so a StrictMode remount keeps it.
+ */
+export const installDesktopWriteSource = createSharedInstall<InstallOptions>(async (opts) => {
   let bridge: TauriBridge
   if (opts.bridge) {
     bridge = opts.bridge
@@ -245,8 +245,7 @@ export async function installDesktopWriteSource(opts: InstallOptions = {}): Prom
     try {
       bridge = { listen, invoke }
     } catch {
-      installed = false
-      return () => {}
+      return null
     }
   }
 
@@ -267,11 +266,10 @@ export async function installDesktopWriteSource(opts: InstallOptions = {}): Prom
   )
 
   return () => {
-    installed = false
     safeUnlisten(unlisten)
     unsubscribeAgentEvents()
   }
-}
+})
 
 async function respond(req: DesktopWriteRequestEvent, bridge: TauriBridge): Promise<void> {
   const { requestId, command, payload } = req

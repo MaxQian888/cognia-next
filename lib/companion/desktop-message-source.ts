@@ -42,6 +42,7 @@ import {
 } from "@cognia/agent-config-types"
 import type { UIMessage } from "@/types"
 import { listen } from "@tauri-apps/api/event"
+import { createSharedInstall, type SharedInstallOptions } from "@/lib/tauri/shared-install"
 import { invoke } from "@tauri-apps/api/core"
 import { isSessionExposed } from "@/lib/chat/session-exposure"
 import { getMessageMedia, parseMediaRef } from "@/lib/db/message-media"
@@ -156,19 +157,17 @@ interface SessionMediaRequestEvent {
  * needed them. `respondMedia` is a distinct required method for that reason.
  */
 
-let installed = false
-
-export interface InstallOptions {
+export interface InstallOptions extends SharedInstallOptions {
   /** Inject a Tauri bridge for tests; defaults to the dynamic real one. */
   bridge?: RuntimeBridge
-  /** Override the singleton-guard for tests. */
-  forceReinstall?: boolean
 }
 
-export async function installDesktopMessageSource(opts: InstallOptions = {}): Promise<() => void> {
-  if (installed && !opts.forceReinstall) return () => {}
-  installed = true
-
+/**
+ * Listen for the Host's bridged message requests. Shared by every caller and
+ * released by the last one ({@link createSharedInstall}), so a StrictMode
+ * remount keeps it.
+ */
+export const installDesktopMessageSource = createSharedInstall<InstallOptions>(async (opts) => {
   let bridge: RuntimeBridge
   if (opts.bridge) {
     bridge = opts.bridge
@@ -193,8 +192,7 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
         },
       }
     } catch {
-      installed = false
-      return () => {}
+      return null
     }
   }
 
@@ -245,7 +243,6 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
   )
 
   return () => {
-    installed = false
     safeUnlisten(offUpdate)
     safeUnlisten(offDelete)
     safeUnlisten(offList)
@@ -258,7 +255,7 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
     safeUnlisten(offFileSpaceAsset)
     safeUnlisten(offFileSpaceMounts)
   }
-}
+})
 
 async function respondValue(
   requestId: string,
@@ -1011,7 +1008,7 @@ function generateMessageId(): string {
     .join("")
 }
 
-/** Test-only — reset the install guard. */
+/** Test-only — forget the shared listener. */
 export function __resetInstalledForTests(): void {
-  installed = false
+  installDesktopMessageSource.reset()
 }
