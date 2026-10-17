@@ -14,6 +14,11 @@ pub(super) const POLICY_DOMAINS_LABEL: &str = "cognia.egress-policy-domains";
 pub(super) const TIER_LABEL: &str = "cognia.egress-tier";
 const MATCHER_VERSION: u32 = 1;
 const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Frames buffered toward one proxied connection (2 MiB at MAX_DATA). A
+/// connection whose upstream stops reading past this is closed on its own,
+/// like sandboxd closes one whose container side overflows; it never stalls
+/// the shared pump or costs the runtime its lease.
+const CONNECTION_QUEUE_FRAMES: usize = 64;
 
 pub(super) fn refused(message: impl Into<String>) -> SandboxSpawnError {
     SandboxSpawnError::refused("sandbox_egress_unenforceable", message)
@@ -422,7 +427,7 @@ async fn connection(
 ) -> Result<Connection, ()> {
     let (client, server) = tokio::io::duplex(wire::MAX_DATA * 2);
     streams.send(Box::new(server)).await.map_err(|_| ())?;
-    let (input, mut incoming) = mpsc::channel::<Frame>(8);
+    let (input, mut incoming) = mpsc::channel::<Frame>(CONNECTION_QUEUE_FRAMES);
     let task = tokio::spawn(async move {
         let (mut read, mut write) = tokio::io::split(client);
         let mut buffer = vec![0; wire::MAX_DATA];
@@ -465,7 +470,16 @@ async fn send(
     kind: u8,
     bytes: Vec<u8>,
 ) -> Result<(), ()> {
-    let bytes = wire::encode(kind, 0, &bytes).map_err(|_| ())?;
+    send_frame(input, kind, 0, bytes).await
+}
+
+async fn send_frame(
+    input: &cognia_external_agent::container_backend::RunnerStdin,
+    kind: u8,
+    id: u32,
+    bytes: Vec<u8>,
+) -> Result<(), ()> {
+    let bytes = wire::encode(kind, id, &bytes).map_err(|_| ())?;
     tokio::time::timeout(Duration::from_secs(2), input.send(bytes))
         .await
         .map_err(|_| ())?
@@ -550,8 +564,10 @@ async fn pump(
                                             probe_request.extend_from_slice(&frame.bytes);
                                             if !cognia_sandboxd::egress::PROBE_REQUEST.starts_with(&probe_request) { return Err(()); }
                                         }
-                                        if let Some(connection) = connections.get(&frame.id) {
-                                            tokio::time::timeout(Duration::from_secs(2),connection.input.send(frame)).await.map_err(|_| ())?.map_err(|_| ())?;
+                                        let id = frame.id;
+                                        if connections.get(&id).is_some_and(|connection| connection.input.try_send(frame).is_err()) {
+                                            connections.remove(&id);
+                                            send_frame(&running.stdin, wire::CLOSE, id, Vec::new()).await?;
                                         }
                                     }
                                     wire::CLOSE => {connections.remove(&frame.id);}
@@ -948,6 +964,149 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[tokio::test]
+    async fn egress_stalled_connection_is_closed_without_stopping_the_bridge() {
+        use cognia_sandboxd::egress::PROBE_REQUEST;
+        let (harness, _) = harness();
+        let api: Arc<dyn SandboxDockerApi> = harness.api.clone();
+        harness
+            .api
+            .labels_by_container
+            .lock()
+            .insert("ctr".into(), BTreeMap::new());
+        harness
+            .api
+            .network_modes
+            .lock()
+            .insert("ctr".into(), "none".into());
+        let (events, received) = mpsc::unbounded_channel();
+        let (input, mut stdin) = mpsc::unbounded_channel::<Vec<u8>>();
+        let running = RunningRunner {
+            container_id: "ctr".into(),
+            events: received.into(),
+            stdin: input.into(),
+        };
+        let (streams, mut accepted) = mpsc::channel::<ProxyStream>(8);
+        let (_stop, stopped) = watch::channel(false);
+        let (ready, readied) = oneshot::channel();
+        let live = Arc::new(AtomicBool::new(false));
+        let digest = "d".repeat(64);
+        let pump_live = live.clone();
+        let pump_digest = digest.clone();
+        let pumped = tokio::spawn(async move {
+            pump(
+                running,
+                streams,
+                stopped,
+                ready,
+                "gen-1",
+                &pump_digest,
+                &pump_live,
+                &api,
+                "ctr",
+            )
+            .await
+        });
+        let frame = |kind, id, bytes: &[u8]| {
+            events
+                .send(RunnerEvent::Stdout(wire::encode(kind, id, bytes).unwrap()))
+                .unwrap()
+        };
+        async fn next_frame(
+            pending: &mut Vec<u8>,
+            stdin: &mut mpsc::UnboundedReceiver<Vec<u8>>,
+        ) -> Frame {
+            loop {
+                if let Some(frame) = wire::decode(pending).unwrap() {
+                    return frame;
+                }
+                pending.extend(
+                    tokio::time::timeout(Duration::from_secs(5), stdin.recv())
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                );
+            }
+        }
+        let mut pending = Vec::new();
+        macro_rules! next {
+            () => {
+                next_frame(&mut pending, &mut stdin).await
+            };
+        }
+        // Handshake: the probe stream gets the proxy's 400, then READY/RELEASED.
+        frame(wire::OPEN, 1, &[]);
+        frame(wire::DATA, 1, PROBE_REQUEST);
+        let mut probe = accepted.recv().await.unwrap();
+        let mut request = vec![0; PROBE_REQUEST.len()];
+        probe.read_exact(&mut request).await.unwrap();
+        probe.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await.unwrap();
+        loop {
+            let reply = next!();
+            if reply.kind == wire::DATA && reply.id == 1 {
+                break;
+            }
+        }
+        frame(
+            wire::EGRESS_READY,
+            0,
+            &serde_json::to_vec(&Ready {
+                version: VERSION,
+                generation: "gen-1".into(),
+                policy_digest: digest,
+                port: 4321,
+            })
+            .unwrap(),
+        );
+        loop {
+            if next!().kind == wire::EGRESS_RELEASE {
+                break;
+            }
+        }
+        frame(
+            wire::EGRESS_RELEASED,
+            0,
+            &serde_json::to_vec(&Release {
+                version: VERSION,
+                generation: "gen-1".into(),
+            })
+            .unwrap(),
+        );
+        readied.await.unwrap();
+        // Connection 2's upstream never reads: it fills its own queue only.
+        frame(wire::OPEN, 2, &[]);
+        let _stalled = accepted.recv().await.unwrap();
+        let chunk = vec![7; wire::MAX_DATA];
+        for _ in 0..CONNECTION_QUEUE_FRAMES + 16 {
+            frame(wire::DATA, 2, &chunk);
+        }
+        loop {
+            let reply = next!();
+            if reply.kind == wire::CLOSE && reply.id == 2 {
+                break;
+            }
+        }
+        assert!(live.load(Ordering::SeqCst), "one stalled stream kept the lease");
+        // Another connection still flows both ways.
+        frame(wire::OPEN, 3, &[]);
+        frame(wire::DATA, 3, b"ping");
+        let mut third = accepted.recv().await.unwrap();
+        let mut ping = [0; 4];
+        third.read_exact(&mut ping).await.unwrap();
+        assert_eq!(&ping, b"ping");
+        third.write_all(b"pong").await.unwrap();
+        loop {
+            let reply = next!();
+            if reply.kind == wire::DATA && reply.id == 3 {
+                assert_eq!(reply.bytes, b"pong");
+                break;
+            }
+        }
+        assert!(live.load(Ordering::SeqCst));
+        assert!(!pumped.is_finished());
+        pumped.abort();
     }
 
     #[test]

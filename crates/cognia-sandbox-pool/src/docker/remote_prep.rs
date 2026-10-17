@@ -3505,9 +3505,7 @@ mod tests {
         assert!(provider.egress_enforced(EgressTier::Allowlist));
     }
 
-    /// Run: `cargo test --offline -p cognia-sandbox-pool provider_allowlist_never_waits_for_a_local_egress_bridge -- --ignored`.
     #[tokio::test]
-    #[ignore = "requires local socket binding for the remote git proxy"]
     async fn provider_allowlist_never_waits_for_a_local_egress_bridge() {
         let mut environment = spec(EgressTier::Allowlist, None);
         environment.egress.approved_domains = vec!["registry.npmjs.org".into()];
