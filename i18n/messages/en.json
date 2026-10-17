@@ -9484,6 +9484,7 @@
       "bringBackDraft": "Added to the main conversation’s draft",
       "bringBackLabel": "Bring back to the main conversation",
       "bringBackTooltip": "Quote into the main conversation",
+      "collapseUserMessage": "Collapse message",
       "continueInNewChat": "Continue in a new chat",
       "copyDone": "Copied!",
       "copyLabel": "Copy message",
@@ -9546,6 +9547,7 @@
         "timeout": "The request took too long — retry, or raise the timeout.",
         "unauthorized": "Authentication failed — check your API key or token in Settings."
       },
+      "expandUserMessage": "Show full message",
       "imPicker": {
         "description": "Choose the platform conversation this message goes to.",
         "empty": "No matching conversations.",
@@ -10663,7 +10665,26 @@
         "title": "Waiting to start"
       },
       "recoveryRequired": {
-        "body": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again.",
+        "body": "The app could not safely restore this turn, so it was not retried automatically. Review the conversation and execution details before deciding whether to send it again.",
+        "reasons": {
+          "ambiguousHistory": "The app could not choose a complete, consistent conversation history for recovery. This turn was not retried automatically. Review the saved history before continuing.",
+          "authoritativeHost": "This turn must be recovered on the host that owns its history. Open the conversation on that host and review its execution details before continuing.",
+          "changedHistory": "The conversation history changed since this turn was saved, so the app did not retry against a different history. Review the current conversation before continuing.",
+          "conflictingHistory": "Saved versions of this conversation conflict, so the app did not choose one or retry this turn automatically. Review the conversation history before continuing.",
+          "corruptLog": "The saved conversation log is damaged, so this turn could not be restored safely. Review the conversation and execution details before deciding whether to send it again.",
+          "incompleteContext": "The saved execution context is incomplete, so the app could not restore this turn with its original settings. Check the conversation settings and execution details before deciding whether to send it again.",
+          "integrityMismatch": "The saved message or execution context failed its integrity check, so the app did not retry with unverified data. Review the original message, settings, and execution details before continuing.",
+          "invalidInput": "The saved message input is invalid, so the original turn could not be restored. Check the message, attachments, and execution details before deciding whether to send it again.",
+          "missingHistory": "No usable conversation history was found for recovery. This turn was not retried automatically. Check the conversation and its execution details before sending it again.",
+          "missingInput": "The saved message input is missing, so the original turn could not be restored. Check the message, attachments, and execution details before deciding whether to send it again.",
+          "missingSession": "The saved conversation could not be found on the execution host, so this turn was not retried automatically. Check that the correct host and conversation are available before continuing.",
+          "previousRuntime": "The app could not confirm that the previous runtime stopped, so it did not start another attempt. Check whether the turn is still running on its execution host before continuing.",
+          "toolActivity": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again.",
+          "uncertainEffects": "The app could not confirm whether earlier tool operations finished, so it did not retry this turn automatically. Check their results before sending it again to avoid repeating an operation.",
+          "unreadableJournal": "The app could not read the saved execution log and could not verify what this turn had already done. It was not retried automatically. Review its execution details before sending it again.",
+          "unreadablePayload": "The app could not open the saved message or execution context, so this turn was not retried automatically. Review the conversation and execution details before deciding whether to send it again.",
+          "unverifiedHost": "The app could not verify the execution host for this saved conversation, so this turn was not retried automatically. Check the host connection and review the conversation before continuing."
+        },
         "title": "Needs your attention"
       }
     },
@@ -11646,6 +11667,7 @@
       "plan": "plan"
     },
     "restartRequired": "Saved. Restart the CLI to apply screen reader mode.",
+    "rewindAmbiguousCheckpoint": "Checkpoint #{seq} matches {count} checkpoints from earlier runs of this session, so nothing was restored.",
     "rewindNotRestored": "Not restored: {paths}.",
     "rewindReasonOutsideWorkspace": "outside the workspace",
     "rewindReasonTooLarge": "too large to snapshot",
@@ -13731,9 +13753,11 @@
         "label": "Sort by",
         "options": {
           "created": "Date created",
+          "createdAsc": "Date created (oldest first)",
           "oldest": "Oldest activity",
           "recent": "Recent activity",
           "title": "Title (A–Z)",
+          "titleDesc": "Title (Z–A)",
           "unread": "Unread first"
         }
       },
@@ -16236,6 +16260,25 @@
     }
   },
   "docsSite": {
+    "home": {
+      "browseEyebrow": "Browse by area",
+      "browseTitle": "Pick up wherever your question starts.",
+      "eyebrow": "Documentation",
+      "github": "GitHub",
+      "llmsBody": "Every page is also served as plain Markdown, and the whole set as one file.",
+      "llmsFull": "llms-full.txt",
+      "llmsIndex": "llms.txt",
+      "llmsTitle": "Reading this with an agent?",
+      "navDocs": "Docs",
+      "openArea": "Open",
+      "pageCount": "{count, plural, one {# page} other {# pages}}",
+      "primaryCta": "Get started",
+      "searchHint": "Search every page",
+      "secondaryCta": "Read the overview",
+      "subtitle": "Architecture, subsystems, plugin authoring and the decision records behind them — the same reference the codebase is built against.",
+      "title": "Everything Cognia does, written down.",
+      "website": "Website"
+    },
     "notFound": {
       "body": "The page this link points to has moved or no longer exists.",
       "docs": "Back to the docs home",
@@ -35293,9 +35336,9 @@
       "openLocalVsCode": "Open in VS Code",
       "profileLabel": "Extension profile",
       "profileManaged": "Managed",
-      "profileManagedTooltip": "Pinned built-ins, the Cognia broker, and signed generated proxies. Agent drive, chat context, and plugin IDE capabilities all need this profile.",
+      "profileManagedTooltip": "Pinned built-ins and Cognia plugins, including agent drive, chat context, and plugin IDE capabilities.",
       "profileNative": "Extensions",
-      "profileNativeTooltip": "Your Open VSX extensions, in a separate process with its own settings and extension directory. It never receives Cognia broker credentials, so agent drive and plugin IDE capabilities are unavailable here.",
+      "profileNativeTooltip": "Cognia plugins and your Open VSX extensions, including agent drive and chat context. Uses separate settings and extension directories from the managed profile.",
       "profileSwitchRestarts": "Switching profile starts a separate VS Code. Open editors and terminals stay in the other profile.",
       "relayGrant": {
         "approve": "Allow",
@@ -43450,6 +43493,12 @@
         "title": "Reset appearance settings?"
       },
       "resetToDefault": "Reset {name} to default",
+      "settingsIcons": {
+        "anime": "Anime",
+        "hint": "Choose artwork for the main navigation and settings sidebar. Your preference is saved automatically.",
+        "label": "Navigation icon style",
+        "ordinary": "Ordinary"
+      },
       "stylePack": {
         "packs": {
           "sharp": {
@@ -51069,15 +51118,6 @@
       "title": "Notifications"
     },
     "pet": {
-      "anchor": {
-        "label": "Position",
-        "options": {
-          "bottom-left": "Bottom left",
-          "bottom-right": "Bottom right",
-          "top-left": "Top left",
-          "top-right": "Top right"
-        }
-      },
       "careAlerts": {
         "description": "Send a gentle notification when your pet becomes unwell from neglect.",
         "label": "Care alerts"
@@ -51103,7 +51143,7 @@
         },
         "hotkeyLink": "Configure a global hotkey to show/hide the desktop pet",
         "size": {
-          "description": "Size of the floating desktop pet. The in-app pet has its own size under Appearance.",
+          "description": "Size of the pet in its independent desktop window.",
           "label": "Desktop pet size ({size}px)"
         },
         "title": "Desktop pet",
@@ -51141,7 +51181,7 @@
         }
       },
       "enabled": {
-        "description": "Show the floating pet widget.",
+        "description": "Enable the pet and open its independent desktop window.",
         "label": "Enable pet"
       },
       "gaze": {
@@ -51352,10 +51392,6 @@
         "failed": "Couldn't reset the pet profile. Try again.",
         "label": "Reset pet",
         "profileScope": "This resets pet progress and history, not the settings on this page."
-      },
-      "size": {
-        "description": "Size of the in-app pet in the corner of this window. The floating desktop pet is sized separately.",
-        "label": "Size ({size}px)"
       },
       "skin": {
         "label": "Skin",

@@ -9484,6 +9484,7 @@
       "bringBackDraft": "已添加到主对话草稿",
       "bringBackLabel": "带回主对话",
       "bringBackTooltip": "引用到主对话",
+      "collapseUserMessage": "收起消息",
       "continueInNewChat": "在新聊天中继续",
       "copyDone": "已复制！",
       "copyLabel": "复制消息",
@@ -9546,6 +9547,7 @@
         "timeout": "请求耗时过长——请重试，或调高超时时间。",
         "unauthorized": "身份验证失败——请在设置中检查 API 密钥或令牌。"
       },
+      "expandUserMessage": "展开完整消息",
       "imPicker": {
         "description": "选择这条消息要发往的平台会话。",
         "empty": "没有匹配的会话。",
@@ -10663,7 +10665,26 @@
         "title": "等待开始"
       },
       "recoveryRequired": {
-        "body": "这一轮在已经开始调用工具之后中断，因此没有自动重试——重放可能重复执行无法撤销的操作。请先确认发生了什么，再决定是否重新发送。",
+        "body": "应用无法安全恢复这一轮，因此没有自动重试。请先查看对话和执行详情，再决定是否重新发送。",
+        "reasons": {
+          "ambiguousHistory": "应用无法确定一份完整且一致的对话历史用于恢复，因此没有自动重试这一轮。请先核对已保存的历史，再继续操作。",
+          "authoritativeHost": "这一轮需要在持有其对话历史的主机上恢复。请在该主机上打开对话并查看执行详情，再继续操作。",
+          "changedHistory": "这一轮保存后，对话历史发生了变化，应用未基于不同的历史自动重试。请先核对当前对话，再继续操作。",
+          "conflictingHistory": "已保存的多个对话版本存在冲突，应用未选择其中一个版本，也未自动重试这一轮。请先核对对话历史，再继续操作。",
+          "corruptLog": "已保存的对话日志已损坏，无法安全恢复这一轮。请先查看对话和执行详情，再决定是否重新发送。",
+          "incompleteContext": "已保存的执行上下文不完整，无法按原有设置恢复这一轮。请先检查对话设置和执行详情，再决定是否重新发送。",
+          "integrityMismatch": "已保存的消息或执行上下文未通过完整性校验，应用未使用无法验证的数据重试。请先核对原始消息、设置和执行详情，再继续操作。",
+          "invalidInput": "已保存的消息输入无效，无法恢复原始请求。请先检查消息、附件和执行详情，再决定是否重新发送。",
+          "missingHistory": "没有找到可用于恢复的对话历史，因此没有自动重试这一轮。请先检查对话和执行详情，再决定是否重新发送。",
+          "missingInput": "已保存的消息输入缺失，无法恢复原始请求。请先检查消息、附件和执行详情，再决定是否重新发送。",
+          "missingSession": "执行主机上未找到已保存的对话，因此没有自动重试这一轮。请先确认对应主机和对话可用，再继续操作。",
+          "previousRuntime": "应用无法确认上一执行进程已经停止，因此没有启动新的尝试。请先在执行主机上检查这一轮是否仍在运行，再继续操作。",
+          "toolActivity": "这一轮在已经开始调用工具之后中断，因此没有自动重试——重放可能重复执行无法撤销的操作。请先确认发生了什么，再决定是否重新发送。",
+          "uncertainEffects": "应用无法确认此前的工具操作是否完成，因此没有自动重试这一轮。请先检查操作结果，再决定是否重新发送，以免重复执行。",
+          "unreadableJournal": "应用无法读取已保存的执行日志，无法确认这一轮已经做过什么，因此没有自动重试。请先查看执行详情，再决定是否重新发送。",
+          "unreadablePayload": "应用无法打开已保存的消息或执行上下文，因此没有自动重试这一轮。请先查看对话和执行详情，再决定是否重新发送。",
+          "unverifiedHost": "应用无法验证这份已保存对话对应的执行主机，因此没有自动重试这一轮。请先检查主机连接并核对对话，再继续操作。"
+        },
         "title": "需要你处理"
       }
     },
@@ -11646,6 +11667,7 @@
       "plan": "规划"
     },
     "restartRequired": "已保存。重启 CLI 后启用新的读屏模式设置。",
+    "rewindAmbiguousCheckpoint": "检查点 #{seq} 对应本会话先前运行留下的 {count} 个检查点，未执行恢复。",
     "rewindNotRestored": "未恢复：{paths}。",
     "rewindReasonOutsideWorkspace": "不在工作区内",
     "rewindReasonTooLarge": "文件过大，无法快照",
@@ -13731,9 +13753,11 @@
         "label": "排序方式",
         "options": {
           "created": "创建时间",
+          "createdAsc": "创建时间（最早优先）",
           "oldest": "最早活动",
           "recent": "最近活动",
           "title": "标题 (A–Z)",
+          "titleDesc": "标题（Z–A）",
           "unread": "未读优先"
         }
       },
@@ -16236,6 +16260,25 @@
     }
   },
   "docsSite": {
+    "home": {
+      "browseEyebrow": "按领域浏览",
+      "browseTitle": "从你的问题出发，直接找到对应章节。",
+      "eyebrow": "文档",
+      "github": "GitHub",
+      "llmsBody": "每一页都提供纯 Markdown 版本，全部内容也合并成了一个文件。",
+      "llmsFull": "llms-full.txt",
+      "llmsIndex": "llms.txt",
+      "llmsTitle": "在用 Agent 阅读？",
+      "navDocs": "文档",
+      "openArea": "打开",
+      "pageCount": "{count} 篇",
+      "primaryCta": "快速开始",
+      "searchHint": "搜索全部页面",
+      "secondaryCta": "阅读概览",
+      "subtitle": "架构、子系统、插件开发，以及背后的决策记录 —— 代码库本身所遵循的同一份参考。",
+      "title": "Cognia 的一切，都写在这里。",
+      "website": "官网"
+    },
     "notFound": {
       "body": "这个链接指向的页面已被移动或删除。",
       "docs": "返回文档首页",
@@ -35293,9 +35336,9 @@
       "openLocalVsCode": "用本机 VS Code 打开",
       "profileLabel": "扩展配置",
       "profileManaged": "托管",
-      "profileManagedTooltip": "仅加载锁定的内置扩展、Cognia broker 和已签名的生成代理。智能体驱动、聊天上下文和插件 IDE 能力都依赖此配置。",
+      "profileManagedTooltip": "加载锁定的内置扩展和 Cognia 插件，支持智能体驱动、聊天上下文和插件 IDE 能力。",
       "profileNative": "扩展",
-      "profileNativeTooltip": "加载你自己的 Open VSX 扩展，运行在独立进程中，拥有独立的设置和扩展目录。它不会拿到 Cognia broker 凭据，因此这里没有智能体驱动和插件 IDE 能力。",
+      "profileNativeTooltip": "同时支持 Cognia 插件和你自己的 Open VSX 扩展，包括智能体驱动和聊天上下文。设置与扩展目录独立于托管模式。",
       "profileSwitchRestarts": "切换配置会启动另一个 VS Code。已打开的编辑器和终端会留在原配置里。",
       "relayGrant": {
         "approve": "允许",
@@ -43450,6 +43493,12 @@
         "title": "确认重置外观设置？"
       },
       "resetToDefault": "将{name}恢复为默认",
+      "settingsIcons": {
+        "anime": "二次元",
+        "hint": "统一选择主导航和设置侧栏的图标风格，偏好会自动保存。",
+        "label": "导航图标风格",
+        "ordinary": "普通"
+      },
       "stylePack": {
         "packs": {
           "sharp": {
@@ -51069,15 +51118,6 @@
       "title": "通知"
     },
     "pet": {
-      "anchor": {
-        "label": "位置",
-        "options": {
-          "bottom-left": "左下",
-          "bottom-right": "右下",
-          "top-left": "左上",
-          "top-right": "右上"
-        }
-      },
       "careAlerts": {
         "description": "当宠物因疏于照顾而变得不适时，发送一条温和的通知。",
         "label": "照护提醒"
@@ -51103,7 +51143,7 @@
         },
         "hotkeyLink": "配置显示/隐藏桌宠的全局快捷键",
         "size": {
-          "description": "桌面上悬浮宠物的大小。应用内宠物的大小在“外观”中单独设置。",
+          "description": "独立桌面窗口中宠物的大小。",
           "label": "桌宠大小（{size}px）"
         },
         "title": "桌面宠物",
@@ -51141,7 +51181,7 @@
         }
       },
       "enabled": {
-        "description": "显示浮动宠物挂件。",
+        "description": "启用宠物并打开独立的桌面宠物窗口。",
         "label": "启用宠物"
       },
       "gaze": {
@@ -51352,10 +51392,6 @@
         "failed": "宠物档案重置失败，请重试。",
         "label": "重置宠物",
         "profileScope": "此操作只重置宠物进度与历史，不会重置本页配置。"
-      },
-      "size": {
-        "description": "应用内宠物在窗口角落里的大小。桌面悬浮宠物的大小单独设置。",
-        "label": "大小（{size}px）"
       },
       "skin": {
         "label": "皮肤",

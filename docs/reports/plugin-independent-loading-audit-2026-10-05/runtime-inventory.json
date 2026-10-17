@@ -529,7 +529,7 @@
       "updateIssue",
       "workflowKindAliases"
     ],
-    "packagedVsBundleFields": []
+    "packagedVsBundleFields": ["integrations"]
   },
   {
     "id": "github-devin-bot",
@@ -545,7 +545,7 @@
       "githubDevinBotDef",
       "manifest"
     ],
-    "packagedVsBundleFields": []
+    "packagedVsBundleFields": ["bots"]
   },
   {
     "id": "cognia-impeccable",

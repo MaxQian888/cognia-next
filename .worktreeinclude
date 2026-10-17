@@ -1,0 +1,2 @@
+# Copy the local app environment into new Herdr worktrees.
+/.env.local
