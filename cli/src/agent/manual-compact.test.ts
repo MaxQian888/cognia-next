@@ -110,6 +110,27 @@ describe("runManualCompact", () => {
     expect(h.unsub).toHaveBeenCalled()
   })
 
+  it("resolves on a failed outcome with the sidecar's reason", async () => {
+    const h = harness()
+    const done = runManualCompact(h.deps)
+    h.fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "system",
+        subtype: "informational",
+        level: "warning",
+        compact_outcome: "failed",
+        content:
+          "Compaction failed: the summary model used its whole 4596-token output budget without writing a summary (likely all reasoning). Nothing was compacted.",
+      },
+    })
+    await done
+    expect(h.emitted).toEqual([])
+    expect(h.notices.at(-1)).toMatch(/^Compaction failed: .*Nothing was compacted\.$/)
+    expect(h.unsub).toHaveBeenCalledTimes(1)
+  })
+
   it("ignores ordinary informational events while waiting", async () => {
     const h = harness()
     void runManualCompact(h.deps)
@@ -133,7 +154,10 @@ describe("runManualCompact", () => {
     const p = runManualCompact(h.deps)
     timers[0]?.()
     await p
-    expect(h.notices.at(-1)).toBe("Compaction requested — it will apply before the next turn.")
+    expect(h.notices.at(-1)).toBe(
+      "Compaction has not finished after 1s — nothing has been compacted yet. Run /compact again if the context meter does not drop."
+    )
+    expect(h.notices.join("\n")).not.toMatch(/next turn/)
     expect(h.unsub).toHaveBeenCalledTimes(1)
   })
 
@@ -165,6 +189,16 @@ describe("manualCompactOutcomeFromInner", () => {
         content: " Declined. ",
       })
     ).toEqual({ outcome: "skipped_by_plugin", message: "Declined." })
+    expect(
+      manualCompactOutcomeFromInner({
+        type: "system",
+        subtype: "informational",
+        compact_outcome: "failed",
+      })
+    ).toEqual({
+      outcome: "failed",
+      message: "Compaction failed: the summary model returned no text. Nothing was compacted.",
+    })
   })
 
   it("rejects anything that is not a compaction outcome", () => {

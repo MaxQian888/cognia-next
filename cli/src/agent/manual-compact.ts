@@ -26,13 +26,26 @@ interface SidecarEnvelope {
   event?: unknown
 }
 
-/** Why a manual compaction ended without a boundary (mirrors the sidecar). */
-export type ManualCompactOutcome = "nothing_to_compact" | "skipped_by_plugin" | "deferred"
+/**
+ * Why a manual compaction ended without a boundary (mirrors the sidecar).
+ * `failed`: the summary produced nothing, so the history is unchanged and no
+ * later attempt is queued.
+ */
+export type ManualCompactOutcome =
+  "nothing_to_compact" | "skipped_by_plugin" | "deferred" | "failed"
+
+const OUTCOMES: ReadonlySet<unknown> = new Set<ManualCompactOutcome>([
+  "nothing_to_compact",
+  "skipped_by_plugin",
+  "deferred",
+  "failed",
+])
 
 const OUTCOME_FALLBACK: Readonly<Record<ManualCompactOutcome, string>> = {
   nothing_to_compact: "Nothing to compact yet: the conversation is still short.",
   skipped_by_plugin: "Compaction skipped: a plugin's PreCompact hook declined it.",
   deferred: "A turn is running; compaction will apply before the next turn.",
+  failed: "Compaction failed: the summary model returned no text. Nothing was compacted.",
 }
 
 /**
@@ -50,10 +63,10 @@ export function manualCompactOutcomeFromInner(
   } | null
   if (!ev || ev.type !== "system" || ev.subtype !== "informational") return null
   const outcome = ev.compact_outcome
-  if (outcome !== "nothing_to_compact" && outcome !== "skipped_by_plugin" && outcome !== "deferred")
-    return null
+  if (!OUTCOMES.has(outcome)) return null
   const content = typeof ev.content === "string" ? ev.content.trim() : ""
-  return { outcome, message: content || OUTCOME_FALLBACK[outcome] }
+  const known = outcome as ManualCompactOutcome
+  return { outcome: known, message: content || OUTCOME_FALLBACK[known] }
 }
 
 export interface RunManualCompactDeps {
@@ -118,15 +131,21 @@ export function runManualCompact(deps: RunManualCompactDeps): Promise<void> {
         return
       }
       // No boundary is coming: the sidecar says why (nothing old enough to
-      // fold, a plugin declined, or a running turn defers it).
+      // fold, a plugin declined, a running turn defers it, or the summary
+      // failed).
       const outcome = manualCompactOutcomeFromInner(env.event)
       if (!outcome) return
       onNotice(outcome.message)
       finish()
     })
 
+    // Silence means neither a boundary nor an outcome arrived in time — not
+    // that one is queued. Only a running turn defers a compaction, and the
+    // sidecar says so itself, so the timeout must not promise a later apply.
     timer = setTimer(() => {
-      onNotice("Compaction requested — it will apply before the next turn.")
+      onNotice(
+        `Compaction has not finished after ${Math.round(timeoutMs / 1000)}s — nothing has been compacted yet. Run /compact again if the context meter does not drop.`
+      )
       finish()
     }, timeoutMs)
 

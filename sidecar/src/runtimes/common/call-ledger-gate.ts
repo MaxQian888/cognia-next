@@ -473,8 +473,13 @@ export async function runLedgeredSideCall<T>(
 
 /**
  * Collect a one-shot call's text. With `withBilling` it also reads the call's
- * usage, response id and streamed error for the ledger; without it the stream
- * is read exactly as the unledgered path always did (text deltas only).
+ * usage and response id for the ledger; without it the call's result getters
+ * are never touched, exactly as the unledgered path always did.
+ *
+ * Either way the stream's finish reason and streamed error are returned beside
+ * the text, so a caller that got no text can say why: a reasoning model that
+ * spent its whole output budget thinking (`length`), a model that answered with
+ * tool calls, or a provider error.
  *
  * @param {{ fullStream: AsyncIterable<any>, usage?: unknown, response?: unknown }} run
  * @param {{ withBilling?: boolean }} [options]
@@ -485,12 +490,22 @@ export async function drainSideCallStream(
 ) {
   let text = ""
   let error: unknown = null
+  let finishReason: string | null = null
   for await (const event of run.fullStream) {
     const evt = record(event)
     if (evt?.type === "text-delta") text += evt.text ?? evt.textDelta ?? evt.delta ?? ""
     else if (evt?.type === "error") error = evt.error
+    else if (
+      (evt?.type === "finish" || evt?.type === "finish-step") &&
+      typeof evt.finishReason === "string"
+    )
+      finishReason = evt.finishReason
   }
-  if (!withBilling) return { value: text }
+  const outcome = {
+    ...(finishReason ? { finishReason } : {}),
+    ...(error ? { error } : {}),
+  }
+  if (!withBilling) return { value: text, ...outcome }
   // Each AI SDK result getter returns a fresh promise that rejects on a failed
   // call: read each exactly once, inside the try.
   let usage: unknown = null
@@ -508,7 +523,7 @@ export async function drainSideCallStream(
       providerRequestId = null
     }
   }
-  return { value: text, usage, providerRequestId, ...(error ? { error } : {}) }
+  return { value: text, usage, providerRequestId, ...outcome }
 }
 
 /** The sidecar's `session_ended` payload for a refused turn: explicit, never silent. */

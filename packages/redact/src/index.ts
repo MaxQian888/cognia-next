@@ -14,7 +14,9 @@
  *   • CN national ID (18 digits, optional X check char)
  *   • US SSN       — dashed 9-digit form, excluding unassigned area/group/serial ranges
  *   • Bank cards    — 13–19 digits, contiguous OR single space/dash separated
- *                     (the human-written `4111 1111 1111 1111` form), Luhn-checked
+ *                     (the human-written `4111 1111 1111 1111` form), Luhn-checked;
+ *                     a run starting with 1 counts only at UATP's 15 digits, so
+ *                     ms/µs/ns Unix timestamps are not read as cards
  *   • Names         — only the names passed in `nameHints` (chat speakers, email
  *                     "From" headers). There is NO free-text name heuristic — a
  *                     name that isn't seeded as a hint is NOT redacted. PII
@@ -349,7 +351,7 @@ function* compressedIpv6Matches(text: string): Generator<TextMatch> {
     let groups = 0
     while (cursor > consumed) {
       const end = cursor
-      while (cursor > consumed && end - cursor < 5 && hex.test(text[cursor - 1])) cursor--
+      while (cursor > consumed && end - cursor < 5 && hex.test(text.charAt(cursor - 1))) cursor--
       if (end === cursor || end - cursor > 4 || word.test(text[cursor - 1] ?? "")) break
       start = cursor
       groups++
@@ -390,6 +392,26 @@ function replaceMatches<T extends TextMatch>(
   if (parts.length === 0) return text
   parts.push(text.slice(cursor))
   return parts.join("")
+}
+
+/**
+ * Is a bank-card candidate (digits, optionally space/dash separated) a
+ * plausible card number?
+ *
+ * Luhn alone is a one-in-ten check, so it cannot tell a card from any other
+ * long number. The leading digit narrows it: major industry identifier 1 is
+ * airlines, and the only card range issued under it is UATP, at 15 digits.
+ * A 13-, 16- or 19-digit run starting with 1 is instead what a Unix timestamp
+ * in milliseconds, microseconds or nanoseconds looks like (every value from
+ * 2001-09 to 2286); app data carries those by the dozen (`createdAt`,
+ * `updatedAt`), and one in ten passing Luhn by chance made a saved tool
+ * result look like card data and blocked the whole conversation from being
+ * sent.
+ */
+function isLikelyBankCard(candidate: string): boolean {
+  const digits = candidate.replace(/[ -]/g, "")
+  if (digits.startsWith("1") && digits.length !== 15) return false
+  return luhn(digits)
 }
 
 function luhn(digits: string): boolean {
@@ -476,9 +498,11 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
   let out = replaceMatches(text, pemMatches(text), (m) => tokenize(state, "PEM_KEY", m[0]))
   // URL-embedded credentials before EMAIL, so the `password@host` tail can't be
   // mistaken for an email address. Only the password (group 2) is redacted.
-  out = replaceMatches(out, urlCredentialMatches(out), (match) =>
-    match[0].replace(`:${match[2]}@`, `:${tokenize(state, "API_KEY", match[2])}@`)
-  )
+  out = replaceMatches(out, urlCredentialMatches(out), (match) => {
+    // URL_CRED_RE requires a non-empty password in capture group 2.
+    const password = match[2]!
+    return match[0].replace(`:${password}@`, `:${tokenize(state, "API_KEY", password)}@`)
+  })
   out = replaceMatches(out, emailMatches(out), (m) => tokenize(state, "EMAIL", m[0]))
   // API keys come *before* anything else digit-heavy so a key like
   // `sk-proj-abc...123` doesn't get half-eaten by the bank-card regex.
@@ -505,7 +529,7 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
   // claimed whole instead of being probed as phones / cards.
   out = out.replace(CREDENTIAL_PATH_RE, (m) => tokenize(state, "CREDENTIAL_PATH", m))
   out = out.replace(BANK_CARD_CANDIDATE_RE, (m) =>
-    luhn(m.replace(/[ -]/g, "")) ? tokenize(state, "BANK_CARD", m) : m
+    isLikelyBankCard(m) ? tokenize(state, "BANK_CARD", m) : m
   )
   out = out.replace(CN_ID_RE, (m) => tokenize(state, "CN_ID", m))
   out = out.replace(SSN_RE, (m) => (isValidUsSsn(m) ? tokenize(state, "SSN", m) : m))
@@ -728,9 +752,10 @@ function scanIsClean(text: string): boolean {
     if (isLikelyPublicIPv4(match[0])) return false
   }
   // Bank cards — Luhn-check the separator-stripped digits so the spaced /
-  // dashed human form is caught, not just contiguous runs.
+  // dashed human form is caught, not just contiguous runs; timestamp-shaped
+  // runs are not cards (see `isLikelyBankCard`).
   for (const match of text.matchAll(BANK_CARD_CANDIDATE_RE)) {
-    if (luhn(match[0].replace(/[ -]/g, ""))) return false
+    if (isLikelyBankCard(match[0])) return false
   }
   return true
 }

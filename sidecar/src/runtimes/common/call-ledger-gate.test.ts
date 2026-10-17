@@ -233,7 +233,7 @@ test("estimates prompt tokens conservatively", () => {
 })
 
 function fakeRun(
-  parts: { type: string; text?: string; error?: unknown }[],
+  parts: { type: string; text?: string; error?: unknown; finishReason?: string }[],
   { usage, responseId }: { usage?: unknown; responseId?: string } = {}
 ) {
   return {
@@ -266,6 +266,25 @@ test("[ACC:OFF-04] a side call without an active gate reads text only, as before
   )
   assert.deepEqual(outcome, { sent: true, value: "sum" })
   assert.equal(usageRead, false)
+})
+
+test("draining a side call reports its finish reason and streamed error in both modes", async () => {
+  const parts = [
+    { type: "reasoning-delta", text: "thinking" },
+    { type: "finish-step", finishReason: "length" },
+    { type: "finish", finishReason: "length" },
+  ]
+  assert.deepEqual(await drainSideCallStream(fakeRun(parts)), { value: "", finishReason: "length" })
+  const billed = await drainSideCallStream(fakeRun(parts, { usage: { outputTokens: 500 } }), {
+    withBilling: true,
+  })
+  assert.equal(billed.finishReason, "length")
+  assert.deepEqual("usage" in billed ? billed.usage : undefined, { outputTokens: 500 })
+  const error = new Error("upstream 502")
+  assert.deepEqual(await drainSideCallStream(fakeRun([{ type: "error", error }])), {
+    value: "",
+    error,
+  })
 })
 
 test("a side call in a ledgered turn is reserved on its own deployment and settled", async () => {

@@ -332,6 +332,42 @@ describe("redactText — hardened secret/PII coverage (T0.1)", () => {
     expect(bad.redacted).toContain("1234 5678 9012 3456")
   })
 
+  it("does not read Luhn-valid Unix timestamps as bank cards", () => {
+    // Each of these passes Luhn; none is a card. 13 digits = ms, 16 = µs, 19 = ns.
+    const ms = "1792207313801"
+    const us = "1792207313795008"
+    const ns = "1792207313795000008"
+    for (const ts of [ms, us, ns]) {
+      expect(hasNoLeakingPii(`"createdAt":${ts}`)).toBe(true)
+      expect(redactText(`"createdAt":${ts}`).redacted).toBe(`"createdAt":${ts}`)
+    }
+    // A saved working_set tool result is JSON *text*: its numeric timestamps
+    // reach the gate as string content, not as structured numbers.
+    const workingSetToolResult = JSON.stringify({
+      workingSet: {
+        revision: 6,
+        entries: [{ id: "goal", summary: "Codename: COPPER-HERON-8046", createdAt: Number(ms) }],
+        updatedAt: Number(ms),
+      },
+    })
+    expect(
+      hasNoLeakingPiiDeep([
+        {
+          role: "tool",
+          content: [{ type: "tool-result", output: { type: "json", value: workingSetToolResult } }],
+        },
+      ])
+    ).toBe(true)
+  })
+
+  it("still treats a UATP number (15 digits, leading 1) and real cards as cards", () => {
+    expect(hasNoLeakingPii("UATP 135410014004955")).toBe(false)
+    expect(redactText("UATP 135410014004955").redacted).toContain("<BANK_CARD_001>")
+    expect(hasNoLeakingPii("Card 4111111111111111")).toBe(false)
+    expect(hasNoLeakingPii("Amex 378282246310005")).toBe(false)
+    expect(hasNoLeakingPii("Visa 4222222222222")).toBe(false)
+  })
+
   it("redacts PEM private-key blocks whole and round-trips", () => {
     const pem = [
       "-----BEGIN RSA PRIVATE KEY-----",

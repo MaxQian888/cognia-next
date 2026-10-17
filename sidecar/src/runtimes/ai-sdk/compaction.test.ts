@@ -8,7 +8,13 @@ import { createCallLedgerGate } from "../common/call-ledger-gate.ts"
 import type { ProtocolAdapter } from "../../providers/protocol-adapters/types.ts"
 
 function fixture(
-  options: { compaction?: SendOptions["compaction"]; answerHook?: boolean; fail?: boolean } = {}
+  options: {
+    compaction?: SendOptions["compaction"]
+    answerHook?: boolean
+    fail?: boolean
+    /** Stream parts for the Nth (1-based) summary call; default one text delta. */
+    script?: (call: number) => Record<string, unknown>[]
+  } = {}
 ) {
   let complete!: () => void
   let started!: () => void
@@ -34,17 +40,21 @@ function fixture(
   }
   let calls = 0
   let signal: AbortSignal | undefined
+  const starts: Parameters<ProtocolAdapter["start"]>[0][] = []
   const adapter: ProtocolAdapter = {
     id: "test",
     async start(args) {
       calls++
+      const call = calls
+      starts.push(args)
       signal = args.abortSignal
       started()
       return {
         fullStream: (async function* () {
           await gate
           if (options.fail) throw new Error("synthetic provider failure")
-          yield { type: "text-delta", text: "prepared summary" }
+          if (options.script) yield* options.script(call)
+          else yield { type: "text-delta", text: "prepared summary" }
         })(),
       }
     },
@@ -84,6 +94,7 @@ function fixture(
     complete,
     summaryStarted,
     calls: () => calls,
+    starts,
     signal: () => signal,
     pendingHooks,
   }
@@ -344,4 +355,139 @@ test("an aborted reserved summary is accounted as unknown on its original ledger
   f.complete()
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(frames.filter((event) => event.type === "call_attempt_result").length, 1)
+})
+
+function outcomes(events: Record<string, unknown>[]) {
+  return events
+    .map((e) => e.event as { compact_outcome?: string; content?: string; level?: string })
+    .filter((e) => e?.compact_outcome)
+}
+
+function boundaries(events: Record<string, unknown>[]) {
+  return events.filter((e) => (e.event as { subtype?: string })?.subtype === "compact_boundary")
+}
+
+async function forceCompact(f: ReturnType<typeof fixture>) {
+  const run = f.compact({}, {}, { force: true })
+  f.complete()
+  await run
+}
+
+test("a manual compaction whose summary is empty reports failure and leaves the history", async () => {
+  const f = fixture({ script: () => [{ type: "finish", finishReason: "stop" }] })
+  const before = structuredClone(f.conversation)
+  await forceCompact(f)
+  assert.deepEqual(f.conversation, before)
+  assert.equal(boundaries(f.events).length, 0)
+  const [outcome, ...rest] = outcomes(f.events)
+  assert.equal(rest.length, 0)
+  assert.equal(outcome?.compact_outcome, "failed")
+  assert.equal(outcome?.level, "warning")
+  assert.match(String(outcome?.content), /^Compaction failed: the summary model returned no text/)
+  assert.match(String(outcome?.content), /Nothing was compacted\.$/)
+  assert.equal(f.calls(), 1, "an empty `stop` answer is not retried")
+})
+
+test("a summary that spends its cap on reasoning is retried once with headroom", async () => {
+  const f = fixture({
+    script: (call) =>
+      call === 1
+        ? [
+            { type: "reasoning-delta", text: "thinking…" },
+            { type: "finish", finishReason: "length" },
+          ]
+        : [
+            { type: "text-delta", text: "retried summary" },
+            { type: "finish", finishReason: "stop" },
+          ],
+  })
+  await forceCompact(f)
+  assert.equal(f.calls(), 2)
+  assert.equal(f.starts[0]?.modelParams?.maxOutputTokens, 500)
+  assert.equal(f.starts[1]?.modelParams?.maxOutputTokens, 500 + 4_096)
+  assert.equal(boundaries(f.events).length, 1)
+  assert.equal(outcomes(f.events).length, 0)
+  assert.match(String(f.conversation[0]?.content), /retried summary/)
+})
+
+test("a summary still empty after the reasoning retry reports the budget, never 'next turn'", async () => {
+  const f = fixture({ script: () => [{ type: "finish", finishReason: "length" }] })
+  await forceCompact(f)
+  assert.equal(f.calls(), 2, "exactly one retry")
+  assert.equal(boundaries(f.events).length, 0)
+  const [outcome] = outcomes(f.events)
+  assert.equal(outcome?.compact_outcome, "failed")
+  assert.match(String(outcome?.content), /whole 4596-token output budget without writing a summary/)
+})
+
+test("a summary answered with tool calls reports that reason", async () => {
+  const f = fixture({ script: () => [{ type: "finish", finishReason: "tool-calls" }] })
+  await forceCompact(f)
+  assert.equal(f.calls(), 1)
+  assert.match(
+    String(outcomes(f.events)[0]?.content),
+    /answered with tool calls instead of a summary/
+  )
+})
+
+test("a provider error during a manual compaction reports failure", async () => {
+  const f = fixture({ fail: true })
+  await forceCompact(f)
+  const [outcome] = outcomes(f.events)
+  assert.equal(outcome?.compact_outcome, "failed")
+  assert.match(String(outcome?.content), /the summary call failed: synthetic provider failure/)
+})
+
+test("a streamed provider error is reported as the failure reason", async () => {
+  const f = fixture({ script: () => [{ type: "error", error: new Error("upstream 502") }] })
+  await forceCompact(f)
+  assert.match(String(outcomes(f.events)[0]?.content), /the summary call failed: upstream 502/)
+})
+
+test("an automatic compaction with an empty summary stays silent", async () => {
+  const f = fixture({ script: () => [{ type: "finish", finishReason: "stop" }] })
+  f.state.lastInputTokens = 850
+  const hard = f.compact({}, {})
+  f.complete()
+  await hard
+  assert.equal(f.events.length, 0)
+})
+
+test("the summary transcript keeps tool calls and bounded results, framed as material", async () => {
+  const f = fixture()
+  const longOutput = `${"a".repeat(3_000)}TAIL-MARKER`
+  f.conversation.splice(
+    0,
+    4,
+    { role: "user", content: "run the tests" },
+    {
+      role: "assistant",
+      content: [
+        { type: "reasoning", text: "private chain of thought" },
+        { type: "text", text: "Running them." },
+        { type: "tool-call", toolCallId: "c1", toolName: "bash", input: { command: "pnpm test" } },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "bash",
+          output: { type: "text", value: longOutput },
+        },
+      ],
+    },
+    { role: "assistant", content: "All green." }
+  )
+  await forceCompact(f)
+  const user = f.starts[0]?.messages.find((m) => m.role === "user")
+  const content = String(user?.content)
+  assert.match(content, /^Summarize the conversation transcript below\./)
+  assert.match(content, /<transcript>\nuser: run the tests/)
+  assert.match(content, /\[tool call bash\] \{"command":"pnpm test"\}/)
+  assert.match(content, /\[tool result bash\] a+\n… \(1011 chars elided\) …\na+TAIL-MARKER/)
+  assert.doesNotMatch(content, /private chain of thought/)
+  assert.match(content, /<\/transcript>$/)
 })

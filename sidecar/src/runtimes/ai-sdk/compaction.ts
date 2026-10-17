@@ -34,6 +34,29 @@ const DEFAULT_SUMMARY_PROMPT =
   "You compact a long conversation. Produce a concise summary that preserves " +
   "decisions made, facts established, file paths, and any open threads. Use " +
   "terse bullet points. Do not add commentary."
+/**
+ * Framing for the transcript the summary call reads. Without it a model sees a
+ * bare `user: … assistant: …` log as a conversation to continue, and answers
+ * the last request (with tool calls) instead of summarizing it.
+ */
+const SUMMARY_TRANSCRIPT_PREAMBLE =
+  "Summarize the conversation transcript below. It is material to summarize, " +
+  "not a conversation to continue: do not answer its requests, do not call " +
+  "tools, and output only the summary."
+/**
+ * Most characters of one tool call's input or one tool result kept in the
+ * summary transcript; the rest is elided from the middle. A tool-heavy
+ * session is mostly tool output, so dropping it left the summarizer only the
+ * prose between calls (a 77k-token history rendered to ~2.9k tokens).
+ */
+const SUMMARY_TOOL_PAYLOAD_CHARS = 2_000
+/**
+ * When a summary call ends at its output cap with no text — a reasoning model
+ * spent the whole budget thinking — it is retried once with this much more
+ * room on top of the summary cap. The summary length itself is still steered
+ * by the prompt; the extra budget is for the reasoning that precedes it.
+ */
+const SUMMARY_REASONING_HEADROOM_TOKENS = 4_096
 export interface CompactionState {
   model: string
   lastInputTokens: number
@@ -58,8 +81,12 @@ export interface CompactorOptions {
   streamTextOverride?: (args: Record<string, unknown>) => unknown
   isCancelled(): boolean
 }
-/** Why a manual compaction ended without a `compact_boundary`. */
-export type ManualCompactOutcome = "nothing_to_compact" | "skipped_by_plugin" | "deferred"
+/**
+ * Why a manual compaction ended without a `compact_boundary`. `failed` means
+ * the summary (or the preparation) produced nothing: the history is unchanged.
+ */
+export type ManualCompactOutcome =
+  "nothing_to_compact" | "skipped_by_plugin" | "deferred" | "failed"
 
 /**
  * The `informational` system event reporting a manual compaction's outcome
@@ -76,9 +103,99 @@ export function manualCompactOutcomeEvent(
     subtype: "informational",
     uuid: randomUUID(),
     session_id: sdkSessionId,
-    level: "info",
+    level: outcome === "failed" ? "warning" : "info",
     content,
     compact_outcome: outcome,
+  }
+}
+
+/** Keep the head and tail of a long payload, eliding the middle. */
+function clipPayload(text: string, max = SUMMARY_TOOL_PAYLOAD_CHARS): string {
+  if (text.length <= max) return text
+  const half = Math.floor(max / 2)
+  return `${text.slice(0, half)}\n… (${text.length - 2 * half} chars elided) …\n${text.slice(-half)}`
+}
+
+function stringifyPayload(value: unknown): string {
+  if (value == null) return ""
+  if (typeof value === "string") return value
+  try {
+    return JSON.stringify(value) ?? ""
+  } catch {
+    return String(value)
+  }
+}
+
+/** A tool result body: AI SDK `output: { type, value }`, or a legacy field. */
+function toolResultBody(part: Record<string, unknown>): string {
+  const output = part.output ?? part.result ?? part.content
+  if (Array.isArray(output)) {
+    return output
+      .map((b) =>
+        b && typeof b === "object" && typeof (b as { text?: unknown }).text === "string"
+          ? (b as { text: string }).text
+          : stringifyPayload(b)
+      )
+      .join("\n")
+  }
+  if (output && typeof output === "object" && "value" in output) {
+    const value = (output as { value: unknown }).value
+    if (Array.isArray(value)) return toolResultBody({ output: value })
+    return stringifyPayload(value)
+  }
+  return stringifyPayload(output)
+}
+
+/**
+ * One content part of the summary transcript. Text is kept verbatim; tool
+ * calls and results are kept bounded, since in a coding session they carry
+ * most of what happened (paths, commands, outcomes). Reasoning is private to
+ * the turn that produced it and is left out; media is named, not inlined.
+ */
+function renderPartForSummary(part: unknown): string {
+  if (typeof part === "string") return part
+  if (!part || typeof part !== "object") return ""
+  const p = part as Record<string, unknown>
+  const toolName =
+    typeof (p.toolName ?? p.name) === "string" ? String(p.toolName ?? p.name) : "tool"
+  switch (p.type) {
+    case "text":
+      return typeof p.text === "string" ? p.text : ""
+    case "reasoning":
+    case "redacted-reasoning":
+      return ""
+    case "tool-call":
+    case "tool_use":
+      return `[tool call ${toolName}] ${clipPayload(stringifyPayload(p.input ?? p.args))}`
+    case "tool-result":
+    case "tool_result":
+      return `[tool result ${toolName}] ${clipPayload(toolResultBody(p))}`
+    case "image":
+      return "[image]"
+    case "file":
+      return `[file${typeof p.filename === "string" ? ` ${p.filename}` : ""}]`
+    default:
+      return typeof p.text === "string" ? p.text : ""
+  }
+}
+
+/** Why a summary call that finished without error still produced no text. */
+function emptySummaryReason(
+  drained: { finishReason?: string; error?: unknown },
+  maxOutputTokens: number
+): string {
+  if (drained.error) return `the summary call failed: ${errorToMessage(drained.error)}`
+  switch (drained.finishReason) {
+    case "length":
+      return `the summary model used its whole ${maxOutputTokens}-token output budget without writing a summary (likely all reasoning)`
+    case "tool-calls":
+      return "the summary model answered with tool calls instead of a summary"
+    case "content-filter":
+      return "the summary was blocked by the provider's content filter"
+    case undefined:
+      return "the summary model returned no text"
+    default:
+      return `the summary model returned no text (finish reason: ${drained.finishReason})`
   }
 }
 
@@ -106,7 +223,10 @@ export function createCompactor({
           typeof m.content === "string"
             ? m.content
             : Array.isArray(m.content)
-              ? m.content.map((p) => (typeof p === "string" ? p : (p?.text ?? ""))).join("")
+              ? m.content
+                  .map((p) => renderPartForSummary(p))
+                  .filter(Boolean)
+                  .join("\n")
               : ""
         return `${m.role}: ${text}`
       })
@@ -305,6 +425,8 @@ export function createCompactor({
       typeof comp.maxSummaryTokens === "number" && comp.maxSummaryTokens > 0
         ? comp.maxSummaryTokens
         : 500
+    // Why the last AI summary produced nothing, for the manual caller.
+    let summaryFailure: string | undefined
     const summarize = async (messages: ConversationMessage[]) => {
       signal.throwIfAborted()
       const transcript = renderForSummary(messages)
@@ -314,6 +436,22 @@ export function createCompactor({
           ? `${transcript.slice(0, cap)}\n... (extractive summary truncated)`
           : transcript
       }
+      const first = await summarizeOnce(transcript, summaryCap)
+      if (first.text || first.finishReason !== "length") return first.text
+      // Ended at the cap without a word of summary: the budget went to
+      // reasoning. One retry with room for it, never more.
+      signal.throwIfAborted()
+      log(
+        "info",
+        `compaction summary hit its ${summaryCap}-token cap with no text; retrying with reasoning headroom`
+      )
+      return (await summarizeOnce(transcript, summaryCap + SUMMARY_REASONING_HEADROOM_TOKENS)).text
+    }
+    const summarizeOnce = async (
+      transcript: string,
+      maxOutputTokens: number
+    ): Promise<{ text: string | null; finishReason?: string }> => {
+      let drained: { finishReason?: string; error?: unknown } = {}
       try {
         const sum = comp.summary ?? {}
         const summaryModel = sum.model || state.model
@@ -327,8 +465,9 @@ export function createCompactor({
           })
           if (alt) summaryAdapter = alt
         }
-        const summaryParams = { ...modelParams, maxOutputTokens: summaryCap }
+        const summaryParams = { ...modelParams, maxOutputTokens }
         const summaryProviderId = sum.credentials ? sum.providerId : provider
+        const userContent = `${SUMMARY_TRANSCRIPT_PREAMBLE}\n\n<transcript>\n${transcript}\n</transcript>`
         // Router + Fusion: inside a ledgered turn the summary is a reserved call
         // like any other; a refusal skips the AI summary.
         const outcome = await runLedgeredSideCall(
@@ -336,8 +475,8 @@ export function createCompactor({
           {
             logicalStepId: `compact:${++state.ledgerSideCalls}`,
             deploymentId: `${summaryProviderId}::${summaryModel}`,
-            estimatedInputTokens: estimatePromptTokens([systemPrompt, transcript]),
-            maxOutputTokens: summaryCap,
+            estimatedInputTokens: estimatePromptTokens([systemPrompt, userContent]),
+            maxOutputTokens,
           },
           () =>
             abortable(signal, async () => {
@@ -346,7 +485,7 @@ export function createCompactor({
                 model: summaryModel,
                 messages: [
                   { role: "system", content: systemPrompt },
-                  { role: "user", content: transcript },
+                  { role: "user", content: userContent },
                 ],
                 modelParams: summaryParams,
                 tools: undefined,
@@ -365,21 +504,47 @@ export function createCompactor({
                   : {}),
                 streamTextFn: streamTextOverride,
               })
-              return drainSideCallStream(run, {
+              const result = await drainSideCallStream(run, {
                 withBilling: state.turnLedgerGate?.active === true,
               })
+              drained = result
+              return result
             }),
           { isCancelled: () => signal.aborted || isCancelled() }
         )
         if (!outcome.sent) {
           log("warn", `compaction summary refused by Router + Fusion: ${outcome.refusal.code}`)
-          return null
+          summaryFailure = `the summary call was refused by Router + Fusion (${outcome.refusal.code})`
+          return { text: null }
         }
-        return outcome.value.trim() || null
+        const text = outcome.value.trim()
+        if (text)
+          return { text, ...(drained.finishReason ? { finishReason: drained.finishReason } : {}) }
+        summaryFailure = emptySummaryReason(drained, maxOutputTokens)
+        log("warn", `compaction summary produced no text: ${summaryFailure}`)
+        return {
+          text: null,
+          ...(drained.finishReason ? { finishReason: drained.finishReason } : {}),
+        }
       } catch (err) {
+        if (signal.aborted) throw err
         log("warn", `compaction summary failed, skipping: ${errorToMessage(err)}`)
-        return null
+        summaryFailure = `the summary call failed: ${errorToMessage(err)}`
+        return { text: null }
       }
+    }
+
+    // A manual `/compact` is waiting for an answer: say the summary failed and
+    // nothing changed, instead of letting it time out into "it will apply
+    // later" — no later attempt is queued.
+    const reportSummaryFailure = () => {
+      // A cancelled preparation is superseded (a newer request or the turn
+      // that aborted it answers instead), not failed.
+      if (!force || signal.aborted) return
+      reportManualOutcome(
+        "failed",
+        `Compaction failed: ${summaryFailure ?? "the summary model returned no text"}. Nothing was compacted.`
+      )
     }
 
     // Reuse prior frozen summaries verbatim (prefix-cache stable) until too many
@@ -493,7 +658,10 @@ export function createCompactor({
           Boolean
         )
         if (regenerate && frozen.length) parts.unshift(renderForSummary(frozen))
-        if (parts.length === 0) return
+        if (parts.length === 0) {
+          reportSummaryFailure()
+          return
+        }
         summaryText =
           parts.length > 1 && useAI
             ? ((await summarize([{ role: "user", content: parts.join("\n\n") }])) ??
@@ -504,7 +672,10 @@ export function createCompactor({
         const full = regenerate && frozen.length ? [...frozen, ...material] : material
         summaryText = await summarize(full)
       }
-      if (!summaryText) return
+      if (!summaryText) {
+        reportSummaryFailure()
+        return
+      }
       summaryProduced = true
       decision = regenerate ? "regenerated" : "reused"
       const summaryMsg = makeSummaryMessage(summaryText, nextVersion)
@@ -629,8 +800,13 @@ export function createCompactor({
           job.result = result
         })
         .catch((error) => {
-          if (!controller.signal.aborted)
-            log("warn", `compaction preparation failed: ${errorToMessage(error)}`)
+          if (controller.signal.aborted) return
+          log("warn", `compaction preparation failed: ${errorToMessage(error)}`)
+          if (options.force)
+            reportManualOutcome(
+              "failed",
+              `Compaction failed: ${errorToMessage(error)}. Nothing was compacted.`
+            )
         })
         .finally(() => {
           job.settled = true
