@@ -3490,6 +3490,42 @@ mod tests {
         assert!(private.fake.provisions.lock().is_empty());
     }
 
+    #[test]
+    fn remote_allowlist_runtime_config_defaults_to_no_local_bridge() {
+        let mut environment = spec(EgressTier::Allowlist, None);
+        environment.egress.approved_domains = vec!["registry.npmjs.org".into()];
+        for spawn in [BTreeMap::new(), BTreeMap::from([("TASK_FLAG".into(), "1".into())])] {
+            let runtime = runtime_config_with_env(&environment, spawn).unwrap();
+            assert!(runtime.egress.is_none());
+            let encoded = encode_runtime_config_env(&runtime).unwrap();
+            assert!(super::super::tests::decode_agent_environment(&encoded).egress.is_none());
+        }
+        assert!(super::super::tests::decode_agent_environment(&git_runtime_env().unwrap()).egress.is_none());
+        let provider = FakeRemote::new("fake");
+        assert!(provider.egress_enforced(EgressTier::Allowlist));
+    }
+
+    /// Run: `cargo test --offline -p cognia-sandbox-pool provider_allowlist_never_waits_for_a_local_egress_bridge -- --ignored`.
+    #[tokio::test]
+    #[ignore = "requires local socket binding for the remote git proxy"]
+    async fn provider_allowlist_never_waits_for_a_local_egress_bridge() {
+        let mut environment = spec(EgressTier::Allowlist, None);
+        environment.egress.approved_domains = vec!["registry.npmjs.org".into()];
+        let remote = Remote::new(FakeRemote::new("fake"), environment.clone(), 1);
+        remote.spawn(mandatory(remote_config("provider-allowlist", &environment))).await.unwrap();
+        let request = remote.fake.provisions.lock()[0].clone();
+        assert_eq!(request.egress.tier, EgressTier::Allowlist);
+        assert_eq!(request.egress.domains, vec!["registry.npmjs.org"]);
+        assert!(super::super::tests::decode_agent_environment(&request.supervisor_env).egress.is_none());
+        for exec in remote.fake.execs.lock().iter() {
+            assert!(!exec.command.iter().any(|arg| arg == "bridge-egress" || arg == "--require-egress-v1"));
+            if exec.env.iter().any(|entry| entry.starts_with("COGNIA_SANDBOXD_RUNTIME_CONFIG_")) {
+                assert!(super::super::tests::decode_agent_environment(&exec.env).egress.is_none());
+            }
+        }
+        remote.backend.kill_all().await.unwrap();
+    }
+
     #[tokio::test]
     async fn an_unenforced_allowlist_runs_labelled_when_isolation_is_optional() {
         let mut allowlisted = spec(EgressTier::Allowlist, None);

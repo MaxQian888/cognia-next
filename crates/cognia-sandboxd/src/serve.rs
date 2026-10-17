@@ -376,6 +376,7 @@ fn spawn_worker(
     piped: bool,
     cwd: Option<&str>,
 ) -> io::Result<(Child, PathBuf)> {
+    crate::egress::require_live(options.runtime.egress.as_ref())?;
     let path = options
         .socket
         .parent()
@@ -403,6 +404,9 @@ fn spawn_worker(
             .arg(&options.bundle)
             .arg("--runtime-config")
             .arg(&path);
+        if runtime.egress.is_some() {
+            command.arg("--require-egress-v1");
+        }
         if let Some(user) = &options.user {
             command.arg("--user").arg(user.to_string());
         }
@@ -514,7 +518,8 @@ fn cleanup_session(session: i32) {
 }
 
 fn same_environment(base: &RuntimeConfigV1, requested: &RuntimeConfigV1) -> bool {
-    base.container_env == requested.container_env
+    base.egress == requested.egress
+        && base.container_env == requested.container_env
         && base.remote_env == requested.remote_env
         && base.workspace_folder == requested.workspace_folder
         && base.lifecycle_commands == requested.lifecycle_commands
@@ -715,6 +720,7 @@ fn handle_connection(
     stream.set_read_timeout(None)?;
     match request {
         Request::Health => {
+            crate::egress::require_live(options.runtime.egress.as_ref())?;
             let active = sessions.lock().unwrap();
             let value = serde_json::json!({"ready":true,"runtimeKey":options.runtime_key,"activeSessions":active.keys().filter(|id| !id.starts_with("@port:")).count(),"activeConnections":active.len()});
             write_frame(&mut stream, REPLY, &serde_json::to_vec(&value).unwrap())
@@ -872,6 +878,10 @@ fn handle_connection(
                     })
                 })
                 .transpose()?;
+            crate::egress::require_live(options.runtime.egress.as_ref())?;
+            // Only the supervisor owns the lease context, even when the
+            // matching session configuration was carried through the Host.
+            runtime.egress.clone_from(&options.runtime.egress);
             runtime.lifecycle_phases = if task.is_some() {
                 Vec::new()
             } else {
@@ -1024,6 +1034,7 @@ pub fn serve(mut options: ServeOptions) -> io::Result<()> {
     {
         return Err(invalid("invalid idle timeout or port"));
     }
+    crate::egress::await_live(options.runtime.egress.as_ref())?;
     process_ids()?; // Refuse unsupported process cleanup before accepting work.
     let parent = options
         .socket
@@ -1089,6 +1100,10 @@ pub fn serve(mut options: ServeOptions) -> io::Result<()> {
         let mut connections = Vec::new();
         let mut last_reap = Instant::now();
         while stopped.load(Ordering::Acquire) == 0 {
+            if crate::egress::require_live(options.runtime.egress.as_ref()).is_err() {
+                stopped.store(SIGTERM, Ordering::Release);
+                break;
+            }
             match listener.accept() {
                 Ok((mut stream, _)) => {
                     if connections.len() >= MAX_SESSIONS * 2 {
@@ -1346,6 +1361,29 @@ fn pump_stdio(mut stream: UnixStream) -> io::Result<i32> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn egress_session_and_task_cannot_replace_supervisor_context() {
+        let base = RuntimeConfigV1 {
+            egress: Some(crate::egress::EgressConfig {
+                version: crate::egress::VERSION,
+                policy_digest: "a".repeat(64),
+            }),
+            ..Default::default()
+        };
+        let mut task = base.clone();
+        task.lifecycle_phases.clear();
+        task.spawn_env.insert("NO_PROXY".into(), "*".into());
+        assert!(same_environment(&base, &task));
+        task.egress = None;
+        assert!(!same_environment(&base, &task));
+        task.egress = Some(crate::egress::EgressConfig {
+            version: crate::egress::VERSION,
+            policy_digest: "b".repeat(64),
+        });
+        assert!(!same_environment(&base, &task));
+        assert!(!same_environment(&RuntimeConfigV1::default(), &task));
+    }
 
     #[test]
     fn frames_preserve_binary_and_reject_oversized_or_truncated_payloads() {

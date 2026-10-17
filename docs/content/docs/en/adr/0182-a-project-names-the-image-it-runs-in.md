@@ -132,15 +132,19 @@ The resolver and injection path are shared by the Docker driver (compose T2 and 
 
 In a local container on the desktop, the agent receives the user's own keys exactly as `env-builder.ts` does today. The desktop gateway is loopback-only. The "sandboxes never hold raw model keys" rule of ADR-0185 (planned) applies to compose T2 and Kubernetes. The desktop exception is labelled in the Runtime environment panel.
 
-### Step ① does not enforce egress, and says so
+### Local Docker allowlists are enforced before execution
 
-One guarantee in this ADR needs infrastructure that Step ② builds. Until then the Step ① driver is deliberately weaker on egress, and the gap is labelled on the type, in the placement the UI renders, and in a test:
+Updated 2026-10-17: local Docker `allowlist` runtimes use `network=none` and a Docker-exec byte bridge to the Host's existing `FilteringProxy`. Admission freezes the merged preset and approved domains; a digest of those domains, matcher semantics and enforcement ABI is part of the persistent runtime key. Random relay ports and bridge generations do not change that key.
 
-- **Egress.** `off` is honoured by giving the container no network at all. `allowlist` and `on` get the network the legacy runner had, with nothing filtering it, because the per-tenant L7 egress proxy is ADR-0185. The placement carries `egress.enforced: false`, so nothing downstream can present an unfiltered sandbox as an enforced allowlist.
+The Host inspects the real Docker network mode and attachments, verifies a versioned, generation-tagged READY plus an end-to-end proxy handshake, then releases the start gate. Gateway initialization, lifecycle hooks, agent sessions and task shells cannot run before verification. Unsupported bundles, bridge exec or handshakes refuse with `sandbox_egress_unenforceable`; they never trigger optional-isolation fallback. `egress.enforced: true` describes an established lease, not a requested tier.
+
+The container owns the bridge and proxy across sessions. Resume and Host restart re-admit and re-handshake before `postStart`; stale READY cannot release the gate. Bridge/proxy failure closes connections, blocks new work and stops the runtime while `network=none` remains. Legacy persistent allowlist runtimes without the policy digest or isolated network are stopped and recreated. `off` and `on` retain their previous behavior; remote/E2B runtimes keep provider-native network policy and never wait for this local bridge.
+
+`bridge-service` in `docker/services.rs` and `open_port` in `docker/ports.rs` remain explicit control-plane exceptions for approved Host services and forwarded workspace ports. The egress bridge is separate from `ToolHostService` and does not accept user-chosen Host ports. Supported egress is CONNECT and absolute-form HTTP; raw TCP, UDP, direct DNS and SOCKS are unavailable. TLS SNI inside an allowed CONNECT tunnel is not inspected, so CDN domain fronting is outside this guarantee.
 
 Credential handling is now implemented. The driver strips the ambient provider-credential names — the same list the local launcher clears — out of the spawn environment before the container sees them, so a sandbox never holds the host's real keys; a managed gateway task's per-task lease (`COGNIA_GATEWAY_TASK_CONFIG`/`COGNIA_GATEWAY_TOKEN`) is the ingress instead, and the placement says `credentials.mode: "gateway-lease"` for it and `"none"` otherwise. Because the stripped names are never listed as driver-provided, the in-sandbox supervisor also drops an image-baked copy ([ADR-0183](./0183-the-agent-is-brought-to-the-image)). Per-sandbox tickets for ordinary spawns remain ADR-0185 §②.7.
 
-Egress is not a silent downgrade: a project cannot ask for an enforced allowlist in Step ① and be told it got one.
+Allowlist setup failures refuse execution instead of silently downgrading isolation or opening the network.
 
 ### The companion plane
 

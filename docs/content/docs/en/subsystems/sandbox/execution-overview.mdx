@@ -262,6 +262,44 @@ carry `stdout_truncated` and `stderr_truncated` and append a visible truncation 
 carry effective tier/provider, refusal or termination, requested timeout, timeout state, exit code,
 truncation flags, and duration in the existing fields.
 
+## Local Docker runtime allowlists
+
+Project runtime environments use `cognia-sandbox-pool` independently of the OS tool tier above.
+For a local Docker `allowlist`, admission freezes the sorted, deduplicated union of egress presets
+and approved domains. The container starts with `network=none`; its only general outbound path is
+a loopback byte relay over Docker exec stdin/stdout to the Host's shared `FilteringProxy` and
+`cognia-net` matcher. This works across Docker Desktop/colima VM boundaries without a Host port,
+sidecar or `NET_ADMIN`.
+
+The startup gate precedes gateway initialization and every lifecycle hook. The Host checks real
+Docker network mode and attachments, requires a versioned READY with a fresh generation, and
+probes the proxy end to end before releasing the gate. Old bundles and failed/unsupported bridges
+refuse with `sandbox_egress_unenforceable`, including when isolation is optional. Placement reports
+`egress.enforced: true` only for an established lease.
+
+The supervisor owns the trusted egress context. Agent and task sessions cannot replace it.
+`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and their lowercase forms are applied after all image,
+container, remote, spawn and gateway environment merges. Both forms of `NO_PROXY` are fixed to
+`localhost,127.0.0.1,::1`; a user-provided `*` cannot override them. Clearing proxy variables still
+cannot bypass Docker's disconnected network. CONNECT and absolute-form HTTP are supported;
+SOCKS, raw TCP, UDP and direct DNS are not. The Host resolves and pins upstream IP addresses,
+but it does not inspect TLS SNI inside CONNECT: domain fronting via an allowed CDN is outside
+the guarantee.
+
+The bridge and proxy belong to the container across sessions. Resume re-handshakes before
+`postStart`, and Host restart creates a new generation. Their failure closes proxied connections,
+blocks new execution and stops the runtime; the network stays disconnected. The frozen policy
+digest includes matcher semantics and enforcement ABI and participates in persistent runtime
+compatibility. Changed presets therefore cannot reuse an old runtime. Random ports and generation
+numbers do not affect compatibility. The deployment's legacy unfiltered persistent allowlist
+runtimes are stopped and must be recreated.
+
+Two explicit control-plane paths remain available: `docker/services.rs` `bridge-service` connects
+approved Host services, and `docker/ports.rs` `open_port` forwards workspace ports. The egress
+bridge is a separate transport, does not impersonate `ToolHostService`, and exposes no user-chosen
+Host port. `off` and `on` are unchanged; remote/E2B runtimes keep provider-native allowlists and
+default the local bridge requirement off. See [ADR-0182](../../adr/0182-a-project-names-the-image-it-runs-in).
+
 ## Next
 
 <Cards>

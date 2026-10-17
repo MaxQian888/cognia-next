@@ -27,9 +27,9 @@
 //! Two things here are deliberately weaker than ADR-0182's end state, are
 //! labeled as such on the type, in the placement the UI renders, and in a test:
 //!
-//! - **Egress.** `off` really means no network. `allowlist` and `on` get the
-//!   legacy runner's network with nothing filtering it, because the per-tenant
-//!   egress proxy is ADR-0185. The placement says `egress.enforced: false`.
+//! - **Egress.** `off` cuts networking. Local `allowlist` uses network=none
+//!   and a container-owned exec relay to the Host FilteringProxy. Execution
+//!   waits for a versioned lease handshake; `on` keeps the configured network.
 //! - **Agent rootfs.** Helper containers (`install`, `probe`) are closed
 //!   programs and run `cap-drop ALL` + a read-only rootfs. The agent
 //!   container keeps a writable rootfs: the image is user-authored, its own
@@ -85,6 +85,7 @@ use crate::command::{bundled_invocation, BundledInvocation};
 use crate::probe_cache::ProbeCacheEntry;
 use crate::status::SandboxDriverStatus;
 
+mod egress;
 mod persistent;
 mod ports;
 mod remote_prep;
@@ -219,6 +220,7 @@ enum RunFailure {
     /// The daemon refused to create or start the container.
     Start(String),
     Timeout,
+    Egress(SandboxSpawnError),
 }
 
 struct Completed {
@@ -257,6 +259,7 @@ pub struct DockerSandboxBackend {
     prepare_slots: Arc<tokio::sync::Semaphore>,
     port_slots: Arc<tokio::sync::Semaphore>,
     service_bridges: Mutex<HashMap<String, services::ServiceLease>>,
+    egress_leases: Mutex<HashMap<String, egress::EgressLease>>,
     retained_tasks: Mutex<retained_tasks::RetainedTasks>,
     pending_tool_hosts: Mutex<HashMap<String, services::PendingToolHost>>,
     own: Weak<Self>,
@@ -298,6 +301,7 @@ impl DockerSandboxBackend {
             staged: Mutex::new(BTreeSet::new()),
             port_slots: Arc::new(tokio::sync::Semaphore::new(64)),
             service_bridges: Mutex::new(HashMap::new()),
+            egress_leases: Mutex::new(HashMap::new()),
             retained_tasks: Mutex::new(retained_tasks::RetainedTasks::default()),
             pending_tool_hosts: Mutex::new(HashMap::new()),
             remote,
@@ -460,6 +464,7 @@ impl DockerSandboxBackend {
                 )
                 .await
                 .map_err(|failure| match failure {
+                    RunFailure::Egress(error) => error,
                     RunFailure::Pull(error) => SandboxSpawnError::fault(
                         "bundle_unavailable",
                         format!("the agent bundle image could not be pulled: {error}"),
@@ -605,6 +610,7 @@ impl DockerSandboxBackend {
                 // An image that cannot be pulled is an answer about the image,
                 // not about the infrastructure: running somewhere else would
                 // silently do less than the project asked for.
+                RunFailure::Egress(error) => error,
                 RunFailure::Pull(error) => SandboxSpawnError::refused(
                     "sandbox_image_unavailable",
                     format!("{} could not be pulled: {error}", image),
@@ -651,7 +657,7 @@ impl DockerSandboxBackend {
         let (mut result_tx, result_rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             // Never cancel a daemon create whose outcome is not yet known.
-            let running = match backend.start_inner(spec, auth).await {
+            let running = match backend.start_inner(spec, auth, leases.clone()).await {
                 Ok(running) => running,
                 Err(error) => {
                     let _ = result_tx.send(Err(error));
@@ -690,7 +696,7 @@ impl DockerSandboxBackend {
         let backend = self.own.upgrade().expect("backend owned during operation");
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
-            let running = match backend.start_inner(spec, auth).await {
+            let running = match backend.start_inner(spec, auth, leases.clone()).await {
                 Ok(running) => running,
                 Err(error) => {
                     let _ = result_tx.send(Err(error));
@@ -719,7 +725,7 @@ impl DockerSandboxBackend {
 
     /// Pull once for an explicit missing image, keeping each daemon request
     /// alive until it settles. Call only from an operation that owns its leases.
-    async fn start_inner(
+    async fn start_daemon(
         &self,
         spec: RunnerSpec,
         auth: Option<RegistryAuth>,
@@ -1066,12 +1072,9 @@ fn default_uid(tier: IsolationTier) -> u32 {
     }
 }
 
-/// Step ① does not filter egress. `off` is honoured by cutting the network
-/// entirely; the other tiers get the legacy runner's network until the
-/// per-tenant egress proxy exists (ADR-0185). [`egress_enforced`] is the one
-/// place that says so, and the placement carries its answer.
-fn egress_enforced(tier: EgressTier) -> bool {
-    matches!(tier, EgressTier::Off)
+/// Allowlist enforcement is evidence from the container's live lease.
+fn egress_enforced(tier: EgressTier, established: bool) -> bool {
+    matches!(tier, EgressTier::Off) || (tier == EgressTier::Allowlist && established)
 }
 
 /// Keep the image environment intact until sandboxd applies the declared
@@ -1245,6 +1248,7 @@ impl SandboxDriverStatus for DockerSandboxBackend {
 /// the image, and the leases that keep it all valid.
 struct LocalPrepared {
     admitted: AdmittedSandbox,
+    egress: Option<egress::FrozenPolicy>,
     mount: RunnerMount,
     report: ProbeReport,
     libc: Libc,
@@ -1290,6 +1294,8 @@ impl DockerSandboxBackend {
                 ),
             ));
         }
+        let egress = (admitted.spec.egress.tier == EgressTier::Allowlist)
+            .then(|| egress::FrozenPolicy::new(self.admission.egress_allowlist(&admitted.spec)));
         let bundle = admitted.admission.bundle.image();
         let leases = OperationLeases {
             _bundle: Some(Arc::new(
@@ -1322,6 +1328,7 @@ impl DockerSandboxBackend {
             .flatten();
         Ok(LocalPrepared {
             admitted,
+            egress,
             mount,
             report,
             libc,
@@ -1382,7 +1389,7 @@ impl DockerSandboxBackend {
         id: &str,
         prepared: &LocalPrepared,
         libc_volume: String,
-        env: Vec<String>,
+        mut env: Vec<String>,
         tail: Vec<String>,
     ) -> Result<RunnerSpec, SandboxSpawnError> {
         let admitted = &prepared.admitted;
@@ -1398,6 +1405,20 @@ impl DockerSandboxBackend {
         if prepared.match_owner {
             cmd.push("--match-owner-of".to_string());
             cmd.push(WORKSPACE_TARGET.to_string());
+        }
+        if let Some(policy) = &prepared.egress {
+            cmd.push("--require-egress-v1".into());
+            let parent = env
+                .iter()
+                .filter_map(|entry| entry.split_once('='))
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            let mut runtime = cognia_sandboxd::env::decode_runtime_config_env(&parent)
+                .map_err(|error| egress::refused(error.to_string()))?
+                .unwrap_or_default();
+            runtime.egress = Some(policy.config());
+            env = encode_runtime_config_env(&runtime)
+                .map_err(|error| egress::refused(error.to_string()))?;
         }
         cmd.push("--".to_string());
         cmd.extend(tail);
@@ -1417,13 +1438,24 @@ impl DockerSandboxBackend {
             nano_cpus: i64::from(size_class.cpu_millis).saturating_mul(1_000_000),
             pids_limit: self.config.host.pids_limit,
             network_mode: match admitted.spec.egress.tier {
-                EgressTier::Off => "none".to_string(),
-                EgressTier::Allowlist | EgressTier::On => self.config.host.network_mode.clone(),
+                EgressTier::Off | EgressTier::Allowlist => "none".to_string(),
+                EgressTier::On => self.config.host.network_mode.clone(),
             },
             labels: {
                 let mut labels =
                     ownership_labels(id, &self.config.instance_id, &self.config.deployment_id);
                 labels.insert("cognia.project-id".into(), admitted.spec.project_id.clone());
+                labels.insert(
+                    egress::TIER_LABEL.into(),
+                    match admitted.spec.egress.tier {
+                        EgressTier::Off => "off",
+                        EgressTier::Allowlist => "allowlist",
+                        EgressTier::On => "on",
+                    }.into(),
+                );
+                if let Some(policy) = &prepared.egress {
+                    policy.label(&mut labels);
+                }
                 labels.insert(
                     "cognia.spec-digest".into(),
                     admitted.spec.spec_digest.clone(),
@@ -1586,19 +1618,23 @@ impl DockerSandboxBackend {
             leases,
             ..
         } = prepared;
-        let placement = sandbox_placement(
+        let mut placement = sandbox_placement(
             &admitted,
             &report,
             libc,
             &invocation,
             &config,
             DRIVER_NAME,
-            egress_enforced(admitted.spec.egress.tier),
+            egress_enforced(admitted.spec.egress.tier, false),
         );
         if admitted.spec.lifecycle == SandboxLifecycleKind::Persistent {
             let (running, cleanup) = self
                 .start_persistent(spec, auth, &admitted.spec, &config, leases)
                 .await?;
+            placement["egress"]["enforced"] = json!(egress_enforced(
+                admitted.spec.egress.tier,
+                self.egress_live(&running.container_id),
+            ));
             sink.sandbox_placement(&id, &placement);
             let id = self
                 .runners
@@ -1611,6 +1647,7 @@ impl DockerSandboxBackend {
             .start(spec, auth, leases)
             .await
             .map_err(|failure| match failure {
+                RunFailure::Egress(error) => error,
                 RunFailure::Pull(error) => SandboxSpawnError::refused(
                     "sandbox_image_unavailable",
                     format!("the project image could not be pulled: {error}"),
@@ -1625,6 +1662,10 @@ impl DockerSandboxBackend {
                 ),
             })?;
 
+        placement["egress"]["enforced"] = json!(egress_enforced(
+            admitted.spec.egress.tier,
+            self.egress_live(&running.container_id),
+        ));
         sink.sandbox_placement(&id, &placement);
         let id = self.runners.adopt(config, running, Some(placement), sink);
         self.finish_gateway_spawn(id, gateway, tool_hosts, nonce)
@@ -1707,6 +1748,12 @@ impl SandboxExecBackend for DockerSandboxBackend {
         config: ExternalAgentSpawnConfig,
         sink: Arc<dyn ExternalAgentEventSink>,
     ) -> Result<String, SandboxSpawnError> {
+        let local_allowlist = self.remote.is_none()
+            && config.sandbox.as_ref().is_some_and(|placement| {
+                placement.spec().get("egress")
+                    .and_then(|egress| egress.get("tier"))
+                    .and_then(Value::as_str) == Some("allowlist")
+            });
         let reservation = Arc::new(
             self.runners
                 .reserve(&config.id)
@@ -1730,7 +1777,15 @@ impl SandboxExecBackend for DockerSandboxBackend {
             } => result,
         };
         cancellation.armed = result.is_err();
-        result
+        result.map_err(|error| {
+            if local_allowlist
+                && error.kind == cognia_external_agent::sandbox_routing_backend::SandboxErrorKind::Fault
+            {
+                egress::refused(error.to_string())
+            } else {
+                error
+            }
+        })
     }
 
     fn multi_tenant(&self) -> bool {
@@ -1958,6 +2013,7 @@ impl ExecBackend for DockerSandboxBackend {
             &self.config.deployment_id,
         )
         .await?;
+        reaped.extend(self.sweep_egress_runtimes().await?);
         reaped.extend(self.sweep_bundle_volumes().await);
         reaped.extend(self.adopt_remote_instances().await);
         Ok(reaped)
@@ -3319,6 +3375,7 @@ pub(crate) mod tests {
                     "vscode",
                     "--match-owner-of",
                     "/workspace",
+                    "--require-egress-v1",
                     "--",
                     "/cognia/glibc/bin/codex-acp",
                     "--stdio"
@@ -3442,7 +3499,7 @@ pub(crate) mod tests {
                     "gid": 10001,
                     "remappedFrom": { "uid": 1000, "gid": 1000 },
                 },
-                "egress": { "tier": "allowlist", "enforced": false },
+                "egress": { "tier": "allowlist", "enforced": true },
                 "credentials": { "mode": "none" },
             })
         );
@@ -3827,7 +3884,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn a_daemon_that_does_not_answer_is_a_fault_the_run_can_fall_back_from() {
-        let spec = spec(EgressTier::Allowlist, None);
+        let spec = spec(EgressTier::On, None);
         let harness = Harness::new(
             admitted(spec.clone(), IsolationTier::Container),
             report(vec![command("kiro-cli", None)], Vec::new()),
@@ -3843,10 +3900,10 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn egress_off_cuts_the_network_and_no_other_tier_claims_enforcement() {
+    async fn egress_tiers_report_only_established_enforcement() {
         for (tier, network, enforced) in [
             (EgressTier::Off, "none", true),
-            (EgressTier::Allowlist, "bridge", false),
+            (EgressTier::Allowlist, "none", true),
             (EgressTier::On, "bridge", false),
         ] {
             let spec = spec(tier, None);

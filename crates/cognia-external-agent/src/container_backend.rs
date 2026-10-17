@@ -617,6 +617,10 @@ pub const TASK_SHELL_RUNTIME_LABEL: &str = "cognia.task-shell-runtime";
 pub struct RuntimeContainerState {
     pub running: bool,
     pub labels: BTreeMap<String, String>,
+    /// Docker's actual HostConfig.NetworkMode, never inferred from labels.
+    pub network_mode: Option<String>,
+    /// NetworkSettings.Networks: attachment name to daemon network identity.
+    pub network_attachments: BTreeMap<String, Option<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1611,7 +1615,10 @@ pub fn exec_backend_from_env(default_deployment_id: &str) -> Result<Arc<dyn Exec
 pub mod bollard_api {
     use super::*;
     use bollard::container::LogOutput;
-    use bollard::models::{ContainerCreateBody, HostConfig, Mount, MountType, MountVolumeOptions};
+    use bollard::models::{
+        ContainerCreateBody, ContainerInspectResponse, HostConfig, Mount, MountType,
+        MountVolumeOptions,
+    };
     use bollard::query_parameters::{
         AttachContainerOptionsBuilder, CreateContainerOptionsBuilder, CreateImageOptionsBuilder,
         KillContainerOptionsBuilder, ListContainersOptionsBuilder, ListVolumesOptionsBuilder,
@@ -1798,19 +1805,42 @@ pub mod bollard_api {
         }
     }
 
+    fn runtime_state(info: ContainerInspectResponse) -> RuntimeContainerState {
+        RuntimeContainerState {
+            running: info.state.and_then(|state| state.running).unwrap_or(false),
+            labels: info
+                .config
+                .and_then(|config| config.labels)
+                .unwrap_or_default()
+                .into_iter()
+                .collect(),
+            network_mode: info.host_config.and_then(|config| config.network_mode),
+            network_attachments: info
+                .network_settings
+                .and_then(|settings| settings.networks)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, endpoint)| (name, endpoint.network_id))
+                .collect(),
+        }
+    }
+
+    fn runtime_stop_result(result: Result<(), bollard::errors::Error>) -> Result<(), String> {
+        match result {
+            Ok(())
+            | Err(bollard::errors::Error::DockerResponseServerError {
+                status_code: 304 | 404,
+                ..
+            }) => Ok(()),
+            Err(error) => Err(format!("stop runtime failed: {error}")),
+        }
+    }
+
     #[async_trait]
     impl SandboxDockerApi for BollardContainerApi {
         async fn inspect_runtime(&self, id: &str) -> Result<Option<RuntimeContainerState>, String> {
             match self.docker.inspect_container(id, None).await {
-                Ok(info) => Ok(Some(RuntimeContainerState {
-                    running: info.state.and_then(|state| state.running).unwrap_or(false),
-                    labels: info
-                        .config
-                        .and_then(|config| config.labels)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .collect(),
-                })),
+                Ok(info) => Ok(Some(runtime_state(info))),
                 Err(bollard::errors::Error::DockerResponseServerError {
                     status_code: 404, ..
                 }) => Ok(None),
@@ -1826,17 +1856,18 @@ pub mod bollard_api {
         }
 
         async fn stop_runtime(&self, id: &str) -> Result<(), String> {
-            self.docker
-                .stop_container(
-                    id,
-                    Some(
-                        bollard::query_parameters::StopContainerOptionsBuilder::default()
-                            .t(10)
-                            .build(),
-                    ),
-                )
-                .await
-                .map_err(|error| format!("stop runtime failed: {error}"))
+            runtime_stop_result(
+                self.docker
+                    .stop_container(
+                        id,
+                        Some(
+                            bollard::query_parameters::StopContainerOptionsBuilder::default()
+                                .t(10)
+                                .build(),
+                        ),
+                    )
+                    .await,
+            )
         }
 
         async fn exec_runtime(&self, spec: RunnerExecSpec) -> Result<RunningRunner, String> {
@@ -2273,6 +2304,55 @@ pub mod bollard_api {
     mod tests {
         use super::*;
 
+        #[test]
+        fn runtime_stop_is_idempotent_only_for_stopped_or_missing_containers() {
+            assert!(runtime_stop_result(Ok(())).is_ok());
+            for status_code in [304, 404, 403, 409, 500] {
+                let result = runtime_stop_result(Err(
+                    bollard::errors::Error::DockerResponseServerError {
+                        status_code,
+                        message: "daemon response".into(),
+                    },
+                ));
+                if matches!(status_code, 304 | 404) {
+                    assert!(result.is_ok());
+                } else {
+                    assert!(result.unwrap_err().contains("daemon response"));
+                }
+            }
+            let transport = runtime_stop_result(Err(bollard::errors::Error::IOError {
+                err: std::io::Error::new(std::io::ErrorKind::ConnectionReset, "transport reset"),
+            }));
+            assert!(transport.unwrap_err().contains("transport reset"));
+        }
+
+        #[test]
+        fn runtime_inspection_uses_daemon_network_evidence_not_labels() {
+            let info = serde_json::from_value(serde_json::json!({
+                "State": { "Running": true },
+                "Config": { "Labels": { "cognia.network": "none" } },
+                "HostConfig": { "NetworkMode": "bridge" },
+                "NetworkSettings": { "Networks": {
+                    "bridge": { "NetworkID": "actual-network" },
+                    "extra": {}
+                } }
+            }))
+            .unwrap();
+            let state = runtime_state(info);
+            assert!(state.running);
+            assert_eq!(state.network_mode.as_deref(), Some("bridge"));
+            assert_eq!(
+                state.network_attachments,
+                BTreeMap::from([
+                    ("bridge".into(), Some("actual-network".into())),
+                    ("extra".into(), None),
+                ])
+            );
+            let absent = runtime_state(ContainerInspectResponse::default());
+            assert_eq!(absent.network_mode, None);
+            assert!(absent.network_attachments.is_empty());
+        }
+
         fn spec(mount: Option<RunnerMount>, extra_mounts: Vec<VolumeMount>) -> RunnerSpec {
             RunnerSpec {
                 name: "n".into(),
@@ -2438,6 +2518,8 @@ pub mod test_support {
     }
 
     type ExitScript = Box<dyn Fn(&RunnerSpec) -> Option<ScriptedExit> + Send + Sync>;
+    type ExecScript =
+        Box<dyn Fn(&RunnerExecSpec) -> Option<Result<RunningRunner, String>> + Send + Sync>;
 
     /// Scriptable in-memory daemon: `run` hands back channels the test
     /// drives; `kill` closes the event stream with the configured code.
@@ -2447,6 +2529,8 @@ pub mod test_support {
         pub removes: Mutex<Vec<String>>,
         /// What the daemon would report for each container.
         pub labels_by_container: Mutex<HashMap<String, BTreeMap<String, String>>>,
+        pub network_modes: Mutex<HashMap<String, String>>,
+        pub network_attachments: Mutex<HashMap<String, BTreeMap<String, Option<String>>>>,
         /// Handles for containers started through this fake, by container id.
         pub handles: Mutex<HashMap<String, FakeHandle>>,
         pub fail_run: Mutex<Option<String>>,
@@ -2472,6 +2556,9 @@ pub mod test_support {
         pub runtimes: Mutex<Result<Vec<String>, String>>,
         pub runtime_execs: Mutex<Vec<RunnerExecSpec>>,
         pub stopped_runtimes: Mutex<std::collections::BTreeSet<String>>,
+        pub fail_stop_runtime: Mutex<Option<String>>,
+        pub stop_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+        pub stop_started: tokio::sync::Notify,
         pub restarted_runtimes: Mutex<Vec<String>>,
         /// Runtimes whose `health` reports a live session.
         pub busy_runtimes: Mutex<std::collections::BTreeSet<String>>,
@@ -2486,12 +2573,86 @@ pub mod test_support {
         /// Containers the script answers for exit on their own (staging and
         /// probe containers); every other container waits for the test.
         pub exit_script: Mutex<Option<ExitScript>>,
+        pub exec_script: Mutex<Option<ExecScript>>,
         counter: Mutex<u64>,
     }
 
     pub struct FakeHandle {
         pub events: mpsc::UnboundedSender<RunnerEvent>,
         pub stdin: Mutex<Option<mpsc::UnboundedReceiver<Vec<u8>>>>,
+    }
+
+    fn fake_bridge_frame(kind: u8, id: u32, bytes: &[u8]) -> Vec<u8> {
+        let mut frame = vec![kind];
+        frame.extend_from_slice(&id.to_be_bytes());
+        frame.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+        frame.extend_from_slice(bytes);
+        frame
+    }
+
+    // Mirrors sandboxd's egress v1 transport without adding a dependency from
+    // the generic container backend to the in-container supervisor.
+    async fn fake_egress_bridge(
+        generation: String,
+        policy_digest: String,
+        mut input: mpsc::UnboundedReceiver<Vec<u8>>,
+        output: mpsc::UnboundedSender<RunnerEvent>,
+    ) {
+        let send = |kind, id, bytes: &[u8]| {
+            output.send(RunnerEvent::Stdout(fake_bridge_frame(kind, id, bytes)))
+        };
+        let _ = send(2, 1, &[]);
+        let _ = send(3, 1, b"COGNIA-EGRESS-PROBE\r\n\r\n");
+        let _ = send(4, 1, &[]);
+        let mut incoming = Vec::new();
+        let mut response = Vec::new();
+        let mut ready = false;
+        loop {
+            let bytes = tokio::select! {
+                _ = output.closed() => break,
+                bytes = input.recv() => match bytes { Some(bytes) => bytes, None => break },
+            };
+            incoming.extend_from_slice(&bytes);
+            while incoming.len() >= 9 {
+                let kind = incoming[0];
+                let id = u32::from_be_bytes(incoming[1..5].try_into().unwrap());
+                let len = u32::from_be_bytes(incoming[5..9].try_into().unwrap()) as usize;
+                if len > 32 * 1024 {
+                    return;
+                }
+                if incoming.len() < 9 + len {
+                    break;
+                }
+                let payload = incoming[9..9 + len].to_vec();
+                incoming.drain(..9 + len);
+                if kind == 3 && id == 1 && !ready {
+                    response.extend_from_slice(&payload);
+                    if response.starts_with(b"HTTP/1.1 400 ") {
+                        let payload = serde_json::to_vec(&serde_json::json!({
+                            "version": 1,
+                            "generation": generation,
+                            "policyDigest": policy_digest,
+                            "port": 34568,
+                        }))
+                        .unwrap();
+                        if send(7, 0, &payload).is_err() {
+                            return;
+                        }
+                        ready = true;
+                    }
+                } else if kind == 8 && id == 0 && ready {
+                    let Ok(release) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+                        return;
+                    };
+                    if release["version"] != 1 || release["generation"] != generation {
+                        return;
+                    }
+                    if send(9, 0, &payload).is_err() {
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     impl FakeContainerApi {
@@ -2501,6 +2662,8 @@ pub mod test_support {
                 kills: Mutex::new(Vec::new()),
                 removes: Mutex::new(Vec::new()),
                 labels_by_container: Mutex::new(HashMap::new()),
+                network_modes: Mutex::new(HashMap::new()),
+                network_attachments: Mutex::new(HashMap::new()),
                 handles: Mutex::new(HashMap::new()),
                 fail_run: Mutex::new(None),
                 run_gate: Mutex::new(None),
@@ -2521,6 +2684,9 @@ pub mod test_support {
                 runtimes: Mutex::new(Ok(vec!["runc".to_string()])),
                 runtime_execs: Mutex::new(Vec::new()),
                 stopped_runtimes: Mutex::new(std::collections::BTreeSet::new()),
+                fail_stop_runtime: Mutex::new(None),
+                stop_gate: Mutex::new(None),
+                stop_started: tokio::sync::Notify::new(),
                 restarted_runtimes: Mutex::new(Vec::new()),
                 busy_runtimes: Mutex::new(std::collections::BTreeSet::new()),
                 volumes: Mutex::new(BTreeMap::new()),
@@ -2530,6 +2696,7 @@ pub mod test_support {
                 auth_pulls: Mutex::new(Vec::new()),
                 fail_auth_pull: Mutex::new(HashMap::new()),
                 exit_script: Mutex::new(None),
+                exec_script: Mutex::new(None),
                 counter: Mutex::new(0),
             })
         }
@@ -2539,6 +2706,16 @@ pub mod test_support {
             script: impl Fn(&RunnerSpec) -> Option<ScriptedExit> + Send + Sync + 'static,
         ) {
             *self.exit_script.lock() = Some(Box::new(script));
+        }
+
+        pub fn script_exec(
+            &self,
+            script: impl Fn(&RunnerExecSpec) -> Option<Result<RunningRunner, String>>
+                + Send
+                + Sync
+                + 'static,
+        ) {
+            *self.exec_script.lock() = Some(Box::new(script));
         }
 
         pub fn handle_events(&self, container_id: &str) -> mpsc::UnboundedSender<RunnerEvent> {
@@ -2587,6 +2764,13 @@ pub mod test_support {
             self.labels_by_container
                 .lock()
                 .insert(container_id.clone(), spec.labels.clone());
+            self.network_modes
+                .lock()
+                .insert(container_id.clone(), spec.network_mode.clone());
+            self.network_attachments.lock().insert(
+                container_id.clone(),
+                BTreeMap::from([(spec.network_mode.clone(), None)]),
+            );
             let scripted = self
                 .exit_script
                 .lock()
@@ -2683,6 +2867,8 @@ pub mod test_support {
                 return Err(error);
             }
             self.labels_by_container.lock().remove(container_id);
+            self.network_modes.lock().remove(container_id);
+            self.network_attachments.lock().remove(container_id);
             self.removes.lock().push(container_id.to_string());
             Ok(())
         }
@@ -2699,6 +2885,13 @@ pub mod test_support {
                 .map(|labels| RuntimeContainerState {
                     running: !self.stopped_runtimes.lock().contains(id),
                     labels,
+                    network_mode: self.network_modes.lock().get(id).cloned(),
+                    network_attachments: self
+                        .network_attachments
+                        .lock()
+                        .get(id)
+                        .cloned()
+                        .unwrap_or_default(),
                 }))
         }
         async fn start_runtime(&self, id: &str) -> Result<(), String> {
@@ -2710,10 +2903,27 @@ pub mod test_support {
             Ok(())
         }
         async fn stop_runtime(&self, id: &str) -> Result<(), String> {
+            let gate = self.stop_gate.lock().clone();
+            if let Some(gate) = gate {
+                self.stop_started.notify_one();
+                gate.acquire().await.expect("test stop gate open").forget();
+            }
+            if let Some(error) = self.fail_stop_runtime.lock().clone() {
+                return Err(error);
+            }
             self.stopped_runtimes.lock().insert(id.into());
             Ok(())
         }
         async fn exec_runtime(&self, spec: RunnerExecSpec) -> Result<RunningRunner, String> {
+            let scripted = self
+                .exec_script
+                .lock()
+                .as_ref()
+                .and_then(|script| script(&spec));
+            if let Some(result) = scripted {
+                self.runtime_execs.lock().push(spec);
+                return result;
+            }
             let (event_tx, event_rx) = mpsc::unbounded_channel();
             let (stdin_tx, stdin_rx) = mpsc::unbounded_channel();
             let action = spec.command.get(1).map(String::as_str).unwrap_or("");
@@ -2788,6 +2998,28 @@ pub mod test_support {
                             stdin: Mutex::new(Some(stdin_rx)),
                         },
                     );
+                }
+                "bridge-egress" => {
+                    let argument = |name| {
+                        spec.command
+                            .windows(2)
+                            .find(|pair| pair[0] == name)
+                            .map(|pair| pair[1].clone())
+                            .ok_or_else(|| format!("missing {name}"))
+                    };
+                    let generation = argument("--generation")?;
+                    let digest = argument("--policy-digest")?;
+                    self.handles.lock().insert(
+                        format!("egress:{}", spec.container_id),
+                        FakeHandle {
+                            events: event_tx.clone(),
+                            stdin: Mutex::new(None),
+                        },
+                    );
+                    tokio::spawn(async move {
+                        fake_egress_bridge(generation, digest, stdin_rx, event_tx.clone()).await;
+                        let _ = event_tx.send(RunnerEvent::Exited { code: Some(0) });
+                    });
                 }
                 "connect-agent" => {
                     self.handles.lock().insert(
@@ -3003,6 +3235,131 @@ mod tests {
             network_mode: "bridge".into(),
             deployment_id: "deployment-A".into(),
         }
+    }
+
+    #[tokio::test]
+    async fn fake_runtime_inspection_retains_network_and_supports_attachment_drift() {
+        let api = FakeContainerApi::new();
+        let mut config = test_config(None);
+        config.network_mode = "none".into();
+        let backend = ContainerBackend::new(api.clone(), config);
+        spawn_with_events(
+            backend.as_ref(),
+            RecordingAgentEmitter::new(),
+            spawn_config("network"),
+        )
+        .await
+        .unwrap();
+        let id = api.labels_by_container.lock().keys().next().unwrap().clone();
+        let state = api.inspect_runtime(&id).await.unwrap().unwrap();
+        assert_eq!(state.network_mode.as_deref(), Some("none"));
+        assert_eq!(
+            state.network_attachments,
+            BTreeMap::from([("none".into(), None)])
+        );
+        api.network_attachments
+            .lock()
+            .get_mut(&id)
+            .unwrap()
+            .insert("bridge".into(), Some("attached-after-create".into()));
+        let changed = api.inspect_runtime(&id).await.unwrap().unwrap();
+        assert_eq!(changed.network_mode.as_deref(), Some("none"));
+        assert_eq!(
+            changed.network_attachments.get("bridge"),
+            Some(&Some("attached-after-create".into()))
+        );
+        backend.kill("network").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fake_runtime_exec_override_precedes_builtin_helpers() {
+        let api = FakeContainerApi::new();
+        api.script_exec(|spec| {
+            (spec.command.get(1).map(String::as_str) == Some("health"))
+                .then(|| Err("unsupported old bundle".into()))
+        });
+        let result = api
+            .exec_runtime(RunnerExecSpec {
+                container_id: "runtime".into(),
+                command: vec!["sandboxd".into(), "health".into()],
+                env: Vec::new(),
+                workspace_env: BTreeMap::new(),
+                working_dir: "/workspace".into(),
+            })
+            .await;
+        assert!(matches!(result, Err(error) if error == "unsupported old bundle"));
+        assert_eq!(api.runtime_execs.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn fake_runtime_stop_waits_for_gate_and_preserves_failures() {
+        let api = FakeContainerApi::new();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *api.stop_gate.lock() = Some(gate.clone());
+        *api.fail_stop_runtime.lock() = Some("daemon stop failed".into());
+        let daemon = api.clone();
+        let stop = tokio::spawn(async move { daemon.stop_runtime("runtime").await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), api.stop_started.notified())
+            .await
+            .unwrap();
+        assert!(!stop.is_finished());
+        assert!(api.stopped_runtimes.lock().is_empty());
+        gate.add_permits(1);
+        assert_eq!(stop.await.unwrap(), Err("daemon stop failed".into()));
+        assert!(api.stopped_runtimes.lock().is_empty());
+        *api.stop_gate.lock() = None;
+        *api.fail_stop_runtime.lock() = None;
+        api.stop_runtime("runtime").await.unwrap();
+        assert!(api.stopped_runtimes.lock().contains("runtime"));
+    }
+
+    #[tokio::test]
+    async fn fake_runtime_egress_bridge_probes_before_ready_and_checks_generation() {
+        let api = FakeContainerApi::new();
+        let mut runner = api
+            .exec_runtime(RunnerExecSpec {
+                container_id: "runtime".into(),
+                command: vec![
+                    "sandboxd".into(),
+                    "bridge-egress".into(),
+                    "--generation".into(),
+                    "generation-one".into(),
+                    "--policy-digest".into(),
+                    "digest".into(),
+                ],
+                env: Vec::new(),
+                workspace_env: BTreeMap::new(),
+                working_dir: "/workspace".into(),
+            })
+            .await
+            .unwrap();
+        for expected in [2, 3, 4] {
+            let Some(RunnerEvent::Stdout(frame)) = runner.events.recv().await else {
+                panic!("expected probe frame");
+            };
+            assert_eq!(frame[0], expected);
+        }
+        let mut response = vec![3, 0, 0, 0, 1];
+        let body = b"HTTP/1.1 400 Bad Request\r\n\r\n";
+        response.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        response.extend_from_slice(body);
+        runner.stdin.send(response).await.unwrap();
+        let Some(RunnerEvent::Stdout(frame)) = runner.events.recv().await else {
+            panic!("expected READY");
+        };
+        assert_eq!(frame[0], 7);
+        let ready: serde_json::Value = serde_json::from_slice(&frame[9..]).unwrap();
+        assert_eq!(ready["generation"], "generation-one");
+        assert_eq!(ready["policyDigest"], "digest");
+        let stale = br#"{"version":1,"generation":"stale"}"#;
+        let mut release = vec![8, 0, 0, 0, 0];
+        release.extend_from_slice(&(stale.len() as u32).to_be_bytes());
+        release.extend_from_slice(stale);
+        runner.stdin.send(release).await.unwrap();
+        assert!(matches!(
+            runner.events.recv().await,
+            Some(RunnerEvent::Exited { .. })
+        ));
     }
 
     fn spawn_config(id: &str) -> ExternalAgentSpawnConfig {

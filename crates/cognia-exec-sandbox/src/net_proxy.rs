@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use cognia_net::proxy_config::wsproxy::ProxyStream;
+pub use cognia_net::proxy_config::wsproxy::ProxyStream;
 use tokio::io::{
     AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
     ReadBuf,
@@ -41,6 +41,7 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProxyEndpoint {
     Tcp(u16),
+    Streams,
     #[cfg(unix)]
     Unix(std::path::PathBuf),
 }
@@ -124,6 +125,25 @@ impl FilteringProxy {
         ))
     }
 
+    /// Accept streams from a trusted byte transport without opening a socket.
+    /// The proxy owns and bounds all connection tasks, including shutdown.
+    pub fn start_streams(
+        policy: impl Into<ProxyPolicy>,
+    ) -> io::Result<(Self, tokio::sync::mpsc::Sender<ProxyStream>)> {
+        let policy = policy.into();
+        policy.validate()?;
+        let (sender, receiver) = tokio::sync::mpsc::channel(policy.max_concurrent_connections);
+        Ok((
+            Self::spawn(
+                Listener::Streams(receiver),
+                ProxyEndpoint::Streams,
+                policy,
+                Network::default(),
+            ),
+            sender,
+        ))
+    }
+
     /// Bind a new Unix socket. Never unlinks a pre-existing path. The caller
     /// should place it in a directory accessible only to its intended clients.
     #[cfg(unix)]
@@ -169,6 +189,7 @@ impl FilteringProxy {
     pub fn port(&self) -> u16 {
         match self.endpoint {
             ProxyEndpoint::Tcp(port) => port,
+            ProxyEndpoint::Streams => panic!("stream proxy has no TCP port; use endpoint()"),
             #[cfg(unix)]
             ProxyEndpoint::Unix(_) => panic!("Unix proxy has no TCP port; use endpoint()"),
         }
@@ -230,8 +251,7 @@ enum Listener {
     Tcp(TcpListener),
     #[cfg(unix)]
     Unix(tokio::net::UnixListener, UnixSocketCleanup),
-    #[cfg(test)]
-    Memory(tokio::sync::mpsc::Receiver<ProxyStream>),
+    Streams(tokio::sync::mpsc::Receiver<ProxyStream>),
 }
 
 impl Listener {
@@ -240,8 +260,7 @@ impl Listener {
             Self::Tcp(listener) => Ok(Box::new(listener.accept().await?.0)),
             #[cfg(unix)]
             Self::Unix(listener, _cleanup) => Ok(Box::new(listener.accept().await?.0)),
-            #[cfg(test)]
-            Self::Memory(receiver) => receiver
+            Self::Streams(receiver) => receiver
                 .recv()
                 .await
                 .ok_or_else(|| io::Error::from(ErrorKind::BrokenPipe)),
@@ -1707,8 +1726,8 @@ mod tests {
         rules.header_timeout = Duration::from_secs(10);
         let (sender, receiver) = tokio::sync::mpsc::channel(2);
         let mut proxy = FilteringProxy::spawn(
-            Listener::Memory(receiver),
-            ProxyEndpoint::Tcp(0),
+            Listener::Streams(receiver),
+            ProxyEndpoint::Streams,
             rules,
             injected(&fake),
         );
@@ -1912,6 +1931,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accepted_streams_enforce_policy_and_shutdown_without_sockets() {
+        let (mut proxy, sender) =
+            FilteringProxy::start_streams(vec!["allowed.test".into()]).unwrap();
+        assert_eq!(proxy.endpoint(), &ProxyEndpoint::Streams);
+        let (mut client, server) = duplex(1024);
+        sender.send(Box::new(server)).await.unwrap();
+        client
+            .write_all(b"CONNECT denied.test:443 HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+        let mut reply = Vec::new();
+        timeout(Duration::from_secs(2), client.read_to_end(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(reply.starts_with(b"HTTP/1.1 403"));
+        let (mut pending, server) = duplex(1024);
+        sender.send(Box::new(server)).await.unwrap();
+        timeout(Duration::from_secs(2), proxy.shutdown())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            pending.read_u8().await.unwrap_err().kind(),
+            ErrorKind::UnexpectedEof
+        );
+        assert!(sender.is_closed());
+        assert!(FilteringProxy::start_streams(ProxyPolicy {
+            max_concurrent_connections: 0,
+            ..ProxyPolicy::default()
+        })
+        .is_err());
+    }
+
+    #[tokio::test]
     async fn concurrency_limit_and_shutdown_own_every_tunnel() {
         let fake = Arc::new(FakeNetwork::new(&["93.184.216.34"]));
         let mut origin = fake.upstream();
@@ -1920,8 +1974,8 @@ mod tests {
         rules.max_concurrent_connections = 1;
         let (sender, receiver) = tokio::sync::mpsc::channel(2);
         let mut proxy = FilteringProxy::spawn(
-            Listener::Memory(receiver),
-            ProxyEndpoint::Tcp(0),
+            Listener::Streams(receiver),
+            ProxyEndpoint::Streams,
             rules,
             injected(&fake),
         );
@@ -1964,8 +2018,8 @@ mod tests {
         rules.max_concurrent_connections = 1;
         let (sender, receiver) = tokio::sync::mpsc::channel(2);
         let proxy = FilteringProxy::spawn(
-            Listener::Memory(receiver),
-            ProxyEndpoint::Tcp(0),
+            Listener::Streams(receiver),
+            ProxyEndpoint::Streams,
             rules,
             injected(&fake),
         );

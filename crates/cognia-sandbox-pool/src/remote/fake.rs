@@ -266,6 +266,8 @@ impl SandboxDockerApi for FakeRemote {
             .map(|(labels, running)| RuntimeContainerState {
                 running: *running,
                 labels: labels.clone(),
+                network_mode: None,
+                network_attachments: Default::default(),
             }))
     }
     async fn start_runtime(&self, id: &str) -> Result<(), String> {

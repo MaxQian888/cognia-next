@@ -207,6 +207,38 @@ ADR-0028 写得很明确：当某个 T1 后端不可用时（Windows setup 未�
 
 stdout 与 stderr 各自限制为 1,000,000 个 UTF-8 字节。原生后端增量读取 child pipe；E2B 响应在跨越工具边界前截断。结果包含 `stdout_truncated` 与 `stderr_truncated`，并追加可见截断标记。审计行也通过既有字段记录有效 tier/provider、拒绝或终止、请求 timeout、是否超时、exit code、两个截断标志与 duration。
 
+## 本地 Docker runtime 白名单
+
+项目运行环境由 `cognia-sandbox-pool` 承载，独立于上文的 OS 工具 tier。本地 Docker 的
+`allowlist` 在准入时冻结 egress preset 与批准域名的合并结果，排序并去重。容器以
+`network=none` 启动，通用出站连接只能从容器回环 relay 经 Docker exec stdin/stdout
+到达 Host 上共享的 `FilteringProxy` 与 `cognia-net` matcher。该路径可跨 Docker Desktop /
+colima 的 VM 边界，不需要 Host 端口、sidecar 或 `NET_ADMIN`。
+
+启动门位于网关初始化与所有生命周期 hook 之前。Host 检查 Docker 真实网络模式与 attachment，
+验证带协议版本和新 generation 的 READY，再完成端到端代理探测，最后才释放启动门。
+旧 bundle、不支持的 bridge 或握手失败均返回 `sandbox_egress_unenforceable` 拒绝，
+可选隔离也不回退到宿主。placement 只有在租约真正建立后才报告 `egress.enforced: true`。
+
+可信 egress context 属于 supervisor，agent/task session 不能替换。`HTTP_PROXY`、
+`HTTPS_PROXY`、`ALL_PROXY` 及其小写形式在 image/container/remote/spawn/gateway 环境合并
+完成后最后写入。`NO_PROXY` 与 `no_proxy` 固定为 `localhost,127.0.0.1,::1`，用户的 `*`
+无法覆盖。即使命令清空代理变量，Docker 的断网状态也不会放行直连。支持 CONNECT 与
+absolute-form HTTP，不支持 SOCKS、raw TCP、UDP 或直接 DNS。Host 解析并固定 upstream IP；
+CONNECT 隧道内的 TLS SNI 不被检查，允许 CDN 上的 domain fronting 不属于该保证。
+
+bridge 与 proxy 归容器所有，跨 session 保留。恢复时在 `postStart` 前重新握手；Host 重启会
+建立新的 generation。失效会关闭代理连接、阻止新执行并停止 runtime，容器仍保持断网。
+冻结策略的摘要同时包含 matcher 语义和 enforcement ABI，进入持久 runtime 兼容性 key；
+预设变化不会复用旧实例，随机端口与 generation 则不影响兼容性。本部署旧的未过滤持久
+allowlist runtime 会被停止，必须重建。
+
+两条明确的控制面例外仍然可用：`docker/services.rs` 的 `bridge-service` 连接批准的 Host
+服务，`docker/ports.rs` 的 `open_port` 转发 workspace 端口。egress bridge 独立于
+`ToolHostService`，不暴露用户指定的 Host 端口。`off`、`on` 行为不变；远端/E2B 保留
+provider 原生白名单，本地 bridge 要求默认为关闭。参见
+[ADR-0182](../../adr/0182-a-project-names-the-image-it-runs-in)。
+
 ## 下一步
 
 <Cards>

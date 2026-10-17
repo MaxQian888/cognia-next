@@ -136,6 +136,24 @@ impl DockerSandboxBackend {
         &self,
         request: TaskShellRequest,
     ) -> Result<TaskShellResult, SandboxSpawnError> {
+        let SandboxPlacement::Container { spec, .. } = &request.placement;
+        let allowlist = self.remote.is_none() && spec["egress"]["tier"] == "allowlist";
+        self.exec_task_shell_inner(request).await.map_err(|error| {
+            if allowlist
+                && error.kind
+                    == cognia_external_agent::sandbox_routing_backend::SandboxErrorKind::Fault
+            {
+                refused("sandbox_egress_unenforceable", error.message)
+            } else {
+                error
+            }
+        })
+    }
+
+    async fn exec_task_shell_inner(
+        &self,
+        request: TaskShellRequest,
+    ) -> Result<TaskShellResult, SandboxSpawnError> {
         validate(&request)?;
         if self.remote.is_some() {
             return Err(refused(
@@ -183,16 +201,29 @@ impl DockerSandboxBackend {
             .await?;
         let workspace_env = spec.workspace_env.clone();
         let tier = prepared.admitted.admission.actual_tier.as_str().to_string();
-        let acquired = self
-            .acquire_runtime(
-                spec,
-                prepared.auth.clone(),
-                &environment,
-                RuntimePurpose::TaskShell,
-            )
-            .await?;
-        // The runtime is up: the preparation slot and bundle leases go back.
-        drop(prepared);
+        let backend = self
+            .own
+            .upgrade()
+            .expect("backend retained during task shell");
+        let boot_environment = environment.clone();
+        let (acquired_tx, acquired_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            // Cancellation cannot abandon a submitted create or its bridge
+            // setup. An acquired runtime owns its egress until release/idle.
+            let result = backend
+                .acquire_runtime(
+                    spec,
+                    prepared.auth.clone(),
+                    &boot_environment,
+                    RuntimePurpose::TaskShell,
+                )
+                .await;
+            drop(prepared);
+            let _ = acquired_tx.send(result);
+        });
+        let acquired = acquired_rx
+            .await
+            .map_err(|_| fault("task shell acquisition worker stopped"))??;
         let container_id = acquired.container_id.clone();
 
         let session = sha256_hex(format!("{owner}:{}", uuid::Uuid::new_v4()).as_bytes());
@@ -215,6 +246,7 @@ impl DockerSandboxBackend {
         );
         exec.command.extend(argv);
         let mut runtime = runtime_config_with_env(&environment, env.into_iter().collect())?;
+        runtime.egress = acquired.egress.clone();
         runtime.workspace_env = workspace_env.clone();
         exec.workspace_env = workspace_env;
         // The supervisor runs no lifecycle for a task command.
@@ -222,12 +254,28 @@ impl DockerSandboxBackend {
         exec.env = encode_runtime_config_env(&runtime)
             .map_err(|error| refused("sandbox_runtime_config_invalid", error.to_string()))?;
         let session_api = SessionApi::new(self.api.clone(), container_id.clone(), session);
-        let running = match self.api.exec_runtime(exec).await {
+        if acquired.egress.is_some() && !self.egress_live(&container_id) {
+            return Err(refused(
+                "sandbox_egress_unenforceable",
+                "runtime egress lease ended before task start",
+            ));
+        }
+        let running = match persistent::runtime_operation(
+            acquired.egress.is_some(),
+            Duration::from_secs(10),
+            self.api.exec_runtime(exec),
+        )
+        .await
+        {
             Ok(running) => running,
             Err(error) => {
                 // The start may still have reached the supervisor.
                 let _ = session_api.kill(&container_id).await;
-                return Err(fault(error));
+                return Err(if acquired.egress.is_some() {
+                    refused("sandbox_egress_unenforceable", error)
+                } else {
+                    fault(error)
+                });
             }
         };
         // Released only once the session exists, so a release that takes the
@@ -316,6 +364,7 @@ impl DockerSandboxBackend {
         let mut removed = Vec::new();
         for id in container_ids {
             let Some(state) = self.api.inspect_runtime(id).await.map_err(fault)? else {
+                self.drain_egress(id).await?;
                 continue;
             };
             let label = |key: &str| state.labels.get(key).map(String::as_str);
@@ -336,6 +385,7 @@ impl DockerSandboxBackend {
             let _guard = lock.lock_owned().await;
             // Re-read under the lock: an acquisition may have started it.
             let Some(state) = self.api.inspect_runtime(id).await.map_err(fault)? else {
+                self.drain_egress(id).await?;
                 continue;
             };
             if state.running {
@@ -349,7 +399,21 @@ impl DockerSandboxBackend {
                     continue;
                 }
             }
-            self.api.remove(id).await.map_err(fault)?;
+            let backend = self.own.upgrade().expect("backend retained during release");
+            let container_id = id.clone();
+            tokio::spawn(async move {
+                // Keep the lock through a submitted delete even if the caller
+                // cancels, so another acquisition cannot reuse its dying lease.
+                let _guard = _guard;
+                backend
+                    .drain_egress(&container_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                backend.api.remove(&container_id).await
+            })
+            .await
+            .map_err(|error| fault(error.to_string()))?
+            .map_err(fault)?;
             removed.push(id.clone());
         }
         Ok(removed)
@@ -697,6 +761,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn allowlist_preparation_fault_refuses_task_shell() {
+        use cognia_external_agent::sandbox_routing_backend::SandboxErrorKind;
+        for tier in [EgressTier::Allowlist, EgressTier::Off, EgressTier::On] {
+            let environment = spec(tier, None);
+            let harness = Harness::new(
+                admitted(environment.clone(), IsolationTier::Container),
+                report(vec![command("kiro-cli", None)], Vec::new()),
+                0,
+            );
+            *harness.api.runtimes.lock() = Err("daemon unavailable".into());
+            let error = harness
+                .backend
+                .exec_task_shell(request(&environment))
+                .await
+                .unwrap_err();
+            if tier == EgressTier::Allowlist {
+                assert_eq!(error.kind, SandboxErrorKind::Refused);
+                assert_eq!(error.code, "sandbox_egress_unenforceable");
+            } else {
+                assert_eq!(error.kind, SandboxErrorKind::Fault);
+            }
+            assert!(harness.api.specs.lock().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn allowlist_context_reaches_task_shell_boot_and_session() {
+        let mut environment = spec(EgressTier::Allowlist, None);
+        environment.egress.approved_domains = vec!["registry.npmjs.org".into()];
+        let harness = Harness::new(
+            admitted(environment.clone(), IsolationTier::Container),
+            report(vec![command("kiro-cli", None)], Vec::new()),
+            0,
+        );
+        let backend = harness.backend.clone();
+        let req = request(&environment);
+        let running = tokio::spawn(async move { backend.exec_task_shell(req).await });
+        let exec = next_connect(&harness, 0).await;
+        let boot = harness
+            .api
+            .specs
+            .lock()
+            .iter()
+            .find(|s| s.cmd[0] == "serve")
+            .unwrap()
+            .clone();
+        let expected = decode_agent_environment(&boot.env).egress.unwrap();
+        assert_eq!(boot.network_mode, "none");
+        assert!(boot.cmd.iter().any(|arg| arg == "--require-egress-v1"));
+        assert_eq!(decode_agent_environment(&exec.env).egress, Some(expected));
+        harness
+            .api
+            .handle_events(&format!("session:{}", flag(&exec, "--session")))
+            .send(RunnerEvent::Exited { code: Some(0) })
+            .unwrap();
+        let id = running.await.unwrap().unwrap().container_id;
+        assert!(harness.backend.egress_live(&id));
+        assert_eq!(
+            harness
+                .backend
+                .release_task_shell(&[id.clone()])
+                .await
+                .unwrap(),
+            vec![id.clone()]
+        );
+        assert!(!harness.backend.egress_live(&id));
+    }
+
+    #[tokio::test]
+    async fn cancelled_release_keeps_the_runtime_lock_until_delete_settles() {
+        let (harness, _) = harness();
+        let mut labels = ownership_labels("key", "inst0", "dep1");
+        labels.insert(PERSISTENT_RUNTIME_LABEL.into(), "1".into());
+        labels.insert(TASK_SHELL_RUNTIME_LABEL.into(), "1".into());
+        labels.insert(persistent::RUNTIME_KEY_LABEL.into(), "cancel-key".into());
+        harness
+            .api
+            .labels_by_container
+            .lock()
+            .insert("cancelled".into(), labels);
+        harness
+            .api
+            .stopped_runtimes
+            .lock()
+            .insert("cancelled".into());
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *harness.api.remove_gate.lock() = Some(gate.clone());
+        let backend = harness.backend.clone();
+        let release =
+            tokio::spawn(async move { backend.release_task_shell(&["cancelled".into()]).await });
+        harness.api.remove_started.notified().await;
+        release.abort();
+        let _ = release.await;
+        let lock = harness.backend.stage_lock("runtime:cancel-key");
+        assert!(lock.try_lock().is_err());
+        gate.add_permits(1);
+        let _guard = tokio::time::timeout(Duration::from_secs(1), lock.lock())
+            .await
+            .expect("delete must complete after its caller is cancelled");
+        assert!(harness.api.removes.lock().contains(&"cancelled".into()));
+    }
+
+    #[tokio::test]
     async fn release_removes_only_idle_task_runtimes() {
         let (harness, environment) = harness();
         let backend = harness.backend.clone();
@@ -784,5 +951,178 @@ mod tests {
                 .code,
             "sandbox_task_shell_invalid"
         );
+    }
+
+    #[cfg(feature = "docker")]
+    async fn real_egress_fixture(script: &str) -> TaskShellResult {
+        use crate::docker::tests::{config, FakeAdmission};
+        use cognia_environment::image::ImageReference;
+        use cognia_external_agent::container_backend::bollard_api::BollardContainerApi;
+        let fixture = std::env::var("COGNIA_TEST_EGRESS_ENVIRONMENT")
+            .expect("set COGNIA_TEST_EGRESS_ENVIRONMENT to a pinned EnvironmentSpec JSON file");
+        let mut environment: EnvironmentSpec = serde_json::from_slice(
+            &std::fs::read(fixture).expect("read pinned EnvironmentSpec fixture"),
+        )
+        .expect("decode pinned EnvironmentSpec fixture");
+        let allowed =
+            std::env::var("COGNIA_TEST_EGRESS_ALLOWED_URL").expect("set allowed HTTP fixture URL");
+        let denied =
+            std::env::var("COGNIA_TEST_EGRESS_DENIED_URL").expect("set denied HTTP fixture URL");
+        let allowed_url = url::Url::parse(&allowed).unwrap();
+        let denied_url = url::Url::parse(&denied).unwrap();
+        assert_eq!(allowed_url.scheme(), "http");
+        assert_eq!(denied_url.scheme(), "http");
+        assert_ne!(allowed_url.host_str(), denied_url.host_str());
+        environment.egress.tier = EgressTier::Allowlist;
+        environment.egress.preset_ids.clear();
+        environment.egress.approved_domains = vec![allowed_url.host_str().unwrap().into()];
+        let bundle = ImageReference::parse(
+            &std::env::var("COGNIA_TEST_EGRESS_BUNDLE")
+                .expect("set registry/repository@sha256 bundle fixture"),
+        )
+        .unwrap();
+        let bundle =
+            PinnedImage::from_reference(&bundle).expect("bundle fixture must be digest-pinned");
+        assert_eq!(bundle.digest, environment.bundle.digest);
+        let mut approved = admitted(environment.clone(), IsolationTier::Container);
+        approved.admission.bundle.registry = bundle.registry;
+        approved.admission.bundle.repository = bundle.repository;
+        approved.admission.bundle.digest = bundle.digest;
+        approved.admission.bundle.release_tag = environment.bundle.release_tag.clone();
+        let workspace = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // The fixture image's declared uid differs from the test Host.
+            std::fs::set_permissions(workspace.path(), std::fs::Permissions::from_mode(0o777))
+                .unwrap();
+        }
+        let path = workspace.path().canonicalize().unwrap();
+        let path = path.to_str().unwrap().to_string();
+        let mut driver = config();
+        driver.deployment_id = format!("egress-fixture-{}", uuid::Uuid::new_v4().simple());
+        driver.instance_id = driver.deployment_id.clone();
+        driver.host.workspaces_dir = workspace.path().canonicalize().unwrap();
+        let api = BollardContainerApi::connect().unwrap();
+        let backend = DockerSandboxBackend::new(
+            api.clone(),
+            FakeAdmission::admitting(approved),
+            driver.clone(),
+        );
+        let mut req = request(&environment);
+        req.workspace_root = path.clone();
+        req.workspace_path = path.clone();
+        req.cwd = path;
+        req.argv = vec!["python3".into(), "-c".into(), script.into()];
+        req.stdin = None;
+        req.env = BTreeMap::from([
+            ("ALLOWED_URL".into(), allowed),
+            ("DENIED_URL".into(), denied),
+            (
+                "FIXTURE_IP".into(),
+                std::env::var("COGNIA_TEST_EGRESS_DIRECT_IP")
+                    .expect("set scoped direct TCP fixture IP"),
+            ),
+            (
+                "DNS_IP".into(),
+                std::env::var("COGNIA_TEST_EGRESS_DNS_IP").expect("set scoped UDP DNS fixture IP"),
+            ),
+            ("NO_PROXY".into(), "*".into()),
+            ("http_proxy".into(), "http://127.0.0.1:1".into()),
+        ]);
+        let result = backend.exec_task_shell(req).await;
+        let mut cleanup_errors = Vec::new();
+        for item in api.list_owned().await.unwrap() {
+            if item.deployment() == Some(driver.deployment_id.as_str()) {
+                if let Err(error) = backend.drain_egress(&item.id).await {
+                    cleanup_errors.push(error.to_string());
+                }
+                if let Err(error) = api.remove(&item.id).await {
+                    cleanup_errors.push(error);
+                }
+            }
+        }
+        for volume in api.list_owned_volumes().await.unwrap() {
+            if volume.labels.get(DEPLOYMENT_LABEL) == Some(&driver.deployment_id) {
+                if let Err(error) = api.remove_volume(&volume.name).await {
+                    cleanup_errors.push(error);
+                }
+            }
+        }
+        assert!(
+            cleanup_errors.is_empty(),
+            "fixture cleanup: {cleanup_errors:?}"
+        );
+        result.expect("production task-shell startup and egress handshake")
+    }
+
+    /// Load the pinned bundle and Python-equipped runtime image named by the
+    /// EnvironmentSpec fixture into a scoped Docker daemon first. Set
+    /// COGNIA_TEST_EGRESS_ENVIRONMENT (JSON path), COGNIA_TEST_EGRESS_BUNDLE
+    /// (registry/repository@sha256), COGNIA_TEST_EGRESS_ALLOWED_URL (HTTP 200),
+    /// COGNIA_TEST_EGRESS_DENIED_URL (another HTTP host),
+    /// COGNIA_TEST_EGRESS_DIRECT_IP and COGNIA_TEST_EGRESS_DNS_IP (scoped peers).
+    /// Run: `cargo test --offline -p cognia-sandbox-pool --features docker real_docker_egress_ -- --ignored --test-threads=1`.
+    #[cfg(feature = "docker")]
+    #[tokio::test]
+    #[ignore = "requires scoped real Docker and pinned bundle fixtures"]
+    async fn real_docker_egress_allowed_200_and_denied_blocked() {
+        let result = real_egress_fixture(
+            r#"
+import os, urllib.request, urllib.error
+assert os.environ['NO_PROXY'] == 'localhost,127.0.0.1,::1'
+assert os.environ['HTTP_PROXY'] == os.environ['http_proxy']
+with urllib.request.urlopen(os.environ['ALLOWED_URL'], timeout=10) as response:
+    assert response.status == 200
+try:
+    urllib.request.urlopen(os.environ['DENIED_URL'], timeout=10)
+except urllib.error.HTTPError as error:
+    assert error.code == 403, error
+else:
+    raise AssertionError('denied host passed the filtering proxy')
+print('allowed=200 denied=403')
+"#,
+        )
+        .await;
+        assert_eq!(result.exit_code, Some(0), "{}", result.stderr);
+        assert!(result.stdout.contains("allowed=200 denied=403"));
+    }
+
+    /// Uses the scoped pinned fixtures and run command documented on
+    /// `real_docker_egress_allowed_200_and_denied_blocked`.
+    /// Run: `cargo test --offline -p cognia-sandbox-pool --features docker real_docker_egress_ -- --ignored --test-threads=1`.
+    #[cfg(feature = "docker")]
+    #[tokio::test]
+    #[ignore = "requires scoped real Docker and pinned bundle fixtures"]
+    async fn real_docker_egress_direct_tcp_udp_dns_and_cleared_proxy_cannot_bypass() {
+        let result = real_egress_fixture(r#"
+import os, socket, urllib.request, urllib.error
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as stream:
+    stream.settimeout(2)
+    assert stream.connect_ex((os.environ['FIXTURE_IP'], 80)) != 0
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as dns:
+    dns.settimeout(2)
+    packet = bytes.fromhex('123401000001000000000000076578616d706c6503636f6d0000010001')
+    try:
+        dns.sendto(packet, (os.environ['DNS_IP'], 53))
+        dns.recvfrom(512)
+    except OSError:
+        pass
+    else:
+        raise AssertionError('direct UDP DNS escaped network=none')
+for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
+    os.environ.pop(name, None)
+try:
+    urllib.request.build_opener(urllib.request.ProxyHandler({})).open(os.environ['ALLOWED_URL'], timeout=2)
+except (urllib.error.URLError, OSError):
+    pass
+else:
+    raise AssertionError('cleared proxy variables bypassed network=none')
+print('tcp=blocked udp-dns=blocked cleared-proxy=blocked')
+"#).await;
+        assert_eq!(result.exit_code, Some(0), "{}", result.stderr);
+        assert!(result
+            .stdout
+            .contains("tcp=blocked udp-dns=blocked cleared-proxy=blocked"));
     }
 }

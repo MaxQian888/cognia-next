@@ -2141,7 +2141,12 @@ impl SandboxDockerApi for KubernetesProvider {
                             .is_some_and(|state| state.running.is_some())
                 })
         });
-        Ok(Some(RuntimeContainerState { running, labels }))
+        Ok(Some(RuntimeContainerState {
+            running,
+            labels,
+            network_mode: None,
+            network_attachments: Default::default(),
+        }))
     }
 
     async fn start_runtime(&self, _id: &str) -> Result<(), String> {

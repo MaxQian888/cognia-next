@@ -10,6 +10,9 @@ pub const DATA: u8 = 3;
 pub const HALF_CLOSE: u8 = 4;
 pub const CLOSE: u8 = 5;
 pub const RENEW: u8 = 6;
+pub const EGRESS_READY: u8 = 7;
+pub const EGRESS_RELEASE: u8 = 8;
+pub const EGRESS_RELEASED: u8 = 9;
 const HEADER: usize = 9;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -32,6 +35,7 @@ pub fn encode(kind: u8, id: u32, bytes: &[u8]) -> io::Result<Vec<u8>> {
 fn validate(kind: u8, id: u32, len: usize) -> io::Result<()> {
     let valid = match kind {
         READY => id == 0 && len == 2,
+        EGRESS_READY | EGRESS_RELEASE | EGRESS_RELEASED => id == 0 && len > 0 && len <= 4096,
         RENEW => id == 0 && len == 0,
         OPEN | HALF_CLOSE | CLOSE => id != 0 && len == 0,
         DATA => id != 0 && len > 0 && len <= MAX_DATA,
@@ -126,6 +130,43 @@ mod unix {
         nonce: Option<&str>,
         port: Option<u16>,
     ) -> io::Result<()> {
+        run_inner(input, output, lease, nonce, port, None)
+    }
+
+    pub fn run_egress(
+        input: OwnedFd,
+        output: OwnedFd,
+        lease: Duration,
+        generation: &str,
+        policy_digest: &str,
+    ) -> io::Result<()> {
+        run_inner(
+            input,
+            output,
+            lease,
+            None,
+            None,
+            Some((generation, policy_digest)),
+        )
+    }
+
+    struct ProbeThread(Option<std::thread::JoinHandle<()>>);
+    impl Drop for ProbeThread {
+        fn drop(&mut self) {
+            if let Some(thread) = self.0.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    fn run_inner(
+        input: OwnedFd,
+        output: OwnedFd,
+        lease: Duration,
+        nonce: Option<&str>,
+        port: Option<u16>,
+        egress: Option<(&str, &str)>,
+    ) -> io::Result<()> {
         if lease.is_zero() || lease > Duration::from_secs(60) {
             return Err(io::ErrorKind::InvalidInput.into());
         }
@@ -144,19 +185,53 @@ mod unix {
             })
             .transpose()
             .map_err(io::Error::other)?;
+        let port = listener.local_addr()?.port();
+        let ready = egress.map(|(generation, policy_digest)| crate::egress::Ready {
+            version: crate::egress::VERSION,
+            generation: generation.into(),
+            policy_digest: policy_digest.into(),
+            port,
+        });
+        let mut egress_lease = ready
+            .as_ref()
+            .map(|ready| crate::egress::LeaseGuard::new(ready.clone(), lease))
+            .transpose()?;
+        let (probe_result, _probe_thread) = if ready.is_some() {
+            let (send, receive) = std::sync::mpsc::sync_channel(1);
+            let thread = std::thread::spawn(move || {
+                let _ = send.send(crate::egress::probe(port));
+            });
+            (Some(receive), ProbeThread(Some(thread)))
+        } else {
+            (None, ProbeThread(None))
+        };
+        let mut probe_complete = ready.is_none();
         let mut outgoing = VecDeque::new();
-        enqueue(
-            &mut outgoing,
-            READY,
-            0,
-            &listener.local_addr()?.port().to_be_bytes(),
-        )?;
+        if ready.is_none() {
+            enqueue(&mut outgoing, READY, 0, &port.to_be_bytes())?;
+        }
         let mut incoming = Vec::new();
         let mut connections: BTreeMap<u32, Connection> = BTreeMap::new();
         let mut next_id = 1u32;
         let mut deadline = Instant::now() + lease;
         let mut buffer = [0; MAX_DATA];
         loop {
+            if !probe_complete {
+                match probe_result.as_ref().expect("egress probe").try_recv() {
+                    Ok(result) => {
+                        result?;
+                        probe_complete = true;
+                        enqueue(
+                            &mut outgoing,
+                            EGRESS_READY,
+                            0,
+                            &serde_json::to_vec(ready.as_ref().expect("egress ready"))?,
+                        )?;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => (),
+                    Err(_) => return Err(io::Error::other("egress probe worker disconnected")),
+                }
+            }
             if Instant::now() >= deadline {
                 return Ok(());
             }
@@ -229,6 +304,27 @@ mod unix {
                         while let Some(frame) = decode(&mut incoming)? {
                             if frame.kind == RENEW {
                                 deadline = Instant::now() + lease;
+                                if let Some(egress_lease) = &mut egress_lease {
+                                    egress_lease.renew()?;
+                                }
+                                continue;
+                            }
+                            if frame.kind == EGRESS_RELEASE {
+                                if !probe_complete {
+                                    return Err(io::Error::other("egress release before probe"));
+                                }
+                                let release: crate::egress::Release =
+                                    serde_json::from_slice(&frame.bytes)?;
+                                egress_lease
+                                    .as_mut()
+                                    .ok_or_else(|| io::Error::other("not an egress bridge"))?
+                                    .release(&release)?;
+                                enqueue(
+                                    &mut outgoing,
+                                    EGRESS_RELEASED,
+                                    0,
+                                    &serde_json::to_vec(&release)?,
+                                )?;
                                 continue;
                             }
                             if !matches!(frame.kind, DATA | HALF_CLOSE | CLOSE) {
@@ -323,11 +419,28 @@ mod unix {
     }
 }
 #[cfg(unix)]
-pub use unix::{run, run_gateway};
+pub use unix::{run, run_egress, run_gateway};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn egress_frames_are_versioned_bounded_and_distinct_from_services() {
+        let release = crate::egress::Release {
+            version: crate::egress::VERSION,
+            generation: "fresh".into(),
+        };
+        let payload = serde_json::to_vec(&release).unwrap();
+        for kind in [EGRESS_READY, EGRESS_RELEASE, EGRESS_RELEASED] {
+            let mut encoded = encode(kind, 0, &payload).unwrap();
+            assert_eq!(decode(&mut encoded).unwrap().unwrap().bytes, payload);
+            assert!(encode(kind, 1, &payload).is_err());
+            assert!(encode(kind, 0, &vec![0; 4097]).is_err());
+        }
+        assert!(encode(READY, 0, &payload).is_err());
+        assert!(encode(EGRESS_READY, 0, &[]).is_err());
+    }
+
     #[test]
     fn frames_are_fragment_safe_and_reject_unbounded_or_unknown_messages() {
         let wire = encode(DATA, 7, b"payload").unwrap();

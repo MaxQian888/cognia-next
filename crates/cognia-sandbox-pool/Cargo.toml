@@ -41,6 +41,7 @@ kubernetes = ["dep:kube", "dep:k8s-openapi"]
 e2b = ["dep:flate2", "cognia-environment/registry"]
 
 [dependencies]
+cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
 cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
 # `store` only: the registry HTTP transport (and the reqwest it pulls) belongs
 # to the metadata reader in `cognia-environment`, not to a driver that hands

@@ -5,6 +5,7 @@ use super::*;
 use cognia_external_agent::container_backend::{
     OwnedContainer, RunnerExecSpec, PERSISTENT_RUNTIME_LABEL, TASK_SHELL_RUNTIME_LABEL,
 };
+use cognia_sandboxd::egress::{EgressConfig, VERSION as EGRESS_VERSION};
 use sha2::{Digest, Sha256};
 
 pub(super) const SOCKET: &str = "/tmp/cognia-sandboxd/control.sock";
@@ -13,6 +14,20 @@ pub(super) const PROJECT_LABEL: &str = "cognia.project-id";
 
 fn fault(message: impl Into<String>) -> SandboxSpawnError {
     SandboxSpawnError::fault("sandbox_persistent_runtime_failed", message.into())
+}
+
+pub(super) async fn runtime_operation<T>(
+    allowlist: bool,
+    timeout: Duration,
+    operation: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    if allowlist {
+        tokio::time::timeout(timeout, operation)
+            .await
+            .map_err(|_| "persistent runtime Docker operation timed out".to_string())?
+    } else {
+        operation.await
+    }
 }
 
 /// What a retained runtime is for. A task shell's runtime is never an
@@ -39,7 +54,9 @@ pub(super) fn runtime_key(
     stable.cmd.clear();
     stable.env.clear();
     // workspace_env remains: a lease change requires a different running instance.
-    stable.labels.clear();
+    stable
+        .labels
+        .retain(|key, _| key == egress::POLICY_DIGEST_LABEL);
     let identity = match purpose {
         // Unchanged since agent runtimes were introduced: a new spelling
         // would orphan every existing one.
@@ -289,6 +306,7 @@ impl DockerSandboxBackend {
         request.command.extend(invocation);
         let mut runtime =
             runtime_config_with_env(environment, config.env.clone().into_iter().collect())?;
+        runtime.egress = acquired.egress.clone();
         runtime.workspace_env = workspace_env.clone();
         request.workspace_env = workspace_env;
         runtime.lifecycle_phases = vec![LifecyclePhase::PostAttach];
@@ -301,11 +319,27 @@ impl DockerSandboxBackend {
         ));
         // A failed start may still have reached the server; signal the unique
         // session before releasing the reservation, never retry that exec.
-        match self.api.exec_runtime(request).await {
+        if acquired.egress.is_some() && !self.egress_live(&container_id) {
+            return Err(SandboxSpawnError::refused(
+                "sandbox_egress_unenforceable",
+                "runtime egress lease ended before session start",
+            ));
+        }
+        match runtime_operation(
+            acquired.egress.is_some(),
+            Duration::from_secs(10),
+            self.api.exec_runtime(request),
+        )
+        .await
+        {
             Ok(running) => Ok((running, cleanup)),
             Err(error) => {
                 let _ = cleanup.remove(&container_id).await;
-                Err(fault(error))
+                Err(if acquired.egress.is_some() {
+                    SandboxSpawnError::refused("sandbox_egress_unenforceable", error)
+                } else {
+                    fault(error)
+                })
             }
         }
     }
@@ -322,14 +356,26 @@ impl DockerSandboxBackend {
         purpose: RuntimePurpose,
     ) -> Result<AcquiredRuntime, SandboxSpawnError> {
         let key = runtime_key(&spec, environment, purpose);
+        let egress = spec
+            .labels
+            .get(egress::POLICY_DIGEST_LABEL)
+            .map(|digest| EgressConfig {
+                version: EGRESS_VERSION,
+                policy_digest: digest.clone(),
+            });
+        let runtime_error = |message: String| match &egress {
+            Some(_) => SandboxSpawnError::refused("sandbox_egress_unenforceable", message),
+            None => fault(message),
+        };
         let lock = self.stage_lock(&format!("runtime:{key}"));
-        let guard = lock.lock_owned().await;
+        let guard = Arc::new(lock.lock_owned().await);
         let command_start = spec
             .cmd
             .iter()
             .position(|arg| arg == "--")
             .ok_or_else(|| fault("missing agent invocation"))?;
         let mut boot = runtime_config_with_env(environment, BTreeMap::new())?;
+        boot.egress = egress.clone();
         boot.workspace_env = spec.workspace_env.clone();
         // Task leases are never baked into a retained container or replayed on
         // restart. Lifecycle preparation uses only the approved project env.
@@ -355,7 +401,16 @@ impl DockerSandboxBackend {
             sanitize_container_name(&self.config.deployment_id),
             &key[..32]
         );
-        spec.labels = ownership_labels(&key, &self.config.instance_id, &self.config.deployment_id);
+        spec.labels.retain(|key, _| {
+            key == egress::POLICY_DIGEST_LABEL
+                || key == egress::POLICY_DOMAINS_LABEL
+                || key == egress::TIER_LABEL
+        });
+        spec.labels.extend(ownership_labels(
+            &key,
+            &self.config.instance_id,
+            &self.config.deployment_id,
+        ));
         spec.labels
             .insert(PERSISTENT_RUNTIME_LABEL.into(), "1".into());
         if purpose == RuntimePurpose::TaskShell {
@@ -367,7 +422,13 @@ impl DockerSandboxBackend {
             .insert(PROJECT_LABEL.into(), environment.project_id.clone());
         spec.labels
             .insert("cognia.spec-digest".into(), environment.spec_digest.clone());
-        let candidates = self.api.list_owned().await.map_err(fault)?;
+        let candidates = runtime_operation(
+            egress.is_some(),
+            Duration::from_secs(10),
+            self.api.list_owned(),
+        )
+        .await
+        .map_err(&runtime_error)?;
         let matching: Vec<_> = candidates
             .into_iter()
             .filter(|item| {
@@ -381,29 +442,55 @@ impl DockerSandboxBackend {
             })
             .collect();
         if matching.len() > 1 {
-            return Err(fault(
-                "multiple persistent runtimes claim the same workspace configuration",
+            return Err(runtime_error(
+                "multiple persistent runtimes claim the same workspace configuration".into(),
             ));
         }
         let container_id = if let Some(existing) = matching.first() {
-            let state = self
-                .api
-                .inspect_runtime(&existing.id)
-                .await
-                .map_err(fault)?
-                .ok_or_else(|| fault("runtime disappeared during acquisition"))?;
-            if !state.running {
-                self.api.start_runtime(&existing.id).await.map_err(fault)?;
+            let state = runtime_operation(
+                egress.is_some(),
+                Duration::from_secs(10),
+                self.api.inspect_runtime(&existing.id),
+            )
+            .await
+            .map_err(&runtime_error)?
+            .ok_or_else(|| runtime_error("runtime disappeared during acquisition".into()))?;
+            let readmit = egress.is_some() && (!state.running || !self.egress_live(&existing.id));
+            if readmit {
+                self.drain_egress(&existing.id).await?;
+                if state.running {
+                    runtime_operation(true, CLEANUP_TIMEOUT, self.api.stop_runtime(&existing.id))
+                        .await
+                        .map_err(&runtime_error)?;
+                }
             }
+            if !state.running || readmit {
+                runtime_operation(
+                    egress.is_some(),
+                    CLEANUP_TIMEOUT,
+                    self.api.start_runtime(&existing.id),
+                )
+                .await
+                .map_err(&runtime_error)?;
+            }
+            self.ensure_egress(&existing.id, &spec).await?;
             existing.id.clone()
         } else {
-            let mut running =
-                self.start_inner(spec, auth)
-                    .await
-                    .map_err(|failure| match failure {
-                        RunFailure::Pull(error) | RunFailure::Start(error) => fault(error),
-                        RunFailure::Timeout => fault("runtime start timed out"),
-                    })?;
+            let mut running = self
+                .start_inner(
+                    spec,
+                    auth,
+                    OperationLeases {
+                        _stage: Some(guard.clone()),
+                        ..OperationLeases::default()
+                    },
+                )
+                .await
+                .map_err(|failure| match failure {
+                    RunFailure::Pull(error) | RunFailure::Start(error) => fault(error),
+                    RunFailure::Timeout => fault("runtime start timed out"),
+                    RunFailure::Egress(error) => error,
+                })?;
             let container_id = running.container_id.clone();
             // Docker retains the rootfs after serve exits on idle. Only its
             // attach stream is drained here; no agent collector owns deletion.
@@ -419,6 +506,11 @@ impl DockerSandboxBackend {
         let deadline = tokio::time::Instant::now()
             + Duration::from_millis(boot.lifecycle_timeout_ms.saturating_mul(4) + 30_000);
         loop {
+            if egress.is_some() && !self.egress_live(&container_id) {
+                return Err(runtime_error(
+                    "runtime egress lease ended before readiness".into(),
+                ));
+            }
             if let Ok(body) = control(
                 &self.api,
                 exec_spec(&container_id, &["health", "--socket", SOCKET]),
@@ -432,24 +524,39 @@ impl DockerSandboxBackend {
                     break;
                 }
             }
-            if self
-                .api
-                .inspect_runtime(&container_id)
-                .await
-                .map_err(fault)?
-                .is_none_or(|state| !state.running)
+            if runtime_operation(
+                egress.is_some(),
+                Duration::from_secs(10),
+                self.api.inspect_runtime(&container_id),
+            )
+            .await
+            .map_err(&runtime_error)?
+            .is_none_or(|state| !state.running)
             {
-                return Err(fault(
-                    "persistent runtime exited before lifecycle preparation completed",
+                let _ = self.drain_egress(&container_id).await;
+                return Err(runtime_error(
+                    "persistent runtime exited before lifecycle preparation completed".into(),
                 ));
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(fault("persistent runtime readiness timed out"));
+                let _ = self.drain_egress(&container_id).await;
+                if egress.is_some() {
+                    let _ = runtime_operation(
+                        true,
+                        CLEANUP_TIMEOUT,
+                        self.api.stop_runtime(&container_id),
+                    )
+                    .await;
+                }
+                return Err(runtime_error(
+                    "persistent runtime readiness timed out".into(),
+                ));
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Ok(AcquiredRuntime {
             container_id,
+            egress,
             _guard: guard,
         })
     }
@@ -458,7 +565,8 @@ impl DockerSandboxBackend {
 /// A retained runtime that is up and prepared, held under its lock.
 pub(super) struct AcquiredRuntime {
     pub container_id: String,
-    pub _guard: tokio::sync::OwnedMutexGuard<()>,
+    pub egress: Option<EgressConfig>,
+    pub _guard: Arc<tokio::sync::OwnedMutexGuard<()>>,
 }
 
 pub(super) fn runtime_ready(state: &Value, expected_key: &str) -> bool {
@@ -468,6 +576,26 @@ pub(super) fn runtime_ready(state: &Value, expected_key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn allowlist_runtime_operations_have_a_setup_deadline() {
+        let result = runtime_operation(
+            true,
+            Duration::from_secs(10),
+            std::future::pending::<Result<(), String>>(),
+        )
+        .await;
+        assert_eq!(
+            result.unwrap_err(),
+            "persistent runtime Docker operation timed out"
+        );
+        let ordinary = runtime_operation(false, Duration::from_secs(1), async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            Ok(())
+        })
+        .await;
+        assert!(ordinary.is_ok());
+    }
 
     #[tokio::test(start_paused = true)]
     async fn session_lease_renewal_stops_when_its_owner_is_dropped() {
@@ -543,6 +671,30 @@ mod tests {
             runtime_key(&changed, &environment, RuntimePurpose::Agent),
             expected
         );
+        changed
+            .labels
+            .insert(egress::POLICY_DIGEST_LABEL.into(), "policy-one".into());
+        let policy_one = runtime_key(&changed, &environment, RuntimePurpose::Agent);
+        assert_ne!(policy_one, expected);
+        changed
+            .labels
+            .insert(egress::POLICY_DIGEST_LABEL.into(), "policy-two".into());
+        assert_ne!(
+            runtime_key(&changed, &environment, RuntimePurpose::Agent),
+            policy_one
+        );
+        changed
+            .labels
+            .insert(egress::POLICY_DIGEST_LABEL.into(), "policy-one".into());
+        changed
+            .labels
+            .insert("cognia.egress-generation".into(), "another-boot".into());
+        changed.env.push("HTTP_PROXY=http://127.0.0.1:45678".into());
+        assert_eq!(
+            runtime_key(&changed, &environment, RuntimePurpose::Agent),
+            policy_one
+        );
+        changed.labels.clear();
         let without_lease = changed.clone();
         changed.workspace_env.insert("PORT".into(), "41000".into());
         assert_ne!(
@@ -633,6 +785,108 @@ mod tests {
             &serde_json::json!({"ready":true}),
             "expected"
         ));
+    }
+
+    #[tokio::test]
+    async fn allowlist_context_survives_persistent_sessions_and_host_restart() {
+        use crate::docker::tests::{
+            admitted, command, config, decode_agent_environment, report, spawn_config, spec,
+            Harness,
+        };
+        use cognia_external_agent::exec_backend::EmitterEventSink;
+        let mut environment = spec(EgressTier::Allowlist, None);
+        environment.lifecycle = SandboxLifecycleKind::Persistent;
+        environment.egress.approved_domains = vec!["registry.npmjs.org".into()];
+        let harness = Harness::new(
+            admitted(environment.clone(), IsolationTier::Container),
+            report(vec![command("kiro-cli", None)], Vec::new()),
+            0,
+        );
+        harness
+            .spawn(spawn_config("before", "kiro-cli", &[], &environment))
+            .await
+            .unwrap();
+        let id = harness.backend.get_info("before").await.unwrap()["containerId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let boot = harness
+            .api
+            .specs
+            .lock()
+            .iter()
+            .find(|s| s.cmd[0] == "serve")
+            .unwrap()
+            .clone();
+        assert_eq!(boot.network_mode, "none");
+        assert!(boot.cmd.iter().any(|arg| arg == "--require-egress-v1"));
+        let expected = decode_agent_environment(&boot.env).egress.unwrap();
+        assert_eq!(
+            expected.policy_digest,
+            boot.labels[egress::POLICY_DIGEST_LABEL]
+        );
+        let connect = harness
+            .api
+            .runtime_execs
+            .lock()
+            .iter()
+            .find(|s| s.command.get(1).map(String::as_str) == Some("connect-agent"))
+            .unwrap()
+            .clone();
+        assert_eq!(
+            decode_agent_environment(&connect.env).egress,
+            Some(expected.clone())
+        );
+        let generation = |exec: &RunnerExecSpec| {
+            exec.command
+                .windows(2)
+                .find(|pair| pair[0] == "--generation")
+                .unwrap()[1]
+                .clone()
+        };
+        let first = generation(
+            harness
+                .api
+                .runtime_execs
+                .lock()
+                .iter()
+                .find(|s| s.command.get(1).map(String::as_str) == Some("bridge-egress"))
+                .unwrap(),
+        );
+        harness.backend.kill_all().await.unwrap();
+        harness.backend.drain_egress(&id).await.unwrap();
+        let mut next_config = config();
+        next_config.instance_id = "next-egress-host".into();
+        let next =
+            DockerSandboxBackend::new(harness.api.clone(), harness.admission.clone(), next_config);
+        next.reap_orphans().await.unwrap();
+        next.spawn_sandboxed(
+            spawn_config("after", "kiro-cli", &[], &environment),
+            EmitterEventSink::new(
+                cognia_external_agent::exec_backend::test_support::RecordingAgentEmitter::new(),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(next.get_info("after").await.unwrap()["containerId"], id);
+        let execs = harness.api.runtime_execs.lock().clone();
+        let bridges: Vec<_> = execs
+            .iter()
+            .filter(|s| s.command.get(1).map(String::as_str) == Some("bridge-egress"))
+            .collect();
+        assert_eq!(bridges.len(), 2);
+        assert_ne!(generation(bridges[1]), first);
+        let connect = execs
+            .iter()
+            .rev()
+            .find(|s| s.command.get(1).map(String::as_str) == Some("connect-agent"))
+            .unwrap();
+        assert_eq!(
+            decode_agent_environment(&connect.env).egress,
+            Some(expected)
+        );
+        next.kill_all().await.unwrap();
+        next.drain_egress(&id).await.unwrap();
     }
 
     #[test]

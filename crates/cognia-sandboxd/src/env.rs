@@ -61,6 +61,9 @@ pub const DEFAULT_LIFECYCLE_TIMEOUT_MS: u64 = 600_000;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeConfigV1 {
     pub version: u32,
+    /// Host-owned local Docker enforcement; remote providers leave this absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress: Option<crate::egress::EgressConfig>,
     #[serde(default)]
     pub container_env: BTreeMap<String, String>,
     #[serde(default)]
@@ -91,6 +94,7 @@ impl Default for RuntimeConfigV1 {
     fn default() -> Self {
         Self {
             version: 1,
+            egress: None,
             container_env: BTreeMap::new(),
             remote_env: BTreeMap::new(),
             spawn_env: BTreeMap::new(),
@@ -248,6 +252,11 @@ impl RuntimeConfigV1 {
     pub fn validate(&self) -> Result<(), RuntimeConfigError> {
         if self.version != 1 {
             return Err(RuntimeConfigError("unsupported version"));
+        }
+        if let Some(egress) = &self.egress {
+            egress
+                .validate()
+                .map_err(|_| RuntimeConfigError("invalid egress configuration"))?;
         }
         validate_environment(
             self.container_env
@@ -476,6 +485,8 @@ pub fn build_runtime_child_env(
     }
     // The trusted layer wins even over explicit remote unsets and task input.
     env.extend(config.workspace_env.clone());
+    crate::egress::apply_env(config.egress.as_ref(), &mut env)
+        .map_err(|_| RuntimeConfigError("sandbox_egress_unenforceable"))?;
     if env.len() > 1024
         || env
             .values()
@@ -740,6 +751,25 @@ mod tests {
             },
             runtime,
         )
+    }
+
+    #[test]
+    fn egress_environment_cannot_be_bypassed_by_unsets_or_proxy_overrides() {
+        let config = RuntimeConfigV1 {
+            egress: Some(crate::egress::EgressConfig {
+                version: crate::egress::VERSION,
+                policy_digest: "0".repeat(64),
+            }),
+            container_env: BTreeMap::from([("HTTP_PROXY".into(), "http://image".into())]),
+            remote_env: BTreeMap::from([("HTTPS_PROXY".into(), None)]),
+            spawn_env: BTreeMap::from([("NO_PROXY".into(), "*".into())]),
+            ..Default::default()
+        };
+        let error = runtime_env(&BTreeMap::new(), &config).unwrap_err();
+        assert_eq!(error.0, "sandbox_egress_unenforceable");
+        let encoded = serde_json::to_vec(&config).unwrap();
+        let decoded: RuntimeConfigV1 = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.egress, config.egress);
     }
 
     #[test]

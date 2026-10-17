@@ -130,15 +130,19 @@ digest 覆盖除「给人看的解析过程」之外的全部内容。Rust 在�
 
 桌面端本机容器里的 agent 拿到的是用户自己的 key，和今天 `env-builder.ts` 的做法一样，因为桌面网关只监听回环。ADR-0185（规划中）的「沙箱永不持有原始模型 key」规则约束的是 compose T2 与 Kubernetes。这个例外在「运行环境」面板里标注。
 
-### 第 ① 步不强制出网，并且明说这一点
+### 本地 Docker 白名单在执行前强制生效
 
-本文里有一条保证要靠第 ② 步的基础设施才成立。在那之前，第 ① 步的驱动在出网上是故意更弱的，这个缺口在类型、界面读到的 placement、以及测试三处标注：
+2026-10-17 更新：本地 Docker 的 `allowlist` runtime 使用 `network=none`，通过 Docker exec 字节桥接访问 Host 上已有的 `FilteringProxy`。准入时冻结预设与批准域名合并后的策略；域名、matcher 语义版本和 enforcement ABI 的摘要进入持久 runtime key。随机 relay 端口和每次启动的 generation 不影响稳定 key。
 
-- **出网**：`off` 会被真正执行——容器完全没有网络。`allowlist` 与 `on` 拿到的是旧 runner 那张网，没有任何东西在过滤，因为按租户的 L7 出网代理属于 ADR-0185。placement 里带 `egress.enforced: false`，下游任何地方都不能把一个没过滤的沙箱说成「已强制的白名单」。
+Host 检查 Docker 的真实网络模式与 attachment，验证带版本和 generation 的 READY 及端到端代理握手后才释放启动门。网关初始化、生命周期 hook、agent session 和 task shell 都必须等待验证。旧 bundle、不支持 bridge exec 或握手失败统一返回 `sandbox_egress_unenforceable` 拒绝，不触发可选隔离的宿主回退。`egress.enforced: true` 表示已经建立的租约，而非请求的 tier。
+
+bridge 和 proxy 属于容器，跨 session 保留。恢复或 Host 重启时重新准入并在 `postStart` 前重新握手；旧 READY 无法释放启动门。bridge/proxy 失效会关闭连接、拒绝新任务并停止 runtime，`network=none` 始终保留。没有策略摘要或隔离网络的旧持久 allowlist runtime 会停止并重建。`off`、`on` 行为不变；远端/E2B 保留 provider 原生网络策略，不等待本地 bridge。
+
+`docker/services.rs` 的 `bridge-service` 与 `docker/ports.rs` 的 `open_port` 是明确的控制面例外，分别服务于批准的 Host 服务和 workspace 端口转发。egress bridge 不冒充 `ToolHostService`，也不接受用户指定的 Host 端口。支持 CONNECT 和 absolute-form HTTP，不支持 raw TCP、UDP、直接 DNS 或 SOCKS。代理不检查 CONNECT 隧道内的 TLS SNI，因此允许 CDN 上的 domain fronting 不属于该保证。
 
 凭据已不再是缺口。驱动会在容器看到 spawn 环境之前，把环境内 provider 凭据名（与本地 launcher 清理的是同一份清单）从中剥离，沙箱因此不会持有宿主的真实 key；受管网关任务按任务签发的租约（`COGNIA_GATEWAY_TASK_CONFIG`/`COGNIA_GATEWAY_TOKEN`）才是入口，placement 对它会写 `credentials.mode: "gateway-lease"`，否则写 `"none"`。由于被剥离的名字从不列入驱动声明的变量清单，沙箱内的 supervisor 也会丢掉镜像里烘焙的同名凭据（[ADR-0183](./0183-the-agent-is-brought-to-the-image)）。普通 spawn 的按沙箱票据仍属 ADR-0185 §②.7。
 
-出网不是悄悄降级：项目不可能在第 ① 步要求「强制白名单」，然后被告知它拿到了。
+白名单初始化失败时拒绝执行，不会悄悄降低隔离或开放网络。
 
 ### companion 命令面
 

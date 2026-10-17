@@ -175,6 +175,7 @@ pub fn run_with_runtime(
     }
     if let Some(runtime) = runtime {
         runtime.validate()?;
+        crate::egress::require_live(runtime.egress.as_ref()).map_err(InitError::Output)?;
     }
     become_subreaper();
     let mut watched: Vec<i32> = FORWARDED_SIGNALS.to_vec();
@@ -208,6 +209,8 @@ pub fn run_with_runtime(
         // Reapply after gateway initialization so lifecycle and agent commands
         // share the host-authoritative lease, regardless of task setup.
         options.env.extend(runtime.workspace_env.clone());
+        crate::egress::apply_env(runtime.egress.as_ref(), &mut options.env)
+            .map_err(InitError::Output)?;
         for phase in &runtime.lifecycle_phases {
             if let Some(command) = runtime.lifecycle_commands.get(*phase) {
                 let commands = lifecycle_tasks(command);
@@ -217,6 +220,7 @@ pub fn run_with_runtime(
                     true,
                     Some(Duration::from_millis(runtime.lifecycle_timeout_ms)),
                     &mut signals,
+                    runtime.egress.as_ref(),
                 )?;
                 if code != 0 {
                     eprintln!("cognia-sandboxd: lifecycle {phase:?} failed with status {code}");
@@ -234,6 +238,7 @@ pub fn run_with_runtime(
         false,
         None,
         &mut signals,
+        runtime.and_then(|runtime| runtime.egress.as_ref()),
     )
 }
 
@@ -385,6 +390,7 @@ fn supervise(
     lifecycle: bool,
     timeout: Option<Duration>,
     signals: &mut Signals,
+    egress: Option<&crate::egress::EgressConfig>,
 ) -> Result<i32, InitError> {
     for signal in signals.pending() {
         if matches!(signal, SIGTERM | SIGINT | SIGQUIT | SIGHUP) {
@@ -400,6 +406,11 @@ fn supervise(
     let mut outcome = None;
     let mut stopping = None;
     loop {
+        if outcome.is_none() && crate::egress::require_live(egress).is_err() {
+            outcome = Some(125);
+            stopping = Some(Instant::now());
+            signal_groups(&groups, SIGTERM);
+        }
         for signal in signals.pending() {
             if signal == SIGCHLD {
                 continue;
@@ -508,6 +519,38 @@ fn become_subreaper() {}
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn egress_gate_precedes_gateway_lifecycle_and_agent() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("command-ran");
+        let runtime = crate::env::RuntimeConfigV1 {
+            egress: Some(crate::egress::EgressConfig {
+                version: crate::egress::VERSION,
+                policy_digest: "0".repeat(64),
+            }),
+            lifecycle_phases: vec![crate::env::LifecyclePhase::OnCreate],
+            lifecycle_commands: crate::env::RuntimeLifecycleCommands {
+                on_create: Some(crate::env::RuntimeCommand::Argv {
+                    argv: vec!["/usr/bin/touch".into(), marker.display().to_string()],
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let error = super::run_with_runtime(
+            super::InitOptions {
+                argv: vec!["/usr/bin/touch".into(), marker.as_os_str().to_owned()],
+                env: Default::default(),
+                user: None,
+                cwd: None,
+            },
+            Some(&runtime),
+        )
+        .unwrap_err();
+        assert!(matches!(error, super::InitError::Output(_)));
+        assert!(!marker.exists());
+    }
+
     use super::*;
     use crate::env::{LifecyclePhase, RuntimeLifecycleCommands};
 

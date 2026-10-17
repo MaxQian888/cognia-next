@@ -1029,6 +1029,8 @@ impl SandboxDockerApi for E2bProvider {
         Ok(info.map(|info| RuntimeContainerState {
             running: info.state == "running",
             labels: decode_labels(info.metadata),
+            network_mode: None,
+            network_attachments: Default::default(),
         }))
     }
 

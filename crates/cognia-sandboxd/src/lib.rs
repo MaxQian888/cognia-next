@@ -15,6 +15,7 @@
 //! than `/`, so the tests run against fixture trees and the probe logic never
 //! needs a container to be exercised.
 
+pub mod egress;
 pub mod elf;
 pub mod env;
 pub mod exec_env;

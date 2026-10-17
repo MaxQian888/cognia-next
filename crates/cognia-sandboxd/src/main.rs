@@ -54,6 +54,14 @@ enum Mode {
         listen_port: Option<u16>,
     },
     #[cfg(unix)]
+    /// Local Docker egress relay; policy decisions stay on the Host.
+    BridgeEgress {
+        #[arg(long)]
+        generation: String,
+        #[arg(long)]
+        policy_digest: String,
+    },
+    #[cfg(unix)]
     /// Complete a second adoption of an existing private service bridge.
     PublishGatewayReady {
         #[arg(long)]
@@ -71,6 +79,9 @@ enum Mode {
     #[cfg(unix)]
     /// Keep one workspace container ready for concurrent agent sessions.
     Serve {
+        /// Refuse bundles without the local egress gate protocol.
+        #[arg(long)]
+        require_egress_v1: bool,
         #[arg(long, default_value = "/tmp/cognia-sandboxd/control.sock")]
         socket: PathBuf,
         #[arg(long, default_value = "/var/lib/cognia-sandboxd")]
@@ -211,6 +222,9 @@ enum Mode {
     },
     /// Run one agent as PID 1.
     InitAgent {
+        /// Refuse bundles without the local egress gate protocol.
+        #[arg(long)]
+        require_egress_v1: bool,
         #[arg(long)]
         user: Option<UserSpec>,
         /// Run a named `--user` as the owner of this in-image directory when
@@ -235,6 +249,26 @@ enum Mode {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
+        #[cfg(unix)]
+        Mode::BridgeEgress {
+            generation,
+            policy_digest,
+        } => {
+            use std::os::fd::AsFd;
+            let result = (|| -> std::io::Result<()> {
+                cognia_sandboxd::service_bridge::run_egress(
+                    std::io::stdin().as_fd().try_clone_to_owned()?,
+                    std::io::stdout().as_fd().try_clone_to_owned()?,
+                    std::time::Duration::from_secs(60),
+                    &generation,
+                    &policy_digest,
+                )
+            })();
+            match result {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => fail(error, EXIT_INIT_FAILED),
+            }
+        }
         #[cfg(unix)]
         Mode::PublishGatewayReady { nonce, port } => {
             match cognia_sandboxd::gateway_task::sandbox::publish(&nonce, port) {
@@ -282,6 +316,7 @@ fn main() -> ExitCode {
         }
         #[cfg(unix)]
         Mode::Serve {
+            require_egress_v1,
             socket,
             state_dir,
             runtime_key,
@@ -303,6 +338,12 @@ fn main() -> ExitCode {
                     )
                 }
             };
+            if require_egress_v1 && runtime.egress.is_none() {
+                return fail(
+                    "sandbox_egress_unenforceable: missing egress configuration",
+                    EXIT_INIT_FAILED,
+                );
+            }
             let executable = match std::env::current_exe() {
                 Ok(path) => path,
                 Err(error) => return fail(error, EXIT_INIT_FAILED),
@@ -468,6 +509,7 @@ fn main() -> ExitCode {
             out,
         ),
         Mode::InitAgent {
+            require_egress_v1,
             user,
             match_owner_of,
             root,
@@ -476,6 +518,7 @@ fn main() -> ExitCode {
             runtime_config,
             argv,
         } => run_init(
+            require_egress_v1,
             user.as_ref(),
             match_owner_of.as_deref(),
             &root,
@@ -576,6 +619,7 @@ fn load_runtime(
 
 #[allow(clippy::too_many_arguments)] // Mirrors the init-agent CLI, including its optional wire handoff.
 fn run_init(
+    require_egress_v1: bool,
     user: Option<&UserSpec>,
     match_owner_of: Option<&str>,
     root: &Path,
@@ -590,6 +634,22 @@ fn run_init(
         Ok(runtime) => runtime,
         Err(error) => return fail(error, EXIT_INIT_FAILED),
     };
+    if require_egress_v1
+        && runtime
+            .as_ref()
+            .and_then(|runtime| runtime.egress.as_ref())
+            .is_none()
+    {
+        return fail(
+            "sandbox_egress_unenforceable: missing egress configuration",
+            EXIT_INIT_FAILED,
+        );
+    }
+    if let Err(error) = cognia_sandboxd::egress::await_live(
+        runtime.as_ref().and_then(|runtime| runtime.egress.as_ref()),
+    ) {
+        return fail(error, EXIT_INIT_FAILED);
+    }
     let cwd = if let Some(runtime) = &runtime {
         let workspace = root.join("workspace");
         let path =
@@ -765,4 +825,53 @@ fn effective_uid() -> u32 {
 #[cfg(not(unix))]
 fn effective_uid() -> u32 {
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn egress_cli_requires_explicit_version_and_complete_bridge_identity() {
+        assert!(Cli::try_parse_from([
+            "sandboxd",
+            "init-agent",
+            "--require-egress-v1",
+            "--",
+            "true"
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "sandboxd",
+            "init-agent",
+            "--require-egress-v2",
+            "--",
+            "true"
+        ])
+        .is_err());
+        #[cfg(unix)]
+        {
+            assert!(Cli::try_parse_from([
+                "sandboxd",
+                "serve",
+                "--runtime-key",
+                "abc",
+                "--require-egress-v1"
+            ])
+            .is_ok());
+            assert!(
+                Cli::try_parse_from(["sandboxd", "bridge-egress", "--generation", "fresh"])
+                    .is_err()
+            );
+            assert!(Cli::try_parse_from([
+                "sandboxd",
+                "bridge-egress",
+                "--generation",
+                "fresh",
+                "--policy-digest",
+                "abc"
+            ])
+            .is_ok());
+        }
+    }
 }

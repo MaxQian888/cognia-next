@@ -1110,6 +1110,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn egress_unenforceable_refusal_never_falls_back_with_optional_isolation() {
+        let sandbox = Recording::new("sandbox");
+        *sandbox.sandbox_result.lock() = Some(SandboxSpawnError::refused(
+            "sandbox_egress_unenforceable",
+            "bundle egress protocol or proxy handshake failed",
+        ));
+        let (existing, router, emitter) = router(sandbox.clone());
+        let error = router
+            .spawn(
+                config("allowlist", Some(placement(false))),
+                EmitterEventSink::new(emitter.clone()),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "sandbox_egress_unenforceable: bundle egress protocol or proxy handshake failed"
+        );
+        assert!(existing.spawned.lock().is_empty());
+        assert!(sandbox.spawned.lock().is_empty());
+        assert!(placements(&emitter).is_empty());
+        assert!(router.list().await.is_empty());
+    }
+
+    #[tokio::test]
     async fn a_multi_tenant_host_requires_a_placement_and_never_falls_back() {
         let sandbox = Arc::new(Recording {
             kind: "sandbox",
