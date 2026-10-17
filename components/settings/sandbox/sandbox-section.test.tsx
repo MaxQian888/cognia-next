@@ -47,8 +47,15 @@ const MESSAGES = {
       ipcError: { label: "IPC error" },
       status: {
         ok: "Active",
+        limited: "Limited confinement",
         setup: "Setup required",
         down: "Unavailable",
+      },
+      windows: {
+        filesystemInert: "Windows filesystem enforcement: inactive",
+        rootsRefused:
+          "Runs requesting filesystem roots are refused until enforcement is available.",
+        networkUnrestricted: "Network: not restricted. Off and Allowlist requests are refused.",
       },
       probe: {
         running: "Verifying…",
@@ -100,7 +107,39 @@ describe("SandboxSection", () => {
       expect(screen.getByTestId("sandbox-status-badge")).toHaveTextContent("Active")
     })
     expect(screen.getByText("linux-bwrap")).toBeInTheDocument()
+    expect(
+      screen.queryByText(MESSAGES.settings.sandbox.windows.filesystemInert)
+    ).not.toBeInTheDocument()
   })
+
+  it.each([true, false])(
+    "labels Windows filesystem enforcement inert, including legacy health (capabilities: %s)",
+    async (hasCapabilities) => {
+      mockCall.mockResolvedValue({
+        available: true,
+        backend: "windows-restricted-token",
+        version: "2",
+        windowsCapabilities: hasCapabilities
+          ? {
+              protocolVersions: [2],
+              filesystemEnforcement: false,
+              filesystemReason: "windows_filesystem_roots_unenforced",
+              networkEnforcement: "unconfined",
+              restrictedToken: true,
+              lowIntegrity: true,
+              jobObject: true,
+            }
+          : undefined,
+      })
+      renderWithIntl(<SandboxSection />)
+      expect(
+        await screen.findByText(MESSAGES.settings.sandbox.windows.filesystemInert)
+      ).toBeVisible()
+      expect(screen.getByText(MESSAGES.settings.sandbox.windows.rootsRefused)).toBeVisible()
+      expect(screen.getByText(MESSAGES.settings.sandbox.windows.networkUnrestricted)).toBeVisible()
+      expect(screen.getByTestId("sandbox-status-badge")).toHaveTextContent("Limited confinement")
+    }
+  )
 
   it("renders 'Unavailable' when IPC errors", async () => {
     mockCall.mockRejectedValue(new Error("ipc down"))

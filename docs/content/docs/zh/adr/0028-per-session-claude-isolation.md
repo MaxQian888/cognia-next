@@ -19,6 +19,21 @@ description: "Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / 代理�
 > **注 （2026-07-25）** 每会话/按角色*账号固定*的一半ADR是实时且用户可访问的，非推测：`accountIdOverride`由`lib/claude/env-resolver.ts`解决，从角色编辑器（`components/settings/characters-section.tsx`）和聊天会话设置表编辑，`components/settings/subscription/account-usage-chips.tsx`中显示为“正在使用”芯片，并有注册的`claude_env_for_account`/`claude_proxy_env_for_session` 命令支持。读者若仅凭字面理解前言，会认为这些内容根本不存在。执行沙盒部分尚未与该文档进行重新核实，因此整体状态保持提议，而非翻转为已接受。
 **Supersedes**：扩展ADR-0010（Claude订阅OAuth）、ADR-0020（计算机使用完整性）、ADR-0025（统一订阅模块）、ADR-0026（插件扩展点扩展）**作者**：Max Qian + Claude Opus 4.7
 
+## 修订 — Windows 文件系统根目录（2026-10-17）
+
+S2 决策取代此前关于 Windows 文件系统隔离的表述：受限令牌、低完整性与 Job Object
+不能强制执行请求的可读/可写根目录。宿主始终使用版本化 stdin `--protocol-v2` 协议
+与共用文件系统计划。在 runner 能力报告证明文件系统强制隔离可用前，携带 roots 的运行
+请求一律以 `Unavailable` 拒绝，原因为 `windows_filesystem_roots_unenforced`。
+Windows 网络 Off 与 Allowlist 同样被拒绝；On 报告不受限制。Settings 明确标注
+文件系统强制隔离“未启用”，并由测试固定该刻意保留的未启用状态。能力探针不等同于
+实际隔离验证成功。
+
+启动加固检查挂起子进程的 Job 分配与恢复，限制继承句柄，使用有界并发匿名管道读取输出，
+且只信任安装位置的 runner。这些措施不会启用文件系统强制隔离。已签名文件系统
+minifilter 是**独立的未来项目**，需要 WDK、驱动签名、提权安装和原生 Windows 验证；
+S2 不交付驱动。
+
 ## 背景
 
 cognia-next 的节点sidecar（`sidecar/claude-host.mjs`）是一个单OS进程，可托管 N 个并发`@anthropic-ai/claude-agent-sdk` `query()`由 `sessionId` 键控的呼叫。`lib/claude/build-options.ts:resolveSendOptions`已经为每个`ChatSession`隔离出大量接口：`cwd`、`model`、`provider`、`providerCredentials`、`allowedTools` / `disallowedTools`、`mcpServers`、`additionalDirectories`、`permissionMode`、`settingSources`、`agents`、`appendHeaders`，每个呼叫的`env`（针对`DEBUG`和`anthropic-beta`的头部）。

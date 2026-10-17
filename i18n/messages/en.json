@@ -51870,6 +51870,7 @@
       "retryButton": "Run health probe",
       "status": {
         "down": "Unavailable",
+        "limited": "Limited confinement",
         "ok": "Active",
         "setup": "Setup required"
       },
@@ -51879,6 +51880,7 @@
           "adapterMissing": "Enable the E2B Sandbox plugin before selecting this tier.",
           "probeFailed": "The active OS confinement check failed. Review the probe diagnostic above, then retry verification.",
           "probeRequired": "Run Verify confinement successfully before selecting this tier.",
+          "windowsFilesystemInert": "Windows filesystem enforcement is inactive: requests carrying roots are refused. Network Off and Allowlist are also unavailable.",
           "workspaceRequired": "Execution also requires a session backed by an existing E2B workspace."
         },
         "description": "Which sandbox layer runs Bash / Edit / Write when a session has sandbox enabled. Characters can override.",
@@ -51896,6 +51898,11 @@
       "verifyButton": "Verify confinement",
       "version": {
         "label": "Version"
+      },
+      "windows": {
+        "filesystemInert": "Windows filesystem enforcement: inactive",
+        "networkUnrestricted": "Network: not restricted. Off and Allowlist requests are refused.",
+        "rootsRefused": "Runs requesting filesystem roots are refused until enforcement is available."
       },
       "workspaceConfinement": {
         "description": "Confine the built-in file and shell tools to the active workspace roots. Tools that try to write outside the workspace ask for approval first; credential paths (.ssh, .aws, …) are always blocked.",

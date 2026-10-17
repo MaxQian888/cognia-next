@@ -55,11 +55,13 @@ export function SandboxTierCard() {
                 ? runtime.available
                   ? t("availability.workspaceRequired")
                   : t("availability.adapterMissing")
-                : runtime.available
-                  ? undefined
-                  : availability.os.reason === "probe-failed"
-                    ? t("availability.probeFailed")
-                    : t("availability.probeRequired")
+                : availability.os.backend.startsWith("windows")
+                  ? t("availability.windowsFilesystemInert")
+                  : runtime.available
+                    ? undefined
+                    : availability.os.reason === "probe-failed"
+                      ? t("availability.probeFailed")
+                      : t("availability.probeRequired")
             return (
               <div key={tier} className="flex items-start gap-3 py-2">
                 <RadioGroupItem

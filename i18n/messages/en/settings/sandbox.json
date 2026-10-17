@@ -67,7 +67,8 @@
   "status": {
     "down": "Unavailable",
     "ok": "Active",
-    "setup": "Setup required"
+    "setup": "Setup required",
+    "limited": "Limited confinement"
   },
   "strictModeNote": "Strict mode: when unavailable, sandboxed tool calls are refused — no bypass option.",
   "tier": {
@@ -75,7 +76,8 @@
       "adapterMissing": "Enable the E2B Sandbox plugin before selecting this tier.",
       "probeFailed": "The active OS confinement check failed. Review the probe diagnostic above, then retry verification.",
       "probeRequired": "Run Verify confinement successfully before selecting this tier.",
-      "workspaceRequired": "Execution also requires a session backed by an existing E2B workspace."
+      "workspaceRequired": "Execution also requires a session backed by an existing E2B workspace.",
+      "windowsFilesystemInert": "Windows filesystem enforcement is inactive: requests carrying roots are refused. Network Off and Allowlist are also unavailable."
     },
     "description": "Which sandbox layer runs Bash / Edit / Write when a session has sandbox enabled. Characters can override.",
     "microvm": {
@@ -98,5 +100,10 @@
     "label": "Confine tools to the workspace",
     "note": "On by default, and works on every platform. Disabling lets built-in tools read and write anywhere on this machine without asking. The OS sandbox, when enabled, supersedes this layer.",
     "title": "Workspace confinement"
+  },
+  "windows": {
+    "filesystemInert": "Windows filesystem enforcement: inactive",
+    "rootsRefused": "Runs requesting filesystem roots are refused until enforcement is available.",
+    "networkUnrestricted": "Network: not restricted. Off and Allowlist requests are refused."
   }
 }

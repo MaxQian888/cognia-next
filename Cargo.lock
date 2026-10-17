@@ -2407,6 +2407,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -3163,6 +3164,7 @@ dependencies = [
 name = "cognia-sandbox-runner"
 version = "0.1.0"
 dependencies = [
+ "cognia-exec-sandbox",
  "serde",
  "serde_json",
  "windows 0.62.2",

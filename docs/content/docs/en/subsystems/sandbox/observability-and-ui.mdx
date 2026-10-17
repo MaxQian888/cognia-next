@@ -143,7 +143,7 @@ remain readable with their provider-specific configuration, but expose no lifecy
 `components/settings/sandbox/` ships a complete, tested section, reachable at **Settings → Sandbox**
 (`?section=sandbox`):
 
-- **`sandbox-section.tsx`** — `SandboxSection`: a health card with a tri-state badge driven by
+- **`sandbox-section.tsx`** — `SandboxSection`: a health card with an availability/capability badge driven by
   `useSandboxHealth()` and a "Run health probe" button (`data-testid="sandbox-retry-button"`),
   composing the cards below.
 - **`sandbox-enable-card.tsx`** — the default / per-session sandbox enable toggle.
@@ -164,6 +164,14 @@ How it is wired:
   is at `settings-shell.tsx:516`.
 - `settings-nav-config.ts:255` registers the `id: "sandbox"` NavItem (group `ai`, `desktopOnly`).
 - The onboarding deep-link (`/settings?section=sandbox`) therefore resolves.
+
+Windows health includes the cached `--capabilities-v2` report as `windowsCapabilities`. While
+`filesystemEnforcement` is false (or absent on an older host), the card explicitly labels Windows
+filesystem enforcement **inactive** and explains that root-bearing runs are refused. An available
+runner receives a **Limited confinement** badge instead of implying full filesystem isolation.
+The network label says **not restricted** and notes that Off/Allowlist requests are refused.
+The capability probe starts no target; the separate Verify confinement action remains an active
+check. See [OS backends](./os-backends) for the v2 protocol and fail-closed admission rules.
 
 ## i18n namespaces
 

@@ -33,7 +33,9 @@ export function SandboxSection() {
   const t = useTranslations("settings.sandbox")
   const { health, refresh, error, probe, verify } = useSandboxHealth()
 
-  const variant: "ok" | "setup" | "down" = error ? "down" : health.available ? "ok" : "setup"
+  const isWindows = health.backend.startsWith("windows") || !!health.windowsCapabilities
+  const filesystemInert = isWindows && health.windowsCapabilities?.filesystemEnforcement !== true
+  const variant = error ? "down" : !health.available ? "setup" : filesystemInert ? "limited" : "ok"
 
   return (
     <div className="space-y-4">
@@ -42,7 +44,7 @@ export function SandboxSection() {
           <CardTitle className="flex items-center gap-2">
             {variant === "ok" ? (
               <CheckCircle2 className="size-5 text-emerald-500" aria-hidden="true" />
-            ) : variant === "setup" ? (
+            ) : variant === "setup" || variant === "limited" ? (
               <AlertCircle className="size-5 text-amber-500" aria-hidden="true" />
             ) : (
               <ShieldOff className="size-5 text-rose-500" aria-hidden="true" />
@@ -77,6 +79,13 @@ export function SandboxSection() {
               </>
             )}
           </dl>
+          {filesystemInert && (
+            <div role="note" className="space-y-1 text-amber-700 dark:text-amber-400">
+              <p className="font-medium">{t("windows.filesystemInert")}</p>
+              <p>{t("windows.rootsRefused")}</p>
+            </div>
+          )}
+          {isWindows && <p className="text-muted-foreground">{t("windows.networkUnrestricted")}</p>}
           <div className="flex flex-wrap items-center gap-2 pt-2">
             <Button
               variant="outline"

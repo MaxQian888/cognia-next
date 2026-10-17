@@ -1,51 +1,36 @@
-// ADR-0028 Phase 4 — Windows backend.
-//
-// `run()` serialises the `SandboxCommand` into the runner's JSON contract and
-// shells out to `cognia-sandbox-runner.exe` — now the real restricted-token +
-// low-integrity + Job Object runner living in its own workspace member crate
-// (`crates/cognia-sandbox-runner`), which replaced the `runas /trustlevel`
-// stopgap. Because that runner launches the child under a restricted SUBSET of
-// the app's own token, `CreateProcessAsUserW` needs no SeAssignPrimaryToken
-// privilege — so the sandbox needs **no UAC, no synthetic users, no setup**.
-//
-// Availability is therefore simply whether the bundled runner binary resolves
-// next to the app executable; `first_time_setup()` is a no-op confirming that.
-// Strict mode still holds: if the runner is missing we report `SetupRequired`
-// rather than silently running unsandboxed.
-//
-// `cognia-sandbox-setup.exe` (synthetic users + per-SID Firewall) remains for
-// the OPTIONAL kernel-enforced network-egress follow-up — it is no longer on
-// the critical path for filesystem / privilege / process confinement.
-
-#![allow(dead_code)]
+//! Windows v2 runner boundary. Roots remain deliberately inert until a signed
+//! filesystem enforcement project ships. Admission precedes target launch;
+//! capability probing never launches the requested command.
 
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
+use crate::filesystem_plan::FilesystemPlan;
 use crate::traits::SandboxedExec;
 use crate::types::{
-    NetworkPolicy, SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
+    NetworkAllowlistProbe, NetworkAllowlistState, NetworkPolicy, NetworkReport, SandboxCommand,
+    SandboxError, SandboxHealth, SandboxPolicy, SandboxResult, WindowsCapabilities,
 };
 
-pub const OFFLINE_USER: &str = "CogniaSandboxOffline";
-pub const ONLINE_USER: &str = "CogniaSandboxOnline";
-
-/// Returns the path the setup binary writes when it finishes
-/// successfully. Used as a cheap availability probe.
-pub fn marker_path() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join("cognia").join("sandbox").join("setup.ok"))
-}
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const CAPABILITY_BYTES: u64 = 16_384;
+type CacheKey = (PathBuf, SystemTime, u64);
+type CapabilityCache = HashMap<CacheKey, WindowsCapabilities>;
+static CAPABILITIES: OnceLock<Mutex<CapabilityCache>> = OnceLock::new();
 
 #[derive(Debug, Clone, Default)]
 pub struct WindowsSandboxBackend {
-    /// Overrides for tests — production constructs `WindowsSandboxBackend::new`.
-    setup_binary: Option<PathBuf>,
-    runner_binary: Option<PathBuf>,
-    marker_override: Option<PathBuf>,
+    // Only unit tests may choose an installation directory; production has no
+    // cwd, PATH, environment or user-writable marker override.
+    #[cfg(test)]
+    install_dir: Option<PathBuf>,
 }
 
 impl WindowsSandboxBackend {
@@ -53,55 +38,309 @@ impl WindowsSandboxBackend {
         Self::default()
     }
 
-    pub fn with_paths(setup: PathBuf, runner: PathBuf, marker: PathBuf) -> Self {
-        Self {
-            setup_binary: Some(setup),
-            runner_binary: Some(runner),
-            marker_override: Some(marker),
+    fn runner_path(&self) -> Result<PathBuf, SandboxError> {
+        #[cfg(test)]
+        if let Some(dir) = &self.install_dir {
+            return trusted_runner_path(dir, &dir.join("cognia-sandbox-runner.exe"));
         }
+        let exe = std::env::current_exe().map_err(|e| unavailable(e.to_string()))?;
+        let dir = exe
+            .parent()
+            .ok_or_else(|| unavailable("executable has no parent"))?;
+        trusted_runner_path(dir, &dir.join("cognia-sandbox-runner.exe"))
     }
 
-    fn setup_path(&self) -> PathBuf {
-        self.setup_binary
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("cognia-sandbox-setup.exe"))
+    fn capabilities(&self) -> Result<WindowsCapabilities, SandboxError> {
+        let runner = self.runner_path()?;
+        cached_capabilities(&runner, probe_capabilities).map_err(unavailable)
     }
+}
 
-    fn runner_path(&self) -> PathBuf {
-        if let Some(p) = &self.runner_binary {
-            return p.clone();
+fn unavailable(reason: impl Into<String>) -> SandboxError {
+    SandboxError::Unavailable {
+        reason: reason.into(),
+    }
+}
+
+/// Only called for the host's newly created private scratch directory, after
+/// admission. A Low integrity child cannot write a default Medium directory.
+/// LABEL_SECURITY_INFORMATION changes the integrity label without relaxing
+/// the existing owner or DACL, and never relabels a caller-provided root.
+#[cfg(windows)]
+fn mark_private_scratch_low_integrity(path: &Path) -> Result<(), SandboxError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::{w, BOOL, PCWSTR};
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{
+        GetSecurityDescriptorSacl, ACL, LABEL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    };
+
+    let failure = |error| unavailable(format!("private scratch integrity unavailable: {error}"));
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // The constant SDDL contains one Low mandatory-label ACE, denying write-up.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            w!("S:(ML;;NW;;;LW)"),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            None,
+        )
+    }
+    .map_err(failure)?;
+    let result = (|| {
+        let mut present = BOOL::default();
+        let mut defaulted = BOOL::default();
+        let mut sacl: *mut ACL = std::ptr::null_mut();
+        unsafe { GetSecurityDescriptorSacl(descriptor, &mut present, &mut sacl, &mut defaulted) }
+            .map_err(failure)?;
+        if !present.as_bool() || sacl.is_null() {
+            return Err(unavailable(
+                "private scratch integrity unavailable: missing label ACL",
+            ));
         }
-        // Bundled alongside the app — resolve next to the running executable so
-        // availability is checkable without relying on the cwd / PATH.
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                let candidate = dir.join("cognia-sandbox-runner.exe");
-                if candidate.exists() {
-                    return candidate;
-                }
+        let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        unsafe {
+            SetNamedSecurityInfoW(
+                PCWSTR(name.as_ptr()),
+                SE_FILE_OBJECT,
+                LABEL_SECURITY_INFORMATION,
+                None,
+                None,
+                None,
+                Some(sacl.cast_const()),
+            )
+        }
+        .ok()
+        .map_err(failure)
+    })();
+    // The ACL borrows descriptor storage; free only after the setter returns,
+    // including every error path after descriptor conversion succeeded.
+    unsafe {
+        let _ = LocalFree(Some(HLOCAL(descriptor.0)));
+    }
+    result
+}
+
+/// A symlink/reparse point cannot redirect the bundled runner out of the
+/// canonical installation directory. The legacy setup marker is a timestamp,
+/// not an installation-path authority, and cannot authorize another location.
+fn trusted_runner_path(install_dir: &Path, candidate: &Path) -> Result<PathBuf, SandboxError> {
+    let install = install_dir
+        .canonicalize()
+        .map_err(|e| unavailable(format!("runner install directory: {e}")))?;
+    let runner = candidate
+        .canonicalize()
+        .map_err(|e| SandboxError::SetupRequired {
+            reason: format!("Windows sandbox runner missing beside the host executable: {e}"),
+        })?;
+    if runner.parent() != Some(install.as_path()) || !runner.is_file() {
+        return Err(unavailable("untrusted_windows_sandbox_runner_path: runner must reside in the host installation directory"));
+    }
+    Ok(runner)
+}
+
+fn cached_capabilities(
+    runner: &Path,
+    probe: impl FnOnce(&Path) -> Result<WindowsCapabilities, String>,
+) -> Result<WindowsCapabilities, String> {
+    let metadata = runner.metadata().map_err(|e| e.to_string())?;
+    let key = (
+        runner.to_path_buf(),
+        metadata.modified().map_err(|e| e.to_string())?,
+        metadata.len(),
+    );
+    let cache = CAPABILITIES.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(cached) = cache.lock().map_err(|e| e.to_string())?.get(&key).cloned() {
+        return Ok(cached);
+    }
+    let result = probe(runner);
+    let mut cache = cache.lock().map_err(|e| e.to_string())?;
+    cache.retain(|existing, _| existing.0 != key.0);
+    if let Ok(capabilities) = &result {
+        cache.insert(key, capabilities.clone());
+    }
+    result
+}
+
+fn parse_capabilities(bytes: &[u8]) -> Result<WindowsCapabilities, String> {
+    let capabilities: WindowsCapabilities = serde_json::from_slice(bytes)
+        .map_err(|e| format!("windows_runner_capabilities_invalid: {e}"))?;
+    if !capabilities.protocol_versions.contains(&2)
+        || !capabilities.restricted_token
+        || !capabilities.low_integrity
+        || !capabilities.job_object
+        || capabilities.network_enforcement != "unconfined"
+        || (!capabilities.filesystem_enforcement && capabilities.filesystem_reason.is_empty())
+    {
+        return Err("windows_runner_capabilities_unsupported: v2 and token/integrity/job guarantees required".into());
+    }
+    Ok(capabilities)
+}
+
+fn probe_capabilities(runner: &Path) -> Result<WindowsCapabilities, String> {
+    use std::io::Read;
+    let mut child = std::process::Command::new(runner)
+        .arg("--capabilities-v2")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("windows_runner_capabilities_unavailable: {e}"))?;
+    let started = Instant::now();
+    // A capability report fits in the pipe. Oversize or wedged probes are
+    // killed at the same deadline, without unbounded buffering or threads.
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < PROBE_TIMEOUT => {
+                std::thread::sleep(Duration::from_millis(10))
+            }
+            result => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("windows_runner_capabilities_unavailable: probe timeout/wait failure: {result:?}"));
             }
         }
-        PathBuf::from("cognia-sandbox-runner.exe")
+    };
+    if !status.success() {
+        return Err(format!(
+            "windows_runner_capabilities_unavailable: probe exited {status}"
+        ));
     }
+    let mut bytes = Vec::new();
+    child
+        .stdout
+        .take()
+        .ok_or("capability stdout missing")?
+        .take(CAPABILITY_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > CAPABILITY_BYTES as usize {
+        return Err("windows_runner_capabilities_invalid: oversized report".into());
+    }
+    parse_capabilities(&bytes)
+}
 
-    fn marker(&self) -> Option<PathBuf> {
-        self.marker_override.clone().or_else(marker_path)
+fn admit(
+    capabilities: &WindowsCapabilities,
+    filesystem: &FilesystemPlan,
+    network: &str,
+) -> Result<(), SandboxError> {
+    if filesystem.has_roots() && !capabilities.filesystem_enforcement {
+        return Err(unavailable("windows_filesystem_roots_unenforced: filesystem roots are inert; not confined (minifilter is a separate project)"));
     }
+    if matches!(network, "off" | "allowlist") {
+        return Err(unavailable(format!(
+            "windows_network_unenforced: {network} cannot be enforced; network not restricted"
+        )));
+    }
+    Ok(())
+}
 
-    fn target_user_for(&self, policy: &SandboxPolicy) -> &'static str {
-        // Online tier is reserved for sandbox policies that grant network;
-        // every other shape goes to the offline user.
-        let network = match policy {
-            SandboxPolicy::Bash { network, .. } => network,
-            SandboxPolicy::Edit { .. }
-            | SandboxPolicy::Write { .. }
-            | SandboxPolicy::TextEditor { .. } => &NetworkPolicy::Off,
-        };
-        match network {
-            NetworkPolicy::Off => OFFLINE_USER,
-            NetworkPolicy::On | NetworkPolicy::Allowlist { .. } => ONLINE_USER,
-        }
+fn network_request(policy: &SandboxPolicy) -> &'static str {
+    match policy {
+        SandboxPolicy::Bash { network, .. } => match network {
+            NetworkPolicy::Off => "off",
+            NetworkPolicy::On => "on",
+            NetworkPolicy::Allowlist { .. } => "allowlist",
+        },
+        _ => "unspecified",
     }
+}
+
+fn network_report(policy: &SandboxPolicy) -> NetworkReport {
+    NetworkReport {
+        requested: match policy {
+            SandboxPolicy::Bash { network, .. } => Some(network.clone()),
+            _ => None,
+        },
+        effective: Some(NetworkPolicy::On),
+        mechanism: Some("unconfined".into()),
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct RunnerEnvelope<'a> {
+    protocol: u32,
+    request: RunnerRequest<'a>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct RunnerRequest<'a> {
+    argv: &'a [String],
+    cwd: String,
+    env: &'a BTreeMap<String, String>,
+    timeout_seconds: u64,
+    limits: RunnerLimits,
+    network: &'static str,
+    filesystem: FilesystemPlan,
+}
+
+#[derive(serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct RunnerLimits {
+    max_memory_mb: u32,
+    max_job_memory_mb: u32,
+    max_cpu_seconds: u32,
+    max_processes: u32,
+}
+
+fn build_runner_payload<'a>(
+    command: &'a SandboxCommand,
+    policy: &SandboxPolicy,
+    filesystem: FilesystemPlan,
+) -> RunnerEnvelope<'a> {
+    let (max_memory_mb, max_cpu_seconds, max_processes) = match policy {
+        SandboxPolicy::Bash {
+            max_memory_mb,
+            max_cpu_seconds,
+            max_processes,
+            ..
+        } => (*max_memory_mb, *max_cpu_seconds, *max_processes),
+        _ => (0, 0, 0),
+    };
+    RunnerEnvelope {
+        protocol: 2,
+        request: RunnerRequest {
+            argv: &command.argv,
+            cwd: command.cwd.to_string_lossy().into_owned(),
+            env: &command.env,
+            timeout_seconds: command.timeout.as_secs(),
+            limits: RunnerLimits {
+                max_memory_mb,
+                max_job_memory_mb: 0,
+                max_cpu_seconds,
+                max_processes,
+            },
+            network: network_request(policy),
+            filesystem,
+        },
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct RunnerOutput {
+    exit_code: i32,
+    stdout: String,
+    stderr: String,
+    duration_ms: u64,
+    timed_out: bool,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+    confinement: RunnerConfinement,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunnerConfinement {
+    network_requested: String,
+    network_enforced: String,
 }
 
 #[async_trait]
@@ -111,87 +350,94 @@ impl SandboxedExec for WindowsSandboxBackend {
         mut command: SandboxCommand,
         policy: SandboxPolicy,
     ) -> Result<SandboxResult, SandboxError> {
-        if !self.is_available() {
-            return Err(SandboxError::SetupRequired {
-                reason: "Windows sandbox runner (cognia-sandbox-runner.exe) not found — reinstall."
-                    .into(),
-            });
-        }
-        // Defense-in-depth: scrub code-injection env vars at the exec boundary
-        // too, so a direct backend call (not just `run_confined`) is safe.
+        let runner = self.runner_path()?;
+        let capabilities = self.capabilities()?;
         crate::env::filter_env(&mut command.env);
-        let runner = self.runner_path();
-        let target_user = self.target_user_for(&policy);
-        let payload = build_runner_payload(target_user, &command, &policy);
-        let serialised =
-            serde_json::to_string(&payload).map_err(|err| SandboxError::BackendFailed {
-                reason: format!("serialise runner payload failed: {err}"),
-            })?;
-        // Host-side watchdog. The runner enforces its own `timeout_seconds`,
-        // but a hung / wedged runner would otherwise block this Tauri command
-        // indefinitely. Spawn via tokio with `kill_on_drop` and a margin over
-        // the runner's own deadline so the host always regains control.
-        let timeout_secs = command.timeout.as_secs();
-        let host_timeout = if timeout_secs == 0 {
-            0
+        // Reserve a private per-run scratch path; it is never interpreted as
+        // permission to ignore the policy's explicit filesystem roots.
+        let scratch = tempfile::Builder::new()
+            .prefix("cognia-windows-sandbox-")
+            .tempdir()
+            .map_err(|e| unavailable(format!("private scratch unavailable: {e}")))?;
+        let home = dirs::home_dir().ok_or_else(|| unavailable("home directory unavailable"))?;
+        let mut runtime_reads = Vec::new();
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            runtime_reads.push(PathBuf::from(root));
+        }
+        if let Some(path) = std::env::var_os("PATH") {
+            runtime_reads.extend(std::env::split_paths(&path).filter(|p| p.is_absolute()));
+        }
+        let filesystem =
+            FilesystemPlan::from_policy(&policy, &home, &runtime_reads, scratch.path())?;
+        admit(&capabilities, &filesystem, network_request(&policy))?;
+        if command.stdin.is_some() {
+            return Err(unavailable(
+                "windows_runner_stdin_unsupported: v2 stdin carries the request",
+            ));
+        }
+        #[cfg(windows)]
+        mark_private_scratch_low_integrity(scratch.path())?;
+        let payload = build_runner_payload(&command, &policy, filesystem);
+        let serialised = serde_json::to_vec(&payload).map_err(|e| SandboxError::BackendFailed {
+            reason: e.to_string(),
+        })?;
+        // Cover stdin delivery and output wait too. A zero timeout uses the
+        // runner's finite five-minute default, never an infinite host wait.
+        let host_timeout = if command.timeout.is_zero() {
+            315
         } else {
-            timeout_secs.saturating_add(15)
+            command.timeout.as_secs().saturating_add(15)
         };
         let child = Command::new(&runner)
-            .arg(&serialised)
+            .arg("--protocol-v2")
             .kill_on_drop(true)
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|err| SandboxError::BackendFailed {
-                reason: format!("spawn {runner:?} failed: {err}"),
+            .map_err(|e| SandboxError::BackendFailed {
+                reason: format!("spawn {runner:?}: {e}"),
             })?;
-        let wait = child.wait_with_output();
-        let output = if host_timeout == 0 {
-            wait.await.map_err(|err| SandboxError::BackendFailed {
-                reason: format!("wait for {runner:?} failed: {err}"),
-            })?
-        } else {
-            match timeout(Duration::from_secs(host_timeout), wait).await {
-                Ok(Ok(out)) => out,
-                Ok(Err(err)) => {
-                    return Err(SandboxError::BackendFailed {
-                        reason: format!("wait for {runner:?} failed: {err}"),
-                    });
-                }
-                Err(_) => {
-                    // Dropping the child (kill_on_drop) terminates the runner.
-                    return Err(SandboxError::Timeout {
-                        seconds: host_timeout,
-                    });
-                }
-            }
+        let operation = async {
+            let mut child = child;
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| std::io::Error::other("runner stdin missing"))?;
+            stdin.write_all(&serialised).await?;
+            stdin.shutdown().await?;
+            drop(stdin);
+            child.wait_with_output().await
         };
+        let output = timeout(Duration::from_secs(host_timeout), operation)
+            .await
+            .map_err(|_| SandboxError::Timeout {
+                seconds: host_timeout,
+            })?
+            .map_err(|e| SandboxError::BackendFailed {
+                reason: format!("runner transport failed: {e}"),
+            })?;
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // `EXIT_CONFINEMENT_UNAVAILABLE` (3): the runner refused to launch
-            // because it cannot enforce what the policy asked for — today that
-            // is `network: off`, which this tier has no way to confine. That is
-            // a strict-mode refusal, not a broken backend, so it surfaces as
-            // `Unavailable` and the confinement probe reports "not confined"
-            // rather than "runner crashed".
-            if output.status.code() == Some(3) {
-                return Err(SandboxError::Unavailable {
-                    reason: stderr.trim().to_string(),
-                });
-            }
-            return Err(SandboxError::BackendFailed {
-                reason: format!(
-                    "runner exited {} — stderr: {stderr}",
-                    output.status.code().unwrap_or(-1),
-                ),
+            let reason = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if output.status.code() == Some(3) {
+                unavailable(reason)
+            } else {
+                SandboxError::BackendFailed {
+                    reason: format!("runner exited {}: {reason}", output.status),
+                }
             });
         }
         let parsed: RunnerOutput =
-            serde_json::from_slice(&output.stdout).map_err(|err| SandboxError::BackendFailed {
-                reason: format!("parse runner JSON failed: {err}"),
+            serde_json::from_slice(&output.stdout).map_err(|e| SandboxError::BackendFailed {
+                reason: format!("parse v2 runner output: {e}"),
             })?;
+        if parsed.confinement.network_enforced != "unconfined"
+            || parsed.confinement.network_requested != network_request(&policy)
+        {
+            return Err(SandboxError::BackendFailed {
+                reason: "runner network evidence does not match the admitted request".into(),
+            });
+        }
         let (stdout, stdout_truncated) = crate::output::truncate_utf8(
             parsed.stdout,
             crate::output::MAX_OUTPUT_BYTES,
@@ -203,7 +449,7 @@ impl SandboxedExec for WindowsSandboxBackend {
             parsed.stderr_truncated,
         );
         Ok(SandboxResult {
-            network: Default::default(),
+            network: network_report(&policy),
             exit_code: parsed.exit_code,
             stdout,
             stderr,
@@ -215,343 +461,331 @@ impl SandboxedExec for WindowsSandboxBackend {
     }
 
     fn is_available(&self) -> bool {
-        // The restricted-token + low-integrity + Job Object runner needs no
-        // elevated setup or synthetic users, so availability is simply whether
-        // the bundled runner binary resolves.
-        self.runner_path().exists()
+        self.runner_path().is_ok()
     }
 
     async fn first_time_setup(&self) -> Result<(), SandboxError> {
-        // No-op: a restricted token is a subset of our own, so
-        // `CreateProcessAsUserW` needs no SeAssignPrimaryToken privilege — no
-        // UAC, no synthetic users. "Setup" is just confirming the bundled
-        // runner is present. (Optional per-SID Firewall rules for
-        // kernel-enforced network egress remain a follow-up via
-        // cognia-sandbox-setup.exe; they are not required for the
-        // filesystem/privilege/process confinement this backend provides.)
-        if self.is_available() {
-            Ok(())
-        } else {
-            Err(SandboxError::SetupRequired {
-                reason: format!(
-                    "sandbox runner not found at {:?} — reinstall cognia (it ships bundled).",
-                    self.runner_path()
-                ),
-            })
-        }
+        self.capabilities().map(|_| ())
     }
 
     fn health(&self) -> SandboxHealth {
-        let available = self.is_available();
+        let capabilities = self.capabilities();
         SandboxHealth {
-            available,
+            available: capabilities.is_ok(),
             backend: "windows-cognia-sandbox".into(),
             version: env!("CARGO_PKG_VERSION").into(),
-            last_error: if available {
-                String::new()
-            } else {
-                "Sandbox runner binary (cognia-sandbox-runner.exe) not found next to the app — \
-                 reinstall to restore it."
-                    .into()
-            },
+            last_error: capabilities
+                .as_ref()
+                .err()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+            windows_capabilities: capabilities.ok(),
         }
     }
-}
 
-#[derive(serde::Serialize)]
-struct RunnerPayload<'a> {
-    target_user: &'a str,
-    argv: &'a [String],
-    cwd: String,
-    env: Vec<(String, String)>,
-    timeout_seconds: u64,
-    /// The policy's caps. They used to stop here: the runner accepted
-    /// `max_memory_mb` and this backend never sent it, so a Windows sandbox
-    /// ran with no memory, CPU or process bound at all while the policy said
-    /// otherwise. The runner now puts all three on its Job Object —
-    /// `max_processes` lands on `ActiveProcessLimit`.
-    max_memory_mb: u32,
-    max_cpu_seconds: u32,
-    max_processes: u32,
-    /// What the policy says about the network, verbatim. `"unspecified"` for
-    /// the file-editing policies, which state no network requirement at all.
-    ///
-    /// The runner REFUSES a launch that asks for `"off"`: this tier confines
-    /// privileges, integrity and the process tree, and nothing else confines
-    /// a socket. Linux allowlists instead use their backend-owned namespace bridge.
-    network: &'static str,
-}
-
-/// What the policy states about egress, in the runner's vocabulary.
-fn network_request(policy: &SandboxPolicy) -> &'static str {
-    match policy {
-        SandboxPolicy::Bash { network, .. } => match network {
-            NetworkPolicy::Off => "off",
-            NetworkPolicy::On => "on",
-            NetworkPolicy::Allowlist { .. } => "allowlist",
-        },
-        // Edit / Write / TextEditor carry no network field. The tool cannot
-        // reach the network on its own, and claiming the policy demanded
-        // confinement it never asked for would refuse every file edit.
-        SandboxPolicy::Edit { .. }
-        | SandboxPolicy::Write { .. }
-        | SandboxPolicy::TextEditor { .. } => "unspecified",
+    async fn probe_confinement(&self) -> crate::types::ProbeReport {
+        // No target is needed to demonstrate a known capability refusal.
+        // Keep this distinct from a crashed runner in the active health UI.
+        let detail = match self.capabilities() {
+            Ok(capabilities) if !capabilities.filesystem_enforcement => {
+                "not confined: windows_filesystem_roots_unenforced; filesystem enforcement is inert"
+                    .into()
+            }
+            Ok(_) => "not confined: windows_network_unenforced; network Off is unavailable".into(),
+            Err(error) => format!("not confined: {error}"),
+        };
+        crate::types::ProbeReport {
+            backend: "windows-cognia-sandbox".into(),
+            confined: false,
+            detail,
+            network_allowlist: self.probe_network_allowlist().await,
+        }
     }
-}
 
-/// The policy's resource caps as `(memory MB, CPU seconds, process count)`;
-/// `0` means no cap / inherit the runner default.
-fn resource_caps(policy: &SandboxPolicy) -> (u32, u32, u32) {
-    match policy {
-        SandboxPolicy::Bash {
-            max_memory_mb,
-            max_cpu_seconds,
-            max_processes,
-            ..
-        } => (*max_memory_mb, *max_cpu_seconds, *max_processes),
-        SandboxPolicy::Edit { .. }
-        | SandboxPolicy::Write { .. }
-        | SandboxPolicy::TextEditor { .. } => (0, 0, 0),
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct RunnerOutput {
-    exit_code: i32,
-    #[serde(default)]
-    stdout: String,
-    #[serde(default)]
-    stderr: String,
-    #[serde(default)]
-    duration_ms: u64,
-    #[serde(default)]
-    timed_out: bool,
-    #[serde(default)]
-    stdout_truncated: bool,
-    #[serde(default)]
-    stderr_truncated: bool,
-}
-
-fn build_runner_payload<'a>(
-    target_user: &'a str,
-    command: &'a SandboxCommand,
-    policy: &SandboxPolicy,
-) -> RunnerPayload<'a> {
-    let (max_memory_mb, max_cpu_seconds, max_processes) = resource_caps(policy);
-    RunnerPayload {
-        target_user,
-        argv: &command.argv,
-        cwd: command.cwd.to_string_lossy().into_owned(),
-        env: command
-            .env
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect(),
-        timeout_seconds: command.timeout.as_secs(),
-        max_memory_mb,
-        max_cpu_seconds,
-        max_processes,
-        network: network_request(policy),
+    async fn probe_network_allowlist(&self) -> NetworkAllowlistProbe {
+        NetworkAllowlistProbe {
+            state: NetworkAllowlistState::Unavailable,
+            detail: "windows_network_unenforced: network not restricted".into(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-    use std::path::PathBuf;
-    use std::time::Duration;
-
     use super::*;
 
-    fn sample_cmd() -> SandboxCommand {
-        SandboxCommand {
-            argv: vec!["whoami".into()],
-            cwd: PathBuf::from("C:\\workspace"),
-            env: BTreeMap::new(),
-            stdin: None,
-            timeout: Duration::from_secs(5),
+    #[cfg(windows)]
+    #[test]
+    fn windows_private_scratch_has_low_integrity_and_missing_path_refuses() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::{PCWSTR, PWSTR};
+        use windows::Win32::Foundation::{LocalFree, HLOCAL};
+        use windows::Win32::Security::Authorization::{
+            ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
+            SDDL_REVISION_1, SE_FILE_OBJECT,
+        };
+        use windows::Win32::Security::{LABEL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+
+        let scratch = tempfile::tempdir().unwrap();
+        mark_private_scratch_low_integrity(scratch.path()).unwrap();
+        let name: Vec<u16> = scratch
+            .path()
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        unsafe {
+            GetNamedSecurityInfoW(
+                PCWSTR(name.as_ptr()),
+                SE_FILE_OBJECT,
+                LABEL_SECURITY_INFORMATION,
+                None,
+                None,
+                None,
+                None,
+                &mut descriptor,
+            )
         }
+        .ok()
+        .unwrap();
+        let mut sddl = PWSTR::null();
+        let converted = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                SDDL_REVISION_1,
+                LABEL_SECURITY_INFORMATION,
+                &mut sddl,
+                None,
+            )
+        };
+        unsafe {
+            let _ = LocalFree(Some(HLOCAL(descriptor.0)));
+        }
+        converted.unwrap();
+        let label = unsafe { sddl.to_string() };
+        unsafe {
+            let _ = LocalFree(Some(HLOCAL(sddl.0.cast())));
+        }
+        assert!(label.unwrap().contains("(ML;;NW;;;LW)"));
+        assert!(matches!(
+            mark_private_scratch_low_integrity(&scratch.path().join("missing")),
+            Err(SandboxError::Unavailable { .. })
+        ));
     }
 
-    fn sample_policy() -> SandboxPolicy {
+    fn capabilities() -> WindowsCapabilities {
+        parse_capabilities(br#"{"protocolVersions":[2],"filesystemEnforcement":false,"filesystemReason":"windows_filesystem_roots_unenforced","networkEnforcement":"unconfined","restrictedToken":true,"lowIntegrity":true,"jobObject":true}"#).unwrap()
+    }
+    fn plan() -> FilesystemPlan {
+        FilesystemPlan {
+            readable_trees: vec![],
+            writable_trees: vec![],
+            writable_files: vec![],
+            deny_read: vec![],
+            deny_write: vec![],
+            runtime_reads: vec![],
+            private_scratch: "C:\\scratch".into(),
+        }
+    }
+    fn policy(network: NetworkPolicy) -> SandboxPolicy {
         SandboxPolicy::Bash {
-            writable: vec![PathBuf::from("C:\\workspace")],
+            writable: vec![],
             readable: vec![],
-            network: NetworkPolicy::Off,
+            network,
             max_cpu_seconds: 5,
             max_memory_mb: 128,
             max_processes: 96,
         }
     }
-
-    #[tokio::test]
-    async fn run_returns_setup_required_without_runner() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let backend = WindowsSandboxBackend::with_paths(
-            PathBuf::from("does-not-matter"),
-            dir.path().join("missing-runner.exe"),
-            dir.path().join("missing.ok"),
-        );
-        let err = backend
-            .run(sample_cmd(), sample_policy())
-            .await
-            .unwrap_err();
-        assert!(matches!(err, SandboxError::SetupRequired { .. }));
-    }
-
     #[test]
-    fn is_available_reflects_runner_presence() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let runner = dir.path().join("cognia-sandbox-runner.exe");
-        let backend = WindowsSandboxBackend::with_paths(
-            PathBuf::from("setup.exe"),
-            runner.clone(),
-            dir.path().join("setup.ok"),
-        );
-        assert!(!backend.is_available());
-        std::fs::write(&runner, b"MZ").unwrap();
-        assert!(backend.is_available());
+    fn windows_capability_parsing_fails_closed() {
+        let value = serde_json::to_value(capabilities()).unwrap();
+        for key in value.as_object().unwrap().keys() {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(key);
+            assert!(
+                parse_capabilities(&serde_json::to_vec(&missing).unwrap()).is_err(),
+                "{key}"
+            );
+        }
+        let mut extra = value.clone();
+        extra["unknown"] = true.into();
+        assert!(parse_capabilities(&serde_json::to_vec(&extra).unwrap()).is_err());
+        let mut old = value;
+        old["protocolVersions"] = serde_json::json!([1]);
+        assert!(parse_capabilities(&serde_json::to_vec(&old).unwrap()).is_err());
     }
-
     #[test]
-    fn target_user_picks_offline_when_network_off() {
-        let backend = WindowsSandboxBackend::new();
-        let user = backend.target_user_for(&sample_policy());
-        assert_eq!(user, OFFLINE_USER);
+    fn windows_roots_are_intentionally_inert_and_refused() {
+        for field in ["read", "write", "file"] {
+            let mut fs = plan();
+            match field {
+                "read" => fs.readable_trees.push("C:\\work".into()),
+                "write" => fs.writable_trees.push("C:\\work".into()),
+                _ => fs.writable_files.push("C:\\work\\a.txt".into()),
+            }
+            let error = admit(&capabilities(), &fs, "on").unwrap_err();
+            assert!(matches!(error, SandboxError::Unavailable { .. }));
+            assert!(error
+                .to_string()
+                .contains("windows_filesystem_roots_unenforced"));
+        }
     }
-
     #[test]
-    fn target_user_picks_online_when_network_on() {
-        let backend = WindowsSandboxBackend::new();
-        let policy = SandboxPolicy::Bash {
-            writable: vec![PathBuf::from("/tmp")],
-            readable: vec![],
-            network: NetworkPolicy::On,
-            max_cpu_seconds: 1,
-            max_memory_mb: 64,
-            max_processes: 0,
-        };
-        assert_eq!(backend.target_user_for(&policy), ONLINE_USER);
+    fn windows_off_and_allowlist_refused_on_reports_unrestricted() {
+        for network in ["off", "allowlist"] {
+            assert!(matches!(
+                admit(&capabilities(), &plan(), network),
+                Err(SandboxError::Unavailable { .. })
+            ));
+        }
+        assert!(admit(&capabilities(), &plan(), "on").is_ok());
+        let evidence = network_report(&policy(NetworkPolicy::On));
+        assert_eq!(evidence.effective, Some(NetworkPolicy::On));
+        assert_eq!(evidence.mechanism.as_deref(), Some("unconfined"));
     }
-
     #[test]
-    fn target_user_picks_online_when_allowlist() {
-        let backend = WindowsSandboxBackend::new();
-        let policy = SandboxPolicy::Bash {
-            writable: vec![PathBuf::from("/tmp")],
-            readable: vec![],
-            network: NetworkPolicy::Allowlist {
-                hosts: vec!["api.example.com".into()],
-            },
-            max_cpu_seconds: 1,
-            max_memory_mb: 64,
-            max_processes: 0,
-        };
-        assert_eq!(backend.target_user_for(&policy), ONLINE_USER);
-    }
-
-    #[test]
-    fn target_user_defaults_offline_for_file_tools() {
-        let backend = WindowsSandboxBackend::new();
-        let policy = SandboxPolicy::Edit {
-            target_files: vec![PathBuf::from("c:\\\\x.txt")],
-            readable: vec![],
-        };
-        assert_eq!(backend.target_user_for(&policy), OFFLINE_USER);
-    }
-
-    #[test]
-    fn health_marks_unavailable_without_runner() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let backend = WindowsSandboxBackend::with_paths(
-            PathBuf::from("setup.exe"),
-            dir.path().join("missing-runner.exe"),
-            dir.path().join("missing.ok"),
-        );
-        let h = backend.health();
-        assert!(!h.available);
-        assert_eq!(h.backend, "windows-cognia-sandbox");
-        assert!(!h.last_error.is_empty());
-    }
-
-    #[test]
-    fn health_marks_active_when_runner_present() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let runner = dir.path().join("cognia-sandbox-runner.exe");
-        std::fs::write(&runner, b"MZ").unwrap();
-        let backend = WindowsSandboxBackend::with_paths(
-            PathBuf::from("setup.exe"),
-            runner,
-            dir.path().join("setup.ok"),
-        );
-        let h = backend.health();
-        assert!(h.available);
-        assert!(h.last_error.is_empty());
-    }
-
-    #[test]
-    fn build_runner_payload_carries_argv_cwd_env_and_timeout() {
-        let mut env = BTreeMap::new();
-        env.insert("FOO".into(), "bar".into());
-        let cmd = SandboxCommand {
-            argv: vec!["echo".into(), "hi".into()],
+    fn windows_payload_is_complete_nested_v2() {
+        let command = SandboxCommand {
+            argv: vec!["whoami".into()],
             cwd: PathBuf::from("C:\\work"),
-            env,
+            env: BTreeMap::from([("FOO".into(), "bar".into())]),
             stdin: None,
             timeout: Duration::from_secs(42),
         };
-        let payload = build_runner_payload(OFFLINE_USER, &cmd, &sample_policy());
-        assert_eq!(payload.target_user, OFFLINE_USER);
-        assert_eq!(payload.argv, &cmd.argv);
-        assert_eq!(payload.cwd, "C:\\work");
-        assert_eq!(payload.env, vec![("FOO".to_string(), "bar".to_string())]);
-        assert_eq!(payload.timeout_seconds, 42);
+        let value = serde_json::to_value(build_runner_payload(
+            &command,
+            &policy(NetworkPolicy::On),
+            plan(),
+        ))
+        .unwrap();
+        assert_eq!(value["protocol"], 2);
+        assert_eq!(value["request"]["env"]["FOO"], "bar");
+        assert_eq!(value["request"]["timeout_seconds"], 42);
+        assert_eq!(
+            value["request"]["limits"],
+            serde_json::json!({"max_memory_mb":128,"max_job_memory_mb":0,"max_cpu_seconds":5,"max_processes":96})
+        );
+        assert!(value["request"]["filesystem"].is_object());
     }
-
-    /// [ACC:SAFE-02] The policy's caps reach the runner, which puts them on
-    /// its Job Object. They were dropped here for as long as this backend
-    /// existed, so a Windows sandbox was bounded by the wall clock alone.
     #[test]
-    fn build_runner_payload_carries_the_policy_resource_caps() {
-        let command = sample_cmd();
-        let payload = build_runner_payload(OFFLINE_USER, &command, &sample_policy());
-        assert_eq!(payload.max_cpu_seconds, 5);
-        assert_eq!(payload.max_memory_mb, 128);
-        // The Job Object's ActiveProcessLimit — the runner defaults to 512
-        // when the policy leaves this at 0.
-        assert_eq!(payload.max_processes, 96);
+    fn windows_runner_must_resolve_inside_installation() {
+        let install = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let good = install.path().join("runner.exe");
+        let bad = outside.path().join("runner.exe");
+        std::fs::write(&good, "runner").unwrap();
+        std::fs::write(&bad, "runner").unwrap();
+        assert!(trusted_runner_path(install.path(), &good).is_ok());
+        assert!(matches!(
+            trusted_runner_path(install.path(), &bad),
+            Err(SandboxError::Unavailable { .. })
+        ));
+        #[cfg(unix)]
+        {
+            let link = install.path().join("escape.exe");
+            std::os::unix::fs::symlink(bad, &link).unwrap();
+            assert!(trusted_runner_path(install.path(), &link).is_err());
+        }
     }
-
-    /// [ACC:SAFE-02] The network the policy asked for travels with the
-    /// payload, so the runner can refuse `off` rather than run a command
-    /// with the open network this tier cannot close.
     #[test]
-    fn build_runner_payload_states_the_policy_network() {
-        let command = sample_cmd();
-        assert_eq!(
-            build_runner_payload(OFFLINE_USER, &command, &sample_policy()).network,
-            "off"
+    fn windows_capability_cache_invalidates_changed_runner() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = dir.path().join("runner.exe");
+        std::fs::write(&runner, "v2").unwrap();
+        assert!(cached_capabilities(&runner, |_| Ok(capabilities())).is_ok());
+        assert!(cached_capabilities(&runner, |_| panic!("must use cache")).is_ok());
+        std::fs::write(&runner, "replacement").unwrap();
+        assert!(cached_capabilities(&runner, |_| Err("new runner refused".into())).is_err());
+        let other = dir.path().join("other.exe");
+        std::fs::write(&other, "v2").unwrap();
+        assert!(cached_capabilities(&other, |_| Err("different path".into())).is_err());
+        assert!(
+            cached_capabilities(&other, |_| Ok(capabilities())).is_ok(),
+            "transient probe failure must be retryable"
         );
-        let online = SandboxPolicy::Bash {
-            writable: vec![PathBuf::from("C:\\workspace")],
-            readable: vec![],
-            network: NetworkPolicy::On,
-            max_cpu_seconds: 0,
-            max_memory_mb: 0,
-            max_processes: 0,
+    }
+    #[tokio::test]
+    async fn windows_missing_runner_is_setup_required() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = WindowsSandboxBackend {
+            install_dir: Some(dir.path().to_path_buf()),
         };
-        assert_eq!(
-            build_runner_payload(ONLINE_USER, &command, &online).network,
-            "on"
+        assert!(!backend.is_available());
+        assert!(!backend.health().available);
+        assert!(matches!(
+            backend.first_time_setup().await,
+            Err(SandboxError::SetupRequired { .. })
+        ));
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn windows_host_uses_stdin_and_refuses_before_target_launch() {
+        use std::os::unix::fs::PermissionsExt;
+        let install = tempfile::tempdir().unwrap();
+        let runner = install.path().join("cognia-sandbox-runner.exe");
+        let report = serde_json::to_string(&capabilities()).unwrap();
+        // The script is a protocol fixture, never a real Windows confinement
+        // claim. It records requests only after a --protocol-v2 invocation.
+        let script = format!(
+            r#"#!/bin/sh
+case "$1" in
+  --capabilities-v2) printf '%s' '{report}'; exit 0 ;;
+  --protocol-v2) cat > "$(dirname "$0")/request.json" ;;
+  *) exit 77 ;;
+esac
+printf '%s' '{{"exit_code":0,"stdout":"ok","stderr":"","duration_ms":1,"timed_out":false,"stdout_truncated":false,"stderr_truncated":false,"confinement":{{"networkRequested":"on","networkEnforced":"unconfined"}}}}'
+"#
         );
-        let editing = SandboxPolicy::Edit {
-            target_files: vec![PathBuf::from("C:\\workspace\\a.txt")],
-            readable: vec![],
+        std::fs::write(&runner, script).unwrap();
+        std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let backend = WindowsSandboxBackend {
+            install_dir: Some(install.path().to_path_buf()),
         };
-        assert_eq!(
-            build_runner_payload(OFFLINE_USER, &command, &editing).network,
-            "unspecified",
-            "a file edit states no network requirement, so it is not refused"
-        );
+        let command = SandboxCommand {
+            argv: vec!["ignored-by-fixture".into()],
+            cwd: install.path().to_path_buf(),
+            env: BTreeMap::from([("SECRET_FOR_TEST".into(), "stdin-only".into())]),
+            stdin: None,
+            timeout: Duration::from_secs(2),
+        };
+        let health = backend.health();
+        assert!(health.available);
+        assert!(!health.windows_capabilities.unwrap().filesystem_enforcement);
+        let mut rooted = policy(NetworkPolicy::On);
+        if let SandboxPolicy::Bash { writable, .. } = &mut rooted {
+            writable.push(install.path().to_path_buf());
+        }
+        for refused in [
+            rooted,
+            policy(NetworkPolicy::Off),
+            policy(NetworkPolicy::Allowlist {
+                hosts: vec!["example.com".into()],
+            }),
+        ] {
+            assert!(matches!(
+                backend.run(command.clone(), refused).await,
+                Err(SandboxError::Unavailable { .. })
+            ));
+            assert!(!install.path().join("request.json").exists());
+        }
+        let probe = backend.probe_confinement().await;
+        assert!(!probe.confined);
+        assert!(probe
+            .detail
+            .contains("not confined: windows_filesystem_roots_unenforced"));
+        assert!(!install.path().join("request.json").exists());
+        let result = backend
+            .run(command, policy(NetworkPolicy::On))
+            .await
+            .unwrap();
+        assert_eq!(result.stdout, "ok");
+        assert_eq!(result.network.effective, Some(NetworkPolicy::On));
+        let request: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(install.path().join("request.json")).unwrap())
+                .unwrap();
+        assert_eq!(request["protocol"], 2);
+        assert_eq!(request["request"]["env"]["SECRET_FOR_TEST"], "stdin-only");
     }
 }

@@ -212,6 +212,7 @@ impl SandboxedExec for LinuxSandboxBackend {
             String::new()
         };
         SandboxHealth {
+            windows_capabilities: None,
             available,
             backend: "linux-bwrap".into(),
             version,

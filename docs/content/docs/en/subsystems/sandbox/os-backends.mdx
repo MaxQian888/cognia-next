@@ -290,28 +290,45 @@ NetworkPolicy::Allowlist { hosts: _ } => match proxy_port {
   `pre_exec` hook, alongside the wall-clock watchdog. `RLIMIT_AS` is unreliable there and
   `RLIMIT_NPROC` would count every process the login user owns, so both are Linux-only.
 
-### Windows — restricted-token runner (real)
+### Windows — restricted-token runner (limited confinement)
 
-`WindowsSandboxBackend` shells out to the bundled `cognia-sandbox-runner.exe` from
-`crates/cognia-sandbox-runner/`. The runner launches the target with a restricted subset of the app's
-own token, lowers integrity, assigns the child to a Job Object, and returns captured stdout/stderr in
-a JSON result. Privilege restrictions (restricted token and low integrity) and process/job limits
-are enforced without elevation, separate OS accounts, or a setup marker. **Filesystem writes are
-not scoped to the workspace by this runner today**: its payload carries no readable or writable
-roots. Kernel egress control is also absent; a request for network `off` is refused rather than
-reported as enforced.
+`WindowsSandboxBackend` launches the bundled `cognia-sandbox-runner.exe` only from a trusted
+installation location resolved beside the host executable. The legacy timestamp marker does not
+authorize another runner location; paths resolving outside the installation directory are refused. Restricted tokens, low integrity and Job
+Object limits remain available; **filesystem-root enforcement is intentionally inactive**.
 
-```rust title="crates/cognia-sandbox-runner/src/main.rs (restricted-token launch shape)"
-// 1. Duplicate the caller token.
-// 2. Create a restricted token and lower integrity.
-// 3. Create a Job Object with kill-on-close and optional memory cap.
-// 4. Spawn suspended under the restricted token, assign to the job, then resume.
-```
+The host always uses `--protocol-v2`, writing exactly one JSON request to stdin as
+`{ "protocol": 2, "request": { ... } }`. The nested request requires argv, cwd, env, timeout,
+limits, network and a filesystem plan; all protocol structs reject unknown fields. Missing fields,
+v1 envelopes and unknown versions are refused. An older runner cannot understand the flag/stdin
+contract and must fail instead of silently ignoring roots. The legacy argv request is accepted
+only without filesystem roots and with network On/Unspecified, for older hosts.
 
-`WindowsSandboxBackend::is_available()` now gates on the runner binary resolving next to the app
-executable. The legacy `target_user` payload field remains only for JSON compatibility with older
-payloads; the restricted-token runner ignores it. `cognia-sandbox-setup.exe` remains only for a
-future optional per-SID Firewall follow-up; it is no longer in the critical path.
+The shared, platform-neutral filesystem plan carries canonicalized, deduplicated readable trees,
+writable trees, exact writable files, protected deny-read/deny-write floors, runtime reads and
+private scratch. Deny floors override grants. Carrying this plan does not imply enforcement:
+Windows requests carrying roots return `SandboxError::Unavailable` with
+`windows_filesystem_roots_unenforced`. Network `Off` and `Allowlist` are also refused until
+implemented; `On` reports **not restricted**. Strict mode never retries these refusals on the host.
+The dispatcher, tool plugin and native-tool route propagate refusals; they do not retry them as
+unconfined host commands. The active probe reports **not confined** for this dormant capability.
+
+`--capabilities-v2` is a side-effect-free probe that starts no target process. Its JSON report
+contains `protocolVersions`, `filesystemEnforcement: false`,
+`filesystemReason: "windows_filesystem_roots_unenforced"`, `networkEnforcement: "unconfined"`,
+`restrictedToken`, `lowIntegrity` and `jobObject`. The host caches it by runner path and modification
+time and exposes it as `windowsCapabilities` in health. Settings shows limited confinement and an
+inactive filesystem-enforcement label even when the runner binary is available.
+
+The child starts with `CREATE_SUSPENDED`, is assigned to the Job Object before execution, and is
+terminated if either assignment or `ResumeThread` fails. An explicit
+`PROC_THREAD_ATTRIBUTE_HANDLE_LIST` restricts handle inheritance to intended standard streams.
+Anonymous stdout/stderr pipes are read concurrently with bounded buffers, preserving
+`MAX_OUTPUT_BYTES` truncation and its marker; output is not captured through temporary files.
+
+A signed filesystem minifilter for enforcement on original paths is a **separate future project**
+requiring WDK, driver signing, elevated installation and native Windows acceptance. It is not
+implemented by this protocol/launch-hardening change. See the 2026-10-17 revision of ADR-0028.
 
 ### Fallback + test double
 

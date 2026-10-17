@@ -32,6 +32,22 @@ description: Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / proxy is
 **Supersedes**: extends ADR-0010 (Claude subscription OAuth), ADR-0020 (Computer-use completeness), ADR-0025 (Unified subscription module), ADR-0026 (Plugin extension point expansion)
 **Authors**: Max Qian + Claude Opus 4.7
 
+## Revision — Windows filesystem roots (2026-10-17)
+
+The S2 decision supersedes the earlier Windows filesystem-confinement claim: restricted tokens,
+low integrity and Job Objects do not enforce requested readable/writable roots. The host always
+uses the versioned stdin `--protocol-v2` contract and shared filesystem plan. Until a runner's
+capability report proves filesystem enforcement, root-bearing runs fail closed as `Unavailable`
+with `windows_filesystem_roots_unenforced`. Windows network Off and Allowlist are also refused;
+On reports not restricted. Settings labels filesystem enforcement inactive and tests pin that
+intentional dormancy. A capability probe is distinct from successful confinement verification.
+
+Launch hardening checks suspended-child job assignment and resume, restricts inherited handles,
+uses bounded concurrent anonymous-pipe output readers and trusts only installation runner paths.
+These controls do not activate filesystem enforcement. A signed filesystem minifilter is a
+**separate future project**, requiring WDK, driver signing, elevated installation and native
+Windows validation; no driver ships in S2.
+
 ## Context
 
 cognia-next's Node sidecar (`sidecar/claude-host.mjs`) is a single OS process that hosts N concurrent `@anthropic-ai/claude-agent-sdk` `query()` calls keyed by `sessionId`. `lib/claude/build-options.ts:resolveSendOptions` already isolates a large surface per `ChatSession`: `cwd`, `model`, `provider`, `providerCredentials`, `allowedTools` / `disallowedTools`, `mcpServers`, `additionalDirectories`, `permissionMode`, `settingSources`, `agents`, `appendHeaders`, per-call `env` (for `DEBUG` and `anthropic-beta` headers).

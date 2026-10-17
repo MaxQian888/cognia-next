@@ -34,6 +34,7 @@
 //! planned before: no memory cap, 512 active processes, no CPU cap, a five
 //! minute default timeout and an unconfined network.
 
+use cognia_exec_sandbox::filesystem_plan::FilesystemPlan;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -67,8 +68,8 @@ pub enum NetworkRequest {
     Off,
     /// Unrestricted egress.
     On,
-    /// Egress restricted to an allowlist, routed through the host-side
-    /// filtering proxy whose variables the caller injected into `env`.
+    /// Egress restricted to an allowlist. This runner refuses the request:
+    /// proxy variables alone cannot prevent direct sockets.
     Allowlist,
 }
 
@@ -76,20 +77,22 @@ pub enum NetworkRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NetworkEnforcement {
-    /// Nothing stops a socket. The only egress control on this tier is the
-    /// proxy environment the caller injected, which the command may ignore.
+    /// Nothing stops a socket. Network is not restricted on this tier.
     Unconfined,
 }
 
 /// What the runner will enforce for one launch, reported back so no consumer
 /// has to infer it from the platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Confinement {
     /// A restricted token with every privilege disabled.
     pub restricted_token: bool,
     /// The child runs at low integrity, so it cannot write the user's files.
     pub low_integrity: bool,
+    /// Intentionally inert until a separately shipped minifilter enforces
+    /// filesystem roots; low integrity is not path-based confinement.
+    pub filesystem_enforcement: bool,
     pub network_requested: NetworkRequest,
     pub network_enforced: NetworkEnforcement,
     /// True when the child's environment is the caller's plus the OS
@@ -131,6 +134,7 @@ impl EnvPayload {
 
 /// The JSON the desktop backend hands the runner in `argv[1]`.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunnerInput {
     /// Retained for backward compatibility with the synthetic-user model;
     /// the restricted-token runner ignores it.
@@ -158,10 +162,95 @@ pub struct RunnerInput {
     /// What the caller's policy says about the network.
     #[serde(default)]
     pub network: NetworkRequest,
+    #[serde(default = "legacy_filesystem_plan")]
+    pub filesystem: FilesystemPlan,
+}
+
+/// Required security fields for protocol v2. No missing field gets a default.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerRequestV2 {
+    pub argv: Vec<String>,
+    pub cwd: String,
+    pub env: BTreeMap<String, String>,
+    pub timeout_seconds: u64,
+    pub limits: RunnerLimitsV2,
+    pub network: NetworkRequest,
+    pub filesystem: FilesystemPlan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerLimitsV2 {
+    pub max_memory_mb: u32,
+    pub max_job_memory_mb: u32,
+    pub max_cpu_seconds: u32,
+    pub max_processes: u32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerEnvelopeV2 {
+    pub protocol: u32,
+    pub request: RunnerRequestV2,
+}
+
+/// Parse exactly one v2 JSON value, rejecting trailing requests and versions
+/// whose security contract this executable does not implement.
+pub fn parse_v2(payload: &str) -> Result<RunnerInput, String> {
+    let envelope: RunnerEnvelopeV2 = serde_json::from_str(payload).map_err(|e| e.to_string())?;
+    if envelope.protocol != 2 {
+        return Err(format!(
+            "unsupported runner protocol: {}",
+            envelope.protocol
+        ));
+    }
+    let request = envelope.request;
+    Ok(RunnerInput {
+        target_user: String::new(),
+        argv: request.argv,
+        cwd: request.cwd,
+        env: EnvPayload::Map(request.env),
+        timeout_seconds: request.timeout_seconds,
+        max_memory_mb: request.limits.max_memory_mb,
+        max_job_memory_mb: request.limits.max_job_memory_mb,
+        max_cpu_seconds: request.limits.max_cpu_seconds,
+        max_processes: request.limits.max_processes,
+        network: request.network,
+        filesystem: request.filesystem,
+    })
+}
+
+pub use cognia_exec_sandbox::types::WindowsCapabilities as RunnerCapabilities;
+
+fn legacy_filesystem_plan() -> FilesystemPlan {
+    FilesystemPlan {
+        readable_trees: vec![],
+        writable_trees: vec![],
+        writable_files: vec![],
+        deny_read: vec![],
+        deny_write: vec![],
+        runtime_reads: vec![],
+        private_scratch: String::new(),
+    }
+}
+
+/// Side-effect-free capability description: no token, job or process is created.
+pub fn capabilities_v2() -> RunnerCapabilities {
+    RunnerCapabilities {
+        protocol_versions: vec![2],
+        filesystem_enforcement: false,
+        filesystem_reason: "windows_filesystem_roots_unenforced".into(),
+        network_enforcement: "unconfined".into(),
+        restricted_token: true,
+        low_integrity: true,
+        job_object: true,
+    }
 }
 
 /// What the runner prints on success.
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunnerOutput {
     pub exit_code: i32,
     pub stdout: String,
@@ -207,6 +296,7 @@ pub enum PlanError {
     /// message names it, and the runner exits [`EXIT_CONFINEMENT_UNAVAILABLE`]
     /// without launching anything.
     NetworkConfinementUnavailable(String),
+    FilesystemConfinementUnavailable,
 }
 
 impl std::fmt::Display for PlanError {
@@ -214,6 +304,9 @@ impl std::fmt::Display for PlanError {
         match self {
             PlanError::EmptyArgv => write!(formatter, "argv is empty"),
             PlanError::NetworkConfinementUnavailable(message) => write!(formatter, "{message}"),
+            PlanError::FilesystemConfinementUnavailable => {
+                write!(formatter, "windows_filesystem_roots_unenforced")
+            }
         }
     }
 }
@@ -297,11 +390,17 @@ pub fn plan_with_host_env(
     if input.argv.is_empty() {
         return Err(PlanError::EmptyArgv);
     }
-    if input.network == NetworkRequest::Off {
+    if input.filesystem.has_roots() {
+        return Err(PlanError::FilesystemConfinementUnavailable);
+    }
+    if matches!(
+        input.network,
+        NetworkRequest::Off | NetworkRequest::Allowlist
+    ) {
         return Err(PlanError::NetworkConfinementUnavailable(
             "network confinement unavailable: this Windows sandbox tier confines privileges, \
              integrity and the process tree, but it cannot block egress. Refusing to run a \
-             command that asked for `network: off` rather than running it with an open network."
+             command that asked for network Off or Allowlist with an open network."
                 .to_string(),
         ));
     }
@@ -321,7 +420,14 @@ pub fn plan_with_host_env(
     let per_process_cpu =
         (input.max_cpu_seconds > 0).then(|| Duration::from_secs(u64::from(input.max_cpu_seconds)));
 
-    let environment = child_environment(host_env, &input.env.clone().into_map());
+    let mut environment = child_environment(host_env, &input.env.clone().into_map());
+    if !input.filesystem.private_scratch.is_empty() {
+        environment
+            .retain(|key, _| !key.eq_ignore_ascii_case("TEMP") && !key.eq_ignore_ascii_case("TMP"));
+        for name in ["TEMP", "TMP"] {
+            environment.insert(name.into(), input.filesystem.private_scratch.clone());
+        }
+    }
 
     Ok(LaunchPlan {
         argv: input.argv.clone(),
@@ -338,6 +444,7 @@ pub fn plan_with_host_env(
         confinement: Confinement {
             restricted_token: true,
             low_integrity: true,
+            filesystem_enforcement: false,
             network_requested: input.network,
             network_enforced: NetworkEnforcement::Unconfined,
             host_environment_filtered: true,
@@ -382,6 +489,164 @@ pub fn cpu_time_100ns(cpu: Duration) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn v2_payload() -> serde_json::Value {
+        serde_json::json!({
+            "protocol": 2,
+            "request": {
+                "argv": ["cmd.exe", "/c", "echo ok"], "cwd": "C:\\work",
+                "env": {}, "timeout_seconds": 30,
+                "limits": { "max_memory_mb": 0, "max_job_memory_mb": 0,
+                    "max_cpu_seconds": 0, "max_processes": 1 },
+                "network": "on", "filesystem": legacy_filesystem_plan()
+            }
+        })
+    }
+
+    #[test]
+    fn v2_requires_every_security_field_and_rejects_unknown_fields() {
+        let original = v2_payload();
+        assert!(parse_v2(&original.to_string()).is_ok());
+        for key in [
+            "argv",
+            "cwd",
+            "env",
+            "timeout_seconds",
+            "limits",
+            "network",
+            "filesystem",
+        ] {
+            let mut value = original.clone();
+            value["request"].as_object_mut().unwrap().remove(key);
+            assert!(parse_v2(&value.to_string()).is_err(), "missing {key}");
+        }
+        for key in [
+            "max_memory_mb",
+            "max_job_memory_mb",
+            "max_cpu_seconds",
+            "max_processes",
+        ] {
+            let mut value = original.clone();
+            value["request"]["limits"]
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(parse_v2(&value.to_string()).is_err(), "missing {key}");
+        }
+        for key in [
+            "readable_trees",
+            "writable_trees",
+            "writable_files",
+            "deny_read",
+            "deny_write",
+            "runtime_reads",
+            "private_scratch",
+        ] {
+            let mut value = original.clone();
+            value["request"]["filesystem"]
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(parse_v2(&value.to_string()).is_err(), "missing {key}");
+        }
+        for pointer in ["", "/request", "/request/limits", "/request/filesystem"] {
+            let mut value = original.clone();
+            value
+                .pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("unknown".into(), true.into());
+            assert!(
+                parse_v2(&value.to_string()).is_err(),
+                "unknown at {pointer}"
+            );
+        }
+    }
+
+    #[test]
+    fn v2_refuses_versions_legacy_payloads_and_multiple_requests() {
+        for protocol in [0, 1, 3, u32::MAX] {
+            let mut value = v2_payload();
+            value["protocol"] = protocol.into();
+            assert!(parse_v2(&value.to_string()).is_err());
+        }
+        assert!(parse_v2(r#"{"argv":["a"],"cwd":"C:\\work"}"#).is_err());
+        assert!(parse_v2(&format!("{} {}", v2_payload(), v2_payload())).is_err());
+    }
+
+    #[test]
+    fn every_protocol_refuses_filesystem_roots() {
+        for field in ["readable_trees", "writable_trees", "writable_files"] {
+            let mut value = v2_payload();
+            value["request"]["filesystem"][field] = serde_json::json!(["C:\\work"]);
+            let input = parse_v2(&value.to_string()).unwrap();
+            assert_eq!(
+                plan_with_host_env(&input, &host(&[])),
+                Err(PlanError::FilesystemConfinementUnavailable)
+            );
+            let mut legacy = value["request"].clone();
+            legacy.as_object_mut().unwrap().remove("limits");
+            let input: RunnerInput = serde_json::from_value(legacy).unwrap();
+            assert_eq!(
+                plan_with_host_env(&input, &host(&[])),
+                Err(PlanError::FilesystemConfinementUnavailable)
+            );
+        }
+        assert!(serde_json::from_str::<RunnerInput>(
+            r#"{"argv":["a"],"cwd":"C:\\work","readable_roots":["C:\\"]}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn allowlist_is_refused_even_with_proxy_environment() {
+        let mut value = v2_payload();
+        value["request"]["network"] = "allowlist".into();
+        value["request"]["env"] = serde_json::json!({"HTTPS_PROXY": "http://127.0.0.1:8888"});
+        let input = parse_v2(&value.to_string()).unwrap();
+        assert!(matches!(
+            plan_with_host_env(&input, &host(&[])),
+            Err(PlanError::NetworkConfinementUnavailable(_))
+        ));
+    }
+
+    #[test]
+    fn explicit_private_scratch_overrides_host_and_caller_temp_variables() {
+        let mut value = v2_payload();
+        value["request"]["filesystem"]["private_scratch"] = "C:\\private-scratch".into();
+        value["request"]["env"] = serde_json::json!({"Temp": "C:\\shared"});
+        let input = parse_v2(&value.to_string()).unwrap();
+        let launch = plan_with_host_env(&input, &host(&[("TMP", "C:\\host-temp")])).unwrap();
+        assert_eq!(
+            launch.environment.get("TEMP").unwrap(),
+            "C:\\private-scratch"
+        );
+        assert_eq!(
+            launch.environment.get("TMP").unwrap(),
+            "C:\\private-scratch"
+        );
+        assert!(!launch.environment.contains_key("Temp"));
+    }
+
+    #[test]
+    fn capabilities_pin_intentional_filesystem_dormancy_and_unconfined_network() {
+        let capability = capabilities_v2();
+        let parsed: RunnerCapabilities =
+            serde_json::from_value(serde_json::to_value(&capability).unwrap()).unwrap();
+        assert_eq!(parsed, capability);
+        assert_eq!(capability.protocol_versions, [2]);
+        assert!(!capability.filesystem_enforcement);
+        assert_eq!(
+            capability.filesystem_reason,
+            "windows_filesystem_roots_unenforced"
+        );
+        assert_eq!(capability.network_enforcement, "unconfined");
+        assert!(capability.restricted_token && capability.low_integrity && capability.job_object);
+        let mut value = serde_json::to_value(&capability).unwrap();
+        value["unknown"] = true.into();
+        assert!(serde_json::from_value::<RunnerCapabilities>(value).is_err());
+    }
 
     fn host(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
@@ -496,7 +761,7 @@ mod tests {
     /// acceptance sandbox.
     #[test]
     fn the_plan_states_that_egress_is_unconfined() {
-        for request in ["on", "allowlist"] {
+        for request in ["on", "unspecified"] {
             let input = payload(&format!(
                 r#"{{"argv":["a"],"cwd":"C:\\work","network":"{request}"}}"#
             ));

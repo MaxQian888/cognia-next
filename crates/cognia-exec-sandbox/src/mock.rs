@@ -117,6 +117,7 @@ impl SandboxedExec for MockSandboxBackend {
     fn health(&self) -> SandboxHealth {
         let g = self.inner.lock().expect("mock lock");
         SandboxHealth {
+            windows_capabilities: None,
             available: g.available,
             backend: "mock".into(),
             version: "test-only".into(),

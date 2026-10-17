@@ -241,18 +241,41 @@ NetworkPolicy::Allowlist { hosts: _ } => match proxy_port {
 - **allowlist 由内核强制执行。** `run_confined` 启动过滤代理（`net_proxy.rs`），把 `HTTP(S)_PROXY` / `ALL_PROXY` 指向它，并通过 `COGNIA_SANDBOX_PROXY_PORT` 传递其端口。profile 随后只放行发往 `localhost:<port>` 的出站 TCP（`sbpl.rs:282-286`），由代理套用主机 allowlist 并自己完成 DNS 与出站，因此绕开代理直连的命令会被 `(deny default)` 拦下。代理绑定失败时，这次调用以 `BackendFailed` 失败。
 - **注意事项：** 资源上限在 macOS 上只应用 `RLIMIT_CPU`（经由共享的 `pre_exec` hook），另有墙钟看门狗。`RLIMIT_AS` 在那里不可靠，`RLIMIT_NPROC` 会把登录用户名下的所有进程都算进去，所以两者都只在 Linux 上生效。
 
-### Windows —— restricted-token runner（真实）
+### Windows —— restricted-token runner（隔离能力有限）
 
-`WindowsSandboxBackend` 调用随包发布的 `crates/cognia-sandbox-runner/` 产物 `cognia-sandbox-runner.exe`。runner 使用当前应用 token 的受限子集启动目标、降低完整性级别、把子进程放入 Job Object，并以 JSON 结果返回捕获到的 stdout/stderr。权限约束（restricted token、low integrity）和进程 / Job 限制无需提权、独立 OS 账号或 setup 标记即可生效。**当前 runner 不会把文件系统写入限制在 workspace 内**：payload 不包含 readable 或 writable roots。内核级出口控制也未实现；请求 network `off` 会被拒绝，不会被报告为已强制执行。
+`WindowsSandboxBackend` 仅从可信安装位置启动随包发布的 `cognia-sandbox-runner.exe`，
+位置由宿主可执行文件旁路径解析。旧时间戳安装标记不授权其他位置；解析后位于安装目录之外的 runner 会被拒绝。
+受限令牌、低完整性和 Job Object 限制仍然可用；**文件系统根目录强制隔离刻意保持未启用**。
 
-```rust title="crates/cognia-sandbox-runner/src/main.rs (restricted-token launch shape)"
-// 1. Duplicate the caller token.
-// 2. Create a restricted token and lower integrity.
-// 3. Create a Job Object with kill-on-close and optional memory cap.
-// 4. Spawn suspended under the restricted token, assign to the job, then resume.
-```
+宿主始终使用 `--protocol-v2`，通过 stdin 写入且仅写入一份 JSON 请求：
+`{ "protocol": 2, "request": { ... } }`。嵌套请求必须包含 argv、cwd、env、timeout、
+limits、network 和文件系统计划；所有协议结构均拒绝未知字段。缺失字段、v1 信封和未知
+版本都会被拒绝。旧 runner 无法理解该 flag/stdin 协议，因此会失败，不会静默忽略 roots。
+仅为兼容旧宿主保留 argv 请求：不允许携带文件系统 roots，网络只能为 On/Unspecified。
 
-`WindowsSandboxBackend::is_available()` 现在只检查 runner 二进制能否在应用旁解析到。旧的 `target_user` payload 字段仅用于兼容旧 JSON 形状；restricted-token runner 会忽略它。`cognia-sandbox-setup.exe` 只保留给未来可选的 per-SID Firewall 后续；它已不在关键路径上。
+共用的平台无关文件系统计划包含规范化、去重后的可读目录树、可写目录树、精确可写文件、
+受保护的 deny-read/deny-write 底线、运行时读取路径与私有 scratch。拒绝底线优先于授权。
+携带计划不代表已执行隔离：Windows 上携带 roots 的请求返回 `SandboxError::Unavailable`，
+原因为 `windows_filesystem_roots_unenforced`。网络 `Off` 和 `Allowlist` 在实现强制约束前
+也会被拒绝；`On` 明确报告**不受限制**。严格模式不会将这些拒绝重试为宿主执行。
+dispatcher、工具插件和原生工具路径会传递拒绝结果，不会重试为无隔离的宿主命令。
+主动探针对此未启用能力明确报告 **not confined（未隔离）**。
+
+`--capabilities-v2` 是不启动目标进程、无副作用的探针。JSON 报告包含 `protocolVersions`、
+`filesystemEnforcement: false`、
+`filesystemReason: "windows_filesystem_roots_unenforced"`、`networkEnforcement: "unconfined"`、
+`restrictedToken`、`lowIntegrity` 与 `jobObject`。宿主按 runner 路径与修改时间缓存结果，
+并通过 health 的 `windowsCapabilities` 暴露。即使 runner 存在，Settings 也会显示
+“隔离能力有限”和文件系统强制隔离“未启用”。
+
+子进程以 `CREATE_SUSPENDED` 启动，在运行前加入 Job Object；加入失败或 `ResumeThread`
+失败都会终止子进程。显式 `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` 将继承限制为预期标准流句柄。
+stdout/stderr 使用匿名管道并发读取与有界缓冲，保留 `MAX_OUTPUT_BYTES` 截断行为及标记，
+不再通过临时文件捕获输出。
+
+在原始路径上实施强制约束的已签名文件系统 minifilter 是**独立的未来项目**，需要 WDK、
+驱动签名、提权安装和原生 Windows 验收；本次协议与启动加固不实现驱动。
+参见 ADR-0028 的 2026-10-17 修订。
 
 ### 兜底 + 测试替身
 

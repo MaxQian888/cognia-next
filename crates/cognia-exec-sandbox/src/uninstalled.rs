@@ -75,6 +75,7 @@ impl SandboxedExec for UninstalledSandboxBackend {
 
     fn health(&self) -> SandboxHealth {
         SandboxHealth {
+            windows_capabilities: None,
             available: false,
             backend: format!("uninstalled-{}", self.os),
             version: String::new(),

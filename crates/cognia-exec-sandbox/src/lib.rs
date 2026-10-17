@@ -21,6 +21,7 @@
 //! are unchanged.
 
 pub mod env;
+pub mod filesystem_plan;
 pub mod launcher;
 pub mod limits;
 #[cfg(target_os = "linux")]
@@ -41,7 +42,6 @@ pub mod seccomp;
 pub mod traits;
 pub mod types;
 pub mod uninstalled;
-#[cfg(target_os = "windows")]
 pub mod windows;
 
 use std::sync::Arc;
@@ -309,8 +309,9 @@ async fn maybe_start_proxy(
         return Ok(None);
     };
     validate_network(policy)?;
-    // Linux owns a Unix proxy inside the backend; caller env is never a bridge.
-    if cfg!(target_os = "linux") {
+    // Linux owns its Unix bridge; Windows refuses allowlists rather than
+    // presenting proxy environment variables as network confinement.
+    if cfg!(any(target_os = "linux", target_os = "windows")) {
         return Ok(None);
     }
     match crate::net_proxy::FilteringProxy::start(hosts.clone()).await {
@@ -691,7 +692,7 @@ mod tests {
         assert!(!cmd.env.contains_key("HTTP_PROXY"));
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     #[tokio::test]
     async fn maybe_start_proxy_injects_env_for_allowlist() {
         let mut cmd = SandboxCommand {

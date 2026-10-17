@@ -22,6 +22,30 @@ afterEach(() => {
 })
 
 describe("useSandboxHealth", () => {
+  it.each(["windowsCapabilities", "windows_capabilities"])(
+    "preserves inert Windows capabilities from %s",
+    async (field) => {
+      const capabilities = {
+        protocolVersions: [2],
+        filesystemEnforcement: false,
+        filesystemReason: "windows_filesystem_roots_unenforced",
+        networkEnforcement: "unconfined",
+        restrictedToken: true,
+        lowIntegrity: true,
+        jobObject: true,
+      }
+      mockCall.mockResolvedValue({
+        available: true,
+        backend: "windows-restricted-token",
+        version: "2",
+        [field]: capabilities,
+      })
+      const { result } = renderHook(() => useSandboxHealth({ pollIntervalMs: 100_000 }))
+      await waitFor(() => expect(result.current.health.windowsCapabilities).toEqual(capabilities))
+      expect(result.current.health.windowsCapabilities?.filesystemEnforcement).toBe(false)
+    }
+  )
+
   it("probes once on mount and exposes the health payload", async () => {
     mockCall.mockResolvedValue({
       available: true,

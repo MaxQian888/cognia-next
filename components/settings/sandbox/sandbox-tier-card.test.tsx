@@ -4,6 +4,8 @@ import { render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import en from "@/i18n/messages/en.json"
 
+let mockOsBackend = "mock"
+
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: { settings: { sandboxTier: string } }) => unknown) =>
     selector({ settings: { sandboxTier: "microvm" } }),
@@ -11,13 +13,29 @@ jest.mock("@/stores/settings", () => ({
 jest.mock("@/lib/db/settings", () => ({ saveSettings: jest.fn() }))
 jest.mock("@/hooks/sandbox/use-sandbox-runtime-availability", () => ({
   useSandboxRuntimeAvailability: () => ({
-    os: { available: true, backend: "mock", detail: "ok", reason: "available" },
+    os: { available: true, backend: mockOsBackend, detail: "ok", reason: "available" },
     microvm: { available: false, reason: "adapter-missing", requiresWorkspace: true },
     container: { available: false, reason: "always-on-host-only", requiresWorkspace: true },
   }),
 }))
 
 import { SandboxTierCard } from "./sandbox-tier-card"
+
+beforeEach(() => {
+  mockOsBackend = "mock"
+})
+
+it("labels Windows filesystem enforcement inactive even when the OS tier is available", () => {
+  mockOsBackend = "windows-restricted-token"
+  render(
+    <NextIntlClientProvider locale="en" messages={en}>
+      <SandboxTierCard />
+    </NextIntlClientProvider>
+  )
+  expect(
+    screen.getByText(en.settings.sandbox.tier.availability.windowsFilesystemInert)
+  ).toBeVisible()
+})
 
 it("keeps an unavailable persisted tier visible, selected, and disabled with a reason", () => {
   render(

@@ -40,5 +40,13 @@ libc.workspace = true
 # The seccomp filter the bwrap backend installs.
 seccompiler = "0.5"
 
+[target."cfg(target_os = \"windows\")".dependencies]
+# Apply a Low integrity label only to the host-created per-run scratch dir.
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+] }
+
 [lints]
 workspace = true

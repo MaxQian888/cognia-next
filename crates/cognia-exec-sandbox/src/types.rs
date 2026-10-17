@@ -222,11 +222,35 @@ pub enum SandboxError {
     Timeout { seconds: u64 },
 }
 
+/// Side-effect-free v2 runner capability report. A capability is not a claim
+/// that any particular command has run under confinement.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WindowsCapabilities {
+    pub protocol_versions: Vec<u32>,
+    /// Intentionally dormant: restricted tokens and low integrity do not
+    /// enforce filesystem roots. False until the separate signed minifilter
+    /// project supplies enforcement; hosts must refuse every root-bearing run.
+    pub filesystem_enforcement: bool,
+    pub filesystem_reason: String,
+    /// `unconfined` means sockets are not restricted; Off/Allowlist must fail.
+    pub network_enforcement: String,
+    pub restricted_token: bool,
+    pub low_integrity: bool,
+    pub job_object: bool,
+}
+
 /// Health snapshot reported by `sandbox_health_probe`. The renderer's
 /// Settings → Sandbox tab consumes this to drive the status badge + "Retry
 /// setup" button.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxHealth {
+    #[serde(
+        default,
+        rename = "windowsCapabilities",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub windows_capabilities: Option<WindowsCapabilities>,
     /// True when the backend is installed and ready to serve calls.
     pub available: bool,
     /// Stable backend id: `"windows-cognia-sandbox"`, `"macos-sandbox-exec"`,
@@ -320,6 +344,19 @@ mod tests {
             serde_json::from_value::<NetworkReport>(json).unwrap(),
             network
         );
+    }
+
+    #[test]
+    fn legacy_health_does_not_claim_windows_enforcement() {
+        let health: SandboxHealth = serde_json::from_value(serde_json::json!({
+            "available": true, "backend": "windows-cognia-sandbox"
+        }))
+        .unwrap();
+        assert!(health.windows_capabilities.is_none());
+        assert!(serde_json::to_value(health)
+            .unwrap()
+            .get("windowsCapabilities")
+            .is_none());
     }
 
     #[test]

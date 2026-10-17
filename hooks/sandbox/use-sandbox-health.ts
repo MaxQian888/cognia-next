@@ -15,11 +15,23 @@ import {
   type SandboxNetworkAllowlistProbe,
 } from "@cognia/plugin-sdk/api/sandbox"
 
+export interface WindowsSandboxCapabilities {
+  protocolVersions: number[]
+  /** Intentionally inert: false until a separate Windows filesystem enforcement project ships. */
+  filesystemEnforcement: boolean
+  filesystemReason: string
+  networkEnforcement: "unconfined"
+  restrictedToken: boolean
+  lowIntegrity: boolean
+  jobObject: boolean
+}
+
 export interface SandboxHealth {
   available: boolean
   backend: string
   version: string
   lastError: string
+  windowsCapabilities?: WindowsSandboxCapabilities
 }
 
 const DEFAULT_HEALTH: SandboxHealth = {
@@ -35,6 +47,8 @@ interface RawSandboxHealth {
   version: string
   last_error?: string
   lastError?: string
+  windowsCapabilities?: WindowsSandboxCapabilities
+  windows_capabilities?: WindowsSandboxCapabilities
 }
 
 /** Active-probe state surfaced by `verify()`. Distinct from `health` — this
@@ -67,6 +81,7 @@ function normaliseHealth(raw: RawSandboxHealth | null | undefined): SandboxHealt
     // Tauri's serde rename emits `last_error` (snake_case); be tolerant
     // of both shapes so future Tauri version bumps don't break this.
     lastError: raw.last_error ?? raw.lastError ?? "",
+    windowsCapabilities: raw.windowsCapabilities ?? raw.windows_capabilities,
   }
 }
 

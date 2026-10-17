@@ -51870,6 +51870,7 @@
       "retryButton": "运行健康探测",
       "status": {
         "down": "不可用",
+        "limited": "隔离能力有限",
         "ok": "已激活",
         "setup": "需要配置"
       },
@@ -51879,6 +51880,7 @@
           "adapterMissing": "请先启用 E2B Sandbox 插件，再选择此层级。",
           "probeFailed": "当前 OS 隔离检查失败。请查看上方探测诊断，然后重试验证。",
           "probeRequired": "请先成功运行“验证隔离”，再选择此层级。",
+          "windowsFilesystemInert": "Windows 文件系统强制隔离未启用：携带根目录的请求会被拒绝。网络 Off 和 Allowlist 也不可用。",
           "workspaceRequired": "执行时还需要会话已绑定到现有 E2B 工作区。"
         },
         "description": "当会话启用沙盒时，决定由哪一层执行 Bash / Edit / Write。角色可以覆盖。",
@@ -51896,6 +51898,11 @@
       "verifyButton": "验证沙盒隔离",
       "version": {
         "label": "版本"
+      },
+      "windows": {
+        "filesystemInert": "Windows 文件系统强制隔离：未启用",
+        "networkUnrestricted": "网络：不受限制。Off 和 Allowlist 请求会被拒绝。",
+        "rootsRefused": "在强制隔离可用前，所有指定文件系统根目录的运行请求都会被拒绝。"
       },
       "workspaceConfinement": {
         "description": "将内置的文件与 Shell 工具约束在当前工作区根目录内。工具试图写到工作区之外时会先请求批准；凭据路径（.ssh、.aws 等）始终被拦截。",

@@ -263,6 +263,7 @@ mod tests {
 
         fn health(&self) -> SandboxHealth {
             SandboxHealth {
+                windows_capabilities: None,
                 available: self.available,
                 backend: "scripted".into(),
                 version: String::new(),

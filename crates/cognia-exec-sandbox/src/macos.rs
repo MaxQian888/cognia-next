@@ -268,6 +268,7 @@ impl SandboxedExec for MacOsSandboxBackend {
     fn health(&self) -> SandboxHealth {
         let available = self.is_available();
         SandboxHealth {
+            windows_capabilities: None,
             available,
             backend: "macos-sandbox-exec".into(),
             version: "system".into(),
