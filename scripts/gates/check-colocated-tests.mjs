@@ -158,6 +158,23 @@ export function rustHasInlineTests(source) {
 }
 
 /**
+ * Repo paths of the test modules a Rust file pulls in from a sibling file with
+ * `#[cfg(test)] #[path = "…"] mod …;`. Such a file is the test module itself,
+ * so it is never a source that needs one. Rust resolves the path against the
+ * declaring file's directory. Pure.
+ *
+ * @param {string} file repo-relative path of the declaring file
+ * @param {string} source its contents
+ * @returns {string[]}
+ */
+export function rustSplitTestModules(file, source) {
+  const dir = file.slice(0, file.lastIndexOf("/") + 1)
+  const declaration =
+    /#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*?#\[path\s*=\s*"([^"]+)"\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*;/g
+  return [...source.matchAll(declaration)].map((match) => `${dir}${match[1]}`)
+}
+
+/**
  * Compute the current violation list. Pure — I/O is injected.
  *
  * @param {string[]} files every tracked repo-relative path
@@ -166,7 +183,13 @@ export function rustHasInlineTests(source) {
  */
 export function findViolations(files, io) {
   const violations = []
+  const rustTestModules = new Set(
+    files
+      .filter((file) => isGatedRustSource(file))
+      .flatMap((file) => rustSplitTestModules(file, io.readRust(file)))
+  )
   for (const file of files) {
+    if (rustTestModules.has(file)) continue
     if (isGatedTsSource(file)) {
       if (!expectedTestPaths(file).some((p) => io.has(p))) violations.push(file)
     } else if (isGatedRustSource(file)) {

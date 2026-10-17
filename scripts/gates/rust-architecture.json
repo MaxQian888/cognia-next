@@ -169,6 +169,8 @@
       "lib.rs",
       "main.rs",
       "menu.rs",
+      "native-service-worker-recovery.js",
+      "native-service-worker-recovery.test.ts",
       "node_runtime.rs",
       "ollama",
       "parse",

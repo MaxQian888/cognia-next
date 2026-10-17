@@ -23,6 +23,7 @@ import {
   main,
   readBaseline,
   rustHasInlineTests,
+  rustSplitTestModules,
   rustIsDeclarationOnly,
 } from "./check-colocated-tests.mjs"
 
@@ -104,6 +105,28 @@ test("expectedTestPaths offers every accepted co-located name", () => {
     "lib/goal/engine.spec.ts",
     "lib/goal/engine.spec.tsx",
   ])
+})
+
+test("a test module split out with #[cfg(test)] #[path] is not a violation", () => {
+  const sources = {
+    "crates/cognia-x/src/snap.rs":
+      'pub fn a() {}\n#[cfg(test)]\n#[path = "snap_tests.rs"]\nmod lifecycle_tests;\n',
+    "crates/cognia-x/src/snap_tests.rs": "use super::*;\n#[test]\nfn works() {}\n",
+    "crates/cognia-x/src/other.rs": 'pub fn b() {}\n#[path = "snap_tests.rs"]\nmod not_a_test;\n',
+  }
+  const io = { has: () => false, readRust: (p) => sources[p] }
+  assert.deepEqual(findViolations(Object.keys(sources), io), ["crates/cognia-x/src/other.rs"])
+})
+
+test("rustSplitTestModules resolves the path against the declaring file's directory", () => {
+  assert.deepEqual(
+    rustSplitTestModules(
+      "crates/cognia-x/src/a/b.rs",
+      '#[cfg(test)]\n#[allow(dead_code)]\n#[path = "b_tests.rs"]\npub(crate) mod tests;'
+    ),
+    ["crates/cognia-x/src/a/b_tests.rs"]
+  )
+  assert.deepEqual(rustSplitTestModules("crates/cognia-x/src/a.rs", '#[path = "x.rs"]\nmod x;'), [])
 })
 
 test("rustHasInlineTests detects the in-file test module", () => {

@@ -1079,6 +1079,7 @@ mod tests {
                     | "task_resource_upload_write_chunk"
                     | "code_snapshot_upload_write_chunk"
                     | "code_result_read_chunk"
+                    | "browser_attachment_upload_chunk"
             ) {
                 super::super::rate_limit::RequestClass::MediaTransfer
             } else if descriptor.operation == CommandOperation::Read {
