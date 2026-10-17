@@ -11,6 +11,7 @@
     "fumadocs-core": "latest",
     "fumadocs-mdx": "latest",
     "fumadocs-ui": "latest",
+    "geist": "^1.7.2",
     "mermaid": "12.0.0",
     "next": "^16.3.6",
     "next-intl": "^4.14.7",

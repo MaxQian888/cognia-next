@@ -2,6 +2,8 @@ import "../global.css"
 import type { Metadata } from "next"
 import type { ReactNode } from "react"
 import { notFound } from "next/navigation"
+import { GeistMono } from "geist/font/mono"
+import { GeistSans } from "geist/font/sans"
 import { IntlProvider } from "@/components/intl-provider"
 import { Provider } from "@/components/provider"
 import { i18n } from "@/lib/i18n"
@@ -34,7 +36,12 @@ export default async function RootLayout({
   }
 
   return (
-    <html lang={lang} suppressHydrationWarning>
+    <html
+      lang={lang}
+      // The website's typefaces;  maps them onto font-sans/mono.
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
+      suppressHydrationWarning
+    >
       <body>
         <IntlProvider locale={lang === "zh" ? "zh-CN" : "en"} messages={messages}>
           <Provider lang={lang}>{children}</Provider>

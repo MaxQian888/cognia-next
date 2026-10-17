@@ -430,8 +430,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: docs/.next/cache
-          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-docs-deploy-${{ inputs.environment }}-${{ vars.DOCS_SITE_URL }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'docs/next.config.ts', 'docs/tsconfig.json', 'docs/postcss.config.mjs') }}-${{ github.sha }}
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-docs-deploy-${{ inputs.environment }}-${{ vars.DOCS_SITE_URL }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'docs/next.config.ts', 'docs/tsconfig.json', 'docs/postcss.config.mjs') }}-
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-docs-deploy-${{ inputs.environment }}-${{ vars.DOCS_SITE_URL }}-${{ vars.WEB_SITE_URL }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'docs/next.config.ts', 'docs/tsconfig.json', 'docs/postcss.config.mjs') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-next-v2-docs-deploy-${{ inputs.environment }}-${{ vars.DOCS_SITE_URL }}-${{ vars.WEB_SITE_URL }}-${{ hashFiles('pnpm-lock.yaml', 'sidecar/pnpm-lock.yaml') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'tsconfig.build.json', 'postcss.config.mjs', 'pnpm-workspace.yaml', 'docs/next.config.ts', 'docs/tsconfig.json', 'docs/postcss.config.mjs') }}-
 
       - name: Cache standalone npm downloads
         uses: actions/cache@v6
@@ -453,6 +453,9 @@ jobs:
           # export has no request to infer an origin from. Unset falls back to
           # Cloudflare's own CF_PAGES_URL, then to the dev origin.
           NEXT_PUBLIC_DOCS_SITE_URL: ${{ vars.DOCS_SITE_URL }}
+          # The landing page's "Website" link. Unset omits the link rather
+          # than pointing a published page at localhost.
+          NEXT_PUBLIC_WEB_SITE_URL: ${{ vars.WEB_SITE_URL }}
 
       - name: Guard Pages project variable
         env:

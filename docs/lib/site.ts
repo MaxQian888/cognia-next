@@ -24,6 +24,9 @@ type SiteEnv = {
   CF_PAGES_URL?: string
 }
 
+/** The GitHub repository the docs and the product live in. */
+export const REPO_URL = "https://github.com/MaxQian888/cognia-next"
+
 /** Strip trailing slashes so callers can always concatenate `/`-prefixed paths. */
 function normalize(value: string): string {
   return value.trim().replace(/\/+$/, "")
@@ -50,4 +53,28 @@ export function siteUrl(): string {
 /** Join an app-absolute path onto the site origin. */
 export function absoluteUrl(path: string): string {
   return `${siteUrl()}${path.startsWith("/") ? path : `/${path}`}`
+}
+
+/**
+ * The marketing site's origin, for the landing page's "Website" link.
+ *
+ * Only `NEXT_PUBLIC_WEB_SITE_URL` counts (the deploy workflow sets it from the
+ * same `WEB_SITE_URL` variable the website build reads). There is deliberately
+ * no fallback: a preview deployment or a local build has no website to point
+ * at, and a link to `localhost` in a published page is worse than no link.
+ */
+export function resolveWebsiteUrl(env: { NEXT_PUBLIC_WEB_SITE_URL?: string }): string | null {
+  const candidate = env.NEXT_PUBLIC_WEB_SITE_URL?.trim()
+  if (!candidate) return null
+  const withProtocol = /^https?:\/\//.test(candidate) ? candidate : `https://${candidate}`
+  try {
+    return normalize(new URL(withProtocol).toString())
+  } catch {
+    return null
+  }
+}
+
+export function websiteUrl(): string | null {
+  // Spelled out so Next inlines it into the client bundle at build time.
+  return resolveWebsiteUrl({ NEXT_PUBLIC_WEB_SITE_URL: process.env.NEXT_PUBLIC_WEB_SITE_URL })
 }

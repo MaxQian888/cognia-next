@@ -1,7 +1,10 @@
 import { defineI18nUI } from "fumadocs-ui/i18n"
-import type { DocsLayoutProps } from "fumadocs-ui/layouts/docs"
+import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared"
 import { i18n } from "@/lib/i18n"
-import { SITE_NAME } from "./site"
+// Relative rather than `@/`: this module has tests, and the repo's Jest runner
+// maps that alias to the app root rather than to `docs/`.
+import { BrandMark } from "../components/brand-mark"
+import { REPO_URL, SITE_NAME } from "./site"
 
 export const i18nUI = defineI18nUI(i18n, {
   zh: {
@@ -23,12 +26,22 @@ export const i18nUI = defineI18nUI(i18n, {
   },
 })
 
-export function baseOptions(lang: string): Omit<DocsLayoutProps, "tree" | "children"> {
+// The shared base, not `DocsLayoutProps`: both the docs layout and the landing
+// page's `HomeLayout` take these, and their slot types differ.
+export function baseOptions(lang: string): BaseLayoutProps {
   return {
     nav: {
-      title: SITE_NAME,
+      // The website's lockup: the mark, then the name in mono.
+      title: (
+        <span className="inline-flex items-center gap-2 font-mono text-sm tracking-tight">
+          <BrandMark />
+          {SITE_NAME}
+        </span>
+      ),
       // hideLocale is "never" (D8 static export) — every locale is prefixed.
-      url: `/${lang}/docs`,
+      // The landing page is the home, as on the website.
+      url: `/${lang}`,
     },
+    githubUrl: REPO_URL,
   }
 }

@@ -10,5 +10,24 @@
     "failed": "复制失败",
     "idle": "复制 Markdown",
     "view": "查看 Markdown"
+  },
+  "home": {
+    "eyebrow": "文档",
+    "title": "Cognia 的一切，都写在这里。",
+    "subtitle": "架构、子系统、插件开发，以及背后的决策记录 —— 代码库本身所遵循的同一份参考。",
+    "primaryCta": "快速开始",
+    "secondaryCta": "阅读概览",
+    "github": "GitHub",
+    "website": "官网",
+    "browseEyebrow": "按领域浏览",
+    "browseTitle": "从你的问题出发，直接找到对应章节。",
+    "pageCount": "{count} 篇",
+    "openArea": "打开",
+    "searchHint": "搜索全部页面",
+    "llmsTitle": "在用 Agent 阅读？",
+    "llmsBody": "每一页都提供纯 Markdown 版本，全部内容也合并成了一个文件。",
+    "llmsIndex": "llms.txt",
+    "llmsFull": "llms-full.txt",
+    "navDocs": "文档"
   }
 }

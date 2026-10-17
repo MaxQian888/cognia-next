@@ -1,3 +1,111 @@
 @import "tailwindcss";
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
+
+/*
+ * The website's palette (`web/app/globals.css`), mapped onto fumadocs' own
+ * variables so every docs page — not just the landing page — reads as the
+ * same product. The docs app cannot import across packages, so the values are
+ * restated here; keep the two in step.
+ *
+ * `--cg-*` are the website tokens by their own names; `--color-fd-*` are what
+ * fumadocs paints with. The neutral preset is still imported for the pieces
+ * this file does not restate (callout and diff colours).
+ */
+:root {
+  --cg-paper: #f3f1ec;
+  --cg-surface: #faf9f6;
+  --cg-ink: #0c1115;
+  --cg-muted: #5f666e;
+  --cg-hairline: #d7d8d5;
+  --cg-hairline-strong: #b9bcb8;
+  --cg-action: #35cedd;
+  /* Cyan text on paper fails contrast, so links and active states use a
+   * deeper step of the same hue in light mode. */
+  --cg-action-text: #0b7a86;
+
+  --color-fd-background: var(--cg-paper);
+  --color-fd-foreground: var(--cg-ink);
+  --color-fd-muted: #ebe9e3;
+  --color-fd-muted-foreground: var(--cg-muted);
+  --color-fd-popover: var(--cg-surface);
+  --color-fd-popover-foreground: var(--cg-ink);
+  --color-fd-card: var(--cg-surface);
+  --color-fd-card-foreground: var(--cg-ink);
+  --color-fd-border: var(--cg-hairline);
+  --color-fd-primary: var(--cg-action-text);
+  --color-fd-primary-foreground: var(--cg-surface);
+  --color-fd-secondary: #ebe9e3;
+  --color-fd-secondary-foreground: var(--cg-ink);
+  --color-fd-accent: #e6e4dd;
+  --color-fd-accent-foreground: var(--cg-ink);
+  --color-fd-ring: var(--cg-action);
+}
+
+.dark {
+  --cg-paper: #0c1115;
+  --cg-surface: #151b20;
+  --cg-ink: #f3f1ec;
+  --cg-muted: #8e959b;
+  --cg-hairline: #2a333a;
+  --cg-hairline-strong: #3c464e;
+  --cg-action: #4fdcea;
+  --cg-action-text: #4fdcea;
+
+  --color-fd-background: var(--cg-paper);
+  --color-fd-foreground: var(--cg-ink);
+  --color-fd-muted: #1c242b;
+  --color-fd-muted-foreground: var(--cg-muted);
+  --color-fd-popover: var(--cg-surface);
+  --color-fd-popover-foreground: var(--cg-ink);
+  --color-fd-card: var(--cg-surface);
+  --color-fd-card-foreground: var(--cg-ink);
+  --color-fd-border: var(--cg-hairline);
+  --color-fd-primary: var(--cg-action-text);
+  --color-fd-primary-foreground: var(--cg-paper);
+  --color-fd-secondary: #1c242b;
+  --color-fd-secondary-foreground: var(--cg-ink);
+  --color-fd-accent: #222b32;
+  --color-fd-accent-foreground: var(--cg-ink);
+  --color-fd-ring: var(--cg-action);
+}
+
+/* The sidebar override in the neutral preset uses grey hsl values; restate
+ * it in the palette so the sidebar matches the page instead of going cold. */
+.dark #nd-sidebar {
+  --color-fd-muted: #1c242b;
+  --color-fd-secondary: #222b32;
+  --color-fd-muted-foreground: var(--cg-muted);
+}
+
+@theme inline {
+  --color-cg-paper: var(--cg-paper);
+  --color-cg-surface: var(--cg-surface);
+  --color-cg-ink: var(--cg-ink);
+  --color-cg-muted: var(--cg-muted);
+  --color-cg-hairline: var(--cg-hairline);
+  --color-cg-hairline-strong: var(--cg-hairline-strong);
+  --color-cg-action: var(--cg-action);
+
+  --radius-cg-control: 8px;
+  --radius-cg-panel: 12px;
+
+  /* Geist, as on the website; `app/[lang]/layout.tsx` sets the variables. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--cg-action) 28%, transparent);
+}
+
+@layer utilities {
+  /* The website's twelve-column ruled ground, faded out towards the bottom so
+   * it frames the hero without competing with the text. */
+  .cg-rhythm-lines {
+    background-image: linear-gradient(to right, var(--cg-hairline) 1px, transparent 1px);
+    background-size: calc(100% / 12) 100%;
+    mask-image: linear-gradient(to bottom, black 40%, transparent);
+    opacity: 0.6;
+  }
+}

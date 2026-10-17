@@ -10,5 +10,24 @@
     "failed": "Copy failed",
     "idle": "Copy Markdown",
     "view": "View Markdown"
+  },
+  "home": {
+    "eyebrow": "Documentation",
+    "title": "Everything Cognia does, written down.",
+    "subtitle": "Architecture, subsystems, plugin authoring and the decision records behind them — the same reference the codebase is built against.",
+    "primaryCta": "Get started",
+    "secondaryCta": "Read the overview",
+    "github": "GitHub",
+    "website": "Website",
+    "browseEyebrow": "Browse by area",
+    "browseTitle": "Pick up wherever your question starts.",
+    "pageCount": "{count, plural, one {# page} other {# pages}}",
+    "openArea": "Open",
+    "searchHint": "Search every page",
+    "llmsTitle": "Reading this with an agent?",
+    "llmsBody": "Every page is also served as plain Markdown, and the whole set as one file.",
+    "llmsIndex": "llms.txt",
+    "llmsFull": "llms-full.txt",
+    "navDocs": "Docs"
   }
 }
