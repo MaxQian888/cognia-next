@@ -421,7 +421,7 @@ fn read_owned_policy_file(path: &std::path::Path) -> Result<String, String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW);
     }
-    let mut file = options
+    let file = options
         .open(path)
         .map_err(|error| format!("upstream proxy policy file: {error}"))?;
     #[cfg(unix)]

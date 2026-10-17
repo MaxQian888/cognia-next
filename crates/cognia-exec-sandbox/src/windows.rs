@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -21,7 +21,9 @@ use crate::types::{
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const CAPABILITY_BYTES: u64 = 16_384;
-type CacheKey = (PathBuf, SystemTime, u64);
+/// Runner path plus a SHA-256 of its bytes: metadata alone cannot tell a
+/// same-size replacement that kept its mtime from the probed binary.
+type CacheKey = (PathBuf, [u8; 32]);
 type CapabilityCache = HashMap<CacheKey, WindowsCapabilities>;
 static CAPABILITIES: OnceLock<Mutex<CapabilityCache>> = OnceLock::new();
 
@@ -143,21 +145,27 @@ fn trusted_runner_path(install_dir: &Path, candidate: &Path) -> Result<PathBuf, 
     Ok(runner)
 }
 
+fn runner_fingerprint(runner: &Path) -> Result<[u8; 32], String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(runner).map_err(|e| e.to_string())?;
+    Ok(Sha256::digest(&bytes).into())
+}
+
 fn cached_capabilities(
     runner: &Path,
     probe: impl FnOnce(&Path) -> Result<WindowsCapabilities, String>,
 ) -> Result<WindowsCapabilities, String> {
-    let metadata = runner.metadata().map_err(|e| e.to_string())?;
-    let key = (
-        runner.to_path_buf(),
-        metadata.modified().map_err(|e| e.to_string())?,
-        metadata.len(),
-    );
+    let key = (runner.to_path_buf(), runner_fingerprint(runner)?);
     let cache = CAPABILITIES.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(cached) = cache.lock().map_err(|e| e.to_string())?.get(&key).cloned() {
         return Ok(cached);
     }
     let result = probe(runner);
+    // A report belongs to the bytes that produced it; a runner replaced while
+    // the probe ran is neither cached nor trusted.
+    if runner_fingerprint(runner)? != key.1 {
+        return Err("windows_runner_capabilities_unavailable: runner changed during probe".into());
+    }
     let mut cache = cache.lock().map_err(|e| e.to_string())?;
     cache.retain(|existing, _| existing.0 != key.0);
     if let Ok(capabilities) = &result {
@@ -696,8 +704,26 @@ mod tests {
         std::fs::write(&runner, "v2").unwrap();
         assert!(cached_capabilities(&runner, |_| Ok(capabilities())).is_ok());
         assert!(cached_capabilities(&runner, |_| panic!("must use cache")).is_ok());
+        // Same path, size and mtime, different bytes: still probed again.
+        let modified = std::fs::metadata(&runner).unwrap().modified().unwrap();
+        std::fs::write(&runner, "v3").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&runner)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert_eq!(std::fs::metadata(&runner).unwrap().modified().unwrap(), modified);
+        assert!(cached_capabilities(&runner, |_| Err("new runner refused".into())).is_err());
         std::fs::write(&runner, "replacement").unwrap();
         assert!(cached_capabilities(&runner, |_| Err("new runner refused".into())).is_err());
+        std::fs::write(&runner, "v2").unwrap();
+        let changed = runner.clone();
+        assert!(cached_capabilities(&runner, move |_| {
+            std::fs::write(&changed, "swapped").unwrap();
+            Ok(capabilities())
+        })
+        .is_err(), "a runner replaced during the probe is not trusted");
         let other = dir.path().join("other.exe");
         std::fs::write(&other, "v2").unwrap();
         assert!(cached_capabilities(&other, |_| Err("different path".into())).is_err());

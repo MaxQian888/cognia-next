@@ -31,6 +31,8 @@ async-trait.workspace = true
 dirs.workspace = true
 # Scratch dirs for the SBPL profile and confined runs.
 tempfile.workspace = true
+# Fingerprints the Windows runner a capability report was probed from.
+sha2.workspace = true
 
 [target."cfg(unix)".dependencies]
 # `setrlimit` for the CPU / address-space caps applied in `pre_exec`.
