@@ -22,6 +22,7 @@ jest.mock("@/lib/best-of-n/publication", () => ({
   archiveBestOfN: jest.fn(),
 }))
 jest.mock("@/lib/best-of-n/service", () => ({ cancelBestOfN: jest.fn() }))
+jest.mock("@/lib/best-of-n/paired", () => ({ requestBestOfNCancel: jest.fn() }))
 jest.mock("@/lib/best-of-n/projection", () => ({ listBestOfNRuns: jest.fn() }))
 jest.mock("@/lib/scm/host", () => ({ createScmHost: () => ({}) }))
 jest.mock("@/stores/agent/external-agent-store", () => ({
@@ -241,4 +242,23 @@ it("labels each candidate's runtime, naming an external configuration when known
   expect(
     within(screen.getByRole("article", { name: "Candidate 2" })).getByText("externalRuntime")
   ).toBeInTheDocument()
+})
+
+it("a paired observer can only ask the Host to stop; choosing and publishing stay inert", async () => {
+  const { requestBestOfNCancel } = jest.requireMock("@/lib/best-of-n/paired")
+  const { cancelBestOfN } = jest.requireMock("@/lib/best-of-n/service")
+  row.group.phase = "running"
+  jest
+    .mocked(useBestOfNRun)
+    .mockReturnValue({ summary: row, refresh, canManage: false, failed: false })
+  render(<BestOfNComparison groupId="group" />)
+  expect(screen.getByText("pairedReadOnly")).toBeInTheDocument()
+  for (const article of screen.getAllByRole("article"))
+    expect(within(article).getByRole("button", { name: "pick" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "publish" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "archive" })).toBeDisabled()
+  fireEvent.click(screen.getByRole("button", { name: "requestStop" }))
+  await screen.findByText("stopRequested")
+  expect(requestBestOfNCancel).toHaveBeenCalledWith("group")
+  expect(cancelBestOfN).not.toHaveBeenCalled()
 })

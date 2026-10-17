@@ -5747,7 +5747,7 @@
     "noChanges": "No code changes; this candidate cannot be published.",
     "noChecks": "No checks recorded.",
     "noSummary": "No summary recorded yet.",
-    "pairedReadOnly": "This device displays a synced summary. Select and publish on the executing Host.",
+    "pairedReadOnly": "This device shows a synced summary. It can ask the executing Host to stop the run; choosing, checking and publishing a winner happen only on that Host.",
     "phase": {
       "awaitingSelection": "Awaiting manual selection / publication",
       "cancelled": "Cancelled",
@@ -5763,6 +5763,7 @@
     "publish": "Publish selected candidate",
     "refresh": "Refresh",
     "refreshFailed": "Could not refresh this run. The last synced summary remains visible.",
+    "requestStop": "Ask Host to stop",
     "retry": "Retry",
     "retryArchive": "Retry archive",
     "run": "Run",
@@ -5780,6 +5781,7 @@
       "running": "Running",
       "succeeded": "Succeeded"
     },
+    "stopRequested": "Stop requested. The executing Host stops each attempt and syncs the result.",
     "summary": "Summary",
     "title": "Best-of-N attempts",
     "unknown": "Unknown",
@@ -5839,6 +5841,7 @@
     "started": "Started {count} attempts at {base}. Result branch: {target}.",
     "starting": "Starting…",
     "status": "Phase: {phase}; candidates: {count}; base: {base}; result branch: {target}.",
+    "stopRequested": "Stop requested. The executing Host stops each attempt and syncs the result.",
     "target": "Result branch",
     "targetMode": "Result branch mode",
     "textOnly": "Best-of-N accepts a text prompt. Remove attachments and addressed runtime routes first.",

@@ -216,6 +216,20 @@ export function createBestOfNPublication(deps: PublicationDeps) {
         }
       }),
     archive: (groupId: string) => exclusive(groupId, () => archive(groupId)),
+    /**
+     * After a Host restart: give back an integration a publishing winner is
+     * still held by, so the person can re-run checks and publish again.
+     * `true` when one was released.
+     */
+    release: (groupId: string) =>
+      exclusive(groupId, async () => {
+        const group = await deps.get(groupId)
+        if (group.phase !== "publishing") return false
+        const changeset = await exactChangeset(group)
+        if (changeset.state !== "integrating") return false
+        await releaseHeldIntegration(group, changeset)
+        return true
+      }),
   }
 }
 
@@ -287,4 +301,7 @@ export async function publishBestOfNCandidate(groupId: string) {
 }
 export async function archiveBestOfN(groupId: string) {
   return (await publication()).archive(groupId)
+}
+export async function releaseBestOfNIntegration(groupId: string) {
+  return (await publication()).release(groupId)
 }

@@ -7,16 +7,22 @@ import {
 } from "@/lib/best-of-n/projection"
 import { cancelBestOfN } from "@/lib/best-of-n/service"
 import { pickBestOfNCandidate } from "@/lib/best-of-n/publication"
+import { requestBestOfNCancel } from "@/lib/best-of-n/paired"
 jest.mock("@/lib/i18n/runtime-translator", () => ({
   getRuntimeTranslator: async () => (key: string) => key,
 }))
 jest.mock("@/lib/best-of-n/projection", () => ({
   canManageBestOfNRuns: jest.fn(() => true),
+  bestOfNDeviceRole: () =>
+    jest.requireMock("@/lib/best-of-n/projection").canManageBestOfNRuns()
+      ? "host"
+      : "pairedObserver",
   listBestOfNRuns: jest.fn(),
   refreshBestOfNRun: jest.fn(),
 }))
 jest.mock("@/lib/best-of-n/service", () => ({ cancelBestOfN: jest.fn() }))
 jest.mock("@/lib/best-of-n/publication", () => ({ pickBestOfNCandidate: jest.fn() }))
+jest.mock("@/lib/best-of-n/paired", () => ({ requestBestOfNCancel: jest.fn() }))
 const group = {
   groupId: "g",
   phase: "running",
@@ -112,17 +118,19 @@ it("refuses start during streaming or with attachments", async () => {
   expect(attached.startBestOfN).not.toHaveBeenCalled()
 })
 
-it("paired observers read synced status and cannot cancel or pick", async () => {
+it("paired observers read synced status, ask the Host to stop, and cannot pick", async () => {
   jest.mocked(canManageBestOfNRuns).mockReturnValue(false)
   const status = ctx("status")
   await handleBestOfN(status)
   expect(status.pushSystemMessage).toHaveBeenCalled()
   expect(refreshBestOfNRun).not.toHaveBeenCalled()
-  for (const args of ["cancel", "pick 1"]) {
-    const context = ctx(args)
-    await handleBestOfN(context)
-    expect(context.pushSystemMessage).toHaveBeenCalledWith("unavailable")
-  }
+  const pick = ctx("pick 1")
+  await handleBestOfN(pick)
+  expect(pick.pushSystemMessage).toHaveBeenCalledWith("unavailable")
+  const cancel = ctx("cancel")
+  await handleBestOfN(cancel)
+  expect(requestBestOfNCancel).toHaveBeenCalledWith("g")
+  expect(cancel.pushSystemMessage).toHaveBeenCalledWith("stopRequested")
   expect(cancelBestOfN).not.toHaveBeenCalled()
   expect(pickBestOfNCandidate).not.toHaveBeenCalled()
 })

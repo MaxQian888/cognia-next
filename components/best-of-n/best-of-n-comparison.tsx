@@ -17,6 +17,7 @@ import {
   archiveBestOfN,
 } from "@/lib/best-of-n/publication"
 import { cancelBestOfN } from "@/lib/best-of-n/service"
+import { requestBestOfNCancel } from "@/lib/best-of-n/paired"
 import { createScmHost } from "@/lib/scm/host"
 import { getSourceControlService } from "@/lib/scm/service"
 import { useDockTabsStore } from "@/stores/artifact/dock-tabs-store"
@@ -61,6 +62,7 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
   // Names only; a paired device without the configuration shows its id.
   const externalAgents = useExternalAgentStore((state) => state.agents)
   const [busy, setBusy] = useState(false)
+  const [stopRequested, setStopRequested] = useState(false)
   const operation = useRef(false)
   const [error, setError] = useState(false)
   const [diagnostic, setDiagnostic] = useState<string | null>(null)
@@ -95,6 +97,24 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
     }
   }, [file, sourceRoot, baseSha, diffKey, diffRetry])
 
+  // A paired observer may only ask the executing Host to stop the run.
+  const requestStop = async () => {
+    if (operation.current || canManage) return
+    operation.current = true
+    setBusy(true)
+    setError(false)
+    setDiagnostic(null)
+    try {
+      await requestBestOfNCancel(groupId)
+      setStopRequested(true)
+    } catch (cause) {
+      setError(true)
+      setDiagnostic(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      operation.current = false
+      setBusy(false)
+    }
+  }
   const mutate = async (action: () => Promise<unknown>) => {
     if (operation.current || !canManage) return
     operation.current = true
@@ -173,6 +193,7 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
         </p>
         {group.checkoutHadUncommittedChanges && <p role="note">{t("dirtyExcluded")}</p>}
         {!canManage && <p role="note">{t("pairedReadOnly")}</p>}
+        {stopRequested && <p role="status">{t("stopRequested")}</p>}
         {(error || failed) && <p role="alert">{t(error ? "actionFailed" : "refreshFailed")}</p>}
         {diagnostic && (
           <details>
@@ -366,10 +387,10 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
         {!terminal && (
           <Button
             variant="outline"
-            disabled={!canManage || busy || group.phase === "publishing"}
-            onClick={() => void mutate(() => cancelBestOfN(groupId))}
+            disabled={busy || group.phase === "publishing"}
+            onClick={() => void (canManage ? mutate(() => cancelBestOfN(groupId)) : requestStop())}
           >
-            {t("cancel")}
+            {canManage ? t("cancel") : t("requestStop")}
           </Button>
         )}
         {group.phase !== "publishing" &&

@@ -333,6 +333,23 @@ it("recovery observes Host state and parks interrupted candidates without re-exe
   )
 })
 
+it("a restart fails attempts that never started instead of replaying or stranding them", async () => {
+  const f = fixture()
+  const state = f.snapshot()
+  state.phase = "running"
+  state.candidates[0].status = "succeeded"
+  state.candidates[0].hasChanges = true
+  f.change(state)
+  const recovered = await f.service.recover("group")
+  expect(recovered.candidates[1]).toMatchObject({
+    status: "failed",
+    error: "The Host restarted before this attempt started",
+  })
+  expect(recovered.phase).toBe("awaitingSelection")
+  expect(f.execution.acquire).not.toHaveBeenCalled()
+  expect(f.execution.execute).not.toHaveBeenCalled()
+})
+
 it("a repeated request owned by another runtime only observes its ledger", async () => {
   const f = fixture()
   f.change({ ownerId: "other" })

@@ -59,5 +59,6 @@
   "sessionAgent": "This conversation's agent",
   "externalAgent": "External: {name}",
   "externalCost": "External agents do not report cost, so their cost is shown as unknown. A dollar budget cannot be enforced for them.",
-  "unknownAgent": "No enabled agent matches \"{agent}\". Use session, an external agent configuration ID, or the preset of an enabled external agent."
+  "unknownAgent": "No enabled agent matches \"{agent}\". Use session, an external agent configuration ID, or the preset of an enabled external agent.",
+  "stopRequested": "Stop requested. The executing Host stops each attempt and syncs the result."
 }

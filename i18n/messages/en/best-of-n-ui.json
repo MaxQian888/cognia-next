@@ -12,7 +12,7 @@
   "base": "Frozen base",
   "head": "Recorded head",
   "dirtyExcluded": "Uncommitted checkout changes were not carried into these attempts.",
-  "pairedReadOnly": "This device displays a synced summary. Select and publish on the executing Host.",
+  "pairedReadOnly": "This device shows a synced summary. It can ask the executing Host to stop the run; choosing, checking and publishing a winner happen only on that Host.",
   "actionFailed": "The action failed. Refresh and review the recorded state before retrying.",
   "refresh": "Refresh",
   "selected": "Selected",
@@ -80,5 +80,7 @@
   "errorDetails": "Error details",
   "runtime": "Runtime",
   "externalRuntime": "External agent: {name}",
-  "cogniaRuntime": "Cognia agent runtime"
+  "cogniaRuntime": "Cognia agent runtime",
+  "requestStop": "Ask Host to stop",
+  "stopRequested": "Stop requested. The executing Host stops each attempt and syncs the result."
 }

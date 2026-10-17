@@ -102,6 +102,15 @@ export interface BestOfNProgress {
   teamRunId?: string
 }
 
+/**
+ * What this device may do with a run. `host` is the executing desktop Host.
+ * `pairedObserver` (a paired phone, browser or remote-driving desktop) reads
+ * the synced projection and may ask the Host to stop a run; select, publish,
+ * exact-head checks and archive are intentionally inert there, because only
+ * the executing Host's interactive user chooses a winner (ADR-0230).
+ */
+export type BestOfNDeviceRole = "host" | "pairedObserver"
+
 /** Disposable, read-only UI mirror; the Host ledger authorizes every mutation. */
 export interface BestOfNRunMetadata {
   parentSessionId?: string

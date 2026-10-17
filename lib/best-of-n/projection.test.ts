@@ -3,6 +3,7 @@ import "fake-indexeddb/auto"
 import { getDb } from "@/lib/db/schema"
 import type { BestOfNGroup } from "@/types/best-of-n"
 import {
+  bestOfNDeviceRole,
   canManageBestOfNRuns,
   getBestOfNRun,
   getBestOfNRunForMessage,
@@ -166,10 +167,13 @@ it("syncs only exact-head changeset evidence and reconstructs approved check nam
 
 it("offers management only on the executing desktop, never a paired or browser mirror", () => {
   expect(canManageBestOfNRuns()).toBe(false)
+  expect(bestOfNDeviceRole()).toBe("pairedObserver")
   jest.mocked(isTauri).mockReturnValue(true)
   expect(canManageBestOfNRuns()).toBe(true)
+  expect(bestOfNDeviceRole()).toBe("host")
   jest.mocked(isRemoteHostActive).mockReturnValue(true)
   expect(canManageBestOfNRuns()).toBe(false)
+  expect(bestOfNDeviceRole()).toBe("pairedObserver")
 })
 
 it("advances the shared sync watermark across different groups written in the same millisecond", async () => {

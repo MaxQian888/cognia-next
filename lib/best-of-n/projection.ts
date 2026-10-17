@@ -2,12 +2,22 @@ import { getDb } from "@/lib/db/schema"
 import { isTauri } from "@/lib/platform/detect"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { createScmHost, type ScmHost } from "@/lib/scm/host"
-import type { BestOfNGroup, BestOfNRunMetadata, BestOfNRunSummary } from "@/types/best-of-n"
+import type {
+  BestOfNDeviceRole,
+  BestOfNGroup,
+  BestOfNRunMetadata,
+  BestOfNRunSummary,
+} from "@/types/best-of-n"
 import { createBestOfNHost, type BestOfNHost } from "./host"
 
 /** Paired devices render synced summaries; only the executing Host offers mutations. */
 export function canManageBestOfNRuns(): boolean {
   return isTauri() && !isRemoteHostActive()
+}
+
+/** See {@link BestOfNDeviceRole}: a paired observer can only watch and ask to stop. */
+export function bestOfNDeviceRole(): BestOfNDeviceRole {
+  return canManageBestOfNRuns() ? "host" : "pairedObserver"
 }
 
 /** A late poll cannot roll back a newer ledger version or erase its chat binding. */

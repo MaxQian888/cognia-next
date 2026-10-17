@@ -279,3 +279,16 @@ it("reports a failed release without hiding the refusal", async () => {
   expect(result.outcome.reason).toBe("target_checked_out_dirty")
   expect(result.releaseError).toBe("abort refused")
 })
+
+it("after a restart releases only a publishing winner's held integration", async () => {
+  const f = fixture()
+  expect(await f.api.release("g")).toBe(false)
+  await f.api.pick("g", "c0")
+  expect(await f.api.release("g")).toBe(false)
+  f.runs.set("held", { integrationId: "held", state: "prepared" } as IntegrationRun)
+  Object.assign(f.changesets[0], { state: "integrating", integrationId: "held" })
+  expect(await f.api.release("g")).toBe(true)
+  expect(f.deps.scm.abortIntegration).toHaveBeenCalledWith("held")
+  expect(f.changesets[0].state).toBe("approved")
+  expect(f.integrate).not.toHaveBeenCalled()
+})

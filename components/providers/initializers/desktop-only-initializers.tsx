@@ -109,6 +109,10 @@ const ExitLeaseReleaseInitializer = dynamic(
   () => import("./exit-lease-release-initializer").then((m) => m.ExitLeaseReleaseInitializer),
   { ssr: false }
 )
+const BestOfNRecoveryInitializer = dynamic(
+  () => import("./best-of-n-recovery-initializer").then((m) => m.BestOfNRecoveryInitializer),
+  { ssr: false }
+)
 const PluginDeepLinkRouter = dynamic(
   () => import("@/components/plugins/plugin-deep-link-router").then((m) => m.PluginDeepLinkRouter),
   { ssr: false }
@@ -244,6 +248,7 @@ export function DesktopOnlyInitializers() {
       <FleetHistorySinkInitializer />
       <WorkerRuntimeInitializer />
       <ExitLeaseReleaseInitializer />
+      <BestOfNRecoveryInitializer />
       <PluginDeepLinkRouter />
       <ConsentOverlay />
       <CliBridgeEventsBridge />

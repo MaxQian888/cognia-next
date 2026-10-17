@@ -53,7 +53,7 @@ export async function handleBestOfN(ctx: SlashContext): Promise<void> {
     await ctx.startBestOfN(command.prompt, command.n, command.agents)
     return
   }
-  const { canManageBestOfNRuns, listBestOfNRuns, refreshBestOfNRun } =
+  const { bestOfNDeviceRole, listBestOfNRuns, refreshBestOfNRun } =
     await import("@/lib/best-of-n/projection")
   const runs = await listBestOfNRuns(ctx.activeSessionId)
   const latest = [...runs].sort((a, b) => b.group.createdAt - a.group.createdAt)[0]
@@ -61,18 +61,25 @@ export async function handleBestOfN(ctx: SlashContext): Promise<void> {
     ctx.pushSystemMessage(t("noRun"))
     return
   }
-  const canManage = canManageBestOfNRuns()
-  if (command.kind !== "status" && !canManage) {
+  // A paired observer may watch and ask the Host to stop; never pick.
+  const canManage = bestOfNDeviceRole() === "host"
+  if (command.kind === "pick" && !canManage) {
     ctx.pushSystemMessage(t("unavailable"))
     return
   }
   const run = canManage ? await refreshBestOfNRun(latest.id) : latest
   const group = run.group
   if (command.kind === "cancel") {
-    const { cancelBestOfN } = await import("@/lib/best-of-n/service")
-    await cancelBestOfN(group.groupId)
-    await refreshBestOfNRun(group.groupId)
-    ctx.pushSystemMessage(t("cancelled"))
+    if (canManage) {
+      const { cancelBestOfN } = await import("@/lib/best-of-n/service")
+      await cancelBestOfN(group.groupId)
+      await refreshBestOfNRun(group.groupId)
+      ctx.pushSystemMessage(t("cancelled"))
+    } else {
+      const { requestBestOfNCancel } = await import("@/lib/best-of-n/paired")
+      await requestBestOfNCancel(group.groupId)
+      ctx.pushSystemMessage(t("stopRequested"))
+    }
   } else if (command.kind === "pick") {
     const candidate = group.candidates.find(
       (item) =>

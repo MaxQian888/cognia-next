@@ -555,7 +555,7 @@ impl TaskWorkspaceService {
         })
     }
     pub fn best_of_n_cancel(&self, mutation: BestOfNMutation) -> Result<BestOfNGroup, String> {
-        self.mutate_best_of_n(&mutation, false, |_, group| {
+        fn request_cancel(group: &mut BestOfNGroup) -> Result<(), String> {
             if matches!(
                 group.phase,
                 BestOfNPhase::Publishing | BestOfNPhase::Published
@@ -567,7 +567,33 @@ impl TaskWorkspaceService {
             stop_remaining(group);
             settle_phase(group);
             Ok(())
-        })
+        }
+        {
+            // Another device (a paired phone) asks the executing owner to stop.
+            // The request only stops work, so it needs no lease: the owner keeps
+            // its lease, sees `cancelling` on its next poll and settles each
+            // candidate. Version CAS still guards against a stale view.
+            require_identity(&mutation.owner_id, "ownerId")?;
+            let mut store = self.store.lock();
+            let tx = store
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
+            let mut group = read(&tx, &mutation.group_id)?
+                .ok_or_else(|| "best-of-N group not found".to_string())?;
+            if group.owner_id != mutation.owner_id {
+                if group.version != mutation.expected_version {
+                    return Err("best-of-N version conflict".into());
+                }
+                request_cancel(&mut group)?;
+                group.version += 1;
+                group.updated_at = now_ms();
+                save(&tx, &group)?;
+                tx.commit().map_err(|e| e.to_string())?;
+                return Ok(group);
+            }
+        }
+        self.mutate_best_of_n(&mutation, false, |_, group| request_cancel(group))
     }
     pub fn best_of_n_select(
         &self,
@@ -1288,6 +1314,51 @@ mod tests {
             assert_eq!(group.phase, BestOfNPhase::Cancelled);
             assert_eq!(group.archive_status, BestOfNArchiveStatus::Archived);
         }
+    }
+
+    #[test]
+    fn another_device_can_ask_the_owner_to_stop_without_taking_its_lease() {
+        let fixture = Fixture::new();
+        let group = fixture.start();
+        let group = fixture.provision(&group, 0);
+        let paired = |group: &BestOfNGroup| BestOfNMutation {
+            owner_id: "paired-phone".into(),
+            ..mutation(group)
+        };
+        let stale = BestOfNMutation {
+            expected_version: group.version - 1,
+            ..paired(&group)
+        };
+        assert_eq!(
+            fixture.service.best_of_n_cancel(stale).unwrap_err(),
+            "best-of-N version conflict"
+        );
+        let cancelled = fixture.service.best_of_n_cancel(paired(&group)).unwrap();
+        assert!(cancelled.cancel_requested);
+        assert_eq!(cancelled.phase, BestOfNPhase::Cancelling);
+        assert_eq!(cancelled.owner_id, group.owner_id);
+        assert_eq!(
+            cancelled.owner_lease_expires_at,
+            group.owner_lease_expires_at
+        );
+        assert_eq!(cancelled.version, group.version + 1);
+        assert!(cancelled
+            .candidates
+            .iter()
+            .all(|c| c.status == BestOfNCandidateStatus::CancelRequested));
+        // The owner settles the stop through its own lease.
+        let mut settled = cancelled;
+        for index in 0..settled.candidates.len() {
+            settled = fixture
+                .service
+                .best_of_n_candidate_progress(progress(
+                    &settled,
+                    index,
+                    BestOfNCandidateStatus::Cancelled,
+                ))
+                .unwrap();
+        }
+        assert_eq!(settled.phase, BestOfNPhase::Cancelled);
     }
 
     #[test]

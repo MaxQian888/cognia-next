@@ -59,5 +59,6 @@
   "sessionAgent": "当前对话的 agent",
   "externalAgent": "外部：{name}",
   "externalCost": "外部 agent 不报告费用，费用显示为未知，也无法对其执行金额预算。",
-  "unknownAgent": "没有已启用的 agent 与「{agent}」匹配。请使用 session、外部 agent 配置 ID，或已启用外部 agent 的预设名称。"
+  "unknownAgent": "没有已启用的 agent 与「{agent}」匹配。请使用 session、外部 agent 配置 ID，或已启用外部 agent 的预设名称。",
+  "stopRequested": "已请求停止。执行 Host 会停止每次尝试并同步结果。"
 }

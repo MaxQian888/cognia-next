@@ -5747,7 +5747,7 @@
     "noChanges": "没有代码变更，无法发布此候选。",
     "noChecks": "尚未记录检查。",
     "noSummary": "尚未记录摘要。",
-    "pairedReadOnly": "此设备显示同步摘要，请在执行 Host 上选择和发布。",
+    "pairedReadOnly": "此设备显示同步的摘要，可以请求执行 Host 停止运行；选择、检查和发布胜出者只能在该 Host 上进行。",
     "phase": {
       "awaitingSelection": "等待手动选择或发布",
       "cancelled": "已取消",
@@ -5763,6 +5763,7 @@
     "publish": "发布已选候选",
     "refresh": "刷新",
     "refreshFailed": "无法刷新此次运行，仍显示上次同步的摘要。",
+    "requestStop": "请求 Host 停止",
     "retry": "重试",
     "retryArchive": "重试归档",
     "run": "运行",
@@ -5780,6 +5781,7 @@
       "running": "运行中",
       "succeeded": "成功"
     },
+    "stopRequested": "已请求停止。执行 Host 会停止每次尝试并同步结果。",
     "summary": "摘要",
     "title": "Best-of-N 并行尝试",
     "unknown": "未知",
@@ -5839,6 +5841,7 @@
     "started": "已在 {base} 启动 {count} 个尝试。结果分支：{target}。",
     "starting": "正在启动…",
     "status": "阶段：{phase}；候选数：{count}；基线：{base}；结果分支：{target}。",
+    "stopRequested": "已请求停止。执行 Host 会停止每次尝试并同步结果。",
     "target": "结果分支",
     "targetMode": "结果分支模式",
     "textOnly": "Best-of-N 接受文本提示词。请先移除附件和指定运行时的路由。",

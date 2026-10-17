@@ -386,6 +386,17 @@ export function createBestOfNService(deps: {
     async recover(groupId: string): Promise<BestOfNGroup> {
       if (running.has(groupId)) return host.get(groupId)
       let group = await serialize(groupId, (current) => host.recover(mutation(current)))
+      // An attempt the previous process never started has no driver left, and
+      // starting it now would run it outside its budget window. Fail it.
+      for (const candidate of group.candidates.filter((item) => item.status === "pending")) {
+        group = await progress(groupId, {
+          candidateId: candidate.candidateId,
+          status: "failed",
+          hasChanges: false,
+          costUsd: candidate.costUsd,
+          error: "The Host restarted before this attempt started",
+        })
+      }
       // Rebind to durable evidence, never blindly replay a potentially writing turn.
       for (const candidate of group.candidates.filter((item) => item.status === "running")) {
         group = await progress(groupId, {

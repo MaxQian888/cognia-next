@@ -12,7 +12,7 @@
   "base": "冻结基线",
   "head": "已记录的提交",
   "dirtyExcluded": "工作区未提交的修改没有带入这些尝试。",
-  "pairedReadOnly": "此设备显示同步摘要，请在执行 Host 上选择和发布。",
+  "pairedReadOnly": "此设备显示同步的摘要，可以请求执行 Host 停止运行；选择、检查和发布胜出者只能在该 Host 上进行。",
   "actionFailed": "操作失败，请刷新并检查已记录的状态后重试。",
   "refresh": "刷新",
   "selected": "已选择",
@@ -80,5 +80,7 @@
   "errorDetails": "错误详情",
   "runtime": "运行时",
   "externalRuntime": "外部 agent：{name}",
-  "cogniaRuntime": "Cognia agent 运行时"
+  "cogniaRuntime": "Cognia agent 运行时",
+  "requestStop": "请求 Host 停止",
+  "stopRequested": "已请求停止。执行 Host 会停止每次尝试并同步结果。"
 }
