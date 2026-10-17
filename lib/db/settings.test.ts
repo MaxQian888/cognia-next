@@ -17,6 +17,23 @@ beforeEach(async () => {
 })
 
 describe("getSettings", () => {
+  it("defaults new and existing settings to anime icons and persists both styles", async () => {
+    expect((await getSettings()).settingsIconStyle).toBe("anime")
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      builtinTools: { ...DEFAULTS.builtinTools },
+    })
+    expect((await getSettings()).settingsIconStyle).toBe("anime")
+    for (const settingsIconStyle of ["ordinary", "anime"] as const) {
+      await saveSettings({ settingsIconStyle })
+      getDb().close()
+      await getDb().open()
+      expect((await getSettings()).settingsIconStyle).toBe(settingsIconStyle)
+    }
+  })
+
   it("rejects a scoped save when the account changes during its settings read", async () => {
     const db = getDb()
     let active = true

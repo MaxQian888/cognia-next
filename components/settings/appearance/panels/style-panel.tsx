@@ -12,6 +12,7 @@ import { RotateCcwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_RADIUS, type RadiusSettings } from "@/types/appearance"
 import { DEFAULT_STYLE_PACK, resolveStylePack } from "@/types/appearance/style-pack"
@@ -21,6 +22,7 @@ import { SettingSliderRow } from "../components/setting-slider-row"
 export function StylePanel() {
   const t = useTranslations("settings.appearance.stylePack")
   const tLayout = useTranslations("settings.appearance.layoutType")
+  const tIcons = useTranslations("settings.appearance.settingsIcons")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 
@@ -35,6 +37,28 @@ export function StylePanel() {
 
   return (
     <div className="space-y-6">
+      <section className="space-y-3">
+        <div className="space-y-1">
+          <Label className="text-sm">{tIcons("label")}</Label>
+          <p className="text-[11px] text-muted-foreground">{tIcons("hint")}</p>
+        </div>
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          aria-label={tIcons("label")}
+          value={settings?.settingsIconStyle ?? "anime"}
+          onValueChange={(value) => {
+            if (value === "ordinary" || value === "anime") {
+              void save({ settingsIconStyle: value })
+            }
+          }}
+        >
+          <ToggleGroupItem value="ordinary">{tIcons("ordinary")}</ToggleGroupItem>
+          <ToggleGroupItem value="anime">{tIcons("anime")}</ToggleGroupItem>
+        </ToggleGroup>
+      </section>
+
       <section className="space-y-3">
         <div className="space-y-1">
           <Label className="text-sm">{t("sectionLabel")}</Label>

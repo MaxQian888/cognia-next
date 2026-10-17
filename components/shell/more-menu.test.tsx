@@ -2,9 +2,11 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { LucideIcon } from "lucide-react"
+import { CompassIcon } from "lucide-react"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   HOVER_REVEAL_FORBIDDEN_CLASSES,
   HOVER_REVEAL_REQUIRED_VARIANTS,
@@ -54,6 +56,15 @@ function renderMenu(overrides: Partial<Parameters<typeof MoreMenuContent>[0]> = 
 }
 
 describe("MoreMenuContent", () => {
+  it("follows the shared anime preference while the menu stays open", () => {
+    useSettingsStore.setState({ settings: null })
+    renderMenu({ items: [{ ...item("discover", "explore"), Icon: CompassIcon }] })
+    const entry = screen.getByTestId("more-item-discover")
+    expect(entry.querySelector("img")).not.toBeNull()
+    act(() => useSettingsStore.setState({ settings: { settingsIconStyle: "ordinary" } as never }))
+    expect(entry.querySelector("img")).toBeNull()
+    expect(entry.querySelector("svg")).toHaveClass("lucide-compass")
+  })
   it("renders items under their category sections, in canonical order", () => {
     renderMenu()
     const labels = screen.getAllByText(/^categories\./).map((el) => el.textContent)

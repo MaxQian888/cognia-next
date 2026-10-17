@@ -34,6 +34,10 @@ describe("AgentTeamIcon", () => {
 })
 
 describe("<MobileSpotIcon />", () => {
+  it("maps media generation to the packaged creation artwork", () => {
+    expect(manifest.coverage.desktopSettings["media-generation"]).toBe("artifacts")
+    expect(MOBILE_SPOT_ICON_NAMES).toContain(manifest.coverage.desktopSettings["media-generation"])
+  })
   it("keeps the asset manifest and component names in sync without duplicates", () => {
     expect(manifest.icons.map((icon) => icon.name)).toEqual([...MOBILE_SPOT_ICON_NAMES])
     expect(new Set(MOBILE_SPOT_ICON_NAMES).size).toBe(MOBILE_SPOT_ICON_NAMES.length)

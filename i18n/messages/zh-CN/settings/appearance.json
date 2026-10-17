@@ -806,6 +806,12 @@
     "title": "确认重置外观设置？"
   },
   "resetToDefault": "将{name}恢复为默认",
+  "settingsIcons": {
+    "anime": "二次元",
+    "hint": "统一选择主导航和设置侧栏的图标风格，偏好会自动保存。",
+    "label": "导航图标风格",
+    "ordinary": "普通"
+  },
   "stylePack": {
     "packs": {
       "sharp": {

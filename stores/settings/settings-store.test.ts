@@ -233,6 +233,7 @@ describe("load", () => {
     expect(s.loaded).toBe(true)
     expect(s.settings).toEqual({
       id: "singleton",
+      settingsIconStyle: "anime",
       language: "en",
       languageMode: "system",
       permissionMode: "default",

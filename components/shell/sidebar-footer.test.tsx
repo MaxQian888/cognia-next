@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -49,6 +49,7 @@ import { SidebarFooter } from "./sidebar-footer"
 import { toAriaKeyShortcuts } from "@/lib/shortcuts/utils"
 import { useUIStore } from "@/stores/ui"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
+import { useSettingsStore as useNavigationSettingsStore } from "@/stores/settings/settings-store"
 
 beforeEach(() => {
   routerPush.mockClear()
@@ -58,6 +59,19 @@ beforeEach(() => {
 })
 
 describe("SidebarFooter", () => {
+  it("switches the Settings shortcut between anime and ordinary artwork", () => {
+    useNavigationSettingsStore.setState({ settings: null })
+    const { rerender } = render(<SidebarFooter />)
+    expect(screen.getByTestId("sidebar-footer-settings").querySelector("img")).not.toBeNull()
+    act(() =>
+      useNavigationSettingsStore.setState({ settings: { settingsIconStyle: "ordinary" } as never })
+    )
+    rerender(<SidebarFooter />)
+    expect(screen.getByTestId("sidebar-footer-settings").querySelector("img")).toBeNull()
+    expect(screen.getByTestId("sidebar-footer-settings").querySelector("svg")).toHaveClass(
+      "lucide-settings"
+    )
+  })
   it("ends the rail on the account card, over the rail's bottom plugin slot", () => {
     render(<SidebarFooter />)
     const footer = screen.getByTestId("sidebar-footer")

@@ -806,6 +806,12 @@
     "title": "Reset appearance settings?"
   },
   "resetToDefault": "Reset {name} to default",
+  "settingsIcons": {
+    "anime": "Anime",
+    "hint": "Choose artwork for the main navigation and settings sidebar. Your preference is saved automatically.",
+    "label": "Navigation icon style",
+    "ordinary": "Ordinary"
+  },
   "stylePack": {
     "packs": {
       "sharp": {

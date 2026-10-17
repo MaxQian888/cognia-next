@@ -33,6 +33,14 @@ import {
 } from "./settings-nav-config"
 import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
 import { useSettingsSidebarCollapse } from "@/hooks/settings/use-settings-sidebar-collapse"
+import { MobileSpotIcon, type MobileSpotIconName } from "@/components/mobile/mobile-spot-icon"
+import { useSettingsStore } from "@/stores/settings"
+import { cn } from "@/lib/utils"
+import iconManifest from "@/public/icons/cognia-mobile-spots/icon-manifest.json"
+
+const SETTINGS_SPOT_ICONS = iconManifest.coverage.desktopSettings as Partial<
+  Record<SettingsSectionId, MobileSpotIconName>
+>
 
 interface Props {
   activeSection: SettingsSectionId
@@ -45,6 +53,7 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
   const t = useTranslations()
   const { state, setOpenMobile } = useSidebar()
   const isCollapsed = state === "collapsed"
+  const animeIcons = useSettingsStore((s) => s.settings?.settingsIconStyle !== "ordinary")
   const { isGroupCollapsed, setGroupCollapsed, expandGroup } = useSettingsSidebarCollapse()
   const { navItems } = useSettingsSectionReachability()
 
@@ -181,6 +190,7 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
                       <SidebarMenu className="group-data-[collapsible=icon]:items-center">
                         {items.map((item) => {
                           const Icon = item.icon
+                          const spotIcon = animeIcons ? SETTINGS_SPOT_ICONS[item.id] : undefined
                           return (
                             <SidebarMenuItem key={item.id}>
                               <SidebarMenuButton
@@ -190,9 +200,20 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
                                   setOpenMobile(false)
                                 }}
                                 tooltip={t(`settings.descriptions.${item.descriptionKey}` as never)}
-                                className="px-2.5 py-2 h-auto group-data-[collapsible=icon]:justify-center"
+                                className={cn(
+                                  "px-2.5 py-2 h-auto group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!",
+                                  spotIcon && "py-1.5"
+                                )}
                               >
-                                <Icon className="h-4 w-4" />
+                                {spotIcon ? (
+                                  <MobileSpotIcon
+                                    name={spotIcon}
+                                    size={28}
+                                    className="size-7 shrink-0"
+                                  />
+                                ) : (
+                                  <Icon className="h-4 w-4" />
+                                )}
                                 {/* Not a `span:last-child`, so the base
                                     icon-mode rules don't hide it — without this
                                     the label keeps consuming the 2rem button

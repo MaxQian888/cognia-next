@@ -543,6 +543,8 @@
       "diagnostics": "diagnostics"
     },
     "desktopNavigation": {
+      "agents": "characters",
+      "conversations": "chat",
       "files": "storage",
       "workflows": "workflows",
       "inbox": "inbox",
@@ -593,6 +595,7 @@
       "ocr": "ocr",
       "speech": "speech",
       "automation": "computer-use",
+      "media-generation": "artifacts",
       "skills": "skills",
       "characters": "characters",
       "slash-commands": "slash-commands",

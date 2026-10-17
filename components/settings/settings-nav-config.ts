@@ -3,7 +3,6 @@
 // section group label (i18n key under `settings.group<Name>`); each item
 // maps to a section id used as the URL `?section=` param + the React key.
 
-import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import type { ComponentType } from "react"
 import {
   PaletteIcon,
@@ -347,7 +346,7 @@ export const SETTINGS_NAV: NavItem[] = [
     labelKey: "squads",
     descriptionKey: "squads",
     group: "agents",
-    icon: AgentTeamIcon,
+    icon: UsersIcon,
   },
   {
     id: "teams",

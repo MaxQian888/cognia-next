@@ -50,6 +50,7 @@ import { useSidebarCollapseHost } from "@/hooks/shell/use-sidebar-collapse-host"
 import { cn } from "@/lib/utils"
 import { ShellLayoutDialog } from "./shell-layout-dialog"
 import { SidebarUserCard } from "./sidebar-user-card"
+import { NavigationIcon } from "./navigation-icon"
 import { SharedSessionJoin } from "@/components/chat/shared-session-join"
 
 // The same stops the mobile quick toggles cycle through (system → light →
@@ -131,7 +132,7 @@ export function SidebarFooter({
             <Button
               variant="ghost"
               size="icon"
-              className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+              className="size-7 shrink-0 text-muted-foreground hover:text-foreground has-[[data-navigation-artwork]]:size-8"
               onClick={() => router.push("/settings")}
               aria-label={t("settings")}
               title={
@@ -145,7 +146,7 @@ export function SidebarFooter({
               aria-keyshortcuts={settingsShortcut.aria}
               data-testid="sidebar-footer-settings"
             >
-              <SettingsIcon className="size-4" aria-hidden />
+              <NavigationIcon id="settings" fallback={SettingsIcon} />
             </Button>
           </ContextMenuTrigger>
           <ContextMenuContent data-testid="sidebar-footer-settings-menu">

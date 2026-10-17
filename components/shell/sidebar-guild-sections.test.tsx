@@ -99,6 +99,21 @@ const team = (id: string, name: string): Team =>
   ({ id, name, memberIds: [], createdAt: new Date(), updatedAt: new Date() }) as unknown as Team
 const teams = [team("t-1", "Alpha"), team("t-2", "Beta")]
 
+it("switches Chats artwork with the shared preference and preserves team avatars", () => {
+  render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="dm" />)
+  const chats = screen.getByTestId("sidebar-guild-dm")
+  expect(chats.querySelector("img")).not.toBeNull()
+  expect(screen.getByTestId("avatar-Alpha")).toBeInTheDocument()
+  act(() =>
+    useSettingsStore.setState({
+      settings: { ...useSettingsStore.getState().settings!, settingsIconStyle: "ordinary" },
+    })
+  )
+  expect(chats.querySelector("img")).toBeNull()
+  expect(chats.querySelector("svg.lucide-messages-square")).not.toBeNull()
+  expect(screen.getByTestId("avatar-Alpha")).toBeInTheDocument()
+})
+
 beforeEach(() => {
   routerPush.mockReset()
   logInfo.mockReset()

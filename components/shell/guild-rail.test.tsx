@@ -201,6 +201,37 @@ test("renders the DM, Canvas, and Settings rail buttons", () => {
   )
 })
 
+test("uses anime navigation by default and restores every ordinary icon live", async () => {
+  const user = userEvent.setup()
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  const buttons = [
+    "guild-dm",
+    "guild-canvas",
+    "guild-open-settings",
+    ...DEFAULT_SIDEBAR_LAYOUT.pinned.map((id) => `guild-feature-${id}`),
+  ].map((id) => screen.getByTestId(id))
+  for (const button of buttons) expect(button.querySelector("img")).not.toBeNull()
+  act(() =>
+    useSettingsStore.setState({
+      settings: { ...useSettingsStore.getState().settings!, settingsIconStyle: "ordinary" },
+    })
+  )
+  for (const button of buttons) {
+    expect(button.querySelector("img, image")).toBeNull()
+    expect(button.querySelector("svg.lucide")).not.toBeNull()
+  }
+  await user.click(screen.getByTestId("guild-more"))
+  const entry = screen.getByTestId("guild-more-item-agents")
+  expect(entry.querySelector("img, image")).toBeNull()
+  act(() =>
+    useSettingsStore.setState({
+      settings: { ...useSettingsStore.getState().settings!, settingsIconStyle: "anime" },
+    })
+  )
+  expect(entry.querySelector("img")).toHaveAttribute("src", expect.stringContaining("characters."))
+  for (const button of buttons) expect(button.querySelector("img")).not.toBeNull()
+})
+
 test("restores the collapsed home sidebar from directly below Settings", () => {
   sidebarCollapsed = true
   const { rerender } = render(
@@ -434,8 +465,10 @@ test("the More button reflects the active state when on an overflow route", () =
 test("only the active rail button carries the selection indicator", () => {
   pathname = "/workflows"
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
-  expect(screen.getByLabelText("workflows").querySelector("span[aria-hidden]")).not.toBeNull()
-  expect(screen.getByLabelText("inbox").querySelector("span[aria-hidden]")).toBeNull()
+  expect(
+    screen.getByLabelText("workflows").querySelector(":scope > span[aria-hidden]")
+  ).not.toBeNull()
+  expect(screen.getByLabelText("inbox").querySelector(":scope > span[aria-hidden]")).toBeNull()
 })
 
 test("the active rail button also draws the edge bar on the window edge", () => {
@@ -449,7 +482,7 @@ test("the active rail button also draws the edge bar on the window edge", () => 
   expect(bar?.className).toContain("rounded-pill")
   // Left-docked rail: the bar hangs off the button's left edge, at the column's.
   expect((bar as HTMLElement).style.left).toBe("-10px")
-  expect(screen.getByLabelText("inbox").querySelector("span[aria-hidden]")).toBeNull()
+  expect(screen.getByLabelText("inbox").querySelector(":scope > span[aria-hidden]")).toBeNull()
 })
 
 test("a selected team button shows the active boxShadow when on the home route", () => {

@@ -2,7 +2,6 @@
 
 /** Summary and actionable attention for the fleet, with optional routing kept separate. */
 
-import { Plus } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
@@ -39,7 +38,6 @@ export function AgentOverviewBoard({
   onStateFilterChange,
   onOpenAgent,
   onAction,
-  onNewAgent,
   onPickPreset,
 }: {
   entries: OverviewAgentEntry[]
@@ -48,7 +46,6 @@ export function AgentOverviewBoard({
   onStateFilterChange: (filter: AgentStateFilter) => void
   onOpenAgent: (agentId: string) => void
   onAction: (agentId: string, action: AgentReadinessAction) => void
-  onNewAgent: () => void
   onPickPreset: (presetId: string) => void
 }) {
   const t = useTranslations("externalAgent.overview")
@@ -69,24 +66,16 @@ export function AgentOverviewBoard({
 
   return (
     <div className="flex min-h-full min-w-0 flex-col gap-4" data-testid="agent-overview-board">
-      <h2 className="text-base font-semibold" tabIndex={-1} data-detail-heading="overview">
-        {entries.length ? tSettings("allAgents") : t("firstAgentTitle")}
-      </h2>
+      <header className="flex flex-col gap-1">
+        <h2 className="text-base font-semibold" tabIndex={-1} data-detail-heading="overview">
+          {entries.length ? tSettings("allAgents") : t("firstAgentTitle")}
+        </h2>
+        {entries.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("firstAgentDescription")}</p>
+        ) : null}
+      </header>
       {entries.length === 0 ? (
         <div className="min-w-0 space-y-4" data-testid="overview-empty">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <p className="text-sm text-muted-foreground">{t("firstAgentDescription")}</p>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onNewAgent}
-              disabled={!enabled}
-              data-testid="overview-add-agent"
-            >
-              <Plus className="size-4" aria-hidden />
-              {tSettings("addAgent")}
-            </Button>
-          </div>
           <PresetPickerList onPick={onPickPreset} disabled={!enabled} />
         </div>
       ) : (

@@ -223,6 +223,11 @@ export const SETTINGS_SYNC = {
   welcomeHints: { category: "desktop-only" },
   mcpPanel: { category: "desktop-only" },
   settingsSidebarCollapsedGroups: { category: "desktop-only" },
+  settingsIconStyle: {
+    category: "device-local",
+    rationale:
+      "Settings navigation artwork is a visual preference for this device; paired clients keep their own icon style instead of changing the execution host's sidebar.",
+  },
   memory: { category: "desktop-only" },
   memoryView: { category: "desktop-only" },
   lastInboxViewedAt: { category: "shared" },

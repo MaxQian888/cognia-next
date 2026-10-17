@@ -349,6 +349,16 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     ).toBeDisabled()
   })
 
+  it("limits the agent rail to 240px while retaining its navigation", () => {
+    render(<ExternalAgentSettings />)
+    const pane = screen.getByTestId("agents-list-detail")
+    const grid = pane.querySelector<HTMLElement>("[style*='--settings-rail-w']")
+    expect(grid?.style.getPropertyValue("--settings-rail-w")).toBe("240px")
+    expect(screen.getByRole("button", { name: "Host-owned agents" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Runtimes & installs" })).toBeVisible()
+    expect(screen.getByRole("textbox", { name: "Search agents…" })).toBeVisible()
+  })
+
   it("opens runtimes from the inspector remedy", async () => {
     const original = mockAgentBlocked.lifecycleReasonCode
     mockAgentBlocked.lifecycleReasonCode = "runtime_missing"
@@ -1396,7 +1406,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     }
   )
 
-  it("offers the same Add dialog and a seeded inline picker on first run", async () => {
+  it("keeps a single primary Add action and a seeded inline picker on first run", async () => {
     const original = externalStoreState.getAllAgents
     externalStoreState.getAllAgents = () => []
     try {
@@ -1406,7 +1416,8 @@ describe("ExternalAgentSettings — preset onboarding", () => {
       expect(
         within(board).getByRole("heading", { name: "Add your first agent" })
       ).toBeInTheDocument()
-      await user.click(within(board).getByTestId("overview-add-agent"))
+      expect(within(board).queryByRole("button", { name: "Add Agent" })).not.toBeInTheDocument()
+      await user.click(screen.getByTestId("add-agent-button"))
       expect(
         within(await screen.findByRole("dialog")).getByTestId("preset-picker-list")
       ).toBeInTheDocument()
@@ -1417,6 +1428,33 @@ describe("ExternalAgentSettings — preset onboarding", () => {
       externalStoreState.getAllAgents = original
     }
   })
+
+  it.each(["split", "stacked"] as const)(
+    "frames overview and configuration panes only at the split tier (%s)",
+    async (density) => {
+      mockListDensity = density
+      try {
+        render(<ExternalAgentSettings />)
+        await userEvent.click(screen.getByTestId("nav-all-agents"))
+        const overview = screen.getByTestId("agent-overview-board").parentElement!
+        if (density === "split") {
+          expect(overview).toHaveClass("border", "rounded-lg", "p-4")
+        } else {
+          expect(overview).not.toHaveClass("border")
+          await userEvent.click(screen.getByTestId("external-agent-rail-back"))
+        }
+        await userEvent.click(screen.getByTestId("nav-global-settings"))
+        const globalSettings = screen.getByTestId("global-settings-card").parentElement!
+        if (density === "split") {
+          expect(globalSettings).toHaveClass("border", "rounded-lg", "p-4")
+        } else {
+          expect(globalSettings).not.toHaveClass("border")
+        }
+      } finally {
+        mockListDensity = "split"
+      }
+    }
+  )
 
   it("changes a selected preset through the same picker and supports custom configuration", async () => {
     const user = userEvent.setup()

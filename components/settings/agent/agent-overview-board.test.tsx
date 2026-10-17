@@ -80,7 +80,6 @@ function renderBoard(over: Partial<Parameters<typeof AgentOverviewBoard>[0]> = {
     onStateFilterChange: jest.fn(),
     onOpenAgent: jest.fn(),
     onAction: jest.fn(),
-    onNewAgent: jest.fn(),
     onPickPreset: jest.fn(),
     ...over,
   }
@@ -196,22 +195,21 @@ describe("AgentOverviewBoard", () => {
     expect(screen.getByTestId("overview-action-blocked")).toBeEnabled()
   })
 
-  it("offers the inline picker and the shared Add entry point on first run", async () => {
+  it("offers preset and custom configuration without a duplicate Add button on first run", async () => {
     const user = userEvent.setup()
-    const { onNewAgent, onPickPreset } = renderBoard({ entries: [] })
+    const { onPickPreset } = renderBoard({ entries: [] })
     expect(screen.getByTestId("preset-picker-list")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Codex CLI" }))
     expect(onPickPreset).toHaveBeenCalledWith("codex")
     await user.click(screen.getByRole("button", { name: "Custom configuration" }))
     expect(onPickPreset).toHaveBeenCalledWith("custom")
-    await user.click(screen.getByTestId("overview-add-agent"))
-    expect(onNewAgent).toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: "Add Agent" })).not.toBeInTheDocument()
     const heading = screen.getByRole("heading", { level: 2 })
     expect(heading).toHaveAttribute("data-detail-heading", "overview")
     expect(heading).toHaveAttribute("tabindex", "-1")
   })
 
-  it("disables the first-run picker and Add action while the master switch is off", () => {
+  it("disables the first-run picker while the master switch is off", () => {
     renderBoard({ entries: [], enabled: false })
     for (const button of screen.getAllByRole("button")) expect(button).toBeDisabled()
   })

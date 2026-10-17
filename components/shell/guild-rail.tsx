@@ -50,6 +50,7 @@ import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel
 import { useRouter } from "next/navigation"
 import { useShellNavModel } from "./use-shell-nav"
 import { MoreMenuContent } from "./more-menu"
+import { NavigationIcon } from "./navigation-icon"
 import { NavItemContextMenu } from "./nav-item-menu"
 import { NavSortableItem, NavSortableList } from "./nav-sortable"
 import { OverlaySideContext, overlaySideFor, useOverlaySide } from "./rail-overlay-side"
@@ -371,7 +372,11 @@ export function GuildRail({
                     badgeLabel={unreadLabel}
                     testId="guild-dm"
                   >
-                    <MessagesSquareIcon className={RAIL_ICON_CLASS} />
+                    <NavigationIcon
+                      id="chat"
+                      fallback={MessagesSquareIcon}
+                      className={RAIL_ICON_CLASS}
+                    />
                   </RailButton>
                 </GuildContextMenu>
 
@@ -401,7 +406,11 @@ export function GuildRail({
                               testId={testId}
                             >
                               {mode.kind === "canvas" ? (
-                                <PencilRulerIcon className={RAIL_ICON_CLASS} />
+                                <NavigationIcon
+                                  id="canvas"
+                                  fallback={PencilRulerIcon}
+                                  className={RAIL_ICON_CLASS}
+                                />
                               ) : (
                                 <ResolvedRailIcon
                                   name={mode.container.def.icon}
@@ -450,7 +459,11 @@ export function GuildRail({
                               shortcut={pinnedShortcuts[index]}
                               testId={`guild-feature-${item.id}`}
                             >
-                              <item.Icon className={RAIL_ICON_CLASS} />
+                              <NavigationIcon
+                                id={item.id}
+                                fallback={item.Icon}
+                                className={RAIL_ICON_CLASS}
+                              />
                             </RailButton>
                           </NavItemContextMenu>
                         )}
@@ -572,7 +585,11 @@ export function GuildRail({
                   testId="guild-open-settings"
                   shortcutId="shell.settings.open"
                 >
-                  <SettingsIcon className={RAIL_ICON_CLASS} />
+                  <NavigationIcon
+                    id="settings"
+                    fallback={SettingsIcon}
+                    className={RAIL_ICON_CLASS}
+                  />
                 </RailButton>
               </div>
             </ContextMenuTrigger>

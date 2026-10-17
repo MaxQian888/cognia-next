@@ -3,17 +3,21 @@
 This folder contains 81 project-matched chibi anime feature illustrations: the
 original 16 icons and 65 additions generated on 2026-09-27. The original assets
 are preserved. Use these for feature cards, onboarding, and empty states at
-48 px or larger; keep Lucide for compact 16–24 px controls.
+48 px or larger; keep Lucide for compact 16–24 px controls. Main navigation and
+the settings sidebar also offer these illustrations at 28 px, with an ordinary
+Lucide alternative.
 
-`icon-manifest.json` maps all 59 mobile Me entries, 27 desktop navigation
-entries, and 62 desktop settings sections to an appropriate illustration.
+`icon-manifest.json` maps all 59 mobile Me entries, 30 desktop navigation
+entries, and 64 desktop settings sections to an appropriate illustration.
 Related settings can share the same feature artwork. The 12 mobile home
 shortcuts are also mapped in `lib/shell/mobile-home-nav.ts`, with dedicated
 Inbox, Templates, Fleet, Servers, and Devices artwork.
 
 All mobile Me entries and home shortcuts use the existing `MobileSpotIcon`
-component. Desktop mappings document available shared artwork; they do not
-replace the desktop rail's compact Lucide glyphs. Dynamic third-party plugin
+component. Main navigation (the icon rail, expanded rows and More menu) and the
+settings sidebar default to anime artwork; Settings → Appearance → Style offers
+one Ordinary / Anime switch saved in `AppSettings.settingsIconStyle`.
+Chats, Canvas and Settings also follow this preference. Dynamic third-party plugin
 icons, provider logos, and the separate agent-role avatar set retain their own
 identity and are outside this feature-illustration inventory.
 

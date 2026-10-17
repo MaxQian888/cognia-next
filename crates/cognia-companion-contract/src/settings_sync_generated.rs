@@ -91,6 +91,10 @@
 //!   An OS-issued input-device identifier. The desktop's microphone id addresses nothing on the
 //!   phone.
 //!
+//! `settingsIconStyle` — device-local (never crosses the wire).
+//!   Settings navigation artwork is a visual preference for this device; paired clients keep
+//!   their own icon style instead of changing the execution host's sidebar.
+//!
 //! `wallpapers` — device-local (never crosses the wire).
 //!   Two of the five WallpaperSource shapes are references into one machine's storage, not
 //!   values: `disk` is a path under that host's own appData, and `indexeddb` is a key in that

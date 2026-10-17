@@ -44,6 +44,7 @@ const SINGLETON_ID = "singleton" as const
  */
 export const DEFAULTS: AppSettings = {
   id: SINGLETON_ID,
+  settingsIconStyle: "anime",
   defaultModel: undefined,
   defaultSystemPrompt: undefined,
   defaultWorkingDir: undefined,

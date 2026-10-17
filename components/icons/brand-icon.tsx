@@ -7,6 +7,7 @@ interface BrandAsset {
 }
 
 const assets = {
+  aider: { src: "/icons/brands/aider-color.png" },
   ai21: { src: "/icons/lobe/ai21-brand-color.svg" },
   amp: { src: "/icons/lobe/amp-color.svg" },
   antigravity: { src: "/icons/lobe/antigravity-color.svg" },
@@ -35,6 +36,7 @@ const assets = {
   doubao: { src: "/icons/lobe/doubao-color.svg" },
   exa: { src: "/icons/lobe/exa-color.svg" },
   fal: { src: "/icons/lobe/fal-color.svg" },
+  factory: { src: "/icons/brands/factory-color.svg" },
   // Not in the LobeHub set: see public/icons/brands/README.md.
   feishu: { src: "/icons/brands/feishu-color.svg" },
   fireworks: { src: "/icons/lobe/fireworks-color.svg" },
@@ -94,6 +96,7 @@ const assets = {
 } satisfies Record<string, BrandAsset>
 
 const BRAND_ALIASES: Record<string, BrandAsset> = {
+  aider: assets.aider,
   ai21: assets.ai21,
   amp: assets.amp,
   antigravity: assets.antigravity,
@@ -123,7 +126,11 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   "cursor-cli": assets.cursor,
   deepinfra: assets.deepinfra,
   deepseek: assets.deepseek,
+  "deepseek-harness-readonly": assets.deepseek,
+  "deepseek-harness-workspace": assets.deepseek,
+  "deepseek-harness-acp": assets.deepseek,
   devin: assets.devin,
+  droid: assets.factory,
   doubao: assets.doubao,
   exa: assets.exa,
   fal: assets.fal,
@@ -178,6 +185,7 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   "opencode-server": assets.openCode,
   "opencode-remote": assets.openCode,
   "opencode-v2-preview": assets.openCode,
+  "opencode-v2-service": assets.openCode,
   openrouter: assets.openRouter,
   "open-router": assets.openRouter,
   perplexity: assets.perplexity,

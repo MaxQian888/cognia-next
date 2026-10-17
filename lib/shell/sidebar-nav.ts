@@ -7,7 +7,6 @@
  * so the persistence layer stays icon-free.
  */
 
-import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   ActivityIcon,
   BotIcon,
@@ -38,6 +37,7 @@ import {
   FolderOpenIcon,
   HistoryIcon,
   UsersRoundIcon,
+  UsersIcon,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { arrayMove } from "@dnd-kit/sortable"
@@ -71,7 +71,7 @@ export const SIDEBAR_NAV_ICONS: Record<string, LucideIcon> = {
   skills: SparklesIcon,
   plugins: PlugIcon,
   agents: UsersRoundIcon,
-  squads: AgentTeamIcon,
+  squads: UsersIcon,
   scheduler: CalendarClockIcon,
   goals: TargetIcon,
   pet: PawPrintIcon,

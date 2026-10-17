@@ -626,7 +626,7 @@ export function ExternalAgentSettings() {
         )}
       >
         <SettingsListDetail
-          listWidth={300}
+          listWidth={240}
           splitAt={720}
           className="min-h-0 flex-1"
           data-testid="agents-list-detail"
@@ -651,8 +651,8 @@ export function ExternalAgentSettings() {
             isConnecting={isConnecting}
           />
 
-          {/* Detail pane — the split inspector gets the bordered frame; the
-              configure destinations use flat settings blocks. The container
+          {/* Detail pane — split views share the bordered frame; the
+              configure destinations use flat settings blocks inside. The container
               is the DETAIL column, so the inspector's layout follows the room
               it actually has, not the rail and detail together. */}
           <AgentDetailSlot stackedView={stackedView}>
@@ -681,7 +681,10 @@ export function ExternalAgentSettings() {
             ) : (
               <div
                 data-detail-density={density}
-                className="@container/agent-detail min-h-0 flex-1 overflow-y-auto pr-0.5"
+                className={cn(
+                  "@container/agent-detail min-h-0 flex-1 overflow-y-auto",
+                  density === "split" ? "rounded-lg border p-4" : "pr-0.5"
+                )}
               >
                 {view.kind === "overview" && (
                   <AgentOverviewBoard
@@ -696,7 +699,6 @@ export function ExternalAgentSettings() {
                     onStateFilterChange={setStateFilter}
                     onOpenAgent={(id) => openView({ kind: "agent", id })}
                     onAction={(id, action) => void runReadinessAction(id, action)}
-                    onNewAgent={openAddDialog}
                     onPickPreset={openEditorForNew}
                   />
                 )}

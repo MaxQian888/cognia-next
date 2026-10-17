@@ -27,6 +27,7 @@ import { CountPill } from "@/components/shared/count-pill"
 import { navBadgeCount, type NavBadgeCounts } from "@/lib/shell/nav-badges"
 import type { SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
 import { groupSidebarNavByCategory } from "@/types/shell/sidebar"
+import { NavigationIcon } from "./navigation-icon"
 
 /** Marks an entry's open button for the menu's own arrow-key walk. */
 const MORE_ITEM_ATTR = "data-more-item"
@@ -178,7 +179,11 @@ export function MoreMenuContent({
                       data-testid={`${testIdPrefix}-item-${item.id}`}
                       className="h-auto min-w-0 flex-1 justify-start rounded px-2 py-1.5 font-normal"
                     >
-                      <item.Icon className="size-4 shrink-0 text-muted-foreground" />
+                      <NavigationIcon
+                        id={item.id}
+                        fallback={item.Icon}
+                        className="size-4 shrink-0 text-muted-foreground"
+                      />
                       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
                       <CountPill
                         count={count}

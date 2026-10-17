@@ -1,4 +1,4 @@
-import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
+import { UsersIcon } from "lucide-react"
 import {
   CANVAS_MODE_ID,
   SIDEBAR_NAV_META,
@@ -410,6 +410,6 @@ describe("navItemForPath", () => {
   })
 })
 
-it("uses the shared anime artwork for Squads", () => {
-  expect(SIDEBAR_NAV_ICONS.squads).toBe(AgentTeamIcon)
+it("provides an ordinary icon for Squads", () => {
+  expect(SIDEBAR_NAV_ICONS.squads).toBe(UsersIcon)
 })

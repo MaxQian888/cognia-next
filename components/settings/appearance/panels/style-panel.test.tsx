@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 const save = jest.fn()
 let settings: Record<string, unknown> = {}
@@ -31,6 +32,36 @@ beforeEach(() => {
 })
 
 describe("StylePanel", () => {
+  it("defaults settings icons to anime and saves the ordinary preference", async () => {
+    const user = userEvent.setup()
+    render(<StylePanel />)
+    expect(
+      screen.getByRole("radio", { name: "settings.appearance.settingsIcons.anime" })
+    ).toHaveAttribute("aria-checked", "true")
+    await user.click(
+      screen.getByRole("radio", { name: "settings.appearance.settingsIcons.ordinary" })
+    )
+    expect(save).toHaveBeenCalledWith({ settingsIconStyle: "ordinary" })
+  })
+
+  it("loads the saved ordinary preference and allows switching back to anime", async () => {
+    const user = userEvent.setup()
+    settings = { settingsIconStyle: "ordinary" }
+    render(<StylePanel />)
+    expect(
+      screen.getByRole("radio", { name: "settings.appearance.settingsIcons.ordinary" })
+    ).toHaveAttribute("aria-checked", "true")
+    await user.click(screen.getByRole("radio", { name: "settings.appearance.settingsIcons.anime" }))
+    expect(save).toHaveBeenCalledWith({ settingsIconStyle: "anime" })
+  })
+
+  it("does not clear the icon preference when clicking the selected style", async () => {
+    const user = userEvent.setup()
+    render(<StylePanel />)
+    await user.click(screen.getByRole("radio", { name: "settings.appearance.settingsIcons.anime" }))
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it("offers every pack", () => {
     render(<StylePanel />)
     for (const id of STYLE_PACK_IDS) {

@@ -62,6 +62,7 @@ import { Button } from "@/components/ui/button"
 import { teamSettingsHref } from "@/lib/settings/deep-link"
 import { cn } from "@/lib/utils"
 import { SidebarRow } from "./sidebar-nav-section"
+import { NavigationIcon } from "./navigation-icon"
 import { CountPill } from "@/components/shared/count-pill"
 import { useShellNav } from "./use-shell-nav"
 
@@ -462,7 +463,7 @@ export function SidebarGuildSectionRows({
                     team ? (
                       <AvatarBadge subject={team} size={16} textClassName="text-[9px]" />
                     ) : (
-                      <MessagesSquareIcon />
+                      <NavigationIcon id="chat" fallback={MessagesSquareIcon} />
                     )
                   }
                   label={label}

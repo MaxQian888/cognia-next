@@ -83,6 +83,41 @@ describe("SettingsSidebar desktop-only entries", () => {
   })
 })
 
+describe("SettingsSidebar icon style", () => {
+  it("uses larger anime artwork by default, including media generation", async () => {
+    await setup()
+    const account = screen.getByRole("button", { name: "settings.tabs.account" })
+    expect(account.querySelector("img")).toHaveAttribute("src", expect.stringContaining("profile."))
+    expect(account.querySelector("img")).toHaveClass("size-7", "shrink-0")
+    const media = screen.getByRole("button", { name: "settings.tabs.mediaGeneration" })
+    expect(media.querySelector("img")).toHaveAttribute("src", expect.stringContaining("artifacts."))
+  })
+
+  it("restores ordinary icons for every entry, including Squads, and updates live", async () => {
+    const { container } = await setup({ settings: { settingsIconStyle: "ordinary" } })
+    const buttons = container.querySelectorAll('[data-slot="sidebar-menu-button"]')
+    for (const button of buttons) {
+      expect(button.querySelector("img, image")).toBeNull()
+      expect(button.querySelector("svg")).toHaveClass("h-4", "w-4")
+    }
+    expect(
+      screen.getByRole("button", { name: "settings.tabs.squads" }).querySelector("svg")
+    ).toHaveClass("lucide-users")
+    act(() =>
+      useSettingsStore.setState({ settings: { settingsIconStyle: "anime" } as AppSettings })
+    )
+    for (const button of buttons) expect(button.querySelector("img")).not.toBeNull()
+  })
+
+  it("keeps anime icons inside collapsed buttons", async () => {
+    const { container } = await setup({ defaultOpen: false })
+    for (const button of container.querySelectorAll('[data-slot="sidebar-menu-button"]')) {
+      expect(button).toHaveClass("group-data-[collapsible=icon]:p-0!")
+      expect(button.querySelector("img")).toHaveClass("size-7", "shrink-0")
+    }
+  })
+})
+
 describe("SettingsSidebar group collapse", () => {
   it("renders all groups expanded by default", async () => {
     await setup()

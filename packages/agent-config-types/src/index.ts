@@ -5383,6 +5383,8 @@ export interface AppSettings {
    * Absent / empty = all groups expanded. Unknown ids are ignored on read.
    */
   settingsSidebarCollapsedGroups?: string[]
+  /** Main and settings navigation artwork. Absent = anime; ordinary restores Lucide icons. */
+  settingsIconStyle?: "ordinary" | "anime"
   /**
    * Autonomous long-term memory configuration. Lives in settings JSON (same
    * pattern as `goalConsoleView` / `mcpPanel`) so it follows the user across

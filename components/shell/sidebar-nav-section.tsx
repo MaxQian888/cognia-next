@@ -44,6 +44,7 @@ import { overlaySideFor } from "./rail-overlay-side"
 import { ShellLayoutDialog } from "./shell-layout-dialog"
 import { useSidebarRowRoving } from "./sidebar-row-roving"
 import { useShellNavModel } from "./use-shell-nav"
+import { NavigationIcon } from "./navigation-icon"
 
 /** One highlight travels between every row of the expanded sidebar. */
 export const SIDEBAR_SELECTION_GROUP = "sidebar-nav-selection"
@@ -115,7 +116,7 @@ export function SidebarRow({
       data-active={active || undefined}
       data-testid={testId}
       className={cn(
-        "relative h-7 w-full min-w-0 justify-start gap-2.5 rounded-md px-2 text-[13px] font-normal",
+        "relative h-7 w-full min-w-0 justify-start gap-2.5 rounded-md px-2 text-[13px] font-normal has-[[data-navigation-artwork]]:h-9",
         active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
         className
       )}
@@ -130,7 +131,7 @@ export function SidebarRow({
           {leading}
         </span>
       ) : null}
-      <span className="relative flex size-4 shrink-0 items-center justify-center [&>svg]:size-4">
+      <span className="relative flex size-4 shrink-0 items-center justify-center has-[[data-navigation-artwork]]:size-7 [&>svg]:size-4">
         {icon}
       </span>
       <span className="relative min-w-0 flex-1 truncate text-left">{label}</span>
@@ -221,7 +222,7 @@ export function SidebarNavSection({ className }: { className?: string }) {
                         isModePending(mode) ? (
                           <Spinner />
                         ) : isCanvas ? (
-                          <PencilRulerIcon />
+                          <NavigationIcon id="canvas" fallback={PencilRulerIcon} />
                         ) : (
                           <ResolvedRailIcon name={mode.container.def.icon} className="size-4" />
                         )
@@ -267,7 +268,13 @@ export function SidebarNavSection({ className }: { className?: string }) {
                           ? t("shortcutHint", { label, shortcut: shortcut.label })
                           : label
                       }
-                      icon={pendingRoute === item.route ? <Spinner /> : <item.Icon />}
+                      icon={
+                        pendingRoute === item.route ? (
+                          <Spinner />
+                        ) : (
+                          <NavigationIcon id={item.id} fallback={item.Icon} />
+                        )
+                      }
                       label={label}
                       trailing={
                         count > 0 ? (

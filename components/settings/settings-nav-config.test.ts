@@ -1,4 +1,4 @@
-import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
+import { UsersIcon } from "lucide-react"
 import { CORE_CAPABILITY_IDS, type CapabilityId } from "@/lib/platform/capabilities"
 import {
   SETTINGS_GROUP_ORDER,
@@ -340,6 +340,6 @@ describe("settings-nav-config", () => {
   })
 })
 
-it("uses the shared anime artwork for Squads", () => {
-  expect(SETTINGS_NAV.find((entry) => entry.id === "squads")?.icon).toBe(AgentTeamIcon)
+it("provides an ordinary icon for Squads", () => {
+  expect(SETTINGS_NAV.find((entry) => entry.id === "squads")?.icon).toBe(UsersIcon)
 })

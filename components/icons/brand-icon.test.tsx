@@ -1,10 +1,43 @@
 import { render, screen } from "@testing-library/react"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 
 import { BrandIcon, brandIconAsset, hasBrandIcon } from "./brand-icon"
 import { RUNTIME_OPTIONS } from "@/components/agent/workspace/runtime-options"
-import type { TeammateRuntime } from "@/types/agent/agent-team"
+import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/config/presets"
 
 describe("BrandIcon", () => {
+  it.each([
+    ["aider", "/icons/brands/aider-color.png"],
+    ["droid", "/icons/brands/factory-color.svg"],
+    ["opencode-v2-service", "/icons/lobe/opencode.svg"],
+    ["deepseek-harness-readonly", "/icons/lobe/deepseek-color.svg"],
+    ["deepseek-harness-workspace", "/icons/lobe/deepseek-color.svg"],
+    ["deepseek-harness-acp", "/icons/lobe/deepseek-color.svg"],
+  ])("renders the preset's brand mark for %s", (id, src) => {
+    render(<BrandIcon id={id} decorative={false} />)
+    expect(screen.getByRole("img", { name: id })).toHaveAttribute("src", src)
+  })
+
+  it.each(Object.entries(EXTERNAL_AGENT_PRESETS).filter(([, preset]) => preset !== null))(
+    "ships an existing brand asset for built-in preset %s",
+    (id) => {
+      expect(hasBrandIcon(id)).toBe(true)
+      const asset = brandIconAsset(id)!
+      expect(readFileSync(join(process.cwd(), "public", asset.src)).byteLength).toBeGreaterThan(0)
+    }
+  )
+
+  it("keeps the Kimi glyph visible on the white brand tile", () => {
+    const asset = brandIconAsset("kimi")!
+    const svg = new DOMParser().parseFromString(
+      readFileSync(join(process.cwd(), "public", asset.src), "utf8"),
+      "image/svg+xml"
+    )
+    expect(svg.querySelectorAll("path")[1].getAttribute("fill")).toBe("#000")
+    expect(svg.querySelector("path")?.getAttribute("fill")).toBe("#1783FF")
+  })
+
   it("renders the Claude Code brand asset for a known external-agent id", () => {
     render(<BrandIcon id="claude-code" label="Claude Code" decorative={false} />)
 
@@ -212,31 +245,10 @@ describe("BrandIcon", () => {
     expect(screen.getByRole("img", { name: "---" })).toHaveTextContent("?")
   })
 
-  // Every selectable teammate runtime is rendered through `BrandIcon` by
-  // `RuntimeBadge`, the runtime selector, and the mention picker. A runtime with
-  // no alias silently degrades to a grey monogram, which is how `pi-rpc` shipped
-  // sitting next to `pi`'s logo. Document gaps explicitly so missing vendor
-  // marks keep their monograms rather than borrowing someone else's mark.
+  // Runtime badges, runtime selectors and mention pickers share this resolver.
   describe("teammate runtimes resolve to a brand asset", () => {
-    const NO_VENDORED_ASSET: readonly TeammateRuntime[] = [
-      "droid", // No Factory asset is vendored.
-      // LobeHub icons-static-svg@1.95.1 has neither aider.svg nor aider-color.svg
-      // (checked 2026-10-05), so no Aider mark can be vendored from that set.
-      "aider",
-    ]
-
-    it.each(NO_VENDORED_ASSET)("keeps an honest monogram for %s", (runtime) => {
-      expect(hasBrandIcon(runtime)).toBe(false)
-      expect(brandIconAsset(runtime)).toBeNull()
-      render(<BrandIcon id={runtime} label={runtime} decorative={false} />)
-      expect(screen.getByRole("img", { name: runtime })).toHaveTextContent(runtime[0].toUpperCase())
+    it.each(RUNTIME_OPTIONS)("%s has a brand alias", (runtime) => {
+      expect(hasBrandIcon(runtime)).toBe(true)
     })
-
-    it.each(RUNTIME_OPTIONS.filter((r) => !NO_VENDORED_ASSET.includes(r)))(
-      "%s has a brand alias",
-      (runtime) => {
-        expect(hasBrandIcon(runtime)).toBe(true)
-      }
-    )
   })
 })

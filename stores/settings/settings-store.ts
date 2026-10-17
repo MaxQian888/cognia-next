@@ -476,6 +476,7 @@ interface SettingsState {
 
 const DEFAULTS: AppSettings = {
   id: "singleton",
+  settingsIconStyle: "anime",
   permissionMode: "default",
   alwaysAllowTools: [],
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },

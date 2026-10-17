@@ -116,6 +116,20 @@ beforeEach(() => {
 })
 
 describe("SidebarRow", () => {
+  it("uses the same live icon preference in the expanded navigation", () => {
+    render(<SidebarNavSection />)
+    const canvas = screen.getByTestId("sidebar-nav-canvas")
+    const squads = screen.getByTestId("sidebar-nav-feature-squads")
+    expect(canvas.querySelector("img")).not.toBeNull()
+    expect(squads.querySelector("img")).not.toBeNull()
+    act(() =>
+      useSettingsStore.setState({
+        settings: { ...useSettingsStore.getState().settings!, settingsIconStyle: "ordinary" },
+      })
+    )
+    expect(canvas.querySelector("img, image")).toBeNull()
+    expect(squads.querySelector("img, image")).toBeNull()
+  })
   it("marks the active row as the current page and carries rest props to the button", () => {
     render(
       <SidebarRow
