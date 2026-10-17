@@ -6,9 +6,13 @@ import type {
   PluginToolExecResponse,
 } from "@/lib/claude/plugin-tool-ipc"
 
+import os from "node:os"
+
 import { buildCliWebToolDeps } from "../config/web-tool-deps"
+import { resolveHome } from "../config/load"
 import type { ResolvedConfig } from "../config/schema"
 import { makeCliPluginToolHandle } from "./subagent-dispatch"
+import { createFileWorkingSetStore } from "./working-set-file-store"
 
 type PluginToolExecutor = (
   request: PluginToolExecRequest,
@@ -32,8 +36,14 @@ export function makeConfiguredCliPluginToolHandle(
   config: ResolvedConfig,
   execute: PluginToolExecutor = defaultExecutor
 ): (request: PluginToolExecRequest) => Promise<PluginToolExecResponse> {
+  // CLI sessions are not Dexie rows, so `working_set` keeps its state in a
+  // per-session file under the CLI home instead of the desktop session row.
+  const workingSetStore = createFileWorkingSetStore({
+    home: config.cliHome ?? resolveHome(process.env, os.homedir()),
+  })
   return makeCliPluginToolHandle((request) =>
     execute(request, {
+      workingSetStore,
       resolveWebToolDeps: () => buildCliWebToolDeps(config),
       resolveAttachmentToolDeps: async () => {
         const { ensureCliDb } = await import("../db/bootstrap")

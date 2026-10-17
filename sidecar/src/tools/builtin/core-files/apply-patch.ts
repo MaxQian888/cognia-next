@@ -139,6 +139,18 @@ async function planFilePatch(
   const abs = resolveToolPath(cwd, rel)
   assertNotSecretEscape(cwd, abs)
 
+  // `parsePatch` accepts a header with no `@@ -a,b +c,d @@` hunk (a missing or
+  // count-less hunk line) and yields `hunks: []`, which `applyPatch` then
+  // "applies" as a no-op: a create wrote an empty file and a modify left the
+  // file unchanged while the tool reported success. A deletion needs no hunk
+  // (git emits none for an empty file); every other change does.
+  if (!deletion && (fp.hunks?.length ?? 0) === 0) {
+    throw new Error(
+      `patch for ${rel} has no hunk — each change needs a header like "@@ -1,3 +1,4 @@" ` +
+        `(use "@@ -0,0 +1,N @@" to create a file)`
+    )
+  }
+
   if (deletion) {
     let st: Stats
     try {
@@ -190,6 +202,11 @@ async function planFilePatch(
         `patch does not apply cleanly: ${abs} — re-read the file and regenerate the diff`
       )
     }
+  }
+  // A hunk of pure context (or one whose `-`/`+` lines are identical) applies
+  // but changes nothing; reporting it as "updated" would hide that from the model.
+  if (out === traits.content) {
+    throw new Error(`patch makes no change to ${abs} — it has no added or removed lines`)
   }
   return { abs, action: "modify", content: out, traits }
 }

@@ -108,11 +108,116 @@ function collect(command: string, out: Segment[], depth: number): void {
   }
 }
 
+/** One `<<WORD` / `<<-WORD` redirection opened on a line. */
+interface HeredocOpen {
+  word: string
+  stripTabs: boolean
+}
+
+/**
+ * The heredocs a single line opens, in order. Quote-aware, so a `<<` inside a
+ * quoted string is not an operator; `<<<` (a here-string, no body) is skipped.
+ * The delimiter's quotes and backslashes are removed, as the shell does.
+ */
+function heredocOpens(line: string): HeredocOpen[] {
+  const opens: HeredocOpen[] = []
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (inSingle) {
+      if (c === "'") inSingle = false
+      continue
+    }
+    if (inDouble) {
+      if (c === "\\") i++
+      else if (c === '"') inDouble = false
+      continue
+    }
+    if (c === "\\") {
+      i++
+      continue
+    }
+    if (c === "'") {
+      inSingle = true
+      continue
+    }
+    if (c === '"') {
+      inDouble = true
+      continue
+    }
+    if (c !== "<" || line[i + 1] !== "<") continue
+    if (line[i + 2] === "<") {
+      i += 2
+      continue
+    }
+    let j = i + 2
+    const stripTabs = line[j] === "-"
+    if (stripTabs) j++
+    while (line[j] === " " || line[j] === "\t") j++
+    let word = ""
+    let quote: string | null = null
+    for (; j < line.length; j++) {
+      const w = line[j] ?? ""
+      if (quote) {
+        if (w === quote) quote = null
+        else word += w
+        continue
+      }
+      if (w === "'" || w === '"') {
+        quote = w
+        continue
+      }
+      if (w === "\\") {
+        word += line[j + 1] ?? ""
+        j++
+        continue
+      }
+      if (/[\s;|&<>()]/.test(w)) break
+      word += w
+    }
+    if (word) opens.push({ word, stripTabs })
+    i = j - 1
+  }
+  return opens
+}
+
+/**
+ * Drop heredoc bodies — the lines between `<<WORD` and the closing `WORD` — so
+ * the segmenter only sees executable lines. A body is data fed to stdin, not a
+ * command: `cat > f <<'EOF'` followed by a line reading `node` must not look
+ * like a bare `node` REPL. A heredoc whose terminator never appears (or a `<<`
+ * that was really an arithmetic shift) leaves the command untouched, so the
+ * fallback is the old over-flagging, never hiding a real command.
+ */
+function stripHeredocBodies(command: string): string {
+  if (!command.includes("<<")) return command
+  const lines = command.split("\n")
+  const kept: string[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i] ?? ""
+    kept.push(line)
+    i++
+    for (const { word, stripTabs } of heredocOpens(line)) {
+      let end = i
+      while (end < lines.length) {
+        const body = (lines[end] ?? "").replace(/\r$/, "")
+        if ((stripTabs ? body.replace(/^\t+/, "") : body) === word) break
+        end++
+      }
+      if (end >= lines.length) return command
+      i = end + 1
+    }
+  }
+  return kept.join("\n")
+}
+
 /** Break a command line into its executable segments. */
 function splitCommandSegments(command: string): Segment[] {
   if (!command || !command.trim()) return []
   const out: Segment[] = []
-  collect(command, out, 0)
+  collect(stripHeredocBodies(command), out, 0)
   return out
 }
 

@@ -20,6 +20,7 @@ export interface RawProviderUsage {
   outputTokens?: number
   output_tokens?: number
   contextInputTokens?: number
+  contextTokens?: number
   cacheCreationInputTokens?: number
   cache_creation_input_tokens?: number
   cache_creation?: {
@@ -55,6 +56,7 @@ export interface NormalizedUsageBlock {
   input_tokens: number
   output_tokens: number
   context_input_tokens?: number
+  context_tokens?: number
   cache_creation_input_tokens: number
   cache_creation?: {
     ephemeral_5m_input_tokens: number
@@ -127,6 +129,10 @@ export function normalizeUsageBlock(usage: RawProviderUsage | undefined): Normal
     ...(typeof u.contextInputTokens === "number"
       ? { context_input_tokens: u.contextInputTokens }
       : {}),
+    // Tokens occupying the window after the turn (last call's prompt incl.
+    // cache + its output), when the channel measured it per call. Outranks any
+    // sum of the billing fields, which add a cache counter totalled over steps.
+    ...(typeof u.contextTokens === "number" ? { context_tokens: u.contextTokens } : {}),
     cache_creation_input_tokens: cacheCreation.total,
     ...(cacheCreation.ephemeral5m > 0 || cacheCreation.ephemeral1h > 0
       ? {

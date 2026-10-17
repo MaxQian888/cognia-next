@@ -1,4 +1,8 @@
 /** @jest-environment node */
+import fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+
 import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"
 import { makeConfiguredCliPluginToolHandle } from "./configured-plugin-tool-handle"
 import type {
@@ -23,6 +27,35 @@ jest.mock("@/lib/claude/attachment-builtin-tools", () => ({
 }))
 
 describe("makeConfiguredCliPluginToolHandle", () => {
+  it("gives working_set a CLI-home file store instead of the Dexie session row", async () => {
+    // LC-03: without it the shared tool looked the CLI session up in Dexie,
+    // where CLI sessions never exist, and every call failed.
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "cli-ws-handle-"))
+    try {
+      const execute: PluginToolExecutorForTest = async (request, deps) => ({
+        type: "plugin_tool_response",
+        sessionId: request.sessionId,
+        toolUseId: request.toolUseId,
+        result: await deps?.workingSetStore?.read(request.sessionId),
+      })
+      const handle = makeConfiguredCliPluginToolHandle(
+        { ...DEFAULT_RESOLVED_CONFIG, cwd: "/workspace", cliHome: home },
+        execute
+      )
+      const response = await handle({
+        type: "plugin_tool_exec",
+        sessionId: "s_cli",
+        toolUseId: "w1",
+        name: "working_set",
+        args: { action: "get" },
+      })
+      expect(response.result).toMatchObject({ revision: 0, entries: [] })
+      expect(mockEnsureCliDb).not.toHaveBeenCalled()
+    } finally {
+      await fs.rm(home, { recursive: true, force: true })
+    }
+  })
+
   it("bootstraps the CLI database lazily before resolving attachment storage", async () => {
     const execute: PluginToolExecutorForTest = async (request, deps) => ({
       type: "plugin_tool_response",
@@ -93,7 +126,8 @@ describe("makeConfiguredCliPluginToolHandle", () => {
   it("carries no per-plugin host dependencies", async () => {
     // The CLI used to hand one named plugin its own model bridge here. Every
     // plugin now reaches the model through `ctx.ai` and the session's host
-    // runtime, so shared host dependencies only serve core web and attachment tools.
+    // runtime, so shared host dependencies only serve core tools: working_set,
+    // web and attachments.
     const execute = jest.fn<
       Promise<PluginToolExecResponse>,
       [PluginToolExecRequest, PluginToolExecHostDeps?]
@@ -117,6 +151,7 @@ describe("makeConfiguredCliPluginToolHandle", () => {
     })
 
     expect(Object.keys(execute.mock.calls[0]?.[1] ?? {})).toEqual([
+      "workingSetStore",
       "resolveWebToolDeps",
       "resolveAttachmentToolDeps",
     ])

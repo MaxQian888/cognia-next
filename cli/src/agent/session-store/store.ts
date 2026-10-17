@@ -69,6 +69,7 @@ import {
   realSessionStoreFs,
   sessionDir,
   sessionsRoot,
+  workingSetPath,
   workspaceKey,
   type SessionStoreFs,
 } from "./paths"
@@ -700,6 +701,8 @@ export function createSessionStore(options: SessionStoreOptions) {
       const lease = takeLease(sessionId)
       if (!lease.ok) return lease
       fsx.removeDir(sessionDir(options.home, sessionId, override))
+      // The session's `working_set` lives under the home, outside its directory.
+      fsx.removeFile(workingSetPath(options.home, sessionId))
       return { ok: true, value: { deleted: true } }
     },
 

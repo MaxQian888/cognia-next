@@ -55,7 +55,7 @@ import {
   type VectorToolRunDeps,
 } from "./vector-builtin-tools"
 import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
-import { isWorkingSetTool, runWorkingSetTool } from "./working-set-tool"
+import { isWorkingSetTool, runWorkingSetTool, type WorkingSetStore } from "./working-set-tool"
 import {
   isProjectHistorySearchTool,
   runProjectHistorySearch,
@@ -674,6 +674,11 @@ export interface PluginToolExecHostDeps {
   resolveAttachmentToolDeps?: () => Promise<AttachmentToolDeps> | AttachmentToolDeps
   /** Host-specific web settings (CLI supplies config without a renderer store). */
   resolveWebToolDeps?: () => Promise<WebToolRunDeps> | WebToolRunDeps
+  /**
+   * Where `working_set` reads and writes. Absent ⇒ the Dexie session row (the
+   * desktop). The CLI's sessions are not Dexie rows, so it supplies its own.
+   */
+  workingSetStore?: WorkingSetStore
 }
 
 export async function handlePluginToolExec(
@@ -790,7 +795,11 @@ export async function handlePluginToolExec(
     // the sidecar only receives a bounded manifest and every mutation reaches
     // the shared Dexie CAS service through this existing tool round trip.
     if (isWorkingSetTool(request.name)) {
-      const result = await runWorkingSetTool(request.args, { sessionId: request.sessionId })
+      const result = await runWorkingSetTool(
+        request.args,
+        { sessionId: request.sessionId },
+        hostDeps.workingSetStore
+      )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Deep-path project history — read this workspace's own conversations ──

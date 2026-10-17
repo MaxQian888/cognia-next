@@ -129,6 +129,66 @@ export async function readSessionWorkingSet(sessionId: string): Promise<SessionW
   return session.workingSet ?? emptyWorkingSet()
 }
 
+/**
+ * The pure core of a working-set mutation: CAS check, entry validation, PII
+ * gate and bounds, returning the next revision without storing it. Every
+ * store (the Dexie session row here, the CLI's per-session file) applies a
+ * mutation through this one function, so the rules cannot drift between them.
+ */
+export function applyWorkingSetMutation(
+  current: SessionWorkingSetV1,
+  mutation: WorkingSetMutation
+): SessionWorkingSetV1 {
+  if (current.revision !== mutation.expectedRevision) {
+    throw new WorkingSetConflictError(mutation.expectedRevision, current.revision)
+  }
+  const now = mutation.now ?? Date.now()
+  let entries: WorkingSetEntry[]
+
+  if (mutation.action === "upsert") {
+    const normalized = validateEntryDraft(mutation.entry)
+    const entryId = mutation.entry.id?.trim() || crypto.randomUUID()
+    const existing = current.entries.find((entry) => entry.id === entryId)
+    const nextEntry: WorkingSetEntry = {
+      id: entryId,
+      kind: mutation.entry.kind,
+      summary: normalized.summary,
+      status: mutation.entry.status ?? existing?.status ?? "active",
+      origin: mutation.entry.origin,
+      refs: normalized.refs,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    }
+    entries = existing
+      ? current.entries.map((entry) => (entry.id === entryId ? nextEntry : entry))
+      : [...current.entries, nextEntry]
+  } else if (mutation.action === "resolve") {
+    if (!current.entries.some((entry) => entry.id === mutation.entryId)) {
+      throw new Error(`Unknown working set entry: ${mutation.entryId}`)
+    }
+    entries = current.entries.map((entry) =>
+      entry.id === mutation.entryId
+        ? { ...entry, status: "resolved" as const, updatedAt: now }
+        : entry
+    )
+  } else {
+    if (!current.entries.some((entry) => entry.id === mutation.entryId)) {
+      throw new Error(`Unknown working set entry: ${mutation.entryId}`)
+    }
+    entries = current.entries.filter((entry) => entry.id !== mutation.entryId)
+  }
+
+  const next: SessionWorkingSetV1 = {
+    contractVersion: SESSION_WORKING_SET_CONTRACT_VERSION,
+    revision: current.revision + 1,
+    entries,
+    updatedAt: now,
+  }
+  assertBounded(next)
+  assertSafeWorkingSet(next)
+  return next
+}
+
 /** Apply one user/model operation atomically without replacing concurrent state. */
 export async function mutateSessionWorkingSet(
   mutation: WorkingSetMutation
@@ -142,53 +202,8 @@ export async function mutateSessionWorkingSet(
       if (!session) throw new Error(`Unknown chat session: ${mutation.sessionId}`)
       assertSessionWritable(session, "metadata")
       const current = session.workingSet ?? emptyWorkingSet()
-      if (current.revision !== mutation.expectedRevision) {
-        throw new WorkingSetConflictError(mutation.expectedRevision, current.revision)
-      }
-      const now = mutation.now ?? Date.now()
-      let entries: WorkingSetEntry[]
-
-      if (mutation.action === "upsert") {
-        const normalized = validateEntryDraft(mutation.entry)
-        const entryId = mutation.entry.id?.trim() || crypto.randomUUID()
-        const existing = current.entries.find((entry) => entry.id === entryId)
-        const nextEntry: WorkingSetEntry = {
-          id: entryId,
-          kind: mutation.entry.kind,
-          summary: normalized.summary,
-          status: mutation.entry.status ?? existing?.status ?? "active",
-          origin: mutation.entry.origin,
-          refs: normalized.refs,
-          createdAt: existing?.createdAt ?? now,
-          updatedAt: now,
-        }
-        entries = existing
-          ? current.entries.map((entry) => (entry.id === entryId ? nextEntry : entry))
-          : [...current.entries, nextEntry]
-      } else if (mutation.action === "resolve") {
-        if (!current.entries.some((entry) => entry.id === mutation.entryId)) {
-          throw new Error(`Unknown working set entry: ${mutation.entryId}`)
-        }
-        entries = current.entries.map((entry) =>
-          entry.id === mutation.entryId
-            ? { ...entry, status: "resolved" as const, updatedAt: now }
-            : entry
-        )
-      } else {
-        if (!current.entries.some((entry) => entry.id === mutation.entryId)) {
-          throw new Error(`Unknown working set entry: ${mutation.entryId}`)
-        }
-        entries = current.entries.filter((entry) => entry.id !== mutation.entryId)
-      }
-
-      const next: SessionWorkingSetV1 = {
-        contractVersion: SESSION_WORKING_SET_CONTRACT_VERSION,
-        revision: current.revision + 1,
-        entries,
-        updatedAt: now,
-      }
-      assertBounded(next)
-      assertSafeWorkingSet(next)
+      const next = applyWorkingSetMutation(current, mutation)
+      const now = next.updatedAt
       await db.sessions.update(mutation.sessionId, { workingSet: next, updatedAt: now })
       const history = db.messages
         .where("[sessionId+createdAt]")

@@ -10,12 +10,13 @@
 
 import os from "node:os"
 import { spawn } from "node:child_process"
+import type { ChildProcess } from "node:child_process"
 import { createWriteStream } from "node:fs"
 import type { WriteStream } from "node:fs"
 import fsp from "node:fs/promises"
 import { z } from "zod"
 
-import { tool, type ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs, type ToolHandlerExtra } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { DANGEROUS_PATTERNS } from "../../../policy/shell/rules.ts"
 import { findDangerousShellFragment } from "../../../policy/shell/ast-scan.ts"
@@ -42,6 +43,60 @@ export const MAX_TIMEOUT_MS = 600_000
 export const MAX_OUTPUT_CHARS = 30_000
 /** Chars of the head kept for the truncated preview (rest comes from the tail). */
 export const PREVIEW_HEAD_CHARS = 12_000
+/** Grace between SIGTERM and SIGKILL when an interrupt or timeout stops a run. */
+export const KILL_GRACE_MS = 2_000
+/** After the SIGKILL, how long to wait for `close` before giving up on the pipes. */
+const PIPE_RELEASE_MS = 500
+
+// A foreground command runs as the leader of its own process group (POSIX), so
+// stopping it reaches everything the shell started — `sh -c "node job.cjs"`
+// often forks rather than execs, and killing only the shell left the real
+// worker running after Esc. The groups still alive are tracked so a sidecar
+// that exits mid-command takes them down instead of orphaning them.
+const GROUP_KILL = process.platform !== "win32"
+const liveForegroundGroups = new Set<number>()
+let exitHookInstalled = false
+
+function trackForegroundGroup(pid: number): void {
+  liveForegroundGroups.add(pid)
+  if (exitHookInstalled) return
+  exitHookInstalled = true
+  process.on("exit", () => {
+    for (const group of liveForegroundGroups) {
+      try {
+        process.kill(-group, "SIGKILL")
+      } catch {
+        // already gone
+      }
+    }
+  })
+}
+
+/**
+ * Signal a foreground run and every process it started: the whole process
+ * group on POSIX, `taskkill /T` (the tree) on Windows, where `child.kill()`
+ * would only end the shell wrapper.
+ */
+function signalProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid
+  if (!pid) return
+  try {
+    if (GROUP_KILL) {
+      process.kill(-pid, signal)
+    } else {
+      spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+      }).on("error", () => {})
+    }
+  } catch {
+    try {
+      child.kill(signal)
+    } catch {
+      // already gone
+    }
+  }
+}
 
 export const bashShape = {
   command: z.string().min(1).describe("The shell command line to execute."),
@@ -205,6 +260,8 @@ interface BashRun {
   fileCreated: boolean
   tmpPath: string
   timedOut: boolean
+  /** The user interrupted the call (the tool's abort signal fired). */
+  interrupted: boolean
   code: number | null
   signal?: NodeJS.Signals | null
   spawnError?: NodeJS.ErrnoException
@@ -223,7 +280,8 @@ export function createBashTool({
   // (PowerShell on Windows when present); injectable so tests pin a deterministic
   // shell regardless of what the runner machine happens to have on PATH.
   const descriptor = shell ?? activeShellDescriptor()
-  async function execBash(args: ToolArgs<typeof bashShape>) {
+  async function execBash(args: ToolArgs<typeof bashShape>, extra?: ToolHandlerExtra) {
+    const abortSignal = extra?.signal
     try {
       // A one-shot capture shell has no TTY: an interactive program (REPL,
       // editor, ssh, login flow, `git rebase -i`, `psql`, `top`, …) would hang
@@ -307,6 +365,9 @@ export function createBashTool({
 
       const timeoutMs = Math.min(args.timeout ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
       const tmpPath = bashSpillPath()
+      if (abortSignal?.aborted) {
+        return toolError("interrupted by the user before the command started — it never ran")
+      }
 
       const result = await new Promise<BashRun>((resolve) => {
         const child = spawn(target.command, target.args, {
@@ -315,7 +376,10 @@ export function createBashTool({
           windowsHide: true,
           windowsVerbatimArguments: isWin,
           stdio: ["pipe", "pipe", "pipe"],
+          detached: GROUP_KILL,
         })
+        const groupId = GROUP_KILL ? child.pid : undefined
+        if (groupId) trackForegroundGroup(groupId)
         // Keep fd 0 connected without relying on /dev/null, which may be
         // unavailable inside the macOS sandbox. End it immediately so
         // non-interactive commands that probe stdin observe EOF instead of
@@ -332,6 +396,11 @@ export function createBashTool({
         let pending = ""
         let total = 0
         let timedOut = false
+        let interrupted = false
+        let settled = false
+        let stopping = false
+        let killTimer: ReturnType<typeof setTimeout> | null = null
+        let releaseTimer: ReturnType<typeof setTimeout> | null = null
         let fileOk = true
         let stream: WriteStream | null = null
         let spilling = false
@@ -379,18 +448,66 @@ export function createBashTool({
         }
         child.stdout.on("data", cap)
         child.stderr.on("data", cap)
+        // Stop the run: SIGTERM the tree, then SIGKILL it after a grace period.
+        // A descendant that left the group can hold the pipes open forever, so
+        // once the SIGKILL is out, stop waiting for `close` shortly after.
+        const stop = () => {
+          if (stopping) return
+          stopping = true
+          signalProcessTree(child, "SIGTERM")
+          killTimer = setTimeout(() => {
+            signalProcessTree(child, "SIGKILL")
+            releaseTimer = setTimeout(() => {
+              child.stdout.destroy()
+              child.stderr.destroy()
+              finish({ code: null, signal: "SIGKILL" })
+            }, PIPE_RELEASE_MS)
+          }, KILL_GRACE_MS)
+        }
         const timer = setTimeout(() => {
           timedOut = true
-          child.kill()
+          stop()
         }, timeoutMs)
+        const onAbort = () => {
+          interrupted = true
+          stop()
+        }
+        abortSignal?.addEventListener("abort", onAbort, { once: true })
         const finish = (
           extra: Pick<BashRun, "code"> & Partial<Pick<BashRun, "signal" | "spawnError">>
         ) => {
+          if (settled) return
+          settled = true
           clearTimeout(timer)
+          if (killTimer) clearTimeout(killTimer)
+          if (releaseTimer) clearTimeout(releaseTimer)
+          abortSignal?.removeEventListener("abort", onAbort)
+          if (groupId) {
+            liveForegroundGroups.delete(groupId)
+            // The leader exited on SIGTERM; anything left in its group that
+            // ignored the signal goes now rather than outliving the call.
+            if (stopping) {
+              try {
+                process.kill(-groupId, "SIGKILL")
+              } catch {
+                // group already empty
+              }
+            }
+          }
           // Flush any bytes the streaming decoder is holding for a partial char.
           if (decoder) append(decoder.decode())
           const done = () =>
-            resolve({ head, mem, total, fileOk, fileCreated, tmpPath, timedOut, ...extra })
+            resolve({
+              head,
+              mem,
+              total,
+              fileOk,
+              fileCreated,
+              tmpPath,
+              timedOut,
+              interrupted,
+              ...extra,
+            })
           if (stream) stream.end(done)
           else done()
         }
@@ -425,16 +542,22 @@ export function createBashTool({
       const lines = [outBody.trimEnd()]
       if (truncated && !fullPath) lines.push("(output truncated — only the tail is shown)")
       if (result.timedOut) lines.push(`(command timed out after ${timeoutMs} ms and was killed)`)
+      if (result.interrupted) {
+        lines.push(
+          "(interrupted by the user — the command and every process it started were stopped)"
+        )
+      }
       if (result.spawnError) {
         const code = result.spawnError.code ? ` (${result.spawnError.code})` : ""
         lines.push(`(the command could not be started${code} — it never ran)`)
-      } else if (result.signal && !result.timedOut) {
+      } else if (result.signal && !result.timedOut && !result.interrupted) {
         lines.push(`(terminated by signal ${result.signal})`)
       }
       if (result.code !== 0 && result.code !== null) lines.push(`(exit code ${result.code})`)
       const body = lines.filter((l) => l.length > 0).join("\n")
       const failed =
         result.timedOut ||
+        result.interrupted ||
         Boolean(result.spawnError) ||
         Boolean(result.signal) ||
         (result.code !== 0 && result.code !== null)

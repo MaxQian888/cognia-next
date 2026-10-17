@@ -110,6 +110,10 @@ export function normalizeUsageBlock(usage: unknown): Record<string, unknown> {
     ...(typeof u.contextInputTokens === "number"
       ? { context_input_tokens: u.contextInputTokens }
       : {}),
+    // Tokens occupying the window after the turn (last call's prompt incl.
+    // cache + its output), when the channel measured it per call. Outranks any
+    // sum of the billing fields, which add a cache counter totalled over steps.
+    ...(typeof u.contextTokens === "number" ? { context_tokens: u.contextTokens } : {}),
     cache_creation_input_tokens: cacheCreation.total,
     // Only emitted when the provider actually reported the split, so a
     // consumer can tell "no 1h writes" from "TTL not reported".

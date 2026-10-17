@@ -57,6 +57,15 @@ const USAGE_MATRIX: Array<[string, Record<string, unknown>]> = [
   ],
   ["ai-sdk v6 prompt/completion", { promptTokens: 500, completionTokens: 250 }],
   [
+    "ai-sdk multi-step turn with measured window",
+    {
+      inputTokens: 177_000,
+      outputTokens: 1_050,
+      contextInputTokens: 60_000,
+      contextTokens: 60_400,
+    },
+  ],
+  [
     "ai-sdk v6 token details",
     {
       promptTokens: 500,

@@ -180,3 +180,23 @@ test("fallbacks", () => {
   assert.equal(r.interactive, false)
   assert.equal(r.reason, "no interactive command detected")
 })
+
+test("heredoc bodies are stdin data, not commands", () => {
+  // The LC-04 regression: a line reading `node` inside a heredoc body.
+  nonInteractive("cat <<'EOF'\nnode\nEOF")
+  nonInteractive(
+    "cat > cli.cjs <<'CLI_EOF'\n#!/usr/bin/env node\nnode\nvim\nCLI_EOF\nnode --check cli.cjs"
+  )
+  nonInteractive('cat <<"EOF" > notes.md\npython\nEOF')
+  nonInteractive("cat <<EOF\nless\nEOF")
+  nonInteractive("cat <<-EOF\n\tnode\n\tEOF")
+  nonInteractive("cat <<A <<B\nnode\nA\npython\nB")
+  // Commands after the terminator are still scanned.
+  interactive("cat <<'EOF' > f\nhello\nEOF\nnode", "node")
+  interactive("cat <<EOF > f; vim f\nbody\nEOF", "vim")
+  // A here-string has no body; `<<` inside quotes is not an operator.
+  interactive("cat <<< x\nnode", "node")
+  interactive("echo 'a << b'\nnode", "node")
+  // An unterminated heredoc keeps the old (over-flagging) verdict.
+  interactive("cat <<EOF\nnode", "node")
+})

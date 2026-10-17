@@ -249,3 +249,68 @@ test("preserves CRLF + BOM through a fuzzy-rescued hunk", async () => {
     await fsp.rm(dir, { recursive: true, force: true })
   }
 })
+
+test("rejects a create patch with no hunk instead of writing an empty file", async () => {
+  // LC-05: `--- /dev/null` / `+++ x` with bare `+` lines and no `@@` header.
+  const dir = await tmp()
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: createReadTracker() }))
+  try {
+    const res = await tool.handler({ patch: "--- /dev/null\n+++ bad.txt\n+hello\n" }, {})
+    assert.equal(res.isError, true)
+    assert.match(textOf(res), /has no hunk/)
+    assert.match(textOf(res), /No changes were written/)
+    await assert.rejects(fsp.stat(path.join(dir, "bad.txt")), { code: "ENOENT" })
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("rejects a modify patch whose bare `@@` line parsed to no hunk", async () => {
+  const dir = await tmp()
+  const tracker = createReadTracker()
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
+  try {
+    const abs = path.join(dir, "edit.txt")
+    await fsp.writeFile(abs, "old\n")
+    tracker.record(abs, await fsp.stat(abs))
+    const res = await tool.handler({ patch: "--- edit.txt\n+++ edit.txt\n@@\n-old\n+new\n" }, {})
+    assert.equal(res.isError, true)
+    assert.match(textOf(res), /has no hunk/)
+    assert.equal(await fsp.readFile(abs, "utf-8"), "old\n")
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("rejects a modify patch that applies but changes nothing", async () => {
+  const dir = await tmp()
+  const tracker = createReadTracker()
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: tracker }))
+  try {
+    const abs = path.join(dir, "same.txt")
+    await fsp.writeFile(abs, "a\nb\n")
+    tracker.record(abs, await fsp.stat(abs))
+    const patch = "--- same.txt\n+++ same.txt\n@@ -1,2 +1,2 @@\n a\n b\n"
+    const res = await tool.handler({ patch }, {})
+    assert.equal(res.isError, true)
+    assert.match(textOf(res), /makes no change/)
+    assert.equal(await fsp.readFile(abs, "utf-8"), "a\nb\n")
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("a standard creation hunk still writes its content", async () => {
+  const dir = await tmp()
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: createReadTracker() }))
+  try {
+    const res = await tool.handler(
+      { patch: "--- /dev/null\n+++ good.txt\n@@ -0,0 +1 @@\n+hello\n" },
+      {}
+    )
+    assert.match(textOf(res), /Applied patch to 1 file/)
+    assert.equal(await fsp.readFile(path.join(dir, "good.txt"), "utf-8"), "hello\n")
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})

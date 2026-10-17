@@ -382,6 +382,12 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     // automatic prefix caching — turn after turn. Byte-identical to the legacy
     // assembly when no dynamic section is present, so it's safe to force on.
     cacheOptimizationEnabled: true,
+    // `autoCompact: false` must reach the sidecar too. The TUI's between-turn
+    // trigger is only one of two: the ai-sdk runtime compacts on its own at
+    // each leg boundary unless `compaction.enabled` is false, so the switch
+    // used to stop the TUI layer while the runtime still compacted mid-turn.
+    // Manual `/compact` is a forced request and is unaffected.
+    ...(config.autoCompact === false ? { compaction: { enabled: false } } : {}),
     // Opt-in auto routing (default off ⇒ this block is skipped and the shim is
     // byte-identical to before). The interactive CLI otherwise omits
     // `modelMappings`, so alias/auto routing is dormant there; when the user

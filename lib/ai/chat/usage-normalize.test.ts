@@ -78,6 +78,11 @@ describe("normalizeUsageBlock — junk guards", () => {
     // 0 is a report, not an absence.
     expect(normalizeUsageBlock({ contextInputTokens: 0 }).context_input_tokens).toBe(0)
   })
+
+  it("carries a measured window occupancy as context_tokens only when reported", () => {
+    expect(normalizeUsageBlock({}).context_tokens).toBeUndefined()
+    expect(normalizeUsageBlock({ inputTokens: 9, contextTokens: 7 }).context_tokens).toBe(7)
+  })
 })
 
 describe("normalizeCacheCreation", () => {

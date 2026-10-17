@@ -518,3 +518,83 @@ test("bash refuses foreground and background execution on host lease error", asy
     assert.match(textOf(result), /lease exhausted/)
   }
 })
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+test(
+  "bash stops the command and the processes it started when the call is interrupted",
+  { skip: process.platform === "win32" },
+  async () => {
+    // LC-01: the shell forks a long-lived worker (the trailing `; true` keeps
+    // `sh` from exec-ing it), so killing only the shell left the worker alive.
+    const dir = await fsp.mkdtemp(`${os.tmpdir()}/bash-abort-`)
+    const pidFile = `${dir}/worker.pid`
+    const worker = `${JSON.stringify(process.execPath)} -e "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setTimeout(() => {}, 60000)" ${JSON.stringify(pidFile)}; true`
+    const tool = asCallable(createBashTool({ cwd: dir, shell: legacyShell }))
+    const controller = new AbortController()
+    try {
+      const pending = tool.handler({ command: worker }, { signal: controller.signal })
+      const deadline = Date.now() + 5000
+      let workerPid = 0
+      while (Date.now() < deadline) {
+        const raw = await fsp.readFile(pidFile, "utf-8").catch(() => "")
+        if (raw) {
+          workerPid = Number(raw)
+          break
+        }
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      assert.ok(workerPid > 0, "worker never started")
+      controller.abort()
+      const res = await pending
+      assert.equal(res.isError, true)
+      assert.match(textOf(res), /interrupted by the user/)
+      assert.doesNotMatch(textOf(res), /terminated by signal/)
+      assert.equal(processAlive(workerPid), false, "worker survived the interrupt")
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
+  }
+)
+
+test("bash refuses to start a command whose call was already interrupted", async () => {
+  const dir = await fsp.mkdtemp(`${os.tmpdir()}/bash-preabort-`)
+  const tool = asCallable(createBashTool({ cwd: dir, shell: legacyShell }))
+  const controller = new AbortController()
+  controller.abort()
+  try {
+    const res = await tool.handler({ command: "echo ran > ran.txt" }, { signal: controller.signal })
+    assert.equal(res.isError, true)
+    assert.match(textOf(res), /never ran/)
+    await assert.rejects(fsp.stat(`${dir}/ran.txt`), { code: "ENOENT" })
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test(
+  "bash timeout also stops the processes the command started",
+  { skip: process.platform === "win32" },
+  async () => {
+    const dir = await fsp.mkdtemp(`${os.tmpdir()}/bash-timeout-tree-`)
+    const pidFile = `${dir}/worker.pid`
+    const worker = `${JSON.stringify(process.execPath)} -e "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setTimeout(() => {}, 60000)" ${JSON.stringify(pidFile)}; true`
+    const tool = asCallable(createBashTool({ cwd: dir, shell: legacyShell }))
+    try {
+      const res = await tool.handler({ command: worker, timeout: 1500 }, {})
+      assert.match(textOf(res), /timed out after 1500 ms/)
+      const workerPid = Number(await fsp.readFile(pidFile, "utf-8"))
+      assert.ok(workerPid > 0)
+      assert.equal(processAlive(workerPid), false, "worker survived the timeout")
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
+  }
+)

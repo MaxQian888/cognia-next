@@ -337,6 +337,17 @@ describe("toBuildContext — session + appSettings shaping", () => {
     expect(ctx.appSettings?.cacheOptimizationEnabled).toBe(true)
   })
 
+  it("passes autoCompact:false to the sidecar as compaction.enabled=false", () => {
+    // LC-02: the flag used to stop only the TUI trigger; the runtime still
+    // auto-compacted mid-turn because no compaction setting reached it.
+    const off = toBuildContext({ sessionId: "s1", now: NOW, config: cfg({ autoCompact: false }) })
+    expect((off.appSettings as { compaction?: unknown }).compaction).toEqual({ enabled: false })
+    for (const autoCompact of [true, undefined]) {
+      const on = toBuildContext({ sessionId: "s1", now: NOW, config: cfg({ autoCompact }) })
+      expect((on.appSettings as { compaction?: unknown }).compaction).toBeUndefined()
+    }
+  })
+
   it("defaults session.kind to direct", () => {
     const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
     expect(ctx.session?.kind).toBe("direct")

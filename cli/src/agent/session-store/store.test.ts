@@ -6,7 +6,7 @@ import type {
 } from "@cognia/agent-config-types/agent-execution"
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 
-import { legacyTranscriptPath, manifestPath, eventLogPath } from "./paths"
+import { legacyTranscriptPath, manifestPath, eventLogPath, workingSetPath } from "./paths"
 import { createSessionStore, withoutReplayedGrants, type SessionStoreOptions } from "./store"
 import { createMemoryFs, type MemoryFs } from "./test-fs"
 
@@ -986,5 +986,20 @@ describe("importCanonical / delete", () => {
     if (held.ok) held.value.close()
     expect(store.delete("held")).toEqual({ ok: true, value: { deleted: true } })
     expect(store.open("held", { writable: false }).ok).toBe(false)
+  })
+})
+
+describe("session store delete", () => {
+  it("also removes the session's working set, which lives outside its directory", () => {
+    const fsx = createMemoryFs()
+    const { store } = makeStore(fsx)
+    const created = store.create("ws1", { cwd: REPO })
+    expect(created.ok).toBe(true)
+    if (created.ok) created.value.close()
+    fsx.files.set(workingSetPath(HOME, "ws1"), "{}")
+    fsx.files.set(workingSetPath(HOME, "other"), "{}")
+    expect(store.delete("ws1")).toEqual({ ok: true, value: { deleted: true } })
+    expect(fsx.files.has(workingSetPath(HOME, "ws1"))).toBe(false)
+    expect(fsx.files.has(workingSetPath(HOME, "other"))).toBe(true)
   })
 })

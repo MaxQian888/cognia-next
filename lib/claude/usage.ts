@@ -405,6 +405,9 @@ export function usageInfoFromUsageBlock(
   const info: UsageInfo = {
     inputTokens: num("input_tokens"),
     outputTokens: num("output_tokens"),
+    // Measured window occupancy (ai-sdk channel: last call's prompt + output).
+    // `tokensInWindow` prefers it to summing the billing fields.
+    contextTokens: num("context_tokens"),
     // Only attach when the channel reported a window-prompt size that differs
     // from the (cumulative) input — i.e. the ai-sdk agent-loop path.
     contextInputTokens:

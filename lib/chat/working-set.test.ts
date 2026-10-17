@@ -6,6 +6,8 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { createSession } from "@/lib/db/sessions"
 import { persistMessages } from "@/lib/db/messages"
 import {
+  applyWorkingSetMutation,
+  emptyWorkingSet,
   mutateSessionWorkingSet,
   readSessionWorkingSet,
   renderWorkingSetForCompaction,
@@ -234,5 +236,40 @@ describe("session working set", () => {
         ],
       })
     ).toThrow("PII gate")
+  })
+})
+
+describe("applyWorkingSetMutation", () => {
+  it("returns the next revision without touching any store", () => {
+    const next = applyWorkingSetMutation(emptyWorkingSet(), {
+      sessionId: "any",
+      expectedRevision: 0,
+      action: "upsert",
+      entry: { id: "e1", kind: "decision", summary: "  use NDJSON  ", origin: "agent" },
+      now: 5,
+    })
+    expect(next).toMatchObject({ revision: 1, updatedAt: 5 })
+    expect(next.entries).toEqual([
+      expect.objectContaining({ id: "e1", summary: "use NDJSON", status: "active", createdAt: 5 }),
+    ])
+  })
+
+  it("applies the same CAS and validation every store relies on", () => {
+    expect(() =>
+      applyWorkingSetMutation(emptyWorkingSet(), {
+        sessionId: "any",
+        expectedRevision: 3,
+        action: "remove",
+        entryId: "x",
+      })
+    ).toThrow(WorkingSetConflictError)
+    expect(() =>
+      applyWorkingSetMutation(emptyWorkingSet(), {
+        sessionId: "any",
+        expectedRevision: 0,
+        action: "upsert",
+        entry: { kind: "fact", summary: "x".repeat(513), origin: "agent" },
+      })
+    ).toThrow(/at most 512/)
   })
 })

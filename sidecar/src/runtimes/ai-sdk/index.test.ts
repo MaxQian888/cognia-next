@@ -3469,3 +3469,81 @@ test("tool names a provider would reject are renamed on the wire and restored fo
   )
   session.closeInput()
 })
+
+// LC-02: a leg of several tool steps. AI SDK v7's `result.usage` SUMS the
+// steps, so it must stay the billing figure while the window comes from the
+// last `finish-step` call alone.
+const multiStepLegStream = () =>
+  makeFakeStream(
+    [
+      {
+        type: "finish-step",
+        usage: { inputTokens: 58_000, outputTokens: 300, cachedInputTokens: 57_500 },
+      },
+      {
+        type: "finish-step",
+        usage: { inputTokens: 59_000, outputTokens: 350, cachedInputTokens: 58_500 },
+      },
+      {
+        type: "finish-step",
+        usage: { inputTokens: 60_000, outputTokens: 400, cachedInputTokens: 59_500 },
+      },
+      { type: "text-delta", id: "1", text: "DONE" },
+      { type: "finish", finishReason: "stop" },
+    ],
+    { inputTokens: 177_000, outputTokens: 1_050, cachedInputTokens: 175_500 }
+  )
+
+test("a multi-step leg reports summed billing but the last call as the window", async () => {
+  const { events, emit } = captureEmit()
+  startSession({
+    provider: "openai",
+    sessionId: "s-window",
+    firstPrompt: "do the task",
+    sendOptions: {
+      model: "gpt-4o",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+    },
+    emit,
+    log: () => {},
+    streamText: multiStepLegStream(),
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  const result = events.find((e) => e.type === "event" && e.event?.type === "result")
+  assert.equal(result!.event.usage.input_tokens, 177_000)
+  assert.equal(result!.event.usage.cache_read_input_tokens, 175_500)
+  assert.equal(result!.event.usage.context_input_tokens, 60_000)
+  assert.equal(result!.event.usage.context_tokens, 60_400)
+})
+
+test("auto-compaction triggers on the last call's prompt, not the leg's summed usage", async () => {
+  // gpt-4o: 128k window × 0.835 ≈ 106,880 hard, ≈ 85,504 soft. The summed
+  // 177k crosses both; the real 60k prompt crosses neither.
+  const { events, emit } = captureEmit()
+  const session = startSession({
+    provider: "openai",
+    sessionId: "s-window-compact",
+    firstPrompt: "do the task",
+    sendOptions: {
+      model: "gpt-4o",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: { enabled: true, keepRecent: 1 },
+    },
+    emit,
+    log: () => {},
+    streamText: multiStepLegStream(),
+  })
+  session.pushUserMessage("second turn")
+  await waitForEvent(
+    events,
+    (e) =>
+      e.type === "event" &&
+      e.event?.type === "result" &&
+      events.filter((x) => x.event?.type === "result").length >= 2
+  )
+  await new Promise<void>((r) => setTimeout(r, 40))
+  assert.equal(
+    events.some((e) => e.event?.subtype === "compact_boundary"),
+    false
+  )
+})

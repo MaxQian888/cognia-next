@@ -3,12 +3,14 @@ import type {
   WorkingSetEntryOrigin,
   WorkingSetEntryStatus,
 } from "@cognia/agent-config-types/working-set"
+import type { SessionWorkingSetV1 } from "@cognia/agent-config-types/working-set"
 import type { ResourceRefV1 } from "@cognia/agent-config-types/governance"
 
 import {
   mutateSessionWorkingSet,
   readSessionWorkingSet,
   WorkingSetConflictError,
+  type WorkingSetMutation,
 } from "@/lib/chat/working-set"
 
 export const WORKING_SET_TOOL_NAME = "working_set"
@@ -77,6 +79,23 @@ export function buildWorkingSetManifestEntries(): WorkingSetManifestEntry[] {
 
 type ToolContext = { sessionId: string }
 
+/**
+ * Where a host keeps a session's working set. The desktop keeps it on the
+ * Dexie session row; the CLI, whose sessions live in its own session store and
+ * never in Dexie, supplies a per-session file store. Both apply mutations
+ * through `applyWorkingSetMutation`, so CAS and validation are identical.
+ */
+export interface WorkingSetStore {
+  read(sessionId: string): Promise<SessionWorkingSetV1>
+  mutate(mutation: WorkingSetMutation): Promise<SessionWorkingSetV1>
+}
+
+/** The desktop store: the working set on the Dexie chat-session row. */
+export const dexieWorkingSetStore: WorkingSetStore = {
+  read: readSessionWorkingSet,
+  mutate: mutateSessionWorkingSet,
+}
+
 function invalidArguments(error: string) {
   return { ok: false as const, code: "invalid_arguments" as const, error }
 }
@@ -89,11 +108,12 @@ function parseRevision(args: Record<string, unknown>): number | null {
 
 export async function runWorkingSetTool(
   args: Record<string, unknown>,
-  context: ToolContext
+  context: ToolContext,
+  store: WorkingSetStore = dexieWorkingSetStore
 ): Promise<unknown> {
   const action = args.action
   if (action === "get") {
-    return { ok: true as const, workingSet: await readSessionWorkingSet(context.sessionId) }
+    return { ok: true as const, workingSet: await store.read(context.sessionId) }
   }
   if (action !== "upsert" && action !== "resolve" && action !== "remove") {
     return invalidArguments("action must be get, upsert, resolve, or remove")
@@ -116,7 +136,7 @@ export async function runWorkingSetTool(
       ) {
         return invalidArguments("entry.kind, entry.summary, and entry.origin are required")
       }
-      const workingSet = await mutateSessionWorkingSet({
+      const workingSet = await store.mutate({
         sessionId: context.sessionId,
         expectedRevision,
         action,
@@ -137,7 +157,7 @@ export async function runWorkingSetTool(
     if (typeof args.entryId !== "string" || !args.entryId.trim()) {
       return invalidArguments("entryId is required for resolve and remove")
     }
-    const workingSet = await mutateSessionWorkingSet({
+    const workingSet = await store.mutate({
       sessionId: context.sessionId,
       expectedRevision,
       action,

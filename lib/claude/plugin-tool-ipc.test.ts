@@ -325,11 +325,27 @@ describe("handlePluginToolExec", () => {
     const response = await handlePluginToolExec(
       makeRequest({ name: "working_set", sessionId: "session-working", args: { action: "get" } })
     )
+    // No host store ⇒ the tool's own default (the Dexie session row).
     expect(mockRunWorkingSetTool).toHaveBeenCalledWith(
       { action: "get" },
-      { sessionId: "session-working" }
+      { sessionId: "session-working" },
+      undefined
     )
     expect(response.result).toEqual({ revision: 2, entries: [] })
+  })
+
+  it("hands working_set the host's own store when one is supplied", async () => {
+    mockRunWorkingSetTool.mockResolvedValueOnce({ revision: 0, entries: [] })
+    const workingSetStore = { read: jest.fn(), mutate: jest.fn() }
+    await handlePluginToolExec(
+      makeRequest({ name: "working_set", sessionId: "s_cli", args: { action: "get" } }),
+      { workingSetStore }
+    )
+    expect(mockRunWorkingSetTool).toHaveBeenCalledWith(
+      { action: "get" },
+      { sessionId: "s_cli" },
+      workingSetStore
+    )
   })
 
   it("routes session messaging before the plugin registry with the calling session identity", async () => {

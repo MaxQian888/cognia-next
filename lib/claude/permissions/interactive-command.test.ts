@@ -208,3 +208,24 @@ describe("detectInteractiveCommand", () => {
     })
   })
 })
+
+describe("detectInteractiveCommand heredocs", () => {
+  it("treats heredoc bodies as stdin data, not commands", () => {
+    expect(detectInteractiveCommand("cat <<'EOF'\nnode\nEOF").interactive).toBe(false)
+    expect(
+      detectInteractiveCommand(
+        "cat > cli.cjs <<'CLI_EOF'\n#!/usr/bin/env node\nnode\nCLI_EOF\nnode --check cli.cjs"
+      ).interactive
+    ).toBe(false)
+    expect(detectInteractiveCommand("cat <<-EOF\n\tpython\n\tEOF").interactive).toBe(false)
+    expect(detectInteractiveCommand("cat <<A <<B\nnode\nA\nvim\nB").interactive).toBe(false)
+  })
+
+  it("still scans the lines around a heredoc", () => {
+    expect(detectInteractiveCommand("cat <<'EOF' > f\nhi\nEOF\nnode").head).toBe("node")
+    expect(detectInteractiveCommand("cat <<< x\nnode").head).toBe("node")
+    expect(detectInteractiveCommand("echo 'a << b'\nnode").head).toBe("node")
+    // Unterminated: keep the old verdict rather than hide a command.
+    expect(detectInteractiveCommand("cat <<EOF\nnode").head).toBe("node")
+  })
+})

@@ -11,6 +11,7 @@ import {
   realSessionStoreFs,
   sessionDir,
   sessionsRoot,
+  workingSetPath,
   workspaceKey,
 } from "./paths"
 
@@ -42,6 +43,18 @@ describe("session store paths", () => {
     expect(manifestPath(HOME, "s1")).toBe(path.join(dir, "manifest.json"))
     expect(eventLogPath(HOME, "s1")).toBe(path.join(dir, "events.jsonl"))
     expect(leasePath(HOME, "s1")).toBe(path.join(dir, "lease.json"))
+  })
+})
+
+describe("workingSetPath", () => {
+  it("keeps working sets beside the sessions root, never in a session directory", () => {
+    expect(workingSetPath(HOME, "s1")).toBe(path.join(HOME, "working-sets", "s1.json"))
+    // A `sessions/<id>/` directory is what marks a session canonical.
+    expect(workingSetPath(HOME, "s1").startsWith(sessionDir(HOME, "s1"))).toBe(false)
+  })
+
+  it("refuses an unsafe session id", () => {
+    expect(() => workingSetPath(HOME, "../x")).toThrow(/invalid session id/)
   })
 })
 

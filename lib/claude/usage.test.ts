@@ -431,6 +431,21 @@ describe("usageInfoFromUsageBlock", () => {
     })
   })
 
+  it("carries the ai-sdk channel's measured window so cache reads are not added on top", () => {
+    // A three-step turn: billing and cache reads are summed over the steps, the
+    // window is the last call alone (60k prompt incl. cache + 400 output).
+    const info = usageInfoFromUsageBlock({
+      input_tokens: 177_000,
+      output_tokens: 1_050,
+      context_input_tokens: 60_000,
+      context_tokens: 60_400,
+      cache_read_input_tokens: 175_500,
+      cache_creation_input_tokens: 0,
+    })
+    expect(info?.contextTokens).toBe(60_400)
+    expect(tokensInWindow(info!)).toBe(60_400)
+  })
+
   it("returns null when nothing was reported", () => {
     expect(usageInfoFromUsageBlock(undefined)).toBeNull()
     expect(usageInfoFromUsageBlock({})).toBeNull()

@@ -137,6 +137,19 @@ export function leasePath(home: string, sessionId: string, override?: string): s
   return path.join(sessionDir(home, sessionId, override), LEASE_FILE)
 }
 
+/**
+ * Directory under the CLI home holding every session's `working_set` file.
+ * Beside `checkpoints/`, NOT inside `sessions/<id>/`: a directory named after
+ * the session id is what marks a session canonical.
+ */
+export const WORKING_SETS_DIR = "working-sets"
+
+/** File holding one session's working set (see `working-set-file-store.ts`). */
+export function workingSetPath(home: string, sessionId: string): string {
+  if (!isSafeSessionId(sessionId)) throw new Error(`invalid session id "${sessionId}"`)
+  return path.join(home, WORKING_SETS_DIR, `${sessionId}.json`)
+}
+
 /** Path of the pre-canonical flat transcript for a session, if any. */
 export function legacyTranscriptPath(home: string, sessionId: string, override?: string): string {
   return path.join(sessionsRoot(home, override), `${sessionId}.jsonl`)

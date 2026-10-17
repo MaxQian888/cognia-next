@@ -644,6 +644,11 @@ export function dispatchAiSdk({
     let currentLegStepOutputTokens = 0
     let currentLegLastInputTokens = 0
     let currentLegStepUsage: Record<string, unknown> | null = null
+    // The turn's latest single model call (prompt incl. cached tokens + its
+    // output): what actually occupies the window once the turn ends. Unlike the
+    // per-leg fields these are never reset between legs.
+    let turnLastStepInputTokens = 0
+    let turnLastStepOutputTokens = 0
     const recordCompletedStepUsage = (value: unknown) => {
       const usage = record(value)
       if (!usage || typeof usage !== "object") return
@@ -652,6 +657,8 @@ export function dispatchAiSdk({
       if (typeof input === "number" && input > 0) {
         currentLegStepInputTokens += input
         currentLegLastInputTokens = input
+        turnLastStepInputTokens = input
+        turnLastStepOutputTokens = typeof output === "number" && output > 0 ? output : 0
       }
       if (typeof output === "number" && output > 0) currentLegStepOutputTokens += output
       currentLegStepUsage = usage
@@ -665,8 +672,15 @@ export function dispatchAiSdk({
         ...(base ?? {}),
         ...(inputTokens > 0 ? { inputTokens } : {}),
         ...(outputTokens > 0 ? { outputTokens } : {}),
-        ...(currentLegLastInputTokens > 0 || lastInputTokens > 0
-          ? { contextInputTokens: currentLegLastInputTokens || lastInputTokens }
+        ...(turnLastStepInputTokens > 0 || lastInputTokens > 0
+          ? { contextInputTokens: turnLastStepInputTokens || lastInputTokens }
+          : {}),
+        // Explicit window occupancy. The summed usage above also sums the
+        // cache-read counter across steps, and AI SDK `inputTokens` already
+        // includes cached tokens, so "input + cache read" overstated the window
+        // many times over on a multi-step turn (a 60K prompt read as 100%).
+        ...(turnLastStepInputTokens > 0
+          ? { contextTokens: turnLastStepInputTokens + turnLastStepOutputTokens }
           : {}),
       }
     }
@@ -1206,10 +1220,17 @@ export function dispatchAiSdk({
         const usage = usageValue ? record(usageValue) : null
         // Record the real prompt size so the next leg/turn can decide whether to
         // compact. AI SDK v6 reports `inputTokens`; older shapes use `promptTokens`.
+        // The leg's `usage` SUMS every step of the leg (AI SDK v7), so it is the
+        // billing figure; the window holds only the last step's prompt, taken
+        // from the `finish-step` events. A leg that reported no step usage falls
+        // back to the leg total.
         if (usage) {
           const inTok = usage.inputTokens ?? usage.promptTokens
           if (typeof inTok === "number" && inTok > 0) {
-            lastInputTokens = inTok
+            lastInputTokens = currentLegLastInputTokens > 0 ? currentLegLastInputTokens : inTok
+            // A stepless leg leaves no per-call figure; drop an earlier leg's so
+            // the window is not reported from a stale call.
+            if (currentLegLastInputTokens === 0) turnLastStepInputTokens = 0
             accInputTokens += inTok
           }
           const outTok = usage.outputTokens ?? usage.completionTokens
