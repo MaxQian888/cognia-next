@@ -1,7 +1,13 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { sanitizeToolMessagePairs } from "./tool-message-pairing.ts"
+import {
+  pairSafeSplitAfter,
+  pairSafeSplitBefore,
+  sanitizeToolMessagePairs,
+  toolPairUnits,
+  unpairedToolCallIds,
+} from "./tool-message-pairing.ts"
 
 // Helpers mirroring the AI SDK `ModelMessage` shapes the dispatcher builds.
 const asstCall = (id: string, name = "bash") => ({
@@ -100,4 +106,81 @@ test("leaves string-content assistant/user/system messages alone", () => {
   ]
   const out = sanitizeToolMessagePairs(history)
   assert.deepEqual(out, history)
+})
+
+// ── pair-safe splits ──────────────────────────────────────────────────────
+
+const parallelCall = (...ids: string[]) => ({
+  role: "assistant",
+  content: ids.map((id) => ({ type: "tool-call", toolCallId: id, toolName: "bash", input: {} })),
+})
+const user = (text: string) => ({ role: "user", content: text })
+
+test("pairSafeSplitBefore moves a cut that lands on a result back to its call", () => {
+  const history = [user("u"), asstCall("a"), toolResult("a"), user("next")]
+  assert.equal(pairSafeSplitBefore(history, 2), 1)
+  assert.equal(pairSafeSplitBefore(history, 3), 3, "a cut after the pair is already safe")
+  assert.equal(pairSafeSplitBefore(history, 1), 1, "a cut before the call is already safe")
+})
+
+test("pairSafeSplitBefore keeps parallel results with their single call message", () => {
+  const history = [user("u"), parallelCall("a", "b"), toolResult("a"), toolResult("b"), user("x")]
+  assert.equal(pairSafeSplitBefore(history, 3), 1)
+})
+
+test("pairSafeSplitBefore follows chained pairs back to the earliest call", () => {
+  // Call b is issued in the same message that carries no result, but result a
+  // arrives after call b: a cut between them must reach call a.
+  const history = [user("u"), asstCall("a"), parallelCall("b"), toolResult("a"), toolResult("b")]
+  assert.equal(pairSafeSplitBefore(history, 4), 1)
+})
+
+test("pairSafeSplitAfter moves a cut past the results of every call before it", () => {
+  const history = [user("u"), parallelCall("a", "b"), toolResult("a"), toolResult("b"), user("x")]
+  assert.equal(pairSafeSplitAfter(history, 2), 4)
+  assert.equal(pairSafeSplitAfter(history, 1), 1)
+  assert.equal(pairSafeSplitAfter(history, 99), history.length, "clamped to the length")
+})
+
+test("a pre-existing orphan result or dangling call never moves a cut", () => {
+  const history = [user("u"), toolResult("ghost"), asstCall("dangling"), user("x")]
+  assert.equal(pairSafeSplitBefore(history, 2), 2)
+  assert.equal(pairSafeSplitAfter(history, 3), 3)
+})
+
+test("toolPairUnits groups each call with all of its results", () => {
+  const history = [
+    user("u"),
+    asstTextCall("run", "a"),
+    toolResult("a"),
+    parallelCall("b", "c"),
+    toolResult("b"),
+    toolResult("c"),
+    { role: "assistant", content: "done" },
+  ]
+  assert.deepEqual(
+    toolPairUnits(history).map((unit) => unit.length),
+    [1, 2, 3, 1]
+  )
+  assert.deepEqual(toolPairUnits(history).flat(), history)
+})
+
+test("unpairedToolCallIds reports orphan results and unanswered calls only", () => {
+  assert.deepEqual([...unpairedToolCallIds([asstCall("a"), toolResult("a")])], [])
+  assert.deepEqual(
+    [
+      ...unpairedToolCallIds([
+        toolResult("orphan"),
+        asstCall("a"),
+        toolResult("a"),
+        asstCall("open"),
+      ]),
+    ].sort(),
+    ["open", "orphan"]
+  )
+  assert.deepEqual(
+    [...unpairedToolCallIds([toolResult("late"), asstCall("late")])].sort(),
+    ["late"],
+    "a result before its call is still an orphan"
+  )
 })

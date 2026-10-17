@@ -21,6 +21,7 @@ import { planStrategy } from "../../context/strategies.ts"
 import { queryPreCompactDecision } from "../../hooks/pre-compact.ts"
 import { runPluginHookHandler, PLUGIN_HOOK_BROADCAST } from "../../hooks/handlers/plugin.ts"
 import { capToolResults } from "../../context/tool-result-cap.ts"
+import { unpairedToolCallIds } from "../../context/tool-message-pairing.ts"
 import { resolveAdapter } from "../../providers/protocol-adapters/registry.ts"
 import {
   drainSideCallStream,
@@ -244,6 +245,8 @@ export function createCompactor({
     controller: AbortController
     model: string
     gate: CallLedgerGate | null
+    /** A forced (`/compact`, overflow recovery) run: its caller waits for an outcome. */
+    force: boolean
     result?: Prepared
     settled: boolean
     promise: Promise<void>
@@ -722,6 +725,24 @@ export function createCompactor({
     const preMessages = captureUndo ? structuredClone(conversation) : undefined
     const preTokens = state.lastInputTokens || estimateTokens(conversation)
     const combined = [...next, ...conversation.slice(job.snapshot.length)]
+    // The compacted history is what gets saved and later resumed, and a resume
+    // refuses an orphan tool result or an unanswered call. The planner keeps
+    // pairs whole; refuse to publish if a compaction would still split one
+    // that was intact (a pair already broken before is not ours to judge).
+    const before = unpairedToolCallIds(conversation)
+    const split = [...unpairedToolCallIds(combined)].filter((id) => !before.has(id))
+    if (split.length > 0) {
+      log(
+        "warn",
+        `compaction discarded: it would separate ${split.length} tool call(s) from their results (${split.slice(0, 3).join(", ")})`
+      )
+      if (job.force)
+        reportManualOutcome(
+          "failed",
+          "Compaction failed: it would have separated a tool call from its result, which would make the session impossible to resume. Nothing was compacted."
+        )
+      return
+    }
     conversation.splice(0, conversation.length, ...combined)
     if (version !== undefined) state.frozenSummaryVersion = version
     state.lastInputTokens = 0
@@ -790,6 +811,7 @@ export function createCompactor({
         controller,
         model: state.model,
         gate: state.turnLedgerGate,
+        force: options.force === true,
         settled: false,
         promise: Promise.resolve(),
       }

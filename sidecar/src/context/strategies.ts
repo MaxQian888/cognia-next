@@ -18,6 +18,7 @@
 import { planCompaction, estimateTokens, getContextWindow } from "./compaction.ts"
 import type { ConversationMessage } from "./compaction.ts"
 import { scoreMessage as defaultScoreMessage } from "./importance.ts"
+import { pairSafeSplitAfter, toolPairUnits } from "./tool-message-pairing.ts"
 import type { MessageScore } from "./importance.ts"
 
 /** The `CompressionStrategy` values this planner understands (types/system/compression.ts). */
@@ -128,6 +129,12 @@ export function planStrategy({
       tailCost -= estimateTokens([evicted])
       middle.push(evicted)
     }
+    // Evicting one message at a time can take a tool call and leave its
+    // results behind: carry those results over with it.
+    const all = [...middle, ...tail]
+    const split = pairSafeSplitAfter(all, middle.length)
+    middle.splice(0, middle.length, ...all.slice(0, split))
+    tail.splice(0, tail.length, ...all.slice(split))
   }
 
   const protectedSystems = () =>
@@ -142,16 +149,26 @@ export function planStrategy({
     const total = conversation.length
     const keep: Messages = []
     const summarizeSet: Messages = []
-    middle.forEach((m, idx) => {
-      if (preserveSystemMessages && m.role === "system") {
-        keep.push(m)
-        return
+    // A tool call and its results are kept or summarized together — keeping
+    // only one half would leave an orphan result or an unanswered call in the
+    // saved history. The pair is kept when any of its messages scores high.
+    let idx = 0
+    for (const unit of toolPairUnits(middle)) {
+      const unitStart = idx
+      idx += unit.length
+      if (unit.length === 1 && preserveSystemMessages && unit[0]!.role === "system") {
+        keep.push(unit[0]!)
+        continue
       }
-      const globalIndex = systemHead.length + frozen.length + idx
-      const { score } = scoreMessage(m, { index: globalIndex, total })
-      if (score >= importanceThreshold) keep.push(m)
-      else summarizeSet.push(m)
-    })
+      const important = unit.some(
+        (m, offset) =>
+          scoreMessage(m, {
+            index: systemHead.length + frozen.length + unitStart + offset,
+            total,
+          }).score >= importanceThreshold
+      )
+      ;(important ? keep : summarizeSet).push(...unit)
+    }
     if (summarizeSet.length === 0) {
       return { kind: "rebuild", rebuilt: [...systemHead, ...frozen, ...keep, ...tail] }
     }

@@ -20,6 +20,7 @@
  * part array.
  */
 import type { ConversationMessage } from "../shared/wire/conversation.ts"
+import { pairSafeSplitBefore } from "./tool-message-pairing.ts"
 export type { ConversationMessage } from "../shared/wire/conversation.ts"
 
 /** A content part as it may appear in `ConversationMessage.content`. */
@@ -266,7 +267,8 @@ export interface CompactionPlan {
  *  - `frozen` — the contiguous prior summary messages right after it (PROTECTED;
  *    carried forward verbatim, never re-summarized),
  *  - `middle` — the genuinely-new user/assistant messages to summarize,
- *  - `tail` — the most-recent `keepRecentMessages` kept verbatim.
+ *  - `tail` — the most-recent `keepRecentMessages` kept verbatim, extended
+ *    back so it never starts inside a tool call ↔ result pair.
  * `head` = `systemHead` + `frozen` (kept for back-compat). Returns null when
  * there is nothing new enough to be worth summarizing.
  */
@@ -287,8 +289,11 @@ export function planCompaction({
   const rest = conversation.slice(j)
   const keep = Math.max(0, keepRecentMessages)
   if (rest.length <= keep) return null
-  const middle = rest.slice(0, rest.length - keep)
-  const tail = rest.slice(rest.length - keep)
+  // Never cut between a tool call and its result: the tail starts early enough
+  // to keep each pair whole, or the saved history would carry an orphan.
+  const split = pairSafeSplitBefore(rest, rest.length - keep)
+  const middle = rest.slice(0, split)
+  const tail = rest.slice(split)
   if (middle.length === 0) return null
   return { head, systemHead, frozen, middle, tail }
 }

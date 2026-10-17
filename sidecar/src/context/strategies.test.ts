@@ -202,3 +202,113 @@ test("optical produces an optical plan carrying the middle (fallback-compatible)
     ["sys"]
   )
 })
+
+// ── tool call ↔ result pairs ───────────────────────────────────────────────
+
+const toolCall = (id: string, input: unknown = {}) => ({
+  role: "assistant",
+  content: [{ type: "tool-call", toolCallId: id, toolName: "bash", input }],
+})
+const toolResult = (id: string, value = "ok") => ({
+  role: "tool",
+  content: [
+    { type: "tool-result", toolCallId: id, toolName: "bash", output: { type: "text", value } },
+  ],
+})
+
+/** The resume check's rule: each result follows its call; no call is left open. */
+function assertPaired(messages: readonly ConversationMessage[]) {
+  const open = new Set<string>()
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) continue
+    for (const part of m.content as { type?: string; toolCallId?: string }[]) {
+      if (part.type === "tool-call") open.add(part.toolCallId!)
+      if (part.type === "tool-result")
+        assert.ok(open.delete(part.toolCallId!), `orphan result ${part.toolCallId}`)
+    }
+  }
+  assert.deepEqual([...open], [], "unanswered calls")
+}
+
+test("drain-line carries a call's results along when it evicts the call", () => {
+  const huge = "x".repeat(4000)
+  const conversation = [
+    { role: "system", content: "sys" },
+    { role: "user", content: "old" },
+    { role: "assistant", content: "old reply" },
+    toolCall("big", { command: huge }),
+    toolResult("big", huge),
+    { role: "user", content: huge },
+    { role: "assistant", content: "done" },
+  ]
+  const plan = planStrategy({
+    strategy: "summary",
+    conversation,
+    keepRecent: 4,
+    retainedFraction: 0.01,
+    modelId: "gpt-4o",
+  })
+  assert.equal(plan.kind, "single")
+  assertPaired(plan.tail)
+  assertPaired(plan.middle)
+  assert.notEqual(plan.tail[0]?.role, "tool")
+})
+
+test("selective keeps or summarizes a tool call together with its result", () => {
+  const conversation = [
+    { role: "system", content: "sys" },
+    { role: "user", content: "hi" },
+    toolCall("a", { command: "ls" }),
+    toolResult("a", "edited lib/x.ts"),
+    { role: "assistant", content: "hmm" },
+    toolCall("b"),
+    toolResult("b"),
+    { role: "user", content: "recent-1" },
+    { role: "assistant", content: "recent-2" },
+  ]
+  // Score exactly one half of each pair as important — the default scorer rates
+  // every tool message alike, so only a custom scorer or threshold splits them.
+  const important = new Set<unknown>([conversation[3], conversation[5]])
+  const plan = planStrategy({
+    strategy: "selective",
+    conversation,
+    keepRecent: 2,
+    importanceThreshold: 0.5,
+    scoreMessage: (m) => ({ score: important.has(m) ? 1 : 0, signals: [] }),
+  })
+  assert.equal(plan.kind, "selective")
+  assertPaired(plan.keep)
+  assertPaired(plan.summarizeSet)
+  assert.deepEqual(plan.keep, [conversation[2], conversation[3], conversation[5], conversation[6]])
+  assert.deepEqual(plan.summarizeSet, [conversation[1], conversation[4]])
+})
+
+test("every strategy's retained messages stay pair-safe on a tool-heavy history", () => {
+  const conversation: ConversationMessage[] = [{ role: "system", content: "sys" }]
+  for (let i = 0; i < 12; i++) {
+    conversation.push(
+      { role: "user", content: `step ${i}` },
+      toolCall(`c${i}`),
+      toolResult(`c${i}`)
+    )
+  }
+  for (const strategy of [
+    "summary",
+    "hybrid",
+    "sliding-window",
+    "selective",
+    "recursive",
+    "optical",
+  ]) {
+    for (let keepRecent = 1; keepRecent <= 8; keepRecent++) {
+      const plan = planStrategy({ strategy, conversation, keepRecent, retainedFraction: 0.5 })
+      const retained =
+        plan.kind === "none"
+          ? conversation
+          : plan.kind === "rebuild"
+            ? plan.rebuilt
+            : [...plan.systemHead, ...plan.frozen, ...plan.keep, ...plan.tail]
+      assertPaired(retained)
+    }
+  }
+})

@@ -302,3 +302,61 @@ test("applyCompaction is a no-op shape when plan is empty", () => {
   const next = applyCompaction({ conversation: short, keepRecentMessages: 2, summary: "S" })
   assert.deepEqual(next, short)
 })
+
+test("planCompaction never starts the verbatim tail inside a tool call/result pair", () => {
+  // The LR-P03 shape: the count-based cut (keep 6) lands on a tool result whose
+  // call would be summarized, leaving an orphan the resume check rejects.
+  const call = (id: string) => ({
+    role: "assistant",
+    content: [{ type: "tool-call", toolCallId: id, toolName: "working_set", input: {} }],
+  })
+  const result = (id: string) => ({
+    role: "tool",
+    content: [
+      {
+        type: "tool-result",
+        toolCallId: id,
+        toolName: "working_set",
+        output: { type: "json", value: {} },
+      },
+    ],
+  })
+  const conversation = [
+    { role: "user", content: "start" },
+    { role: "assistant", content: "ok" },
+    { role: "user", content: "get the working set" },
+    call("ws-1"),
+    result("ws-1"),
+    { role: "assistant", content: "it has 3 entries" },
+    { role: "user", content: "codename?" },
+    { role: "assistant", content: "COPPER-HERON-8046" },
+    { role: "user", content: "thanks" },
+  ]
+  const plan = planCompaction({ conversation, keepRecentMessages: 5 })
+  assert.ok(plan)
+  assert.equal(plan.tail[0], conversation[3], "the tail starts at the call, keeping its result")
+  assert.equal(plan.tail.length, 6)
+  assert.equal(plan.middle.length, 3)
+})
+
+test("planCompaction reports nothing to compact when the pair reaches the start", () => {
+  const conversation = [
+    {
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId: "x", toolName: "bash", input: {} }],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "x",
+          toolName: "bash",
+          output: { type: "text", value: "" },
+        },
+      ],
+    },
+    { role: "user", content: "next" },
+  ]
+  assert.equal(planCompaction({ conversation, keepRecentMessages: 2 }), null)
+})

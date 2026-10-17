@@ -491,3 +491,86 @@ test("the summary transcript keeps tool calls and bounded results, framed as mat
   assert.doesNotMatch(content, /private chain of thought/)
   assert.match(content, /<\/transcript>$/)
 })
+
+const callMsg = (id: string): ConversationMessage => ({
+  role: "assistant",
+  content: [{ type: "tool-call", toolCallId: id, toolName: "working_set", input: { op: "get" } }],
+})
+const resultMsg = (id: string): ConversationMessage => ({
+  role: "tool",
+  content: [
+    {
+      type: "tool-result",
+      toolCallId: id,
+      toolName: "working_set",
+      output: { type: "json", value: { revision: 6 } },
+    },
+  ],
+})
+
+/** The CLI resume check (`checkConversationSnapshot`): results follow calls, none left open. */
+function assertResumable(messages: readonly ConversationMessage[]) {
+  const open = new Set<string>()
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) continue
+    for (const part of m.content as { type?: string; toolCallId?: string }[]) {
+      if (part.type === "tool-call") open.add(part.toolCallId!)
+      if (part.type === "tool-result")
+        assert.ok(
+          open.delete(part.toolCallId!),
+          `a saved tool result has no matching call (${part.toolCallId})`
+        )
+    }
+  }
+  assert.deepEqual([...open], [], "the saved turn has unresolved tool calls")
+}
+
+test("a compaction whose count cut lands on a tool result keeps the pair whole", async () => {
+  const f = fixture()
+  // keepRecent 2 would start the tail at the result; the call must come along.
+  f.conversation.splice(
+    0,
+    f.conversation.length,
+    { role: "user", content: "start" },
+    { role: "assistant", content: "ok" },
+    { role: "user", content: "check the working set" },
+    { role: "assistant", content: "checking" },
+    { role: "user", content: "go" },
+    callMsg("call_00_b93uozl0u9hhljswggugi1fb"),
+    resultMsg("call_00_b93uozl0u9hhljswggugi1fb"),
+    { role: "assistant", content: "revision 6" }
+  )
+  await forceCompact(f)
+  assert.equal(boundaries(f.events).length, 1)
+  assertResumable(f.conversation)
+  assert.deepEqual(f.conversation.slice(-3), [
+    callMsg("call_00_b93uozl0u9hhljswggugi1fb"),
+    resultMsg("call_00_b93uozl0u9hhljswggugi1fb"),
+    { role: "assistant", content: "revision 6" },
+  ])
+})
+
+test("a compaction that would still orphan a result is discarded and reported", async () => {
+  // keepRecent 0 summarizes a call whose result lands after the snapshot.
+  const f = fixture({ compaction: { keepRecent: 0 } })
+  f.conversation.push(callMsg("late"))
+  const run = f.compact({}, {}, { force: true })
+  await waitFor(f.summaryStarted)
+  f.conversation.push(resultMsg("late"))
+  const before = structuredClone(f.conversation)
+  f.complete()
+  await run
+  assert.deepEqual(f.conversation, before, "nothing is published")
+  assert.equal(boundaries(f.events).length, 0)
+  const [outcome] = outcomes(f.events)
+  assert.equal(outcome?.compact_outcome, "failed")
+  assert.match(String(outcome?.content), /separated a tool call from its result/)
+})
+
+test("a pair already broken before compaction does not block it", async () => {
+  const f = fixture()
+  // An interrupt left an unanswered call early on; compaction may proceed.
+  f.conversation.splice(1, 0, callMsg("interrupted"))
+  await forceCompact(f)
+  assert.equal(boundaries(f.events).length, 1)
+})
