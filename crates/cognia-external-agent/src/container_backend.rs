@@ -279,7 +279,7 @@ fn parse_env_number(key: &str, default: i64) -> Result<i64, String> {
 // ---------------------------------------------------------------------------
 
 /// How the workspace reaches the runner.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RunnerMount {
     /// Named-volume subpath (compose/k8s): the runner sees ONLY its own
     /// workspace even though every workspace shares one volume.
@@ -565,6 +565,14 @@ pub enum VolumeRemoval {
     Gone,
 }
 
+/// Immutable daemon image identity and its complete virtual filesystem size.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotImage {
+    pub id: String,
+    pub size_bytes: u64,
+}
+
 /// The extra daemon primitives the runtime environment driver needs on top of
 /// [`ContainerApi`] (ADR-0183 "Injection"): named volumes for the staged
 /// bundle, the registered OCI runtimes (to attest the gVisor tier) and pulls
@@ -572,6 +580,28 @@ pub enum VolumeRemoval {
 /// of ADR-0184, not a runner pod.
 #[async_trait]
 pub trait SandboxDockerApi: ContainerApi {
+    /// Read the actual configured workspace mount, never a label claim.
+    async fn runtime_workspace_mount(&self, _id: &str) -> Result<Option<RunnerMount>, String> {
+        Err("snapshot workspace inspection is unavailable".into())
+    }
+
+    /// Cold checkpoints never commit a running or paused container.
+    async fn commit_stopped_runtime(
+        &self,
+        _id: &str,
+        _repository: &str,
+        _tag: &str,
+    ) -> Result<SnapshotImage, String> {
+        Err("snapshot_fork_unsupported: provider checkpoint API is unverified".into())
+    }
+    async fn inspect_snapshot_image(&self, _id: &str) -> Result<Option<SnapshotImage>, String> {
+        Err("snapshot_fork_unsupported: provider checkpoint API is unverified".into())
+    }
+    /// Non-forced removal: daemon references are an additional safety backstop.
+    async fn remove_snapshot_image(&self, _id: &str) -> Result<(), String> {
+        Err("snapshot_fork_unsupported: provider checkpoint API is unverified".into())
+    }
+
     /// Persistent runtime operations. A driver lacking these capabilities
     /// refuses persistent placement; it cannot silently run an ephemeral job.
     async fn inspect_runtime(&self, _id: &str) -> Result<Option<RuntimeContainerState>, String> {
@@ -1836,8 +1866,219 @@ pub mod bollard_api {
         }
     }
 
+    /// Run: `cargo test -p cognia-external-agent --features container-exec snapshot_real_docker_commit_fork -- --ignored --nocapture`.
+    /// Requires a preloaded image with `sh` (alpine:3.20, or the one named by
+    /// COGNIA_TEST_SNAPSHOT_IMAGE); the test never pulls anything.
+    #[cfg(test)]
+    #[tokio::test]
+    #[ignore = "requires a real Docker daemon"]
+    async fn snapshot_real_docker_commit_fork() {
+        let api = BollardContainerApi::connect().unwrap();
+        let mut source = None;
+        let mut fork = None;
+        let mut image: Option<SnapshotImage> = None;
+        let outcome: Result<(), String> = async {
+            let id = api
+                .docker
+                .create_container(
+                    None::<bollard::query_parameters::CreateContainerOptions>,
+                    ContainerCreateBody {
+                        image: Some(
+                            std::env::var("COGNIA_TEST_SNAPSHOT_IMAGE")
+                                .unwrap_or_else(|_| "alpine:3.20".into()),
+                        ),
+                        cmd: Some(vec![
+                            "sh".into(),
+                            "-c".into(),
+                            "echo checkpoint-proof > /root/proof".into(),
+                        ]),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())?
+                .id;
+            source = Some(id.clone());
+            api.docker
+                .start_container(&id, None::<StartContainerOptions>)
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut wait = api
+                .docker
+                .wait_container(&id, None::<bollard::query_parameters::WaitContainerOptions>);
+            while let Some(result) = wait.next().await {
+                result.map_err(|e| e.to_string())?;
+            }
+            let snapshot = api
+                .commit_stopped_runtime(&id, "cognia-snapshot-test", &default_instance_id())
+                .await?;
+            image = Some(snapshot.clone());
+            let id = api
+                .docker
+                .create_container(
+                    None::<bollard::query_parameters::CreateContainerOptions>,
+                    ContainerCreateBody {
+                        image: Some(snapshot.id),
+                        cmd: Some(vec![
+                            "sh".into(),
+                            "-c".into(),
+                            "test \"$(cat /root/proof)\" = checkpoint-proof".into(),
+                        ]),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())?
+                .id;
+            fork = Some(id.clone());
+            api.docker
+                .start_container(&id, None::<StartContainerOptions>)
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut wait = api
+                .docker
+                .wait_container(&id, None::<bollard::query_parameters::WaitContainerOptions>);
+            let exit = wait
+                .next()
+                .await
+                .ok_or("fork wait ended without a result")?
+                .map_err(|e| e.to_string())?;
+            if exit.status_code != 0 {
+                return Err(format!("fork proof failed: {}", exit.status_code));
+            }
+            Ok(())
+        }
+        .await;
+        let mut cleanup = Vec::new();
+        for id in [fork, source].into_iter().flatten() {
+            if let Err(error) = api
+                .docker
+                .remove_container(
+                    &id,
+                    Some(RemoveContainerOptionsBuilder::default().force(true).build()),
+                )
+                .await
+            {
+                cleanup.push(error.to_string());
+            }
+        }
+        if let Some(image) = image {
+            if let Err(error) = api.remove_snapshot_image(&image.id).await {
+                cleanup.push(error);
+            }
+        }
+        assert!(cleanup.is_empty(), "roundtrip cleanup: {cleanup:?}");
+        outcome.unwrap();
+    }
+
     #[async_trait]
     impl SandboxDockerApi for BollardContainerApi {
+        async fn runtime_workspace_mount(&self, id: &str) -> Result<Option<RunnerMount>, String> {
+            let info = self
+                .docker
+                .inspect_container(id, None)
+                .await
+                .map_err(|e| e.to_string())?;
+            let mount = info
+                .host_config
+                .and_then(|config| config.mounts)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|mount| mount.target.as_deref() == Some(WORKSPACE_TARGET));
+            Ok(mount.and_then(|mount| match mount.typ {
+                Some(MountType::BIND) => {
+                    mount.source.map(|host_dir| RunnerMount::Bind { host_dir })
+                }
+                Some(MountType::VOLUME) => mount.source.map(|volume| RunnerMount::Volume {
+                    volume,
+                    subpath: mount.volume_options.and_then(|options| options.subpath),
+                }),
+                _ => None,
+            }))
+        }
+
+        async fn commit_stopped_runtime(
+            &self,
+            id: &str,
+            repository: &str,
+            tag: &str,
+        ) -> Result<SnapshotImage, String> {
+            let state = self
+                .inspect_runtime(id)
+                .await?
+                .ok_or("snapshot runtime missing")?;
+            if state.running {
+                return Err("snapshot_busy: container is running".into());
+            }
+            let created = self
+                .docker
+                .commit_container(
+                    bollard::query_parameters::CommitContainerOptionsBuilder::default()
+                        .container(id)
+                        .repo(repository)
+                        .tag(tag)
+                        .pause(false)
+                        .build(),
+                    bollard::models::ContainerConfig::default(),
+                )
+                .await
+                .map_err(|error| format!("snapshot commit failed: {error}"))?;
+            let image_id = created.id;
+            match self.inspect_snapshot_image(&image_id).await {
+                Ok(Some(image)) => Ok(image),
+                result => {
+                    let cause = match result {
+                        Ok(None) => "committed image missing".into(),
+                        Err(error) => error,
+                        _ => unreachable!(),
+                    };
+                    match self.remove_snapshot_image(&image_id).await {
+                        Ok(()) => Err(cause),
+                        Err(cleanup) => Err(format!(
+                            "{cause}; image {image_id} cleanup failed: {cleanup}"
+                        )),
+                    }
+                }
+            }
+        }
+        async fn inspect_snapshot_image(&self, id: &str) -> Result<Option<SnapshotImage>, String> {
+            match self.docker.inspect_image(id).await {
+                Ok(image) => Ok(Some(SnapshotImage {
+                    id: image.id.ok_or("snapshot image has no immutable ID")?,
+                    size_bytes: image
+                        .size
+                        .and_then(|size| u64::try_from(size).ok())
+                        .ok_or("snapshot image has no valid size")?,
+                })),
+                Err(bollard::errors::Error::DockerResponseServerError {
+                    status_code: 404, ..
+                }) => Ok(None),
+                Err(error) => Err(format!("snapshot image inspect failed: {error}")),
+            }
+        }
+        async fn remove_snapshot_image(&self, id: &str) -> Result<(), String> {
+            match self
+                .docker
+                .remove_image(
+                    id,
+                    Some(
+                        bollard::query_parameters::RemoveImageOptionsBuilder::default()
+                            .force(false)
+                            .noprune(true)
+                            .build(),
+                    ),
+                    None,
+                )
+                .await
+            {
+                Ok(_)
+                | Err(bollard::errors::Error::DockerResponseServerError {
+                    status_code: 404, ..
+                }) => Ok(()),
+                Err(error) => Err(format!("snapshot image remove failed: {error}")),
+            }
+        }
+
         async fn inspect_runtime(&self, id: &str) -> Result<Option<RuntimeContainerState>, String> {
             match self.docker.inspect_container(id, None).await {
                 Ok(info) => Ok(Some(runtime_state(info))),
@@ -2308,12 +2549,11 @@ pub mod bollard_api {
         fn runtime_stop_is_idempotent_only_for_stopped_or_missing_containers() {
             assert!(runtime_stop_result(Ok(())).is_ok());
             for status_code in [304, 404, 403, 409, 500] {
-                let result = runtime_stop_result(Err(
-                    bollard::errors::Error::DockerResponseServerError {
+                let result =
+                    runtime_stop_result(Err(bollard::errors::Error::DockerResponseServerError {
                         status_code,
                         message: "daemon response".into(),
-                    },
-                ));
+                    }));
                 if matches!(status_code, 304 | 404) {
                     assert!(result.is_ok());
                 } else {
@@ -2555,6 +2795,12 @@ pub mod test_support {
         /// `/info` runtimes, or the error `/info` fails with.
         pub runtimes: Mutex<Result<Vec<String>, String>>,
         pub runtime_execs: Mutex<Vec<RunnerExecSpec>>,
+        pub snapshot_images: Mutex<BTreeMap<String, SnapshotImage>>,
+        pub snapshot_commits: Mutex<Vec<(String, String, String)>>,
+        pub snapshot_removes: Mutex<Vec<String>>,
+        pub fail_snapshot_commit: Mutex<Option<String>>,
+        pub fail_snapshot_remove: Mutex<Option<String>>,
+        pub snapshot_image_bytes: Mutex<u64>,
         pub stopped_runtimes: Mutex<std::collections::BTreeSet<String>>,
         pub fail_stop_runtime: Mutex<Option<String>>,
         pub stop_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
@@ -2683,6 +2929,12 @@ pub mod test_support {
                 fail_pull: Mutex::new(None),
                 runtimes: Mutex::new(Ok(vec!["runc".to_string()])),
                 runtime_execs: Mutex::new(Vec::new()),
+                snapshot_images: Mutex::new(BTreeMap::new()),
+                snapshot_commits: Mutex::new(Vec::new()),
+                snapshot_removes: Mutex::new(Vec::new()),
+                fail_snapshot_commit: Mutex::new(None),
+                fail_snapshot_remove: Mutex::new(None),
+                snapshot_image_bytes: Mutex::new(1024),
                 stopped_runtimes: Mutex::new(std::collections::BTreeSet::new()),
                 fail_stop_runtime: Mutex::new(None),
                 stop_gate: Mutex::new(None),
@@ -2876,6 +3128,58 @@ pub mod test_support {
 
     #[async_trait]
     impl SandboxDockerApi for FakeContainerApi {
+        async fn runtime_workspace_mount(&self, id: &str) -> Result<Option<RunnerMount>, String> {
+            let labels = self.labels_by_container.lock().get(id).cloned();
+            Ok(self
+                .specs
+                .lock()
+                .iter()
+                .rev()
+                .find(|spec| Some(&spec.labels) == labels.as_ref())
+                .and_then(|spec| spec.mount.clone()))
+        }
+
+        async fn commit_stopped_runtime(
+            &self,
+            id: &str,
+            repository: &str,
+            tag: &str,
+        ) -> Result<SnapshotImage, String> {
+            let state = self
+                .inspect_runtime(id)
+                .await?
+                .ok_or("snapshot runtime missing")?;
+            if state.running {
+                return Err("snapshot_busy: container is running".into());
+            }
+            if let Some(error) = self.fail_snapshot_commit.lock().clone() {
+                return Err(error);
+            }
+            let mut commits = self.snapshot_commits.lock();
+            commits.push((id.into(), repository.into(), tag.into()));
+            let image = SnapshotImage {
+                id: format!("sha256:{:064x}", commits.len()),
+                size_bytes: *self.snapshot_image_bytes.lock(),
+            };
+            let mut images = self.snapshot_images.lock();
+            images.insert(image.id.clone(), image.clone());
+            images.insert(format!("{repository}:{tag}"), image.clone());
+            Ok(image)
+        }
+        async fn inspect_snapshot_image(&self, id: &str) -> Result<Option<SnapshotImage>, String> {
+            Ok(self.snapshot_images.lock().get(id).cloned())
+        }
+        async fn remove_snapshot_image(&self, id: &str) -> Result<(), String> {
+            if let Some(error) = self.fail_snapshot_remove.lock().clone() {
+                return Err(error);
+            }
+            self.snapshot_removes.lock().push(id.into());
+            self.snapshot_images
+                .lock()
+                .retain(|_, image| image.id != id);
+            Ok(())
+        }
+
         async fn inspect_runtime(&self, id: &str) -> Result<Option<RuntimeContainerState>, String> {
             Ok(self
                 .labels_by_container
@@ -3250,7 +3554,13 @@ mod tests {
         )
         .await
         .unwrap();
-        let id = api.labels_by_container.lock().keys().next().unwrap().clone();
+        let id = api
+            .labels_by_container
+            .lock()
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
         let state = api.inspect_runtime(&id).await.unwrap().unwrap();
         assert_eq!(state.network_mode.as_deref(), Some("none"));
         assert_eq!(
@@ -3299,9 +3609,12 @@ mod tests {
         *api.fail_stop_runtime.lock() = Some("daemon stop failed".into());
         let daemon = api.clone();
         let stop = tokio::spawn(async move { daemon.stop_runtime("runtime").await });
-        tokio::time::timeout(std::time::Duration::from_secs(2), api.stop_started.notified())
-            .await
-            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            api.stop_started.notified(),
+        )
+        .await
+        .unwrap();
         assert!(!stop.is_finished());
         assert!(api.stopped_runtimes.lock().is_empty());
         gate.add_permits(1);

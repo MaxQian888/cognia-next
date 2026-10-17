@@ -75,6 +75,7 @@ cognia-secrets = { path = "../cognia-secrets" }
 cognia-sidecar = { path = "../cognia-sidecar" }
 cognia-signaling-core = { path = "../../services/signaling-server/core" }
 cognia-tenant-auth = { path = "../cognia-tenant-auth" }
+cognia-task-workspace = { path = "../cognia-task-workspace" }
 cognia-terminal = { path = "../cognia-terminal" }
 cognia-update-catalog = { path = "../cognia-update-catalog", features = ["client"] }
 tauri = { workspace = true, optional = true }
@@ -120,6 +121,7 @@ uuid = { workspace = true, features = ["v4", "v7"] }
 webrtc = "0.21.0"
 
 [dev-dependencies]
+cognia-external-agent = { path = "../cognia-external-agent", features = ["test-support"] }
 cognia-agents = { path = "../cognia-agents" }
 cognia-companion-bus = { path = "../cognia-companion-bus", features = ["test-support"] }
 cognia-companion-security = { path = "../cognia-companion-security", features = ["test-support"] }

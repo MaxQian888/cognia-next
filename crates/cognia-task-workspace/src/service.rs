@@ -82,7 +82,8 @@ pub struct TaskWorkspaceService {
     pub(crate) store: Arc<Mutex<WorkspaceStore>>,
     pub(crate) registry: WorkspaceRegistry,
     pub(crate) integration_dir: PathBuf,
-    execution_dir: PathBuf,
+    pub(crate) execution_dir: PathBuf,
+    pub(crate) checkpoint_dir: PathBuf,
     /// Managed source checkouts supplied from a remote (ADR-0176).
     ///
     /// A sibling of `execution_dir`, not a child, because a source checkout is
@@ -348,6 +349,7 @@ impl TaskWorkspaceService {
             registry,
             integration_dir: config.data_dir.join("integration"),
             execution_dir,
+            checkpoint_dir: service_dir.join("sandbox-checkpoints"),
             sources_dir,
             mirrors_dir,
             manifest_key: load_or_create_manifest_key(&service_dir)?,
@@ -1407,6 +1409,7 @@ impl TaskWorkspaceService {
         if !root.is_dir() {
             return Err(format!("workspace is not a directory: {}", root.display()));
         }
+        let _cold_acquisition = self.lock_cold_workspace_acquisition(&root, false)?;
         let tracking_policy = resolve_tracking_policy(&root, &input.tracking_policy)?;
         if borrowed.is_some() {
             self.resolve_workspace_port_lease(crate::HOST_LOOPBACK_NAMESPACE, None, &root, true)
@@ -1414,6 +1417,9 @@ impl TaskWorkspaceService {
         }
         {
             let store = self.store.lock();
+            crate::sandbox_snapshot::reject_snapshot_reservation(
+                &store.connection, &root, &input.task_id,
+            )?;
             if let Some((existing, _)) = store.get_run::<WorkspaceSnapshot>(&input.run_id)? {
                 let task = store
                     .get_task(&existing.task_id)?
@@ -1462,6 +1468,23 @@ impl TaskWorkspaceService {
             runs.into_iter().rev().find(|run| {
                 run.workspace_key.as_deref() == Some(workspace_key) && run.state == RunState::Ready
             })
+        } else {
+            None
+        };
+        let _reused_acquisition = reusable.as_ref().map(|previous| {
+            let execution_root = Path::new(&previous.execution_root);
+            let guard = self.lock_cold_workspace_acquisition(execution_root, false)?;
+            crate::sandbox_snapshot::reject_snapshot_reservation(
+                &self.store.lock().connection, execution_root, &input.task_id,
+            )?;
+            Ok::<_, String>(guard)
+        }).transpose()?;
+        // Fence the generated root before its directory becomes visible. The
+        // source root alone does not protect a snapshot of this new workspace.
+        let _fresh_execution_acquisition = if reusable.is_none() && borrowed.is_none() {
+            let execution_root = self.execution_dir
+                .join(storage_key(&input.task_id)).join(storage_key(&input.run_id));
+            Some(self.lock_cold_workspace_acquisition(&execution_root, false)?)
         } else {
             None
         };
@@ -3314,6 +3337,9 @@ impl TaskWorkspaceService {
         if policy.blob_budget_bytes == 0 {
             return Err("blob budget must be greater than zero".into());
         }
+        if policy.sandbox_snapshot_budget_bytes == 0 {
+            return Err("sandbox snapshot budget must be greater than zero".into());
+        }
         self.registry
             .set_policy(policy)
             .map_err(|error| error.to_string())?;
@@ -3473,7 +3499,7 @@ impl TaskWorkspaceService {
         Ok(protected)
     }
 
-    fn enforce_managed_workspace_capacity(&self, requested: u32) -> Result<(), String> {
+    pub(crate) fn enforce_managed_workspace_capacity(&self, requested: u32) -> Result<(), String> {
         let policy = self.registry.policy();
         let active_managed = self
             .registry
@@ -3639,6 +3665,18 @@ impl TaskWorkspaceService {
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
         let _scratch_lock = self.lock_scratch_record(&record)?;
+        let _cold_acquisition = self.lock_cold_workspace_acquisition(Path::new(&record.execution_root), true)?;
+        let locked_root = record.execution_root.clone();
+        record = self.registry.get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        if record.execution_root != locked_root {
+            return Err("snapshot_busy: workspace root changed during acquisition".into());
+        }
+        crate::sandbox_snapshot::reject_snapshot_reservation(
+            &self.store.lock().connection, Path::new(&record.execution_root),
+            record.snapshot_task_id.as_deref().unwrap_or(workspace_id),
+        )?;
         if _scratch_lock.is_some() {
             record = self
                 .registry
@@ -3693,7 +3731,10 @@ impl TaskWorkspaceService {
         let execution_root = Path::new(&record.execution_root);
         if execution_root.is_dir() {
             let policy = crate::ResourceTrackingPolicy {
-                self_contained: _scratch_lock.is_some(),
+                // Snapshot forks own their Git database inside the execution
+                // root. It must survive archive, along with ignored outputs.
+                self_contained: _scratch_lock.is_some()
+                    || record.source_root == record.execution_root,
                 ..Default::default()
             };
             let (snapshot, blobs) = capture_with_policy(execution_root, &policy)?;
@@ -3766,6 +3807,17 @@ impl TaskWorkspaceService {
             .get(workspace_id)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        let _cold_acquisition = self.lock_cold_workspace_acquisition(Path::new(&record.execution_root), true)?;
+        let locked_root = record.execution_root.clone();
+        record = self.registry.get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        if record.execution_root != locked_root {
+            return Err("snapshot_busy: workspace root changed during acquisition".into());
+        }
+        crate::sandbox_snapshot::reject_snapshot_reservation(
+            &self.store.lock().connection, Path::new(&record.execution_root), workspace_id,
+        )?;
         if record.environment_kind != crate::WorkspaceEnvironmentKind::Managed {
             return Err("only managed environments can be restored".into());
         }
@@ -3858,6 +3910,17 @@ impl TaskWorkspaceService {
             .get(workspace_id)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        let _cold_acquisition = self.lock_cold_workspace_acquisition(Path::new(&record.execution_root), true)?;
+        let locked_root = record.execution_root.clone();
+        let record = self.registry.get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        if record.execution_root != locked_root {
+            return Err("snapshot_busy: workspace root changed during acquisition".into());
+        }
+        crate::sandbox_snapshot::reject_snapshot_reservation(
+            &self.store.lock().connection, Path::new(&record.execution_root), workspace_id,
+        )?;
         if record.environment_kind != crate::WorkspaceEnvironmentKind::Managed {
             return Err("permanent and imported environments are protected from deletion".into());
         }
@@ -4435,6 +4498,24 @@ impl TaskWorkspaceService {
                     continue;
                 }
                 let runs = store.list_runs(&task.task_id)?;
+                let mut reserved = false;
+                for root in std::iter::once(task.workspace_root.as_str())
+                    .chain(runs.iter().map(|run| run.execution_root.as_str()))
+                {
+                    match crate::sandbox_snapshot::reject_snapshot_reservation(
+                        &store.connection, Path::new(root), &task.task_id,
+                    ) {
+                        Ok(()) => {}
+                        Err(error) if error.starts_with("snapshot_busy") => {
+                            reserved = true;
+                            break;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                if reserved {
+                    continue;
+                }
                 candidates.push((task, runs));
             }
             candidates
@@ -4442,6 +4523,34 @@ impl TaskWorkspaceService {
         let mut removed_task_ids = Vec::new();
         let mut removed_workspace_ids = std::collections::HashSet::new();
         for (task, runs) in candidates {
+            let mut roots = std::iter::once(task.workspace_root.clone())
+                .chain(runs.iter().map(|run| run.execution_root.clone()))
+                .map(|root| crate::sandbox_snapshot::canonical_lock_root(Path::new(&root)))
+                .collect::<Result<Vec<_>, _>>()?;
+            roots.sort();
+            roots.dedup();
+            let mut acquisitions = Vec::new();
+            let mut busy = false;
+            for root in &roots {
+                match self.lock_cold_workspace_acquisition(Path::new(root), true) {
+                    Ok(guard) => acquisitions.push(guard),
+                    Err(error) if error.starts_with("snapshot_busy") => { busy = true; break; }
+                    Err(error) => return Err(error),
+                }
+            }
+            if busy { continue; }
+            {
+                let store = self.store.lock();
+                if !store.task_is_prunable(&task.task_id)? { continue; }
+                for root in &roots {
+                    match crate::sandbox_snapshot::reject_snapshot_reservation(&store.connection, Path::new(root), &task.task_id) {
+                        Ok(()) => {},
+                        Err(error) if error.starts_with("snapshot_busy") => { busy = true; break; },
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+            if busy { continue; }
             for run in runs {
                 if let Some(workspace_id) = run.workspace_id.as_deref() {
                     if !removed_workspace_ids.insert(workspace_id.to_string()) {

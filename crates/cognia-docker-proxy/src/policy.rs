@@ -109,19 +109,33 @@ pub enum Route {
     /// `POST /containers/create`: the body is checked.
     ContainerCreate,
     /// An operation on one container.
-    Container { id: String, op: ContainerOp },
+    Container {
+        id: String,
+        op: ContainerOp,
+    },
     /// `POST /containers/{id}/exec`: the target must be ours, the body unprivileged.
-    ExecCreate { container: String },
+    ExecCreate {
+        container: String,
+    },
     /// An operation on one exec instance; its container must be ours.
-    Exec { id: String },
+    Exec {
+        id: String,
+    },
     /// `POST /images/create`: a pull.
     ImagePull,
+    SnapshotCommit,
+    SnapshotImage {
+        id: String,
+        remove: bool,
+    },
     /// `GET /volumes`: answered only for this deployment's volumes.
     VolumeList,
     /// `POST /volumes/create`: the body is checked.
     VolumeCreate,
     /// `DELETE /volumes/{name}`: the volume must be ours.
-    VolumeRemove { name: String },
+    VolumeRemove {
+        name: String,
+    },
 }
 
 /// The per-container operations the pool uses.
@@ -217,6 +231,15 @@ pub fn classify(verb: Verb, path: &str) -> Result<Route, String> {
             Ok(Route::Exec { id: id.to_string() })
         }
         (Verb::Post, ["images", "create"]) => Ok(Route::ImagePull),
+        (Verb::Post, ["commit"]) => Ok(Route::SnapshotCommit),
+        (Verb::Get, ["images", id, "json"]) => Ok(Route::SnapshotImage {
+            id: decode_image_id(id)?,
+            remove: false,
+        }),
+        (Verb::Delete, ["images", id]) => Ok(Route::SnapshotImage {
+            id: decode_image_id(id)?,
+            remove: true,
+        }),
         (Verb::Get, ["volumes"]) => Ok(Route::VolumeList),
         (Verb::Post, ["volumes", "create"]) => Ok(Route::VolumeCreate),
         (Verb::Delete, ["volumes", name]) if !name.is_empty() && *name != "create" => {
@@ -226,6 +249,101 @@ pub fn classify(verb: Verb, path: &str) -> Result<Route, String> {
         }
         _ => refuse(),
     }
+}
+
+/// The namespace is deterministic across Host and proxy restarts. Only the
+/// restricted commit route can create a tag within it through this proxy.
+pub fn snapshot_repository(policy: &ProxyPolicy) -> String {
+    use sha2::{Digest, Sha256};
+    format!(
+        "cognia-snapshot-{}",
+        &hex::encode(Sha256::digest(policy.deployment_id.as_bytes()))[..24]
+    )
+}
+fn decode_image_id(raw: &str) -> Result<String, String> {
+    let pair = format!("id={raw}");
+    let id = url::form_urlencoded::parse(pair.as_bytes())
+        .next()
+        .map(|(_, id)| id.into_owned())
+        .ok_or("invalid image identity")?;
+    // Snapshots are addressed by image ID only; a name or tag (`alpine`,
+    // `repo:tag`) is never a snapshot and stays refused at classification.
+    if snapshot_image_id(&id) {
+        Ok(id)
+    } else {
+        Err("invalid snapshot image identity".into())
+    }
+}
+pub fn snapshot_image_id(id: &str) -> bool {
+    id.strip_prefix("sha256:")
+        .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+pub fn snapshot_tag(policy: &ProxyPolicy, tag: &str) -> bool {
+    tag.strip_prefix(&format!("{}:", snapshot_repository(policy)))
+        .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+}
+fn query_map(query: Option<&str>) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut values = std::collections::BTreeMap::new();
+    for (key, value) in url::form_urlencoded::parse(query.unwrap_or("").as_bytes()) {
+        if values
+            .insert(key.into_owned(), value.into_owned())
+            .is_some()
+        {
+            return Err("duplicate snapshot query parameter".into());
+        }
+    }
+    Ok(values)
+}
+/// Return the exact stopped container to inspect before forwarding commit.
+pub fn check_snapshot_commit(
+    policy: &ProxyPolicy,
+    query: Option<&str>,
+    body: &Value,
+) -> Result<String, String> {
+    let values = query_map(query)?;
+    if values
+        .keys()
+        .any(|k| !["container", "repo", "tag", "pause"].contains(&k.as_str()))
+        || values.get("repo") != Some(&snapshot_repository(policy))
+        || !values
+            .get("tag")
+            .is_some_and(|tag| uuid::Uuid::parse_str(tag).is_ok())
+        || values.get("pause").map(String::as_str) != Some("false")
+    {
+        return Err(
+            "snapshot commit requires this deployment's UUID namespace and pause=false".into(),
+        );
+    }
+    if !body
+        .as_object()
+        .is_some_and(|map| map.values().all(Value::is_null))
+    {
+        return Err("snapshot commit cannot override container configuration".into());
+    }
+    let container = values
+        .get("container")
+        .ok_or("snapshot container required")?;
+    if container.is_empty()
+        || !container
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    {
+        return Err("invalid snapshot container".into());
+    }
+    Ok(container.clone())
+}
+pub fn check_snapshot_remove(query: Option<&str>, id: &str) -> Result<(), String> {
+    let values = query_map(query)?;
+    if !snapshot_image_id(id)
+        || values
+            .keys()
+            .any(|k| !["force", "noprune"].contains(&k.as_str()))
+        || values.get("force").is_some_and(|v| v != "false")
+        || values.get("noprune").map(String::as_str) != Some("true")
+    {
+        return Err("snapshot removal requires immutable ID, force=false and noprune=true".into());
+    }
+    Ok(())
 }
 
 fn object<'a>(value: &'a Value, field: &str) -> Result<Option<&'a Map<String, Value>>, String> {
@@ -537,6 +655,56 @@ mod tests {
         let mut body = pool_agent_body();
         body["HostConfig"][field] = value;
         body
+    }
+
+    #[test]
+    fn snapshots_require_exclusive_deployment_namespace_and_nonforced_ids() {
+        let policy = policy();
+        let id = uuid::Uuid::new_v4().to_string();
+        let repository = snapshot_repository(&policy);
+        let query = format!("container=runtime-1&repo={repository}&tag={id}&pause=false");
+        assert_eq!(
+            check_snapshot_commit(&policy, Some(&query), &json!({})),
+            Ok("runtime-1".into())
+        );
+        assert!(snapshot_tag(&policy, &format!("{repository}:{id}")));
+        assert!(!snapshot_tag(
+            &ProxyPolicy::new("other", "volume"),
+            &format!("{repository}:{id}")
+        ));
+        assert!(check_snapshot_commit(
+            &policy,
+            Some(&query.replace("pause=false", "pause=true")),
+            &json!({})
+        )
+        .is_err());
+        assert!(check_snapshot_commit(
+            &policy,
+            Some(&format!("{query}&container=other")),
+            &json!({})
+        )
+        .is_err());
+        assert!(
+            check_snapshot_commit(&policy, Some(&query), &json!({"Env":["SECRET=value"]})).is_err()
+        );
+        let image = format!("sha256:{}", "a".repeat(64));
+        assert!(check_snapshot_remove(Some("force=false&noprune=true"), &image).is_ok());
+        assert!(check_snapshot_remove(Some("force=true&noprune=true"), &image).is_err());
+        assert!(check_snapshot_remove(Some("force=false&noprune=false"), &image).is_err());
+        assert!(check_snapshot_remove(
+            Some("force=false&noprune=true"),
+            &format!("{repository}:{id}")
+        )
+        .is_err());
+        assert!(matches!(
+            classify(Verb::Post, "/v1.53/commit"),
+            Ok(Route::SnapshotCommit)
+        ));
+        assert!(matches!(
+            classify(Verb::Get, &format!("/v1.53/images/{image}/json")),
+            Ok(Route::SnapshotImage { remove: false, .. })
+        ));
+        assert!(classify(Verb::Delete, "/images/..%2fother").is_err());
     }
 
     #[test]

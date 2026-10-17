@@ -26,6 +26,8 @@ mod revision_patch;
 mod sensitive;
 mod service;
 mod snapshot;
+mod sandbox_snapshot;
+pub use sandbox_snapshot::*;
 mod store;
 mod tracking;
 mod transfer;

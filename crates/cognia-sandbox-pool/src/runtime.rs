@@ -5,6 +5,88 @@ use async_trait::async_trait;
 use cognia_external_agent::sandbox_routing_backend::{SandboxPlacement, SandboxSpawnError};
 use serde::Serialize;
 
+pub use cognia_external_agent::container_backend::SnapshotImage;
+
+/// The four operations have separate provider contracts; cold Docker snapshots
+/// never claim process or memory resumption.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotCapabilities {
+    pub filesystem_checkpoint: bool,
+    pub fork_from_checkpoint: bool,
+    pub pause_resume: bool,
+    pub memory_resume: bool,
+}
+
+pub fn snapshot_unsupported() -> SandboxSpawnError {
+    SandboxSpawnError::refused(
+        "snapshot_fork_unsupported",
+        "Provider filesystem checkpoint/fork API has not been verified",
+    )
+}
+
+#[derive(Clone, Debug)]
+pub struct SnapshotRuntimeSource {
+    pub bundle_digest: String,
+    pub placement: SandboxPlacement,
+    pub was_running: bool,
+}
+
+/// Host-only freeze lease. Its runtime identity lock spans checkpoint capture,
+/// image commit and restoration of the previous running state.
+pub struct SnapshotRuntimeLease {
+    pub bundle_digest: String,
+    pub provider: String,
+    pub container_id: String,
+    pub project_id: String,
+    pub workspace_root: String,
+    pub placement: SandboxPlacement,
+    pub(crate) running: bool,
+    pub(crate) guard: Option<std::sync::Arc<tokio::sync::OwnedMutexGuard<()>>>,
+    pub(crate) workspace_guard: Option<std::sync::Arc<tokio::sync::OwnedRwLockWriteGuard<()>>>,
+    pub(crate) backend: std::sync::Weak<crate::docker::DockerSandboxBackend>,
+}
+
+impl SnapshotRuntimeLease {
+    pub fn was_running(&self) -> bool {
+        self.running
+    }
+}
+
+impl Drop for SnapshotRuntimeLease {
+    fn drop(&mut self) {
+        // Cancellation cannot leave a formerly-running source frozen forever.
+        // The guard remains held until restart settles.
+        if self.running {
+            if let (Some(backend), Some(guard), Ok(handle)) = (
+                self.backend.upgrade(),
+                self.guard.take(),
+                tokio::runtime::Handle::try_current(),
+            ) {
+                let id = self.container_id.clone();
+                let workspace_guard = self.workspace_guard.take();
+                handle.spawn(async move {
+                    let _guard = guard;
+                    let _workspace_guard = workspace_guard;
+                    if let Err(error) = backend.resume_snapshot_source(&id).await {
+                        log::error!("snapshot source restart failed for {id}: {error:?}");
+                    }
+                });
+            }
+        }
+    }
+}
+
 /// Internal sidecar-created listener. This type is never a renderer RPC input.
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -105,6 +187,144 @@ fn task_shell_unsupported() -> SandboxSpawnError {
 
 #[async_trait]
 pub trait SandboxRuntimeControl: Send + Sync {
+    fn snapshot_capabilities(&self, _provider: &str) -> SnapshotCapabilities {
+        SnapshotCapabilities::default()
+    }
+    fn snapshot_image_name(
+        &self,
+        _provider: &str,
+        _snapshot_id: &str,
+    ) -> Result<String, SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn inspect_snapshot_source(
+        &self,
+        _provider: &str,
+        _container: &str,
+        _project: &str,
+        _root: &str,
+    ) -> Result<SnapshotRuntimeSource, SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn quiesce_snapshot(
+        &self,
+        _provider: &str,
+        _container_id: &str,
+        _project_id: &str,
+        _workspace_root: &str,
+    ) -> Result<SnapshotRuntimeLease, SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn commit_snapshot_image(
+        &self,
+        _lease: &SnapshotRuntimeLease,
+        _snapshot_id: &str,
+    ) -> Result<SnapshotImage, SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn resume_snapshot_runtime(
+        &self,
+        _lease: SnapshotRuntimeLease,
+    ) -> Result<(), SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn inspect_snapshot_image(
+        &self,
+        _provider: &str,
+        _id: &str,
+    ) -> Result<Option<SnapshotImage>, SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn remove_snapshot_image(
+        &self,
+        _provider: &str,
+        _id: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn snapshot_runtime_for_workspace(
+        &self,
+        _provider: &str,
+        _root: &str,
+    ) -> Result<Option<String>, SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn pending_snapshot_restore_targets(
+        &self,
+        _provider: &str,
+    ) -> Result<Vec<String>, SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn complete_snapshot_restore_target(
+        &self,
+        _provider: &str,
+        _root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn rollback_snapshot_restore_target(
+        &self,
+        _provider: &str,
+        _root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn retire_snapshot_restore_target(
+        &self,
+        _provider: &str,
+        _project: &str,
+        _root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn discard_snapshot_fork(
+        &self,
+        _provider: &str,
+        _root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn release_snapshot_fork(
+        &self,
+        _provider: &str,
+        _root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn recover_snapshot_source(
+        &self,
+        _provider: &str,
+        _id: &str,
+        _was_running: bool,
+    ) -> Result<(), SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn snapshot_runtime_exists(
+        &self,
+        _provider: &str,
+        _id: &str,
+    ) -> Result<bool, SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn verify_snapshot_bundle(
+        &self,
+        _provider: &str,
+        _placement: &SandboxPlacement,
+        _expected: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+    async fn fork_snapshot_runtime(
+        &self,
+        _provider: &str,
+        _image_id: &str,
+        _placement: SandboxPlacement,
+        _workspace_root: &str,
+        _bundle_digest: &str,
+    ) -> Result<String, SandboxSpawnError> {
+        Err(snapshot_unsupported())
+    }
+
     /// Run one task tool command in the task's runtime environment.
     async fn exec_task_shell(
         &self,

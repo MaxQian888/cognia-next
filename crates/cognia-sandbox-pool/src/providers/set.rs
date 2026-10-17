@@ -53,6 +53,7 @@ pub struct ProviderMember {
 pub struct ProviderView {
     pub id: String,
     pub driver: String,
+    pub capabilities: crate::runtime::SnapshotCapabilities,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub remote: bool,
@@ -104,7 +105,9 @@ impl ProviderSet {
         }
         if let Some(default) = &default_remote {
             if !map.contains_key(default) || default == LOCAL_PROVIDER_ID {
-                return Err(format!("the default provider {default} is not a remote member"));
+                return Err(format!(
+                    "the default provider {default} is not a remote member"
+                ));
             }
         }
         Ok(Arc::new(Self {
@@ -173,6 +176,11 @@ impl ProviderSet {
             views.push(ProviderView {
                 id: member.id.clone(),
                 driver: member.status.driver().to_string(),
+                capabilities: member
+                    .runtime
+                    .as_ref()
+                    .map(|runtime| runtime.snapshot_capabilities(&member.id))
+                    .unwrap_or_default(),
                 label: member.label.clone(),
                 remote: member.limits.is_some(),
                 is_default: self.default_remote.as_deref() == Some(member.id.as_str()),
@@ -264,12 +272,16 @@ impl SandboxExecBackend for ProviderSet {
         }
         self.translate_tool_leases(&mut config, &member.id);
         let spawned = member.exec.spawn_sandboxed(config, sink).await?;
-        self.owners.lock().insert(spawned.clone(), member.id.clone());
+        self.owners
+            .lock()
+            .insert(spawned.clone(), member.id.clone());
         Ok(spawned)
     }
 
     fn multi_tenant(&self) -> bool {
-        self.members.values().any(|member| member.exec.multi_tenant())
+        self.members
+            .values()
+            .any(|member| member.exec.multi_tenant())
     }
 }
 
@@ -423,6 +435,181 @@ fn unsupported() -> SandboxSpawnError {
 
 #[async_trait]
 impl SandboxRuntimeControl for ProviderSet {
+    fn snapshot_capabilities(&self, provider: &str) -> crate::runtime::SnapshotCapabilities {
+        self.task_shell_runtime(provider)
+            .map(|runtime| runtime.snapshot_capabilities(provider))
+            .unwrap_or_default()
+    }
+    fn snapshot_image_name(
+        &self,
+        provider: &str,
+        snapshot_id: &str,
+    ) -> Result<String, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .snapshot_image_name(provider, snapshot_id)
+    }
+    async fn inspect_snapshot_source(
+        &self,
+        provider: &str,
+        container: &str,
+        project: &str,
+        root: &str,
+    ) -> Result<crate::runtime::SnapshotRuntimeSource, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .inspect_snapshot_source(provider, container, project, root)
+            .await
+    }
+    async fn quiesce_snapshot(
+        &self,
+        provider: &str,
+        container_id: &str,
+        project_id: &str,
+        workspace_root: &str,
+    ) -> Result<crate::runtime::SnapshotRuntimeLease, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .quiesce_snapshot(provider, container_id, project_id, workspace_root)
+            .await
+    }
+    async fn commit_snapshot_image(
+        &self,
+        lease: &crate::runtime::SnapshotRuntimeLease,
+        snapshot_id: &str,
+    ) -> Result<crate::runtime::SnapshotImage, SandboxSpawnError> {
+        self.task_shell_runtime(&lease.provider)?
+            .commit_snapshot_image(lease, snapshot_id)
+            .await
+    }
+    async fn resume_snapshot_runtime(
+        &self,
+        lease: crate::runtime::SnapshotRuntimeLease,
+    ) -> Result<(), SandboxSpawnError> {
+        self.task_shell_runtime(&lease.provider)?
+            .resume_snapshot_runtime(lease)
+            .await
+    }
+    async fn inspect_snapshot_image(
+        &self,
+        provider: &str,
+        id: &str,
+    ) -> Result<Option<crate::runtime::SnapshotImage>, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .inspect_snapshot_image(provider, id)
+            .await
+    }
+    async fn remove_snapshot_image(
+        &self,
+        provider: &str,
+        id: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .remove_snapshot_image(provider, id)
+            .await
+    }
+    async fn snapshot_runtime_for_workspace(
+        &self,
+        provider: &str,
+        root: &str,
+    ) -> Result<Option<String>, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .snapshot_runtime_for_workspace(provider, root)
+            .await
+    }
+    async fn pending_snapshot_restore_targets(
+        &self,
+        provider: &str,
+    ) -> Result<Vec<String>, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .pending_snapshot_restore_targets(provider)
+            .await
+    }
+    async fn complete_snapshot_restore_target(
+        &self,
+        provider: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .complete_snapshot_restore_target(provider, root)
+            .await
+    }
+    async fn rollback_snapshot_restore_target(
+        &self,
+        provider: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .rollback_snapshot_restore_target(provider, root)
+            .await
+    }
+    async fn retire_snapshot_restore_target(
+        &self,
+        provider: &str,
+        project: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .retire_snapshot_restore_target(provider, project, root)
+            .await
+    }
+    async fn discard_snapshot_fork(
+        &self,
+        provider: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .discard_snapshot_fork(provider, root)
+            .await
+    }
+    async fn release_snapshot_fork(
+        &self,
+        provider: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .release_snapshot_fork(provider, root)
+            .await
+    }
+    async fn recover_snapshot_source(
+        &self,
+        provider: &str,
+        id: &str,
+        was_running: bool,
+    ) -> Result<(), SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .recover_snapshot_source(provider, id, was_running)
+            .await
+    }
+    async fn snapshot_runtime_exists(
+        &self,
+        provider: &str,
+        id: &str,
+    ) -> Result<bool, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .snapshot_runtime_exists(provider, id)
+            .await
+    }
+    async fn verify_snapshot_bundle(
+        &self,
+        provider: &str,
+        placement: &SandboxPlacement,
+        expected: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .verify_snapshot_bundle(provider, placement, expected)
+            .await
+    }
+    async fn fork_snapshot_runtime(
+        &self,
+        provider: &str,
+        image: &str,
+        placement: SandboxPlacement,
+        root: &str,
+        bundle_digest: &str,
+    ) -> Result<String, SandboxSpawnError> {
+        self.task_shell_runtime(provider)?
+            .fork_snapshot_runtime(provider, image, placement, root, bundle_digest)
+            .await
+    }
+
     async fn exec_task_shell(
         &self,
         request: TaskShellRequest,
@@ -446,7 +633,10 @@ impl SandboxRuntimeControl for ProviderSet {
 
     fn agent_origin_allowed(&self, agent_id: &str, device_id: &str) -> Option<bool> {
         let member = self.owner_of(agent_id)?;
-        member.runtime.as_ref()?.agent_origin_allowed(agent_id, device_id)
+        member
+            .runtime
+            .as_ref()?
+            .agent_origin_allowed(agent_id, device_id)
     }
 
     async fn register_tool_host(
@@ -511,7 +701,11 @@ impl SandboxRuntimeControl for ProviderSet {
 
     async fn list_ports(&self, project_id: &str) -> Result<Vec<RuntimePort>, SandboxSpawnError> {
         let mut ports = Vec::new();
-        for runtime in self.members.values().filter_map(|member| member.runtime.as_ref()) {
+        for runtime in self
+            .members
+            .values()
+            .filter_map(|member| member.runtime.as_ref())
+        {
             ports.extend(runtime.list_ports(project_id).await?);
         }
         Ok(ports)
@@ -523,7 +717,11 @@ impl SandboxRuntimeControl for ProviderSet {
         container_id: &str,
         port: u16,
     ) -> Result<bool, SandboxSpawnError> {
-        for runtime in self.members.values().filter_map(|member| member.runtime.as_ref()) {
+        for runtime in self
+            .members
+            .values()
+            .filter_map(|member| member.runtime.as_ref())
+        {
             if runtime.port_allowed(project_id, container_id, port).await? {
                 return Ok(true);
             }
@@ -537,7 +735,11 @@ impl SandboxRuntimeControl for ProviderSet {
         container_id: &str,
         port: u16,
     ) -> Result<tokio::io::DuplexStream, SandboxSpawnError> {
-        for runtime in self.members.values().filter_map(|member| member.runtime.as_ref()) {
+        for runtime in self
+            .members
+            .values()
+            .filter_map(|member| member.runtime.as_ref())
+        {
             if runtime.port_allowed(project_id, container_id, port).await? {
                 return runtime.open_port(project_id, container_id, port).await;
             }
@@ -733,7 +935,11 @@ mod tests {
     fn member(id: &str, driver: &'static str, remote: bool) -> (ProviderMember, Arc<Member>) {
         let backend = Arc::new(Member {
             driver,
-            tiers: vec![if remote { IsolationTier::Vm } else { IsolationTier::Container }],
+            tiers: vec![if remote {
+                IsolationTier::Vm
+            } else {
+                IsolationTier::Container
+            }],
             ..Default::default()
         });
         (
@@ -794,7 +1000,9 @@ mod tests {
         let (cloud, cloud_backend) = member("cloud", "e2b", true);
         let set = ProviderSet::new(vec![local, cloud], Some("cloud".into())).unwrap();
 
-        set.spawn_sandboxed(placed("a", None, vec![]), sink()).await.unwrap();
+        set.spawn_sandboxed(placed("a", None, vec![]), sink())
+            .await
+            .unwrap();
         set.spawn_sandboxed(placed("b", Some("cloud"), vec![]), sink())
             .await
             .unwrap();
@@ -871,7 +1079,9 @@ mod tests {
         assert_eq!(error.kind, SandboxErrorKind::Refused);
         assert_eq!(error.code, "sandbox_provider_unknown");
 
-        set.spawn_sandboxed(placed("a", None, vec![]), sink()).await.unwrap();
+        set.spawn_sandboxed(placed("a", None, vec![]), sink())
+            .await
+            .unwrap();
         let duplicate = set
             .spawn_sandboxed(placed("a", Some("cloud"), vec![]), sink())
             .await
@@ -937,7 +1147,10 @@ mod tests {
         assert!(!set.port_allowed("p", "elsewhere", 3000).await.unwrap());
         assert!(set.open_port("p", "e2b-runtime", 3000).await.is_ok());
         assert_eq!(
-            set.open_port("p", "elsewhere", 3000).await.unwrap_err().code,
+            set.open_port("p", "elsewhere", 3000)
+                .await
+                .unwrap_err()
+                .code,
             "sandbox_port_unavailable"
         );
     }
@@ -966,7 +1179,10 @@ mod tests {
         let views = set.views().await;
         let cluster = views.iter().find(|view| view.id == "cluster").unwrap();
         assert!(cluster.remote && cluster.is_default && !cluster.reachable);
-        assert_eq!(cluster.unavailable_code.as_deref(), Some("sandbox_provider_unreachable"));
+        assert_eq!(
+            cluster.unavailable_code.as_deref(),
+            Some("sandbox_provider_unreachable")
+        );
         assert_eq!(cluster.limits.unwrap().max_concurrent, 2);
         let local = views.iter().find(|view| view.id == "local").unwrap();
         assert!(!local.remote && local.reachable && local.limits.is_none());

@@ -356,6 +356,14 @@ impl DockerSandboxBackend {
         purpose: RuntimePurpose,
     ) -> Result<AcquiredRuntime, SandboxSpawnError> {
         let key = runtime_key(&spec, environment, purpose);
+        let snapshot_mount = spec.mount.clone();
+        let workspace_guard = match &snapshot_mount {
+            Some(mount) => Some(Arc::new(
+                self.snapshot_workspace_lock(mount).read_owned().await,
+            )),
+            None => None,
+        };
+        let snapshot_bundle = spec.labels.get("cognia.bundle-digest").cloned();
         let egress = spec
             .labels
             .get(egress::POLICY_DIGEST_LABEL)
@@ -375,6 +383,9 @@ impl DockerSandboxBackend {
             .position(|arg| arg == "--")
             .ok_or_else(|| fault("missing agent invocation"))?;
         let mut boot = runtime_config_with_env(environment, BTreeMap::new())?;
+        if spec.labels.get("cognia.snapshot-fork").map(String::as_str) == Some("1") {
+            boot.lifecycle_phases = vec![LifecyclePhase::PostStart];
+        }
         boot.egress = egress.clone();
         boot.workspace_env = spec.workspace_env.clone();
         // Task leases are never baked into a retained container or replayed on
@@ -482,6 +493,7 @@ impl DockerSandboxBackend {
                     auth,
                     OperationLeases {
                         _stage: Some(guard.clone()),
+                        _workspace: workspace_guard.clone(),
                         ..OperationLeases::default()
                     },
                 )
@@ -554,10 +566,20 @@ impl DockerSandboxBackend {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        if let Some(mount) = &snapshot_mount {
+            self.remember_snapshot_runtime(
+                &container_id,
+                &key,
+                environment,
+                mount,
+                snapshot_bundle.as_deref().unwrap_or(""),
+            )?;
+        }
         Ok(AcquiredRuntime {
             container_id,
             egress,
             _guard: guard,
+            _workspace_guard: workspace_guard,
         })
     }
 }
@@ -567,6 +589,7 @@ pub(super) struct AcquiredRuntime {
     pub container_id: String,
     pub egress: Option<EgressConfig>,
     pub _guard: Arc<tokio::sync::OwnedMutexGuard<()>>,
+    pub _workspace_guard: Option<Arc<tokio::sync::OwnedRwLockReadGuard<()>>>,
 }
 
 pub(super) fn runtime_ready(state: &Value, expected_key: &str) -> bool {

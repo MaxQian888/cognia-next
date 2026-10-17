@@ -67,6 +67,7 @@ beforeEach(() => {
     activeDirectoryCap: 25,
     snapshotRetentionDays: 14,
     blobBudgetBytes: 2_000_000_000,
+    sandboxSnapshotBudgetBytes: 536_870_912,
     portRangeStart: 42000,
     portRangeEnd: 45999,
     portBlockSize: 20,
@@ -226,6 +227,7 @@ describe("<MaintenanceTab /> worktree lifecycle policy", () => {
       activeDirectoryCap: 40,
       snapshotRetentionDays: 14,
       blobBudgetBytes: 2_000_000_000,
+      sandboxSnapshotBudgetBytes: 536_870_912,
       portRangeStart: 42000,
       portRangeEnd: 45999,
       portBlockSize: 20,
@@ -233,6 +235,25 @@ describe("<MaintenanceTab /> worktree lifecycle policy", () => {
     expect(runWorkspaceUserActionMock).toHaveBeenCalledWith(
       "task_workspace_policy_set",
       expect.any(Function)
+    )
+  })
+
+  it("preserves the separate sandbox snapshot budget when changing the blob budget", async () => {
+    render(<MaintenanceTab />)
+    await screen.findByTestId("workspace-lifecycle-policy")
+
+    fireEvent.change(screen.getByTestId("workspace-lifecycle-blobBudgetBytes"), {
+      target: { value: "3000000000" },
+    })
+    fireEvent.click(screen.getByTestId("workspace-lifecycle-save"))
+
+    await waitFor(() =>
+      expect(setWorkspaceLifecyclePolicyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          blobBudgetBytes: 3_000_000_000,
+          sandboxSnapshotBudgetBytes: 536_870_912,
+        })
+      )
     )
   })
 

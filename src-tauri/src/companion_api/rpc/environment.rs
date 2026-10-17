@@ -24,11 +24,21 @@ use cognia_environment::catalog::CatalogEntry;
 
 use super::*;
 use crate::companion_api::environment_pool::{self as pool, EnvironmentServiceError, PoolServices};
+use crate::companion_api::sandbox_snapshots::{
+    self, CreateSandboxSnapshot, ForkSandboxSnapshot, RestoreSandboxSnapshot,
+};
 use crate::companion_api::workspace_access::{
     acting_person, require_approval_authority, require_environment_authority,
 };
 
 pub(super) const COMMANDS: &[&str] = &[
+    "sandbox_snapshot_create",
+    "sandbox_snapshot_list",
+    "sandbox_snapshot_get",
+    "sandbox_snapshot_delete",
+    "sandbox_snapshot_pin",
+    "sandbox_snapshot_fork",
+    "sandbox_snapshot_restore",
     "environment_delivery_list",
     "environment_catalog_list",
     "environment_catalog_get",
@@ -120,6 +130,36 @@ fn canonical_remote(name: &str, raw: &str) -> Result<String, (StatusCode, Json<R
             )),
         )
     })
+}
+
+fn snapshot_error(name: &str, error: String) -> (StatusCode, Json<RpcError>) {
+    let code = error
+        .split(':')
+        .next()
+        .filter(|code| code.starts_with("snapshot_") || *code == "sandbox_pool_disabled")
+        .unwrap_or("snapshot_operation_failed")
+        .trim();
+    let status = match code {
+        "snapshot_busy" => StatusCode::CONFLICT,
+        "snapshot_not_found" => StatusCode::NOT_FOUND,
+        "sandbox_pool_disabled" => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    (
+        status,
+        Json(RpcError::new(code, format!("{name}: {error}"))),
+    )
+}
+
+async fn snapshots(
+    name: &str,
+) -> Result<std::sync::Arc<sandbox_snapshots::SnapshotService>, (StatusCode, Json<RpcError>)> {
+    let service = sandbox_snapshots::installed().map_err(|error| snapshot_error(name, error))?;
+    service
+        .initialize()
+        .await
+        .map_err(|error| snapshot_error(name, error))?;
+    Ok(service)
 }
 
 fn unix_time_secs() -> i64 {
@@ -215,6 +255,94 @@ async fn dispatch_arm(
     let services = services(name)?;
 
     match name {
+        "sandbox_snapshot_create" => {
+            let request: CreateSandboxSnapshot = required(&args, "request")?;
+            require_approval_authority(name, &request.project_id, tenant_id).await?;
+            to_json(
+                snapshots(name)
+                    .await?
+                    .create(request)
+                    .await
+                    .map_err(|error| snapshot_error(name, error))?,
+            )
+        }
+        "sandbox_snapshot_list" => {
+            let project_id: String = required(&args, "projectId")?;
+            require_environment_authority(name, &project_id, tenant_id, false).await?;
+            to_json(
+                snapshots(name)
+                    .await?
+                    .list(&project_id)
+                    .map_err(|error| snapshot_error(name, error))?,
+            )
+        }
+        "sandbox_snapshot_get" => {
+            let snapshot_id: String = required(&args, "snapshotId")?;
+            let record = snapshots(name)
+                .await?
+                .get(&snapshot_id)
+                .map_err(|error| snapshot_error(name, error))?;
+            require_environment_authority(name, &record.project_id, tenant_id, false).await?;
+            to_json(record)
+        }
+        "sandbox_snapshot_delete" => {
+            let snapshot_id: String = required(&args, "snapshotId")?;
+            let service = snapshots(name).await?;
+            let record = service
+                .get(&snapshot_id)
+                .map_err(|error| snapshot_error(name, error))?;
+            require_approval_authority(name, &record.project_id, tenant_id).await?;
+            to_json(
+                service
+                    .delete(&snapshot_id)
+                    .await
+                    .map_err(|error| snapshot_error(name, error))?,
+            )
+        }
+        "sandbox_snapshot_pin" => {
+            let snapshot_id: String = required(&args, "snapshotId")?;
+            let pinned: bool = required(&args, "pinned")?;
+            let service = snapshots(name).await?;
+            let record = service
+                .get(&snapshot_id)
+                .map_err(|error| snapshot_error(name, error))?;
+            require_approval_authority(name, &record.project_id, tenant_id).await?;
+            to_json(
+                service
+                    .pin(&snapshot_id, pinned)
+                    .await
+                    .map_err(|error| snapshot_error(name, error))?,
+            )
+        }
+        "sandbox_snapshot_fork" => {
+            let request: ForkSandboxSnapshot = required(&args, "request")?;
+            let service = snapshots(name).await?;
+            let record = service
+                .get(&request.snapshot_id)
+                .map_err(|error| snapshot_error(name, error))?;
+            require_approval_authority(name, &record.project_id, tenant_id).await?;
+            to_json(
+                service
+                    .fork(request)
+                    .await
+                    .map_err(|error| snapshot_error(name, error))?,
+            )
+        }
+        "sandbox_snapshot_restore" => {
+            let request: RestoreSandboxSnapshot = required(&args, "request")?;
+            let service = snapshots(name).await?;
+            let record = service
+                .get(&request.snapshot_id)
+                .map_err(|error| snapshot_error(name, error))?;
+            require_approval_authority(name, &record.project_id, tenant_id).await?;
+            to_json(
+                service
+                    .restore(request)
+                    .await
+                    .map_err(|error| snapshot_error(name, error))?,
+            )
+        }
+
         // ── Catalog ────────────────────────────────────────────────────────
         "environment_catalog_list" => {
             let request = page_request(&args)?;
@@ -572,6 +700,20 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_refusals_preserve_busy_and_provider_codes() {
+        for (code, expected) in [
+            ("snapshot_busy", StatusCode::CONFLICT),
+            ("snapshot_not_found", StatusCode::NOT_FOUND),
+            ("snapshot_fork_unsupported", StatusCode::BAD_REQUEST),
+        ] {
+            let (status, Json(error)) =
+                snapshot_error("sandbox_snapshot_create", format!("{code}: refused"));
+            assert_eq!(status, expected);
+            assert_eq!(error.code, code);
+        }
+    }
+
+    #[test]
     fn command_family_is_non_empty_and_unique() {
         let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len());
@@ -625,4 +767,91 @@ mod tests {
         );
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
+}
+
+/// Named IPC shells share the companion authority and dispatch implementation.
+#[tauri::command]
+pub async fn sandbox_snapshot_create(
+    app: tauri::AppHandle,
+    request: CreateSandboxSnapshot,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_snapshot_create".into(),
+        Some(serde_json::json!({"request": request})),
+    )
+    .await
+}
+#[tauri::command]
+pub async fn sandbox_snapshot_list(
+    app: tauri::AppHandle,
+    project_id: String,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_snapshot_list".into(),
+        Some(serde_json::json!({"projectId": project_id})),
+    )
+    .await
+}
+#[tauri::command]
+pub async fn sandbox_snapshot_get(
+    app: tauri::AppHandle,
+    snapshot_id: String,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_snapshot_get".into(),
+        Some(serde_json::json!({"snapshotId": snapshot_id})),
+    )
+    .await
+}
+#[tauri::command]
+pub async fn sandbox_snapshot_delete(
+    app: tauri::AppHandle,
+    snapshot_id: String,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_snapshot_delete".into(),
+        Some(serde_json::json!({"snapshotId": snapshot_id})),
+    )
+    .await
+}
+#[tauri::command]
+pub async fn sandbox_snapshot_pin(
+    app: tauri::AppHandle,
+    snapshot_id: String,
+    pinned: bool,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_snapshot_pin".into(),
+        Some(serde_json::json!({"snapshotId": snapshot_id, "pinned": pinned})),
+    )
+    .await
+}
+#[tauri::command]
+pub async fn sandbox_snapshot_fork(
+    app: tauri::AppHandle,
+    request: ForkSandboxSnapshot,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_snapshot_fork".into(),
+        Some(serde_json::json!({"request": request})),
+    )
+    .await
+}
+#[tauri::command]
+pub async fn sandbox_snapshot_restore(
+    app: tauri::AppHandle,
+    request: RestoreSandboxSnapshot,
+) -> Result<Value, RpcError> {
+    environment_local_call(
+        app,
+        "sandbox_snapshot_restore".into(),
+        Some(serde_json::json!({"request": request})),
+    )
+    .await
 }

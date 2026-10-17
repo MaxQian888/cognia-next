@@ -91,6 +91,7 @@ mod ports;
 mod remote_prep;
 mod retained_tasks;
 mod services;
+mod snapshots;
 mod task_shell;
 
 pub use remote_prep::{EXPIRES_AT_LABEL, PROVIDER_LABEL};
@@ -256,11 +257,13 @@ pub struct DockerSandboxBackend {
     /// Preparation holds a shared lease across gaps between Docker mounts.
     /// A sweep takes an exclusive lease before deleting a retired bundle.
     bundle_locks: Mutex<HashMap<String, Weak<tokio::sync::RwLock<()>>>>,
+    snapshot_workspace_locks: Mutex<HashMap<String, Weak<tokio::sync::RwLock<()>>>>,
     prepare_slots: Arc<tokio::sync::Semaphore>,
     port_slots: Arc<tokio::sync::Semaphore>,
     service_bridges: Mutex<HashMap<String, services::ServiceLease>>,
     egress_leases: Mutex<HashMap<String, egress::EgressLease>>,
     retained_tasks: Mutex<retained_tasks::RetainedTasks>,
+    snapshot_forks: Mutex<snapshots::ForkIndex>,
     pending_tool_hosts: Mutex<HashMap<String, services::PendingToolHost>>,
     own: Weak<Self>,
     /// Volumes this process has already filled. The install itself is
@@ -297,12 +300,14 @@ impl DockerSandboxBackend {
             config,
             stage_locks: Mutex::new(HashMap::new()),
             bundle_locks: Mutex::new(HashMap::new()),
+            snapshot_workspace_locks: Mutex::new(HashMap::new()),
             prepare_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREPARES)),
             staged: Mutex::new(BTreeSet::new()),
             port_slots: Arc::new(tokio::sync::Semaphore::new(64)),
             service_bridges: Mutex::new(HashMap::new()),
             egress_leases: Mutex::new(HashMap::new()),
             retained_tasks: Mutex::new(retained_tasks::RetainedTasks::default()),
+            snapshot_forks: Mutex::new(snapshots::ForkIndex::default()),
             pending_tool_hosts: Mutex::new(HashMap::new()),
             remote,
         })
@@ -830,6 +835,7 @@ struct OperationLeases {
     _prepare: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
     _reservation: Option<Arc<RunnerReservation>>,
     _stage: Option<Arc<tokio::sync::OwnedMutexGuard<()>>>,
+    _workspace: Option<Arc<tokio::sync::OwnedRwLockReadGuard<()>>>,
     _bundle: Option<Arc<tokio::sync::OwnedRwLockReadGuard<()>>>,
 }
 
@@ -1297,6 +1303,7 @@ impl DockerSandboxBackend {
         let egress = (admitted.spec.egress.tier == EgressTier::Allowlist)
             .then(|| egress::FrozenPolicy::new(self.admission.egress_allowlist(&admitted.spec)));
         let bundle = admitted.admission.bundle.image();
+        self.check_snapshot_fork_bundle(cwd, &bundle.digest)?;
         let leases = OperationLeases {
             _bundle: Some(Arc::new(
                 self.bundle_lock(&bundle.digest).read_owned().await,
@@ -1393,6 +1400,23 @@ impl DockerSandboxBackend {
         tail: Vec<String>,
     ) -> Result<RunnerSpec, SandboxSpawnError> {
         let admitted = &prepared.admitted;
+        if self.snapshot_fork_image(&prepared.mount).is_some() {
+            let entries = env
+                .iter()
+                .filter_map(|entry| entry.split_once('='))
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect();
+            let mut runtime = cognia_sandboxd::env::decode_runtime_config_env(&entries)
+                .map_err(|error| {
+                    SandboxSpawnError::fault("snapshot_runtime_failed", error.to_string())
+                })?
+                .unwrap_or(runtime_config_with_env(&admitted.spec, BTreeMap::new())?);
+            runtime.lifecycle_phases = vec![LifecyclePhase::PostStart, LifecyclePhase::PostAttach];
+            env = encode_runtime_config_env(&runtime).map_err(|error| {
+                SandboxSpawnError::fault("snapshot_runtime_failed", error.to_string())
+            })?;
+        }
+
         let mut cmd = vec![
             "init-agent".to_string(),
             "--root".to_string(),
@@ -1427,7 +1451,9 @@ impl DockerSandboxBackend {
         Ok(RunnerSpec {
             workspace_env: BTreeMap::new(),
             name: sanitize_container_name(id),
-            image: self.admission.runtime_image(&admitted.spec)?,
+            image: self
+                .snapshot_fork_image(&prepared.mount)
+                .unwrap_or(self.admission.runtime_image(&admitted.spec)?),
             entrypoint: Some(vec![format!("{INJECTION_ROOT}/bin/cognia-sandboxd")]),
             cmd,
             env,
@@ -1446,12 +1472,20 @@ impl DockerSandboxBackend {
                     ownership_labels(id, &self.config.instance_id, &self.config.deployment_id);
                 labels.insert("cognia.project-id".into(), admitted.spec.project_id.clone());
                 labels.insert(
+                    "cognia.bundle-digest".into(),
+                    prepared.bundle.digest.clone(),
+                );
+                if self.snapshot_fork_image(&prepared.mount).is_some() {
+                    labels.insert("cognia.snapshot-fork".into(), "1".into());
+                }
+                labels.insert(
                     egress::TIER_LABEL.into(),
                     match admitted.spec.egress.tier {
                         EgressTier::Off => "off",
                         EgressTier::Allowlist => "allowlist",
                         EgressTier::On => "on",
-                    }.into(),
+                    }
+                    .into(),
                 );
                 if let Some(policy) = &prepared.egress {
                     policy.label(&mut labels);
@@ -1643,6 +1677,22 @@ impl DockerSandboxBackend {
                 .finish_gateway_spawn(id, gateway, tool_hosts, nonce)
                 .await;
         }
+        let snapshot_mount = spec.mount.clone();
+        let snapshot_bundle = spec
+            .labels
+            .get("cognia.bundle-digest")
+            .cloned()
+            .unwrap_or_default();
+        let _snapshot_workspace_guard = match &snapshot_mount {
+            Some(mount) => Some(Arc::new(
+                self.snapshot_workspace_lock(mount).read_owned().await,
+            )),
+            None => None,
+        };
+        let leases = OperationLeases {
+            _workspace: _snapshot_workspace_guard.clone(),
+            ..leases
+        };
         let running = self
             .start(spec, auth, leases)
             .await
@@ -1662,6 +1712,19 @@ impl DockerSandboxBackend {
                 ),
             })?;
 
+        if let Some(mount) = &snapshot_mount {
+            if let Err(error) = self.remember_snapshot_runtime(
+                &running.container_id,
+                &format!("ephemeral:{}", running.container_id),
+                &admitted.spec,
+                mount,
+                &snapshot_bundle,
+            ) {
+                let _ = self.api.stop_runtime(&running.container_id).await;
+                let _ = self.api.remove(&running.container_id).await;
+                return Err(error);
+            }
+        }
         placement["egress"]["enforced"] = json!(egress_enforced(
             admitted.spec.egress.tier,
             self.egress_live(&running.container_id),
@@ -1750,9 +1813,12 @@ impl SandboxExecBackend for DockerSandboxBackend {
     ) -> Result<String, SandboxSpawnError> {
         let local_allowlist = self.remote.is_none()
             && config.sandbox.as_ref().is_some_and(|placement| {
-                placement.spec().get("egress")
+                placement
+                    .spec()
+                    .get("egress")
                     .and_then(|egress| egress.get("tier"))
-                    .and_then(Value::as_str) == Some("allowlist")
+                    .and_then(Value::as_str)
+                    == Some("allowlist")
             });
         let reservation = Arc::new(
             self.runners
@@ -1779,7 +1845,8 @@ impl SandboxExecBackend for DockerSandboxBackend {
         cancellation.armed = result.is_err();
         result.map_err(|error| {
             if local_allowlist
-                && error.kind == cognia_external_agent::sandbox_routing_backend::SandboxErrorKind::Fault
+                && error.kind
+                    == cognia_external_agent::sandbox_routing_backend::SandboxErrorKind::Fault
             {
                 egress::refused(error.to_string())
             } else {

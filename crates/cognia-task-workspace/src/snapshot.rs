@@ -198,6 +198,119 @@ pub fn capture_with_policy(
     ))
 }
 
+/// Complete cold capture. Git administrative data is reconstructed from the
+/// independently pinned commit, never copied as a source worktree pointer.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointManifest {
+    pub files: WorkspaceSnapshot,
+    pub directories: BTreeMap<String, Option<u32>>,
+    pub exclusions: Vec<String>,
+    /// Git administrative files are replaced with a new independent repository
+    /// rooted at the checkpoint commit. Source worktree pointers never transfer.
+    pub reconstructed_metadata: Vec<String>,
+    pub omitted_special_files: Vec<String>,
+    pub bytes: u64,
+}
+
+/// Capture all regular files, links and directories, without ignore filtering.
+/// An exclusion is an exact relative path or directory prefix, not a glob.
+/// Sockets/FIFOs/devices are explicitly inventoried as non-restorable entries.
+pub fn capture_checkpoint(
+    root: &Path,
+    exclusions: &[String],
+    budget: u64,
+) -> Result<(CheckpointManifest, HashMap<String, Vec<u8>>), String> {
+    use std::{io::Read, path::Component};
+    let canonical = root.canonicalize().map_err(|e| e.to_string())?;
+    for exclusion in exclusions {
+        let path = Path::new(exclusion);
+        if exclusion.is_empty()
+            || path.components().any(|c| !matches!(c, Component::Normal(_)))
+            || exclusion.contains(['\\', '*', '?', '[', ']'])
+        {
+            return Err(format!("invalid snapshot exclusion: {exclusion}"));
+        }
+    }
+    let mut manifest = CheckpointManifest {
+        files: WorkspaceSnapshot::default(),
+        directories: BTreeMap::new(),
+        exclusions: exclusions.to_vec(),
+        reconstructed_metadata: vec![".git".into()],
+        omitted_special_files: Vec::new(),
+        bytes: 0,
+    };
+    let mut blobs = HashMap::new();
+    let filter_root = canonical.clone();
+    let filter_exclusions = exclusions.to_vec();
+    let mut walker = WalkBuilder::new(&canonical);
+    walker.hidden(false).ignore(false).git_ignore(false).git_global(false)
+        .git_exclude(false).parents(false).follow_links(false)
+        .filter_entry(move |entry| {
+            let Ok(rel) = entry.path().strip_prefix(&filter_root) else { return false };
+            !rel.starts_with(".git") && !filter_exclusions.iter().any(|p| rel.starts_with(p))
+        });
+    for item in walker.build() {
+        let item = item.map_err(|e| format!("checkpoint walk: {e}"))?;
+        let path = item.path();
+        if path == canonical { continue; }
+        let relative = path.strip_prefix(&canonical).map_err(|e| e.to_string())?;
+        let name = relative.to_str().ok_or_else(|| format!("non-UTF8 checkpoint path: {}", path.display()))?.to_string();
+        let metadata = path.symlink_metadata().map_err(|e| e.to_string())?;
+        if metadata.is_dir() {
+            manifest.directories.insert(name, file_mode(path));
+            continue;
+        }
+        let (kind, bytes) = if metadata.file_type().is_symlink() {
+            let target = fs::read_link(path).map_err(|e| e.to_string())?;
+            validate_symlink_target(relative, &target)?;
+            let target = target.to_str().ok_or("non-UTF8 checkpoint symlink")?;
+            (EntryKind::Symlink, target.as_bytes().to_vec())
+        } else if metadata.is_file() {
+            if metadata.len() > budget.saturating_sub(manifest.bytes) {
+                return Err("snapshot_budget_exceeded: workspace checkpoint exceeds budget".into());
+            }
+            let mut bytes = Vec::new();
+            fs::File::open(path).map_err(|e| e.to_string())?
+                .take(budget.saturating_sub(manifest.bytes).saturating_add(1))
+                .read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+            (EntryKind::File, bytes)
+        } else {
+            manifest.omitted_special_files.push(name);
+            continue;
+        };
+        manifest.bytes = manifest.bytes.checked_add(bytes.len() as u64).ok_or("snapshot_budget_exceeded")?;
+        if manifest.bytes > budget { return Err("snapshot_budget_exceeded".into()); }
+        let hash = hex::encode(Sha256::digest(&bytes));
+        let binary = kind == EntryKind::File && detect_binary(&bytes);
+        manifest.files.entries.insert(name.clone(), SnapshotEntry {
+            path: name.clone(), kind, hash: hash.clone(), size: bytes.len() as u64,
+            mode: file_mode(path), binary,
+            media_type: media_type_for(&name, binary).to_string(),
+            sensitive: is_sensitive_resource(&name),
+        });
+        blobs.entry(hash).or_insert(bytes);
+    }
+    Ok((manifest, blobs))
+}
+
+pub fn materialize_checkpoint(
+    root: &Path,
+    manifest: &CheckpointManifest,
+    blobs: &HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    // The caller supplies a new empty execution directory. Directory modes
+    // are applied last so a read-only directory does not prevent restoration.
+    for path in manifest.directories.keys() {
+        fs::create_dir_all(root.join(path)).map_err(|e| e.to_string())?;
+    }
+    materialize(root, &manifest.files, blobs)?;
+    for (path, mode) in manifest.directories.iter().rev() {
+        apply_mode(&root.join(path), *mode)?;
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Git-backed capture
 //
@@ -1037,6 +1150,57 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn checkpoint_profile_captures_ignored_generated_and_empty_directories() {
+        let root = TempDir::new().unwrap();
+        fs::write(root.path().join(".gitignore"), "ignored\nnode_modules/\n").unwrap();
+        fs::write(root.path().join("ignored"), "ignored bytes").unwrap();
+        fs::create_dir_all(root.path().join("node_modules/empty")).unwrap();
+        fs::write(root.path().join("node_modules/generated"), "generated bytes").unwrap();
+        fs::create_dir_all(root.path().join("exclude/sub")).unwrap();
+        fs::write(root.path().join("exclude/sub/file"), "excluded bytes").unwrap();
+        let (manifest, blobs) = capture_checkpoint(root.path(), &["exclude".into()], 4096).unwrap();
+        assert!(manifest.files.entries.contains_key("ignored"));
+        assert!(manifest.files.entries.contains_key("node_modules/generated"));
+        assert!(manifest.directories.contains_key("node_modules/empty"));
+        assert!(!manifest.files.entries.contains_key("exclude/sub/file"));
+        assert_eq!(manifest.exclusions, vec!["exclude"]);
+        let target = TempDir::new().unwrap();
+        materialize_checkpoint(target.path(), &manifest, &blobs).unwrap();
+        assert!(target.path().join("node_modules/empty").is_dir());
+        assert_eq!(fs::read_to_string(target.path().join("ignored")).unwrap(), "ignored bytes");
+    }
+
+    #[test]
+    fn checkpoint_profile_fails_budget_and_invalid_exclusions() {
+        let root = TempDir::new().unwrap();
+        fs::write(root.path().join("large"), [0u8; 128]).unwrap();
+        assert!(capture_checkpoint(root.path(), &[], 127).unwrap_err().contains("snapshot_budget_exceeded"));
+        for exclusion in ["", "../escape", "/absolute", "*.log", "directory/../file"] {
+            assert!(capture_checkpoint(root.path(), &[exclusion.into()], 4096).unwrap_err().contains("invalid snapshot exclusion"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checkpoint_profile_restores_file_directory_modes_and_internal_links() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let root = TempDir::new().unwrap();
+        fs::create_dir(root.path().join("empty")).unwrap();
+        fs::write(root.path().join("run"), "#!/bin/sh\n").unwrap();
+        fs::set_permissions(root.path().join("empty"), fs::Permissions::from_mode(0o750)).unwrap();
+        fs::set_permissions(root.path().join("run"), fs::Permissions::from_mode(0o755)).unwrap();
+        symlink("run", root.path().join("link")).unwrap();
+        let (manifest, blobs) = capture_checkpoint(root.path(), &[], 4096).unwrap();
+        let target = TempDir::new().unwrap();
+        materialize_checkpoint(target.path(), &manifest, &blobs).unwrap();
+        assert_eq!(fs::metadata(target.path().join("empty")).unwrap().permissions().mode() & 0o777, 0o750);
+        assert_eq!(fs::metadata(target.path().join("run")).unwrap().permissions().mode() & 0o777, 0o755);
+        assert_eq!(fs::read_link(target.path().join("link")).unwrap(), Path::new("run"));
+        symlink("../escape", root.path().join("escape")).unwrap();
+        assert!(capture_checkpoint(root.path(), &[], 4096).unwrap_err().contains("escapes workspace"));
+    }
 
     /// Count of observations recorded for `name`, or 0 if the span is unknown.
     ///

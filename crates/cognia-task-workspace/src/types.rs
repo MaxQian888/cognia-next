@@ -1013,12 +1013,18 @@ pub struct WorkspaceLifecyclePolicy {
     pub active_directory_cap: u32,
     pub snapshot_retention_days: u32,
     pub blob_budget_bytes: u64,
+    #[serde(default = "default_sandbox_snapshot_budget")]
+    pub sandbox_snapshot_budget_bytes: u64,
     #[serde(default = "default_port_range_start")]
     pub port_range_start: u32,
     #[serde(default = "default_port_range_end")]
     pub port_range_end: u32,
     #[serde(default = "default_port_block_size")]
     pub port_block_size: u32,
+}
+
+fn default_sandbox_snapshot_budget() -> u64 {
+    1 << 30
 }
 
 fn default_port_range_start() -> u32 {
@@ -1102,6 +1108,7 @@ impl Default for WorkspaceLifecyclePolicy {
             active_directory_cap: 15,
             snapshot_retention_days: 30,
             blob_budget_bytes: 1 << 30,
+            sandbox_snapshot_budget_bytes: default_sandbox_snapshot_budget(),
             port_range_start: default_port_range_start(),
             port_range_end: default_port_range_end(),
             port_block_size: default_port_block_size(),

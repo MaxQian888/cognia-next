@@ -230,6 +230,7 @@ export interface WorkspaceLifecyclePolicy {
   activeDirectoryCap: number
   snapshotRetentionDays: number
   blobBudgetBytes: number
+  sandboxSnapshotBudgetBytes: number
   portRangeStart: number
   portRangeEnd: number
   portBlockSize: number

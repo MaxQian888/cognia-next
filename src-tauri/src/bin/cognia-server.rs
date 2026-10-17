@@ -643,14 +643,18 @@ async fn install_file_share(data_dir: &Path, local_account_id: &str, shared: &Sh
                 .map_err(|violation| violation.to_string())
         }),
     );
-    let bridge = Arc::new(cognia_companion::filespace_bridge::BridgeFileSpaceSource::brain(
-        Arc::clone(&shared.desktop_messages_bridge),
-    ));
+    let bridge = Arc::new(
+        cognia_companion::filespace_bridge::BridgeFileSpaceSource::brain(Arc::clone(
+            &shared.desktop_messages_bridge,
+        )),
+    );
     service.set_asset_reader(bridge.clone());
     service.set_mount_source(bridge);
     // The one account this server serves; the brain may confirm it, never
     // choose another.
-    service.bind_account(Some(local_account_id.to_string())).await;
+    service
+        .bind_account(Some(local_account_id.to_string()))
+        .await;
 }
 
 /// `cognia-server init`: create the master key this data dir boots with.
@@ -708,8 +712,8 @@ async fn run_service_command(
                 mdns: !no_mdns,
                 local_account_id: local_account_id.clone(),
             };
-            let report =
-                server::install_server_service(&request, &env, &SystemIo).map_err(|e| e.to_string())?;
+            let report = server::install_server_service(&request, &env, &SystemIo)
+                .map_err(|e| e.to_string())?;
             println!("Installed {}", report.definition_path.display());
             println!("Data dir:   {}", report.data_dir.display());
             println!(
@@ -787,8 +791,16 @@ async fn run_service_command(
             println!(
                 "{}: {}, {}",
                 status.definition_path.display(),
-                if status.installed { "installed" } else { "not installed" },
-                if status.running { "running" } else { "not running" }
+                if status.installed {
+                    "installed"
+                } else {
+                    "not installed"
+                },
+                if status.running {
+                    "running"
+                } else {
+                    "not running"
+                }
             );
             println!("Readiness:  {}", probe_readyz(*port).await);
             Ok(())
@@ -814,7 +826,10 @@ async fn probe_readyz(port: u16) -> String {
         Err(error) => return format!("no answer on 127.0.0.1:{port} ({error})"),
     };
     let http_status = response.status();
-    let body = response.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null);
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .unwrap_or(serde_json::Value::Null);
     describe_readiness(http_status.is_success(), &body)
 }
 
@@ -1067,7 +1082,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .clone()
             .or_else(|| std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok())
             .filter(|id| !id.trim().is_empty());
-        return run_service_command(command, local_account_id).await.map_err(Into::into);
+        return run_service_command(command, local_account_id)
+            .await
+            .map_err(Into::into);
     }
     if let CliCommand::Init { keychain } = &cli.command {
         return run_init(&data_dir(), *keychain).map_err(Into::into);
@@ -1542,7 +1559,11 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                 let granted = capabilities.insert(BROWSER_DRIVE.to_string());
                 println!(
                     "{} browser-drive for {device_id}",
-                    if granted { "granted" } else { "already granted" }
+                    if granted {
+                        "granted"
+                    } else {
+                        "already granted"
+                    }
                 );
             }
             security.replace_device_capabilities(
@@ -1591,7 +1612,11 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                 let revoked = capabilities.remove(BROWSER_DRIVE);
                 println!(
                     "{} browser-drive for {device_id}",
-                    if revoked { "revoked" } else { "was not granted" }
+                    if revoked {
+                        "revoked"
+                    } else {
+                        "was not granted"
+                    }
                 );
             }
             security.replace_device_capabilities(
@@ -1804,7 +1829,11 @@ fn print_pair_invitation(encoded: &str, expires_at_ms: i64, qr: bool) {
 /// What `pair` does with the running server's answer: `Ok(None)` prints the
 /// invitation it issued, `Ok(Some(reason))` issues a standalone direct one
 /// (only under `--direct`), `Err` refuses a relay-less invitation.
-fn pair_decision(running: &RunningPair, direct: bool, base_url: &str) -> Result<Option<String>, String> {
+fn pair_decision(
+    running: &RunningPair,
+    direct: bool,
+    base_url: &str,
+) -> Result<Option<String>, String> {
     match running {
         RunningPair::Issued {
             relay_unavailable: Some(reason),
@@ -1891,9 +1920,7 @@ async fn run_pair(
         }
         print_pair_invitation(&encoded, expires_at_ms, options.qr);
         if has_relay {
-            println!(
-                "Scan or paste it on the app's pair screen. It works from any network."
-            );
+            println!("Scan or paste it on the app's pair screen. It works from any network.");
         } else {
             println!(
                 "Scan or paste it on the app's pair screen. The device must reach {base_url} directly."
@@ -1940,7 +1967,9 @@ async fn run_pair(
     println!("Scan or paste it on the app's pair screen once the host is serving.");
     println!(
         "It has no relay room ({}): the device must reach {base_url} directly.",
-        standalone_reason.as_deref().unwrap_or("no running server answered")
+        standalone_reason
+            .as_deref()
+            .unwrap_or("no running server answered")
     );
     if invitation.is_some() {
         println!("\n{OWNER_INVITATION_WARNING}");
@@ -2497,6 +2526,11 @@ async fn run_serve(
     // `sandbox_pool_disabled` on a deployment that never opted in rather than
     // opening a store of its own.
     if let Some(services) = pool.services {
+        cognia_companion::sandbox_snapshots::install(
+            app_lib::task_workspace::service()?,
+            services.clone(),
+        )
+        .map_err(|error| format!("sandbox snapshots: {error}"))?;
         app_lib::companion_api::environment_pool::install(services);
     }
     log::info!(
@@ -3245,7 +3279,10 @@ mod tests {
             other => panic!("expected an issued invitation, got {other:?}"),
         }
         let refused = super::running_pair_from_issue(
-            &issue(serde_json::Value::Null, Some("the relay at wss://r did not accept the pairing room")),
+            &issue(
+                serde_json::Value::Null,
+                Some("the relay at wss://r did not accept the pairing room"),
+            ),
             "https://127.0.0.1:27890",
         );
         assert!(matches!(
@@ -3254,10 +3291,14 @@ mod tests {
                 if reason.contains("did not accept")
         ));
         // A server from before ADR-0224 A2 sends no reason; there still is one.
-        let old = super::running_pair_from_issue(&issue(serde_json::Value::Null, None), "https://h");
+        let old =
+            super::running_pair_from_issue(&issue(serde_json::Value::Null, None), "https://h");
         assert!(matches!(
             old,
-            super::RunningPair::Issued { relay_unavailable: Some(_), .. }
+            super::RunningPair::Issued {
+                relay_unavailable: Some(_),
+                ..
+            }
         ));
         let mut broken = issue(serde_json::Value::Null, None);
         broken.as_object_mut().unwrap().remove("invitation");
@@ -3290,7 +3331,8 @@ mod tests {
         assert!(refusal.contains(base));
         assert_eq!(super::pair_decision(&relay_less, true, base), Ok(None));
 
-        let nothing = super::RunningPair::NotRunning("no running server answered on 127.0.0.1:27890".into());
+        let nothing =
+            super::RunningPair::NotRunning("no running server answered on 127.0.0.1:27890".into());
         let refusal = super::pair_decision(&nothing, false, base).unwrap_err();
         assert!(refusal.contains("service install"));
         assert_eq!(
@@ -3303,7 +3345,10 @@ mod tests {
         let refusal = super::pair_decision(&failed, false, base).unwrap_err();
         assert!(refusal.contains("500: boom"));
         assert!(!refusal.contains("service install"));
-        assert_eq!(format!("{:?}", super::OperatorError(refusal.clone())), refusal);
+        assert_eq!(
+            format!("{:?}", super::OperatorError(refusal.clone())),
+            refusal
+        );
     }
 
     #[test]
@@ -3313,11 +3358,23 @@ mod tests {
         assert_eq!(super::resolve_pair_port(None, Some(" 27991 ")), 27991);
         assert_eq!(super::resolve_pair_port(None, Some("not-a-port")), default);
         assert_eq!(super::resolve_pair_port(None, None), default);
-        let cli = Cli::try_parse_from(["cognia-server", "pair", "--port", "27990", "--direct", "--no-qr"])
-            .expect("pair flags parse");
+        let cli = Cli::try_parse_from([
+            "cognia-server",
+            "pair",
+            "--port",
+            "27990",
+            "--direct",
+            "--no-qr",
+        ])
+        .expect("pair flags parse");
         assert!(matches!(
             cli.command,
-            CliCommand::Pair { port: Some(27990), direct: true, no_qr: true, .. }
+            CliCommand::Pair {
+                port: Some(27990),
+                direct: true,
+                no_qr: true,
+                ..
+            }
         ));
     }
 
@@ -3351,8 +3408,14 @@ mod tests {
             "status": "not_ready",
             "checks": { "draining": true, "storage": true, "brain": false, "sidecar": false },
         });
-        assert_eq!(super::describe_readiness(false, &held), "not ready (brain, draining, sidecar)");
-        assert_eq!(super::describe_readiness(false, &serde_json::Value::Null), "not ready");
+        assert_eq!(
+            super::describe_readiness(false, &held),
+            "not ready (brain, draining, sidecar)"
+        );
+        assert_eq!(
+            super::describe_readiness(false, &serde_json::Value::Null),
+            "not ready"
+        );
         let refused = serde_json::json!({
             "checks": { "brain": false },
             "brainRefusal": {
@@ -3684,26 +3747,50 @@ mod tests {
 
         // `--browser-drive` is the one grant a browser may take: it is how a
         // headless operator lets agents act in that browser (ADR-0228).
-        devices(&["grant", "browser-a", "--browser-drive", "--tenant-id", "tenant-a"])
-            .await
-            .expect("browser-drive on a browser");
+        devices(&[
+            "grant",
+            "browser-a",
+            "--browser-drive",
+            "--tenant-id",
+            "tenant-a",
+        ])
+        .await
+        .expect("browser-drive on a browser");
         assert_eq!(
             class(),
             vec!["browser.drive", "browser.read-own", "browser.submit"]
         );
-        devices(&["grant", "browser-a", "--browser-drive", "--tenant-id", "tenant-a"])
-            .await
-            .expect("granting again is a no-op, not an error");
-        devices(&["revoke", "browser-a", "--browser-drive", "--tenant-id", "tenant-a"])
-            .await
-            .expect("revoke browser-drive");
+        devices(&[
+            "grant",
+            "browser-a",
+            "--browser-drive",
+            "--tenant-id",
+            "tenant-a",
+        ])
+        .await
+        .expect("granting again is a no-op, not an error");
+        devices(&[
+            "revoke",
+            "browser-a",
+            "--browser-drive",
+            "--tenant-id",
+            "tenant-a",
+        ])
+        .await
+        .expect("revoke browser-drive");
         assert_eq!(class(), vec!["browser.read-own", "browser.submit"]);
 
         // A phone cannot be made drivable as a browser: `browser.drive` is
         // no capability an owner device's set may name.
-        let error = devices(&["grant", "owner-a", "--browser-drive", "--tenant-id", "tenant-a"])
-            .await
-            .expect_err("browser-drive on an owner device");
+        let error = devices(&[
+            "grant",
+            "owner-a",
+            "--browser-drive",
+            "--tenant-id",
+            "tenant-a",
+        ])
+        .await
+        .expect_err("browser-drive on an owner device");
         assert!(
             matches!(
                 error.downcast_ref::<SecurityStoreError>(),

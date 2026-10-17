@@ -449,6 +449,9 @@ pub struct DriverStatus {
     pub reachable: bool,
     pub unreachable_reason: Option<String>,
     pub bundles: Vec<OfferedBundleView>,
+    /// Local-driver checkpoint capabilities, also available without a provider set.
+    #[serde(default)]
+    pub snapshot_capabilities: cognia_sandbox_pool::runtime::SnapshotCapabilities,
     /// Every driver a spawn can be placed on (ADR-0221), the local one
     /// included. Empty when the local driver is the only one, which is every
     /// Host that configured no remote provider.
@@ -728,6 +731,11 @@ pub async fn driver_status(services: &PoolServices) -> DriverStatus {
         reachable,
         unreachable_reason,
         bundles,
+        snapshot_capabilities: services
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.snapshot_capabilities("local"))
+            .unwrap_or_default(),
         providers: match services.providers.as_ref() {
             Some(set) => set.views().await,
             None => Vec::new(),
@@ -1286,8 +1294,12 @@ mod tests {
     async fn a_host_without_remote_providers_lists_none() {
         let status = driver_status(&pool(Some(vec![IsolationTier::Container]))).await;
         assert!(status.providers.is_empty());
+        assert_eq!(status.snapshot_capabilities, Default::default());
         let mut wire = serde_json::to_value(&status).expect("a status serializes");
         wire.as_object_mut().expect("an object").remove("providers");
+        wire.as_object_mut()
+            .expect("an object")
+            .remove("snapshotCapabilities");
         let read: DriverStatus = serde_json::from_value(wire).expect("an older status reads");
         assert_eq!(read, status);
     }

@@ -225,6 +225,7 @@
     "0227-agent-changes-integrate-through-one-host-queue",
     "0228-the-browser-companion-captures-richly-and-can-be-driven",
     "0229-per-workspace-port-leases",
-    "0230-best-of-n-attempts-share-a-frozen-base"
+    "0230-best-of-n-attempts-share-a-frozen-base",
+    "0231-sandbox-snapshots-join-rootfs-and-workspace"
   ]
 }

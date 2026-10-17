@@ -1,6 +1,118 @@
 {
   "schemaVersion": 1,
   "$defs": {
+    "SandboxSnapshotRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "snapshotId": { "type": "string" },
+        "deploymentId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "taskId": { "type": "string" },
+        "workspaceRoot": { "type": "string" },
+        "runtime": {},
+        "exclusions": { "type": "array", "items": { "type": "string" } },
+        "checkpointId": { "type": ["string", "null"] },
+        "imageId": { "type": ["string", "null"] },
+        "imageBytes": { "type": "integer", "format": "uint64", "minimum": 0 },
+        "phase": { "$ref": "#/$defs/SnapshotOperationPhase" },
+        "createdAt": { "type": "integer", "format": "int64" },
+        "expiresAt": { "type": "integer", "format": "int64" },
+        "pinned": { "type": "boolean" }
+      },
+      "required": [
+        "snapshotId",
+        "deploymentId",
+        "projectId",
+        "taskId",
+        "workspaceRoot",
+        "runtime",
+        "exclusions",
+        "checkpointId",
+        "imageId",
+        "imageBytes",
+        "phase",
+        "createdAt",
+        "expiresAt",
+        "pinned"
+      ]
+    },
+    "SnapshotOperationPhase": {
+      "type": "string",
+      "enum": ["preparing", "workspaceCaptured", "imageCommitted", "ready", "tombstoned"]
+    },
+    "ForkedCheckpointWorkspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": { "$ref": "#/$defs/TaskWorkspace" },
+        "workspaceId": { "type": "string" },
+        "executionRoot": { "type": "string" },
+        "portLease": { "$ref": "#/$defs/WorkspacePortLease" }
+      },
+      "required": ["task", "workspaceId", "executionRoot", "portLease"]
+    },
+    "ForkedSandboxSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspace": { "$ref": "#/$defs/ForkedCheckpointWorkspace" },
+        "provider": { "type": "string" },
+        "containerId": { "type": "string" },
+        "restoredInPlace": { "type": "boolean" }
+      },
+      "required": ["workspace", "provider", "containerId", "restoredInPlace"]
+    },
+    "SnapshotCapabilities": {
+      "type": "object",
+      "properties": {
+        "filesystemCheckpoint": { "type": "boolean" },
+        "forkFromCheckpoint": { "type": "boolean" },
+        "pauseResume": { "type": "boolean" },
+        "memoryResume": { "type": "boolean" }
+      },
+      "required": ["filesystemCheckpoint", "forkFromCheckpoint", "pauseResume", "memoryResume"]
+    },
+    "SnapshotProviderView": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "driver": { "type": "string" },
+        "label": { "type": "string" },
+        "remote": { "type": "boolean" },
+        "isDefault": { "type": "boolean" },
+        "reachable": { "type": "boolean" },
+        "availableTiers": { "type": "array", "items": { "$ref": "#/$defs/IsolationTier" } },
+        "capabilities": { "$ref": "#/$defs/SnapshotCapabilities" },
+        "unavailableCode": { "type": "string" },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "maxConcurrent": { "type": "integer", "minimum": 0 },
+            "maxLifetimeSecs": { "type": "integer", "minimum": 0 },
+            "idleTimeoutSecs": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["maxConcurrent", "maxLifetimeSecs", "idleTimeoutSecs"]
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "instances": { "type": "integer", "minimum": 0 },
+            "sessions": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["instances", "sessions"]
+        }
+      },
+      "required": [
+        "id",
+        "driver",
+        "remote",
+        "isDefault",
+        "reachable",
+        "availableTiers",
+        "capabilities"
+      ]
+    },
     "BestOfNPhase": {
       "enum": [
         "preparing",
@@ -10250,6 +10362,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "sandboxSnapshotBudgetBytes": {
+          "default": 1073741824,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "portBlockSize": {
           "default": 10,
           "format": "uint32",
@@ -10277,6 +10395,7 @@
       "required": [
         "activeDirectoryCap",
         "blobBudgetBytes",
+        "sandboxSnapshotBudgetBytes",
         "portBlockSize",
         "portRangeEnd",
         "portRangeStart",
@@ -13373,6 +13492,16 @@
     }
   },
   "commands": {
+    "sandbox_snapshot_create": { "$ref": "#/$defs/SandboxSnapshotRecord" },
+    "sandbox_snapshot_list": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/SandboxSnapshotRecord" }
+    },
+    "sandbox_snapshot_get": { "$ref": "#/$defs/SandboxSnapshotRecord" },
+    "sandbox_snapshot_delete": { "$ref": "#/$defs/SandboxSnapshotRecord" },
+    "sandbox_snapshot_pin": { "$ref": "#/$defs/SandboxSnapshotRecord" },
+    "sandbox_snapshot_fork": { "$ref": "#/$defs/ForkedSandboxSnapshot" },
+    "sandbox_snapshot_restore": { "$ref": "#/$defs/ForkedSandboxSnapshot" },
     "best_of_n_start": {
       "$ref": "#/$defs/BestOfNGroup"
     },
@@ -18223,6 +18352,11 @@
     "environment_driver_status": {
       "description": "The driver's own answer about itself.",
       "properties": {
+        "snapshotCapabilities": { "$ref": "#/$defs/SnapshotCapabilities" },
+        "providers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SnapshotProviderView" }
+        },
         "availableTiers": {
           "description": "Empty with `reachable: false`. An unreachable daemon attests no tier,\nwhich is not the same claim as attesting none.",
           "items": {
@@ -18266,6 +18400,8 @@
         "isolationFloor",
         "availableTiers",
         "reachable",
+        "snapshotCapabilities",
+        "providers",
         "bundles"
       ],
       "title": "DriverStatus",

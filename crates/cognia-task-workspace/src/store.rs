@@ -119,6 +119,7 @@ impl WorkspaceStore {
         store.apply_changeset_migration()?;
         crate::best_of_n::migrate(&store.connection)?;
         store.apply_provenance_migration()?;
+        crate::sandbox_snapshot::migrate(&store.connection)?;
         Ok(store)
     }
 

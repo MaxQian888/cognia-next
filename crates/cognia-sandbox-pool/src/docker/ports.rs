@@ -60,6 +60,156 @@ impl DockerSandboxBackend {
 
 #[async_trait]
 impl SandboxRuntimeControl for DockerSandboxBackend {
+    fn snapshot_capabilities(&self, _provider: &str) -> crate::runtime::SnapshotCapabilities {
+        self.checkpoint_capabilities()
+    }
+    fn snapshot_image_name(
+        &self,
+        _provider: &str,
+        snapshot_id: &str,
+    ) -> Result<String, SandboxSpawnError> {
+        self.checkpoint_image_name(snapshot_id)
+    }
+    async fn inspect_snapshot_source(
+        &self,
+        _provider: &str,
+        container: &str,
+        project: &str,
+        root: &str,
+    ) -> Result<crate::runtime::SnapshotRuntimeSource, SandboxSpawnError> {
+        self.checkpoint_source(container, project, root).await
+    }
+    async fn quiesce_snapshot(
+        &self,
+        provider: &str,
+        container_id: &str,
+        project_id: &str,
+        workspace_root: &str,
+    ) -> Result<crate::runtime::SnapshotRuntimeLease, SandboxSpawnError> {
+        self.checkpoint_quiesce(provider, container_id, project_id, workspace_root)
+            .await
+    }
+    async fn commit_snapshot_image(
+        &self,
+        lease: &crate::runtime::SnapshotRuntimeLease,
+        snapshot_id: &str,
+    ) -> Result<crate::runtime::SnapshotImage, SandboxSpawnError> {
+        self.checkpoint_commit(lease, snapshot_id).await
+    }
+    async fn resume_snapshot_runtime(
+        &self,
+        lease: crate::runtime::SnapshotRuntimeLease,
+    ) -> Result<(), SandboxSpawnError> {
+        self.checkpoint_resume(lease).await
+    }
+    async fn inspect_snapshot_image(
+        &self,
+        _provider: &str,
+        id: &str,
+    ) -> Result<Option<crate::runtime::SnapshotImage>, SandboxSpawnError> {
+        self.checkpoint_inspect(id).await
+    }
+    async fn remove_snapshot_image(
+        &self,
+        _provider: &str,
+        id: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.checkpoint_remove(id).await
+    }
+    async fn snapshot_runtime_for_workspace(
+        &self,
+        _provider: &str,
+        root: &str,
+    ) -> Result<Option<String>, SandboxSpawnError> {
+        self.checkpoint_runtime_for_workspace(root).await
+    }
+    async fn pending_snapshot_restore_targets(
+        &self,
+        _provider: &str,
+    ) -> Result<Vec<String>, SandboxSpawnError> {
+        Ok(self.checkpoint_pending_restore_targets())
+    }
+    async fn complete_snapshot_restore_target(
+        &self,
+        _provider: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.checkpoint_complete_restore_target(root).await
+    }
+    async fn rollback_snapshot_restore_target(
+        &self,
+        _provider: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.checkpoint_rollback_restore_target(root).await
+    }
+    async fn retire_snapshot_restore_target(
+        &self,
+        _provider: &str,
+        project: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.checkpoint_retire_restore_target(project, root).await
+    }
+    async fn discard_snapshot_fork(
+        &self,
+        _provider: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.checkpoint_discard_fork(root).await
+    }
+    async fn release_snapshot_fork(
+        &self,
+        _provider: &str,
+        root: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.checkpoint_release_fork(root).await
+    }
+    async fn recover_snapshot_source(
+        &self,
+        _provider: &str,
+        id: &str,
+        was_running: bool,
+    ) -> Result<(), SandboxSpawnError> {
+        if was_running {
+            if !self.snapshot_forks.lock().runtimes.contains_key(id) {
+                return Err(crate::runtime::snapshot_unsupported());
+            }
+            self.resume_snapshot_source(id).await?;
+        }
+        Ok(())
+    }
+    async fn snapshot_runtime_exists(
+        &self,
+        _provider: &str,
+        id: &str,
+    ) -> Result<bool, SandboxSpawnError> {
+        self.api
+            .inspect_runtime(id)
+            .await
+            .map(|value| value.is_some())
+            .map_err(|e| SandboxSpawnError::fault("snapshot_runtime_failed", e))
+    }
+    async fn verify_snapshot_bundle(
+        &self,
+        _provider: &str,
+        placement: &SandboxPlacement,
+        expected: &str,
+    ) -> Result<(), SandboxSpawnError> {
+        self.checkpoint_verify_bundle(placement, expected).await
+    }
+    async fn fork_snapshot_runtime(
+        &self,
+        _provider: &str,
+        image: &str,
+        placement: SandboxPlacement,
+        root: &str,
+        bundle_digest: &str,
+    ) -> Result<String, SandboxSpawnError> {
+        self.checkpoint_fork(image, placement, root, bundle_digest)
+            .await
+    }
+
     async fn exec_task_shell(
         &self,
         request: TaskShellRequest,

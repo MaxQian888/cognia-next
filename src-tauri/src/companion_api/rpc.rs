@@ -1325,6 +1325,13 @@ const KNOWN_COMMANDS: &[&str] = &[
     // deployment facts (`host.observe` / `host.admin`); the approvals and the
     // egress grants are workspace-scoped and carry their own ADR-0149
     // authority check on top of the capability.
+    "sandbox_snapshot_create",
+    "sandbox_snapshot_list",
+    "sandbox_snapshot_get",
+    "sandbox_snapshot_delete",
+    "sandbox_snapshot_pin",
+    "sandbox_snapshot_fork",
+    "sandbox_snapshot_restore",
     "environment_delivery_list",
     "environment_catalog_list",
     "environment_catalog_get",
@@ -1705,6 +1712,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // ADR-0059 W2: the brain's runtimes as they are now.
     "host_runtime_status",
     // Runtime environments — every read is a projection of stored state.
+    "sandbox_snapshot_list",
+    "sandbox_snapshot_get",
     "environment_delivery_list",
     "environment_catalog_list",
     "environment_catalog_get",
@@ -2118,6 +2127,11 @@ const CONTROL_COMMANDS: &[&str] = &[
     // Runtime environments — a catalog write widens what may run on this
     // deployment, and an approval or an egress grant widens what one project
     // may reach. All four need remote control on top of their capability.
+    "sandbox_snapshot_create",
+    "sandbox_snapshot_delete",
+    "sandbox_snapshot_pin",
+    "sandbox_snapshot_fork",
+    "sandbox_snapshot_restore",
     "environment_catalog_create",
     "environment_catalog_update",
     "environment_catalog_delete",

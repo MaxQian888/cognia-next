@@ -141,6 +141,14 @@ export interface RemoteSandboxesUpdate {
   secrets?: Record<string, string | null>
 }
 
+/** Filesystem checkpoints and process suspension are independent provider capabilities. */
+export interface SandboxSnapshotCapabilities {
+  filesystemCheckpoint: boolean
+  forkFromCheckpoint: boolean
+  pauseResume: boolean
+  memoryResume: boolean
+}
+
 /** One driver of a Host's provider set, as `environment_driver_status` reports it. */
 export interface SandboxProviderView {
   /** `local` for the Host's own driver. */
@@ -152,6 +160,8 @@ export interface SandboxProviderView {
   isDefault: boolean
   reachable: boolean
   availableTiers: IsolationTier[]
+  /** Older hosts omit this; absence must not be treated as checkpoint support. */
+  capabilities?: SandboxSnapshotCapabilities
   unavailableCode?: string
   limits?: SandboxProviderLimits
   usage?: { instances: number; sessions: number }

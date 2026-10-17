@@ -378,6 +378,11 @@
       "category": "agents"
     },
     {
+      "id": "sandbox-snapshots",
+      "title": "Sandbox Snapshots",
+      "category": "development"
+    },
+    {
       "id": "scheduled-tasks",
       "title": "Scheduled Tasks",
       "category": "automation"
@@ -23139,6 +23144,152 @@
       "outputSchema": {
         "description": "The driver's own answer about itself.",
         "properties": {
+          "snapshotCapabilities": {
+            "type": "object",
+            "properties": {
+              "filesystemCheckpoint": {
+                "type": "boolean"
+              },
+              "forkFromCheckpoint": {
+                "type": "boolean"
+              },
+              "pauseResume": {
+                "type": "boolean"
+              },
+              "memoryResume": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "filesystemCheckpoint",
+              "forkFromCheckpoint",
+              "pauseResume",
+              "memoryResume"
+            ]
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "driver": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "remote": {
+                  "type": "boolean"
+                },
+                "isDefault": {
+                  "type": "boolean"
+                },
+                "reachable": {
+                  "type": "boolean"
+                },
+                "availableTiers": {
+                  "type": "array",
+                  "items": {
+                    "description": "Isolation tiers, weakest first. `Ord` is the strength order, so\n`max(a, b)` is the stricter of two requirements.",
+                    "oneOf": [
+                      {
+                        "const": "container",
+                        "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                        "type": "string"
+                      },
+                      {
+                        "const": "gvisor",
+                        "description": "A user-space kernel (runsc).",
+                        "type": "string"
+                      },
+                      {
+                        "const": "vm",
+                        "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                        "type": "string"
+                      }
+                    ]
+                  }
+                },
+                "capabilities": {
+                  "type": "object",
+                  "properties": {
+                    "filesystemCheckpoint": {
+                      "type": "boolean"
+                    },
+                    "forkFromCheckpoint": {
+                      "type": "boolean"
+                    },
+                    "pauseResume": {
+                      "type": "boolean"
+                    },
+                    "memoryResume": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "filesystemCheckpoint",
+                    "forkFromCheckpoint",
+                    "pauseResume",
+                    "memoryResume"
+                  ]
+                },
+                "unavailableCode": {
+                  "type": "string"
+                },
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "maxConcurrent": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxLifetimeSecs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "idleTimeoutSecs": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "maxConcurrent",
+                    "maxLifetimeSecs",
+                    "idleTimeoutSecs"
+                  ]
+                },
+                "usage": {
+                  "type": "object",
+                  "properties": {
+                    "instances": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sessions": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "instances",
+                    "sessions"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "driver",
+                "remote",
+                "isDefault",
+                "reachable",
+                "availableTiers",
+                "capabilities"
+              ]
+            }
+          },
           "availableTiers": {
             "description": "Empty with `reachable: false`. An unreachable daemon attests no tier,\nwhich is not the same claim as attesting none.",
             "items": {
@@ -23245,6 +23396,8 @@
           "isolationFloor",
           "availableTiers",
           "reachable",
+          "snapshotCapabilities",
+          "providers",
           "bundles"
         ],
         "title": "DriverStatus",
@@ -57271,6 +57424,1004 @@
       "outputTyped": true
     },
     {
+      "name": "sandbox_snapshot_create",
+      "category": "development",
+      "resource": "sandbox-snapshots",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sandbox_snapshot_create (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "workspaceId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "provider": {
+                "type": "string",
+                "minLength": 1
+              },
+              "containerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "exclusions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "projectId",
+              "workspaceId",
+              "provider",
+              "containerId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "snapshotId": {
+            "type": "string"
+          },
+          "deploymentId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "workspaceRoot": {
+            "type": "string"
+          },
+          "runtime": {},
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpointId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageBytes": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "workspaceCaptured",
+              "imageCommitted",
+              "ready",
+              "tombstoned"
+            ]
+          },
+          "createdAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pinned": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "snapshotId",
+          "deploymentId",
+          "projectId",
+          "taskId",
+          "workspaceRoot",
+          "runtime",
+          "exclusions",
+          "checkpointId",
+          "imageId",
+          "imageBytes",
+          "phase",
+          "createdAt",
+          "expiresAt",
+          "pinned"
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sandbox_snapshot_delete",
+      "category": "development",
+      "resource": "sandbox-snapshots",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sandbox_snapshot_delete (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "snapshotId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "snapshotId": {
+            "type": "string"
+          },
+          "deploymentId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "workspaceRoot": {
+            "type": "string"
+          },
+          "runtime": {},
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpointId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageBytes": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "workspaceCaptured",
+              "imageCommitted",
+              "ready",
+              "tombstoned"
+            ]
+          },
+          "createdAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pinned": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "snapshotId",
+          "deploymentId",
+          "projectId",
+          "taskId",
+          "workspaceRoot",
+          "runtime",
+          "exclusions",
+          "checkpointId",
+          "imageId",
+          "imageBytes",
+          "phase",
+          "createdAt",
+          "expiresAt",
+          "pinned"
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sandbox_snapshot_fork",
+      "category": "development",
+      "resource": "sandbox-snapshots",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sandbox_snapshot_fork (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "properties": {
+              "snapshotId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "taskId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "snapshotId",
+              "taskId",
+              "sessionId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task": {
+                "additionalProperties": false,
+                "properties": {
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "expiresAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "revision": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "enum": [
+                      "active",
+                      "ready",
+                      "applied",
+                      "conflict",
+                      "expired"
+                    ],
+                    "type": "string"
+                  },
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "workspaceRoot": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "createdAt",
+                  "expiresAt",
+                  "pinned",
+                  "revision",
+                  "sessionId",
+                  "state",
+                  "taskId",
+                  "workspaceRoot"
+                ],
+                "type": "object"
+              },
+              "workspaceId": {
+                "type": "string"
+              },
+              "executionRoot": {
+                "type": "string"
+              },
+              "portLease": {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "task",
+              "workspaceId",
+              "executionRoot",
+              "portLease"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "containerId": {
+            "type": "string"
+          },
+          "restoredInPlace": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "workspace",
+          "provider",
+          "containerId",
+          "restoredInPlace"
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sandbox_snapshot_get",
+      "category": "development",
+      "resource": "sandbox-snapshots",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "sandbox_snapshot_get (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "snapshotId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "snapshotId": {
+            "type": "string"
+          },
+          "deploymentId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "workspaceRoot": {
+            "type": "string"
+          },
+          "runtime": {},
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpointId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageBytes": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "workspaceCaptured",
+              "imageCommitted",
+              "ready",
+              "tombstoned"
+            ]
+          },
+          "createdAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pinned": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "snapshotId",
+          "deploymentId",
+          "projectId",
+          "taskId",
+          "workspaceRoot",
+          "runtime",
+          "exclusions",
+          "checkpointId",
+          "imageId",
+          "imageBytes",
+          "phase",
+          "createdAt",
+          "expiresAt",
+          "pinned"
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sandbox_snapshot_list",
+      "category": "development",
+      "resource": "sandbox-snapshots",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "sandbox_snapshot_list (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "snapshotId": {
+              "type": "string"
+            },
+            "deploymentId": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "workspaceRoot": {
+              "type": "string"
+            },
+            "runtime": {},
+            "exclusions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "checkpointId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "imageId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "imageBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "preparing",
+                "workspaceCaptured",
+                "imageCommitted",
+                "ready",
+                "tombstoned"
+              ]
+            },
+            "createdAt": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "expiresAt": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "pinned": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "snapshotId",
+            "deploymentId",
+            "projectId",
+            "taskId",
+            "workspaceRoot",
+            "runtime",
+            "exclusions",
+            "checkpointId",
+            "imageId",
+            "imageBytes",
+            "phase",
+            "createdAt",
+            "expiresAt",
+            "pinned"
+          ]
+        }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sandbox_snapshot_pin",
+      "category": "development",
+      "resource": "sandbox-snapshots",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sandbox_snapshot_pin (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pinned": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "snapshotId",
+          "pinned"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "snapshotId": {
+            "type": "string"
+          },
+          "deploymentId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "workspaceRoot": {
+            "type": "string"
+          },
+          "runtime": {},
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpointId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageBytes": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "workspaceCaptured",
+              "imageCommitted",
+              "ready",
+              "tombstoned"
+            ]
+          },
+          "createdAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pinned": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "snapshotId",
+          "deploymentId",
+          "projectId",
+          "taskId",
+          "workspaceRoot",
+          "runtime",
+          "exclusions",
+          "checkpointId",
+          "imageId",
+          "imageBytes",
+          "phase",
+          "createdAt",
+          "expiresAt",
+          "pinned"
+        ]
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sandbox_snapshot_restore",
+      "category": "development",
+      "resource": "sandbox-snapshots",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sandbox_snapshot_restore (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "properties": {
+              "snapshotId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "taskId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "workspaceId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "snapshotId",
+              "taskId",
+              "sessionId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task": {
+                "additionalProperties": false,
+                "properties": {
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "expiresAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "revision": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "enum": [
+                      "active",
+                      "ready",
+                      "applied",
+                      "conflict",
+                      "expired"
+                    ],
+                    "type": "string"
+                  },
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "workspaceRoot": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "createdAt",
+                  "expiresAt",
+                  "pinned",
+                  "revision",
+                  "sessionId",
+                  "state",
+                  "taskId",
+                  "workspaceRoot"
+                ],
+                "type": "object"
+              },
+              "workspaceId": {
+                "type": "string"
+              },
+              "executionRoot": {
+                "type": "string"
+              },
+              "portLease": {
+                "additionalProperties": false,
+                "properties": {
+                  "basePort": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "canonicalRoot": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "leaseId": {
+                    "type": "string"
+                  },
+                  "namespaceKey": {
+                    "type": "string"
+                  },
+                  "portCount": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "registryWorkspaceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subjectKey": {
+                    "type": "string"
+                  },
+                  "subjectKind": {
+                    "enum": [
+                      "registry",
+                      "desktop-session",
+                      "project-root"
+                    ],
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "basePort",
+                  "canonicalRoot",
+                  "createdAt",
+                  "leaseId",
+                  "namespaceKey",
+                  "portCount",
+                  "registryWorkspaceId",
+                  "subjectKey",
+                  "subjectKind",
+                  "updatedAt"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "task",
+              "workspaceId",
+              "executionRoot",
+              "portLease"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "containerId": {
+            "type": "string"
+          },
+          "restoredInPlace": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "workspace",
+          "provider",
+          "containerId",
+          "restoredInPlace"
+        ]
+      },
+      "outputTyped": true
+    },
+    {
       "name": "scheduled_task_backfill",
       "category": "automation",
       "resource": "scheduled-tasks",
@@ -81961,6 +83112,12 @@
             "minimum": 0,
             "type": "integer"
           },
+          "sandboxSnapshotBudgetBytes": {
+            "default": 1073741824,
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "portBlockSize": {
             "default": 10,
             "format": "uint32",
@@ -81988,6 +83145,7 @@
         "required": [
           "activeDirectoryCap",
           "blobBudgetBytes",
+          "sandboxSnapshotBudgetBytes",
           "portBlockSize",
           "portRangeEnd",
           "portRangeStart",
@@ -82039,6 +83197,12 @@
             "minimum": 0,
             "type": "integer"
           },
+          "sandboxSnapshotBudgetBytes": {
+            "default": 1073741824,
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "portBlockSize": {
             "default": 10,
             "format": "uint32",
@@ -82066,6 +83230,7 @@
         "required": [
           "activeDirectoryCap",
           "blobBudgetBytes",
+          "sandboxSnapshotBudgetBytes",
           "portBlockSize",
           "portRangeEnd",
           "portRangeStart",
@@ -92893,5 +94058,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "1c365867e731aeb2502662af5f3ebfd3f16df84352297b3879b177e03a412ce1"
+  "catalogHash": "199bec55fd98ad81ad244631bfc0ef3cfb0a76518c43acd98421a21c1c6b315d"
 }

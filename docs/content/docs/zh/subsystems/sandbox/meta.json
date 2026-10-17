@@ -8,6 +8,7 @@
     "microvm-and-web",
     "plugin-isolation",
     "cua-remote-sandbox",
-    "observability-and-ui"
+    "observability-and-ui",
+    "snapshots"
   ]
 }

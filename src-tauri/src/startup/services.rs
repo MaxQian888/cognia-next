@@ -242,6 +242,11 @@ pub(crate) fn remote_sandboxes(app: &App) {
                     return;
                 }
                 if let Some(services) = pool.services {
+                    if let Err(error) = crate::task_workspace::service().and_then(|workspaces| {
+                        cognia_companion::sandbox_snapshots::install(workspaces, services.clone())
+                    }) {
+                        log::warn!("sandbox snapshots: startup recovery unavailable: {error}");
+                    }
                     crate::companion_api::environment_pool::install(services);
                 }
                 log::info!("remote sandboxes: on");

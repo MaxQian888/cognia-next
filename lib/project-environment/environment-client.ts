@@ -36,7 +36,10 @@ import type {
   PinnedImage,
   TaskDeliveryRecord,
 } from "@/types/sandbox/environment-spec"
-import type { SandboxProviderView } from "@/types/sandbox/remote-sandboxes"
+import type {
+  SandboxProviderView,
+  SandboxSnapshotCapabilities,
+} from "@/types/sandbox/remote-sandboxes"
 import type {
   CatalogEntrySource,
   CatalogImageView,
@@ -312,6 +315,8 @@ export interface DriverStatus {
   reachable: boolean
   unreachableReason?: string
   bundles: OfferedBundleView[]
+  /** Absent on older hosts; never infer checkpoint support from a provider name. */
+  snapshotCapabilities?: SandboxSnapshotCapabilities
   /**
    * Every driver a spawn can be placed on (ADR-0221), the local one included
    * as `local`. Empty or absent on a Host whose local driver is its only one.

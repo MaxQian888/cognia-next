@@ -23,8 +23,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::UnixStream;
 
 use crate::policy::{
-    check_container_create, check_exec_create, check_volume_create, classify, scoped_list_query,
-    Ownership, ProxyPolicy, Route, Verb,
+    check_container_create, check_exec_create, check_snapshot_commit, check_snapshot_remove,
+    check_volume_create, classify, scoped_list_query, snapshot_image_id, snapshot_tag, Ownership,
+    ProxyPolicy, Route, Verb,
 };
 
 pub type ProxyBody = BoxBody<Bytes, hyper::Error>;
@@ -79,6 +80,24 @@ fn parse_body(bytes: &Bytes, empty_is: Value) -> Result<Value, String> {
         return Ok(empty_is);
     }
     serde_json::from_slice(bytes).map_err(|e| format!("the request body is not JSON: {e}"))
+}
+
+fn snapshot_image_authorized(policy: &ProxyPolicy, id: &str, info: &Value) -> bool {
+    let tags = info.get("RepoTags").and_then(Value::as_array);
+    let same_id = !snapshot_image_id(id) || info.get("Id").and_then(Value::as_str) == Some(id);
+    same_id
+        && tags.is_some_and(|tags| {
+            !tags.is_empty()
+                && tags
+                    .iter()
+                    .all(|tag| tag.as_str().is_some_and(|tag| snapshot_tag(policy, tag)))
+        })
+}
+
+fn snapshot_container_stopped(policy: &ProxyPolicy, info: &Value) -> bool {
+    policy.owns(info.pointer("/Config/Labels").and_then(Value::as_object))
+        && info.pointer("/State/Running").and_then(Value::as_bool) == Some(false)
+        && info.pointer("/State/Paused").and_then(Value::as_bool) != Some(true)
 }
 
 impl Proxy {
@@ -216,6 +235,20 @@ impl Proxy {
             Route::ExecCreate { .. } => {
                 parse_body(&bytes, serde_json::json!({})).and_then(|body| check_exec_create(&body))
             }
+            Route::SnapshotCommit => parse_body(&bytes, serde_json::json!({}))
+                .and_then(|body| check_snapshot_commit(&self.policy, parts.uri.query(), &body))
+                .map(|_| ()),
+            Route::SnapshotImage { id, remove: true } => {
+                check_snapshot_remove(parts.uri.query(), id)
+            }
+            Route::ImagePull
+                if parts.uri.query().is_some_and(|query| {
+                    url::form_urlencoded::parse(query.as_bytes())
+                        .any(|(_, value)| value.starts_with("cognia-snapshot-"))
+                }) =>
+            {
+                Err("snapshot namespace cannot be pulled or imported".into())
+            }
             Route::VolumeCreate => parse_body(&bytes, Value::Null)
                 .and_then(|body| check_volume_create(&self.policy, &body)),
             _ => Ok(()),
@@ -223,6 +256,46 @@ impl Proxy {
         if let Err(reason) = checked {
             tracing::warn!(method = %parts.method, %path, %reason, "refused");
             return refusal(StatusCode::FORBIDDEN, reason);
+        }
+
+        match &route {
+            Route::SnapshotCommit => {
+                let body =
+                    parse_body(&bytes, serde_json::json!({})).expect("validated commit body");
+                let id = check_snapshot_commit(&self.policy, parts.uri.query(), &body)
+                    .expect("validated commit query");
+                match self.lookup(&format!("/containers/{id}/json")).await {
+                    Ok(Some(info)) if snapshot_container_stopped(&self.policy, &info) => {}
+                    Ok(_) => {
+                        return refusal(
+                            StatusCode::FORBIDDEN,
+                            "snapshot requires a stopped container of this deployment",
+                        )
+                    }
+                    Err(error) => return refusal(StatusCode::BAD_GATEWAY, error),
+                }
+            }
+            Route::SnapshotImage { id, .. } => {
+                if !snapshot_image_id(id) && !snapshot_tag(&self.policy, id) {
+                    return refusal(
+                        StatusCode::FORBIDDEN,
+                        "snapshot image is outside this deployment",
+                    );
+                }
+                match self.lookup(&format!("/images/{id}/json")).await {
+                    Ok(None) => {}
+                    Ok(Some(info)) => {
+                        if !snapshot_image_authorized(&self.policy, id, &info) {
+                            return refusal(
+                                StatusCode::FORBIDDEN,
+                                "snapshot image has no exclusive deployment commit provenance",
+                            );
+                        }
+                    }
+                    Err(error) => return refusal(StatusCode::BAD_GATEWAY, error),
+                }
+            }
+            _ => {}
         }
 
         match self.owner(&route.ownership()).await {
@@ -482,6 +555,55 @@ mod tests {
             "Labels": labels,
             "HostConfig": { "Mounts": mounts, "NetworkMode": "none", "CapDrop": ["ALL"] }
         })
+    }
+
+    #[test]
+    fn snapshot_provenance_uses_immutable_id_and_exclusive_tags_never_image_labels() {
+        let policy = ProxyPolicy::new("dep1", "dep1_workspaces");
+        let image = format!("sha256:{}", "a".repeat(64));
+        let tag = format!(
+            "{}:{}",
+            crate::policy::snapshot_repository(&policy),
+            uuid::Uuid::new_v4()
+        );
+        let valid = serde_json::json!({ "Id": image, "RepoTags": [tag] });
+        assert!(snapshot_image_authorized(&policy, &image, &valid));
+        assert!(snapshot_image_authorized(&policy, &tag, &valid));
+        let mut mismatch = valid.clone();
+        mismatch["Id"] = serde_json::json!(format!("sha256:{}", "b".repeat(64)));
+        assert!(!snapshot_image_authorized(&policy, &image, &mismatch));
+        for tags in [
+            serde_json::json!([]),
+            serde_json::json!(["foreign:latest"]),
+            serde_json::json!([tag, "another-deployment:latest"]),
+        ] {
+            let forged = serde_json::json!({ "Id": image, "RepoTags": tags, "Config": { "Labels": ours() } });
+            assert!(!snapshot_image_authorized(&policy, &image, &forged));
+        }
+        assert!(!snapshot_image_authorized(
+            &ProxyPolicy::new("other", "v"),
+            &image,
+            &valid
+        ));
+    }
+
+    #[test]
+    fn snapshot_commit_needs_explicit_stopped_state_and_own_container() {
+        let policy = ProxyPolicy::new("dep1", "dep1_workspaces");
+        let mut info = serde_json::json!({ "Config": { "Labels": ours() }, "State": { "Running": false, "Paused": false } });
+        assert!(snapshot_container_stopped(&policy, &info));
+        info["State"]["Running"] = serde_json::json!(true);
+        assert!(!snapshot_container_stopped(&policy, &info));
+        info["State"]["Running"] = serde_json::json!(false);
+        info["State"]["Paused"] = serde_json::json!(true);
+        assert!(!snapshot_container_stopped(&policy, &info));
+        info["State"] = serde_json::json!({});
+        assert!(!snapshot_container_stopped(&policy, &info));
+        info["State"] = serde_json::json!({"Running": false});
+        assert!(!snapshot_container_stopped(
+            &ProxyPolicy::new("other", "v"),
+            &info
+        ));
     }
 
     #[tokio::test]

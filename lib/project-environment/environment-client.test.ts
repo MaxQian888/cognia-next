@@ -55,6 +55,19 @@ function entry(): CatalogEntryRecord {
 }
 
 describe("the wire names and arguments", () => {
+  it("preserves separate filesystem and memory capabilities from the Host", async () => {
+    const status = {
+      snapshotCapabilities: {
+        filesystemCheckpoint: true,
+        forkFromCheckpoint: true,
+        pauseResume: false,
+        memoryResume: false,
+      },
+      providers: [],
+    }
+    call.mockResolvedValueOnce(status as never)
+    expect(await environmentDriverStatus()).toEqual(status)
+  })
   // The command names are the contract with `rpc/environment.rs`. A typo here
   // is an `unknown_command` at runtime and nothing catches it earlier, so the
   // whole surface is pinned in one table.

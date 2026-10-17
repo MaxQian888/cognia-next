@@ -413,6 +413,22 @@ const schemas = {
     error: z.string().nullable().optional(),
     teamRunId: z.string().nullable().optional(),
   }) }),
+  sandbox_snapshot_create: z.object({ request: z.object({
+    projectId: z.string().min(1), workspaceId: z.string().min(1),
+    provider: z.string().min(1), containerId: z.string().min(1),
+    exclusions: stringArray.optional(),
+  }) }),
+  sandbox_snapshot_list: z.object({ projectId: z.string().min(1) }),
+  sandbox_snapshot_get: z.object({ snapshotId: z.string().min(1) }),
+  sandbox_snapshot_delete: z.object({ snapshotId: z.string().min(1) }),
+  sandbox_snapshot_pin: z.object({ snapshotId: z.string().min(1), pinned: z.boolean() }),
+  sandbox_snapshot_fork: z.object({ request: z.object({
+    snapshotId: z.string().min(1), taskId: z.string().min(1), sessionId: z.string().min(1),
+  }) }),
+  sandbox_snapshot_restore: z.object({ request: z.object({
+    snapshotId: z.string().min(1), taskId: z.string().min(1), sessionId: z.string().min(1),
+    workspaceId: z.string().nullable().optional(),
+  }) }),
   task_workspace_changeset_get: changesetReference,
   task_workspace_changeset_list: z.object({
     filter: z.object({

@@ -98,7 +98,7 @@ export function MaintenanceTab() {
  * (`service.rs::set_workspace_lifecycle_policy`), so refusing it here is the
  * difference between a disabled Save and a raw Rust error string.
  */
-type EditableLifecycleField = keyof WorkspaceLifecyclePolicy
+type EditableLifecycleField = Exclude<keyof WorkspaceLifecyclePolicy, "sandboxSnapshotBudgetBytes">
 
 function WorkspaceLifecyclePolicyBlock() {
   const t = useTranslations("settings.data.workspaceLifecycle")

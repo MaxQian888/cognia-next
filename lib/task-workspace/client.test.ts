@@ -786,6 +786,7 @@ describe("task workspace client", () => {
       activeDirectoryCap: 15,
       snapshotRetentionDays: 30,
       blobBudgetBytes: 1 << 30,
+      sandboxSnapshotBudgetBytes: 1 << 30,
       portRangeStart: 41000,
       portRangeEnd: 48999,
       portBlockSize: 10,

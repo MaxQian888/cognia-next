@@ -1009,6 +1009,13 @@ mod tests {
         ("browser_find", OutputShape::Opaque(RootType::Any)),
         ("browser_find_clear", OutputShape::Opaque(RootType::Any)),
         // ── runtime environments (rpc/environment.rs) ───────────────────────
+        ("sandbox_snapshot_create", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::SandboxSnapshotRecord", schema: schema_of::<cognia_task_workspace::SandboxSnapshotRecord> })),
+        ("sandbox_snapshot_list", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::SandboxSnapshotRecord>", schema: schema_of::<Vec<cognia_task_workspace::SandboxSnapshotRecord>> })),
+        ("sandbox_snapshot_get", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::SandboxSnapshotRecord", schema: schema_of::<cognia_task_workspace::SandboxSnapshotRecord> })),
+        ("sandbox_snapshot_delete", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::SandboxSnapshotRecord", schema: schema_of::<cognia_task_workspace::SandboxSnapshotRecord> })),
+        ("sandbox_snapshot_pin", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::SandboxSnapshotRecord", schema: schema_of::<cognia_task_workspace::SandboxSnapshotRecord> })),
+        ("sandbox_snapshot_fork", OutputShape::Derived(DerivedOutput { rust_type: "cognia_companion::sandbox_snapshots::ForkedSandboxSnapshot", schema: schema_of::<cognia_companion::sandbox_snapshots::ForkedSandboxSnapshot> })),
+        ("sandbox_snapshot_restore", OutputShape::Derived(DerivedOutput { rust_type: "cognia_companion::sandbox_snapshots::ForkedSandboxSnapshot", schema: schema_of::<cognia_companion::sandbox_snapshots::ForkedSandboxSnapshot> })),
         //
         // Every row is `Derived`: the wire types live in `environment_pool`
         // and `cognia-environment`, they already carry `JsonSchema`, and the
@@ -1284,7 +1291,8 @@ mod tests {
                     sha256: "a".repeat(64),
                     size: 4,
                     mtime_ms: None,
-                }).unwrap(),
+                })
+                .unwrap(),
             ),
             (
                 "fs_read_workspace_file_versioned",
@@ -1293,18 +1301,43 @@ mod tests {
                     sha256: "a".repeat(64),
                     size: 4,
                     mtime_ms: Some(123),
-                }).unwrap(),
+                })
+                .unwrap(),
             ),
         ] {
             let reference = published["commands"][arm]["$ref"].as_str().unwrap();
             let definition = &published["$defs"][reference.strip_prefix("#/$defs/").unwrap()];
-            let actual: BTreeSet<_> = value.as_object().unwrap().keys().map(String::as_str).collect();
-            let declared: BTreeSet<_> = definition["properties"].as_object().unwrap().keys().map(String::as_str).collect();
-            let required: BTreeSet<_> = definition["required"].as_array().unwrap().iter().map(|field| field.as_str().unwrap()).collect();
-            assert_eq!(actual, declared, "{arm} must declare every serialized field");
-            assert_eq!(actual, required, "{arm} must require every serialized field");
+            let actual: BTreeSet<_> = value
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let declared: BTreeSet<_> = definition["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let required: BTreeSet<_> = definition["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|field| field.as_str().unwrap())
+                .collect();
+            assert_eq!(
+                actual, declared,
+                "{arm} must declare every serialized field"
+            );
+            assert_eq!(
+                actual, required,
+                "{arm} must require every serialized field"
+            );
             assert_eq!(definition["additionalProperties"], false);
-            assert_eq!(definition["properties"]["mtimeMs"]["type"], serde_json::json!(["integer", "null"]));
+            assert_eq!(
+                definition["properties"]["mtimeMs"]["type"],
+                serde_json::json!(["integer", "null"])
+            );
         }
     }
 

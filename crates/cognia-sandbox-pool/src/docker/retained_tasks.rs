@@ -119,6 +119,7 @@ impl RetainedTasks {
 }
 impl DockerSandboxBackend {
     pub fn configure_retained_tasks(&self, data_dir: &Path) -> Result<(), String> {
+        self.configure_snapshot_forks(data_dir)?;
         *self.retained_tasks.lock() =
             RetainedTasks::load(data_dir.join("sandbox-retained-tasks.json"))?;
         Ok(())

@@ -2065,6 +2065,7 @@ dependencies = [
  "cognia-secrets",
  "cognia-sidecar",
  "cognia-signaling-core",
+ "cognia-task-workspace",
  "cognia-tenant-auth",
  "cognia-terminal",
  "cognia-update-catalog",
@@ -2352,15 +2353,18 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "cognia-external-agent",
+ "hex",
  "http-body-util",
  "hyper",
  "hyper-util",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid",
 ]
 
 [[package]]
