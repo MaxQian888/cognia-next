@@ -284,8 +284,12 @@ impl RelayTarget {
         ))
     }
 
+    /// Port and preview relays carry a proxied application: its own
+    /// Authorization, Host and Origin travel in `x-cognia-port-*` headers and
+    /// the loopback listener refuses foreign browser origins.
     fn is_port(&self) -> bool {
         self.relay_path.starts_with("/api/environment/ports/")
+            || self.relay_path.starts_with(PREVIEW_RELAY_PREFIX)
     }
 
     fn key(&self) -> String {
@@ -394,6 +398,22 @@ fn normalize_fingerprint(value: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
+/// A sandbox preview grant shared with this paired device (ADR-0231 phase 2):
+/// `/api/sandbox/previews/<32 lowercase hex>/`. The Host admits the device and
+/// re-checks the grant; the relay only refuses any other shape.
+fn preview_relay_path(path: &str) -> bool {
+    path.strip_prefix(PREVIEW_RELAY_PREFIX)
+        .map(|id| id.strip_suffix('/').unwrap_or(id))
+        .is_some_and(|id| {
+            id.len() == 32
+                && id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+}
+
+const PREVIEW_RELAY_PREFIX: &str = "/api/sandbox/previews/";
+
 fn normalize_relay_path(value: &str) -> Result<String, String> {
     let path = value.trim();
     let port_path = path
@@ -405,7 +425,7 @@ fn normalize_relay_path(value: &str) -> Result<String, String> {
                 && !parts[1].is_empty()
                 && parts[2].parse::<u16>().is_ok_and(|port| port != 0)
         });
-    if !(path.starts_with("/ide/relay/") || port_path)
+    if !(path.starts_with("/ide/relay/") || port_path || preview_relay_path(path))
         || path.contains("..")
         || path.contains('?')
         || path.contains('#')
@@ -828,6 +848,20 @@ mod tests {
             "/api/environment/ports/project/container/3000/extra",
         ] {
             assert!(normalize_relay_path(invalid).is_err(), "{invalid}");
+        }
+        let grant = "0123456789abcdef0123456789abcdef";
+        assert_eq!(
+            normalize_relay_path(&format!("/api/sandbox/previews/{grant}")).unwrap(),
+            format!("/api/sandbox/previews/{grant}/")
+        );
+        for invalid in [
+            "/api/sandbox/previews/".to_string(),
+            "/api/sandbox/previews/0123456789ABCDEF0123456789ABCDEF/".to_string(),
+            format!("/api/sandbox/previews/{grant}0/"),
+            format!("/api/sandbox/previews/{grant}/extra"),
+            "/api/sandbox/previews/../ports".to_string(),
+        ] {
+            assert!(normalize_relay_path(&invalid).is_err(), "{invalid}");
         }
     }
 

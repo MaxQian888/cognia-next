@@ -10,6 +10,7 @@ import { isTauri } from "@/lib/tauri"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 import { SandboxPreviewLinksPanel } from "./sandbox-preview-links-panel"
 import { SandboxSnapshotsPanel } from "./sandbox-snapshots-panel"
+import { SharedSandboxPreviewsPanel } from "./shared-sandbox-previews-panel"
 
 /** Shared Settings/workspace entry point; all runtime identities come from the Host. */
 export function SandboxManagementPanels({ projectId }: { projectId: string }) {
@@ -25,7 +26,9 @@ export function SandboxManagementPanels({ projectId }: { projectId: string }) {
     setWorkspaces([])
     setFailed(false)
   }
-  const local = isTauri() && !getActiveRemoteEndpoint()
+  const desktop = isTauri()
+  const remote = desktop ? getActiveRemoteEndpoint() : null
+  const local = desktop && !remote
   const refresh = useCallback(async () => {
     const current = ++epoch.current
     try {
@@ -54,8 +57,23 @@ export function SandboxManagementPanels({ projectId }: { projectId: string }) {
     }
   }, [refresh, local])
 
+  if (remote)
+    return (
+      <div className="space-y-3">
+        <p className="border-t pt-3 text-xs text-muted-foreground">{t("localRequired")}</p>
+        <SharedSandboxPreviewsPanel endpoint={remote} projectId={projectId} />
+      </div>
+    )
   if (!local)
-    return <p className="border-t pt-3 text-xs text-muted-foreground">{t("localRequired")}</p>
+    return (
+      <div className="space-y-2 border-t pt-3 text-xs text-muted-foreground">
+        <p>{t("localRequired")}</p>
+        {/* No signed relay outside the desktop app: see `PairedPreviewSupport`. */}
+        <p data-dormant="paired-mobile-preview" aria-disabled="true">
+          {t("shared.desktopOnly")}
+        </p>
+      </div>
+    )
   if (failed)
     return (
       <div className="space-y-2 border-t pt-3">

@@ -50,7 +50,7 @@ beforeEach(() => {
   jest.mocked(requestBrowserUrl).mockReturnValue(true)
 })
 
-it("copies a capability once, keeps it out of list metadata and always requests local owner", async () => {
+it("copies a capability once, keeps it out of list metadata and defaults to the local owner", async () => {
   const { result } = renderHook(() => useSandboxPreviewLinks("p"))
   await waitFor(() => expect(result.current.loading).toBe(false))
   await act(() => result.current.create(request))
@@ -63,6 +63,18 @@ it("copies a capability once, keeps it out of list metadata and always requests 
   await act(() => result.current.copy("g"))
   await act(() => result.current.copy("g"))
   expect(writeClipboardText).toHaveBeenCalledTimes(1)
+  expect(result.current.copyable).toEqual([])
+})
+
+it("shares a grant with one paired device without holding any copy capability", async () => {
+  const audience = { kind: "pairedDevice" as const, deviceId: "desk" }
+  const paired = { ...grant, audience, origin: "/api/sandbox/previews/g/" }
+  create.mockResolvedValueOnce({ grant: paired, bootstrapUrl: paired.origin })
+  const { result } = renderHook(() => useSandboxPreviewLinks("p"))
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  await act(() => result.current.create(request, audience))
+  expect(create).toHaveBeenCalledWith({ ...request, projectId: "p", audience })
+  expect(result.current.grants).toEqual([paired])
   expect(result.current.copyable).toEqual([])
 })
 

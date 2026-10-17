@@ -98,8 +98,23 @@ async fn relay(
     if !authorized(&context, &project).await {
         return StatusCode::FORBIDDEN.into_response();
     }
-    relay_request_inner(project, container, port, request, Some(context), None).await
+    relay_request_inner(
+        project,
+        container,
+        port,
+        request,
+        Some(context),
+        None,
+        PORT_ROUTE_TAIL,
+    )
+    .await
 }
+
+/// `/api/environment/ports/{project}/{container}/{port}/<tail>`: the tail is
+/// the eighth `/`-separated piece.
+const PORT_ROUTE_TAIL: usize = 7;
+/// `/api/sandbox/previews/{grant}/<tail>`.
+const PREVIEW_ROUTE_TAIL: usize = 5;
 
 /// Native local relay: the caller binds one fixed workspace/port on a separate
 /// loopback origin. The Tauri command is the owner boundary, and every request
@@ -110,7 +125,7 @@ pub async fn local_relay(
     port: u16,
     request: Request,
 ) -> Response {
-    relay_request_inner(project, container, port, request, None, None).await
+    relay_request_inner(project, container, port, request, None, None, 0).await
 }
 
 /// The preview grant owns cancellation until the last HTTP body or upgraded
@@ -122,7 +137,44 @@ pub(crate) async fn preview_relay(
     request: Request,
     cancellation: tokio::sync::watch::Receiver<bool>,
 ) -> Response {
-    relay_request_inner(project, container, port, request, None, Some(cancellation)).await
+    relay_request_inner(
+        project,
+        container,
+        port,
+        request,
+        None,
+        Some(cancellation),
+        0,
+    )
+    .await
+}
+
+/// A paired device's preview through its native relay: the grant owns
+/// cancellation and the device keeps its workspace authority for the whole
+/// stream, both re-checked while bodies and upgrades are open.
+pub(crate) async fn preview_device_relay(
+    project: String,
+    container: String,
+    port: u16,
+    request: Request,
+    context: DeviceContext,
+    cancellation: tokio::sync::watch::Receiver<bool>,
+) -> Response {
+    relay_request_inner(
+        project,
+        container,
+        port,
+        request,
+        Some(context),
+        Some(cancellation),
+        PREVIEW_ROUTE_TAIL,
+    )
+    .await
+}
+
+/// Whether a paired device may reach a project's ports right now.
+pub(crate) async fn device_authorized(context: &DeviceContext, project: &str) -> bool {
+    authorized(context, project).await
 }
 
 async fn relay_request_inner(
@@ -132,6 +184,7 @@ async fn relay_request_inner(
     request: Request,
     context: Option<DeviceContext>,
     preview_cancel: Option<tokio::sync::watch::Receiver<bool>>,
+    device_tail: usize,
 ) -> Response {
     let Some(runtime) = super::environment_pool::installed().and_then(|pool| pool.runtime) else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -144,8 +197,14 @@ async fn relay_request_inner(
         request,
         context,
         preview_cancel,
+        device_tail,
     )
     .await
+}
+
+/// The still-encoded application path after a device route's own segments.
+fn route_tail(path: &str, index: usize) -> &str {
+    path.splitn(index + 1, '/').nth(index).unwrap_or("")
 }
 
 async fn forward_request(
@@ -156,6 +215,7 @@ async fn forward_request(
     mut request: Request,
     context: Option<DeviceContext>,
     preview_cancel: Option<tokio::sync::watch::Receiver<bool>>,
+    device_tail: usize,
 ) -> Response {
     let remote = context.is_some();
     let stream = match runtime.open_port(&project, &container, port).await {
@@ -170,7 +230,7 @@ async fn forward_request(
     // Axum's Path extractor decodes %2F/%3F. Keep the original encoded tail
     // so application URLs retain their exact path/query boundary.
     let tail = if remote {
-        request.uri().path().splitn(8, '/').nth(7).unwrap_or("")
+        route_tail(request.uri().path(), device_tail)
     } else {
         request
             .uri()
@@ -224,30 +284,41 @@ async fn forward_request(
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
     let authorization = tokio::spawn(async move {
         // The runtime owns continuous spec/port admission for its stream.
-        // This layer adds device/workspace authority only, avoiding a second
-        // Docker inspect and policy lookup for every connection every tick.
-        if let Some(mut preview_cancel) = preview_cancel {
-            if *preview_cancel.borrow() {
-                cancel_tx.send_replace(true);
-                return;
-            }
-            tokio::select! {
-                _ = cancel_tx.closed() => {},
-                _ = preview_cancel.changed() => { cancel_tx.send_replace(true); }
-            }
+        // This layer adds grant cancellation and device/workspace authority
+        // only, avoiding a second Docker inspect and policy lookup for every
+        // connection every tick. A paired preview has both.
+        let mut preview_cancel = preview_cancel;
+        if preview_cancel
+            .as_ref()
+            .is_some_and(|cancel| *cancel.borrow())
+        {
+            cancel_tx.send_replace(true);
             return;
         }
-        let Some(context) = context else {
-            cancel_tx.closed().await;
-            return;
-        };
         loop {
             tokio::select! {
                 _ = cancel_tx.closed() => break,
-                _ = tokio::time::sleep(Duration::from_secs(2)) => {
-                    if !authorized(&context, &project).await {
-                        cancel_tx.send_replace(true);
-                        break;
+                _ = async {
+                    match preview_cancel.as_mut() {
+                        // A dropped sender means the grant is gone too.
+                        Some(cancel) => { let _ = cancel.changed().await; }
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    cancel_tx.send_replace(true);
+                    break;
+                }
+                _ = async {
+                    match &context {
+                        Some(_) => tokio::time::sleep(Duration::from_secs(2)).await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    if let Some(context) = &context {
+                        if !authorized(context, &project).await {
+                            cancel_tx.send_replace(true);
+                            break;
+                        }
                     }
                 }
             }
@@ -303,6 +374,29 @@ impl Drop for CancelAuthorization {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_routes_hand_the_encoded_application_tail_to_the_project() {
+        assert_eq!(
+            route_tail("/api/environment/ports/p/c/3000/a%2Fb/c", PORT_ROUTE_TAIL),
+            "a%2Fb/c"
+        );
+        assert_eq!(
+            route_tail("/api/environment/ports/p/c/3000", PORT_ROUTE_TAIL),
+            ""
+        );
+        assert_eq!(
+            route_tail(
+                "/api/sandbox/previews/abc/assets/app.js",
+                PREVIEW_ROUTE_TAIL
+            ),
+            "assets/app.js"
+        );
+        assert_eq!(
+            route_tail("/api/sandbox/previews/abc/", PREVIEW_ROUTE_TAIL),
+            ""
+        );
+    }
 
     #[test]
     fn host_credentials_and_nominated_headers_never_reach_project_ports() {
@@ -432,6 +526,7 @@ mod preview_stream_tests {
                                 request.map(Body::new),
                                 None,
                                 Some(cancel),
+                                0,
                             )
                             .await,
                         )

@@ -12,6 +12,7 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tokio::sync::OnceCell;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -83,10 +84,14 @@ impl Claims {
             match held.get(key) {
                 None => {}
                 Some(&EXCLUSIVE) => {
-                    return Err(format!("snapshot_busy: {key} has a snapshot operation in progress"))
+                    return Err(format!(
+                        "snapshot_busy: {key} has a snapshot operation in progress"
+                    ))
                 }
                 Some(_) if *exclusive => {
-                    return Err(format!("snapshot_busy: {key} has a snapshot operation in progress"))
+                    return Err(format!(
+                        "snapshot_busy: {key} has a snapshot operation in progress"
+                    ))
                 }
                 Some(_) => {}
             }
@@ -187,7 +192,123 @@ fn stored_provider(snapshot: &SandboxSnapshotRecord) -> Result<&str, String> {
         .ok_or_else(|| "snapshot_record_invalid: missing provider".into())
 }
 
+/// Snapshot commands are reachable only with the Host's service scope, so the
+/// actor in the audit trail is the Host itself, never a paired device.
+const AUDIT_ACTOR: &str = "host-service";
+
+/// Audit and count one mutating snapshot operation. Only the error code (the
+/// text before the first `:`) is recorded: details can carry host paths.
+async fn record_operation(
+    operation: &str,
+    project_id: &str,
+    mut fields: serde_json::Value,
+    outcome: Result<(), &String>,
+) {
+    super::metrics::record_snapshot_operation(operation, outcome.is_ok());
+    if let Err(error) = outcome {
+        fields["errorCode"] = json!(error.split(':').next().unwrap_or_default().trim());
+    }
+    super::audit::record_async(
+        &format!("sandbox_snapshot_{operation}"),
+        AUDIT_ACTOR,
+        project_id,
+        if outcome.is_ok() { "ok" } else { "error" },
+        fields,
+    )
+    .await;
+}
+
 impl SnapshotService {
+    pub async fn pin(
+        &self,
+        snapshot_id: &str,
+        pinned: bool,
+    ) -> Result<SandboxSnapshotRecord, String> {
+        let result = self.pin_inner(snapshot_id, pinned).await;
+        let project = result.as_ref().map(|record| record.project_id.clone());
+        record_operation(
+            "pin",
+            project.as_deref().unwrap_or_default(),
+            json!({ "snapshotId": snapshot_id, "pinned": pinned }),
+            result.as_ref().map(|_| ()),
+        )
+        .await;
+        result
+    }
+
+    pub async fn create(
+        &self,
+        request: CreateSandboxSnapshot,
+    ) -> Result<SandboxSnapshotRecord, String> {
+        let project_id = request.project_id.clone();
+        let mut fields = json!({
+            "workspaceId": &request.workspace_id,
+            "provider": &request.provider,
+        });
+        let result = self.create_inner(request).await;
+        if let Ok(record) = &result {
+            fields["snapshotId"] = json!(record.snapshot_id);
+            fields["imageBytes"] = json!(record.image_bytes);
+        }
+        record_operation("create", &project_id, fields, result.as_ref().map(|_| ())).await;
+        result
+    }
+
+    pub async fn delete(&self, snapshot_id: &str) -> Result<SandboxSnapshotRecord, String> {
+        let result = self.delete_inner(snapshot_id).await;
+        let project = result.as_ref().map(|record| record.project_id.clone());
+        record_operation(
+            "delete",
+            project.as_deref().unwrap_or_default(),
+            json!({ "snapshotId": snapshot_id }),
+            result.as_ref().map(|_| ()),
+        )
+        .await;
+        result
+    }
+
+    pub async fn fork(
+        &self,
+        request: ForkSandboxSnapshot,
+    ) -> Result<ForkedSandboxSnapshot, String> {
+        let project = self
+            .get(&request.snapshot_id)
+            .map(|record| record.project_id);
+        let fields = json!({ "snapshotId": &request.snapshot_id, "taskId": &request.task_id });
+        let result = self.fork_inner(request).await;
+        record_operation(
+            "fork",
+            project.as_deref().unwrap_or_default(),
+            fields,
+            result.as_ref().map(|_| ()),
+        )
+        .await;
+        result
+    }
+
+    pub async fn restore(
+        &self,
+        request: RestoreSandboxSnapshot,
+    ) -> Result<ForkedSandboxSnapshot, String> {
+        let project = self
+            .get(&request.snapshot_id)
+            .map(|record| record.project_id);
+        let fields = json!({
+            "snapshotId": &request.snapshot_id,
+            "taskId": &request.task_id,
+            "workspaceId": &request.workspace_id,
+        });
+        let result = self.restore_inner(request).await;
+        record_operation(
+            "restore",
+            project.as_deref().unwrap_or_default(),
+            fields,
+            result.as_ref().map(|_| ()),
+        )
+        .await;
+        result
+    }
+
     pub fn set_preview_revoker(&self, revoker: Arc<dyn SnapshotPreviewRevoker>) {
         *self.previews.write() = Some(revoker);
     }
@@ -219,7 +340,7 @@ impl SnapshotService {
             .collect())
     }
 
-    pub async fn pin(
+    async fn pin_inner(
         &self,
         snapshot_id: &str,
         pinned: bool,
@@ -231,7 +352,7 @@ impl SnapshotService {
             .pin_sandbox_snapshot(&self.deployment, snapshot_id, pinned)
     }
 
-    pub async fn create(
+    async fn create_inner(
         &self,
         request: CreateSandboxSnapshot,
     ) -> Result<SandboxSnapshotRecord, String> {
@@ -552,7 +673,7 @@ impl SnapshotService {
         Ok(())
     }
 
-    pub async fn delete(&self, snapshot_id: &str) -> Result<SandboxSnapshotRecord, String> {
+    async fn delete_inner(&self, snapshot_id: &str) -> Result<SandboxSnapshotRecord, String> {
         self.initialize().await?;
         let _gate = self.gate.read().await;
         let _claim = self.claims.take(&[(snapshot_key(snapshot_id), true)])?;
@@ -621,11 +742,11 @@ impl SnapshotService {
         }
     }
 
-    pub async fn fork(
+    async fn fork_inner(
         &self,
         request: ForkSandboxSnapshot,
     ) -> Result<ForkedSandboxSnapshot, String> {
-        self.restore(RestoreSandboxSnapshot {
+        self.restore_inner(RestoreSandboxSnapshot {
             snapshot_id: request.snapshot_id,
             task_id: request.task_id,
             session_id: request.session_id,
@@ -634,7 +755,7 @@ impl SnapshotService {
         .await
     }
 
-    pub async fn restore(
+    async fn restore_inner(
         &self,
         request: RestoreSandboxSnapshot,
     ) -> Result<ForkedSandboxSnapshot, String> {

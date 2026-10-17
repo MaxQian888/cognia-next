@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum PreviewAudience {
     LocalOwner,
-    /// Inert in phase 1b. The Host refuses this variant until phase 2.
+    /// One paired device (ADR-0231 phase 2): served only on that device's
+    /// authenticated `/api/sandbox/previews/<id>/` route, never on a listener.
     PairedDevice {
         #[serde(rename = "deviceId")]
         device_id: String,

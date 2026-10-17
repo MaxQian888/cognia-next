@@ -217,6 +217,71 @@ pub fn record_lark_counter(name: &str) -> bool {
     true
 }
 
+// ── Sandbox previews and snapshots (ADR-0231 phase 2) ───────────────────────
+// Closed label sets: callers pass a fixed event name, unknown names are
+// dropped rather than minting a new series.
+const PREVIEW_EVENTS: [&str; 7] = [
+    "created",
+    "created_paired",
+    "opened",
+    "redeemed",
+    "revoked",
+    "device_request",
+    "device_denied",
+];
+static PREVIEW_EVENTS_TOTAL: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
+const SNAPSHOT_OPERATIONS: [&str; 5] = ["create", "delete", "pin", "fork", "restore"];
+static SNAPSHOT_OPERATIONS_TOTAL: [[AtomicU64; 2]; 5] =
+    [const { [const { AtomicU64::new(0) }; 2] }; 5];
+
+/// Count one sandbox preview lifecycle event. Returns `false` for a name
+/// outside the closed set.
+pub fn record_preview_event(event: &str) -> bool {
+    let Some(index) = PREVIEW_EVENTS.iter().position(|known| *known == event) else {
+        return false;
+    };
+    PREVIEW_EVENTS_TOTAL[index].fetch_add(1, Ordering::Relaxed);
+    true
+}
+
+/// Count one snapshot operation outcome. Returns `false` for an unknown
+/// operation.
+pub fn record_snapshot_operation(operation: &str, success: bool) -> bool {
+    let Some(index) = SNAPSHOT_OPERATIONS
+        .iter()
+        .position(|known| *known == operation)
+    else {
+        return false;
+    };
+    SNAPSHOT_OPERATIONS_TOTAL[index][usize::from(!success)].fetch_add(1, Ordering::Relaxed);
+    true
+}
+
+fn push_sandbox_metrics(out: &mut String) {
+    out.push_str(
+        "# HELP cognia_sandbox_preview_events_total Sandbox preview grant lifecycle events.\n",
+    );
+    out.push_str("# TYPE cognia_sandbox_preview_events_total counter\n");
+    for (event, counter) in PREVIEW_EVENTS.iter().zip(&PREVIEW_EVENTS_TOTAL) {
+        out.push_str(&format!(
+            "cognia_sandbox_preview_events_total{{event=\"{event}\"}} {}\n",
+            counter.load(Ordering::Relaxed)
+        ));
+    }
+    out.push_str(
+        "# HELP cognia_sandbox_snapshot_operations_total Sandbox snapshot operations by outcome.\n",
+    );
+    out.push_str("# TYPE cognia_sandbox_snapshot_operations_total counter\n");
+    for (operation, counters) in SNAPSHOT_OPERATIONS.iter().zip(&SNAPSHOT_OPERATIONS_TOTAL) {
+        for (outcome, counter) in ["ok", "error"].iter().zip(counters) {
+            out.push_str(&format!(
+                "cognia_sandbox_snapshot_operations_total{{operation=\"{operation}\",outcome=\"{outcome}\"}} {}\n",
+                counter.load(Ordering::Relaxed)
+            ));
+        }
+    }
+}
+
 /// Force `STARTED_AT` early so uptime measures boot, not first scrape.
 pub fn init() {
     Lazy::force(&STARTED_AT);
@@ -597,6 +662,7 @@ pub fn render_prometheus() -> String {
             services.sidecar_restart_count(),
         );
     }
+    push_sandbox_metrics(&mut out);
     out
 }
 
@@ -687,6 +753,29 @@ mod tests {
         assert!(value(&after, "cognia_dpop_replays_total") >= 1);
         assert!(value(&after, "cognia_dpop_rejections_total") >= 1);
         ws_client_disconnected();
+    }
+
+    #[test]
+    fn sandbox_metrics_use_closed_label_sets() {
+        assert!(record_preview_event("created_paired"));
+        assert!(!record_preview_event("made_up"));
+        assert!(record_snapshot_operation("fork", false));
+        assert!(!record_snapshot_operation("explode", true));
+        let rendered = render_prometheus();
+        let value = |series: &str| {
+            rendered
+                .lines()
+                .find_map(|line| line.strip_prefix(series))
+                .and_then(|rest| rest.trim().parse::<u64>().ok())
+                .unwrap_or(0)
+        };
+        assert!(value("cognia_sandbox_preview_events_total{event=\"created_paired\"}") >= 1);
+        assert!(
+            value("cognia_sandbox_snapshot_operations_total{operation=\"fork\",outcome=\"error\"}")
+                >= 1
+        );
+        assert!(!rendered.contains("made_up"));
+        assert!(!rendered.contains("explode"));
     }
 
     #[test]

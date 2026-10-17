@@ -1,5 +1,6 @@
-/** Host-owned, local-owner preview capabilities. Never persist bootstrap URLs. */
+/** Host-owned preview capabilities. Never persist bootstrap URLs. */
 import { transport } from "@/lib/tauri/transport-instance"
+import type { DevicePlatform } from "@/types/mobile/paired-device"
 import { collectPages, type Page } from "@/lib/tauri/companion-paging"
 import type { ManagedWorkspaceState, WorkspacePortLease } from "@/lib/task-workspace/types"
 import type { EnvironmentRuntimePort } from "@/lib/project-environment/environment-client"
@@ -9,8 +10,40 @@ export type PreviewPort =
 
 export type PreviewAudience =
   | { kind: "localOwner" }
-  /** Inert until phase 2: the Host refuses this audience. */
+  /**
+   * One paired device (ADR-0231 phase 2). The Host mints no bootstrap secret:
+   * it serves the grant on `/api/sandbox/previews/<id>/` to that device's own
+   * DPoP credentials only, and the owner cannot open it locally.
+   */
   | { kind: "pairedDevice"; deviceId: string }
+
+/**
+ * Where a paired-device grant can be opened. Only the desktop app has the
+ * native loopback relay that signs every proxied request with the device key.
+ * Phones and browsers have no such path (a WebView cannot attach DPoP and the
+ * WAN carrier transports RPC frames, not HTTP streams), so for them the
+ * audience is intentionally inert: listed, labelled, never selectable.
+ */
+export type PairedPreviewSupport = "desktopRelay" | "unsupported"
+
+export function pairedPreviewSupport(platform: DevicePlatform): PairedPreviewSupport {
+  return platform === "desktop" ? "desktopRelay" : "unsupported"
+}
+
+export function pairedPreviewDeviceId(grant: Pick<PreviewGrantV1, "audience">): string | null {
+  return grant.audience.kind === "pairedDevice" ? grant.audience.deviceId : null
+}
+
+/** What the Host lists to the paired device itself. Nothing here is a credential. */
+export interface PairedPreviewSummary {
+  id: string
+  projectId: string
+  workspaceId: string
+  resolvedPort: number
+  expiresAt: number
+  /** `/api/sandbox/previews/<id>/`, the only path the native relay accepts. */
+  relayPath: string
+}
 
 export interface PreviewGrantV1 {
   version: number
@@ -45,7 +78,10 @@ export interface CreateSandboxPreview {
 
 export interface CreatedSandboxPreview {
   grant: PreviewGrantV1
-  /** A one-shot, 60-second bootstrap capability, available only in memory. */
+  /**
+   * Local owner: a one-shot, 60-second bootstrap capability, available only in
+   * memory. Paired device: the device route path, which is not a credential.
+   */
   bootstrapUrl: string
 }
 

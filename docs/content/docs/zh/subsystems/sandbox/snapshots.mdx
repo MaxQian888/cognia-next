@@ -100,8 +100,8 @@ Settings 与工作区概览中的 Runtime environment 区域复用快照和预�
 预算用量由 Host 账本提供，包含检查点存储；UI 只累加镜像大小会低估用量。
 忙碌或超预算错误保持可见，不会丢弃当前列表。
 
-预览链接仅服务于本机所有者。已配对设备选项被禁用，标注将在 phase 2 推出；
-Host 同样拒绝该 audience。没有匿名公开链接。
+预览链接服务于本机所有者，或某一台已配对桌面（见
+[已配对设备预览](#已配对设备预览)）。没有匿名公开链接。
 
 桌面命令通过可信本地 IPC 执行。Headless 所有者使用经过认证、仅接受
 loopback 的内部 service plane；已配对设备 RPC 不能调用这些命令。
@@ -147,11 +147,60 @@ Client 使用共享分页适配器收集所有列表页；结果不完整或 cur
 返回。重新打开授权会替换尚未兑换的 bootstrap 凭据，之前复制的 URL 随即
 不能再兑换。
 
+## 已配对设备预览
+
+所有者可以把 audience 选为某一台已配对桌面
+（`{ kind: "pairedDevice", deviceId }`），将授权共享给它。创建时该设备必须
+仍持有 `workspace.write`；所有者的这一选择就是对该设备、项目和端口的批准。
+配对授权没有监听器，也没有 bootstrap 密钥：origin 是设备路由
+`/api/sandbox/previews/<id>/`，所有者无法在本机打开（`sandbox_preview_open`
+以 `preview_paired_grant_opens_on_device` 拒绝）。
+
+| 路由 | 用途 |
+| --- | --- |
+| `GET /api/sandbox/previews` | 共享给调用设备、且其仍可访问所属项目的有效授权 |
+| `/api/sandbox/previews/{grant}/…` | 该授权的不透明 HTTP 与 upgrade 代理 |
+
+两者都是设备路由：先校验 bearer + DPoP，再检查 `device_can_control` 和授权
+所属项目的 `environment_port_access` 审批权限。共享给其他设备的授权返回 404，
+与不存在的授权无法区分；控制权限被收回返回 403；已撤销、过期或失效的授权
+返回 410。每个请求还会重新检查运行时 generation 与端口批准；流保持打开期间，
+中继每两秒重新授权一次设备。撤销、过期或失去控制权限都会关闭活动响应和升级
+后的流。入站请求会剥离预览 cookie，出站 cookie 被改为 host-only。
+
+已配对桌面通过与环境端口转发相同的原生 loopback 中继
+（`crates/cognia-codeserver/src/relay.rs`）打开授权。中继只接受
+`/api/sandbox/previews/<32 位小写十六进制>/`，固定 Host 证书，并用设备密钥为
+每个代理请求签名；系统浏览器只看到 `http://127.0.0.1:<port>/`。已配对桌面的
+Settings 中列出“共享给此设备”（`lib/sandbox/paired-previews.ts`、
+`hooks/sandbox/use-shared-sandbox-previews.ts`）；授权从列表中消失时，其中继
+随之关闭。
+
+手机与浏览器刻意保持未启用：WebView 无法附带 DPoP，WAN 通道只传输 RPC 帧，
+不传输 HTTP 流。`PairedPreviewSupport` 记录了这一点，所有者选择器会以禁用并
+标注“尚未启用”的方式列出这些设备，测试同时固定这两点。
+
+## 审计与指标
+
+每个修改快照的操作（`create`、`delete`、`pin`、`fork`、`restore`）以及每次
+预览 `create`、`open`、`revoke` 都会写入以项目为 scope 的审计记录
+（`sandbox_snapshot_<op>`、`sandbox_preview_<op>`）。这些命令要求 Host 的
+service scope，因此 actor 为 `host-service`。失败的快照操作只记录错误码。
+被拒绝的设备请求以设备 id 审计（`sandbox_preview_device_request`）；被放行
+的请求只计数，因为一个页面会加载大量资源。撤销会记录原因：`owner`、
+`invalidated` 或 `snapshot_deleted`。
+
+`/metrics` 暴露 `cognia_sandbox_preview_events_total{event}`（`created`、
+`created_paired`、`opened`、`redeemed`、`revoked`、`device_request`、
+`device_denied`）和 `cognia_sandbox_snapshot_operations_total{operation,outcome}`。
+两组标签都是封闭集合。
+
 ## Provider 与验证
 
 能力分别为 `filesystemCheckpoint`、`forkFromCheckpoint`、`pauseResume`
 和 `memoryResume`。本地 Docker 支持文件系统检查点与分叉。E2B 保留暂停
-恢复，但在验证其 API 前，以明确的不支持原因拒绝检查点分叉。旧 Host 未提供
+恢复，但在验证其 API 前，以明确的不支持原因拒绝检查点分叉。每个远程
+provider 声明自己的能力标志，Host 再将其收窄到自身能驱动的范围。旧 Host 未提供
 能力标志时，不能假定它支持快照。
 
 定向编译检查命令：

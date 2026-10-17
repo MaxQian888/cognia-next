@@ -62,7 +62,19 @@ const IDE_RELAY_KEY = Symbol("IDE relay")
  * Its signing key is handed over only through local IPC, never in a URL.
  */
 async function requestDeviceToken(endpoint: RemoteHostEndpoint): Promise<string> {
-  const config: CompanionConfig = {
+  const headers = await companionAuthorizationHeaders(
+    remoteEndpointCompanionConfig(endpoint),
+    "GET",
+    "/ide/relay"
+  )
+  const bearer = headers.Authorization?.replace(/^Bearer\s+/i, "").trim()
+  if (!bearer) throw new Error("remote host did not issue a device access token")
+  return bearer
+}
+
+/** The paired identity a remote endpoint carries, as companion-auth reads it. */
+export function remoteEndpointCompanionConfig(endpoint: RemoteHostEndpoint): CompanionConfig {
+  return {
     baseUrl: endpoint.baseUrl,
     deviceId: endpoint.deviceId,
     serverVersion: endpoint.serverVersion,
@@ -71,10 +83,6 @@ async function requestDeviceToken(endpoint: RemoteHostEndpoint): Promise<string>
     serverFingerprint: endpoint.serverFingerprint,
     accountId: endpoint.accountId,
   }
-  const headers = await companionAuthorizationHeaders(config, "GET", "/ide/relay")
-  const bearer = headers.Authorization?.replace(/^Bearer\s+/i, "").trim()
-  if (!bearer) throw new Error("remote host did not issue a device access token")
-  return bearer
 }
 
 // One token request serves concurrent IDE/port refreshes for the same pairing.

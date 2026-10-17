@@ -2,7 +2,7 @@
   "cancel": "取消",
   "refresh": "刷新",
   "loading": "正在加载沙箱数据…",
-  "localRequired": "快照与预览链接仅供本机桌面所有者使用。配对设备预览将在第 2 阶段提供。",
+  "localRequired": "快照与预览链接由 Host 的桌面所有者管理。",
   "contextError": "无法加载 Host 的运行时列表和快照预算。",
   "snapshots": {
     "title": "快照",
@@ -47,7 +47,7 @@
   },
   "previews": {
     "title": "预览链接",
-    "description": "链接仅在本机使用。只能复制一次，且须在 60 秒内兑换；每个复制的链接只能兑换一次。访问会自动过期，也可随时撤销。",
+    "description": "本机所有者链接仅在本机使用：只能复制一次，且须在 60 秒内兑换。共享给配对桌面的链接只能在该设备上打开。访问会自动过期，也可随时撤销。",
     "port": "已批准的服务端口",
     "noPorts": "没有已批准的本地服务端口",
     "portOption": "{root} · {port} {label}",
@@ -55,7 +55,6 @@
     "minutes": "{count} 分钟",
     "audience": "访问对象",
     "localOwner": "本机所有者",
-    "pairedPhase2": "配对设备——第 2 阶段提供（尚未启用）",
     "addressing": "端口寻址",
     "leaseOffset": "工作区租约 + {offset}",
     "fixedPort": "固定端口 {port}",
@@ -76,6 +75,28 @@
     "origin": "预览地址",
     "localhostOrigin": "独立 localhost 主机名",
     "loopbackOrigin": "127.0.0.1 回退——不可用",
-    "originHelp": "不同端口会共享 Cookie，因此数字回环地址回退已禁用。如果浏览器无法解析独立的 localhost 地址，预览将无法使用。"
+    "originHelp": "不同端口会共享 Cookie，因此数字回环地址回退已禁用。如果浏览器无法解析独立的 localhost 地址，预览将无法使用。",
+    "localOwnerHelp": "复制一次，并在 60 秒内于本机兑换链接。",
+    "pairedDesktop": "配对桌面 · {label}",
+    "pairedUnsupportedOption": "{label}（需要桌面应用）",
+    "pairedHelp": "只有该配对桌面能用自己的设备凭据打开，无需复制。撤销链接或收回该设备的控制权限会立即关闭访问。",
+    "pairedMobileInactive": "手机和浏览器暂时无法打开共享预览（尚未启用）：只有桌面应用具备所需的签名中继。",
+    "sharedWith": "已共享给 {label}",
+    "opensOnDevice": "仅能在该设备上打开。"
+  },
+  "shared": {
+    "title": "共享给此设备",
+    "description": "Host 所有者共享给此桌面的预览。每个预览通过本地中继在浏览器中打开，中继会用此设备的密钥为每个请求签名。",
+    "empty": "此项目没有共享给此设备的预览。",
+    "port": "端口 {port} · 工作区 {workspace}",
+    "remaining": "约 {minutes} 分钟后过期",
+    "open": "在浏览器中打开",
+    "close": "关闭中继",
+    "desktopOnly": "共享给配对设备的预览只能在桌面应用中打开（此处尚未启用）。",
+    "errors": {
+      "load": "无法加载共享给此设备的预览。",
+      "forbidden": "此设备在 Host 上已没有控制权限，其共享预览已关闭。",
+      "open": "无法打开共享预览，它可能已被撤销或过期。"
+    }
   }
 }

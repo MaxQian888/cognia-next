@@ -103,10 +103,34 @@ generation and port approval. Revocation and expiry also cancel live HTTP
 bodies, SSE and WebSockets. Forwarding reuses `environment_ports.rs` over
 `open_port`; no Docker port is published, including for `network=none` runtimes.
 
-Paired-device audience remains an explicitly inert phase 2 variant. Phase 1b
-refuses it and exposes no anonymous public or paired-device preview access.
-The UI labels it as coming in phase 2. A capability alone must not broaden the
-owner boundary.
+Phase 1b refused the paired-device audience; phase 2 below enables it. There is
+still no anonymous public preview access. A capability alone must not broaden
+the owner boundary.
+
+## Phase 2: paired-device previews, provider declarations and audit
+
+- **Audience.** `pairedDevice { deviceId }` names one device. The owner's choice
+  is that device's approval for the project and port; creation also requires the
+  device to hold `workspace.write` now. No listener or bootstrap secret is
+  minted: the grant's origin is `/api/sandbox/previews/<id>/`, and the owner
+  cannot open it locally.
+- **Host route.** `GET /api/sandbox/previews` lists the caller's live grants;
+  `/api/sandbox/previews/{grant}/…` proxies through `environment_ports.rs` with
+  the device's own context. Admission: unknown or other-device grant → 404,
+  lost control or approval authority → 403, revoked/expired/invalidated → 410.
+  The relay re-authorizes the device every two seconds and the grant's
+  cancellation closes live streams.
+- **Clients.** Only the desktop app opens these grants, through the existing
+  native loopback relay, which signs each request with the device key. Phones,
+  browsers and the WAN carrier have no signed HTTP stream path, so that
+  audience is inert for them on all three axes (type, UI, test). A WAN stream
+  adapter is out of scope.
+- **Providers.** `RemoteProvisioner::snapshot_capabilities()` declares a remote
+  provider's flags (none by default; E2B declares pause and memory resume) and
+  the Host intersects them with its own.
+- **Audit and metrics.** Snapshot and preview mutations are audited per project
+  with `host-service` as the actor; refused device requests carry the device id.
+  Two closed-label counter families are exported on `/metrics`.
 
 ## Provider and host contract
 

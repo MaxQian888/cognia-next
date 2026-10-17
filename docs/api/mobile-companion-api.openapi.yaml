@@ -1972,6 +1972,21 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/A2aJsonRpcRequest"
+  /api/sandbox/previews:
+    get:
+      operationId: getApiSandboxPreviews
+      tags:
+        - api
+      summary: GET /api/sandbox/previews
+      security:
+        - dpopAccess: []
+      responses:
+        "200":
+          description: Successful response.
+        "401":
+          $ref: "#/components/responses/AuthenticationRejected"
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
   /ide/relay/{relay_id}:
     get:
       operationId: getIdeRelayRelayId

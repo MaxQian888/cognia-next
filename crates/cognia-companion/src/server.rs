@@ -694,6 +694,23 @@ fn build_router_for_mode(
             "/api/environment/ports/{project}/{container}/{port}/{*tail}",
             any(super::environment_ports::handler),
         )
+        // ADR-0231 phase 2: preview grants shared with one paired device.
+        .route(
+            "/api/sandbox/previews",
+            get(super::sandbox_previews::device_list),
+        )
+        .route(
+            "/api/sandbox/previews/{grant}",
+            any(super::sandbox_previews::device_root_handler),
+        )
+        .route(
+            "/api/sandbox/previews/{grant}/",
+            any(super::sandbox_previews::device_root_handler),
+        )
+        .route(
+            "/api/sandbox/previews/{grant}/{*tail}",
+            any(super::sandbox_previews::device_handler),
+        )
         .route("/api/_rpc/{name}", post(super::api::rpc_handler))
         .route(
             "/api/sessions/{session_id}/media/{hash}",

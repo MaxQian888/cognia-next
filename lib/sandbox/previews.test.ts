@@ -5,6 +5,8 @@ import {
   sandboxPreviewList,
   sandboxPreviewOpen,
   sandboxPreviewRevoke,
+  pairedPreviewDeviceId,
+  pairedPreviewSupport,
 } from "./previews"
 
 const call = jest.spyOn(transport, "call")
@@ -42,8 +44,16 @@ it("lists safe metadata and only obtains bootstrap tokens through create/open", 
   ])
 })
 
-it("preserves the Host refusal for the inert phase 2 audience", async () => {
-  const refusal = new Error("preview_paired_device_unsupported")
+it("only the desktop app can open a paired-device grant", () => {
+  expect(pairedPreviewSupport("desktop")).toBe("desktopRelay")
+  for (const platform of ["ios", "android", "web", "browser", "unknown"] as const)
+    expect(pairedPreviewSupport(platform)).toBe("unsupported")
+  expect(pairedPreviewDeviceId({ audience: { kind: "pairedDevice", deviceId: "d" } })).toBe("d")
+  expect(pairedPreviewDeviceId({ audience: { kind: "localOwner" } })).toBeNull()
+})
+
+it("preserves the Host refusal for a device that may no longer control it", async () => {
+  const refusal = new Error("preview_device_not_permitted")
   call.mockRejectedValueOnce(refusal)
   await expect(
     sandboxPreviewCreate({

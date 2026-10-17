@@ -115,9 +115,9 @@ usage comes from the Host ledger, including checkpoint storage; summing image
 sizes in the UI would undercount it. Busy and over-budget failures remain
 visible without discarding the current list.
 
-Preview links serve the local owner on this machine. The paired-device option
-is disabled and labelled as coming in phase 2; the Host also rejects that
-audience. There are no anonymous public links.
+Preview links serve the local owner on this machine or one paired desktop
+(see [Paired-device previews](#paired-device-previews)). There are no anonymous
+public links.
 
 Desktop commands run through trusted local IPC. A headless owner uses the
 authenticated, loopback-only internal service plane; paired-device RPC cannot
@@ -171,13 +171,69 @@ The client collects every list page using the shared paging adapter and refuses
 an incomplete or repeated-cursor result. Reopening a grant replaces any
 unredeemed bootstrap credential; an older copied URL then cannot be redeemed.
 
+## Paired-device previews
+
+The owner can share a grant with one paired desktop by choosing it as the
+audience (`{ kind: "pairedDevice", deviceId }`). Creating it requires that the
+device still holds `workspace.write`; choosing it is the owner's approval for
+that device, project and port. A paired grant has no listener and no bootstrap
+secret: its origin is the device route `/api/sandbox/previews/<id>/`, and the
+owner cannot open it locally (`sandbox_preview_open` refuses with
+`preview_paired_grant_opens_on_device`).
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/sandbox/previews` | Live grants shared with the calling device whose project it may still reach |
+| `/api/sandbox/previews/{grant}/…` | Opaque HTTP and upgrade proxy for that grant |
+
+Both are device routes: bearer + DPoP, then `device_can_control` and the
+`environment_port_access` approval authority for the grant's project. A grant
+shared with another device answers 404, exactly like a missing one; withdrawn
+control answers 403; a revoked, expired or invalidated grant answers 410. Each
+request also rechecks the runtime generation and port approval, and the relay
+re-authorizes the device every two seconds while a stream is open. Revocation,
+expiry and lost control close live bodies and upgraded streams. Preview cookies
+are stripped on the way in and made host-only on the way out.
+
+The paired desktop opens a grant through the same native loopback relay as
+forwarded environment ports (`crates/cognia-codeserver/src/relay.rs`), which
+accepts only `/api/sandbox/previews/<32 lowercase hex>/`, pins the Host
+certificate and signs every proxied request with the device key. The system
+browser only sees `http://127.0.0.1:<port>/`. Settings on a paired desktop
+lists "Shared with this device" (`lib/sandbox/paired-previews.ts`,
+`hooks/sandbox/use-shared-sandbox-previews.ts`); a grant that leaves the list
+closes its relay.
+
+Phones and browsers are intentionally inert: a WebView cannot attach DPoP and
+the WAN carrier transports RPC frames, not HTTP streams. `PairedPreviewSupport`
+documents this, the owner picker lists such devices disabled with an inactive
+label, and tests pin both.
+
+## Audit and metrics
+
+Every mutating snapshot operation (`create`, `delete`, `pin`, `fork`, `restore`)
+and every preview `create`, `open` and `revoke` writes an audit record
+(`sandbox_snapshot_<op>`, `sandbox_preview_<op>`) scoped to the project, with
+`host-service` as the actor because these commands require the Host's service
+scope. Failed snapshot operations record only the error code. Refused device
+requests are audited with the device id (`sandbox_preview_device_request`);
+admitted ones are only counted, since a page loads many assets. Revocations
+record their reason: `owner`, `invalidated` or `snapshot_deleted`.
+
+`/metrics` exposes `cognia_sandbox_preview_events_total{event}` (`created`,
+`created_paired`, `opened`, `redeemed`, `revoked`, `device_request`,
+`device_denied`) and
+`cognia_sandbox_snapshot_operations_total{operation,outcome}`. Both label sets
+are closed.
+
 ## Providers and verification
 
 Capabilities are separate flags: `filesystemCheckpoint`, `forkFromCheckpoint`,
 `pauseResume` and `memoryResume`. Local Docker supports filesystem checkpoints
 and forks. E2B retains pause/resume but refuses checkpoint forks with a labelled
-unsupported reason until its API is verified. An older Host omitting capability
-flags must not be assumed to support snapshots.
+unsupported reason until its API is verified. Each remote provider declares its
+own flags and the Host narrows them to what it can drive. An older Host
+omitting capability flags must not be assumed to support snapshots.
 
 The targeted compilation check is:
 

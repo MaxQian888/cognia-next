@@ -20,6 +20,11 @@ jest.mock("./sandbox-snapshots-panel", () => ({
 jest.mock("./sandbox-preview-links-panel", () => ({
   SandboxPreviewLinksPanel: () => <div>previews-child</div>,
 }))
+jest.mock("./shared-sandbox-previews-panel", () => ({
+  SharedSandboxPreviewsPanel: ({ projectId }: { projectId: string }) => (
+    <div>shared-child:{projectId}</div>
+  ),
+}))
 beforeEach(() => {
   jest.clearAllMocks()
   jest.mocked(isTauri).mockReturnValue(true)
@@ -49,6 +54,19 @@ it("does not expose local-owner commands to a remote endpoint", () => {
   jest.mocked(getActiveRemoteEndpoint).mockReturnValue({ id: "remote" } as never)
   render(<SandboxManagementPanels projectId="p" />)
   expect(screen.getByText(en.localRequired)).toBeInTheDocument()
+  expect(screen.getByText("shared-child:p")).toBeInTheDocument()
+  expect(screen.queryByText("previews-child")).not.toBeInTheDocument()
+  expect(sandboxPreviewContext).not.toHaveBeenCalled()
+})
+
+it("labels shared previews inert outside the desktop app", () => {
+  jest.mocked(isTauri).mockReturnValue(false)
+  render(<SandboxManagementPanels projectId="p" />)
+  expect(screen.getByText(en.shared.desktopOnly)).toHaveAttribute(
+    "data-dormant",
+    "paired-mobile-preview"
+  )
+  expect(screen.queryByText("shared-child:p")).not.toBeInTheDocument()
   expect(sandboxPreviewContext).not.toHaveBeenCalled()
 })
 

@@ -145,6 +145,26 @@
       "document": "none",
       "reason": "Opaque application paths served through the authenticated container port proxy, including protocol upgrades."
     },
+    { "path": "/api/sandbox/previews", "method": "get", "document": "public" },
+    {
+      "path": "/api/sandbox/previews/{grant}",
+      "method": "get",
+      "document": "none",
+      "reason": "Authenticated opaque HTTP and upgrade proxy for a sandbox preview grant the owner shared with the calling paired device; application response schemas are project-defined."
+    },
+    {
+      "path": "/api/sandbox/previews/{grant}/",
+      "method": "get",
+      "document": "none",
+      "reason": "Root path of the paired-device sandbox preview proxy."
+    },
+    {
+      "path": "/api/sandbox/previews/{grant}/{tail}",
+      "runtimePath": "/api/sandbox/previews/{grant}/{*tail}",
+      "method": "get",
+      "document": "none",
+      "reason": "Opaque application paths served through the paired-device sandbox preview proxy, including protocol upgrades."
+    },
     { "path": "/ide/relay/{relay_id}", "method": "get", "document": "public" },
     {
       "path": "/ide/relay/{relay_id}/",

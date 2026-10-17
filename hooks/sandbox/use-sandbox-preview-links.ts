@@ -9,6 +9,7 @@ import {
   sandboxPreviewOpen,
   sandboxPreviewRevoke,
   type CreateSandboxPreview,
+  type PreviewAudience,
   type PreviewGrantV1,
 } from "@/lib/sandbox/previews"
 
@@ -113,19 +114,21 @@ export function useSandboxPreviewLinks(projectId: string) {
     copyable,
     now,
     refresh,
-    create: (request: Omit<CreateSandboxPreview, "projectId" | "audience">) =>
+    /** A paired-device grant has no bootstrap capability: it opens on that device. */
+    create: (
+      request: Omit<CreateSandboxPreview, "projectId" | "audience">,
+      audience: PreviewAudience = { kind: "localOwner" }
+    ) =>
       run(async (current) => {
-        const created = await sandboxPreviewCreate({
-          ...request,
-          projectId,
-          audience: { kind: "localOwner" },
-        })
+        const created = await sandboxPreviewCreate({ ...request, projectId, audience })
         if (current !== epoch.current) return
-        capabilities.current.set(created.grant.id, {
-          url: created.bootstrapUrl,
-          until: Math.min(created.grant.expiresAt, Date.now() + 60_000),
-        })
-        setCopyable([...capabilities.current.keys()])
+        if (created.grant.audience.kind === "localOwner") {
+          capabilities.current.set(created.grant.id, {
+            url: created.bootstrapUrl,
+            until: Math.min(created.grant.expiresAt, Date.now() + 60_000),
+          })
+          setCopyable([...capabilities.current.keys()])
+        }
         setGrants((previous) => [
           ...previous.filter((grant) => grant.id !== created.grant.id),
           created.grant,

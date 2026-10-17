@@ -86,9 +86,27 @@ SameSite=Strict cookie 后导航到 `/`。Bootstrap 响应不能缓存。持久�
 复用 `environment_ports.rs`，通过 `open_port` 访问服务；包括 `network=none`
 运行时在内，都不会发布 Docker 端口。
 
-已配对设备 audience 明确保留为尚未启用的 phase 2 variant。Phase 1b
-拒绝该 variant，不提供匿名公开或已配对设备预览访问。UI 标注“将在 phase 2
-推出”。单独持有 capability 不能扩大所有者权限边界。
+Phase 1b 拒绝已配对设备 audience，下文的 phase 2 启用了它。仍然不提供
+匿名公开预览访问。单独持有 capability 不能扩大所有者权限边界。
+
+## Phase 2：已配对设备预览、provider 声明与审计
+
+- **Audience。** `pairedDevice { deviceId }` 指定一台设备。所有者的选择即对该
+  设备访问此项目与端口的批准；创建时该设备还必须当前持有 `workspace.write`。
+  不创建监听器，也不生成 bootstrap 密钥：授权的 origin 是
+  `/api/sandbox/previews/<id>/`，所有者无法在本机打开。
+- **Host 路由。** `GET /api/sandbox/previews` 列出调用者的有效授权；
+  `/api/sandbox/previews/{grant}/…` 以该设备自己的上下文经 `environment_ports.rs`
+  代理。准入：未知或属于其他设备的授权 → 404，失去控制权限或审批权限 → 403，
+  已撤销/过期/失效 → 410。中继每两秒重新授权设备，授权取消会关闭活动流。
+- **客户端。** 只有桌面应用能打开这些授权，复用已有的原生 loopback 中继，由它
+  用设备密钥为每个请求签名。手机、浏览器和 WAN 通道没有带签名的 HTTP 流通路，
+  因此该 audience 对它们在类型、UI 和测试三方面都标注为未启用。WAN 流适配器
+  不在本阶段范围内。
+- **Provider。** `RemoteProvisioner::snapshot_capabilities()` 声明远程 provider
+  的能力（默认无；E2B 声明暂停与内存恢复），Host 再与自身能力取交集。
+- **审计与指标。** 快照与预览的修改操作按项目审计，actor 为 `host-service`；
+  被拒绝的设备请求记录设备 id。`/metrics` 导出两组封闭标签的计数器。
 
 ## Provider 与 Host 契约
 

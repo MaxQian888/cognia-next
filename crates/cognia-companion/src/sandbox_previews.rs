@@ -1,8 +1,11 @@
-//! Local-owner preview security boundary. A grant has a separate loopback
+//! Preview security boundary. A local-owner grant has a separate loopback
 //! listener/origin, one-shot bootstrap and process-salted, hash-only secrets.
+//! A paired-device grant has no listener and no bearer secret: the named
+//! device reaches it through `/api/sandbox/previews/{id}/` with its own token
+//! and DPoP proof, via the desktop's native relay on its own loopback origin.
 use axum::{
     body::Body,
-    extract::{Request, State},
+    extract::{Path, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
     Router,
@@ -130,7 +133,41 @@ fn require_owner() -> Result<(), String> {
 fn require_audience(audience: &PreviewAudience) -> Result<(), String> {
     match audience {
         PreviewAudience::LocalOwner => Ok(()),
-        PreviewAudience::PairedDevice { .. } => Err("preview_paired_device_phase_2".into()),
+        PreviewAudience::PairedDevice { device_id }
+            if !device_id.trim().is_empty() && device_id.len() <= 256 =>
+        {
+            Ok(())
+        }
+        PreviewAudience::PairedDevice { .. } => Err("preview_device_invalid".into()),
+    }
+}
+/// Where the named paired device opens a grant. Carries no credential.
+pub fn paired_relay_path(id: &str) -> String {
+    format!("/api/sandbox/previews/{id}/")
+}
+/// Preview commands require the local Host owner, so owner-side audit records
+/// name the Host; paired-device records carry the calling device id.
+const AUDIT_ACTOR: &str = "host-service";
+
+async fn audit_grant(
+    kind: &str,
+    actor: &str,
+    grant: &PreviewGrantV1,
+    decision: &str,
+    mut fields: serde_json::Value,
+) {
+    fields["grantId"] = serde_json::json!(grant.id);
+    fields["workspaceId"] = serde_json::json!(grant.workspace_id);
+    fields["port"] = serde_json::json!(grant.resolved_port);
+    fields["audience"] = serde_json::json!(paired_device(grant).unwrap_or("localOwner"));
+    fields["expiresAt"] = serde_json::json!(grant.expires_at);
+    super::audit::record_async(kind, actor, &grant.project_id, decision, fields).await;
+}
+
+fn paired_device(grant: &PreviewGrantV1) -> Option<&str> {
+    match &grant.audience {
+        PreviewAudience::PairedDevice { device_id } => Some(device_id),
+        PreviewAudience::LocalOwner => None,
     }
 }
 fn mac(salt: &[u8; 32], id: &str, purpose: &str, token: &str) -> Hmac<Sha256> {
@@ -158,11 +195,14 @@ fn active(grant: &PreviewGrantV1, time: i64) -> bool {
         && !grant.revoked
         && time < grant.expires_at
         && require_audience(&grant.audience).is_ok()
-        && grant
-            .origin
-            .strip_prefix(&format!("http://p-{}.localhost:", grant.id))
-            .and_then(|port| port.parse::<u16>().ok())
-            .is_some_and(|port| port != 0)
+        && match grant.audience {
+            PreviewAudience::LocalOwner => grant
+                .origin
+                .strip_prefix(&format!("http://p-{}.localhost:", grant.id))
+                .and_then(|port| port.parse::<u16>().ok())
+                .is_some_and(|port| port != 0),
+            PreviewAudience::PairedDevice { .. } => grant.origin == paired_relay_path(&grant.id),
+        }
 }
 
 /// Called before snapshot maintenance starts. Restart rotates the salt and
@@ -352,6 +392,13 @@ impl PreviewService {
         let lifetime = duration(request.expires_in_seconds)?;
         let audience = request.audience.unwrap_or(PreviewAudience::LocalOwner);
         require_audience(&audience)?;
+        // The owner naming one device, project and port is that device's
+        // approval; the device must also still hold control right now.
+        if let PreviewAudience::PairedDevice { device_id } = &audience {
+            if !super::workspace_access::device_can_control(device_id) {
+                return Err("preview_device_not_permitted".into());
+            }
+        }
         if request.provider != "local" {
             return Err("preview_provider_unsupported".into());
         }
@@ -380,13 +427,26 @@ impl PreviewService {
             .await
             .map_err(|e| e.message)?;
         let id = uuid::Uuid::new_v4().simple().to_string();
+        let paired = matches!(audience, PreviewAudience::PairedDevice { .. });
         // Separate listener from the Companion API. The fallback address is
         // intentionally inert until it can preserve per-grant cookie isolation.
-        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-            .await
-            .map_err(|e| format!("preview_listener_failed: {e}"))?;
-        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-        let host = format!("p-{id}.localhost");
+        // A paired grant is served on the device route instead.
+        let listener = if paired {
+            None
+        } else {
+            Some(
+                tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                    .await
+                    .map_err(|e| format!("preview_listener_failed: {e}"))?,
+            )
+        };
+        let origin = match &listener {
+            Some(listener) => format!(
+                "http://p-{id}.localhost:{}",
+                listener.local_addr().map_err(|e| e.to_string())?.port()
+            ),
+            None => paired_relay_path(&id),
+        };
         let time = now();
         let grant = PreviewGrantV1 {
             version: 1,
@@ -404,13 +464,13 @@ impl PreviewService {
             expires_at: time + i64::from(lifetime) * 1000,
             revision: 1,
             revoked: false,
-            origin: format!("http://{host}:{port}"),
+            origin,
         };
         self.validate(&grant).await?;
         let secret = token()?;
         let record = StoredPreviewGrant {
-            bootstrap_hash: Some(hash(&self.salt, &id, "bootstrap", &secret)),
-            bootstrap_expires_at: time + 60_000,
+            bootstrap_hash: (!paired).then(|| hash(&self.salt, &id, "bootstrap", &secret)),
+            bootstrap_expires_at: if paired { 0 } else { time + 60_000 },
             session_hash: None,
             grant: grant.clone(),
         };
@@ -420,6 +480,21 @@ impl PreviewService {
         let (cancel, shutdown) = watch::channel(false);
         self.live.write().insert(id.clone(), cancel);
         tokio::spawn(self.clone().monitor(id.clone(), shutdown));
+        super::metrics::record_preview_event(if paired { "created_paired" } else { "created" });
+        audit_grant(
+            "sandbox_preview_create",
+            AUDIT_ACTOR,
+            &grant,
+            "allow",
+            serde_json::json!({}),
+        )
+        .await;
+        let Some(listener) = listener else {
+            return Ok(CreatedSandboxPreview {
+                bootstrap_url: grant.origin.clone(),
+                grant,
+            });
+        };
         let mut shutdown = self.live.read()[&id].subscribe();
         let app = Router::new()
             .fallback(preview_handler)
@@ -452,7 +527,7 @@ impl PreviewService {
                 Err(_) => false,
             };
             if !valid {
-                let _ = self.revoke_internal(&monitor_id).await;
+                let _ = self.revoke_internal(&monitor_id, "invalidated").await;
                 break;
             }
         }
@@ -461,6 +536,9 @@ impl PreviewService {
         require_owner()?;
         let _guard = self.operation.lock().await;
         let mut record = self.workspaces.preview_grant(&self.deployment, id)?;
+        if paired_device(&record.grant).is_some() {
+            return Err("preview_paired_grant_opens_on_device".into());
+        }
         self.validate(&record.grant).await?;
         if !self.live.read().contains_key(id) {
             return Err("preview_restart_invalidated".into());
@@ -472,6 +550,15 @@ impl PreviewService {
         record.bootstrap_expires_at = (now() + 60_000).min(record.grant.expires_at);
         self.workspaces
             .store_preview_grant(&self.deployment, &record, Some(previous))?;
+        super::metrics::record_preview_event("opened");
+        audit_grant(
+            "sandbox_preview_open",
+            AUDIT_ACTOR,
+            &record.grant,
+            "allow",
+            serde_json::json!({ "revision": record.grant.revision }),
+        )
+        .await;
         Ok(CreatedSandboxPreview {
             bootstrap_url: format!("{}/__cognia_bootstrap#{secret}", record.grant.origin),
             grant: record.grant,
@@ -479,9 +566,10 @@ impl PreviewService {
     }
     pub async fn revoke(&self, id: &str) -> Result<PreviewGrantV1, String> {
         require_owner()?;
-        self.revoke_internal(id).await
+        self.revoke_internal(id, "owner").await
     }
-    async fn revoke_internal(&self, id: &str) -> Result<PreviewGrantV1, String> {
+    /// `reason` is `owner`, `invalidated` (monitor) or `snapshot_deleted`.
+    async fn revoke_internal(&self, id: &str, reason: &str) -> Result<PreviewGrantV1, String> {
         // Cancellation must not queue behind admission/Docker awaits in redeem.
         if let Some(cancel) = self.live.write().remove(id) {
             cancel.send_replace(true);
@@ -496,6 +584,15 @@ impl PreviewService {
             record.session_hash = None;
             self.workspaces
                 .store_preview_grant(&self.deployment, &record, Some(previous))?;
+            super::metrics::record_preview_event("revoked");
+            audit_grant(
+                "sandbox_preview_revoke",
+                AUDIT_ACTOR,
+                &record.grant,
+                "allow",
+                serde_json::json!({ "reason": reason }),
+            )
+            .await;
         }
         Ok(record.grant)
     }
@@ -524,6 +621,7 @@ impl PreviewService {
         record.session_hash = Some(hash(&self.salt, id, "session", &session));
         self.workspaces
             .store_preview_grant(&self.deployment, &record, Some(previous))?;
+        super::metrics::record_preview_event("redeemed");
         Ok((record.grant, session))
     }
 }
@@ -556,7 +654,7 @@ impl super::sandbox_snapshots::SnapshotPreviewRevoker for PreviewService {
                         || (kind == "fork" && owner == &grant.workspace_id)
                 })
             {
-                self.revoke_internal(&grant.id).await?;
+                self.revoke_internal(&grant.id, "snapshot_deleted").await?;
             }
         }
         Ok(())
@@ -738,8 +836,13 @@ async fn handle(service: &PreviewService, id: &str, request: &mut Request) -> Re
         cancel,
     )
     .await;
-    // The application cannot overwrite a Host cookie or broaden its cookie
-    // domain to another grant. Application cookies remain host-only.
+    host_only_cookies(&mut response);
+    response
+}
+
+/// The application cannot overwrite a Host cookie or broaden its cookie
+/// domain to another grant. Application cookies remain host-only.
+fn host_only_cookies(response: &mut Response) {
     let cookies: Vec<_> = response
         .headers()
         .get_all("set-cookie")
@@ -763,6 +866,166 @@ async fn handle(service: &PreviewService, id: &str, request: &mut Request) -> Re
     for cookie in cookies {
         response.headers_mut().append("set-cookie", cookie);
     }
+}
+
+/// What a paired device sees of a grant shared with it.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct PairedPreviewSummary {
+    pub id: String,
+    pub project_id: String,
+    pub workspace_id: String,
+    pub resolved_port: u16,
+    pub expires_at: i64,
+    pub relay_path: String,
+}
+
+/// `GET /api/sandbox/previews` — the live grants shared with the calling
+/// device whose project it may still reach. Nothing here is a credential.
+pub async fn device_list(request: Request) -> Response {
+    let Some(context) = request
+        .extensions()
+        .get::<super::middleware::DeviceContext>()
+        .cloned()
+    else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Ok(service) = installed() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    if !super::workspace_access::device_can_control(&context.device_id) {
+        super::metrics::record_preview_event("device_denied");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Ok(items) = service.shared_with(&context).await else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let mut response = axum::Json(serde_json::json!({ "items": items })).into_response();
+    security_headers(&mut response);
+    response
+}
+
+impl PreviewService {
+    /// Live grants naming `context`'s device whose project it may still reach.
+    async fn shared_with(
+        &self,
+        context: &super::middleware::DeviceContext,
+    ) -> Result<Vec<PairedPreviewSummary>, String> {
+        let time = now();
+        let mut items = Vec::new();
+        for grant in self
+            .workspaces
+            .preview_grants(&self.deployment)?
+            .into_iter()
+            .map(|record| record.grant)
+        {
+            if paired_device(&grant) != Some(context.device_id.as_str())
+                || !active(&grant, time)
+                || !self.live.read().contains_key(&grant.id)
+                || !super::environment_ports::device_authorized(context, &grant.project_id).await
+            {
+                continue;
+            }
+            items.push(PairedPreviewSummary {
+                relay_path: paired_relay_path(&grant.id),
+                id: grant.id,
+                project_id: grant.project_id,
+                workspace_id: grant.workspace_id,
+                resolved_port: grant.resolved_port,
+                expires_at: grant.expires_at,
+            });
+        }
+        Ok(items)
+    }
+}
+
+pub async fn device_root_handler(Path(id): Path<String>, request: Request) -> Response {
+    device_relay(id, request).await
+}
+
+pub async fn device_handler(
+    Path((id, _tail)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    device_relay(id, request).await
+}
+
+/// Why a paired device's request to a grant is refused, before any relay.
+async fn admit_device(
+    service: &PreviewService,
+    id: &str,
+    context: &super::middleware::DeviceContext,
+) -> Result<(PreviewGrantV1, watch::Receiver<bool>), StatusCode> {
+    // An unknown grant and one shared with another device look the same.
+    let record = service
+        .workspaces
+        .preview_grant(&service.deployment, id)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    if paired_device(&record.grant) != Some(context.device_id.as_str()) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    if !super::environment_ports::device_authorized(context, &record.grant.project_id).await {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if service.validate(&record.grant).await.is_err() {
+        return Err(StatusCode::GONE);
+    }
+    let cancel = service
+        .live
+        .read()
+        .get(id)
+        .map(watch::Sender::subscribe)
+        .ok_or(StatusCode::GONE)?;
+    if *cancel.borrow() {
+        return Err(StatusCode::GONE);
+    }
+    Ok((record.grant, cancel))
+}
+
+async fn device_relay(id: String, mut request: Request) -> Response {
+    let Some(context) = request
+        .extensions()
+        .get::<super::middleware::DeviceContext>()
+        .cloned()
+    else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Ok(service) = installed() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let (grant, cancel) = match admit_device(&service, &id, &context).await {
+        Ok(admitted) => admitted,
+        Err(status) => {
+            super::metrics::record_preview_event("device_denied");
+            // Only refusals are audited; admitted requests (every asset of a
+            // page) are counted, not logged.
+            super::audit::record_async(
+                "sandbox_preview_device_request",
+                &context.device_id,
+                &context.scope,
+                "deny",
+                serde_json::json!({ "grantId": &id, "status": status.as_u16() }),
+            )
+            .await;
+            let mut response = status.into_response();
+            security_headers(&mut response);
+            return response;
+        }
+    };
+    super::metrics::record_preview_event("device_request");
+    strip_preview_cookies(request.headers_mut());
+    let mut response = super::environment_ports::preview_device_relay(
+        grant.project_id,
+        grant.container_id,
+        grant.resolved_port,
+        request,
+        context,
+        cancel,
+    )
+    .await;
+    host_only_cookies(&mut response);
+    security_headers(&mut response);
     response
 }
 
@@ -923,8 +1186,190 @@ pub(crate) mod tests {
         assert!(require_audience(&PreviewAudience::PairedDevice {
             device_id: "paired".into()
         })
-        .unwrap_err()
-        .contains("phase_2"));
+        .is_ok());
+        for device_id in [String::new(), "x".repeat(257)] {
+            assert_eq!(
+                require_audience(&PreviewAudience::PairedDevice { device_id }).unwrap_err(),
+                "preview_device_invalid"
+            );
+        }
+    }
+
+    /// Holds the process-global security store and leaves none installed.
+    struct StoreScope(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+    impl Drop for StoreScope {
+        fn drop(&mut self) {
+            super::super::security_store::install_security_store(None);
+        }
+    }
+
+    fn paired_owner_store(devices: &[&str]) -> StoreScope {
+        let scope = StoreScope(super::super::security_store::test_guard());
+        let store = super::super::security_store::SecurityStore::in_memory().unwrap();
+        let time = now() / 1000;
+        for device in devices {
+            let challenge = store.issue_challenge("tenant", time, 600).unwrap();
+            let invitation = store
+                .create_owner_invitation("tenant", "trust-root", time, 600)
+                .unwrap();
+            store
+                .register_owner_device(
+                    "tenant",
+                    &invitation,
+                    &challenge.id,
+                    &challenge.nonce,
+                    device,
+                    "Owner",
+                    "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----",
+                    &format!("thumb-{device}"),
+                    time,
+                )
+                .unwrap();
+        }
+        super::super::security_store::install_security_store(Some(store));
+        scope
+    }
+
+    fn device(device_id: &str) -> super::super::middleware::DeviceContext {
+        super::super::middleware::DeviceContext {
+            device_id: device_id.into(),
+            tenant_id: "tenant".into(),
+            scope: "device".into(),
+            granted_scopes: Vec::new(),
+            authorization_capabilities: None,
+        }
+    }
+
+    fn paired_request(device_id: &str) -> CreateSandboxPreview {
+        CreateSandboxPreview {
+            project_id: "project".into(),
+            workspace_id: "workspace".into(),
+            provider: "local".into(),
+            container_id: "container".into(),
+            port: PreviewPort::Fixed { port: 3000 },
+            expires_in_seconds: None,
+            audience: Some(PreviewAudience::PairedDevice {
+                device_id: device_id.into(),
+            }),
+            origin_mode: PreviewOriginMode::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_paired_grant_is_served_only_on_the_named_devices_route() {
+        let _store = paired_owner_store(&["phone", "laptop"]);
+        let fixture = Fixture::new();
+        assert_eq!(
+            fixture
+                .service
+                .create(paired_request("stranger"))
+                .await
+                .err()
+                .unwrap(),
+            "preview_device_not_permitted"
+        );
+        let created = fixture
+            .service
+            .create(paired_request("phone"))
+            .await
+            .unwrap();
+        let id = created.grant.id.clone();
+        // No listener, no bootstrap secret: the device's own credentials are
+        // the capability, so the URL is only the device route.
+        assert_eq!(created.grant.origin, paired_relay_path(&id));
+        assert_eq!(created.bootstrap_url, paired_relay_path(&id));
+        let record = fixture
+            .service
+            .workspaces
+            .preview_grant("deployment", &id)
+            .unwrap();
+        assert!(record.bootstrap_hash.is_none());
+        assert_eq!(record.bootstrap_expires_at, 0);
+        assert!(active(&record.grant, now()));
+        assert_eq!(
+            fixture.service.open(&id).await.err().unwrap(),
+            "preview_paired_grant_opens_on_device"
+        );
+
+        let listed = fixture.service.shared_with(&device("phone")).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, id);
+        assert_eq!(listed[0].relay_path, format!("/api/sandbox/previews/{id}/"));
+        assert!(fixture
+            .service
+            .shared_with(&device("laptop"))
+            .await
+            .unwrap()
+            .is_empty());
+
+        assert!(admit_device(&fixture.service, &id, &device("phone"))
+            .await
+            .is_ok());
+        // Another device cannot tell a grant shared elsewhere from a missing one.
+        assert_eq!(
+            admit_device(&fixture.service, &id, &device("laptop"))
+                .await
+                .err()
+                .unwrap(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            admit_device(&fixture.service, "missing", &device("phone"))
+                .await
+                .err()
+                .unwrap(),
+            StatusCode::NOT_FOUND
+        );
+
+        let (_, mut cancel) = admit_device(&fixture.service, &id, &device("phone"))
+            .await
+            .unwrap();
+        fixture.service.revoke(&id).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), cancel.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            admit_device(&fixture.service, &id, &device("phone"))
+                .await
+                .err()
+                .unwrap(),
+            StatusCode::GONE
+        );
+        assert!(fixture
+            .service
+            .shared_with(&device("phone"))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_device_that_lost_control_is_refused_before_any_relay() {
+        let _store = paired_owner_store(&["phone", "laptop"]);
+        let fixture = Fixture::new();
+        let created = fixture
+            .service
+            .create(paired_request("phone"))
+            .await
+            .unwrap();
+        super::super::security_store::security_store()
+            .unwrap()
+            .revoke_device("tenant", "laptop", "phone", false, now() / 1000)
+            .unwrap();
+        assert_eq!(
+            admit_device(&fixture.service, &created.grant.id, &device("phone"))
+                .await
+                .err()
+                .unwrap(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(fixture
+            .service
+            .shared_with(&device("phone"))
+            .await
+            .unwrap()
+            .is_empty());
     }
     #[test]
     fn preview_hash_is_process_salted_domain_separated_and_256_bit_random() {

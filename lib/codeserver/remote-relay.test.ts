@@ -17,6 +17,7 @@ import {
   isRemoteIdeRelayActive,
   stopRemoteIdeRelayRefresh,
   stopRemoteIdeRelay,
+  remoteEndpointCompanionConfig,
 } from "./remote-relay"
 
 const call = transport.call as jest.Mock
@@ -56,6 +57,18 @@ it("binds the loopback relay with a freshly minted device token", async () => {
     devicePrivateKeyJwk: ENDPOINT.devicePrivateKeyJwk,
     serverFingerprint: ENDPOINT.serverFingerprint,
     relayPath: RELAY_PATH,
+  })
+})
+
+it("hands companion-auth exactly the paired identity of the endpoint", () => {
+  expect(remoteEndpointCompanionConfig({ ...ENDPOINT, accountId: "acct" })).toEqual({
+    baseUrl: ENDPOINT.baseUrl,
+    deviceId: "device-1",
+    serverVersion: "1.0.0",
+    devicePrivateKeyJwk: ENDPOINT.devicePrivateKeyJwk,
+    deviceKeyThumbprint: "device-thumbprint",
+    serverFingerprint: ENDPOINT.serverFingerprint,
+    accountId: "acct",
   })
 })
 

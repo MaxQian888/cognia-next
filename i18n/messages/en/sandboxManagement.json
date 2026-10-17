@@ -2,7 +2,7 @@
   "cancel": "Cancel",
   "refresh": "Refresh",
   "loading": "Loading sandbox data…",
-  "localRequired": "Snapshots and preview links require the local desktop owner. Paired-device previews are coming in phase 2.",
+  "localRequired": "Snapshots and preview links are managed by the Host's desktop owner.",
   "contextError": "Could not load the Host's runtime inventory and snapshot budget.",
   "snapshots": {
     "title": "Snapshots",
@@ -47,7 +47,7 @@
   },
   "previews": {
     "title": "Preview links",
-    "description": "Links serve this machine only. Copy once and redeem within 60 seconds; each copied link can be redeemed only once. Access expires automatically and can be revoked.",
+    "description": "Local-owner links serve this machine only: copy once and redeem within 60 seconds. A link shared with a paired desktop opens only on that device. Access expires automatically and can be revoked.",
     "port": "Approved service port",
     "noPorts": "No approved local service ports",
     "portOption": "{root} · {port} {label}",
@@ -55,7 +55,6 @@
     "minutes": "{count} minutes",
     "audience": "Audience",
     "localOwner": "Local owner on this machine",
-    "pairedPhase2": "Paired devices — coming in phase 2 (inactive)",
     "addressing": "Port addressing",
     "leaseOffset": "Workspace lease + {offset}",
     "fixedPort": "Fixed port {port}",
@@ -76,6 +75,28 @@
     "origin": "Preview address",
     "localhostOrigin": "Separate localhost hostname",
     "loopbackOrigin": "127.0.0.1 fallback — unavailable",
-    "originHelp": "Numeric loopback fallback is disabled because cookies are shared across ports. If this browser cannot resolve the isolated localhost address, preview access is unavailable."
+    "originHelp": "Numeric loopback fallback is disabled because cookies are shared across ports. If this browser cannot resolve the isolated localhost address, preview access is unavailable.",
+    "localOwnerHelp": "Copy once and redeem the link on this machine within 60 seconds.",
+    "pairedDesktop": "Paired desktop · {label}",
+    "pairedUnsupportedOption": "{label} (needs the desktop app)",
+    "pairedHelp": "Only that paired desktop can open it, with its own device credentials. Nothing to copy; revoking it or withdrawing the device's control closes it immediately.",
+    "pairedMobileInactive": "Phones and browsers cannot open shared previews yet (inactive): only the desktop app has the signed relay they need.",
+    "sharedWith": "Shared with {label}",
+    "opensOnDevice": "Opens on that device only."
+  },
+  "shared": {
+    "title": "Shared with this device",
+    "description": "Previews the Host owner shared with this desktop. Each opens in your browser through a local relay that signs every request with this device's key.",
+    "empty": "Nothing is shared with this device for this project.",
+    "port": "Port {port} · workspace {workspace}",
+    "remaining": "Expires in about {minutes} min",
+    "open": "Open in browser",
+    "close": "Close relay",
+    "desktopOnly": "Previews shared with a paired device open only in the desktop app (inactive here).",
+    "errors": {
+      "load": "Could not load the previews shared with this device.",
+      "forbidden": "This device no longer has control access on the Host, so its shared previews are closed.",
+      "open": "Could not open the shared preview. It may have been revoked or expired."
+    }
   }
 }
