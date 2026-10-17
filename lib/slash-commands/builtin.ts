@@ -54,7 +54,7 @@ export type SettingsTab = SettingsSectionId
 /** What the dispatcher hands an Action command's handler. */
 export interface SlashContext {
   /** Interactive start preview shared by the slash command and one-shot chip. */
-  startBestOfN?: (prompt: string, n: 2 | 3 | 4) => Promise<boolean>
+  startBestOfN?: (prompt: string, n: 2 | 3 | 4, agents?: string[]) => Promise<boolean>
   isMobile?: boolean
   isAside?: boolean
   /** Cooperative cancellation supplied by the invoking host, when supported. */

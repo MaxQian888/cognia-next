@@ -77,5 +77,8 @@
     "archived": "已归档",
     "failed": "失败"
   },
-  "errorDetails": "错误详情"
+  "errorDetails": "错误详情",
+  "runtime": "运行时",
+  "externalRuntime": "外部 agent：{name}",
+  "cogniaRuntime": "Cognia agent 运行时"
 }

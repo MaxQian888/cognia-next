@@ -24,6 +24,10 @@ jest.mock("@/lib/best-of-n/publication", () => ({
 jest.mock("@/lib/best-of-n/service", () => ({ cancelBestOfN: jest.fn() }))
 jest.mock("@/lib/best-of-n/projection", () => ({ listBestOfNRuns: jest.fn() }))
 jest.mock("@/lib/scm/host", () => ({ createScmHost: () => ({}) }))
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: (select: (state: unknown) => unknown) =>
+    select({ agents: { "codex-1": { id: "codex-1", name: "Codex" } } }),
+}))
 jest.mock("@/lib/scm/service", () => ({ getSourceControlService: jest.fn() }))
 jest.mock("@/components/source-control/agent-changes/changeset-detail", () => ({
   ChangesetDetail: ({ readOnly }: { readOnly: boolean }) => (
@@ -226,4 +230,15 @@ it("offers cleanup retry after Host workspace archive succeeds but session archi
   render(<BestOfNComparison groupId="group" />)
   expect(screen.getByRole("button", { name: "retryArchive" })).toBeEnabled()
   expect(screen.getByText("archiveFailed")).toBeInTheDocument()
+})
+
+it("labels each candidate's runtime, naming an external configuration when known", () => {
+  row.group.candidates[1].agent = { agentId: "agent", provider: "cognia:external-agent:codex-1" }
+  render(<BestOfNComparison groupId="group" />)
+  expect(
+    within(screen.getByRole("article", { name: "Candidate 1" })).getByText("cogniaRuntime")
+  ).toBeInTheDocument()
+  expect(
+    within(screen.getByRole("article", { name: "Candidate 2" })).getByText("externalRuntime")
+  ).toBeInTheDocument()
 })

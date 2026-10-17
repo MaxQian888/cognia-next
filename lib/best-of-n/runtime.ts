@@ -13,7 +13,12 @@ import {
 import { openWorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
 import { runWorkspaceUserAction } from "@/lib/task-workspace/user-action"
 import { createScmHost, scmErrorCode } from "@/lib/scm/host"
-import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
+import {
+  externalAgentIdFromProviderId,
+  isExternalAgentProviderId,
+} from "@/lib/ai/agent/external/session/session-models"
+import { describeBestOfNAgent } from "./agents"
+import { runExternalCandidate } from "./external"
 import { BestOfNAttemptError, type BestOfNExecution, type BestOfNInput } from "./core"
 
 export function bestOfNTeam(group: BestOfNGroup, request: BestOfNInput): AgentTeam {
@@ -121,6 +126,14 @@ export function createBestOfNExecution(): BestOfNExecution {
         title: `Best-of-N ${candidate.index + 1}`,
         kind: "direct",
         characterId: character.id,
+        // An external candidate's runtime is part of its identity, so the
+        // child conversation shows what actually ran.
+        ...(describeBestOfNAgent(candidate.agent).kind === "external"
+          ? {
+              providerOverride: candidate.agent.provider!,
+              ...(candidate.agent.model ? { model: candidate.agent.model } : {}),
+            }
+          : {}),
         workingDir: workspace.physicalRoot,
         workspaceConfinementEnabled: true,
         ...(request.projectId ? { projectId: request.projectId } : {}),
@@ -194,60 +207,89 @@ export function createBestOfNExecution(): BestOfNExecution {
             updatedAt: new Date(group.createdAt),
             lastAccessedAt: new Date(group.createdAt),
           }
-          const options = await resolveSendOptions({
-            session,
-            character,
-            appSettings: await getSettings(),
-            activeProject: candidateProject,
-            agentKind: "teammate",
-            capabilityGrants: [grant],
-            routingSurface: "agent",
-            routingContextHint: { promptText: request.prompt, category: "coding" },
-          })
-          if (isExternalAgentProviderId(options.provider))
-            throw new Error("External best-of-N agents are not supported in phase 1")
-          // The frozen execution spec is the sidecar's runtime authority. The
-          // AI-SDK lane does not enforce SendOptions.maxBudgetUsd, so a dollar
-          // cap must fail closed there instead of silently becoming advisory.
-          const runtimeAdapter = options.execution?.runtimeAdapter
-          const costCap = group.budgetPolicy.maxCostUsd
-          if (
-            costCap != null &&
-            (runtimeAdapter !== "claude-agent-sdk" ||
-              options.maxBudgetUsd == null ||
-              !Number.isFinite(options.maxBudgetUsd) ||
-              options.maxBudgetUsd <= 0 ||
-              options.maxBudgetUsd > costCap / group.n)
-          ) {
-            throw new Error("The selected runtime cannot enforce the best-of-N cost budget")
-          }
-          const result = await runner.runAndCaptureAssistantReply(
-            session.id,
-            request.prompt,
-            options,
-            {
-              signal,
-              timeoutMs: Math.max(
-                1,
-                (group.budgetPolicy.maxDurationMs ?? 600_000) - (Date.now() - group.createdAt)
-              ),
-              onEvent: dispatch.capture,
-              execution: { kind: "team", runId: group.teamRunId, taskId: candidate.candidateId },
-            }
+          const remainingMs = Math.max(
+            1,
+            (group.budgetPolicy.maxDurationMs ?? 600_000) - (Date.now() - group.createdAt)
           )
-          const reportedCost = result.usage?.totalCostUsd
-          // AI-SDK's result adapter emits zero when the provider supplies no
-          // cost. Preserve unknown instead of turning that wire default into
-          // a claim that the attempt was free.
-          costUsd =
-            reportedCost == null || (reportedCost === 0 && runtimeAdapter !== "claude-agent-sdk")
+          const declared = describeBestOfNAgent(candidate.agent)
+          const options =
+            declared.kind === "external"
               ? null
-              : reportedCost
-          if (result.resultSubtype?.startsWith("error"))
-            throw new BestOfNAttemptError(
-              `Candidate execution ended: ${result.resultSubtype}`,
-              costUsd
+              : await resolveSendOptions({
+                  session,
+                  character,
+                  appSettings: await getSettings(),
+                  activeProject: candidateProject,
+                  agentKind: "teammate",
+                  capabilityGrants: [grant],
+                  routingSurface: "agent",
+                  routingContextHint: { promptText: request.prompt, category: "coding" },
+                })
+          // A Cognia agent whose own default runtime is external takes the same lane.
+          const externalConfigId =
+            declared.kind === "external"
+              ? declared.configId
+              : isExternalAgentProviderId(options?.provider)
+                ? externalAgentIdFromProviderId(options?.provider)
+                : undefined
+          let text: string
+          if (externalConfigId !== undefined) {
+            if (!externalConfigId)
+              throw new Error("Best-of-N candidate names an unscoped external agent")
+            // The external execute contract has no dollar cap and reports no cost.
+            if (group.budgetPolicy.maxCostUsd != null)
+              throw new Error("The selected runtime cannot enforce the best-of-N cost budget")
+            ;({ text } = await runExternalCandidate({
+              configId: externalConfigId,
+              prompt: request.prompt,
+              model: declared.kind === "external" ? candidate.agent.model : options?.model,
+              workingDirectory: workspace.physicalRoot,
+              signal: AbortSignal.any([signal, AbortSignal.timeout(remainingMs)]),
+              onCapture: dispatch.capture,
+            }))
+          } else {
+            const sendOptions = options!
+            // The frozen execution spec is the sidecar's runtime authority. The
+            // AI-SDK lane does not enforce SendOptions.maxBudgetUsd, so a dollar
+            // cap must fail closed there instead of silently becoming advisory.
+            const runtimeAdapter = sendOptions.execution?.runtimeAdapter
+            const costCap = group.budgetPolicy.maxCostUsd
+            if (
+              costCap != null &&
+              (runtimeAdapter !== "claude-agent-sdk" ||
+                sendOptions.maxBudgetUsd == null ||
+                !Number.isFinite(sendOptions.maxBudgetUsd) ||
+                sendOptions.maxBudgetUsd <= 0 ||
+                sendOptions.maxBudgetUsd > costCap / group.n)
+            ) {
+              throw new Error("The selected runtime cannot enforce the best-of-N cost budget")
+            }
+            const result = await runner.runAndCaptureAssistantReply(
+              session.id,
+              request.prompt,
+              sendOptions,
+              {
+                signal,
+                timeoutMs: remainingMs,
+                onEvent: dispatch.capture,
+                execution: { kind: "team", runId: group.teamRunId, taskId: candidate.candidateId },
+              }
             )
+            const reportedCost = result.usage?.totalCostUsd
+            // AI-SDK's result adapter emits zero when the provider supplies no
+            // cost. Preserve unknown instead of turning that wire default into
+            // a claim that the attempt was free.
+            costUsd =
+              reportedCost == null || (reportedCost === 0 && runtimeAdapter !== "claude-agent-sdk")
+                ? null
+                : reportedCost
+            if (result.resultSubtype?.startsWith("error"))
+              throw new BestOfNAttemptError(
+                `Candidate execution ended: ${result.resultSubtype}`,
+                costUsd
+              )
+            text = result.text
+          }
           await turn.lease.settle("ready")
           let changeset
           try {
@@ -261,7 +303,7 @@ export function createBestOfNExecution(): BestOfNExecution {
             if (scmErrorCode(error) !== "nothing_to_capture") throw error
           }
           await dispatch.complete({
-            text: result.text,
+            text,
             ...(costUsd === null ? {} : { costUsd }),
             ...(changeset
               ? {

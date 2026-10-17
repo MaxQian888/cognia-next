@@ -23,7 +23,7 @@
   "needsCommit": "请先提交仓库，再启动 Best-of-N。",
   "invalidPolicy": "已提交的验收策略无效，请修复后再启动。",
   "mixedBatch": "/best-of-n 必须单独作为整条消息发送，不能和其他命令一起发送。",
-  "usage": "用法：/best-of-n [2|3|4] '<提示词>'、/best-of-n status、/best-of-n cancel、/best-of-n pick '<候选>'",
+  "usage": "用法：/best-of-n [2|3|4] [--agents a,b,...] '<提示词>'、/best-of-n status、/best-of-n cancel、/best-of-n pick '<候选>'",
   "busy": "请等待当前轮次结束后再启动 Best-of-N。",
   "textOnly": "Best-of-N 接受文本提示词。请先移除附件和指定运行时的路由。",
   "useComposer": "请在对话输入框中运行此命令，以预览基线和结果分支。",
@@ -53,5 +53,11 @@
     "cancelled": "已停止",
     "recoveryRequired": "需要恢复"
   },
-  "unavailable": "Best-of-N 操作仅可在本地桌面 Host 上执行。当前设备可以查看同步结果。"
+  "unavailable": "Best-of-N 操作仅可在本地桌面 Host 上执行。当前设备可以查看同步结果。",
+  "agents": "每次尝试使用的 agent",
+  "candidateAgent": "第 {index} 次尝试的 agent",
+  "sessionAgent": "当前对话的 agent",
+  "externalAgent": "外部：{name}",
+  "externalCost": "外部 agent 不报告费用，费用显示为未知，也无法对其执行金额预算。",
+  "unknownAgent": "没有已启用的 agent 与「{agent}」匹配。请使用 session、外部 agent 配置 ID，或已启用外部 agent 的预设名称。"
 }

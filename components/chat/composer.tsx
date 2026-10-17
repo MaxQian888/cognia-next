@@ -3995,7 +3995,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   } | null>(null)
   const bestOfNStartRef = useRef(false)
   const requestBestOfN = useCallback(
-    async (prompt: string, n: 2 | 3 | 4): Promise<boolean> => {
+    async (prompt: string, n: 2 | 3 | 4, agents?: string[]): Promise<boolean> => {
       if (!session?.id || bestOfNStartRef.current) return false
       if (["streaming", "awaiting_approval"].includes(status)) {
         toast.error(tBestOfN("busy"))
@@ -4004,7 +4004,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       bestOfNStartRef.current = true
       try {
         const { prepareBestOfNChat } = await import("@/lib/best-of-n/entry")
-        const prepared = await prepareBestOfNChat(session.id, prompt, n)
+        const prepared = await prepareBestOfNChat(session.id, prompt, n, agents)
         return await new Promise<boolean>((resolve) => setBestOfNStart({ prepared, resolve }))
       } catch (error) {
         toast.error(
@@ -4034,8 +4034,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         let bestOfNAccepted = true
         const ctx: SlashContext = {
           args,
-          startBestOfN: async (prompt, n) => {
-            bestOfNAccepted = await requestBestOfN(prompt, n)
+          startBestOfN: async (prompt, n, agents) => {
+            bestOfNAccepted = await requestBestOfN(prompt, n, agents)
             return bestOfNAccepted
           },
           isAside: session?.kind === "resource-workbench",
@@ -4849,9 +4849,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             bestOfNStart.resolve(false)
             setBestOfNStart(null)
           }}
-          onConfirm={async (target) => {
+          onConfirm={async (target, agents) => {
             const { startPreparedBestOfN } = await import("@/lib/best-of-n/entry")
-            await startPreparedBestOfN(bestOfNStart.prepared, target)
+            await startPreparedBestOfN(bestOfNStart.prepared, target, agents)
             setBestOfNChoice(null)
             bestOfNStart.resolve(true)
             setBestOfNStart(null)

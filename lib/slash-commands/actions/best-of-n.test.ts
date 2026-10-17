@@ -54,11 +54,38 @@ it("registers a real action and preserves multiline prompt with optional count",
   for (const invalid of ["", "5 fix", "3", "pick", "pick 1 2", "status extra"])
     expect(parseBestOfNCommand(invalid)).toEqual({ kind: "invalid" })
 })
+it("assigns one named agent per candidate and infers the count from the list", () => {
+  expect(parseBestOfNCommand("--agents claude-code,codex fix bug\ninclude tests")).toEqual({
+    kind: "start",
+    n: 2,
+    prompt: "fix bug\ninclude tests",
+    agents: ["claude-code", "codex"],
+  })
+  expect(parseBestOfNCommand("3 --agents=session,codex,session fix")).toEqual({
+    kind: "start",
+    n: 3,
+    prompt: "fix",
+    agents: ["session", "codex", "session"],
+  })
+  for (const invalid of [
+    "3 --agents a,b fix",
+    "--agents a fix",
+    "--agents a,b,c,d,e fix",
+    "--agents a,,b fix",
+    "--agents a,b",
+  ])
+    expect(parseBestOfNCommand(invalid)).toEqual({ kind: "invalid" })
+})
+it("hands the named agents to the composer preview", async () => {
+  const context = ctx("--agents session,codex fix")
+  await handleBestOfN(context)
+  expect(context.startBestOfN).toHaveBeenCalledWith("fix", 2, ["session", "codex"])
+})
 it("consumes start through the composer preview exactly once", async () => {
   const context = ctx("4 fix")
   await handleBestOfN(context)
   expect(context.startBestOfN).toHaveBeenCalledTimes(1)
-  expect(context.startBestOfN).toHaveBeenCalledWith("fix", 4)
+  expect(context.startBestOfN).toHaveBeenCalledWith("fix", 4, undefined)
   expect(context.pushSystemMessage).not.toHaveBeenCalled()
 })
 it("picks only a user-named candidate from this session's latest run", async () => {

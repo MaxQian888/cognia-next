@@ -26,6 +26,13 @@ jest.mock("@/lib/i18n/runtime-translator", () => ({
   getRuntimeTranslator: async () => (key: string) => key,
 }))
 jest.mock("./service", () => ({ startBestOfN: jest.fn() }))
+const mockExternal = { available: true, agents: {} as Record<string, unknown> }
+jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
+  supportsExternalAgents: () => mockExternal.available,
+}))
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: { getState: () => ({ agents: mockExternal.agents }) },
+}))
 jest.mock("./projection", () => ({
   canManageBestOfNRuns: jest.fn(() => true),
   projectBestOfNGroup: jest.fn(),
@@ -33,6 +40,10 @@ jest.mock("./projection", () => ({
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockExternal.available = true
+  mockExternal.agents = {
+    codex: { id: "codex", name: "Codex", enabled: true, metadata: { preset: "codex" } },
+  }
   jest.mocked(canManageBestOfNRuns).mockReturnValue(true)
   jest.mocked(getSession).mockResolvedValue({
     id: "s",
@@ -114,5 +125,43 @@ it("refuses starts from paired observers before accessing the Host", async () =>
   await expect(
     startPreparedBestOfN(prepared, { targetRef: "main", targetIsNew: false })
   ).rejects.toThrow("unavailable")
+  expect(startBestOfN).not.toHaveBeenCalled()
+})
+
+it("previews and starts candidates on different runtimes, one per named agent", async () => {
+  const prepared = await prepareBestOfNChat("s", "fix", 2, ["session", "codex"])
+  expect(prepared.agents).toEqual(["session", "codex"])
+  expect(prepared.agentOptions.map((option) => option.value)).toEqual(["session", "codex"])
+  const group = { groupId: "g", baseSha: "b", targetRef: "t", checkoutHadUncommittedChanges: false }
+  jest
+    .mocked(startBestOfN)
+    .mockResolvedValue({ group, completion: Promise.resolve(group) } as never)
+  await startPreparedBestOfN(prepared, { targetRef: "t", targetIsNew: true }, ["codex", "session"])
+  expect(startBestOfN).toHaveBeenCalledWith(
+    expect.objectContaining({
+      candidates: [
+        { agentId: "agent", provider: "cognia:external-agent:codex" },
+        { agentId: "agent", model: "model" },
+      ],
+    })
+  )
+})
+
+it("refuses an unknown or unavailable agent before preview and again before start", async () => {
+  await expect(prepareBestOfNChat("s", "fix", 2, ["session", "gemini-cli"])).rejects.toThrow(
+    "unknownAgent"
+  )
+  const prepared = await prepareBestOfNChat("s", "fix", 2, ["session", "codex"])
+  mockExternal.agents = {}
+  await expect(
+    startPreparedBestOfN(prepared, { targetRef: "t", targetIsNew: true })
+  ).rejects.toThrow("unknownAgent")
+  await expect(
+    startPreparedBestOfN(prepared, { targetRef: "t", targetIsNew: true }, ["session"])
+  ).rejects.toThrow("usage")
+  mockExternal.available = false
+  await expect(prepareBestOfNChat("s", "fix", 2, ["codex", "session"])).rejects.toThrow(
+    "unknownAgent"
+  )
   expect(startBestOfN).not.toHaveBeenCalled()
 })

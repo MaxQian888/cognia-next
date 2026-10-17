@@ -77,5 +77,8 @@
     "archived": "Archived",
     "failed": "Failed"
   },
-  "errorDetails": "Error details"
+  "errorDetails": "Error details",
+  "runtime": "Runtime",
+  "externalRuntime": "External agent: {name}",
+  "cogniaRuntime": "Cognia agent runtime"
 }

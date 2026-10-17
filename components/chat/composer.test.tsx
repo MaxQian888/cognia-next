@@ -10,6 +10,8 @@ jest.mock("@/lib/best-of-n/entry", () => ({
     dirty: true,
     targetRef: "best-of-n/bon-request",
     branches: ["main"],
+    agents: Array.from({ length: n }, () => "session"),
+    agentOptions: [{ value: "session", kind: "session", label: "session" }],
   })),
   startPreparedBestOfN: jest.fn(async () => ({ groupId: "bon-group" })),
 }))

@@ -9,6 +9,14 @@ import { useChatStore } from "@/stores/chat/chat-store"
 import { getRuntimeTranslator } from "@/lib/i18n/runtime-translator"
 import { startBestOfN } from "./service"
 import { canManageBestOfNRuns, projectBestOfNGroup } from "./projection"
+import {
+  BestOfNAgentChoiceError,
+  SESSION_AGENT_CHOICE,
+  bestOfNAgentOptions,
+  resolveBestOfNAgentChoices,
+  type BestOfNAgentOption,
+  type BestOfNExternalConfig,
+} from "./agents"
 
 export interface PreparedBestOfN {
   session: ChatSession
@@ -21,20 +29,55 @@ export interface PreparedBestOfN {
   branches: string[]
   targetRef: string
   requiredChecks: string[]
+  /** Every agent the start dialog may assign to a candidate. */
+  agentOptions: BestOfNAgentOption[]
+  /** One choice per candidate: `session` or an external configuration. */
+  agents: string[]
+}
+
+async function externalAgentConfigs() {
+  const [{ supportsExternalAgents }, { useExternalAgentStore }] = await Promise.all([
+    import("@/lib/ai/agent/external/agent-transport"),
+    import("@/stores/agent/external-agent-store"),
+  ])
+  return {
+    available: supportsExternalAgents(),
+    configs: Object.values(
+      useExternalAgentStore.getState().agents ?? {}
+    ) as BestOfNExternalConfig[],
+  }
+}
+
+async function resolveAgents(session: ChatSession, agents: readonly string[]) {
+  const t = await getRuntimeTranslator("bestOfNEntry")
+  const { available, configs } = await externalAgentConfigs()
+  try {
+    return resolveBestOfNAgentChoices(session, agents, configs, available)
+  } catch (error) {
+    if (error instanceof BestOfNAgentChoiceError)
+      throw new Error(t("unknownAgent", { agent: error.choice }))
+    throw error
+  }
 }
 
 /** Preview the exact committed base before either entry point spends anything. */
 export async function prepareBestOfNChat(
   sessionId: string,
   prompt: string,
-  n: 2 | 3 | 4
+  n: 2 | 3 | 4,
+  agents?: readonly string[]
 ): Promise<PreparedBestOfN> {
   const t = await getRuntimeTranslator("bestOfNEntry")
   if (!canManageBestOfNRuns()) throw new Error(t("unavailable"))
   const session = await getSession(sessionId)
   if (!session || !session.characterId || session.kind !== "direct" || session.platformBinding)
     throw new Error(t("needsSession"))
-  if (!prompt.trim() || ![2, 3, 4].includes(n)) throw new Error(t("usage"))
+  if (!prompt.trim() || ![2, 3, 4].includes(n) || (agents && agents.length !== n))
+    throw new Error(t("usage"))
+  const choices = agents ? [...agents] : Array.from({ length: n }, () => SESSION_AGENT_CHOICE)
+  // Refuse an unknown name before any preview is shown, not after confirmation.
+  await resolveAgents(session, choices)
+  const external = await externalAgentConfigs()
   const sourceRoot = await resolveEffectiveCwdForSession(session)
   if (!sourceRoot) throw new Error(t("needsRepository"))
   const scm = getSourceControlService()
@@ -59,17 +102,21 @@ export async function prepareBestOfNChat(
     branches: branches.filter((branch) => !branch.isRemote).map((branch) => branch.name),
     targetRef: `best-of-n/${requestId}`,
     requiredChecks: policy.policy.requiredChecks,
+    agentOptions: bestOfNAgentOptions(external.configs, external.available),
+    agents: choices,
   }
 }
 
 /** Both composer entry points consume their ordinary send through this one call. */
 export async function startPreparedBestOfN(
   prepared: PreparedBestOfN,
-  target: { targetRef: string; targetIsNew: boolean }
+  target: { targetRef: string; targetIsNew: boolean },
+  agents: readonly string[] = prepared.agents
 ) {
   const t = await getRuntimeTranslator("bestOfNEntry")
   if (!canManageBestOfNRuns()) throw new Error(t("unavailable"))
   const { session, requestId, prompt, n, sourceRoot, baseSha, requiredChecks } = prepared
+  if (agents.length !== n) throw new Error(t("usage"))
   const handle = await startBestOfN({
     requestId,
     repositoryId: sourceRoot,
@@ -80,11 +127,8 @@ export async function startPreparedBestOfN(
     projectId: session.projectId,
     requiredChecks,
     budgetPolicy: {},
-    candidates: Array.from({ length: n }, () => ({
-      agentId: session.characterId!,
-      ...(session.model ? { model: session.model } : {}),
-      ...(session.providerOverride ? { provider: session.providerOverride } : {}),
-    })),
+    // Resolved again: a configuration disabled since the preview is refused.
+    candidates: await resolveAgents(session, agents),
   })
   // Observe rejection immediately, even if local projection persistence takes time.
   void handle.completion.catch(() => undefined)

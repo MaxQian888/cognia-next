@@ -5724,6 +5724,7 @@
       "passed": "Passed"
     },
     "checks": "Checks",
+    "cogniaRuntime": "Cognia agent runtime",
     "compare": "Compare candidates",
     "confirm": "Confirm publication",
     "confirmPublish": "Publish only the selected head {sha} to {branch}. Nothing will be pushed.",
@@ -5737,6 +5738,7 @@
     "empty": "No best-of-N runs in this conversation.",
     "errorDetails": "Error details",
     "existingTarget": "Explicitly selected existing branch: {branch}",
+    "externalRuntime": "External agent: {name}",
     "files": "Files changed",
     "head": "Recorded head",
     "loading": "Loading…",
@@ -5765,6 +5767,7 @@
     "retryArchive": "Retry archive",
     "run": "Run",
     "runChecks": "Run checks again",
+    "runtime": "Runtime",
     "seconds": "{seconds}s",
     "selected": "Selected",
     "staleCheck": " (different head)",
@@ -5783,12 +5786,14 @@
     "usd": "US${cost}"
   },
   "bestOfNEntry": {
+    "agents": "Agent per attempt",
     "attempts": "Best of {count}",
     "base": "Committed base: {base}",
     "busy": "Wait for the current turn to finish before starting best-of-N.",
     "cancel": "Cancel",
     "cancelled": "The best-of-N run was stopped.",
     "candidate": "Candidate {index}: {status}",
+    "candidateAgent": "Agent for attempt {index}",
     "candidateMissing": "Choose a candidate number or exact candidate ID from this run.",
     "candidateStatus": {
       "cancelRequested": "Stopping",
@@ -5805,6 +5810,8 @@
     "description": "Run independent attempts from one committed base, then choose a winner manually.",
     "dirty": "This checkout has uncommitted changes. They will not be carried into the attempts.",
     "existingBranch": "Explicitly choose an existing branch",
+    "externalAgent": "External: {name}",
+    "externalCost": "External agents do not report cost, so their cost is shown as unknown. A dollar budget cannot be enforced for them.",
     "failed": "Could not start best-of-N: {error}",
     "invalidPolicy": "The committed acceptance policy is invalid. Fix it before starting best-of-N.",
     "manualOnly": "You choose the winner manually. Picking early stops the other attempts. Publishing updates only the chosen local branch; nothing is pushed.",
@@ -5827,6 +5834,7 @@
       "running": "Running"
     },
     "picked": "Candidate selected. Review its exact-head check results in the comparison before publishing.",
+    "sessionAgent": "This conversation's agent",
     "start": "Start attempts",
     "started": "Started {count} attempts at {base}. Result branch: {target}.",
     "starting": "Starting…",
@@ -5836,7 +5844,8 @@
     "textOnly": "Best-of-N accepts a text prompt. Remove attachments and addressed runtime routes first.",
     "title": "Start {count} independent attempts",
     "unavailable": "Best-of-N controls are available only on the local desktop Host. This device can view synced results.",
-    "usage": "Usage: /best-of-n [2|3|4] '<prompt>', /best-of-n status, /best-of-n cancel, /best-of-n pick '<candidate>'",
+    "unknownAgent": "No enabled agent matches \"{agent}\". Use session, an external agent configuration ID, or the preset of an enabled external agent.",
+    "usage": "Usage: /best-of-n [2|3|4] [--agents a,b,...] '<prompt>', /best-of-n status, /best-of-n cancel, /best-of-n pick '<candidate>'",
     "useComposer": "Run this command from the chat composer to preview the base and result branch."
   },
   "board": {

@@ -70,6 +70,10 @@ jest.mock("@/lib/claude/run-and-capture", () => ({
   runAndCaptureAssistantReply: (...args: unknown[]) => run(...args),
 }))
 jest.mock("@/lib/claude/ipc", () => ({ interruptSession: jest.fn() }))
+const external = jest.fn()
+jest.mock("./external", () => ({
+  runExternalCandidate: (...args: unknown[]) => external(...args),
+}))
 import { bestOfNTeam, createBestOfNExecution } from "./runtime"
 import { candidateGrant } from "./core"
 
@@ -135,13 +139,13 @@ it("acquires the frozen base for the Host-assigned child, reusing its port block
   expect(workspace.physicalRoot).toBe("/physical")
 })
 
-async function execute(executionGroup = group) {
+async function execute(executionGroup = group, executionCandidate = group.candidates[0]) {
   return createBestOfNExecution().execute({
     group: executionGroup,
-    candidate: group.candidates[0],
+    candidate: executionCandidate,
     request,
     workspace: { bundleId: "bundle", workspaceId: "workspace", physicalRoot: "/physical" },
-    grant: candidateGrant(executionGroup, group.candidates[0]),
+    grant: candidateGrant(executionGroup, executionCandidate),
     signal: new AbortController().signal,
   })
 }
@@ -225,4 +229,64 @@ it("keeps an AI-SDK zero wire cost unknown for duration-only attempts", async ()
 it("preserves a reported zero from the Claude SDK cost authority", async () => {
   run.mockResolvedValue({ text: "done", usage: { totalCostUsd: 0 } })
   expect((await execute()).costUsd).toBe(0)
+})
+
+const codex = {
+  ...candidate,
+  agent: { agentId: "agent", provider: "cognia:external-agent:codex-1", model: "gpt-5" },
+} as BestOfNGroup["candidates"][number]
+const durationOnly = { ...group, budgetPolicy: { maxDurationMs: 10_000 } } as BestOfNGroup
+
+it("runs an external candidate in its own workspace root and keeps its cost unknown", async () => {
+  external.mockResolvedValue({ text: "external done" })
+  expect(await execute(durationOnly, codex)).toEqual({
+    changesetId: "change",
+    headSha: "head",
+    hasChanges: true,
+    costUsd: null,
+  })
+  expect(resolve).not.toHaveBeenCalled()
+  expect(run).not.toHaveBeenCalled()
+  expect(external).toHaveBeenCalledWith(
+    expect.objectContaining({
+      configId: "codex-1",
+      model: "gpt-5",
+      prompt: "Fix this",
+      workingDirectory: "/physical",
+      onCapture: dispatch.capture,
+    })
+  )
+  expect(sessions.add).toHaveBeenCalledWith(
+    expect.objectContaining({ providerOverride: "cognia:external-agent:codex-1", model: "gpt-5" })
+  )
+  expect(dispatch.complete).toHaveBeenCalledWith(expect.objectContaining({ text: "external done" }))
+  expect(dispatch.complete).toHaveBeenCalledWith(
+    expect.not.objectContaining({ costUsd: expect.anything() })
+  )
+})
+
+it("refuses a dollar cap for an external candidate before it starts", async () => {
+  await expect(execute(group, codex)).rejects.toThrow("cannot enforce the best-of-N cost budget")
+  expect(external).not.toHaveBeenCalled()
+  expect(capture).not.toHaveBeenCalled()
+})
+
+it("routes a Cognia agent whose resolved runtime is external through the same lane", async () => {
+  resolve.mockResolvedValue({ ...options, provider: "cognia:external-agent:claude-1", model: "m" })
+  external.mockResolvedValue({ text: "ok" })
+  await execute(durationOnly)
+  expect(external).toHaveBeenCalledWith(
+    expect.objectContaining({ configId: "claude-1", model: "m" })
+  )
+  expect(run).not.toHaveBeenCalled()
+})
+
+it("refuses the legacy unscoped external marker instead of guessing an agent", async () => {
+  await expect(
+    execute(durationOnly, {
+      ...codex,
+      agent: { agentId: "agent", provider: "cognia:external-agent" },
+    })
+  ).rejects.toThrow("unscoped external agent")
+  expect(external).not.toHaveBeenCalled()
 })

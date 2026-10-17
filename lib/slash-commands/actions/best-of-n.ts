@@ -1,8 +1,9 @@
 import type { SlashContext } from "../builtin"
 import { getRuntimeTranslator } from "@/lib/i18n/runtime-translator"
+import { splitAgentsFlag } from "@/lib/best-of-n/agents"
 
 export type BestOfNCommand =
-  | { kind: "start"; n: 2 | 3 | 4; prompt: string }
+  | { kind: "start"; n: 2 | 3 | 4; prompt: string; agents?: string[] }
   | { kind: "status" | "cancel" }
   | { kind: "pick"; candidate: string }
   | { kind: "invalid" }
@@ -15,11 +16,14 @@ export function parseBestOfNCommand(args: string): BestOfNCommand {
   if (head === "status" || head === "cancel") return rest ? { kind: "invalid" } : { kind: head }
   if (head === "pick")
     return tail.length === 1 ? { kind: "pick", candidate: rest } : { kind: "invalid" }
-  if (/^\d+$/.test(head))
-    return ["2", "3", "4"].includes(head) && rest
-      ? { kind: "start", n: Number(head) as 2 | 3 | 4, prompt: rest }
-      : { kind: "invalid" }
-  return { kind: "start", n: 2, prompt: text }
+  // `[n] [--agents a,b,...] <prompt>`: one agent per candidate, in order.
+  const counted = /^\d+$/.test(head)
+  if (counted && !["2", "3", "4"].includes(head)) return { kind: "invalid" }
+  const { agents, rest: prompt } = splitAgentsFlag(counted ? rest : text)
+  if (!prompt || (agents && agents.length === 0)) return { kind: "invalid" }
+  const n = counted ? Number(head) : (agents?.length ?? 2)
+  if (![2, 3, 4].includes(n) || (agents && agents.length !== n)) return { kind: "invalid" }
+  return { kind: "start", n: n as 2 | 3 | 4, prompt, ...(agents ? { agents } : {}) }
 }
 
 export async function handleBestOfN(ctx: SlashContext): Promise<void> {
@@ -46,7 +50,7 @@ export async function handleBestOfN(ctx: SlashContext): Promise<void> {
       ctx.pushSystemMessage(t("useComposer"))
       return
     }
-    await ctx.startBestOfN(command.prompt, command.n)
+    await ctx.startBestOfN(command.prompt, command.n, command.agents)
     return
   }
   const { canManageBestOfNRuns, listBestOfNRuns, refreshBestOfNRun } =

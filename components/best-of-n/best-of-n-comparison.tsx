@@ -20,6 +20,8 @@ import { cancelBestOfN } from "@/lib/best-of-n/service"
 import { createScmHost } from "@/lib/scm/host"
 import { getSourceControlService } from "@/lib/scm/service"
 import { useDockTabsStore } from "@/stores/artifact/dock-tabs-store"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { describeBestOfNAgent } from "@/lib/best-of-n/agents"
 import type { GitDiff } from "@/types/git"
 
 export function BestOfNComparisonPanel({ sessionId }: { sessionId: string | null }) {
@@ -56,6 +58,8 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
   const t = useTranslations("best-of-n-ui")
   const { summary, refresh, canManage, failed } = useBestOfNRun(groupId)
   const host = useMemo(() => createScmHost(), [])
+  // Names only; a paired device without the configuration shows its id.
+  const externalAgents = useExternalAgentStore((state) => state.agents)
   const [busy, setBusy] = useState(false)
   const operation = useRef(false)
   const [error, setError] = useState(false)
@@ -188,6 +192,7 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
           const evidence = summary?.candidateChangesets?.[candidate.candidateId]
           const changeset = evidence?.headSha === candidate.headSha ? evidence : undefined
           const isSelected = group.selectedCandidateId === candidate.candidateId
+          const runtime = describeBestOfNAgent(candidate.agent)
           const duration =
             candidate.startedAt == null
               ? null
@@ -205,6 +210,17 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
               <dl className="space-y-2 text-xs">
                 <dt>{t("agent")}</dt>
                 <dd className="break-all">{candidate.agent.agentId}</dd>
+                <dt>{t("runtime")}</dt>
+                <dd className="break-all">
+                  {runtime.kind === "external"
+                    ? t("externalRuntime", {
+                        name:
+                          (runtime.configId && externalAgents[runtime.configId]?.name) ||
+                          runtime.configId ||
+                          t("unknown"),
+                      })
+                    : t("cogniaRuntime")}
+                </dd>
                 <dt>{t("model")}</dt>
                 <dd>{candidate.agent.model ?? t("unknown")}</dd>
                 <dt>{t("base")}</dt>

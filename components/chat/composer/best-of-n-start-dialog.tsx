@@ -21,12 +21,13 @@ export function BestOfNStartDialog({
   onCancel,
 }: {
   prepared: PreparedBestOfN
-  onConfirm(target: { targetRef: string; targetIsNew: boolean }): Promise<void>
+  onConfirm(target: { targetRef: string; targetIsNew: boolean }, agents: string[]): Promise<void>
   onCancel(): void
 }) {
   const t = useTranslations("bestOfNEntry")
   const [targetIsNew, setTargetIsNew] = useState(true)
   const [targetRef, setTargetRef] = useState(prepared.targetRef)
+  const [agents, setAgents] = useState(prepared.agents)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   return (
@@ -79,6 +80,33 @@ export function BestOfNStartDialog({
             ))}
           </NativeSelect>
         )}
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">{t("agents")}</legend>
+          {agents.map((choice, index) => (
+            <NativeSelect
+              key={index}
+              aria-label={t("candidateAgent", { index: index + 1 })}
+              value={choice}
+              disabled={busy}
+              onChange={(event) =>
+                setAgents((current) =>
+                  current.map((item, at) => (at === index ? event.target.value : item))
+                )
+              }
+            >
+              {prepared.agentOptions.map((option) => (
+                <NativeSelectOption key={option.value} value={option.value}>
+                  {option.kind === "session"
+                    ? t("sessionAgent")
+                    : t("externalAgent", { name: option.label })}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ))}
+          {agents.some((choice) => choice !== "session") && (
+            <p className="text-xs text-muted-foreground">{t("externalCost")}</p>
+          )}
+        </fieldset>
         <p className="text-xs text-muted-foreground">{t("manualOnly")}</p>
         {error && <p role="alert">{t("failed", { error })}</p>}
         <DialogFooter>
@@ -91,7 +119,7 @@ export function BestOfNStartDialog({
               setBusy(true)
               setError(null)
               try {
-                await onConfirm({ targetRef: targetRef.trim(), targetIsNew })
+                await onConfirm({ targetRef: targetRef.trim(), targetIsNew }, agents)
               } catch (cause) {
                 setError(cause instanceof Error ? cause.message : String(cause))
                 setBusy(false)

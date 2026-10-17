@@ -23,7 +23,7 @@
   "needsCommit": "Commit the repository before starting best-of-N.",
   "invalidPolicy": "The committed acceptance policy is invalid. Fix it before starting best-of-N.",
   "mixedBatch": "/best-of-n must be the whole message. Send it on its own, without other commands.",
-  "usage": "Usage: /best-of-n [2|3|4] '<prompt>', /best-of-n status, /best-of-n cancel, /best-of-n pick '<candidate>'",
+  "usage": "Usage: /best-of-n [2|3|4] [--agents a,b,...] '<prompt>', /best-of-n status, /best-of-n cancel, /best-of-n pick '<candidate>'",
   "busy": "Wait for the current turn to finish before starting best-of-N.",
   "textOnly": "Best-of-N accepts a text prompt. Remove attachments and addressed runtime routes first.",
   "useComposer": "Run this command from the chat composer to preview the base and result branch.",
@@ -53,5 +53,11 @@
     "cancelled": "Stopped",
     "recoveryRequired": "Recovery required"
   },
-  "unavailable": "Best-of-N controls are available only on the local desktop Host. This device can view synced results."
+  "unavailable": "Best-of-N controls are available only on the local desktop Host. This device can view synced results.",
+  "agents": "Agent per attempt",
+  "candidateAgent": "Agent for attempt {index}",
+  "sessionAgent": "This conversation's agent",
+  "externalAgent": "External: {name}",
+  "externalCost": "External agents do not report cost, so their cost is shown as unknown. A dollar budget cannot be enforced for them.",
+  "unknownAgent": "No enabled agent matches \"{agent}\". Use session, an external agent configuration ID, or the preset of an enabled external agent."
 }
