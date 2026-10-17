@@ -203,6 +203,7 @@ impl SandboxedExec for WindowsSandboxBackend {
             parsed.stderr_truncated,
         );
         Ok(SandboxResult {
+            network: Default::default(),
             exit_code: parsed.exit_code,
             stdout,
             stderr,
@@ -277,8 +278,7 @@ struct RunnerPayload<'a> {
     ///
     /// The runner REFUSES a launch that asks for `"off"`: this tier confines
     /// privileges, integrity and the process tree, and nothing else confines
-    /// a socket. Failing closed there is the same rule
-    /// `downgrade_unenforceable_network` applies to a Linux allowlist.
+    /// a socket. Linux allowlists instead use their backend-owned namespace bridge.
     network: &'static str,
 }
 

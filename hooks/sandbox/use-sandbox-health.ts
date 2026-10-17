@@ -10,6 +10,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { transport } from "@/lib/tauri"
 import { refreshCodeSandboxStatus } from "@/lib/ai/code-mode/sandbox-status"
+import {
+  normalizeSandboxNetworkAllowlistProbe,
+  type SandboxNetworkAllowlistProbe,
+} from "@cognia/plugin-sdk/api/sandbox"
 
 export interface SandboxHealth {
   available: boolean
@@ -44,9 +48,15 @@ export interface SandboxProbe {
   backend: string
   /** Human-readable detail: `"ok"` or the reason confinement failed. */
   detail: string
+  networkAllowlist: SandboxNetworkAllowlistProbe
 }
 
-const IDLE_PROBE: SandboxProbe = { status: "idle", backend: "", detail: "" }
+const IDLE_PROBE: SandboxProbe = {
+  status: "idle",
+  backend: "",
+  detail: "",
+  networkAllowlist: normalizeSandboxNetworkAllowlistProbe(undefined),
+}
 
 function normaliseHealth(raw: RawSandboxHealth | null | undefined): SandboxHealth {
   if (!raw) return DEFAULT_HEALTH
@@ -102,7 +112,11 @@ export function useSandboxHealth(options: UseSandboxHealthOptions = {}): {
   }, [])
 
   const verify = useCallback(async () => {
-    setProbe((p) => ({ ...p, status: "running" }))
+    setProbe((p) => ({
+      ...p,
+      status: "running",
+      networkAllowlist: normalizeSandboxNetworkAllowlistProbe(undefined),
+    }))
     try {
       const raw = await refreshCodeSandboxStatus()
       if (!aliveRef.current) return
@@ -110,6 +124,7 @@ export function useSandboxHealth(options: UseSandboxHealthOptions = {}): {
         status: raw.confined ? "ok" : "failed",
         backend: raw.backend,
         detail: raw.detail,
+        networkAllowlist: normalizeSandboxNetworkAllowlistProbe(raw.networkAllowlist),
       })
     } catch (err) {
       if (!aliveRef.current) return
@@ -118,6 +133,7 @@ export function useSandboxHealth(options: UseSandboxHealthOptions = {}): {
         status: "failed",
         backend: "",
         detail: err instanceof Error ? err.message : String(err),
+        networkAllowlist: normalizeSandboxNetworkAllowlistProbe(undefined),
       })
     }
   }, [])

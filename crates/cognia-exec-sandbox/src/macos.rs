@@ -239,6 +239,7 @@ impl SandboxedExec for MacOsSandboxBackend {
             })?;
 
         Ok(SandboxResult {
+            network: Default::default(),
             exit_code: status.code().unwrap_or(-1),
             stdout,
             stderr,

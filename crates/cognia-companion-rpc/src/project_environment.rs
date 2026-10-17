@@ -514,6 +514,7 @@ mod tests {
                 |command, _policy| {
                     *captured.lock().unwrap() = Some(command);
                     std::future::ready(Ok(cognia_exec_sandbox::types::SandboxResult {
+                        network: Default::default(),
                         exit_code: 0,
                         stdout: String::new(),
                         stderr: String::new(),

@@ -76,6 +76,27 @@ cheap binary-presence probe. microVM availability comes from the currently accep
 adapter; the UI also explains that final eligibility requires an E2B-backed workspace. Persisted
 unavailable selections remain visible and selected but disabled with an actionable reason.
 
+## Network capability and per-run evidence
+
+Filesystem/process confinement and network allowlist enforcement are separate facts. The network
+allowlist probe is carried independently through the CLI probe, `useSandboxHealth`,
+`runtime-availability`, and code-mode sandbox status. A successful general confinement probe or a
+present bwrap binary does not prove the allowlist bridge is available. Old backends and missing
+network fields resolve to unknown, never to enforced.
+
+The SDK result exposes an independent `network` field containing `requested`, `effective`, and
+`mechanism`. On Linux, `mechanism: "netns_unix_proxy"` requires the versioned Ready/Go/Started
+handshake for that run: Ready proves the loopback/proxy probe, Go releases target startup, and
+Started acknowledges successful spawn and seccomp installation. Configuration, proxy environment
+variables and a capability probe alone cannot substitute for Started. Missing or incompatible trusted helpers refuse allowlist execution with
+setup guidance. `MicrovmConfinement.networkEnforced` still means no egress at all and is not reused
+for allowlist enforcement.
+
+The Linux mechanism combines a private network namespace with a Unix filtering proxy. Its supported
+protocols are CONNECT and absolute-form HTTP, not SOCKS, raw TCP, UDP or direct DNS. The target also
+cannot use pathname Unix IPC under an allowlist. These restrictions belong to the reported
+capability even when filesystem/process confinement is healthy.
+
 ## Diagnostics — shipped & wired
 
 `components/settings/sections/diagnostics-section.tsx` mounts two ADR-0028 cards:

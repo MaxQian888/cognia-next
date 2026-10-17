@@ -28,6 +28,8 @@ pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod mock;
+#[cfg(unix)]
+pub mod net_bridge;
 pub mod net_proxy;
 pub mod output;
 pub mod paths;
@@ -129,47 +131,22 @@ fn canonicalize_policy(
     })
 }
 
-/// On Linux a `Bash` network allowlist is NOT kernel-enforced — the backend
-/// shares the host network and only the proxy env constrains egress, which a
-/// sandboxed command can simply ignore (raw socket, dropped proxy var). Per
-/// ADR-0028 strict mode we fail CLOSED: downgrade the allowlist to "no
-/// network" rather than run with an unenforced (effectively open) one. macOS
-/// pins egress to the proxy port at the kernel, so it keeps the allowlist.
-fn downgrade_unenforceable_network(
-    policy: crate::types::SandboxPolicy,
-) -> crate::types::SandboxPolicy {
-    #[cfg(target_os = "linux")]
+/// Reject an empty allowlist before backend selection or proxy setup.
+fn validate_network(
+    policy: &crate::types::SandboxPolicy,
+) -> Result<(), crate::types::SandboxError> {
+    if let crate::types::SandboxPolicy::Bash {
+        network: crate::types::NetworkPolicy::Allowlist { hosts },
+        ..
+    } = policy
     {
-        use crate::types::{NetworkPolicy, SandboxPolicy};
-        if let SandboxPolicy::Bash {
-            network: NetworkPolicy::Allowlist { .. },
-            writable,
-            readable,
-            max_cpu_seconds,
-            max_memory_mb,
-            max_processes,
-        } = policy
-        {
-            eprintln!(
-                "sandbox: network allowlist is not kernel-enforced on Linux — downgrading to \
-                 no-network (fail-closed). Use network=off, or run on macOS for an enforced \
-                 allowlist."
-            );
-            return SandboxPolicy::Bash {
-                network: NetworkPolicy::Off,
-                writable,
-                readable,
-                max_cpu_seconds,
-                max_memory_mb,
-                max_processes,
-            };
+        if hosts.is_empty() {
+            return Err(crate::types::SandboxError::InvalidPolicy {
+                reason: "network allowlist must not be empty".into(),
+            });
         }
-        policy
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        policy
-    }
+    Ok(())
 }
 
 /// The directories a sandbox writable root / write target may never be or sit
@@ -315,9 +292,8 @@ fn reject_forbidden_readable(
 }
 
 /// Start the host-side filtering proxy for a (kernel-enforceable) allowlist
-/// policy and inject the proxy env into `command`. Returns the guard (held
-/// for the lifetime of the run, then dropped to abort the proxy) or `None`
-/// when the policy needs no proxy. Fails closed: an allowlist that can't bind
+/// policy and inject the proxy env into `command`. The owner explicitly shuts
+/// it down after the run. Linux returns `None`: its backend owns a Unix bridge. Fails closed: an allowlist that can't bind
 /// its proxy is a `BackendFailed` error, never an open-network run.
 async fn maybe_start_proxy(
     command: &mut crate::types::SandboxCommand,
@@ -332,7 +308,9 @@ async fn maybe_start_proxy(
     else {
         return Ok(None);
     };
-    if hosts.is_empty() {
+    validate_network(policy)?;
+    // Linux owns a Unix proxy inside the backend; caller env is never a bridge.
+    if cfg!(target_os = "linux") {
         return Ok(None);
     }
     match crate::net_proxy::FilteringProxy::start(hosts.clone()).await {
@@ -368,14 +346,15 @@ async fn maybe_start_proxy(
 /// order: (1) a backend-availability gate (fail-closed → `SetupRequired`,
 /// so an unavailable backend can never run unsandboxed even if a future
 /// backend forgets to re-check); (2) path canonicalization + validation;
-/// (3) dangerous-env scrubbing; (4) the Linux allowlist fail-closed
-/// downgrade; (5) the kernel-enforced filtering proxy. Only then does it
+/// (3) dangerous-env scrubbing; (4) backend-owned network enforcement. Only then does it
 /// hand off to the per-platform backend.
 pub async fn run_confined(
     mut command: crate::types::SandboxCommand,
     policy: crate::types::SandboxPolicy,
 ) -> Result<crate::types::SandboxResult, crate::types::SandboxError> {
     use crate::types::SandboxError;
+
+    validate_network(&policy)?;
 
     // 1. Availability gate — the dispatcher-level invariant. Fail closed.
     let backend = current_backend();
@@ -410,13 +389,18 @@ pub async fn run_confined(
     // 3. Drop code-injection environment variables (LD_PRELOAD, NODE_OPTIONS…).
     crate::env::filter_env(&mut command.env);
 
-    // 4. Fail closed on networks the platform can't actually enforce.
-    let policy = downgrade_unenforceable_network(policy);
-
-    // 5. Proxy for an enforceable allowlist (held until the run returns).
-    let _proxy_guard = maybe_start_proxy(&mut command, &policy).await?;
-
-    backend.run(command, policy).await
+    // macOS owns a TCP proxy here; Linux creates its Unix bridge in run().
+    let mut proxy = maybe_start_proxy(&mut command, &policy).await?;
+    let result = backend.run(command, policy).await;
+    if let Some(proxy) = proxy.as_mut() {
+        proxy
+            .shutdown()
+            .await
+            .map_err(|e| SandboxError::BackendFailed {
+                reason: format!("proxy shutdown failed: {e}"),
+            })?;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -491,34 +475,54 @@ mod tests {
         assert!(canonicalize_policy(policy).is_ok());
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn linux_downgrades_allowlist_to_no_network() {
+    fn allowlist_is_preserved_and_empty_is_invalid() {
         let policy = bash_policy(
             NetworkPolicy::Allowlist {
-                hosts: vec!["api.github.com".into()],
+                hosts: vec!["example.com".into()],
             },
-            vec![PathBuf::from("/w")],
+            vec![],
         );
-        let SandboxPolicy::Bash { network, .. } = downgrade_unenforceable_network(policy) else {
-            panic!("expected Bash");
-        };
-        assert_eq!(network, NetworkPolicy::Off);
+        assert!(validate_network(&policy).is_ok());
+        assert!(matches!(
+            policy,
+            SandboxPolicy::Bash {
+                network: NetworkPolicy::Allowlist { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            validate_network(&bash_policy(
+                NetworkPolicy::Allowlist { hosts: vec![] },
+                vec![]
+            )),
+            Err(SandboxError::InvalidPolicy { .. })
+        ));
     }
 
-    #[cfg(not(target_os = "linux"))]
-    #[test]
-    fn non_linux_preserves_allowlist() {
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn linux_dispatcher_never_starts_a_tcp_proxy_or_trusts_env() {
+        let mut command = SandboxCommand {
+            argv: vec!["true".into()],
+            cwd: PathBuf::from("/tmp"),
+            env: Default::default(),
+            stdin: None,
+            timeout: Duration::from_secs(1),
+        };
+        command
+            .env
+            .insert("COGNIA_SANDBOX_PROXY_PORT".into(), "1234".into());
         let policy = bash_policy(
             NetworkPolicy::Allowlist {
-                hosts: vec!["api.github.com".into()],
+                hosts: vec!["example.com".into()],
             },
-            vec![PathBuf::from("/w")],
+            vec![],
         );
-        let SandboxPolicy::Bash { network, .. } = downgrade_unenforceable_network(policy) else {
-            panic!("expected Bash");
-        };
-        assert!(matches!(network, NetworkPolicy::Allowlist { .. }));
+        assert!(maybe_start_proxy(&mut command, &policy)
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -687,6 +691,7 @@ mod tests {
         assert!(!cmd.env.contains_key("HTTP_PROXY"));
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[tokio::test]
     async fn maybe_start_proxy_injects_env_for_allowlist() {
         let mut cmd = SandboxCommand {

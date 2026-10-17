@@ -23,7 +23,7 @@ path = "src/lib.rs"
 [dependencies]
 # The egress proxy's allow/deny checks and the upstream proxy dialer.
 cognia-net = { path = "../cognia-net" }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time", "net"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time", "net", "signal"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true

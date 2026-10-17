@@ -12,7 +12,7 @@
 //! It calls `sandbox::run_confined`, which is the single confined-execution
 //! path shared with the Tauri command, so the confinement a CLI session gets is
 //! byte-identical to the desktop's: availability gate, path canonicalization,
-//! forbidden-root rejection, env scrubbing, unenforceable-network downgrade,
+//! forbidden-root rejection, env scrubbing, backend-owned network enforcement,
 //! filtering proxy, then the per-platform backend (bwrap / sandbox-exec /
 //! Windows runner) with seccomp, rlimits and capped output.
 //!

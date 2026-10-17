@@ -69,7 +69,7 @@ T1–T5涵盖正交威胁接口;并非所有场次都涵盖所有等级。
 
 - **Windows**：`crates/cognia-sandbox-runner`以`cognia-sandbox-runner.exe`形式发布。运行者在应用自身令牌的受限子集下启动目标，降低完整性，将进程树分配给作业对象，并通过JSON返回捕获的stdout/stderr。它不需要升华、独立OS账户，或预设的文件系统/权限/进程约束设置标记。遗留`target_user` 载荷字段仅保留用于JSON兼容性，运行者忽略;`cognia-sandbox-setup.exe`预留给未来的可选per-SID防火墙后续。
 - **macOS**：直接Rust呼叫`sandbox-exec -f <profile.sb> -- <argv>`，`src-tauri/src/sandbox/macos/profiles/`中SBPL模板。备选方案B文档，苹果移除`sandbox-exec`当天——迁移到应用沙盒+XPC服务。
-- **Linux**：捆绑静态`bwrap`二进制文件Tauri资源;`--unshare-all` + 可选`--share-net` + read/write绑定 + `--die-with-parent` + 基于 Flatpak 的 seccomp 配置文件。
+- **Linux**：捆绑静态`bwrap`二进制文件Tauri资源;`--unshare-all` + 仅 network `On` 使用 `--share-net`（allowlist 使用 netns + Unix proxy bridge）+ read/write绑定 + `--die-with-parent` + 基于 Flatpak 的 seccomp 配置文件。
 
 T1拦截路径：一个新的树内插件`plugins/cognia-sandboxed-tools/`注册四个MCP工具（`sandbox_bash` / `sandbox_edit` / `sandbox_write` / `sandbox_text_editor`）。当会话启用沙盒时，`resolveSendOptions`会将内置SDK添加到`disallowedTools`，过滤`anthropicTools`投影中的原生`text_editor`，附加简短的系统提示说明，并通过`opts.pluginTools` 接口四个沙箱对应工具。现有的`plugin_tool_exec` IPC桥（`sidecar/builtin-tools/plugin-tools.mjs`）将调用传递给渲染器，渲染器再向`sandbox_exec` Tauri 命令发送。SDK保持不变。
 
@@ -189,3 +189,47 @@ SDK的`--resume`忽略`CLAUDE_CONFIG_DIR`（只在默认`~/.claude/projects/`下
 sandboxed-tools 插件采用穷尽路由：`os` 使用既有 `sandbox_exec`，`microvm` 使用已注册 E2B adapter，`cua-desktop` 直接拒绝。runtime ref、adapter、实时连接、能力或 running 状态任一缺失，都会在任何宿主机执行前失败。
 
 E2B 现在与现有 workspace backend 共用一个实例池。microVM runtime 只能绑定到存活的 E2B workspace handle，不会另行 clone 或同步第二份目录。同一 runtime ref 的连续调用复用同一 VM；同一会话的配置 generation 会共同保留该 workspace，直到所有 owner 释放，而不同 workspace handle 保持隔离。会话释放与插件停用只关闭一次；关闭失败会继续被跟踪并向上抛出，以便重试。network mode 属于实例创建事实；当前基于 Git 的 handle 创建时必须联网，因此在 adapter 能证明落实前，offline 请求、allowlist 与 CPU/内存上限都会被拒绝。
+
+## 补充 — Linux 网络 allowlist 强制执行（2026-10-17）
+
+Linux `Allowlist` 由独立 network namespace 与 `net_proxy.rs` 中共用的宿主过滤代理执行，
+复用现有 `cognia-net` matcher。`Off` 使用 `--unshare-net`；仅 `On` 使用 `--share-net`。
+空 allowlist 无效。即使被直接调用，`LinuxSandboxBackend::run` 也持有 bridge setup；
+dispatcher 不会在 Linux 上启动 TCP 代理，也不会把 allowlist 降级为 Off。
+
+后端创建权限为 0700 的私有目录，其中有权限为 0600 的 `proxy.sock` 和独立的 `control.sock`，
+在所有用户 bind 之后将这些 socket 与可信 launcher helper 只读挂载到 `/run/cognia-egress/`。
+冲突的用户路径会被拒绝。namespace 隔离、文件保护、seccomp、`--cap-drop ALL` 与
+`--die-with-parent` 保持生效。现有 launcher 使用内部 `--linux-netns-bridge` 模式；其位置
+来自可信绝对路径，不来自目标 env、`PATH` 或参数。helper 缺失或不兼容时返回 `SetupRequired`，
+不会回退到共享网络。
+
+supervisor 验证 loopback 标志与连通性，绑定 `127.0.0.1:0`，并以一个必须返回 400 的无效
+请求对 Unix 代理做端到端 probe，无需外部 DNS。它通过 control socket 发送带版本的 Ready，
+等待 Go 后才在独立进程组中启动目标。仅在目标 spawn 与 seccomp 安装成功后确认 Started。
+最后将大小写两套代理环境变量设置为 relay，并清空
+两个 `NO_PROXY` 变量。只有 supervisor 保留监听/控制/上游描述符；relay 不消费目标 stdin/stdout，
+并且只向固定 proxy socket 转发连接。
+
+两层 seccomp 为 supervisor 允许 AF_UNIX + AF_INET，但在目标 exec 前拒绝其
+`socket(AF_UNIX)` 与其他非 IP 地址族。用于本地 IPC 的 AF_UNIX `SOCK_STREAM` socketpair
+仍可用；datagram 与其他非 stream socketpair 因可重新连接 pathname Unix socket 而被拒绝。
+过滤器失败会拒绝运行。
+**allowlist 下目标不能使用 pathname Unix IPC**，包括挂载的宿主 socket。支持的出口协议为
+CONNECT 和 absolute-form HTTP；不支持 SOCKS、raw TCP、UDP 或直接 DNS。宿主代理检查
+解析后的公网目标，但不会检查 CONNECT 隧道内的 TLS SNI。
+
+supervisor 充当 namespace init（支持时使用 `--as-pid-1`），转发 SIGTERM/SIGINT/SIGHUP，
+通过单一 wait 路径回收，并在退出时关闭 relay。setup/握手、stdin、输出与 wait 共用 watchdog。
+退出、超时、stdin 错误与调用方取消都先终止并回收沙盒，再等待代理 shutdown，最后移除 socket
+与私有目录；终止宽限期有上限。
+
+能力报告将网络 allowlist probe 与一般 confinement 分开。逐次运行的 `network` 包含
+`requested`、`effective` 和 `mechanism`；仅收到 Started 并完成握手后才报告
+`netns_unix_proxy`，从不根据
+调用方代理 env 推断。旧后端或缺失字段表示 unknown。`MicrovmConfinement.networkEnforced`
+仍表示完全无出口。真实 Linux 验收独立于 macOS 单元测试与交叉编译：
+`cargo test -p cognia-exec-sandbox --test linux_allowlist -- --ignored --test-threads=1`。
+fixture 要求 bwrap、util-linux `unshare`、iproute2 `ip`、`/usr/bin/python3` 与嵌套的
+user/network/mount namespace。它在一次性 namespace 内重新执行，不修改宿主网络状态。
+缺少前提时验收失败，不会跳过。

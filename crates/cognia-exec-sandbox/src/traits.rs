@@ -72,6 +72,11 @@ pub trait SandboxedExec: Send + Sync {
     /// Diagnostic snapshot for the renderer's Settings → Sandbox tab.
     fn health(&self) -> SandboxHealth;
 
+    /// Separate active network probe; legacy backends make no claim.
+    async fn probe_network_allowlist(&self) -> crate::types::NetworkAllowlistProbe {
+        Default::default()
+    }
+
     /// ACTIVE confinement probe. Unlike `health`/`is_available` (which only
     /// check that the backend binary exists), this actually runs commands in
     /// the sandbox and verifies confinement is enforced. Two sub-probes:
@@ -89,8 +94,10 @@ pub trait SandboxedExec: Send + Sync {
     /// renderer can render a precise reason.
     async fn probe_confinement(&self) -> ProbeReport {
         let backend = self.health().backend;
+        let network_allowlist = self.probe_network_allowlist().await;
         if !self.is_available() {
             return ProbeReport {
+                network_allowlist,
                 backend,
                 confined: false,
                 detail: "backend unavailable — sandbox binary not installed".into(),
@@ -134,6 +141,7 @@ pub trait SandboxedExec: Send + Sync {
             Ok(r) => {
                 let _ = std::fs::remove_dir_all(&writable_dir);
                 return ProbeReport {
+                    network_allowlist,
                     backend,
                     confined: false,
                     detail: format!(
@@ -146,6 +154,7 @@ pub trait SandboxedExec: Send + Sync {
             Err(e) => {
                 let _ = std::fs::remove_dir_all(&writable_dir);
                 return ProbeReport {
+                    network_allowlist,
                     backend,
                     confined: false,
                     detail: format!("sandbox failed to run a trivial command: {e}"),
@@ -159,6 +168,7 @@ pub trait SandboxedExec: Send + Sync {
         let Some(forbidden) = forbidden else {
             let _ = std::fs::remove_dir_all(&writable_dir);
             return ProbeReport {
+                network_allowlist,
                 backend,
                 confined: true,
                 detail: "ok (write-denial probe skipped — no home directory)".into(),
@@ -183,6 +193,7 @@ pub trait SandboxedExec: Send + Sync {
 
         if leaked || !blocked_by_exit {
             return ProbeReport {
+                network_allowlist,
                 backend,
                 confined: false,
                 detail: "a write outside the sandbox's writable set was NOT blocked \
@@ -192,6 +203,7 @@ pub trait SandboxedExec: Send + Sync {
         }
 
         ProbeReport {
+            network_allowlist,
             backend,
             confined: true,
             detail: "ok".into(),
@@ -230,6 +242,7 @@ mod tests {
                 self.denied_write
             };
             Ok(SandboxResult {
+                network: Default::default(),
                 exit_code,
                 stdout: String::new(),
                 stderr: String::new(),

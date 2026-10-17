@@ -26,6 +26,7 @@ import { resolveWorkspacePortEnv } from "../workspace-port-env"
 import type { OsSandboxExecutor } from "@/lib/sandbox/os-exec-bridge"
 import type { CodeSandboxStatus } from "@/lib/ai/code-mode/sandbox-status"
 import type { MicrovmExecPayload, MicrovmResult } from "@cognia/plugin-sdk/api/sandbox"
+import { normalizeSandboxNetworkAllowlistProbe } from "@cognia/plugin-sdk/api/sandbox"
 
 import {
   defaultNativeCandidates,
@@ -46,6 +47,11 @@ export const SANDBOX_EXEC_ENV = "COGNIA_SANDBOX_EXEC"
  */
 export const SUPERVISOR_GRACE_MS = 30_000
 
+/** Rust runs an independent network probe and two filesystem probes in sequence,
+ * each capped at ten seconds. Cleanup and report serialization need the same
+ * additional grace as execution, beyond those combined probe deadlines. */
+const ACTIVE_PROBE_TIMEOUT_MS = 3 * 10_000
+
 /** Ceiling on the envelope we will buffer. Each output stream is already capped
  * at one million bytes on the Rust side, so anything past this is a protocol
  * fault rather than a large-but-legitimate result. */
@@ -61,7 +67,7 @@ interface RawEnvelope {
   ok?: boolean
   result?: MicrovmResult
   error?: RawSandboxError
-  probe?: { backend?: string; confined?: boolean; detail?: string }
+  probe?: { backend?: string; confined?: boolean; detail?: string; network_allowlist?: unknown }
 }
 
 /**
@@ -301,19 +307,38 @@ export function createNodeOsSandboxExecutor(
 
     async probe(): Promise<CodeSandboxStatus> {
       if (!binary) {
-        return { confined: false, backend: "", detail: sandboxExecUnavailableMessage(devCheckout) }
+        return {
+          confined: false,
+          backend: "",
+          detail: sandboxExecUnavailableMessage(devCheckout),
+          networkAllowlist: normalizeSandboxNetworkAllowlistProbe(undefined),
+        }
       }
       try {
-        const envelope = await runHelper(binary, ["--probe"], null, spawnFn, grace)
+        const envelope = await runHelper(
+          binary,
+          ["--probe"],
+          null,
+          spawnFn,
+          ACTIVE_PROBE_TIMEOUT_MS + grace
+        )
         return {
           confined: envelope.probe?.confined === true,
           backend: envelope.probe?.backend ?? "",
           detail: envelope.probe?.detail ?? "",
+          networkAllowlist: normalizeSandboxNetworkAllowlistProbe(
+            envelope.probe?.network_allowlist
+          ),
         }
       } catch (err) {
         // A probe that could not run is not evidence of confinement. It is the
         // fail-closed answer, carrying the reason so the operator can act.
-        return { confined: false, backend: "", detail: describe(err) }
+        return {
+          confined: false,
+          backend: "",
+          detail: describe(err),
+          networkAllowlist: normalizeSandboxNetworkAllowlistProbe(undefined),
+        }
       }
     },
   }

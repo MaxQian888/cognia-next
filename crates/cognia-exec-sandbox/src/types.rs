@@ -138,10 +138,36 @@ pub enum SandboxPolicy {
     },
 }
 
+/// Independent per-run network evidence. Missing fields in older envelopes are
+/// unknown, never inferred from filesystem confinement or caller proxy env.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NetworkReport {
+    pub requested: Option<NetworkPolicy>,
+    pub effective: Option<NetworkPolicy>,
+    pub mechanism: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkAllowlistState {
+    #[default]
+    Unknown,
+    Available,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NetworkAllowlistProbe {
+    pub state: NetworkAllowlistState,
+    pub detail: String,
+}
+
 /// Result of a successful sandboxed execution. Each output stream is bounded
 /// to one million UTF-8 bytes before it crosses the native tool boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxResult {
+    #[serde(default)]
+    pub network: NetworkReport,
     /// Process exit code (0 = success). On signal termination, backends
     /// report 128 + signo (POSIX) or the raw exit code (Windows).
     pub exit_code: i32,
@@ -225,6 +251,8 @@ pub struct SandboxHealth {
 /// does a backend that runs commands UNconfined.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeReport {
+    #[serde(default)]
+    pub network_allowlist: NetworkAllowlistProbe,
     /// Stable backend id (mirrors `SandboxHealth.backend`).
     pub backend: String,
     /// True only when BOTH sub-probes pass: a trivial command ran to
@@ -261,6 +289,38 @@ mod duration_secs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_envelopes_have_unknown_network_evidence() {
+        let result: SandboxResult = serde_json::from_value(serde_json::json!({
+            "exit_code": 0, "stdout": "", "stderr": "", "duration": 0, "timed_out": false
+        }))
+        .unwrap();
+        assert_eq!(result.network, NetworkReport::default());
+        let probe: ProbeReport = serde_json::from_value(serde_json::json!({
+            "backend": "old", "confined": true, "detail": "ok"
+        }))
+        .unwrap();
+        assert_eq!(
+            probe.network_allowlist.state,
+            NetworkAllowlistState::Unknown
+        );
+        let network = NetworkReport {
+            requested: Some(NetworkPolicy::Allowlist {
+                hosts: vec!["example.com".into()],
+            }),
+            effective: Some(NetworkPolicy::Allowlist {
+                hosts: vec!["example.com".into()],
+            }),
+            mechanism: Some("netns_unix_proxy".into()),
+        };
+        let json = serde_json::to_value(&network).unwrap();
+        assert_eq!(json["effective"]["kind"], "allowlist");
+        assert_eq!(
+            serde_json::from_value::<NetworkReport>(json).unwrap(),
+            network
+        );
+    }
 
     #[test]
     fn network_policy_default_is_off() {

@@ -1,5 +1,34 @@
 /** Portable sandbox contracts shared by providers, consumers, and the host. */
 
+export type SandboxNetworkPolicy =
+  { kind: "off" } | { kind: "on" } | { kind: "allowlist"; hosts: string[] }
+
+/** Per-run attestation, independent of the microVM's no-egress guarantee. */
+export interface SandboxNetworkReport {
+  requested: SandboxNetworkPolicy | null
+  effective: SandboxNetworkPolicy | null
+  /** `netns_unix_proxy` is emitted only after that run's bridge handshake. */
+  mechanism: string | null
+}
+
+export interface SandboxNetworkAllowlistProbe {
+  state: "unknown" | "available" | "unavailable"
+  detail: string
+}
+
+/** Older hosts and malformed capability payloads attest nothing. */
+export function normalizeSandboxNetworkAllowlistProbe(raw: unknown): SandboxNetworkAllowlistProbe {
+  if (raw && typeof raw === "object" && "state" in raw) {
+    if (raw.state === "available" || raw.state === "unavailable" || raw.state === "unknown") {
+      return {
+        state: raw.state,
+        detail: "detail" in raw && typeof raw.detail === "string" ? raw.detail : "",
+      }
+    }
+  }
+  return { state: "unknown", detail: "" }
+}
+
 export interface MicrovmResult {
   exit_code: number
   stdout: string
@@ -10,6 +39,8 @@ export interface MicrovmResult {
   stdout_truncated?: boolean
   /** True when stderr exceeded the per-stream transport cap. */
   stderr_truncated?: boolean
+  /** Missing/null fields from older backends mean unknown, never enforced. */
+  network?: SandboxNetworkReport | null
   /**
    * What the adapter ATTESTS it enforced for this call, as opposed to what the
    * request asked for. Omitted by an adapter that attests nothing; a consumer

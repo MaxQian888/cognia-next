@@ -78,3 +78,15 @@ it("projects connection actions from the live implemented adapter", () => {
     Object.values(projectSandboxConnectionCapabilities(cloud, true)).every((value) => !value)
   ).toBe(true)
 })
+
+it("does not infer allowlist support from filesystem confinement or a microVM adapter", () => {
+  const status = { confined: true, backend: "linux-bwrap", detail: "ok" }
+  expect(projectSandboxRuntimeAvailability(status, true).os.networkAllowlist).toEqual({
+    state: "unknown",
+    detail: "",
+  })
+  const networkAllowlist = { state: "unavailable" as const, detail: "bridge missing" }
+  expect(projectSandboxRuntimeAvailability({ ...status, networkAllowlist }, true).os).toMatchObject(
+    { available: true, networkAllowlist }
+  )
+})

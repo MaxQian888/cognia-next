@@ -254,3 +254,34 @@ describe("useSandboxHealth", () => {
     expect(mockCall.mock.calls.length).toBeGreaterThan(afterInitial)
   })
 })
+
+it("exposes allowlist verification separately from general confinement", async () => {
+  const network = { state: "unavailable", detail: "bridge helper missing" }
+  mockCall.mockResolvedValue({
+    confined: true,
+    backend: "linux-bwrap",
+    detail: "ok",
+    network_allowlist: network,
+  })
+  const { result } = renderHook(() => useSandboxHealth({ paused: true }))
+  expect(result.current.probe.networkAllowlist.state).toBe("unknown")
+  await act(async () => {
+    await result.current.verify()
+  })
+  expect(result.current.probe.status).toBe("ok")
+  expect(result.current.probe.networkAllowlist).toEqual(network)
+})
+
+it("keeps allowlist unknown for legacy probes and after a failed refresh", async () => {
+  mockCall.mockResolvedValue({ confined: true, backend: "linux-bwrap", detail: "ok" })
+  const { result } = renderHook(() => useSandboxHealth({ paused: true }))
+  await act(async () => {
+    await result.current.verify()
+  })
+  expect(result.current.probe.networkAllowlist.state).toBe("unknown")
+  mockCall.mockRejectedValue(new Error("connection lost"))
+  await act(async () => {
+    await result.current.verify()
+  })
+  expect(result.current.probe.networkAllowlist.state).toBe("unknown")
+})

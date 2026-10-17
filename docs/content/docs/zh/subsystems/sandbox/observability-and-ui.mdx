@@ -69,6 +69,24 @@ export function resolveShieldState(args: {
 
 护盾、Devices、Settings tier picker 与连接操作消费同一个 `runtime-availability` 投影。OS 可用性来自主动 confinement check，而不是只检查二进制是否存在的廉价 probe；microVM 可用性来自当前正在接受新绑定的已注册 adapter，UI 同时说明最终资格还需要 E2B-backed workspace。已持久化但当前不可用的选择仍保持可见和选中，只会禁用并显示可操作原因。
 
+## 网络能力与逐次运行证据
+
+文件系统/进程隔离与网络 allowlist 约束是独立事实。网络 allowlist probe 独立传递到 CLI
+probe、`useSandboxHealth`、`runtime-availability` 与 code-mode 沙盒状态。一般 confinement
+probe 成功或 bwrap 二进制存在，不能证明 allowlist bridge 可用。旧后端与缺失网络字段都解析为
+unknown，绝不视为已强制执行。
+
+SDK 结果暴露独立的 `network` 字段，包含 `requested`、`effective` 和 `mechanism`。
+Linux 的 `mechanism: "netns_unix_proxy"` 要求本次运行完成带版本的 Ready/Go/Started
+握手：Ready 证明 loopback/proxy probe 成功，Go 放行目标启动，Started 确认 spawn 与
+seccomp 安装成功。配置、代理环境变量或单独的能力 probe 都不能替代 Started。可信 helper 缺失或版本不兼容时会拒绝
+allowlist 执行并提供 setup 指引。`MicrovmConfinement.networkEnforced` 仍表示完全无出口，
+不会复用为 allowlist 约束标记。
+
+Linux 机制结合独立 network namespace 与 Unix 过滤代理。支持的协议为 CONNECT 和
+absolute-form HTTP，不支持 SOCKS、raw TCP、UDP 或直接 DNS。目标在 allowlist 下也不能
+使用 pathname Unix IPC。即使文件系统/进程隔离正常，这些限制仍是网络能力的一部分。
+
 ## Diagnostics — 已发布并接通
 
 `components/settings/sections/diagnostics-section.tsx` 挂载了两个 ADR-0028 卡片：

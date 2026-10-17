@@ -92,6 +92,7 @@ impl SandboxedExec for MockSandboxBackend {
             return next;
         }
         Ok(SandboxResult {
+            network: Default::default(),
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
@@ -203,6 +204,7 @@ mod tests {
 
     fn ok_result(exit_code: i32) -> Result<SandboxResult, SandboxError> {
         Ok(SandboxResult {
+            network: Default::default(),
             exit_code,
             stdout: String::new(),
             stderr: String::new(),

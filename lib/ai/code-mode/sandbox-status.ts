@@ -16,6 +16,10 @@
  */
 
 import { transport } from "@/lib/tauri"
+import {
+  normalizeSandboxNetworkAllowlistProbe,
+  type SandboxNetworkAllowlistProbe,
+} from "@cognia/plugin-sdk/api/sandbox"
 import { getOsSandboxExec, subscribeOsSandboxAvailability } from "@/lib/sandbox/os-exec-bridge"
 import { updateOsSandboxAvailability } from "@/lib/sandbox/runtime-availability"
 
@@ -26,14 +30,22 @@ export interface CodeSandboxStatus {
   backend: string
   /** Reason confinement is unavailable, for the disabled-state explanation. */
   detail: string
+  /** Independent active allowlist probe; absent on older executors means unknown. */
+  networkAllowlist?: SandboxNetworkAllowlistProbe
 }
 
-const UNCONFINED: CodeSandboxStatus = { confined: false, backend: "", detail: "" }
+const UNCONFINED: CodeSandboxStatus = {
+  confined: false,
+  backend: "",
+  detail: "",
+  networkAllowlist: normalizeSandboxNetworkAllowlistProbe(undefined),
+}
 
 interface RawProbeReport {
   backend?: string
   confined?: boolean
   detail?: string
+  network_allowlist?: unknown
 }
 
 let cached: Promise<CodeSandboxStatus> | null = null
@@ -56,7 +68,11 @@ async function probe(): Promise<CodeSandboxStatus> {
     // the sandbox the session will get, rather than the desktop's.
     const hostExecutor = getOsSandboxExec()
     if (hostExecutor) {
-      const status = await hostExecutor.probe()
+      const raw = await hostExecutor.probe()
+      const status = {
+        ...raw,
+        networkAllowlist: normalizeSandboxNetworkAllowlistProbe(raw.networkAllowlist),
+      }
       updateOsSandboxAvailability(status)
       return status
     }
@@ -65,6 +81,7 @@ async function probe(): Promise<CodeSandboxStatus> {
       confined: raw?.confined === true,
       backend: raw?.backend ?? "",
       detail: raw?.detail ?? "",
+      networkAllowlist: normalizeSandboxNetworkAllowlistProbe(raw?.network_allowlist),
     }
     updateOsSandboxAvailability(status)
     return status

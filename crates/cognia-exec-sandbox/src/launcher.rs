@@ -23,6 +23,125 @@ use std::path::{Path, PathBuf};
 use crate::protected::{protected_entries_under, ProtKind};
 use crate::sbpl;
 
+/// Host-owned paths for a Linux allowlist launch. Never constructed from target
+/// env or argv. The backend retains all three sources until the child is reaped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinuxBridgeLaunchSpec {
+    pub helper: PathBuf,
+    pub proxy_socket: PathBuf,
+    pub control_socket: PathBuf,
+    pub as_pid_1: bool,
+}
+
+pub const LINUX_EGRESS_DIR: &str = "/run/cognia-egress";
+
+/// Pure validation, shared by the host backend and macOS unit tests. Reject
+/// ancestors as well as descendants so no user mount can shadow reserved IPC.
+pub fn reject_linux_bridge_collisions(
+    command: &crate::types::SandboxCommand,
+    policy: &crate::types::SandboxPolicy,
+) -> Result<(), crate::types::SandboxError> {
+    use crate::types::{SandboxError, SandboxPolicy};
+    let (readable, writable) = match policy {
+        SandboxPolicy::Bash {
+            readable, writable, ..
+        } => (readable, writable),
+        SandboxPolicy::Edit {
+            readable,
+            target_files,
+        }
+        | SandboxPolicy::Write {
+            readable,
+            target_files,
+        }
+        | SandboxPolicy::TextEditor {
+            readable,
+            target_files,
+        } => (readable, target_files),
+    };
+    let reserved = Path::new(LINUX_EGRESS_DIR);
+    for path in std::iter::once(&command.cwd)
+        .chain(readable)
+        .chain(writable)
+    {
+        if !path.is_absolute()
+            || path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            || path.starts_with(reserved)
+            || reserved.starts_with(path)
+        {
+            return Err(SandboxError::InvalidPolicy {
+                reason: format!(
+                    "'{}' collides with reserved Linux bridge path {LINUX_EGRESS_DIR}",
+                    path.display()
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Render the network flags and final command. Append AFTER all user binds and
+/// protection mounts. With no backend-owned bridge an allowlist cannot render.
+pub fn render_linux_network_launch(
+    network: &crate::types::NetworkPolicy,
+    bridge: Option<&LinuxBridgeLaunchSpec>,
+    target: &[String],
+) -> Result<Vec<String>, crate::types::SandboxError> {
+    use crate::types::{NetworkPolicy, SandboxError};
+    let mut args = Vec::new();
+    match network {
+        NetworkPolicy::On => args.push("--share-net".into()),
+        NetworkPolicy::Off => args.push("--unshare-net".into()),
+        NetworkPolicy::Allowlist { hosts } => {
+            if hosts.is_empty() {
+                return Err(SandboxError::InvalidPolicy {
+                    reason: "network allowlist must not be empty".into(),
+                });
+            }
+            let spec = bridge.ok_or_else(|| SandboxError::SetupRequired {
+                reason: "Linux allowlist requires a backend-owned Unix bridge".into(),
+            })?;
+            if [&spec.helper, &spec.proxy_socket, &spec.control_socket]
+                .iter()
+                .any(|p| !p.is_absolute())
+            {
+                return Err(SandboxError::InvalidPolicy {
+                    reason: "bridge source paths must be absolute".into(),
+                });
+            }
+            args.extend(["--unshare-net".into(), "--cap-drop".into(), "ALL".into()]);
+            if spec.as_pid_1 {
+                args.push("--as-pid-1".into());
+            }
+            // A mount point is required for the final read-only remount.
+            args.extend(["--tmpfs".into(), LINUX_EGRESS_DIR.into()]);
+            for (source, name) in [
+                (&spec.proxy_socket, "proxy.sock"),
+                (&spec.control_socket, "control.sock"),
+                (&spec.helper, "helper"),
+            ] {
+                args.extend([
+                    "--ro-bind".into(),
+                    source.to_string_lossy().into_owned(),
+                    format!("{LINUX_EGRESS_DIR}/{name}"),
+                ]);
+            }
+            args.extend([
+                "--remount-ro".into(),
+                LINUX_EGRESS_DIR.into(),
+                "--".into(),
+                format!("{LINUX_EGRESS_DIR}/helper"),
+                "--linux-netns-bridge".into(),
+            ]);
+        }
+    }
+    args.push("--".into());
+    args.extend_from_slice(target);
+    Ok(args)
+}
+
 /// Filesystem + network scope for a sandboxed interactive launch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchScope {
@@ -437,6 +556,105 @@ fn push_secret_read_denies(out: &mut String, readable: &[String]) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn linux_allowlist_requires_owned_bridge_and_never_shares_network() {
+        use crate::types::NetworkPolicy;
+        let policy = NetworkPolicy::Allowlist {
+            hosts: vec!["example.com".into()],
+        };
+        assert!(render_linux_network_launch(&policy, None, &["true".into()]).is_err());
+        let spec = LinuxBridgeLaunchSpec {
+            helper: "/trusted/helper".into(),
+            proxy_socket: "/private/proxy.sock".into(),
+            control_socket: "/private/control.sock".into(),
+            as_pid_1: true,
+        };
+        let args = render_linux_network_launch(
+            &policy,
+            Some(&spec),
+            &["echo".into(), "--share-net".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            args.iter().filter(|a| a.as_str() == "--share-net").count(),
+            1
+        ); // only target argv
+        assert!(args.contains(&"--unshare-net".into()));
+        assert!(args.contains(&"--as-pid-1".into()));
+        assert!(args.windows(2).any(|w| w == ["--cap-drop", "ALL"]));
+        assert!(args.windows(3).any(|w| w
+            == [
+                "--ro-bind",
+                "/private/proxy.sock",
+                "/run/cognia-egress/proxy.sock"
+            ]));
+        assert_eq!(
+            &args[args.len() - 5..],
+            &[
+                "/run/cognia-egress/helper",
+                "--linux-netns-bridge",
+                "--",
+                "echo",
+                "--share-net"
+            ]
+        );
+        assert!(render_linux_network_launch(
+            &NetworkPolicy::Allowlist { hosts: vec![] },
+            Some(&spec),
+            &[]
+        )
+        .is_err());
+        assert_eq!(
+            render_linux_network_launch(&NetworkPolicy::Off, None, &[]).unwrap(),
+            ["--unshare-net", "--"]
+        );
+        assert_eq!(
+            render_linux_network_launch(&NetworkPolicy::On, None, &[]).unwrap(),
+            ["--share-net", "--"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_bridge_reserved_path_rejects_ancestors_descendants_and_traversal() {
+        use crate::types::*;
+        let mut command = SandboxCommand {
+            argv: vec!["true".into()],
+            cwd: "/workspace".into(),
+            env: Default::default(),
+            stdin: None,
+            timeout: std::time::Duration::ZERO,
+        };
+        for path in [
+            "/",
+            "/run",
+            "/run/cognia-egress",
+            "/run/cognia-egress/proxy.sock",
+            "/work/../run/cognia-egress",
+        ] {
+            let policy = SandboxPolicy::Bash {
+                writable: vec![path.into()],
+                readable: vec![],
+                network: NetworkPolicy::On,
+                max_cpu_seconds: 0,
+                max_memory_mb: 0,
+                max_processes: 0,
+            };
+            assert!(
+                reject_linux_bridge_collisions(&command, &policy).is_err(),
+                "{path}"
+            );
+        }
+        let policy = SandboxPolicy::Edit {
+            target_files: vec!["/run/cognia-egress-other".into()],
+            readable: vec![],
+        };
+        assert!(reject_linux_bridge_collisions(&command, &policy).is_ok());
+        command.cwd = "/run/cognia-egress".into();
+        assert!(reject_linux_bridge_collisions(&command, &policy).is_err());
+    }
+
     #[test]
     fn managed_task_hides_credentials_and_siblings_but_keeps_its_own_home() {
         let root = tempfile::tempdir().unwrap();

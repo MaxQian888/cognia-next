@@ -82,7 +82,7 @@ A new Rust trait `SandboxedExec` in `src-tauri/src/sandbox/mod.rs` exposes `run(
 
 - **Windows**: ship `crates/cognia-sandbox-runner` as `cognia-sandbox-runner.exe`. The runner launches the target under a restricted subset of the app's own token, lowers integrity, assigns the process tree to a Job Object, and returns captured stdout/stderr via JSON. It does not require elevation, separate OS accounts, or a pre-created setup marker for filesystem / privilege / process confinement. The legacy `target_user` payload field is retained only for JSON compatibility and ignored by the runner; `cognia-sandbox-setup.exe` is reserved for a future optional per-SID Firewall follow-up.
 - **macOS**: direct Rust call to `sandbox-exec -f <profile.sb> -- <argv>` with SBPL templates in `src-tauri/src/sandbox/macos/profiles/`. Plan B documented for the day Apple removes `sandbox-exec` — migrate to App Sandbox + XPC service.
-- **Linux**: bundled static `bwrap` binary in Tauri resources; `--unshare-all` + optional `--share-net` + read/write binds + `--die-with-parent` + seccomp profile modeled on Flatpak.
+- **Linux**: bundled static `bwrap` binary in Tauri resources; `--unshare-all` + `--share-net` only for network `On` (allowlist uses a netns + Unix proxy bridge) + read/write binds + `--die-with-parent` + seccomp profile modeled on Flatpak.
 
 T1 interception path: a new in-tree plugin `plugins/cognia-sandboxed-tools/` registers four MCP tools (`sandbox_bash` / `sandbox_edit` / `sandbox_write` / `sandbox_text_editor`). When sandbox is enabled for a session, `resolveSendOptions` adds the SDK builtins to `disallowedTools`, filters native `text_editor` out of the `anthropicTools` projection, appends a short system-prompt note, and surfaces the four sandboxed equivalents via `opts.pluginTools`. The existing `plugin_tool_exec` IPC bridge (`sidecar/builtin-tools/plugin-tools.mjs`) carries the call to the renderer, which dispatches to the `sandbox_exec` Tauri command. The SDK is untouched.
 
@@ -230,3 +230,50 @@ and plugin deactivation close each VM once; close failures remain tracked and
 are surfaced for retry. Network mode is an instance-creation fact; the current
 Git-backed handle is created online, so offline requests, allowlists, and
 CPU/memory ceilings are rejected until the adapter can prove enforcement.
+
+## Addendum — Linux network allowlist enforcement (2026-10-17)
+
+Linux `Allowlist` is enforced by an isolated network namespace and the shared host filtering proxy
+in `net_proxy.rs`, using the existing `cognia-net` matcher. `Off` uses `--unshare-net`; only `On`
+uses `--share-net`. An empty allowlist is invalid. `LinuxSandboxBackend::run` owns bridge setup even
+when called directly; the dispatcher does not start a TCP proxy on Linux or downgrade an allowlist
+to Off.
+
+The backend creates a 0700 private directory with a 0600 `proxy.sock` and separate `control.sock`,
+then mounts those sockets and the trusted launcher helper read-only under `/run/cognia-egress/`
+after all user binds. Conflicting user paths are rejected. Namespace isolation, file protections,
+seccomp, `--cap-drop ALL` and `--die-with-parent` remain in force. The existing launcher uses an
+internal `--linux-netns-bridge` mode, resolved from a trusted absolute path, never target env, `PATH`
+or arguments. A missing or incompatible helper returns `SetupRequired`, without shared-network
+fallback.
+
+The supervisor verifies loopback flags and connectivity, binds `127.0.0.1:0`, and probes the Unix
+proxy end to end with an invalid request that must return 400 without external DNS. It sends a
+versioned Ready over the control socket and waits for Go before spawning the target in its own
+process group. It acknowledges Started only after target spawn and seccomp installation succeed.
+Proxy variables in both cases are set last to the relay, and both `NO_PROXY` forms
+are cleared. Only the supervisor retains the listener/control/upstream descriptors; the relay never
+consumes target stdin/stdout and forwards connections only to the fixed proxy socket.
+
+Two seccomp layers allow AF_UNIX + AF_INET for the supervisor but deny `socket(AF_UNIX)` and other
+non-IP families for the target before exec. AF_UNIX `SOCK_STREAM` socketpairs remain available for
+local IPC; datagram and other non-stream socketpairs are denied because they can reconnect to
+pathname Unix sockets. Filter failure refuses the run. **Pathname Unix IPC is unavailable to the target under an allowlist**, including mounted
+host sockets. Supported egress protocols are CONNECT and absolute-form HTTP; SOCKS, raw TCP, UDP
+and direct DNS are unsupported. The host proxy checks resolved public destinations, but does not
+inspect TLS SNI within CONNECT tunnels.
+
+The supervisor acts as namespace init (`--as-pid-1` where supported), forwards SIGTERM/SIGINT/SIGHUP,
+reaps via one wait path, and tears down relays on exit. Setup/handshake, stdin, output and wait share
+a watchdog. Exit, timeout, stdin error and caller cancellation kill and reap the sandbox, await
+proxy shutdown, then remove sockets and the private directory; termination grace is bounded.
+
+Capability reporting keeps the network-allowlist probe independent from general confinement.
+Per-run `network` contains `requested`, `effective`, and `mechanism`; `netns_unix_proxy` is reported
+only after receiving Started and completing the handshake, never inferred from caller proxy env. Old backends or missing
+fields mean unknown. `MicrovmConfinement.networkEnforced` retains its meaning of no egress at all.
+Real Linux acceptance is separate from macOS unit tests and cross-compilation:
+`cargo test -p cognia-exec-sandbox --test linux_allowlist -- --ignored --test-threads=1`.
+The fixture requires bwrap, util-linux `unshare`, iproute2 `ip`, `/usr/bin/python3`, and nested
+user/network/mount namespaces. It re-execs in disposable namespaces without changing host network
+state. Missing prerequisites fail the acceptance run rather than skipping it.

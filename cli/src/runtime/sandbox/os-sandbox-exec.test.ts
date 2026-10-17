@@ -323,8 +323,71 @@ describe("createNodeOsSandboxExecutor", () => {
       confined: true,
       backend: "macos-sandbox-exec",
       detail: "ok",
+      networkAllowlist: { state: "unknown", detail: "" },
     })
     expect(calls[0]?.args).toEqual(["--probe"])
+  })
+
+  it("allows all three active probe deadlines plus cleanup grace before killing the helper", async () => {
+    jest.useFakeTimers()
+    try {
+      const { spawn, last } = fakeSpawn()
+      const executor = createNodeOsSandboxExecutor({
+        binary: "/bin/helper",
+        spawn,
+        supervisorGraceMs: 1_000,
+      })
+      const promise = executor.probe()
+      // Linux runs the network handshake probe and two filesystem probes,
+      // each with a ten-second deadline, before serializing the report.
+      jest.advanceTimersByTime(30_000)
+      expect(last().killed).toEqual([])
+      jest.advanceTimersByTime(999)
+      expect(last().killed).toEqual([])
+      jest.advanceTimersByTime(1)
+      expect(last().killed).toEqual(["SIGKILL"])
+      await expect(promise).resolves.toMatchObject({
+        confined: false,
+        detail: expect.stringContaining("did not answer within 31000ms"),
+        networkAllowlist: { state: "unknown", detail: "" },
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("preserves the independent allowlist probe from the helper", async () => {
+    const { spawn, last } = fakeSpawn()
+    const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
+    const promise = executor.probe()
+    const network = { state: "unavailable", detail: "bridge helper missing" }
+    last().emitStdout(
+      JSON.stringify({ ok: true, probe: { confined: true, network_allowlist: network } })
+    )
+    last().close(0)
+    await expect(promise).resolves.toMatchObject({ confined: true, networkAllowlist: network })
+  })
+
+  it("passes per-run network evidence through independently of microVM confinement", async () => {
+    const { spawn, last } = fakeSpawn()
+    const executor = createNodeOsSandboxExecutor({ binary: "/bin/helper", spawn })
+    const promise = executor.execute(payload())
+    await Promise.resolve()
+    const network = {
+      requested: { kind: "allowlist", hosts: ["example.com"] },
+      effective: { kind: "allowlist", hosts: ["example.com"] },
+      mechanism: "netns_unix_proxy",
+    }
+    last().emitStdout(
+      JSON.stringify({
+        ...JSON.parse(OK_ENVELOPE),
+        result: { ...JSON.parse(OK_ENVELOPE).result, network },
+      })
+    )
+    last().close(0)
+    const result = await promise
+    expect(result.network).toEqual(network)
+    expect(result.confinement).toBeUndefined()
   })
 
   it("reports unconfined when the probe itself fails", async () => {

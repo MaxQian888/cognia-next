@@ -469,6 +469,7 @@ mod admission_tests {
     #[test]
     fn audit_reason_carries_effective_backend_and_result_limits() {
         let result = crate::sandbox::types::SandboxResult {
+            network: Default::default(),
             exit_code: 137,
             stdout: String::new(),
             stderr: String::new(),

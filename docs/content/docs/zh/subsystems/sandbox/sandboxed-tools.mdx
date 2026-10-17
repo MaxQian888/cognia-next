@@ -57,6 +57,27 @@ maxCpuSeconds: { type: "integer", minimum: 0 },
 maxMemoryMb: { type: "integer", minimum: 0 },
 ```
 
+## Linux 网络 allowlist
+
+`sandbox_bash` 的 `network: "allowlist"` 要求非空 `networkHosts`。Linux 通过独立 network
+namespace 与通往共用宿主过滤代理的 Unix-socket bridge 强制执行。可信 launcher helper
+完成 loopback/proxy probe 后发送带版本的 Ready，收到 Go 后才启动目标，且仅在 spawn 与
+seccomp 安装成功后确认 Started。完整握手有时限。helper 缺失或不兼容时需要完成 setup；
+失败不会开放宿主网络。调用方的代理环境变量会被覆盖为 bridge relay，两个大小写版本的
+`NO_PROXY` 都会清空。删除这些变量也不能允许直连。
+
+支持的客户端协议为 HTTP CONNECT 或 absolute-form HTTP。不支持 SOCKS、raw TCP、UDP
+或直接 DNS；宿主代理负责 DNS 并拒绝非公网目标。允许的 CONNECT 隧道不会检查 TLS SNI。
+目标的 seccomp 过滤器也禁止创建 pathname Unix socket，因此 **allowlist 模式不支持依赖
+pathname Unix IPC 的工具**，包括访问 bind-mounted 宿主 socket。用于本地 IPC 的 AF_UNIX
+`SOCK_STREAM` socketpair 仍可用；datagram 与其他非 stream socketpair 因可重新连接 pathname
+socket 而不可用。
+
+结果包含独立的 `network` 报告，字段为 `requested`、`effective` 和 `mechanism`。
+仅在本次运行收到 Started 并完成握手后才报告 `netns_unix_proxy`。旧后端缺少字段表示 unknown，
+`MicrovmConfinement.networkEnforced` 继续表示完全无出口。生命周期与安装要求见
+[OS 后端](./os-backends)。
+
 ## 配置的可读范围上限
 
 桌面端与 CLI 都在派发前收紧模型提供的 `readable` 列表。上限为

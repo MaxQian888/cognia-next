@@ -18,7 +18,7 @@
 
 #![allow(dead_code)]
 
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -106,185 +106,84 @@ impl SandboxedExec for LinuxSandboxBackend {
                 reason: "argv must not be empty".into(),
             });
         }
-        // Defense-in-depth: scrub code-injection env vars at the exec boundary
-        // too, so a direct backend call (not just `run_confined`) is safe.
-        crate::env::filter_env(&mut command.env);
-        // Defense-in-depth on the filesystem side: refuse readable roots that
-        // would expose host runtime state (`/var/run`, `/proc`, …) even when
-        // the call did not come through `run_confined`.
-        reject_forbidden_readable_roots(&policy)?;
-        let Some(bwrap) = self.bwrap.as_ref() else {
-            return Err(SandboxError::Unavailable {
-                reason: "bwrap binary not found (no bundled + not on PATH)".into(),
-            });
-        };
-
-        // bwrap binds by path and refuses a missing bind SOURCE, so a write
-        // target that does not exist yet has to be created before the mounts
-        // are built.
-        ensure_write_targets_exist(&policy)?;
-
-        // Defence-in-depth syscall filter, parked on a descriptor for bwrap to
-        // install on the sandboxed process. `seccomp_program` owns that
-        // descriptor and must outlive the spawn below.
-        let seccomp_program = match crate::seccomp::build_filter() {
-            Ok(bpf) => match crate::seccomp::park_program(&bpf) {
-                Ok(file) => Some(file),
-                Err(e) => {
-                    eprintln!(
-                        "sandbox: seccomp program could not be parked, proceeding \
-                         namespace-only: {e}"
-                    );
-                    None
-                }
-            },
-            Err(e) => {
-                eprintln!("sandbox: seccomp unavailable, proceeding namespace-only: {e}");
-                None
+        crate::validate_network(&policy)?;
+        command.cwd = crate::paths::safe_canonicalize(&command.cwd).map_err(|e| {
+            SandboxError::InvalidPolicy {
+                reason: e.to_string(),
             }
-        };
-        let bwrap_args = render_bwrap_args(
-            &policy,
-            &command,
-            seccomp_program.as_ref().map(|_| crate::seccomp::SECCOMP_FD),
-        );
-
-        let mut cmd = Command::new(bwrap);
-        for a in &bwrap_args {
-            cmd.arg(a);
-        }
-        cmd.arg("--");
-        for a in &command.argv {
-            cmd.arg(a);
-        }
-
-        cmd.env_clear()
-            .envs(&command.env)
-            .kill_on_drop(true)
-            .stdin(if command.stdin.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        // Resource limits (opt-in) + seccomp defense-in-depth. Both are
-        // applied to the `bwrap` process via `pre_exec` and inherited into the
-        // sandboxed command. seccomp is best-effort — namespaces remain the
-        // boundary if filter construction fails on an exotic arch.
-        crate::limits::apply_rlimits(&mut cmd, rlimits_for(&policy));
-        if let Some(program) = seccomp_program.as_ref() {
-            crate::seccomp::attach_program_fd(&mut cmd, program.as_raw_fd());
-        }
-
-        let started = Instant::now();
-        let mut child = cmd.spawn().map_err(|e| SandboxError::BackendFailed {
-            reason: format!("failed to spawn bwrap: {e}"),
         })?;
+        let policy = crate::canonicalize_policy(policy)?;
+        crate::reject_forbidden_paths(&command.cwd, &policy, &crate::forbidden_deny_roots())?;
+        crate::launcher::reject_linux_bridge_collisions(&command, &policy)?;
+        crate::env::filter_env(&mut command.env);
+        // These are never trusted as proof of a bridge or used by its helper.
+        command.env.remove("COGNIA_SANDBOX_PROXY_PORT");
+        reject_forbidden_readable_roots(&policy)?;
+        let bwrap = self
+            .bwrap
+            .clone()
+            .ok_or_else(|| SandboxError::SetupRequired {
+                reason: "bwrap binary not found".into(),
+            })?;
+        // The worker owns cleanup even if the caller drops this future. Closing
+        // the channel cancels setup, input, output, or wait through one path.
+        let (cancel, cancelled) = tokio::sync::oneshot::channel::<()>();
+        let worker = tokio::spawn(run_owned(bwrap, command, policy, cancelled));
+        let result = worker.await.map_err(|e| SandboxError::BackendFailed {
+            reason: format!("sandbox lifecycle worker failed: {e}"),
+        })?;
+        drop(cancel);
+        result
+    }
 
-        if let Some(payload) = command.stdin {
-            if let Some(mut stdin) = child.stdin.take() {
-                stdin
-                    .write_all(&payload)
-                    .await
-                    .map_err(|e| SandboxError::BackendFailed {
-                        reason: format!("failed to write stdin: {e}"),
-                    })?;
-                drop(stdin);
+    async fn probe_network_allowlist(&self) -> crate::types::NetworkAllowlistProbe {
+        use crate::types::{NetworkAllowlistProbe, NetworkAllowlistState};
+        let result = self
+            .run(
+                SandboxCommand {
+                    argv: vec!["/bin/true".into()],
+                    cwd: PathBuf::from("/tmp"),
+                    env: Default::default(),
+                    stdin: None,
+                    timeout: Duration::from_secs(10),
+                },
+                SandboxPolicy::Bash {
+                    writable: vec![],
+                    readable: vec![],
+                    network: NetworkPolicy::Allowlist {
+                        hosts: vec!["example.invalid".into()],
+                    },
+                    max_cpu_seconds: 0,
+                    max_memory_mb: 0,
+                    max_processes: 0,
+                },
+            )
+            .await;
+        match result {
+            Ok(r)
+                if r.exit_code == 0
+                    && !r.timed_out
+                    && r.network.mechanism.as_deref() == Some("netns_unix_proxy") =>
+            {
+                NetworkAllowlistProbe {
+                    state: NetworkAllowlistState::Available,
+                    detail:
+                        "network namespace and Unix proxy handshake completed; no external DNS used"
+                            .into(),
+                }
             }
+            Ok(r) => NetworkAllowlistProbe {
+                state: NetworkAllowlistState::Unavailable,
+                detail: format!(
+                    "allowlist probe exited {} (timeout={})",
+                    r.exit_code, r.timed_out
+                ),
+            },
+            Err(e) => NetworkAllowlistProbe {
+                state: NetworkAllowlistState::Unavailable,
+                detail: e.to_string(),
+            },
         }
-
-        let timeout_secs = command.timeout.as_secs();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| SandboxError::BackendFailed {
-                reason: "bwrap stdout pipe was unavailable".into(),
-            })?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| SandboxError::BackendFailed {
-                reason: "bwrap stderr pipe was unavailable".into(),
-            })?;
-        let stdout_task = tokio::spawn(crate::output::read_capped(stdout));
-        let stderr_task = tokio::spawn(crate::output::read_capped(stderr));
-        let wait_future = child.wait();
-        let timed_out;
-        let status = if timeout_secs == 0 {
-            timed_out = false;
-            match wait_future.await {
-                Ok(out) => out,
-                Err(e) => {
-                    stdout_task.abort();
-                    stderr_task.abort();
-                    let _ = stdout_task.await;
-                    let _ = stderr_task.await;
-                    return Err(SandboxError::BackendFailed {
-                        reason: format!("wait failed: {e}"),
-                    });
-                }
-            }
-        } else {
-            match timeout(Duration::from_secs(timeout_secs), wait_future).await {
-                Ok(Ok(out)) => {
-                    timed_out = false;
-                    out
-                }
-                Ok(Err(e)) => {
-                    stdout_task.abort();
-                    stderr_task.abort();
-                    let _ = stdout_task.await;
-                    let _ = stderr_task.await;
-                    return Err(SandboxError::BackendFailed {
-                        reason: format!("wait failed: {e}"),
-                    });
-                }
-                Err(_) => {
-                    let _ = child.start_kill();
-                    timed_out = true;
-                    match child.wait().await {
-                        Ok(out) => out,
-                        Err(e) => {
-                            stdout_task.abort();
-                            stderr_task.abort();
-                            let _ = stdout_task.await;
-                            let _ = stderr_task.await;
-                            return Err(SandboxError::BackendFailed {
-                                reason: format!("wait after timeout failed: {e}"),
-                            });
-                        }
-                    }
-                }
-            }
-        };
-        let (stdout, stdout_truncated) =
-            stdout_task.await.map_err(|e| SandboxError::BackendFailed {
-                reason: format!("stdout capture task failed: {e}"),
-            })?;
-        let (stderr, stderr_truncated) =
-            stderr_task.await.map_err(|e| SandboxError::BackendFailed {
-                reason: format!("stderr capture task failed: {e}"),
-            })?;
-
-        // bwrap failing to build the namespace is not a failed command, it is
-        // a host that cannot sandbox. Report it as such instead of handing back
-        // an exit code the caller will read as "your command failed".
-        let exit_code = status.code().unwrap_or(-1);
-        if let Some(reason) = namespace_setup_denial(exit_code, &stdout, &stderr) {
-            return Err(SandboxError::SetupRequired { reason });
-        }
-
-        Ok(SandboxResult {
-            exit_code,
-            stdout,
-            stderr,
-            duration: started.elapsed(),
-            timed_out,
-            stdout_truncated,
-            stderr_truncated,
-        })
     }
 
     fn is_available(&self) -> bool {
@@ -323,6 +222,551 @@ impl SandboxedExec for LinuxSandboxBackend {
             },
         }
     }
+}
+
+/// Resources stay owned by the lifecycle worker until kill/reap and asynchronous
+/// proxy shutdown have completed. The private directory is deliberately last.
+#[derive(Default)]
+struct RunResources {
+    child: Option<tokio::process::Child>,
+    proxy: Option<crate::net_proxy::FilteringProxy>,
+    control: Option<tokio::net::UnixListener>,
+    private_dir: Option<tempfile::TempDir>,
+    handshake_completed: bool,
+    namespace_init: Option<OwnedFd>,
+    lifecycle: Option<tokio::net::UnixStream>,
+    stdout: Option<crate::output::CappedOutput<tokio::process::ChildStdout>>,
+    stderr: Option<crate::output::CappedOutput<tokio::process::ChildStderr>>,
+}
+
+impl RunResources {
+    async fn cleanup(&mut self) -> Result<(), SandboxError> {
+        let mut failure = None;
+        // Killing PID 1 destroys the entire namespace, including setsid and
+        // double-fork descendants. A pidfd cannot accidentally signal a reused PID.
+        if let Some(init) = self.namespace_init.take() {
+            if let Err(error) = kill_namespace(&init) {
+                failure = Some(format!("namespace teardown failed: {error}"));
+            }
+        }
+        self.lifecycle.take();
+        if let Some(mut child) = self.child.take() {
+            let _ = child.start_kill();
+            match timeout(Duration::from_secs(2), child.wait()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => failure = Some(format!("sandbox reap failed: {e}")),
+                Err(_) => failure = Some("sandbox reap timed out after namespace teardown".into()),
+            }
+        }
+        // Output pipes are not a lifetime authority. Drain only for a bounded
+        // interval even if some unexpected holder prevents EOF.
+        let drain_stdout = async {
+            if let Some(output) = self.stdout.as_mut() {
+                output.drain_for(Duration::from_millis(200)).await;
+            }
+        };
+        let drain_stderr = async {
+            if let Some(output) = self.stderr.as_mut() {
+                output.drain_for(Duration::from_millis(200)).await;
+            }
+        };
+        tokio::join!(drain_stdout, drain_stderr);
+        if let Some(mut proxy) = self.proxy.take() {
+            match timeout(Duration::from_secs(2), proxy.shutdown()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => failure = Some(format!("proxy shutdown failed: {e}")),
+                Err(_) => failure = Some("proxy shutdown timed out".into()),
+            }
+        }
+        self.control.take();
+        if let Some(dir) = self.private_dir.take() {
+            if let Err(e) = dir.close() {
+                failure = Some(format!("bridge directory cleanup failed: {e}"));
+            }
+        }
+        match failure {
+            Some(reason) => Err(SandboxError::BackendFailed { reason }),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Pin the actual namespace init, including bwrap's init on versions without
+/// --as-pid-1. Authenticate the connecting helper before trusting Ready.
+fn pin_namespace_init(peer: &tokio::net::UnixStream, bwrap_pid: i32) -> std::io::Result<OwnedFd> {
+    let credentials = peer.peer_cred()?; // SO_PEERCRED, never protocol input.
+    if credentials.uid() != unsafe { libc::geteuid() } {
+        return Err(std::io::Error::other("bridge peer UID mismatch"));
+    }
+    let pid = credentials
+        .pid()
+        .ok_or_else(|| std::io::Error::other("bridge peer has no process credentials"))?;
+    verify_run_peer(pid, bwrap_pid)?;
+    let init = pin_namespace_init_pid(pid)?;
+    // Recheck ancestry after pinning, before returning any authority to send Go.
+    verify_run_peer(pid, bwrap_pid)?;
+    Ok(init)
+}
+
+fn verify_run_peer(pid: i32, bwrap_pid: i32) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    // Keep the namespace alive while comparing inodes (no inode reuse).
+    let peer_namespace = std::fs::File::open(format!("/proc/{pid}/ns/pid"))?;
+    let root_namespace = std::fs::File::open(format!("/proc/{bwrap_pid}/ns/pid"))?;
+    let identity = |file: &std::fs::File| -> std::io::Result<_> {
+        let metadata = file.metadata()?;
+        Ok((metadata.dev(), metadata.ino()))
+    };
+    verify_run_lineage(
+        pid,
+        bwrap_pid,
+        identity(&peer_namespace)?,
+        identity(&root_namespace)?,
+        |current| {
+            let status = std::fs::read_to_string(format!("/proc/{current}/status"))?;
+            let parent = status
+                .lines()
+                .find_map(|line| line.strip_prefix("PPid:"))
+                .and_then(|value| value.trim().parse::<i32>().ok())
+                .ok_or_else(|| std::io::Error::other("bridge parent PID unavailable"))?;
+            let metadata = std::fs::metadata(format!("/proc/{current}/ns/pid"))?;
+            Ok((parent, (metadata.dev(), metadata.ino())))
+        },
+    )
+}
+
+fn verify_run_lineage(
+    mut pid: i32,
+    bwrap_pid: i32,
+    peer_namespace: (u64, u64),
+    root_namespace: (u64, u64),
+    mut process: impl FnMut(i32) -> std::io::Result<(i32, (u64, u64))>,
+) -> std::io::Result<()> {
+    if pid == bwrap_pid || peer_namespace == root_namespace {
+        return Err(std::io::Error::other(
+            "bridge did not enter this run's PID namespace",
+        ));
+    }
+    let mut reached_outer_namespace = false;
+    // bwrap can retain an outer waiter and an inner PID 1 reaper. Walk only
+    // this child's ancestry, checking that the first descendant namespace it
+    // created is exactly the peer's namespace, not a further nested one.
+    // pid_for_children on the outer waiter is insufficient: clone(CLONE_NEWPID)
+    // need not change the waiter's own namespace-for-children link.
+    for _ in 0..4096 {
+        if pid == bwrap_pid {
+            return Ok(());
+        }
+        if pid <= 1 {
+            break;
+        }
+        let (parent, namespace) = process(pid)?;
+        if namespace == root_namespace {
+            reached_outer_namespace = true;
+        } else if namespace != peer_namespace || reached_outer_namespace {
+            return Err(std::io::Error::other(
+                "bridge descendant PID namespace mismatch",
+            ));
+        }
+        pid = parent;
+    }
+    Err(std::io::Error::other(
+        "bridge peer is not a descendant of this run's bwrap",
+    ))
+}
+
+fn pin_namespace_init_pid(mut pid: i32) -> std::io::Result<OwnedFd> {
+    use std::os::unix::fs::MetadataExt;
+    let namespace = std::fs::File::open(format!("/proc/{pid}/ns/pid"))?;
+    let identity = namespace.metadata()?;
+    let host = std::fs::metadata("/proc/self/ns/pid")?;
+    if (identity.dev(), identity.ino()) == (host.dev(), host.ino()) {
+        return Err(std::io::Error::other(
+            "bridge did not enter a PID namespace",
+        ));
+    }
+    loop {
+        let current = std::fs::metadata(format!("/proc/{pid}/ns/pid"))?;
+        if (identity.dev(), identity.ino()) != (current.dev(), current.ino()) {
+            return Err(std::io::Error::other(
+                "namespace init not found in bridge ancestry",
+            ));
+        }
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status"))?;
+        let field = |name: &str| status.lines().find_map(|line| line.strip_prefix(name));
+        if field("NSpid:").and_then(|pids| pids.split_whitespace().last()) == Some("1") {
+            let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let fd = unsafe { OwnedFd::from_raw_fd(fd as i32) };
+            // Revalidate after opening: pinning the namespace above prevents
+            // its inode from being reused during this identity check.
+            let current = std::fs::metadata(format!("/proc/{pid}/ns/pid"))?;
+            if (identity.dev(), identity.ino()) != (current.dev(), current.ino()) {
+                return Err(std::io::Error::other("bridge namespace identity changed"));
+            }
+            return Ok(fd);
+        }
+        pid = field("PPid:")
+            .and_then(|value| value.trim().parse().ok())
+            .filter(|parent| *parent > 0)
+            .ok_or_else(|| std::io::Error::other("bridge parent PID unavailable"))?;
+    }
+}
+
+fn kill_namespace(init: &OwnedFd) -> std::io::Result<()> {
+    if unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            init.as_raw_fd(),
+            libc::SIGKILL,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        )
+    } < 0
+    {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+fn requested_network(policy: &SandboxPolicy) -> NetworkPolicy {
+    match policy {
+        SandboxPolicy::Bash { network, .. } => network.clone(),
+        _ => NetworkPolicy::Off,
+    }
+}
+
+async fn run_owned(
+    bwrap: PathBuf,
+    command: SandboxCommand,
+    policy: SandboxPolicy,
+    mut cancelled: tokio::sync::oneshot::Receiver<()>,
+) -> Result<SandboxResult, SandboxError> {
+    let started = Instant::now();
+    let duration = command.timeout;
+    let requested = requested_network(&policy);
+    let mut resources = RunResources::default();
+    let result = {
+        let operation = execute_owned(&bwrap, command, &policy, &mut resources);
+        tokio::pin!(operation);
+        let deadline = async {
+            if duration.is_zero() {
+                std::future::pending::<()>().await;
+            } else {
+                tokio::time::sleep(duration).await;
+            }
+        };
+        tokio::select! {
+            biased;
+            _ = &mut cancelled => Err(SandboxError::BackendFailed { reason: "sandbox caller cancelled".into() }),
+            _ = deadline => Ok(SandboxResult {
+                exit_code: -1, stdout: String::new(), stderr: String::new(),
+                duration: started.elapsed(), timed_out: true, stdout_truncated: false,
+                stderr_truncated: false, network: Default::default(),
+            }),
+            result = &mut operation => result,
+        }
+    };
+    resources.cleanup().await?;
+    result.and_then(|mut r| {
+        r.duration = started.elapsed();
+        if let Some(output) = resources.stdout.take() {
+            (r.stdout, r.stdout_truncated) = output.finish();
+        }
+        if let Some(output) = resources.stderr.take() {
+            (r.stderr, r.stderr_truncated) = output.finish();
+        }
+        let allowlist = matches!(requested, NetworkPolicy::Allowlist { .. });
+        r.network = crate::types::NetworkReport {
+            requested: Some(requested.clone()),
+            effective: if !allowlist || resources.handshake_completed {
+                Some(requested)
+            } else {
+                None
+            },
+            mechanism: if allowlist {
+                resources
+                    .handshake_completed
+                    .then(|| "netns_unix_proxy".into())
+            } else {
+                Some(
+                    if matches!(requested_network(&policy), NetworkPolicy::Off) {
+                        "netns"
+                    } else {
+                        "shared_network"
+                    }
+                    .into(),
+                )
+            },
+        };
+        if let Some(reason) = namespace_setup_denial(r.exit_code, &r.stdout, &r.stderr) {
+            return Err(SandboxError::SetupRequired { reason });
+        }
+        Ok(r)
+    })
+}
+
+/// Resolve only the running installation's helper, never PATH, a command env
+/// override, or user argv. Test executables live in target/<profile>/deps.
+fn trusted_bridge_helper() -> Result<PathBuf, SandboxError> {
+    let exe = std::env::current_exe().map_err(setup_error)?;
+    let parent = exe
+        .parent()
+        .ok_or_else(|| setup_error("current executable has no parent"))?;
+    let candidate = if exe
+        .file_name()
+        .is_some_and(|n| n == "cognia-external-agent-launcher")
+    {
+        exe.clone()
+    } else {
+        let dir = if parent.file_name().is_some_and(|n| n == "deps") {
+            parent.parent().unwrap_or(parent)
+        } else {
+            parent
+        };
+        dir.join("cognia-external-agent-launcher")
+    };
+    let helper = candidate.canonicalize().map_err(|e| {
+        setup_error(format!(
+            "Linux allowlist helper {} unavailable: {e}",
+            candidate.display()
+        ))
+    })?;
+    use std::os::unix::fs::MetadataExt;
+    let metadata = helper.metadata().map_err(setup_error)?;
+    if !helper.is_absolute()
+        || !metadata.is_file()
+        || !is_executable(&helper)
+        || metadata.mode() & 0o022 != 0
+        || (metadata.uid() != 0 && metadata.uid() != unsafe { libc::geteuid() })
+    {
+        return Err(setup_error(
+            "Linux allowlist helper must be an owner-controlled absolute executable",
+        ));
+    }
+    Ok(helper)
+}
+
+fn setup_error(error: impl std::fmt::Display) -> SandboxError {
+    SandboxError::SetupRequired {
+        reason: error.to_string(),
+    }
+}
+
+/// A bounded executable probe using the same child guard/cleanup as the run.
+async fn probe_program(
+    resources: &mut RunResources,
+    path: &Path,
+    flag: &str,
+) -> Result<String, SandboxError> {
+    resources.child = Some(
+        Command::new(path)
+            .arg(flag)
+            .env_clear()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(setup_error)?,
+    );
+    let child = resources.child.as_mut().expect("probe child");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let (status, (output, truncated)) = timeout(Duration::from_secs(3), async {
+        tokio::join!(child.wait(), crate::output::read_capped(stdout))
+    })
+    .await
+    .map_err(|_| setup_error("bridge capability probe timed out"))?;
+    let status = status.map_err(setup_error)?;
+    resources.child.take();
+    if !status.success() || truncated {
+        return Err(setup_error("bridge capability probe failed"));
+    }
+    Ok(output)
+}
+
+async fn prepare_allowlist_run(
+    resources: &mut RunResources,
+    bwrap: &Path,
+    hosts: &[String],
+) -> Result<crate::launcher::LinuxBridgeLaunchSpec, SandboxError> {
+    use std::os::unix::fs::PermissionsExt;
+    let helper = trusted_bridge_helper()?;
+    let version = probe_program(resources, &helper, "--linux-netns-bridge-version").await?;
+    if version.trim() != crate::net_bridge::PROTOCOL_VERSION.to_string() {
+        return Err(setup_error(
+            "Linux allowlist helper protocol version mismatch",
+        ));
+    }
+    let help = probe_program(resources, bwrap, "--help").await?;
+    let dir = tempfile::Builder::new()
+        .prefix("cognia-egress-")
+        .tempdir()
+        .map_err(setup_error)?;
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))
+        .map_err(setup_error)?;
+    let proxy_socket = dir.path().join("proxy.sock");
+    let control_socket = dir.path().join("control.sock");
+    resources.private_dir = Some(dir);
+    resources.proxy = Some(
+        crate::net_proxy::FilteringProxy::start_unix(
+            &proxy_socket,
+            crate::net_proxy::ProxyPolicy::from(hosts.to_vec()),
+        )
+        .await
+        .map_err(setup_error)?,
+    );
+    std::fs::set_permissions(&proxy_socket, std::fs::Permissions::from_mode(0o600))
+        .map_err(setup_error)?;
+    resources.control = Some(tokio::net::UnixListener::bind(&control_socket).map_err(setup_error)?);
+    std::fs::set_permissions(&control_socket, std::fs::Permissions::from_mode(0o600))
+        .map_err(setup_error)?;
+    Ok(crate::launcher::LinuxBridgeLaunchSpec {
+        helper,
+        proxy_socket,
+        control_socket,
+        as_pid_1: help.contains("--as-pid-1"),
+    })
+}
+
+async fn execute_owned(
+    bwrap: &Path,
+    command: SandboxCommand,
+    policy: &SandboxPolicy,
+    resources: &mut RunResources,
+) -> Result<SandboxResult, SandboxError> {
+    let bridge = if let NetworkPolicy::Allowlist { hosts } = requested_network(policy) {
+        Some(prepare_allowlist_run(resources, bwrap, &hosts).await?)
+    } else {
+        None
+    };
+    ensure_write_targets_exist(policy)?;
+    let filter = if bridge.is_some() {
+        crate::seccomp::build_allowlist_supervisor_filter()
+    } else {
+        crate::seccomp::build_filter()
+    }
+    .map_err(setup_error)?;
+    let seccomp = crate::seccomp::park_program(&filter).map_err(setup_error)?;
+    let args = render_bwrap_args(
+        policy,
+        &command,
+        Some(crate::seccomp::SECCOMP_FD),
+        bridge.as_ref(),
+    )?;
+    let mut cmd = Command::new(bwrap);
+    cmd.args(args)
+        .env_clear()
+        .envs(&command.env)
+        .kill_on_drop(true)
+        .stdin(if bridge.is_none() && command.stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::limits::apply_rlimits(&mut cmd, rlimits_for(policy));
+    crate::seccomp::attach_program_fd(&mut cmd, seccomp.as_raw_fd());
+    resources.child = Some(cmd.spawn().map_err(setup_error)?);
+    drop(seccomp);
+    // Create the target pipe only AFTER bwrap has spawned. Its parent and
+    // optional PID 1 reaper inherit /dev/null and cannot retain a pipe end.
+    let mut bridge_stdin = None;
+    if let Some(control) = resources.control.as_ref() {
+        let target_stdin = if command.stdin.is_some() {
+            let (writer, reader) = tokio::net::unix::pipe::pipe().map_err(setup_error)?;
+            bridge_stdin = Some(writer);
+            reader.into_blocking_fd().map_err(setup_error)?
+        } else {
+            std::fs::File::open("/dev/null")
+                .map_err(setup_error)?
+                .into()
+        };
+        let init = &mut resources.namespace_init;
+        let bwrap_pid = resources
+            .child
+            .as_ref()
+            .and_then(|child| child.id())
+            .ok_or_else(|| setup_error("bwrap exited before bridge handshake"))?
+            as i32;
+        resources.lifecycle = Some(
+            crate::net_bridge::host_handshake(control, target_stdin, |peer| {
+                *init = Some(pin_namespace_init(peer, bwrap_pid)?);
+                Ok(())
+            })
+            .await
+            .map_err(setup_error)?,
+        );
+        resources.handshake_completed = true;
+    }
+    let child = resources.child.as_mut().expect("sandbox child");
+    resources.stdout = Some(crate::output::CappedOutput::new(
+        child.stdout.take().expect("piped stdout"),
+    ));
+    resources.stderr = Some(crate::output::CappedOutput::new(
+        child.stderr.take().expect("piped stderr"),
+    ));
+    let stdin = child.stdin.take();
+    let input = async move {
+        if let Some(payload) = command.stdin {
+            let result = if let Some(mut writer) = bridge_stdin {
+                crate::net_bridge::write_stdin(&mut writer, &payload, Duration::from_secs(5)).await
+            } else if let Some(mut writer) = stdin {
+                writer.write_all(&payload).await
+            } else {
+                return Err(SandboxError::BackendFailed {
+                    reason: "sandbox stdin writer unavailable".into(),
+                });
+            };
+            result.map_err(|error| SandboxError::BackendFailed {
+                reason: format!("sandbox stdin write failed: {error}"),
+            })?;
+        }
+        Ok::<_, SandboxError>(())
+    };
+    let wait = async { child.wait().await.map_err(setup_error) };
+    let capture = async {
+        tokio::join!(
+            resources.stdout.as_mut().expect("stdout capture").drain(),
+            resources.stderr.as_mut().expect("stderr capture").drain()
+        );
+        std::future::pending::<()>().await;
+    };
+    let completion = async {
+        tokio::pin!(input, wait);
+        tokio::select! {
+            biased;
+            result = &mut input => { result?; wait.await }
+            status = &mut wait => {
+                status?;
+                Err(SandboxError::BackendFailed { reason: "sandbox exited before stdin delivery completed".into() })
+            }
+        }
+    };
+    let status = tokio::select! {
+        result = completion => result?,
+        _ = capture => unreachable!("capture remains pending after EOF"),
+    };
+    use std::os::unix::process::ExitStatusExt;
+    let exit_code = status
+        .code()
+        .unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
+    Ok(SandboxResult {
+        exit_code,
+        stdout: String::new(),
+        stderr: String::new(),
+        duration: Duration::ZERO,
+        timed_out: false,
+        stdout_truncated: false,
+        stderr_truncated: false,
+        network: Default::default(),
+    })
 }
 
 /// Resolve the rlimit caps a policy asks for. Only `Bash` carries CPU /
@@ -548,7 +992,8 @@ fn render_bwrap_args(
     policy: &SandboxPolicy,
     command: &SandboxCommand,
     seccomp_fd: Option<std::os::fd::RawFd>,
-) -> Vec<String> {
+    bridge: Option<&crate::launcher::LinuxBridgeLaunchSpec>,
+) -> Result<Vec<String>, SandboxError> {
     // Isolation baseline. Order matters: namespace flags first.
     let mut args: Vec<String> = vec![
         "--unshare-user".into(),
@@ -620,7 +1065,7 @@ fn render_bwrap_args(
             // writable + readable roots (last bwrap bind wins). See
             // `push_protected_binds`.
             push_protected_binds(&mut args, writable, readable);
-            push_network_flags(&mut args, network);
+            let _ = network;
         }
         SandboxPolicy::Edit {
             target_files,
@@ -652,33 +1097,15 @@ fn render_bwrap_args(
             // the exfiltration threat) — bind last so it wins.
             push_protected_binds(&mut args, &[], readable);
             // Always net-off for edit / write / text_editor.
-            push_network_flags(&mut args, &NetworkPolicy::Off);
         }
     }
 
-    args
-}
-
-fn push_network_flags(args: &mut Vec<String>, policy: &NetworkPolicy) {
-    match policy {
-        NetworkPolicy::Off => {
-            args.push("--unshare-net".into());
-        }
-        NetworkPolicy::On => {
-            args.push("--share-net".into());
-        }
-        NetworkPolicy::Allowlist { hosts: _ } => {
-            // Proxy-routed allowlist: the command shares the host network so it
-            // can reach the loopback filtering proxy (ADR-0028 Phase 3) that the
-            // dispatcher started and injected as HTTP(S)_PROXY / ALL_PROXY. The
-            // proxy enforces the host allowlist. NOTE: this is enforced for
-            // proxy-respecting clients only — true kernel enforcement (an
-            // unshared netns + a unix-socket bridge so direct egress is
-            // impossible) is the documented Linux follow-up. macOS already gets
-            // kernel enforcement via the SBPL localhost-port pin.
-            args.push("--share-net".into());
-        }
-    }
+    args.extend(crate::launcher::render_linux_network_launch(
+        &requested_network(policy),
+        bridge,
+        &command.argv,
+    )?);
+    Ok(args)
 }
 
 #[cfg(test)]
@@ -686,6 +1113,143 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+
+    #[test]
+    fn run_lineage_requires_owned_ancestry_and_exact_descendant_namespace() {
+        let host = (4, 100);
+        let sandbox = (4, 200);
+        let nested = (4, 300);
+        let check = |peer, nodes: &[(i32, i32, (u64, u64))]| {
+            verify_run_lineage(40, 10, peer, host, |pid| {
+                nodes
+                    .iter()
+                    .find(|node| node.0 == pid)
+                    .map(|node| (node.1, node.2))
+                    .ok_or_else(|| std::io::Error::other("process vanished"))
+            })
+        };
+        // --as-pid-1 and older bwrap with an inner reaper/outer waiter.
+        assert!(check(sandbox, &[(40, 10, sandbox)]).is_ok());
+        assert!(check(
+            sandbox,
+            &[(40, 30, sandbox), (30, 20, sandbox), (20, 10, host)]
+        )
+        .is_ok());
+        // A foreign namespace alone is not authority; its lineage must end at
+        // the particular bwrap child, not at the host or a sibling run.
+        assert!(check(sandbox, &[(40, 20, sandbox), (20, 1, host)]).is_err());
+        assert!(check(nested, &[(40, 30, nested), (30, 10, sandbox)]).is_err());
+        assert!(check(host, &[(40, 10, host)]).is_err());
+        assert!(check(sandbox, &[(40, 30, sandbox)]).is_err());
+        assert!(check(sandbox, &[(40, 40, sandbox)]).is_err());
+        assert!(check(sandbox, &[(40, 30, host), (30, 10, sandbox)]).is_err());
+    }
+
+    #[test]
+    fn namespace_guard_refuses_the_hosts_own_namespace() {
+        let error = pin_namespace_init_pid(std::process::id() as i32).unwrap_err();
+        assert!(error.to_string().contains("did not enter a PID namespace"));
+    }
+
+    #[tokio::test]
+    async fn direct_backend_rejects_empty_allowlist_and_reserved_or_protected_paths() {
+        let backend = LinuxSandboxBackend {
+            bwrap: None,
+            bundled: false,
+        };
+        let mut command = cmd();
+        command.cwd = PathBuf::from("/tmp");
+        command
+            .env
+            .insert("COGNIA_SANDBOX_PROXY_PORT".into(), "1234".into());
+        let mut policy = SandboxPolicy::Bash {
+            writable: vec![],
+            readable: vec![],
+            network: NetworkPolicy::Allowlist { hosts: vec![] },
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+            max_processes: 0,
+        };
+        assert!(matches!(
+            backend.run(command.clone(), policy.clone()).await,
+            Err(SandboxError::InvalidPolicy { .. })
+        ));
+        if let SandboxPolicy::Bash {
+            network, writable, ..
+        } = &mut policy
+        {
+            *network = NetworkPolicy::Allowlist {
+                hosts: vec!["example.com".into()],
+            };
+            writable.push(PathBuf::from("/run/cognia-egress"));
+        }
+        assert!(matches!(
+            backend.run(command.clone(), policy).await,
+            Err(SandboxError::InvalidPolicy { .. })
+        ));
+        let protected = SandboxPolicy::Edit {
+            target_files: vec![PathBuf::from("/tmp/work/.ssh/id_rsa")],
+            readable: vec![],
+        };
+        assert!(matches!(
+            backend.run(command, protected).await,
+            Err(SandboxError::InvalidPolicy { .. })
+        ));
+    }
+
+    #[test]
+    fn bridge_mounts_and_command_follow_all_user_binds() {
+        let policy = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("/workspace")],
+            readable: vec![],
+            network: NetworkPolicy::Allowlist {
+                hosts: vec!["example.com".into()],
+            },
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+            max_processes: 0,
+        };
+        assert!(matches!(
+            render_bwrap_args(&policy, &cmd(), None, None),
+            Err(SandboxError::SetupRequired { .. })
+        ));
+        let bridge = crate::launcher::LinuxBridgeLaunchSpec {
+            helper: "/trusted/helper".into(),
+            proxy_socket: "/private/proxy.sock".into(),
+            control_socket: "/private/control.sock".into(),
+            as_pid_1: true,
+        };
+        let args = render_bwrap_args(
+            &policy,
+            &cmd(),
+            Some(crate::seccomp::SECCOMP_FD),
+            Some(&bridge),
+        )
+        .unwrap();
+        let user_bind = args
+            .windows(3)
+            .position(|w| w == ["--bind", "/workspace", "/workspace"])
+            .unwrap();
+        let bridge_bind = args
+            .windows(3)
+            .position(|w| {
+                w == [
+                    "--ro-bind",
+                    "/private/proxy.sock",
+                    "/run/cognia-egress/proxy.sock",
+                ]
+            })
+            .unwrap();
+        assert!(bridge_bind > user_bind);
+        assert!(!args.contains(&"--share-net".into()));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--tmpfs", "/run/cognia-egress"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--remount-ro", "/run/cognia-egress"]));
+        assert_eq!(args.last().unwrap(), "ls");
+    }
 
     #[tokio::test]
     async fn timeout_returns_truthful_result_when_bwrap_is_available() {
@@ -757,7 +1321,7 @@ mod tests {
             max_memory_mb: 0,
             max_processes: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         // `.ssh` (secret dir) is shadowed by an empty read-only tmpfs, so it is
         // neither readable nor writable nor creatable, whether or not it
         // exists. It must NOT be a bind from a host path: the host path this
@@ -785,7 +1349,7 @@ mod tests {
             max_memory_mb: 0,
             max_processes: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         // `.git` is write-protected and absent → NOT bound, so `git init` still
         // works (the threat is rewriting an EXISTING repo, handled when present).
         assert_eq!(ro_bind_src_for(&args, &format!("{root}/.git")), None);
@@ -806,7 +1370,7 @@ mod tests {
             max_memory_mb: 0,
             max_processes: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         // `.ssh` reachable through the readable root is shadowed so it can't
         // be read.
         let ssh = home.path().join(".ssh");
@@ -824,7 +1388,7 @@ mod tests {
             max_memory_mb: 0,
             max_processes: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         // A readable root is mounted read-only, and bwrap mkdirs a mount point
         // before covering it. Covering an entry that is not there fails the
         // whole call with `Can't mkdir ...: Read-only file system`, so one
@@ -847,7 +1411,7 @@ mod tests {
             max_memory_mb: 0,
             max_processes: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         // A writable root IS creatable, so an absent secret store must still be
         // covered or the sandboxed process could write `~/.ssh/authorized_keys`
         // into a clean root.
@@ -865,7 +1429,7 @@ mod tests {
             max_memory_mb: 0,
             max_processes: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         assert!(args.iter().any(|s| s == "--unshare-pid"));
         assert!(args.iter().any(|s| s == "--unshare-net"));
         assert!(args.iter().any(|s| s == "--die-with-parent"));
@@ -890,7 +1454,7 @@ mod tests {
             max_memory_mb: 0,
             max_processes: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         let bind_idx = args
             .iter()
             .position(|s| s == "--bind")
@@ -922,7 +1486,7 @@ mod tests {
             max_memory_mb: 0,
             max_processes: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         assert!(args.iter().any(|s| s == "--share-net"));
         assert!(!args.iter().any(|s| s == "--unshare-net"));
     }
@@ -933,7 +1497,7 @@ mod tests {
             target_files: vec![PathBuf::from("/repo/a.txt")],
             readable: vec![],
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         // The exact file is writable via --bind.
         let contains_file = args
             .windows(3)
@@ -958,7 +1522,8 @@ mod tests {
         // `unshare` and `pivot_root` calls bwrap needs to build the sandbox,
         // which is how every Linux sandbox call came back as
         // `bwrap: Failed to make / slave: Operation not permitted`.
-        let args = render_bwrap_args(&policy, &cmd(), Some(crate::seccomp::SECCOMP_FD));
+        let args =
+            render_bwrap_args(&policy, &cmd(), Some(crate::seccomp::SECCOMP_FD), None).unwrap();
         let idx = args
             .iter()
             .position(|s| s == "--seccomp")
@@ -967,7 +1532,7 @@ mod tests {
 
         // Without one the run proceeds on namespace isolation alone, and bwrap
         // must not be handed a descriptor that holds nothing.
-        let none = render_bwrap_args(&policy, &cmd(), None);
+        let none = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         assert!(!none.iter().any(|s| s == "--seccomp"));
     }
 
@@ -1094,7 +1659,7 @@ mod tests {
             max_memory_mb: 0,
             max_processes: 0,
         };
-        let args = render_bwrap_args(&policy, &cmd(), None);
+        let args = render_bwrap_args(&policy, &cmd(), None, None).unwrap();
         assert!(
             !args.iter().any(|a| a.contains("docker.sock")),
             "docker socket must never appear in bwrap argv: {args:?}"

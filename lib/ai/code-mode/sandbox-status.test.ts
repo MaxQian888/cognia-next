@@ -34,11 +34,13 @@ describe("codeSandboxStatus", () => {
       confined: true,
       backend: "macos-sandbox-exec",
       detail: "ok",
+      networkAllowlist: { state: "unknown", detail: "" },
     })
     expect(mockUpdateAvailability).toHaveBeenCalledWith({
       confined: true,
       backend: "macos-sandbox-exec",
       detail: "ok",
+      networkAllowlist: { state: "unknown", detail: "" },
     })
   })
 
@@ -64,17 +66,24 @@ describe("codeSandboxStatus", () => {
       confined: false,
       backend: "",
       detail: "command not found",
+      networkAllowlist: { state: "unknown", detail: "" },
     })
     expect(mockUpdateAvailability).toHaveBeenCalledWith({
       confined: false,
       backend: "",
       detail: "command not found",
+      networkAllowlist: { state: "unknown", detail: "" },
     })
   })
 
   it("handles an empty probe payload", async () => {
     mockCall.mockResolvedValue(undefined)
-    await expect(codeSandboxStatus()).resolves.toEqual({ confined: false, backend: "", detail: "" })
+    await expect(codeSandboxStatus()).resolves.toEqual({
+      confined: false,
+      backend: "",
+      detail: "",
+      networkAllowlist: { state: "unknown", detail: "" },
+    })
   })
 
   it("probes once per app session", async () => {
@@ -115,6 +124,7 @@ describe("host executor", () => {
       confined: true,
       backend: "macos-sandbox-exec",
       detail: "ok",
+      networkAllowlist: { state: "unknown", detail: "" },
     })
     expect(mockCall).not.toHaveBeenCalled()
   })
@@ -152,3 +162,23 @@ describe("host executor", () => {
     await expect(codeSandboxStatus()).resolves.toMatchObject({ confined: false })
   })
 })
+
+it.each(["available", "unavailable"] as const)(
+  "retains independent network probe state %s",
+  async (state) => {
+    const network = { state, detail: "bridge handshake result" }
+    mockCall.mockResolvedValue({
+      confined: true,
+      backend: "linux-bwrap",
+      detail: "ok",
+      network_allowlist: network,
+    })
+    await expect(codeSandboxStatus()).resolves.toMatchObject({
+      confined: true,
+      networkAllowlist: network,
+    })
+    expect(mockUpdateAvailability).toHaveBeenCalledWith(
+      expect.objectContaining({ networkAllowlist: network })
+    )
+  }
+)

@@ -55,10 +55,10 @@ pub trait SandboxedExec: Send + Sync {
 | `SandboxCommand` | `types.rs:29-58`   | `argv`, `cwd`, `env: BTreeMap`, `stdin`, `timeout` (serialized as secs) |
 | `NetworkPolicy`  | `types.rs:67-79`   | `Off` (default) · `Allowlist { hosts }` · `On`                        |
 | `SandboxPolicy`  | `types.rs:86-139`  | `Bash { writable, readable, network, max_cpu_seconds, max_memory_mb, max_processes }` · `Edit`/`Write`/`TextEditor { target_files, readable }` |
-| `SandboxResult`  | `types.rs:144-163` | `exit_code`, `stdout`, `stderr`, `duration`, `timed_out`, `stdout_truncated`, `stderr_truncated` |
+| `SandboxResult`  | `types.rs:144-163` | `exit_code`, `stdout`, `stderr`, `duration`, `timed_out`, `stdout_truncated`, `stderr_truncated`, independent `network` report |
 | `SandboxError`   | `types.rs:170-197` | `Unavailable` · `SetupRequired` · `InvalidPolicy` · `BackendFailed` · `Timeout` |
 | `SandboxHealth`  | `types.rs:203-218` | `available`, `backend`, `version`, `last_error`                       |
-| `ProbeReport`    | `types.rs:227-236` | `backend`, `confined`, `detail` — the result of `probe_confinement`   |
+| `ProbeReport`    | `types.rs:227-236` | `backend`, `confined`, `detail`, independent network-allowlist probe — the result of `probe_confinement`   |
 
 ```rust title="crates/cognia-exec-sandbox/src/types.rs:66-79"
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -114,8 +114,10 @@ records the outcome to the audit ring as `Surface::Sandbox`.
 `run_confined` is the one confined-execution path every Rust caller goes through. In order, it
 enforces the backend-availability gate (fail closed with `SetupRequired`), canonicalizes every path and
 applies the forbidden-writable and forbidden-readable floors, scrubs code-injection environment
-variables, downgrades a network the platform cannot enforce, and starts the filtering proxy for an
-enforceable allowlist. Only then does it call `current_backend().run(...)`.
+variables, and validates the network policy. macOS starts its TCP filtering proxy in this dispatcher;
+Linux creates its Unix-socket filtering proxy inside `LinuxSandboxBackend::run`, including direct
+backend calls. Unsupported enforcement is refused; Linux allowlists are never downgraded to Off or
+shared host networking.
 
 ```rust title="crates/cognia-exec-sandbox/src/lib.rs:56-75 (backend selection)"
 pub fn current_backend() -> Arc<dyn SandboxedExec> {
@@ -160,7 +162,7 @@ sequenceDiagram
     else Ok
       Pol-->>Cmd: SandboxPolicy
       Cmd->>Run: run_confined(command, policy)
-      Run->>Run: availability gate, path floors, env scrub, network downgrade, proxy
+      Run->>Run: availability gate, path floors, env scrub, network validation
       Run->>Back: run(command, policy)
       Back-->>Cmd: SandboxResult / SandboxError
       Cmd->>Audit: record Allow / Deny + duration
@@ -195,23 +197,55 @@ args.push("--dev".into());   args.push("/dev".into());
 args.push("--tmpfs".into()); args.push("/tmp".into());
 ```
 
-```rust title="crates/cognia-exec-sandbox/src/linux.rs:662-682 (network → namespace flag, abridged)"
-NetworkPolicy::Off => args.push("--unshare-net".into()),
-NetworkPolicy::On  => args.push("--share-net".into()),
-NetworkPolicy::Allowlist { hosts: _ } => {
-    // Proxy-routed: shares the host network so the command can reach the
-    // loopback filtering proxy. Holds only for proxy-respecting clients.
-    args.push("--share-net".into());
-}
-```
+| Network policy | Namespace and egress |
+| --- | --- |
+| `Off` | `--unshare-net`; no egress |
+| `On` | `--share-net`; unrestricted host networking |
+| `Allowlist { hosts }` | `--unshare-net`, `--cap-drop ALL`; host filtering proxy reached only through a Unix-socket bridge |
+
+`LinuxSandboxBackend::run` owns the bridge for each allowlisted run. It creates a private 0700
+folder, a 0600 `proxy.sock`, and a separate `control.sock`. After all user binds, the sockets and the
+trusted helper are mounted read-only under reserved `/run/cognia-egress/`; colliding user paths are
+rejected. User/pid/ipc/uts namespaces, file protections, seccomp and `--die-with-parent` remain in
+force. An empty host list is `InvalidPolicy`.
+
+The helper is the existing `cognia-external-agent-launcher` in internal `--linux-netns-bridge` mode.
+Its absolute path is trusted, never taken from command env, `PATH`, or user arguments. A missing or
+incompatible helper returns `SetupRequired`. The namespace supervisor verifies loopback is up and
+reachable, listens on `127.0.0.1:0`, and sends an invalid request through `proxy.sock` that must return
+400 without external DNS. It sends versioned Ready on `control.sock` and waits for Go before starting
+the target in its own process group. It acknowledges Started only after target spawn and seccomp
+installation succeed; the host reports `netns_unix_proxy` only after receiving Started. Failure, EOF
+or timeout before Go prevents target startup; missing Started aborts the run. Caller-supplied proxy
+variables or `COGNIA_SANDBOX_PROXY_PORT` never prove a working bridge.
+
+The supervisor sets `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and their lowercase forms last, pointing
+to its relay, and clears both `NO_PROXY` and `no_proxy`. Every relay connection goes only to the fixed
+`proxy.sock`. The target inherits no listener, control, or upstream descriptors; its stdin/stdout
+are never read or written by the relay. Bwrap and its fallback init receive `/dev/null` as stdin.
+Protocol v2 transfers the target's stdin read descriptor over `control.sock` after Go; the host
+creates that pipe only after bwrap starts. The supervisor drops its copy before Started, so closing
+target stdin produces EPIPE even while the target remains alive. Pipe ends are close-on-exec;
+allowlist stdin delivery also fails after five seconds without write progress, independently of the
+command timeout. Clearing proxy variables cannot restore direct network access.
+
+The shared `net_proxy.rs` proxy and `cognia-net` matcher allow CONNECT and absolute-form HTTP only.
+SOCKS, raw TCP, UDP and direct DNS are unsupported. DNS resolution and public-address checks happen
+on the host; TLS SNI inside CONNECT is not inspected. A second seccomp layer installed before target
+exec denies `socket(AF_UNIX)` and other non-IP families while retaining AF_UNIX `SOCK_STREAM`
+`socketpair` for local IPC. Datagram and other non-stream socketpairs are denied because they can
+reconnect to pathname Unix sockets. The supervisor retains AF_UNIX + AF_INET. **Tools requiring pathname Unix IPC cannot run under an allowlist**, even
+when a host socket is bind-mounted. Failure to build or install either filter refuses execution.
+
+The supervisor acts as namespace init (`--as-pid-1` when supported), forwards SIGTERM/SIGINT/SIGHUP
+to the target process group, and reaps through one wait path. Exit, timeout, stdin error and caller
+cancellation use the same cleanup order: kill and reap the sandbox, await proxy shutdown, then
+remove sockets and the private folder. Graceful termination is bounded before a forced kill, and
+the watchdog covers setup, stdin, output reads and wait. Before Go, the host pins the actual namespace
+init with a pidfd; cleanup kills it to cover descendants that escape the target process group,
+then bounds process reaping and the final output drain.
 
 - `health().backend == "linux-bwrap"`; `version` is `"bundled"` / `"system"` / empty.
-- **An allowlist never reaches `bwrap` from `run_confined`.** The `Allowlist` branch above would
-  constrain only clients that honour `HTTP(S)_PROXY`, which is not enforcement. So
-  `downgrade_unenforceable_network` (`lib.rs:138-173`) turns a Linux allowlist into
-  `NetworkPolicy::Off` first and prints a notice on stderr: the run gets no network rather than an
-  unenforced one. Kernel enforcement (an unshared netns plus a unix-socket bridge to the proxy) is
-  the documented follow-up.
 - Edit/Write/TextEditor `--bind` each **target file individually** (not the parent dir) and force
   `NetworkPolicy::Off`.
 - `max_cpu_seconds` / `max_memory_mb` / `max_processes` are resolved by `limits.rs` and applied to
@@ -315,7 +349,7 @@ exit means the protocol failed and stdout may be empty, so a missing envelope mu
 
 Because it calls the same `run_confined`, a CLI session gets byte-identical confinement rather than
 a second implementation: the availability gate, path canonicalization, the forbidden-root floor,
-env scrubbing, the unenforceable-network downgrade, the filtering proxy, seccomp, rlimits and output
+env scrubbing, fail-closed network enforcement, the filtering proxy, seccomp, rlimits and output
 capping all still happen on the Rust side. The renderer side registers it through
 `lib/sandbox/os-exec-bridge`; see [Execution overview](./execution-overview).
 
@@ -323,7 +357,7 @@ capping all still happen on the Rust side. The renderer side registers it throug
 
 | Backend     | `health().backend` (live) | State                  | Real OS exec?                                                                 |
 | ----------- | ------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| Linux       | `linux-bwrap`             | Real                   | Yes — resolves + execs `bwrap` under namespaces/timeout + opt-in rlimits. Allowlist → no network. |
+| Linux       | `linux-bwrap`             | Real                   | Yes — resolves + execs `bwrap` under namespaces/timeout + opt-in rlimits. Allowlist → isolated netns + Unix filtering proxy after a successful handshake. |
 | macOS       | `macos-sandbox-exec`      | Real                   | Yes — execs `/usr/bin/sandbox-exec` with rendered SBPL. Allowlist → kernel-pinned to the filtering proxy. |
 | Windows     | `windows-cognia-sandbox`  | Real                   | Yes — bundled restricted-token + low-integrity + Job Object runner captures stdout/stderr. |
 | Uninstalled | `uninstalled-<os>`        | Deny stub              | No — always Unavailable / SetupRequired.                                     |
@@ -347,6 +381,20 @@ availability, compatibility payload shape, stdout/stderr JSON parsing), `uninsta
 Real-sandbox integration runs via `cargo test -p cognia-next --test sandbox_integration`
 (`src-tauri/tests/sandbox_integration.rs`) on Linux + macOS; the Windows runner crate is covered by
 its own unit tests.
+
+### Linux allowlist acceptance
+
+`crates/cognia-exec-sandbox/tests/linux_allowlist.rs` contains ignored real-bwrap acceptance tests:
+
+```sh
+cargo test -p cognia-exec-sandbox --test linux_allowlist -- --ignored --test-threads=1
+```
+
+They require Linux, bwrap, util-linux `unshare`, iproute2 `ip`, `/usr/bin/python3`, nested
+user/network/mount namespaces, and the trusted launcher helper. Each fixture runs in its own
+disposable namespace without changing host network state. Missing prerequisites fail instead of skipping. The acceptance cases cover allowed CONNECT, denied hosts/private IPs,
+direct-network and mounted Unix-socket bypass attempts, helper failure before target startup, and
+process/socket cleanup. macOS unit tests or Linux cross-compilation do not prove this live boundary.
 
 ## Next
 

@@ -25,14 +25,16 @@
 // the cheap health probe still reported the backend as available. Verified on
 // Ubuntu 24.04 / aarch64 against the real binary.
 //
-// Defense-in-depth, not the boundary: if filter construction fails, the
-// backend proceeds with namespaces only and records a warning rather than
-// failing the command — the namespace isolation still holds.
+// Allowlist runs require both filters: construction or installation failure
+// refuses the run, because denying pathname Unix IPC is part of the boundary.
 
 use std::convert::TryInto;
 use std::os::fd::{FromRawFd, RawFd};
 
-use seccompiler::{BpfProgram, SeccompAction, SeccompFilter};
+use seccompiler::{
+    BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter,
+    SeccompRule,
+};
 
 /// Human-readable names of the blocked syscalls — the single source of truth
 /// the unit test asserts against so the list can't silently drift.
@@ -51,6 +53,7 @@ pub const BLOCKED_SYSCALLS: &[&str] = &[
     "ptrace",
     "process_vm_readv",
     "process_vm_writev",
+    "pidfd_getfd",
     "io_uring_setup",
     "io_uring_enter",
     "io_uring_register",
@@ -86,6 +89,7 @@ fn blocked_syscall_numbers() -> Vec<i64> {
         libc::SYS_ptrace,
         libc::SYS_process_vm_readv,
         libc::SYS_process_vm_writev,
+        libc::SYS_pidfd_getfd,
         libc::SYS_io_uring_setup,
         libc::SYS_io_uring_enter,
         libc::SYS_io_uring_register,
@@ -110,10 +114,66 @@ fn blocked_syscall_numbers() -> Vec<i64> {
 /// Build the compiled BPF program: blocked syscalls return `EPERM`
 /// (`match_action`), everything else is allowed (`mismatch_action`).
 pub fn build_filter() -> Result<BpfProgram, String> {
-    let rules = blocked_syscall_numbers()
+    build_filter_with_socket_families(None, false)
+}
+
+/// The namespace supervisor needs only pathname Unix IPC and IPv4 loopback.
+pub fn build_allowlist_supervisor_filter() -> Result<BpfProgram, String> {
+    build_filter_with_socket_families(Some(&[libc::AF_UNIX, libc::AF_INET]), false)
+}
+
+/// The target may create IP sockets, but cannot reach mounted host Unix sockets.
+/// Stream `socketpair` remains available for local process IPC. Datagram pairs
+/// must be denied: either endpoint can reconnect to a mounted pathname socket.
+pub fn build_allowlist_target_filter() -> Result<BpfProgram, String> {
+    build_filter_with_socket_families(Some(&[libc::AF_INET, libc::AF_INET6]), true)
+}
+
+fn build_filter_with_socket_families(
+    families: Option<&[i32]>,
+    stream_pairs_only: bool,
+) -> Result<BpfProgram, String> {
+    let mut rules: std::collections::BTreeMap<i64, Vec<SeccompRule>> = blocked_syscall_numbers()
         .into_iter()
         .map(|nr| (nr, vec![]))
         .collect();
+    if let Some(families) = families {
+        let conditions = families
+            .iter()
+            .map(|family| {
+                SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Ne, *family as u64)
+                    .map_err(|error| format!("invalid socket-family condition: {error}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let rule = SeccompRule::new(conditions)
+            .map_err(|error| format!("invalid socket-family rule: {error}"))?;
+        rules.insert(libc::SYS_socket, vec![rule]);
+    }
+    if stream_pairs_only {
+        // seccompiler exposes MaskedEq but not MaskedNe. Enumerating these four
+        // accepted values is exactly `(type & !(NONBLOCK | CLOEXEC)) == STREAM`;
+        // the conjunction denies every other value, including unknown flags.
+        let conditions = [
+            0,
+            libc::SOCK_CLOEXEC,
+            libc::SOCK_NONBLOCK,
+            libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+        ]
+        .into_iter()
+        .map(|flags| {
+            SeccompCondition::new(
+                1,
+                SeccompCmpArgLen::Dword,
+                SeccompCmpOp::Ne,
+                (libc::SOCK_STREAM | flags) as u64,
+            )
+            .map_err(|error| format!("invalid socketpair-type condition: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+        let rule = SeccompRule::new(conditions)
+            .map_err(|error| format!("invalid socketpair-type rule: {error}"))?;
+        rules.insert(libc::SYS_socketpair, vec![rule]);
+    }
     let filter = SeccompFilter::new(
         rules,
         SeccompAction::Allow, // mismatch: allow everything else
@@ -123,9 +183,74 @@ pub fn build_filter() -> Result<BpfProgram, String> {
             .map_err(|e| format!("unsupported arch for seccomp: {e:?}"))?,
     )
     .map_err(|e| format!("failed to build seccomp filter: {e:?}"))?;
-    filter
+    let program: BpfProgram = filter
         .try_into()
-        .map_err(|e| format!("failed to compile seccomp BPF: {e:?}"))
+        .map_err(|e| format!("failed to compile seccomp BPF: {e:?}"))?;
+    #[cfg(target_arch = "x86_64")]
+    {
+        // x32 shares AUDIT_ARCH_X86_64 but uses different syscall numbers.
+        // Reject the entire ABI, including unknown calls, before native rules.
+        // Other audit architectures still reach seccompiler's kill guard.
+        use seccompiler::sock_filter;
+        let mut guarded = vec![
+            sock_filter {
+                code: 0x20,
+                jt: 0,
+                jf: 0,
+                k: 4,
+            }, // LD arch
+            sock_filter {
+                code: 0x15,
+                jt: 0,
+                jf: 3,
+                k: 0xc000_003e,
+            },
+            sock_filter {
+                code: 0x20,
+                jt: 0,
+                jf: 0,
+                k: 0,
+            }, // LD nr
+            sock_filter {
+                code: 0x45,
+                jt: 0,
+                jf: 1,
+                k: 0x4000_0000,
+            }, // JSET x32
+            sock_filter {
+                code: 0x06,
+                jt: 0,
+                jf: 0,
+                k: libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
+            },
+        ];
+        guarded.extend(program);
+        Ok(guarded)
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    Ok(program)
+}
+
+/// Install an already-compiled filter in a child immediately before exec.
+/// Only raw syscalls are used; no allocator or lock is touched after fork.
+pub fn install_target_filter(bpf: &BpfProgram) -> std::io::Result<()> {
+    if bpf.is_empty() || bpf.len() > u16::MAX as usize {
+        return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
+    }
+    let program = libc::sock_fprog {
+        len: bpf.len() as u16,
+        filter: bpf.as_ptr().cast::<libc::sock_filter>().cast_mut(),
+    };
+    // SAFETY: the program refers to initialized BPF memory for the duration of
+    // prctl; NO_NEW_PRIVS is mandatory before an unprivileged filter install.
+    unsafe {
+        if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0
+            || libc::prctl(libc::PR_SET_SECCOMP, libc::SECCOMP_MODE_FILTER, &program) != 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 /// The descriptor number the compiled program is handed to `bwrap` on.
@@ -198,6 +323,247 @@ pub fn attach_program_fd(cmd: &mut tokio::process::Command, source: RawFd) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Evaluate the actual compiled program without installing a filter or
+    // requiring kernel x32 support. Unexpected instructions fail the test.
+    fn evaluate(program: &BpfProgram, arch: u32, nr: u32, args: [u64; 6]) -> u32 {
+        let mut data = [0u32; 16];
+        data[0] = nr;
+        data[1] = arch;
+        for (index, arg) in args.into_iter().enumerate() {
+            data[4 + index * 2] = arg as u32;
+            data[5 + index * 2] = (arg >> 32) as u32;
+        }
+        let mut accumulator = 0;
+        let mut pc = 0;
+        for _ in 0..program.len() {
+            let insn = &program[pc];
+            pc += 1;
+            match insn.code {
+                0x20 => accumulator = data[insn.k as usize / 4],
+                0x05 => pc += insn.k as usize,
+                0x15 | 0x25 | 0x35 | 0x45 => {
+                    let yes = match insn.code {
+                        0x15 => accumulator == insn.k,
+                        0x25 => accumulator > insn.k,
+                        0x35 => accumulator >= insn.k,
+                        _ => accumulator & insn.k != 0,
+                    };
+                    pc += if yes { insn.jt } else { insn.jf } as usize;
+                }
+                0x54 => accumulator &= insn.k,
+                0x06 => return insn.k,
+                code => panic!("unsupported BPF instruction {code:#x}"),
+            }
+        }
+        panic!("BPF did not return an action");
+    }
+
+    #[test]
+    fn compiled_filters_reject_x32_and_preserve_native_policy() {
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => 0xc000_003e,
+            "aarch64" => 0xc000_00b7,
+            "riscv64" => 0xc000_00f3,
+            other => panic!("unsupported test arch {other}"),
+        };
+        let denied = libc::SECCOMP_RET_ERRNO | libc::EPERM as u32;
+        for (program, unix_allowed) in [
+            (build_allowlist_supervisor_filter().unwrap(), true),
+            (build_allowlist_target_filter().unwrap(), false),
+        ] {
+            for nr in blocked_syscall_numbers() {
+                assert_eq!(evaluate(&program, arch, nr as u32, [0; 6]), denied);
+            }
+            for family in [libc::AF_UNIX, libc::AF_INET, libc::AF_INET6] {
+                let allowed = family == libc::AF_INET
+                    || (family == libc::AF_UNIX && unix_allowed)
+                    || (family == libc::AF_INET6 && !unix_allowed);
+                assert_eq!(
+                    evaluate(
+                        &program,
+                        arch,
+                        libc::SYS_socket as u32,
+                        [family as u64, libc::SOCK_STREAM as u64, 0, 0, 0, 0]
+                    ),
+                    if allowed {
+                        libc::SECCOMP_RET_ALLOW
+                    } else {
+                        denied
+                    }
+                );
+            }
+            assert_eq!(
+                evaluate(
+                    &program,
+                    arch,
+                    libc::SYS_socketpair as u32,
+                    [libc::AF_UNIX as u64, libc::SOCK_STREAM as u64, 0, 0, 0, 0]
+                ),
+                libc::SECCOMP_RET_ALLOW
+            );
+            // x32 socket, socketpair, all io_uring calls, and an unknown number.
+            for nr in [41, 53, 425, 426, 427, 0xffff] {
+                assert_eq!(
+                    evaluate(
+                        &program,
+                        arch,
+                        0x4000_0000 | nr,
+                        [libc::AF_UNIX as u64, libc::SOCK_STREAM as u64, 0, 0, 0, 0]
+                    ),
+                    if cfg!(target_arch = "x86_64") {
+                        denied
+                    } else {
+                        libc::SECCOMP_RET_ALLOW
+                    }
+                );
+            }
+            assert_eq!(
+                evaluate(&program, 0x4000_0003, 0x4000_0029, [0; 6]),
+                libc::SECCOMP_RET_KILL_PROCESS
+            );
+        }
+    }
+
+    #[test]
+    fn allowlist_target_denies_unix_and_non_ip_socket_families_but_keeps_socketpair() {
+        // Install only on a disposable thread, never on the parallel test
+        // runner. Filters are inherited downward, not by the parent thread.
+        std::thread::spawn(|| {
+            let filter = build_allowlist_target_filter().unwrap();
+            install_target_filter(&filter).unwrap();
+            for family in [libc::AF_UNIX, libc::AF_NETLINK, libc::AF_PACKET] {
+                assert_eq!(unsafe { libc::socket(family, libc::SOCK_STREAM, 0) }, -1);
+                assert_eq!(
+                    std::io::Error::last_os_error().raw_os_error(),
+                    Some(libc::EPERM)
+                );
+            }
+            let inet = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+            assert!(inet >= 0);
+            unsafe {
+                libc::close(inet);
+            }
+            let mut pair = [-1; 2];
+            assert_eq!(
+                unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, pair.as_mut_ptr()) },
+                0
+            );
+            unsafe {
+                libc::close(pair[0]);
+                libc::close(pair[1]);
+            }
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn target_denies_pidfd_getfd_even_for_its_own_descriptor() {
+        std::thread::spawn(|| {
+            use std::os::fd::AsRawFd;
+            let file = std::fs::File::open("/dev/null").unwrap();
+            let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, libc::getpid(), 0) };
+            assert!(pidfd >= 0);
+            let pidfd = unsafe { std::os::fd::OwnedFd::from_raw_fd(pidfd as i32) };
+            install_target_filter(&build_allowlist_target_filter().unwrap()).unwrap();
+            assert_eq!(
+                unsafe {
+                    libc::syscall(
+                        libc::SYS_pidfd_getfd,
+                        pidfd.as_raw_fd(),
+                        file.as_raw_fd(),
+                        0,
+                    )
+                },
+                -1
+            );
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::EPERM)
+            );
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn target_socketpair_rejects_datagrams_with_all_creation_flags() {
+        std::thread::spawn(|| {
+            install_target_filter(&build_allowlist_target_filter().unwrap()).unwrap();
+            for flags in [
+                0,
+                libc::SOCK_CLOEXEC,
+                libc::SOCK_NONBLOCK,
+                libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+            ] {
+                let mut pair = [-1; 2];
+                assert_eq!(
+                    unsafe {
+                        libc::socketpair(
+                            libc::AF_UNIX,
+                            libc::SOCK_DGRAM | flags,
+                            0,
+                            pair.as_mut_ptr(),
+                        )
+                    },
+                    -1
+                );
+                assert_eq!(
+                    std::io::Error::last_os_error().raw_os_error(),
+                    Some(libc::EPERM)
+                );
+                assert_eq!(
+                    unsafe {
+                        libc::socketpair(
+                            libc::AF_UNIX,
+                            libc::SOCK_STREAM | flags,
+                            0,
+                            pair.as_mut_ptr(),
+                        )
+                    },
+                    0
+                );
+                unsafe {
+                    libc::close(pair[0]);
+                    libc::close(pair[1]);
+                }
+            }
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn allowlist_supervisor_keeps_unix_but_denies_packet_sockets() {
+        std::thread::spawn(|| {
+            install_target_filter(&build_allowlist_supervisor_filter().unwrap()).unwrap();
+            let unix = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+            assert!(unix >= 0);
+            unsafe {
+                libc::close(unix);
+            }
+            let mut pair = [-1; 2];
+            assert_eq!(
+                unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, pair.as_mut_ptr()) },
+                0
+            );
+            unsafe {
+                libc::close(pair[0]);
+                libc::close(pair[1]);
+            }
+            assert_eq!(
+                unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW, 0) },
+                -1
+            );
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::EPERM)
+            );
+        })
+        .join()
+        .unwrap();
+    }
 
     #[test]
     fn blocked_names_and_numbers_stay_one_to_one() {

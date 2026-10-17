@@ -1,4 +1,9 @@
-import { HOST_FALLBACK_RUNTIME_REF, MicrovmAdapterError, SandboxRuntimeError } from "./sandbox"
+import {
+  normalizeSandboxNetworkAllowlistProbe,
+  HOST_FALLBACK_RUNTIME_REF,
+  MicrovmAdapterError,
+  SandboxRuntimeError,
+} from "./sandbox"
 
 describe("sandbox API runtime contracts", () => {
   it("keeps the host fallback sentinel stable for explicitly sessionless calls", () => {
@@ -21,6 +26,30 @@ describe("sandbox API runtime contracts", () => {
       name: "SandboxRuntimeError",
       code: "placement-unavailable",
       cause,
+    })
+  })
+})
+
+describe("network allowlist probe compatibility", () => {
+  it.each([undefined, null, {}, true, { state: true }, { state: "enforced" }])(
+    "keeps missing or malformed evidence unknown: %j",
+    (raw) => {
+      expect(normalizeSandboxNetworkAllowlistProbe(raw)).toEqual({ state: "unknown", detail: "" })
+    }
+  )
+  it.each(["unknown", "available", "unavailable"])(
+    "preserves state %s without inferring no-egress",
+    (state) => {
+      expect(normalizeSandboxNetworkAllowlistProbe({ state, detail: "observed" })).toEqual({
+        state,
+        detail: "observed",
+      })
+    }
+  )
+  it("does not accept non-string detail", () => {
+    expect(normalizeSandboxNetworkAllowlistProbe({ state: "unavailable", detail: 42 })).toEqual({
+      state: "unavailable",
+      detail: "",
     })
   })
 })

@@ -229,6 +229,34 @@ fn bot_environment(
 }
 
 fn main() {
+    // Internal mode is handled before the ordinary launcher parser. It starts
+    // a fresh current-thread runtime inside the namespace, never a post-fork
+    // Rust runtime inherited from the multi-threaded sandbox host.
+    #[cfg(target_os = "linux")]
+    {
+        let raw: Vec<String> = std::env::args().skip(1).collect();
+        if raw.first().map(String::as_str) == Some("--linux-netns-bridge-version") {
+            if raw.len() != 1 {
+                eprintln!("unexpected arguments to bridge version probe");
+                std::process::exit(1);
+            }
+            println!("{}", cognia_exec_sandbox::net_bridge::PROTOCOL_VERSION);
+            return;
+        }
+        if raw.first().map(String::as_str) == Some("--linux-netns-bridge") {
+            if raw.get(1).map(String::as_str) != Some("--") || raw.len() < 3 {
+                eprintln!("expected --linux-netns-bridge -- target [args]");
+                std::process::exit(1);
+            }
+            match cognia_exec_sandbox::net_bridge::run_helper(raw.into_iter().skip(2).collect()) {
+                Ok(code) => std::process::exit(code),
+                Err(error) => {
+                    eprintln!("cognia-external-agent-launcher bridge: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
     if let Err(error) = run() {
         eprintln!("cognia-external-agent-launcher: {error}");
         std::process::exit(1);

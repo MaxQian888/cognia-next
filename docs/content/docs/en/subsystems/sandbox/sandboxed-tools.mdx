@@ -60,6 +60,28 @@ maxCpuSeconds: { type: "integer", minimum: 0 },
 maxMemoryMb: { type: "integer", minimum: 0 },
 ```
 
+## Linux network allowlists
+
+For `sandbox_bash`, `network: "allowlist"` requires a non-empty `networkHosts` list. Linux enforces
+it with an isolated network namespace and a Unix-socket bridge to the shared host filtering proxy.
+The trusted launcher helper sends versioned Ready after its loopback/proxy probe, waits for Go
+before starting the target, then acknowledges Started only after spawn and seccomp installation
+succeed. The complete handshake is bounded. A missing or incompatible helper requires setup; failure never opens host networking.
+Caller proxy environment variables are overwritten with the bridge relay and both forms of
+`NO_PROXY` are cleared. Removing those variables does not permit a direct connection.
+
+Supported clients use HTTP CONNECT or absolute-form HTTP. SOCKS, raw TCP, UDP and direct DNS are
+unsupported; the host proxy performs DNS and rejects non-public destinations. An allowed CONNECT
+tunnel does not inspect TLS SNI. The target seccomp filter also denies pathname Unix socket creation,
+so **tools requiring pathname Unix IPC are unavailable in allowlist mode**, including access to
+bind-mounted host sockets. AF_UNIX `SOCK_STREAM` socketpairs remain available for local IPC; datagram
+and other non-stream socketpairs are unavailable because they can reconnect to pathname sockets.
+
+Results carry a separate `network` report with `requested`, `effective`, and `mechanism`.
+`netns_unix_proxy` is reported only after this run receives Started and completes its handshake. Missing fields from old
+backends mean unknown, and `MicrovmConfinement.networkEnforced` retains its no-egress meaning.
+See [OS backends](./os-backends) for lifecycle and installation requirements.
+
 ## Configured read ceiling
 
 The model's `readable` list is clamped before dispatch on both the desktop and CLI rails. The

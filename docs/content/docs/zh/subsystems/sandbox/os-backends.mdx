@@ -50,10 +50,10 @@ pub trait SandboxedExec: Send + Sync {
 | `SandboxCommand` | `types.rs:29-58`   | `argv`、`cwd`、`env: BTreeMap`、`stdin`、`timeout`（序列化为秒） |
 | `NetworkPolicy`  | `types.rs:67-79`   | `Off`（默认）· `Allowlist { hosts }` · `On`                        |
 | `SandboxPolicy`  | `types.rs:86-139`  | `Bash { writable, readable, network, max_cpu_seconds, max_memory_mb, max_processes }` · `Edit`/`Write`/`TextEditor { target_files, readable }` |
-| `SandboxResult`  | `types.rs:144-163` | `exit_code`、`stdout`、`stderr`、`duration`、`timed_out`、`stdout_truncated`、`stderr_truncated` |
+| `SandboxResult`  | `types.rs:144-163` | `exit_code`、`stdout`、`stderr`、`duration`、`timed_out`、`stdout_truncated`、`stderr_truncated`、独立的 `network` 报告 |
 | `SandboxError`   | `types.rs:170-197` | `Unavailable` · `SetupRequired` · `InvalidPolicy` · `BackendFailed` · `Timeout` |
 | `SandboxHealth`  | `types.rs:203-218` | `available`、`backend`、`version`、`last_error`                       |
-| `ProbeReport`    | `types.rs:227-236` | `backend`、`confined`、`detail` —— `probe_confinement` 的结果      |
+| `ProbeReport`    | `types.rs:227-236` | `backend`、`confined`、`detail`、独立网络 allowlist probe —— `probe_confinement` 的结果      |
 
 ```rust title="crates/cognia-exec-sandbox/src/types.rs:66-79"
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -97,7 +97,7 @@ pub enum NetworkPolicy {
 
 `sandbox_exec`（`crates/cognia-automation/src/sandbox.rs:153-278`）是 `cognia-sandboxed-tools` 插件通过渲染端调用的 Tauri 入口点。它先用 `admit_sandbox_call`（`sandbox.rs:115`）检查插件的 `native:filesystem` 与 `native:process` 授权，再派生策略并调用 `run_confined`（`crates/cognia-exec-sandbox/src/lib.rs:374-420`），最后以 `Surface::Sandbox` 把结果记录到审计环。
 
-`run_confined` 是所有 Rust 调用方都要经过的唯一受限执行路径。它依次执行：后端可用性闸（失败即关闭，返回 `SetupRequired`）；规范化每一条路径并套用禁写、禁读两道地板；清洗可注入代码的环境变量；把平台无法强制执行的网络降级；为可强制执行的 allowlist 启动过滤代理。这些都做完之后，才调用 `current_backend().run(...)`。
+`run_confined` 是 Rust 调用方的统一受限执行入口。它依次检查后端可用性（失败返回 `SetupRequired`）、规范化路径并应用禁写和禁读规则、清洗可注入代码的环境变量、校验网络策略。macOS 的 TCP 过滤代理由此处启动；Linux 的 Unix-socket 过滤代理由 `LinuxSandboxBackend::run` 内部创建，因此直接调用后端也受约束。不支持的约束会被拒绝；Linux allowlist 不会降级为 Off，也不会共享宿主网络。
 
 ```rust title="crates/cognia-exec-sandbox/src/lib.rs:56-75 (backend selection)"
 pub fn current_backend() -> Arc<dyn SandboxedExec> {
@@ -142,7 +142,7 @@ sequenceDiagram
     else Ok
       Pol-->>Cmd: SandboxPolicy
       Cmd->>Run: run_confined(command, policy)
-      Run->>Run: availability gate, path floors, env scrub, network downgrade, proxy
+      Run->>Run: availability gate, path floors, env scrub, network validation
       Run->>Back: run(command, policy)
       Back-->>Cmd: SandboxResult / SandboxError
       Cmd->>Audit: record Allow / Deny + duration
@@ -174,18 +174,49 @@ args.push("--dev".into());   args.push("/dev".into());
 args.push("--tmpfs".into()); args.push("/tmp".into());
 ```
 
-```rust title="crates/cognia-exec-sandbox/src/linux.rs:662-682 (network → namespace flag, abridged)"
-NetworkPolicy::Off => args.push("--unshare-net".into()),
-NetworkPolicy::On  => args.push("--share-net".into()),
-NetworkPolicy::Allowlist { hosts: _ } => {
-    // Proxy-routed: shares the host network so the command can reach the
-    // loopback filtering proxy. Holds only for proxy-respecting clients.
-    args.push("--share-net".into());
-}
-```
+| 网络策略 | Namespace 与出口 |
+| --- | --- |
+| `Off` | `--unshare-net`；无出口 |
+| `On` | `--share-net`；不限制宿主网络 |
+| `Allowlist { hosts }` | `--unshare-net`、`--cap-drop ALL`；只能通过 Unix-socket bridge 到达宿主过滤代理 |
+
+`LinuxSandboxBackend::run` 为每次 allowlist 运行持有 bridge。它创建权限为 0700 的私有目录、
+权限为 0600 的 `proxy.sock` 与独立的 `control.sock`。所有用户 bind 完成后，再将 socket 和可信
+helper 只读挂载到保留路径 `/run/cognia-egress/`；与该路径冲突的用户路径会被拒绝。user/pid/ipc/uts
+namespace、文件保护、seccomp 与 `--die-with-parent` 保持生效。空 host 列表返回 `InvalidPolicy`。
+
+helper 复用现有 `cognia-external-agent-launcher` 的内部 `--linux-netns-bridge` 模式。
+它的绝对路径来自可信位置，不读取命令 env、`PATH` 或用户参数。helper 缺失或版本不兼容时返回
+`SetupRequired`。namespace supervisor 验证 loopback 已启用且真实可达，在 `127.0.0.1:0` 监听，
+并经 `proxy.sock` 发送一个必须返回 400 的无效请求，无需外部 DNS。它通过 `control.sock` 发送带
+版本的 Ready，收到 Go 后才在独立进程组中启动目标。仅在目标 spawn 与 seccomp 安装成功后
+确认 Started；宿主收到 Started 后才报告 `netns_unix_proxy`。Go 前失败、EOF 或超时会阻止
+目标启动；缺少 Started 则中止运行。调用方提供的代理环境变量或 `COGNIA_SANDBOX_PROXY_PORT`
+从不构成 bridge 可用的证明。
+
+supervisor 最后设置 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 及其小写形式，全部指向 relay，
+并清空 `NO_PROXY` 与 `no_proxy`。每条 relay 连接只能到达固定的 `proxy.sock`。目标不会继承监听、
+控制或上游描述符，relay 不读取或写入目标的 stdin/stdout。Bwrap 及其 fallback init 的 stdin
+均为 `/dev/null`。协议 v2 在 Go 后通过 `control.sock` 传递目标的 stdin 读描述符；宿主仅在
+bwrap 启动后创建该管道。supervisor 在 Started 前释放自己的副本，因此目标关闭 stdin 后，
+即使目标仍存活，宿主也会收到 EPIPE。管道两端均为 close-on-exec；allowlist stdin 连续五秒
+没有写入进展也会失败，不依赖命令超时。清除代理环境变量也无法恢复网络直连。
+
+共用的 `net_proxy.rs` 代理与 `cognia-net` matcher 仅支持 CONNECT 和 absolute-form HTTP。
+不支持 SOCKS、raw TCP、UDP 或直接 DNS。DNS 解析与公网地址检查发生在宿主侧；CONNECT 隧道内
+的 TLS SNI 不受检查。目标 exec 前安装第二层 seccomp，拒绝 `socket(AF_UNIX)` 及其他非 IP
+地址族，仅保留用于本地 IPC 的 AF_UNIX `SOCK_STREAM` `socketpair`。Datagram 与其他
+非 stream socketpair 因可重新连接 pathname Unix socket 而被拒绝；supervisor 仍可使用
+AF_UNIX + AF_INET。**依赖 pathname Unix IPC
+的工具不能在 allowlist 下运行**，即使宿主 socket 已被 bind mount。任一过滤器构建或安装失败都会拒绝执行。
+
+supervisor 充当 namespace init（支持时使用 `--as-pid-1`），将 SIGTERM/SIGINT/SIGHUP 转发至
+目标进程组，并通过单一 wait 路径回收。退出、超时、stdin 错误与调用方取消采用相同清理顺序：
+终止并回收沙盒，等待代理 shutdown，然后移除 socket 与私有目录。宽限期有上限，之后强制终止；
+watchdog 覆盖 setup、stdin、输出读取与 wait。Go 前宿主通过 pidfd 固定实际的 namespace init；
+清理时终止它，以覆盖逃离目标进程组的后代，并限制进程回收和最终输出 drain 的等待时间。
 
 - `health().backend == "linux-bwrap"`；`version` 为 `"bundled"` / `"system"` / 空。
-- **allowlist 从 `run_confined` 过来时永远到不了 `bwrap`。** 上面的 `Allowlist` 分支只能约束遵守 `HTTP(S)_PROXY` 的客户端，这不算强制执行。所以 `downgrade_unenforceable_network`（`lib.rs:138-173`）会先把 Linux 上的 allowlist 变成 `NetworkPolicy::Off`，并在 stderr 打印一条提示：这次运行拿到的是"没有网络"，而不是"没人执行的网络限制"。内核级强制执行（独立 netns 加一条通往代理的 unix-socket 桥）是已记录在案的后续工作。
 - Edit/Write/TextEditor 会对**每个目标文件单独** `--bind`（而非父目录），并强制 `NetworkPolicy::Off`。
 - `max_cpu_seconds` / `max_memory_mb` / `max_processes` 由 `limits.rs` 解析，并通过 `pre_exec` hook 应用到 `bwrap` 进程（`RLIMIT_CPU`、`RLIMIT_AS`，以及被 user namespace 限定在沙盒进程树内的 `RLIMIT_NPROC`）。这些限制会在 `bwrap` exec 到目标命令后继承；墙钟看门狗仍是默认超时路径。
 
@@ -244,13 +275,13 @@ NetworkPolicy::Allowlist { hosts: _ } => match proxy_port {
 
 请求走 stdin 而不是 argv，因为它携带调用方的环境变量——里面常有令牌——而 argv 通过 `ps` 对全机可读。只要产出了信封，退出码就是 0，包括一次拒绝，也包括子进程非零退出；非零退出意味着协议本身失败、stdout 可能为空，所以"没有信封"绝不能被读成"跑得挺好"。
 
-因为它调用的是同一个 `run_confined`，CLI 会话拿到的约束与桌面逐字节一致，而不是第二份实现：可用性闸、路径规范化、禁写根地板、env 清洗、不可执行网络的降级、过滤代理、seccomp、rlimit 和输出截断，全都还在 Rust 侧发生。渲染端通过 `lib/sandbox/os-exec-bridge` 注册它，见[执行总览](./execution-overview)。
+因为它调用的是同一个 `run_confined`，CLI 会话拿到的约束与桌面逐字节一致，而不是第二份实现：可用性闸、路径规范化、禁写根地板、env 清洗、失败即拒绝的网络约束、过滤代理、seccomp、rlimit 和输出截断，全都还在 Rust 侧发生。渲染端通过 `lib/sandbox/os-exec-bridge` 注册它，见[执行总览](./execution-overview)。
 
 ## 实现状态汇总
 
 | 后端        | `health().backend`（实际） | 状态                   | 真实 OS 执行？                                                                 |
 | ----------- | ------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| Linux       | `linux-bwrap`             | 真实                   | 是 —— 解析并在 namespace/超时 + opt-in rlimit 下执行 `bwrap`。allowlist → 无网络。 |
+| Linux       | `linux-bwrap`             | 真实                   | 是 —— 解析并在 namespace/超时 + opt-in rlimit 下执行 `bwrap`。allowlist → 握手成功后的独立 netns + Unix 过滤代理。 |
 | macOS       | `macos-sandbox-exec`      | 真实                   | 是 —— 以渲染出的 SBPL 执行 `/usr/bin/sandbox-exec`。allowlist → 由内核锁定到过滤代理。 |
 | Windows     | `windows-cognia-sandbox`  | 真实                   | 是 —— bundled restricted-token + low-integrity + Job Object runner，并捕获 stdout/stderr。 |
 | Uninstalled | `uninstalled-<os>`        | 拒绝桩                 | 否 —— 始终 Unavailable / SetupRequired。                                     |
@@ -261,6 +292,20 @@ NetworkPolicy::Allowlist { hosts: _ } => match proxy_port {
 ## 测试
 
 `crates/cognia-exec-sandbox/src/` 里文件内的 `#[cfg(test)]` 套件覆盖了纯逻辑 + 可观测面，无需在单元测试时使用真实沙盒（`cargo test -p cognia-exec-sandbox`）：`policy.rs`（默认值、空 writable 拒绝、网络解析、可读上限收紧及符号链接逃逸）、`types.rs:261-320`（serde 往返 + 带标签判别符）、`linux.rs:684-1218`（argv 基线、按文件 bind、share-net、资源限制解析、后端字符串）、`macos.rs:577-1006`（SBPL 渲染、literal vs subpath、转义、代理端口锁定）、`windows.rs:358-557`（runner 可用性、兼容 payload 形状、stdout/stderr JSON 解析）、`uninstalled.rs:89-167`、`mock.rs:127-267`，以及用一个脚本化后端驱动 `probe_confinement` 的 `traits.rs`。真实沙盒集成测试在 Linux + macOS 上通过 `cargo test -p cognia-next --test sandbox_integration`（`src-tauri/tests/sandbox_integration.rs`）运行；Windows runner crate 由自己的单元测试覆盖。
+
+### Linux allowlist 验收
+
+`crates/cognia-exec-sandbox/tests/linux_allowlist.rs` 提供标记为 ignored 的真实 bwrap 验收测试：
+
+```sh
+cargo test -p cognia-exec-sandbox --test linux_allowlist -- --ignored --test-threads=1
+```
+
+测试要求 Linux、bwrap、util-linux `unshare`、iproute2 `ip`、`/usr/bin/python3`、嵌套的
+user/network/mount namespace 与可信 launcher helper。每个 fixture 在独立的一次性 namespace
+内运行，不修改宿主网络状态。缺少前提时测试失败，不会跳过。验收覆盖允许的 CONNECT、被拒绝的 host/私有 IP、网络直连和挂载 Unix socket 的绕过
+尝试、目标启动前 helper 故障，以及进程/socket 清理。macOS 单元测试或 Linux 交叉编译不能证明
+这条真实隔离边界已通过验收。
 
 ## 下一步
 

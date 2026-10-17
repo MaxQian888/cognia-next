@@ -1,4 +1,8 @@
 import type { CodeSandboxStatus } from "@/lib/ai/code-mode/sandbox-status"
+import {
+  normalizeSandboxNetworkAllowlistProbe,
+  type SandboxNetworkAllowlistProbe,
+} from "@cognia/plugin-sdk/api/sandbox"
 import { getContainerExec } from "@/lib/sandbox/container-exec-adapter"
 import { getMicrovmExec, subscribeMicrovmAvailability } from "@/lib/sandbox/microvm-bridge"
 import type { SandboxCapabilities, SandboxConnectionRow } from "@/types/sandbox"
@@ -19,6 +23,7 @@ export interface SandboxRuntimeAvailability {
     backend: string
     reason: SandboxAvailabilityReason
     detail: string
+    networkAllowlist: SandboxNetworkAllowlistProbe
   }
   microvm: {
     available: boolean
@@ -50,6 +55,9 @@ export function projectSandboxRuntimeAvailability(
       backend: status.backend,
       reason: status.confined ? "available" : status.detail ? "probe-failed" : "probe-required",
       detail: status.detail,
+      networkAllowlist: Object.freeze(
+        normalizeSandboxNetworkAllowlistProbe(status.networkAllowlist)
+      ),
     }),
     microvm: Object.freeze({
       available: microvmAdapterAvailable,
