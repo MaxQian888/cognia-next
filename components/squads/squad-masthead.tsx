@@ -34,10 +34,12 @@ import { TeamRunControls } from "@/components/agent/workspace/team-run-controls"
 import { AgentTeamAvatar } from "@/components/agent/workspace/agent-team-avatar"
 import { squadPanelId } from "@/components/settings/squads/nav-config"
 import { StatusBadge } from "@/components/status-badge"
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { SquadRunControl } from "@/hooks/squads/use-squad-run-control"
 import { settingsHref } from "@/lib/settings/deep-link"
+import { combineHarness, harnessFromTeammateRuntime } from "@/lib/usage/run-estimate/harness"
 import { cn } from "@/lib/utils"
 import type { AgentTeam } from "@/types/agent/agent-team"
 
@@ -52,6 +54,11 @@ export interface SquadMastheadProps {
   control: SquadRunControl
   /** Present where the Squad view replaces the list (a phone): a way back to it. */
   onBack?: () => void
+  /**
+   * Each member's configured `runtime`, for the run estimate's harness
+   * (ADR-0232). Omitted: the harness is unknown and the estimate ignores it.
+   */
+  teammateRuntimes?: readonly (string | undefined)[]
   className?: string
 }
 
@@ -61,6 +68,7 @@ export function SquadMasthead({
   waitingCount,
   control,
   onBack,
+  teammateRuntimes,
   className,
 }: SquadMastheadProps) {
   const t = useTranslations("squads.fleet")
@@ -158,6 +166,24 @@ export function SquadMasthead({
             {t("detail.cannotStart", { reason: control.startDisabledReason ?? "" })}
           </span>
         </p>
+      ) : null}
+
+      {startOffered ? (
+        <RunEstimateHint
+          className="mt-2"
+          queries={[
+            {
+              surface: "team",
+              harness:
+                teammateRuntimes && teammateRuntimes.length > 0
+                  ? combineHarness(teammateRuntimes.map(harnessFromTeammateRuntime))
+                  : null,
+              model: squad.config?.defaultModel ?? null,
+              providerId: squad.config?.defaultProvider ?? null,
+            },
+          ]}
+          data-testid="squad-start-estimate"
+        />
       ) : null}
 
       {refused ? (

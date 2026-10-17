@@ -107,7 +107,12 @@ jest.mock("@/components/scheduler/payload-editors", () => ({
   DraftValidationError: class extends Error {},
 }))
 
+jest.mock("@/components/usage/run-estimate-hint", () => ({ RunEstimateHint: jest.fn(() => null) }))
+
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
 import { TaskForm } from "./task-form"
+
+const hintMock = RunEstimateHint as unknown as jest.Mock
 
 describe("TaskForm", () => {
   it("renders without throwing", () => {
@@ -522,6 +527,37 @@ describe("TaskForm", () => {
     await screen.findByText("lifecycle.endAtInPast")
 
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
+/** ADR-0232: an advisory estimate for task types that launch a long agent run. */
+describe("TaskForm — run estimate", () => {
+  beforeEach(() => hintMock.mockClear())
+
+  it("estimates a conversation task from scheduled history and follows the type", () => {
+    render(
+      <TaskForm
+        onSubmit={jest.fn(async () => undefined)}
+        onCancel={jest.fn()}
+        hostForTesting={{
+          platform: "tauri",
+          capabilities: ["shell", "sidecar", "keyring", "connector-runtime", "mcp-runtime"],
+        }}
+      />
+    )
+    expect(hintMock.mock.lastCall?.[0].queries).toEqual([{ surface: "scheduled", model: null }])
+    fireEvent.click(screen.getByTestId("task-type-goal"))
+    expect(hintMock.mock.lastCall?.[0].queries).toEqual([{ surface: "goal" }])
+  })
+
+  it("shows no estimate for a type that launches no agent run", () => {
+    render(<TaskForm onSubmit={jest.fn(async () => undefined)} onCancel={jest.fn()} />)
+    fireEvent.click(screen.getByTestId("task-type-test"))
+    hintMock.mockClear()
+    fireEvent.change(document.querySelector("input") as HTMLInputElement, {
+      target: { value: "rename" },
+    })
+    expect(hintMock).not.toHaveBeenCalled()
   })
 })
 

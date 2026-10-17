@@ -7,9 +7,14 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
+
 import { SquadMasthead } from "./squad-masthead"
 import type { SquadRunControl } from "@/hooks/squads/use-squad-run-control"
 import { DEFAULT_TEAM_CONFIG, type AgentTeam } from "@/types/agent/agent-team"
+
+jest.mock("@/components/usage/run-estimate-hint", () => ({ RunEstimateHint: jest.fn(() => null) }))
+const hintMock = RunEstimateHint as unknown as jest.Mock
 
 const squad = {
   id: "a",
@@ -51,7 +56,10 @@ function state(over: Partial<SquadRunControl> = {}): SquadRunControl {
   }
 }
 
-function mount(over: Partial<SquadRunControl> = {}, extra: { onBack?: () => void } = {}) {
+function mount(
+  over: Partial<SquadRunControl> = {},
+  extra: { onBack?: () => void; teammateRuntimes?: (string | undefined)[] } = {}
+) {
   return render(
     <SquadMasthead
       squad={squad}
@@ -180,4 +188,32 @@ describe("refusal", () => {
 it("carries no run link of its own", () => {
   mount({ run: { id: "execution:team:canonical" } as SquadRunControl["run"] })
   expect(screen.queryByRole("link", { name: "Open run" })).not.toBeInTheDocument()
+})
+
+/** ADR-0232: an advisory estimate beside Start, never once a run is live. */
+describe("run estimate", () => {
+  it("estimates a team run on the squad's default model and its members' harness", () => {
+    mount({}, { teammateRuntimes: ["claude", undefined] })
+    expect(hintMock.mock.lastCall?.[0].queries).toEqual([
+      {
+        surface: "team",
+        harness: "builtin",
+        model: DEFAULT_TEAM_CONFIG.defaultModel ?? null,
+        providerId: DEFAULT_TEAM_CONFIG.defaultProvider ?? null,
+      },
+    ])
+  })
+
+  it("marks a mixed roster as mixed and an unknown roster as unknown", () => {
+    mount({}, { teammateRuntimes: ["claude", "codex"] })
+    expect(hintMock.mock.lastCall?.[0].queries[0].harness).toBe("mixed")
+    mount()
+    expect(hintMock.mock.lastCall?.[0].queries[0].harness).toBeNull()
+  })
+
+  it("is not shown while the run is live or paused", () => {
+    mount({ status: "executing" })
+    mount({ status: "paused" })
+    expect(hintMock).not.toHaveBeenCalled()
+  })
 })

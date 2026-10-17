@@ -26,7 +26,12 @@ jest.mock("@/hooks/bots/use-bot-control-writes", () => ({
   }),
 }))
 
+jest.mock("@/components/usage/run-estimate-hint", () => ({ RunEstimateHint: jest.fn(() => null) }))
+
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
 import { RunBotNowButton } from "./run-bot-now-button"
+
+const hintMock = RunEstimateHint as unknown as jest.Mock
 
 function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
   return {
@@ -52,6 +57,7 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
 }
 
 beforeEach(() => {
+  hintMock.mockClear()
   runNow.mockClear()
   pending = new Set()
   readiness = {
@@ -261,4 +267,17 @@ it("constrains the manual trigger picker without losing long option names", () =
   )
   expect(screen.getByRole("combobox").parentElement).toHaveClass("min-w-0", "max-w-full")
   expect(screen.getByRole("option", { name: label.trim() })).toBeInTheDocument()
+})
+
+/** ADR-0232: bots have no usage history yet, so the estimate is labelled inert. */
+describe("RunBotNowButton — run estimate", () => {
+  it("asks for a bot estimate, which the hint renders as unavailable", () => {
+    render(<RunBotNowButton row={row()} />)
+    expect(hintMock.mock.lastCall?.[0].queries).toEqual([{ surface: "bot" }])
+  })
+
+  it("is not shown when the run is blocked", () => {
+    render(<RunBotNowButton row={row({ orphaned: true })} />)
+    expect(hintMock).not.toHaveBeenCalled()
+  })
 })

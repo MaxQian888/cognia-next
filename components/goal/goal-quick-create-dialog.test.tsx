@@ -45,7 +45,12 @@ jest.mock("@/lib/db/goal-templates", () => ({
   listGoalTemplates: () => Promise.resolve(templatesValue),
 }))
 
+jest.mock("@/components/usage/run-estimate-hint", () => ({ RunEstimateHint: jest.fn(() => null) }))
+
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
 import { GoalQuickCreateDialog } from "./goal-quick-create-dialog"
+
+const hintMock = RunEstimateHint as unknown as jest.Mock
 
 beforeEach(() => {
   pushMock.mockClear()
@@ -62,6 +67,18 @@ beforeEach(() => {
 })
 
 describe("GoalQuickCreateDialog", () => {
+  it("shows a run estimate for the app default model while open (ADR-0232)", async () => {
+    useSettingsStore.setState({
+      settings: { defaultProvider: "anthropic", defaultModel: "claude-sonnet-4-5" } as never,
+    })
+    render(<GoalQuickCreateDialog />)
+    fireEvent.click(screen.getByTestId("goal-quick-create-trigger"))
+    await screen.findByTestId("goal-quick-create-dialog")
+    expect(hintMock.mock.lastCall?.[0].queries).toEqual([
+      { surface: "goal", model: "claude-sonnet-4-5", providerId: "anthropic" },
+    ])
+  })
+
   it("opens the dialog from the trigger", async () => {
     render(<GoalQuickCreateDialog />)
     fireEvent.click(screen.getByTestId("goal-quick-create-trigger"))

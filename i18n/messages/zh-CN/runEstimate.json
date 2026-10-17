@@ -1,0 +1,14 @@
+{
+  "label": "预估：",
+  "cost": "按 API 价格约 {typical}（{low}–{high}）",
+  "tokens": "约 {typical} token（{low}–{high}）",
+  "duration": "{typical}（{low}–{high}）",
+  "confidence": {
+    "based": "基于 {count} 次同类运行",
+    "few": "目前仅 {count} 次同类运行",
+    "rough": "粗略：仅 {count} 次同类运行"
+  },
+  "stopped": "其中 {percent}% 中途停止",
+  "none": "暂无预估：同类运行不足",
+  "unavailable": "暂无预估：Bot 运行尚未记录用量"
+}

@@ -1,0 +1,14 @@
+{
+  "label": "Estimate:",
+  "cost": "≈ {typical} at API prices ({low}–{high})",
+  "tokens": "~{typical} tokens ({low}–{high})",
+  "duration": "{typical} ({low}–{high})",
+  "confidence": {
+    "based": "based on {count} similar runs",
+    "few": "only {count} similar runs so far",
+    "rough": "rough: {count, plural, one {# similar run} other {# similar runs}}"
+  },
+  "stopped": "{percent}% of them stopped early",
+  "none": "No estimate yet: not enough similar runs",
+  "unavailable": "No estimate yet: bot runs do not record usage"
+}

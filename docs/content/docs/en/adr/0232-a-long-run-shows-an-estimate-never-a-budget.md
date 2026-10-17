@@ -44,43 +44,78 @@ execution.
 stops anything. The existing budget mechanisms remain the only enforcement.
 No success probability is shown.
 
-**Where it appears.** Only on the launch surfaces of long runs: `/goal`, Agent
-Team, best-of-N, bots and scheduled tasks. Ordinary chat sends show nothing.
+**Where it appears.** Only on the launch surfaces of long runs: the new-goal
+dialog and the `/goal` created card (the slash command has no confirm step),
+the squad's start controls, the best-of-N start dialog (summed over the
+candidates' agents), the scheduled-task form, and the bot run button (dormant,
+see below). Ordinary chat sends show nothing.
 
-**What it shows.** A typical value, a P10–P90 range and a confidence label,
-for both cost and wall-clock duration, plus the share of comparable runs that
-stopped early. API-key users see USD. Subscription users see tokens with the
-equivalent API price. Quota percentages are never derived from tokens.
+**What it shows.** A typical value and a P10–P90 range for cost, tokens and
+wall-clock duration, a confidence label, and the share of comparable runs
+that stopped early. Cost is always worded "at API prices": for an API-key user
+that is the bill, for a subscription user the equivalent, so neither needs to
+be detected. Quota percentages are never derived from tokens.
 
-**Samples.** One sample is one launched run, aggregated over its run tree
+**Samples.** One sample is one finished run, aggregated over its run tree
 (child runs and teammates included). A sample holds the per-category token
 counts jointly, not their separate quantiles. Each sample is priced at
-today's rates through `lib/usage/pricing.ts`, then quantiles are taken over
-those per-sample totals, so price changes do not distort history. Cancelled,
-failed and budget-stopped runs are included; the estimate means "what a run
+today's rates for the launch's model (or its own model when the launch names
+none) through `lib/usage/pricing.ts`, then quantiles are taken over those
+per-sample totals, so price changes do not distort history. Cancelled,
+failed and limit-stopped runs are included; the estimate means "what a run
 like this costs until it ends". Censoring is not modelled.
 
-**Buckets.** Launch surface × harness × model family, refined by a coarse
-prompt-length band and whether a repository is bound. Lookups fall back from
-the fine bucket to harness × model family, then to global. Model families
-normalize concrete model ids (for example `sonnet-*`). Features come from the
-launch configuration and existing metadata only; estimation makes no model
-call.
+Each surface keeps its history in a different place, so each has its own
+sample builder (`lib/usage/run-estimate/samples.ts`):
+
+| Surface | Tokens | Status and duration | Model |
+|---|---|---|---|
+| goal | usage rows under `goal:<goalId>` | the goal row | the conversation's chat rows during the goal's lifetime; none for a headless goal |
+| team (squad) | usage rows under `team:<runId>` | the team `ExecutionRun` | the rows' dominant model |
+| best-of-N | none: candidates write no usage rows | each candidate | the candidate's agent |
+| scheduled | the conversation a task created (`origin.kind === "scheduled-task"`), minus scheduled goals | the rows' time span | the rows' dominant model |
+| external session | imported rows per source session | the rows' time span | the rows' dominant model |
+
+Best-of-N candidates carry only a frozen dollar figure, so their samples
+cannot be re-priced; one candidate is one sample and a launch of N multiplies.
+Native bot agent turns record no usage at all, so the bot surface is
+intentionally dormant: documented on `RunEstimateSurface`, rendered as "no
+estimate yet" beside the bot's run button, and pinned by `estimate.test.ts`.
+Both gaps are ledger bugs (ADR-0165) to fix separately; when bot turns write
+usage rows, the bot surface gets a sample builder.
+
+**Buckets.** Launch surface × harness × model family. Lookups fall back from
+the fine bucket to surface × harness, then to the surface alone; a key the
+query cannot fill is skipped rather than matched against "unknown". Model
+families normalize concrete model ids (`claude-sonnet-4-5-20250929` →
+`claude-sonnet`). No run record stores a harness, so it is recovered where a
+source carries one (a teammate's `runtime`, a best-of-N candidate's
+external-agent preset, an import's `sourceId`); every Codex surface maps to
+one key. A run whose harness cannot be recovered joins only the buckets that
+ignore harness. Prompt length and repository binding were considered as
+refinements and dropped: only goals record their prompt, so they would empty
+almost every bucket. Features come from the launch configuration and
+existing metadata only; estimation makes no model call.
 
 **External history.** Imported Claude Code and Codex sessions count as one
 sample per session, in a separate "external interactive session" surface
-bucket. They inform only launches of the same external harness and never mix
-into goal, team or other buckets. They remain excluded from budgets.
+bucket. They are consulted only for a launch on the same external harness,
+after that surface's own history on the harness, and never mix into goal,
+team or other buckets. They remain excluded from budgets.
 
 **Drift.** Only the last 90 days are used, weighted with a 30-day half-life.
 
-**Confidence.** Fewer than 5 samples: fall back to a coarser bucket or to the
-bundled prior and label the result "rough". 5–19 samples: show the range and
-label it "few samples". 20 or more: show P10–P90 labelled "based on N runs".
-With no usable source, show "no estimate yet".
+**Confidence.** The finest bucket with at least 5 samples answers: 5–19
+samples are labelled "few", 20 or more "based on N runs". When no bucket
+reaches 5, the fullest one answers and the result is labelled "rough" (until
+phase 3, when a bundled prior fills that gap). With no usable source, show
+"no estimate yet". Quantiles are weighted (midpoint interpolation), so recent
+runs pull harder.
 
-**Computation.** Pure functions aggregate `sessionUsage` and `executionRuns`
-on demand at launch, behind an in-memory cache. No new Dexie table and no
+**Computation.** `lib/usage/run-estimate/load-samples.ts` reads the existing
+tables (`sessionUsage`, `chatGoals`, `executionRuns`, `agentTeamChildRuns`,
+`bestOfNRuns`, `sessions`) inside the window on demand, behind a five-minute
+in-memory cache; pure functions do the rest. No new Dexie table and no
 schema bump.
 
 **During a run.** The run surface shows "spent X of a typical Y" and notes when

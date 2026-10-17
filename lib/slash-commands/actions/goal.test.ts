@@ -6,6 +6,8 @@
  */
 import en from "@/i18n/messages/en/goal.json"
 import zh from "@/i18n/messages/zh-CN/goal.json"
+import enEstimate from "@/i18n/messages/en/runEstimate.json"
+import zhEstimate from "@/i18n/messages/zh-CN/runEstimate.json"
 import type { SlashContext } from "../builtin"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
@@ -18,9 +20,15 @@ let mockLocale: "en" | "zh-CN" = "en"
 const mockMissing: string[] = []
 jest.mock("@/lib/i18n/runtime-translator", () => ({
   getRuntimeTranslator: async (namespace?: string) => {
-    expect(namespace).toBe("goal")
+    expect(["goal", "runEstimate"]).toContain(namespace)
     const locale = mockLocale
-    const bundle = (locale === "en" ? en : zh) as unknown as Record<string, unknown>
+    const bundle = (namespace === "runEstimate"
+      ? locale === "en"
+        ? enEstimate
+        : zhEstimate
+      : locale === "en"
+        ? en
+        : zh) as unknown as Record<string, unknown>
     const lookup = (key: string): unknown =>
       key.split(".").reduce<unknown>((node, seg) => {
         return node && typeof node === "object" ? (node as Record<string, unknown>)[seg] : undefined
@@ -51,6 +59,10 @@ jest.mock("@/lib/i18n/runtime-translator", () => ({
   },
 }))
 
+// The created card carries the ADR-0232 run estimate; history is stubbed here
+// (the estimator has its own suites) so each case chooses what it returns.
+jest.mock("@/lib/usage/run-estimate/launch", () => ({ estimateLaunchNow: jest.fn() }))
+
 // useSettingsStore is touched by /goal create — mock the store to return null
 // settings so the runtime defaults kick in deterministically.
 jest.mock("@/stores/settings", () => ({
@@ -68,10 +80,13 @@ jest.mock("@/lib/platform/detect", () => ({
 jest.mock("@/lib/tauri/transport-instance", () => ({ transport: { call: jest.fn() } }))
 
 import { isNativeMobile } from "@/lib/platform/detect"
+import { estimateLaunchNow } from "@/lib/usage/run-estimate/launch"
+import { EMPTY_ESTIMATE } from "@/lib/usage/run-estimate/estimate"
 import { transport } from "@/lib/tauri/transport-instance"
 
 const isNativeMobileMock = isNativeMobile as jest.Mock
 const mockCall = transport.call as jest.Mock
+const estimateMock = estimateLaunchNow as jest.Mock
 
 const dbFixture = createDbTestFixture()
 
@@ -81,6 +96,7 @@ beforeEach(async () => {
   mockMissing.length = 0
   isNativeMobileMock.mockReturnValue(false)
   mockCall.mockReset()
+  estimateMock.mockReset().mockResolvedValue(EMPTY_ESTIMATE)
   await dbFixture.restore()
   await __resetRedactionKey()
   __resetGoalRuntimeForTesting()
@@ -366,9 +382,33 @@ describe("dispatchGoalSubcommand — localized replies", () => {
       `🎯 **Goal active** — ${goal!.config.maxTurns} turns budget, ${new Intl.NumberFormat("en").format(Math.round(goal!.config.maxTokens / 1000))}k token budget.`
     )
     expect(lines[2]).toBe("> ship it")
+    // No goal history yet: the card carries no estimate line at all.
     expect(lines[4]).toBe(
       "The agent will continue toward this goal automatically. Pause with `/goal pause` · stop with `/goal stop` · update with `/goal update <new text>`."
     )
+  })
+
+  it("en: created card sets an expectation from goal history on this session's model", async () => {
+    estimateMock.mockResolvedValue({
+      confidence: "based",
+      sampleCount: 24,
+      tokens: null,
+      costUsd: { p10: 0.5, p50: 1.25, p90: 4 },
+      durationMs: null,
+      stoppedShare: null,
+    })
+    const out = await dispatchGoalSubcommand(ctx({ args: "ship it" }))
+    expect(estimateMock).toHaveBeenCalledWith([{ surface: "goal", model: null, providerId: null }])
+    expect(out!.system!.split("\n")[4]).toBe(
+      "Estimate: ≈ $1.25 at API prices ($0.50–$4.00) · based on 24 similar runs"
+    )
+  })
+
+  it("starts the goal without an estimate line when history cannot be read", async () => {
+    estimateMock.mockRejectedValue(new Error("db closed"))
+    const out = await dispatchGoalSubcommand(ctx({ args: "ship it" }))
+    expect(out!.system).not.toContain("Estimate:")
+    expect(await getGoalRuntime().getActiveGoalForSession("ses_a")).toBeDefined()
   })
 
   it("en: status card labels recent activity instead of printing raw kinds", async () => {
@@ -414,6 +454,7 @@ describe("dispatchGoalSubcommand — localized replies", () => {
     const created = (await dispatchGoalSubcommand(ctx({ args: "写一首诗" })))!.system!
     expect(created).toMatch(/^🎯 \*\*目标已激活\*\* — \d+ 回合预算，[\d,]+k token 预算。$/m)
     expect(created).toContain("用 `/goal update <新内容>` 更新。")
+    expect(created).not.toContain("预估")
 
     expect((await dispatchGoalSubcommand(ctx({ args: "resume" })))?.system).toBe("目标已在进行中。")
     const paused = (await dispatchGoalSubcommand(ctx({ args: "pause" })))!.system!

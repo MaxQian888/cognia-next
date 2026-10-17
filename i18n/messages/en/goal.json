@@ -117,6 +117,7 @@
     "createUsage": "Usage: `/goal '<'what you want to accomplish>`. Example: `/goal write a haiku about winter`.",
     "created": "🎯 **Goal active** — {maxTurns, plural, one {# turn} other {# turns}} budget, {maxTokensK, number}k token budget.",
     "createdHint": "The agent will continue toward this goal automatically. Pause with `/goal pause` · stop with `/goal stop` · update with `/goal update '<'new text>`.",
+    "createdEstimate": "Estimate: {estimate}",
     "needSession": "Start a chat session first — `/goal` operates inside an active session.",
     "noActiveGoal": "No active goal in this session. Start one with `/goal '<'what you want to accomplish>`.",
     "noGoalToPause": "No active goal to pause.",

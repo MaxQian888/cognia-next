@@ -20034,6 +20034,7 @@
       "cannotResume": "无法恢复「{status}」状态的目标。请用 `/goal '<'内容>` 新建一个。",
       "createUsage": "用法：`/goal '<'你想完成的事>`。示例：`/goal 写一首关于冬天的俳句`。",
       "created": "🎯 **目标已激活** — {maxTurns} 回合预算，{maxTokensK, number}k token 预算。",
+      "createdEstimate": "预估：{estimate}",
       "createdHint": "智能体会自动朝这个目标继续推进。用 `/goal pause` 暂停 · 用 `/goal stop` 停止 · 用 `/goal update '<'新内容>` 更新。",
       "needSession": "请先开始一个聊天会话——`/goal` 在活跃会话内运行。",
       "noActiveGoal": "该会话没有活跃目标。用 `/goal '<'你想完成的事>` 开始一个。",
@@ -39325,6 +39326,20 @@
     "answeredVia": "已通过 {provider}（{model}）回应",
     "fallbackExhausted": "所有回退提供商都失败：{error}",
     "retryingWithFallback": "提供商失败 — 正在改用 {provider} 重试…"
+  },
+  "runEstimate": {
+    "confidence": {
+      "based": "基于 {count} 次同类运行",
+      "few": "目前仅 {count} 次同类运行",
+      "rough": "粗略：仅 {count} 次同类运行"
+    },
+    "cost": "按 API 价格约 {typical}（{low}–{high}）",
+    "duration": "{typical}（{low}–{high}）",
+    "label": "预估：",
+    "none": "暂无预估：同类运行不足",
+    "stopped": "其中 {percent}% 中途停止",
+    "tokens": "约 {typical} token（{low}–{high}）",
+    "unavailable": "暂无预估：Bot 运行尚未记录用量"
   },
   "runtime": {
     "surfaceBoundary": {

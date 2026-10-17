@@ -48,6 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
 import { listGoalTemplates } from "@/lib/db/goal-templates"
 import { useGoalCreate } from "@/hooks/goal/use-goal-create"
 import { useSessions } from "@/hooks/chat/use-sessions"
@@ -217,6 +218,22 @@ export function GoalQuickCreateDialog({
               />
             </div>
           )}
+
+          {/* The new conversation starts on the app default model. */}
+          <RunEstimateHint
+            queries={
+              open
+                ? [
+                    {
+                      surface: "goal",
+                      model: appSettings?.defaultModel ?? null,
+                      providerId: appSettings?.defaultProvider ?? null,
+                    },
+                  ]
+                : null
+            }
+            data-testid="goal-quick-create-estimate"
+          />
         </div>
 
         <DialogFooter>

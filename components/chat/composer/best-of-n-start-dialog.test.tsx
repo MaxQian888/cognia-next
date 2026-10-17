@@ -1,8 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { BestOfNStartDialog } from "./best-of-n-start-dialog"
 import type { PreparedBestOfN } from "@/lib/best-of-n/entry"
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
+jest.mock("@/components/usage/run-estimate-hint", () => ({ RunEstimateHint: jest.fn(() => null) }))
+const hintMock = RunEstimateHint as unknown as jest.Mock
 const prepared = {
+  session: { model: "claude-sonnet-4-5", providerOverride: "anthropic" },
   n: 3,
   dirty: true,
   baseSha: "abc",
@@ -64,4 +69,17 @@ it("keeps a failed start reviewable and retryable", async () => {
   fireEvent.click(screen.getByRole("button", { name: "start" }))
   expect(await screen.findByRole("alert")).toHaveTextContent("failed")
   expect(screen.getByRole("button", { name: "start" })).toBeEnabled()
+})
+it("estimates the whole group from the agents currently assigned (ADR-0232)", () => {
+  render(<BestOfNStartDialog prepared={prepared} onConfirm={jest.fn()} onCancel={jest.fn()} />)
+  expect(hintMock.mock.lastCall?.[0].queries).toEqual([
+    { surface: "best-of-n", model: "claude-sonnet-4-5", providerId: "anthropic", multiplier: 3 },
+  ])
+  fireEvent.change(screen.getAllByRole("combobox", { name: "candidateAgent" })[1], {
+    target: { value: "codex-1" },
+  })
+  expect(hintMock.mock.lastCall?.[0].queries).toEqual([
+    { surface: "best-of-n", model: "claude-sonnet-4-5", providerId: "anthropic", multiplier: 2 },
+    { surface: "best-of-n", providerId: externalAgentProviderId("codex-1"), multiplier: 1 },
+  ])
 })

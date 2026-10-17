@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { AdapterForm, type JsonSchema } from "@/components/settings/connections/forms/adapter-form"
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
 import { useBotControlActions, useBotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
 import { BOT_WRITE_COMMANDS } from "@/lib/bot/control-writes"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
@@ -111,6 +112,17 @@ export function RunBotNowButton({ row }: { row: BotConsoleRow }) {
           {blocked}
         </p>
       ) : null}
+      {/* Intentionally inert (ADR-0232): native bot turns record no usage, so
+          the hint always says "no estimate yet" until they do. */}
+      {blocked ? null : (
+        <RunEstimateHint
+          className="basis-full text-[11px]"
+          queries={BOT_ESTIMATE_QUERIES}
+          data-testid="bot-run-now-estimate"
+        />
+      )}
     </div>
   )
 }
+
+const BOT_ESTIMATE_QUERIES = [{ surface: "bot" as const }]

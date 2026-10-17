@@ -93,6 +93,7 @@ function SquadDetailViewContent({
         memberCount={members.length}
         waitingCount={reviews.length}
         control={control}
+        teammateRuntimes={members.map((member) => member.config?.runtime)}
         {...(onBack ? { onBack } : {})}
       />
       {/* Controlled, not `defaultValue`. This view re-renders on every live

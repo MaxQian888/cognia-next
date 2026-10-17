@@ -13,6 +13,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
+import { bestOfNEstimateQueries } from "@/lib/best-of-n/estimate-queries"
 import type { PreparedBestOfN } from "@/lib/best-of-n/entry"
 
 export function BestOfNStartDialog({
@@ -108,6 +110,10 @@ export function BestOfNStartDialog({
           )}
         </fieldset>
         <p className="text-xs text-muted-foreground">{t("manualOnly")}</p>
+        <RunEstimateHint
+          queries={bestOfNEstimateQueries(prepared.session, agents)}
+          data-testid="best-of-n-estimate"
+        />
         {error && <p role="alert">{t("failed", { error })}</p>}
         <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={onCancel}>

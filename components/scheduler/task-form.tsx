@@ -34,6 +34,11 @@ import {
   CRON_PRESETS,
   DEFAULT_EXECUTION_CONFIG,
 } from "@/types/scheduler"
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
+import {
+  scheduledTaskEstimateQuery,
+  type ScheduledEstimateInput,
+} from "@/lib/scheduler/estimate-query"
 import {
   getTaskTypeHostSupport,
   isCardAuthoredTaskType,
@@ -2157,6 +2162,12 @@ export function TaskForm({
         </CollapsibleContent>
       </Collapsible>
 
+      <TaskRunEstimate
+        taskType={f.taskType}
+        model={f.chatLikeDraft.model}
+        externalAgentId={f.externalAgentDraft.agentId}
+      />
+
       {/* Actions */}
       <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 pt-2">
         <Button
@@ -2178,4 +2189,14 @@ export function TaskForm({
       </div>
     </div>
   )
+}
+
+/**
+ * What runs of this kind usually cost and take (ADR-0232). Hidden for task
+ * types that do not launch a long agent run.
+ */
+function TaskRunEstimate(props: ScheduledEstimateInput) {
+  const query = scheduledTaskEstimateQuery(props)
+  if (!query) return null
+  return <RunEstimateHint queries={[query]} data-testid="scheduler-task-estimate" />
 }

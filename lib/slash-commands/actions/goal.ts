@@ -262,7 +262,7 @@ async function commandCreate(
     rawObjective: text,
   })
   return {
-    system: renderCreatedCard(t, goal),
+    system: renderCreatedCard(t, goal, await describeGoalEstimate(sessionId)),
   }
 }
 
@@ -371,7 +371,7 @@ async function commandUpdate(
 // Card renderers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function renderCreatedCard(t: RuntimeTranslator, goal: Goal): string {
+function renderCreatedCard(t: RuntimeTranslator, goal: Goal, estimate: string | null): string {
   return [
     t("commands.created", {
       maxTurns: goal.config.maxTurns,
@@ -380,6 +380,7 @@ function renderCreatedCard(t: RuntimeTranslator, goal: Goal): string {
     "",
     `> ${goal.safeObjective}`,
     "",
+    ...(estimate ? [t("commands.createdEstimate", { estimate }), ""] : []),
     t("commands.createdHint"),
   ].join("\n")
 }
@@ -436,6 +437,38 @@ function statusEmoji(status: Goal["status"]): string {
       return "↩️"
     default:
       return "•"
+  }
+}
+
+/**
+ * The ADR-0232 run estimate for a goal on this conversation's model, as one
+ * line. The slash path has no confirm step, so the created card is where the
+ * expectation is set. `null` when there is no history to estimate from (the
+ * card stays as it was) or when it cannot be read: a goal must never fail to
+ * start over an advisory figure.
+ */
+async function describeGoalEstimate(sessionId: string): Promise<string | null> {
+  try {
+    const [{ getSession }, { estimateLaunchNow }, { formatRunEstimate }, et] = await Promise.all([
+      import("@/lib/db/sessions"),
+      import("@/lib/usage/run-estimate/launch"),
+      import("@/lib/usage/run-estimate/format"),
+      getRuntimeTranslator("runEstimate"),
+    ])
+    const session = await getSession(sessionId)
+    const settings = useSettingsStore.getState().settings
+    const estimate = await estimateLaunchNow([
+      {
+        surface: "goal",
+        model: session?.model ?? settings?.defaultModel ?? null,
+        providerId: session?.providerOverride ?? settings?.defaultProvider ?? null,
+      },
+    ])
+    if (estimate.confidence === "none") return null
+    const formatted = formatRunEstimate(estimate, et)
+    return formatted.detail ? `${formatted.summary} · ${formatted.detail}` : formatted.summary
+  } catch {
+    return null
   }
 }
 

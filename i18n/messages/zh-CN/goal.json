@@ -117,6 +117,7 @@
     "createUsage": "用法：`/goal '<'你想完成的事>`。示例：`/goal 写一首关于冬天的俳句`。",
     "created": "🎯 **目标已激活** — {maxTurns} 回合预算，{maxTokensK, number}k token 预算。",
     "createdHint": "智能体会自动朝这个目标继续推进。用 `/goal pause` 暂停 · 用 `/goal stop` 停止 · 用 `/goal update '<'新内容>` 更新。",
+    "createdEstimate": "预估：{estimate}",
     "needSession": "请先开始一个聊天会话——`/goal` 在活跃会话内运行。",
     "noActiveGoal": "该会话没有活跃目标。用 `/goal '<'你想完成的事>` 开始一个。",
     "noGoalToPause": "没有可暂停的活跃目标。",

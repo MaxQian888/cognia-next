@@ -87,8 +87,13 @@ jest.mock("@/components/agent/workspace/tasks", () => ({
 jest.mock("@/components/agent/workspace/team-run-controls", () => ({
   TeamRunControls: () => <div data-testid="run-controls" />,
 }))
+jest.mock("@/components/usage/run-estimate-hint", () => ({ RunEstimateHint: jest.fn(() => null) }))
+
+import { RunEstimateHint } from "@/components/usage/run-estimate-hint"
 
 import { SquadDetailView } from "./squad-detail-view"
+
+const hintMock = RunEstimateHint as unknown as jest.Mock
 
 const setTab = jest.fn()
 function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
@@ -119,7 +124,13 @@ function seed() {
       b: { id: "b", name: "Other", status: "idle", config: {} } as unknown as AgentTeam,
     },
     teammates: {
-      m1: { id: "m1", teamId: "a", name: "Lead", role: "lead" } as AgentTeammate,
+      m1: {
+        id: "m1",
+        teamId: "a",
+        name: "Lead",
+        role: "lead",
+        config: { runtime: "codex" },
+      } as AgentTeammate,
       m2: { id: "m2", teamId: "a", name: "Worker", role: "teammate" } as AgentTeammate,
       m3: { id: "m3", teamId: "b", name: "Elsewhere", role: "teammate" } as AgentTeammate,
     },
@@ -141,6 +152,15 @@ it("heads the view with the Squad's masthead", () => {
   render(<SquadDetailView squadId="a" route={route()} tab="overview" />)
   expect(screen.getByTestId("squad-fleet-inspector")).toHaveTextContent("Review Crew")
   expect(screen.getByTestId("squad-fleet-inspector")).toHaveTextContent("2 members")
+})
+
+it("keys the masthead's run estimate on this Squad's members' runtimes", () => {
+  render(<SquadDetailView squadId="a" route={route()} tab="overview" />)
+  // m1 runs Codex, m2 the built-in lane: a mixed roster.
+  expect(hintMock.mock.lastCall?.[0].queries[0]).toMatchObject({
+    surface: "team",
+    harness: "mixed",
+  })
 })
 
 it("renders nothing for a Squad that no longer exists", () => {
