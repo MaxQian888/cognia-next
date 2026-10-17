@@ -46,6 +46,8 @@ pub(crate) struct FakeRemote {
     pub provision_error: Mutex<Option<SandboxSpawnError>>,
     /// Whether `start_runtime` works (E2B resumes; a Kubernetes pod cannot).
     pub restartable: bool,
+    /// What the provider declares it can preserve (E2B: pause and memory).
+    pub snapshot: Mutex<crate::runtime::SnapshotCapabilities>,
     pub probe: Mutex<(Vec<u8>, i64)>,
     /// Answers by git subcommand (`clone`, `status`, `rev-parse`, `push`, …).
     /// `rev-parse` answers are consumed in order, the last one repeating.
@@ -73,6 +75,11 @@ impl FakeRemote {
             delegated: Vec::new(),
             provision_error: Mutex::new(None),
             restartable: true,
+            snapshot: Mutex::new(crate::runtime::SnapshotCapabilities {
+                pause_resume: kind == "e2b",
+                memory_resume: kind == "e2b",
+                ..Default::default()
+            }),
             probe: Mutex::new((Vec::new(), 0)),
             git: Mutex::new(HashMap::from([
                 (
@@ -179,6 +186,9 @@ fn finished(stdout: Vec<u8>, code: i64) -> RunningRunner {
 impl RemoteProvisioner for FakeRemote {
     fn kind(&self) -> &'static str {
         self.kind
+    }
+    fn snapshot_capabilities(&self) -> crate::runtime::SnapshotCapabilities {
+        *self.snapshot.lock()
     }
     async fn tiers(&self) -> Result<Vec<IsolationTier>, SandboxSpawnError> {
         self.tiers.lock().clone()

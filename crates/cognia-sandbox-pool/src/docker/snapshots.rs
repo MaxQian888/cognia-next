@@ -249,10 +249,12 @@ impl DockerSandboxBackend {
     }
     pub(super) fn checkpoint_capabilities(&self) -> SnapshotCapabilities {
         if let Some(remote) = &self.remote {
-            let e2b = remote.provisioner.kind() == "e2b";
+            // Negotiated: the provider declares, the Host keeps only what it
+            // implements for remote runtimes (no filesystem checkpoint/fork).
+            let declared = remote.provisioner.snapshot_capabilities();
             SnapshotCapabilities {
-                pause_resume: e2b,
-                memory_resume: e2b,
+                pause_resume: declared.pause_resume,
+                memory_resume: declared.memory_resume,
                 ..SnapshotCapabilities::default()
             }
         } else {
@@ -1268,6 +1270,49 @@ mod tests {
             .remove_snapshot_image("local", &image.id)
             .await
             .unwrap();
+    }
+    #[test]
+    fn remote_snapshot_capabilities_are_the_provider_declaration_narrowed_by_the_host() {
+        let env = spec(EgressTier::Off, None);
+        let h = Harness::new(
+            admitted(env, IsolationTier::Container),
+            report(Vec::new(), Vec::new()),
+            0,
+        );
+        let remote = |fake: Arc<crate::remote::fake::FakeRemote>| {
+            DockerSandboxBackend::new_remote(
+                "cloud".into(),
+                fake,
+                crate::remote::RemoteLimits {
+                    max_concurrent: 1,
+                    max_lifetime: Duration::from_secs(60),
+                    idle_timeout: Duration::from_secs(30),
+                },
+                h.admission.clone(),
+                crate::docker::tests::config(),
+            )
+        };
+        // A provider that declares nothing (a Kubernetes pod cannot resume).
+        let kubernetes = crate::remote::fake::FakeRemote::new("kubernetes");
+        assert_eq!(
+            remote(kubernetes).snapshot_capabilities("cloud"),
+            SnapshotCapabilities::default()
+        );
+        // Over-claiming cannot widen what the Host implements for remotes.
+        let claims = crate::remote::fake::FakeRemote::new("custom");
+        *claims.snapshot.lock() = SnapshotCapabilities {
+            filesystem_checkpoint: true,
+            fork_from_checkpoint: true,
+            pause_resume: true,
+            memory_resume: false,
+        };
+        assert_eq!(
+            remote(claims).snapshot_capabilities("cloud"),
+            SnapshotCapabilities {
+                pause_resume: true,
+                ..SnapshotCapabilities::default()
+            }
+        );
     }
     #[tokio::test]
     async fn snapshot_e2b_refuses_fork_without_claiming_checkpoint_support() {

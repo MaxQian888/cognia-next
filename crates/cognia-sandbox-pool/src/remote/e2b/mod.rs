@@ -804,6 +804,17 @@ impl RemoteProvisioner for E2bProvider {
         KIND
     }
 
+    /// `stop_runtime` pauses with a full memory snapshot and `start_runtime`
+    /// resumes it, so processes survive. E2B's filesystem snapshot and fork
+    /// APIs are not used until verified.
+    fn snapshot_capabilities(&self) -> crate::runtime::SnapshotCapabilities {
+        crate::runtime::SnapshotCapabilities {
+            pause_resume: true,
+            memory_resume: true,
+            ..Default::default()
+        }
+    }
+
     async fn tiers(&self) -> Result<Vec<IsolationTier>, SandboxSpawnError> {
         self.api
             .list_sandboxes_page(&self.owner_filter(), 1, None)

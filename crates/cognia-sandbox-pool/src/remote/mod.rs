@@ -141,6 +141,13 @@ pub trait RemoteProvisioner: Send + Sync + 'static {
         instance: &str,
         request: &ProvisionRequest,
     ) -> Result<(), SandboxSpawnError>;
+
+    /// What this provider's own API can preserve. The Host intersects it with
+    /// what it implements for remote runtimes, so a provider can only narrow,
+    /// never widen, the snapshot surface. Default: nothing.
+    fn snapshot_capabilities(&self) -> crate::runtime::SnapshotCapabilities {
+        crate::runtime::SnapshotCapabilities::default()
+    }
 }
 
 /// A remote provider: the container surface plus provisioning.
