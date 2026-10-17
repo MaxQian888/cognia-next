@@ -75,3 +75,6 @@ published`, plus `cancelling/cancelled/recoveryRequired`; archive progress is
    single-winner integration to a result branch, archive, synced summary.
 3. Heterogeneous external agents per candidate, CLI/headless/plugin surface,
    paired-device and restart acceptance.
+
+Status (2026-10-17): all three phases are implemented; ADR-0230 records the
+phase 3 rules.

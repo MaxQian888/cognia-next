@@ -93,6 +93,18 @@ is a rebuildable Host projection mirrored read-only over Companion sync.
 Native confirmation keeps the lease alive without blocking candidate progress;
 changed business state requires fresh confirmation. Budget exhaustion does not
 override a subsequent explicit cancel, so cancelled runs remain archivable.
+
+Each attempt can run on a different agent: `/best-of-n --agents claude-code,codex
+<prompt>` (one entry per attempt; `session` is the conversation's agent), or
+the start dialog's per-attempt picker. External agents run in the attempt's
+own workspace, report no cost (shown as unknown) and refuse a dollar budget.
+`/best-of-n` must be the whole message. From a terminal,
+`cognia-agent best-of-n start|status|list|cancel|select|publish|archive` drives
+the desktop app; select and publish need an interactive terminal and the
+desktop's approval. Plugins can start and observe runs through `ctx.team`,
+never pick. A paired device can ask the Host to stop a run. After a Host
+restart, unfinished runs are rebound from the ledger, and a refused publish
+(for example a dirty checked-out branch) can be retried once fixed.
 See [ADR-0230](../adr/0230-best-of-n-attempts-share-a-frozen-base).
 
 ## Related

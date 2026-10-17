@@ -19,8 +19,9 @@ Write leases use Host-canonicalized physical roots. The opt-in
 ledger evidence and never automatically replays uncertain writes. Capture,
 integration prepare and publish enforce the frozen-base/winner contract even
 through generic SCM callers. See [ADR-0230](/docs/adr/0230-best-of-n-attempts-share-a-frozen-base)
-for state and authorization rules. UI and public plugin/CLI entry points are
-later-phase work.
+for state and authorization rules. `restart-recovery.ts` rebinds unfinished
+groups once per desktop Host process; `external.ts` runs external-agent
+candidates through the external-agent manager in their own workspace roots.
 
 `@cognia/agent-orchestration` is the host-independent core of the durable
 Agent Team. It has no dependencies. It owns the run records, the persistence

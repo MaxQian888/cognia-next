@@ -82,6 +82,16 @@ head 上创建新 checkout 检查、记录用户审批，再以 stop-on-conflict
 失败可独立重试，不影响发布成功。`bestOfNRuns` 为可重建 Host 投影，透过
 Companion sync 提供只读镜像。原生确认期间持续续租，不阻塞候选进展；业务状态
 变化需要重新确认。预算耗尽不会覆盖后续显式取消，取消后仍可归档。
+
+每次尝试可以使用不同的 agent：`/best-of-n --agents claude-code,codex <prompt>`
+（每次尝试一项，`session` 表示当前对话的 agent），或在开始对话框中为每次尝试
+选择。外部 agent 在该尝试自己的工作区中运行，不报告费用（显示为未知），也
+拒绝金额预算。`/best-of-n` 必须单独作为整条消息。在终端中，
+`cognia-agent best-of-n start|status|list|cancel|select|publish|archive`
+可驱动桌面应用；select 与 publish 需要交互式终端以及桌面端审批。插件可通过
+`ctx.team` 开始和观察运行，但不能选择胜者。配对设备可请求 Host 停止运行。
+Host 重启后会从账本重新绑定未完成的运行；被拒绝的发布（例如已检出分支有未
+提交修改）在修复后可重试。
 参见 [ADR-0230](../adr/0230-best-of-n-attempts-share-a-frozen-base)。
 
 ## 相关文档

@@ -72,8 +72,8 @@ integration 在胜者守卫前规范化目标分支，因此 `main` 和 `refs/he
 
 第一阶段包含账本、Host commands/catalogs、固定任务驱动、恢复、预算和发布
 守卫。第二阶段提供 slash command、仅作用于下一次发送的 composer chip、
-比较 dock、人工选择/检查/发布及同步摘要。异构外部 agent 和公开 CLI/plugin
-产品入口仍属于第三阶段；内部 schema 不授予自动选择权限。
+比较 dock、人工选择/检查/发布及同步摘要。第三阶段（见下文）提供异构 agent、
+CLI 与 plugin 入口、配对设备停止请求和重启恢复；schema 始终不授予选择权限。
 
 两个入口共用确认对话框，展示已提交基线、不携带未提交修改的提示及可编辑目标。
 默认新分支名为 `best-of-n/<requestId>`，使用组的持久请求标识；已有分支必须
@@ -96,3 +96,46 @@ account E2E sync 权威。
 
 定向测试覆盖幂等分配、冻结基线、owner/CAS、物理别名写锁、独立失败、提前
 取消、未知费用、人工 exact-head 选择以及 prepare/publish 双重守卫。
+
+## 第三阶段：agent、入口、设备与重启
+
+**异构候选。** 每个候选记录自己的 agent 描述。选择项可以是 `session`（当前
+对话的 agent、model 与 provider）、外部 agent 配置的精确 ID，或 preset ID
+（`claude-code`、`codex`），后者按共享绑定顺序解析为该运行时第一个已启用、
+未绑定 gateway 的配置。slash command 接受 `--agents a,b,...`，每个候选一项；
+开始对话框为每次尝试提供一个选择器。预览前和开始前都会重新解析；未知或已
+禁用的名称直接拒绝，不会替换为其他 agent。外部候选记录为当前对话的 agent
+加 `cognia:external-agent:<configId>` provider。
+
+外部候选通过外部 agent manager 运行，与 Agent Team 队员的启动路径相同：工作
+目录为候选自己的工作区根，截止时间为组剩余的时长预算。不转发 MCP server，
+候选授权中的工具禁用因此成立。外部执行契约不报告费用、也不执行金额上限：
+费用保持 `null`（显示为未知），设置 USD 预算时在尝试开始前拒绝。自身解析
+运行时为外部 agent 的 Cognia agent 走同一通道；旧的无作用域外部标记被拒绝。
+
+**CLI。** `cognia-agent best-of-n start|status|list|cancel|select|publish|archive`
+通过 CLI bridge 的 `POST /api/dev/best-of-n/{action}` 驱动桌面端，由负责编排
+的 renderer 应答。start 复用 composer 的预览与开始路径。select 和 publish 在
+`--yes`、`CI` 或没有 TTY 时拒绝；先在终端确认，再经过 Host 的原生审批，因为
+bridge 字段无法声明是人做出的选择。原有 Host 命令保持其目录条目。
+
+**插件。** `ctx.team` 新增 `startBestOfN`（`agent:dispatch`，始终使用新结果
+分支）、`getBestOfN` 与 `listBestOfN`（`team:read`，读取同步投影）以及
+`cancelBestOfN`（`agent:control`）。不提供 select 或 publish，并有测试锁定不存在
+此类方法。读取返回不含 owner lease、version、物理根与工作区 ID 的公开投影。
+
+**配对设备。** `BestOfNDeviceRole` 定义两种角色。配对观察者展示投影，并可
+请求 Host 停止运行：Host 接受非 owner 发起的取消，不夺取 owner lease（仍做
+version CAS），owner 在下一次轮询时逐个结束尝试。选择、发布、检查和归档在
+配对设备上保持非活动状态，UI 有标注并由测试锁定。
+
+**重启与被拒绝的发布。** 桌面初始化器在每个进程中执行一次恢复：等待上一进程的
+lease 过期（有上限），然后重新绑定所有未完成的组：运行中的尝试标记为
+`recoveryRequired`，从未开始的尝试标记为失败，缺失的工作区由 Host 报告。
+prepare 之后被 Host 拒绝的发布（例如已检出的目标分支有未提交修改）过去会让
+胜者停留在 `integrating`，review 会拒绝该状态。现在 abort 会把 best-of-N
+胜者恢复为 `approved`；发布在拒绝后立即释放所持有的集成，任何重试或重启时
+也会再次释放，因此重试会重新运行 exact-head 检查并创建新的集成。仍处于
+`publishing` 的运行永不 abort。多命令批次中的 `/best-of-n` 会在任何命令运行前
+被拒绝。
+

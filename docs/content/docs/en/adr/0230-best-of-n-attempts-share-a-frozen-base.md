@@ -85,8 +85,9 @@ and `refs/heads/main` name the same explicitly chosen target.
 Phase 1 provides the ledger, Host commands and catalogs, fixed driver, recovery,
 budgets and publish guard. Phase 2 adds the slash command, one-shot composer
 chip, comparison dock, manual selection/check/publication flow and synced
-summary. Heterogeneous external agents and public CLI/plugin product surfaces
-remain phase 3; schemas do not grant selection authority.
+summary. Phase 3 (below) adds heterogeneous agents, the CLI and plugin
+surfaces, paired stop requests and restart recovery; schemas never grant
+selection authority.
 
 Both starts preview the committed base, excluded uncommitted edits and editable
 target. The default new branch is `best-of-n/<requestId>` using the group's
@@ -114,3 +115,58 @@ the account E2E authority registry is unchanged.
 Focused tests cover allocation retries, frozen-base capture, owner/CAS races,
 physical alias locking, independent failure, early cancellation, unknown cost,
 manual exact-head selection and the integration prepare/publish guards.
+
+## Phase 3: agents, surfaces, devices and restarts
+
+**Heterogeneous candidates.** Each candidate records its own agent descriptor.
+A choice is `session` (the conversation's agent, model and provider), an exact
+external-agent configuration id, or a preset id (`claude-code`, `codex`) that
+resolves to the first enabled, non-gateway-bound configuration of that runtime
+in the shared binding order. The slash command takes `--agents a,b,...`, one
+entry per candidate; the start dialog has one picker per attempt. Choices are
+resolved before the preview and again before start; an unknown or disabled
+name is refused, never replaced. An external candidate is stored as the
+conversation's agent plus the `cognia:external-agent:<configId>` provider.
+
+External candidates run through the external-agent manager, the launch path
+Agent Team teammates use, with the candidate's workspace root as the working
+directory and the group's remaining duration as a deadline. No MCP servers are
+forwarded, so the candidate grant's tool denials hold. The external execute
+contract reports no cost and enforces no dollar cap: cost stays `null`
+(shown as unknown) and a USD budget is refused before the attempt starts. A
+Cognia agent whose own resolved runtime is external takes the same lane; the
+legacy unscoped external marker is refused.
+
+**CLI.** `cognia-agent best-of-n start|status|list|cancel|select|publish|archive`
+drives the desktop through `POST /api/dev/best-of-n/{action}` on the CLI
+bridge, answered by the renderer that owns orchestration. Start uses the same
+preview/start path as the composer. Select and publish are refused with
+`--yes`, under `CI`, or without a TTY; they ask on the terminal and then still
+meet the Host's native approval, because no bridge field can assert that a
+person chose. Existing Host commands keep their catalog entries.
+
+**Plugins.** `ctx.team` gains `startBestOfN` (`agent:dispatch`, always a new
+result branch), `getBestOfN` and `listBestOfN` (`team:read`, from the synced
+projection) and `cancelBestOfN` (`agent:control`). There is no select or
+publish; a test pins that no such method exists. Reads return a public
+projection without owner lease, version, physical roots or workspace ids.
+
+**Paired devices.** `BestOfNDeviceRole` names the two roles. A paired
+observer renders the projection and may ask the Host to stop a run: the Host
+accepts a cancel from a non-owner without taking the owner's lease (version
+CAS still applies), and the owner settles each attempt on its next poll.
+Select, publish, checks and archive are inert there, labelled in the UI and
+pinned by tests.
+
+**Restart and refused publication.** A desktop initializer runs recovery once
+per process. It waits for the previous process's lease to lapse (bounded),
+then rebinds every unfinished group: running attempts become
+`recoveryRequired`, attempts that never started fail, and a missing workspace
+is reported by the Host. A publish the Host refuses after prepare (for
+example a dirty checked-out target) used to leave the winner `integrating`,
+which review refuses. Abort now returns a best-of-N winner to `approved`;
+publication releases the held run right after the refusal and again on any
+retry or restart, so the retry re-runs exact-head checks and prepares a fresh
+integration. A run still `publishing` is never aborted. `/best-of-n` inside a
+multi-command batch is refused before any command runs.
+
