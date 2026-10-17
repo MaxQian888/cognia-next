@@ -23,7 +23,7 @@ cognia-gateway = { path = "../cognia-gateway" }
 cognia-terminal = { path = "../cognia-terminal" }
 cognia-hooks = { path = "../cognia-hooks" }
 chrono.workspace = true
-cognia-core = { path = "../cognia-core" }
+cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
 axum.workspace = true
 parking_lot.workspace = true
 once_cell.workspace = true

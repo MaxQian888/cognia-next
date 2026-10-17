@@ -798,7 +798,7 @@ fn undo_last(ctx: &mut DrainContext, live: &mut Vec<LiveStep>) -> Option<u32> {
     }
     let _ = ctx
         .step_count
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |c| {
             Some(c.saturating_sub(1))
         });
     let _ = last.bytes;
