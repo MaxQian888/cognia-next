@@ -200,6 +200,10 @@ fn bind_probe_socket(address: SocketAddr) -> io::Result<socket2::Socket> {
 }
 
 fn probe(port: u32) -> Result<bool, PortLeaseError> {
+    #[cfg(test)]
+    if let Some(occupied) = TEST_PORT_OCCUPANCY.with(std::cell::Cell::get) {
+        return Ok(occupied);
+    }
     let mut occupied = false;
     for ip in [
         IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -222,6 +226,33 @@ fn probe(port: u32) -> Result<bool, PortLeaseError> {
         }
     }
     Ok(occupied)
+}
+
+// Ledger/integration tests need real Git and SQLite but no network listeners.
+// The override is opt-in, thread-local, nested, and absent from production.
+#[cfg(test)]
+thread_local! {
+    static TEST_PORT_OCCUPANCY: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+#[cfg(test)]
+pub(crate) struct TestPortProbeGuard {
+    previous: Option<bool>,
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+#[cfg(test)]
+impl TestPortProbeGuard {
+    pub(crate) fn vacant() -> Self {
+        Self {
+            previous: TEST_PORT_OCCUPANCY.with(|state| state.replace(Some(false))),
+            _thread_bound: std::marker::PhantomData,
+        }
+    }
+}
+#[cfg(test)]
+impl Drop for TestPortProbeGuard {
+    fn drop(&mut self) {
+        TEST_PORT_OCCUPANCY.with(|state| state.set(self.previous));
+    }
 }
 
 // Host-probe fixtures never overlap the default range used by ordinary
@@ -1766,4 +1797,20 @@ mod tests {
             .any(|entry| entry.kind == PortLeaseDiagnosticKind::DuplicateRoot));
         assert_eq!(before, list(&store.connection).unwrap());
     }
+    #[test]
+    fn best_of_n_test_port_probe_is_scoped_nested_and_thread_local() {
+        assert_eq!(TEST_PORT_OCCUPANCY.with(std::cell::Cell::get), None);
+        {
+            let _outer = TestPortProbeGuard::vacant();
+            assert_eq!(probe(41000).unwrap(), false);
+            {
+                let _inner = TestPortProbeGuard::vacant();
+                assert_eq!(probe(41000).unwrap(), false);
+            }
+            assert_eq!(TEST_PORT_OCCUPANCY.with(std::cell::Cell::get), Some(false));
+            assert_eq!(std::thread::spawn(|| TEST_PORT_OCCUPANCY.with(std::cell::Cell::get)).join().unwrap(), None);
+        }
+        assert_eq!(TEST_PORT_OCCUPANCY.with(std::cell::Cell::get), None);
+    }
+
 }

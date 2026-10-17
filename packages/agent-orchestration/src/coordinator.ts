@@ -75,6 +75,8 @@ export interface TeamRunJournal {
 export interface TeamPathPolicy {
   /** Normalized absolute form, or `""` when the path cannot be resolved. */
   normalize(path: string): string
+  /** Resolve disk aliases on the execution Host before taking a write lease. */
+  canonicalize?(path: string): Promise<string>
   isWithinRoot(target: string, root: string): boolean
 }
 
@@ -138,6 +140,7 @@ interface RunPolicy {
 interface ActiveOwnership {
   leaseId: string
   paths: string[]
+  released: Promise<void>
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "terminated"])
@@ -444,30 +447,56 @@ export function createDurableTeamCoordinator<TConstraints = unknown>(
     if (request.access === "read") return execute()
     const policy = policies.get(request.runId)
     const mode = policy?.writeMode ?? "single-writer"
-    const key = `${request.runId}:${request.repositoryId}`
+    const repository = policy?.repositories.get(request.repositoryId)
+    if (!repository) throw new Error(`Unknown repository: ${request.repositoryId}`)
+    if (!repository.writable) throw new Error(`Repository ${request.repositoryId} is read-only`)
+    const child = request.childRunId ? await store.getChild(request.childRunId) : undefined
+    if (
+      request.childRunId &&
+      (!child || child.runId !== request.runId || child.repositoryId !== request.repositoryId)
+    ) {
+      throw new Error("Writer lease does not match its durable child")
+    }
+    const workspacePath = child?.workspacePath ?? repository.path
+    const root = paths.normalize(
+      paths.canonicalize ? await paths.canonicalize(workspacePath) : workspacePath
+    )
+    if (!root || !/^(?:\/|[A-Za-z]:\/)/.test(root)) {
+      throw new Error("Writer workspace requires a canonical absolute root")
+    }
+    // Windows drive/UNC spellings compare case-insensitively, as ownership does.
+    const key = /^(?:[A-Za-z]:\/|\/\/)/.test(root) ? root.toLowerCase() : root
 
     if (mode === "isolated-parallel") {
       if (!request.fileOwnership || request.fileOwnership.length === 0) {
         throw new Error("Isolated parallel writers require explicit file ownership")
       }
-      const repository = policy?.repositories.get(request.repositoryId)
-      if (!repository) throw new Error(`Unknown repository: ${request.repositoryId}`)
       const claimed = request.fileOwnership.map((claim) => {
         const path = claim.trim().replace(/\\/g, "/")
         if (!path || path.includes("\0")) throw new Error("Invalid writer ownership path")
-        const normalized = paths.normalize(
-          /^(?:\/|[A-Za-z]:)/.test(path) ? path : `${repository.path}/${path}`
-        )
-        if (!normalized || !paths.isWithinRoot(normalized, repository.path)) {
+        const absolute = /^(?:\/|[A-Za-z]:)/.test(path)
+        const lexical = paths.normalize(absolute ? path : `${root}/${path}`)
+        // Absolute ownership may use the checkout's alias spelling. Translate
+        // it onto the same canonical root used by relative ownership claims.
+        const workspaceRoot = paths.normalize(workspacePath)
+        const normalized =
+          absolute && paths.isWithinRoot(lexical, workspaceRoot)
+            ? paths.normalize(`${root}/${lexical.slice(workspaceRoot.length).replace(/^\/+/, "")}`)
+            : lexical
+        if (!normalized || !paths.isWithinRoot(normalized, root)) {
           throw new Error("Writer ownership must remain within its repository")
         }
         return normalized
       })
       const active = activeOwnership.get(key) ?? []
-      if (active.some((lease) => overlaps(paths, lease.paths, claimed))) {
+      if (writerTails.has(key) || active.some((lease) => overlaps(paths, lease.paths, claimed))) {
         throw new Error("Parallel writer ownership overlaps an active lease")
       }
-      const lease: ActiveOwnership = { leaseId: newId("writer"), paths: claimed }
+      let release!: () => void
+      const released = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const lease: ActiveOwnership = { leaseId: newId("writer"), paths: claimed, released }
       activeOwnership.set(key, [...active, lease])
       try {
         return await execute()
@@ -477,10 +506,16 @@ export function createDurableTeamCoordinator<TConstraints = unknown>(
         )
         if (remaining.length === 0) activeOwnership.delete(key)
         else activeOwnership.set(key, remaining)
+        release()
       }
     }
 
-    const previous = writerTails.get(key)
+    const activeIsolated = activeOwnership.get(key)
+    const previous =
+      writerTails.get(key) ??
+      (activeIsolated?.length
+        ? Promise.all(activeIsolated.map((lease) => lease.released)).then(() => undefined)
+        : undefined)
     let release!: () => void
     const own = new Promise<void>((resolve) => {
       release = resolve

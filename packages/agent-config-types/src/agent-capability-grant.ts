@@ -86,6 +86,8 @@ export interface AgentCapabilityGrantV1 {
   effort?: SendOptions["effort"]
   /** Agentic-turn ceiling for this run, 1 through 100. */
   maxTurns?: number
+  /** Per-attempt USD ceiling; composed grants may only lower it. */
+  maxBudgetUsd?: number
   /** Prompt fragments appended after the agent's own prompt. Never replace it. */
   instructions?: string[]
   /** Host and plugin skill ids. Added skills contribute their declared tools. */
@@ -176,6 +178,12 @@ export function validateAgentCapabilityGrant(v: unknown): ValidationResult<Agent
     (!Number.isInteger(v.maxTurns) || (v.maxTurns as number) < 1 || (v.maxTurns as number) > 100)
   ) {
     errors.push("maxTurns must be an integer between 1 and 100")
+  }
+  if (
+    v.maxBudgetUsd !== undefined &&
+    (typeof v.maxBudgetUsd !== "number" || !Number.isFinite(v.maxBudgetUsd) || v.maxBudgetUsd <= 0)
+  ) {
+    errors.push("maxBudgetUsd must be a finite positive number")
   }
   checkIdList(v.instructions, "instructions", errors)
   checkDelta(v.skills, "skills", ["add", "remove"], errors)
@@ -272,6 +280,10 @@ export function mergeCapabilityGrants(
   if (effort) merged.effort = effort
   const maxTurns = inner.maxTurns ?? outer.maxTurns
   if (maxTurns !== undefined) merged.maxTurns = maxTurns
+  const budgets = [outer.maxBudgetUsd, inner.maxBudgetUsd].filter(
+    (v): v is number => v !== undefined
+  )
+  if (budgets.length) merged.maxBudgetUsd = Math.min(...budgets)
 
   const instructions = [...(outer.instructions ?? []), ...(inner.instructions ?? [])]
   if (instructions.length > 0) merged.instructions = instructions

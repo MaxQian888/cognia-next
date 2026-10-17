@@ -1,6 +1,254 @@
 {
   "schemaVersion": 1,
   "$defs": {
+    "BestOfNPhase": {
+      "enum": [
+        "preparing",
+        "running",
+        "awaitingSelection",
+        "publishing",
+        "published",
+        "cancelling",
+        "cancelled",
+        "recoveryRequired"
+      ],
+      "type": "string"
+    },
+    "BestOfNCandidateStatus": {
+      "enum": [
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelRequested",
+        "cancelled",
+        "recoveryRequired"
+      ],
+      "type": "string"
+    },
+    "BestOfNArchiveStatus": {
+      "enum": ["pending", "archiving", "archived", "failed"],
+      "type": "string"
+    },
+    "BestOfNBudgetPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "maxCostUsd": {
+          "format": "double",
+          "type": ["number", "null"]
+        },
+        "maxDurationMs": {
+          "format": "uint64",
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      },
+      "required": ["maxCostUsd", "maxDurationMs"],
+      "type": "object"
+    },
+    "BestOfNAgentDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": ["string", "null"]
+        },
+        "model": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["agentId", "model", "provider"],
+      "type": "object"
+    },
+    "BestOfNCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "candidateId": {
+          "type": "string"
+        },
+        "index": {
+          "format": "uint32",
+          "type": "integer",
+          "minimum": 0
+        },
+        "agent": {
+          "$ref": "#/$defs/BestOfNAgentDescriptor"
+        },
+        "childSessionId": {
+          "type": "string"
+        },
+        "workspaceBundleId": {
+          "type": ["string", "null"]
+        },
+        "physicalRoot": {
+          "type": ["string", "null"]
+        },
+        "changesetId": {
+          "type": ["string", "null"]
+        },
+        "headSha": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "$ref": "#/$defs/BestOfNCandidateStatus"
+        },
+        "hasChanges": {
+          "type": "boolean"
+        },
+        "costUsd": {
+          "format": "double",
+          "type": ["number", "null"]
+        },
+        "startedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "finishedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "agent",
+        "candidateId",
+        "changesetId",
+        "childSessionId",
+        "costUsd",
+        "error",
+        "finishedAt",
+        "hasChanges",
+        "headSha",
+        "index",
+        "physicalRoot",
+        "startedAt",
+        "status",
+        "workspaceBundleId"
+      ],
+      "type": "object"
+    },
+    "BestOfNGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "repositoryId": {
+          "type": "string"
+        },
+        "repoCommonDir": {
+          "type": "string"
+        },
+        "sourceRoot": {
+          "type": "string"
+        },
+        "baseSha": {
+          "type": "string"
+        },
+        "checkoutHadUncommittedChanges": {
+          "type": "boolean"
+        },
+        "targetRef": {
+          "type": "string"
+        },
+        "targetIsNew": {
+          "type": "boolean"
+        },
+        "n": {
+          "format": "uint32",
+          "type": "integer",
+          "minimum": 0
+        },
+        "budgetPolicy": {
+          "$ref": "#/$defs/BestOfNBudgetPolicy"
+        },
+        "teamRunId": {
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/BestOfNPhase"
+        },
+        "selectedCandidateId": {
+          "type": ["string", "null"]
+        },
+        "selectedHeadSha": {
+          "type": ["string", "null"]
+        },
+        "integrationId": {
+          "type": ["string", "null"]
+        },
+        "version": {
+          "format": "uint64",
+          "type": "integer",
+          "minimum": 0
+        },
+        "ownerId": {
+          "type": "string"
+        },
+        "ownerLeaseExpiresAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "archiveStatus": {
+          "$ref": "#/$defs/BestOfNArchiveStatus"
+        },
+        "archiveError": {
+          "type": ["string", "null"]
+        },
+        "error": {
+          "type": ["string", "null"]
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/BestOfNCandidate"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "archiveError",
+        "archiveStatus",
+        "baseSha",
+        "budgetPolicy",
+        "candidates",
+        "checkoutHadUncommittedChanges",
+        "createdAt",
+        "error",
+        "groupId",
+        "integrationId",
+        "n",
+        "ownerId",
+        "ownerLeaseExpiresAt",
+        "phase",
+        "repoCommonDir",
+        "repositoryId",
+        "requestId",
+        "selectedCandidateId",
+        "selectedHeadSha",
+        "sourceRoot",
+        "targetIsNew",
+        "targetRef",
+        "teamRunId",
+        "updatedAt",
+        "version"
+      ],
+      "type": "object"
+    },
     "TaskDeliveryRecord": {
       "additionalProperties": false,
       "properties": {
@@ -13120,6 +13368,43 @@
     }
   },
   "commands": {
+    "best_of_n_start": {
+      "$ref": "#/$defs/BestOfNGroup"
+    },
+    "best_of_n_cancel": {
+      "$ref": "#/$defs/BestOfNGroup"
+    },
+    "best_of_n_archive": {
+      "$ref": "#/$defs/BestOfNGroup"
+    },
+    "best_of_n_select": {
+      "$ref": "#/$defs/BestOfNGroup"
+    },
+    "best_of_n_candidate_progress": {
+      "$ref": "#/$defs/BestOfNGroup"
+    },
+    "best_of_n_recover": {
+      "$ref": "#/$defs/BestOfNGroup"
+    },
+    "best_of_n_get": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BestOfNGroup"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "best_of_n_list": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BestOfNGroup"
+      }
+    },
+    "task_workspace_canonical_root": {
+      "type": "string"
+    },
     "environment_delivery_list": {
       "type": "object",
       "additionalProperties": false,

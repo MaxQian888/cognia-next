@@ -257,6 +257,92 @@ describe("durable dispatch bridge", () => {
     }
   )
 
+  it.each([false, true])(
+    "keeps initialization failures scoped to the child when isolateFailure=%s",
+    async (isolateFailure) => {
+      const coordinator = createDurableTeamCoordinator()
+      const runId = "run-isolated-init"
+      await coordinator.prepareRun(team, runId)
+      const append = runtimeDb.dexieTeamRunStore.appendTrajectory
+      jest
+        .spyOn(runtimeDb.dexieTeamRunStore, "appendTrajectory")
+        .mockImplementation(async (event, content) => {
+          if (event.kind === "model_turn_started") throw new Error("initial journal unavailable")
+          return append(event, content)
+        })
+      await expect(
+        beginDurableDispatch({
+          coordinator,
+          team,
+          runId,
+          teammateId: "first",
+          taskId: "first",
+          access: "read",
+          repositoryId: "primary",
+          isolateFailure,
+        })
+      ).rejects.toThrow("initial journal unavailable")
+      expect(await runtimeDb.listAgentTeamChildRuns(runId)).toEqual([])
+      expect(await runtimeDb.getAgentTeamRun(runId)).toMatchObject({
+        status: isolateFailure ? "running" : "needs_input",
+      })
+    }
+  )
+
+  it.each(["unsettled completion", "uncertain failure", "evidence failure"])(
+    "keeps siblings runnable while retaining an isolated child's %s recovery gate",
+    async (scenario) => {
+      const coordinator = createDurableTeamCoordinator()
+      const runId = "run-independent-candidates"
+      await coordinator.prepareRun(team, runId)
+      const input = {
+        coordinator,
+        team,
+        runId,
+        access: "read" as const,
+        repositoryId: "primary",
+        isolateFailure: true,
+      }
+      const failed = await beginDurableDispatch({
+        ...input,
+        teammateId: "first",
+        taskId: "first",
+        ...(scenario === "evidence failure" ? { taskKind: "code" as const } : {}),
+      })
+      const sibling = await beginDurableDispatch({
+        ...input,
+        teammateId: "second",
+        taskId: "second",
+      })
+      if (scenario !== "evidence failure") {
+        failed.capture({
+          type: "tool-call",
+          id: "write",
+          toolName: "Write",
+          input: { path: "file.ts" },
+        })
+      }
+      if (scenario === "uncertain failure") await failed.fail(new Error("provider disconnected"))
+      else
+        await expect(failed.complete({ text: "done" })).rejects.toThrow(
+          scenario === "evidence failure" ? "Evidence gate" : "unsettled tool"
+        )
+      expect(await runtimeDb.getAgentTeamChildRun(failed.childRunId)).toMatchObject({
+        status: "needs_input",
+      })
+      expect(await runtimeDb.getAgentTeamRun(runId)).toMatchObject({ status: "running" })
+      const operation = jest.fn(async () => "sibling completed")
+      await expect(sibling.run(operation)).resolves.toBe("sibling completed")
+      expect(operation).toHaveBeenCalledTimes(1)
+      await sibling.complete({ text: "done" })
+      expect(await runtimeDb.getAgentTeamChildRun(sibling.childRunId)).toMatchObject({
+        status: "completed",
+      })
+      failed.dispose()
+      sibling.dispose()
+    }
+  )
+
   it("preserves an unsafe provider pause result through the control wrapper", async () => {
     const { coordinator, dispatch } = await openDispatch("run-unsafe-pause")
     await dispatch.attachControl({ steer: async () => {}, pause: async () => false })

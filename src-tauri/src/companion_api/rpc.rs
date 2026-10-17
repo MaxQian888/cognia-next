@@ -916,6 +916,15 @@ const KNOWN_COMMANDS: &[&str] = &[
     "task_workspace_integration_analyze",
     "task_workspace_integration_get",
     "task_workspace_integration_list",
+    "task_workspace_canonical_root",
+    "best_of_n_start",
+    "best_of_n_get",
+    "best_of_n_list",
+    "best_of_n_cancel",
+    "best_of_n_select",
+    "best_of_n_archive",
+    "best_of_n_candidate_progress",
+    "best_of_n_recover",
     "task_workspace_changeset_capture",
     "task_workspace_changeset_mark_ready",
     "task_workspace_changeset_record_review",
@@ -1369,6 +1378,9 @@ pub fn known_commands() -> &'static [&'static str] {
 /// They are cheap to re-run and structurally idempotent.
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
+    "task_workspace_canonical_root",
+    "best_of_n_get",
+    "best_of_n_list",
     "execution_run_detail",
     "execution_run_approval_list",
     "execution_run_get",
@@ -1732,6 +1744,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 /// name as soon as it appears here (it runs before the dispatch `match`).
 #[cfg(test)]
 const CONTROL_COMMANDS: &[&str] = &[
+    "best_of_n_start",
+    "best_of_n_cancel",
+    "best_of_n_select",
+    "best_of_n_archive",
+    "best_of_n_candidate_progress",
+    "best_of_n_recover",
     // Shared media engine, with caller-owned binary transfers.
     "plugin_media_concatenate_videos",
     "plugin_media_export_video",
@@ -2531,6 +2549,8 @@ fn inject_caller_device_grants(
 /// `mcp_oauth_*`.
 #[cfg(test)]
 const SERVICE_ONLY_COMMANDS: &[&str] = &[
+    "best_of_n_candidate_progress",
+    "best_of_n_recover",
     // ADR-0059 R12 — the brain manages the public webhook ingress registry.
     // The runtime-lease arms are deliberately NOT here: the lease arbitrates
     // between every runtime attached to this companion, so a desktop webview
@@ -3820,6 +3840,28 @@ fn scratch_ensure_is_registered_only_on_the_service_plane() {
     assert!(is_service_only_command(command));
     assert!(service_plane::COMMANDS.contains(&command));
 }
+#[cfg(test)]
+#[test]
+fn best_of_n_commands_keep_progress_internal_and_reads_non_mutating() {
+    for command in ["best_of_n_get", "best_of_n_list", "task_workspace_canonical_root"] {
+        assert!(known_commands().contains(&command));
+        assert!(READ_ONLY_COMMANDS_SET.contains(command));
+        assert!(!is_control_command(command));
+        assert!(filesystem::COMMANDS.contains(&command));
+    }
+    for command in ["best_of_n_candidate_progress", "best_of_n_recover"] {
+        assert!(is_service_only_command(command));
+        assert!(is_control_command(command));
+        assert!(filesystem::COMMANDS.contains(&command));
+    }
+    for command in ["best_of_n_start", "best_of_n_cancel", "best_of_n_archive", "best_of_n_select"] {
+        assert!(known_commands().contains(&command));
+        assert!(is_control_command(command));
+        assert!(!READ_ONLY_COMMANDS_SET.contains(command));
+        assert!(filesystem::COMMANDS.contains(&command));
+    }
+}
+
 #[cfg(test)]
 #[test]
 fn changeset_and_integration_commands_have_matching_remote_control_classification() {

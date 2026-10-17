@@ -117,6 +117,7 @@ impl WorkspaceStore {
         store.apply_registry_migration()?;
         store.apply_port_migration()?;
         store.apply_changeset_migration()?;
+        crate::best_of_n::migrate(&store.connection)?;
         store.apply_provenance_migration()?;
         Ok(store)
     }

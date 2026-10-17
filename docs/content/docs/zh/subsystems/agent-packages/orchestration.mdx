@@ -5,6 +5,20 @@ description: "@cognia/agent-orchestration 如何运行持久化 Agent Team——
 
 # 编排
 
+## 独立 Best-of-N 尝试
+
+`lib/best-of-n/service.ts` 提供 `startBestOfN`、`recoverBestOfN` 和
+`cancelBestOfN`。Host 的 workspace SQLite 账本管理幂等分配、冻结 commit SHA、
+候选 session 与物理根、预算、owner lease、人工胜者及独立归档进度。`core.ts`
+固定调度 2–4 个独立任务，`runtime.ts` 复用 durable dispatch、session-owned
+bundle、ADR-0229 端口和 changeset capture，不发送父会话消息。
+
+写锁使用 Host canonicalize 后的物理根。可选 `isolateFailure` 只暂停失败
+候选，保留其他候选运行。恢复重新读取账本，不自动重放不确定写入。通用 SCM
+的 capture、integration prepare 和 publish 同样执行冻结基线与胜者约束。
+状态及授权规则见 [ADR-0230](/docs/adr/0230-best-of-n-attempts-share-a-frozen-base)。
+UI 和公开 plugin/CLI 入口属于后续阶段。
+
 `@cognia/agent-orchestration` 是持久化 Agent Team 与宿主无关的核心，没有任何依赖。它拥有
 运行记录、持久化规则、协调器（准入、公平调度、工作区租约、转向、暂停、接管与恢复）、决策
 与证据账本以及重放安全规则。数据库、日志、PII 脱敏、路径语义以及 agent 本身由应用提供。

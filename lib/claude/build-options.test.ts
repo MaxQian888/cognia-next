@@ -5733,6 +5733,23 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
 })
 
 describe("resolveSendOptions — ADR-0028 lite workspace confinement", () => {
+  it("confines an independent candidate to its root even when the app default is disabled", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "candidate",
+        workingDir: "/candidate/root",
+        workspaceConfinementEnabled: true,
+      }),
+      activeProject: makeProject([{ path: "/candidate/root", isPrimary: true }]),
+      appSettings: { id: "singleton", workspaceConfinementEnabled: false } as AppSettings,
+      capabilityGrants: [
+        { schemaVersion: 1, source: { kind: "agent-team", id: "candidate" }, maxBudgetUsd: 2 },
+      ],
+    })
+    expect(opts.confinement).toEqual({ enabled: true, roots: ["/candidate/root"] })
+    expect(opts.maxBudgetUsd).toBe(2)
+  })
+
   it("defaults ON: stamps confinement.roots from cwd + additionalDirectories", async () => {
     const opts = await resolveSendOptions({
       activeProject: makeProject([{ path: "/ws", isPrimary: true }, { path: "/ws/extra" }]),
@@ -7763,6 +7780,13 @@ describe("resolveSendOptions — a model that belongs to an external agent", () 
 })
 
 describe("resolveSendOptions — capability grants", () => {
+  it("applies the per-attempt budget before sending without caller patches", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar(),
+      capabilityGrants: [{ schemaVersion: 1, source: { kind: "agent-team" }, maxBudgetUsd: 0.5 }],
+    })
+    expect(opts.maxBudgetUsd).toBe(0.5)
+  })
   const grant = (
     fields: Partial<
       import("@cognia/agent-config-types/agent-capability-grant").AgentCapabilityGrantV1

@@ -8862,6 +8862,3330 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/best_of_n_archive:
+    post:
+      operationId: internalRpcBestOfNArchive
+      tags:
+        - headless-rpc
+      summary: best_of_n_archive (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+                  properties:
+                    groupId:
+                      type: string
+                      minLength: 1
+                    expectedVersion:
+                      type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                    ownerId:
+                      type: string
+                      minLength: 1
+                    leaseDurationMs:
+                      type: integer
+                      exclusiveMinimum: 0
+                      maximum: 300000
+                  required:
+                    - groupId
+                    - expectedVersion
+                    - ownerId
+                    - leaseDurationMs
+                  additionalProperties: false
+              required:
+                - input
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  groupId:
+                    type: string
+                  requestId:
+                    type: string
+                  repositoryId:
+                    type: string
+                  repoCommonDir:
+                    type: string
+                  sourceRoot:
+                    type: string
+                  baseSha:
+                    type: string
+                  checkoutHadUncommittedChanges:
+                    type: boolean
+                  targetRef:
+                    type: string
+                  targetIsNew:
+                    type: boolean
+                  n:
+                    format: uint32
+                    type: integer
+                    minimum: 0
+                  budgetPolicy:
+                    additionalProperties: false
+                    properties:
+                      maxCostUsd:
+                        format: double
+                        type:
+                          - number
+                          - "null"
+                      maxDurationMs:
+                        format: uint64
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                    required:
+                      - maxCostUsd
+                      - maxDurationMs
+                    type: object
+                  teamRunId:
+                    type: string
+                  phase:
+                    enum:
+                      - preparing
+                      - running
+                      - awaitingSelection
+                      - publishing
+                      - published
+                      - cancelling
+                      - cancelled
+                      - recoveryRequired
+                    type: string
+                  selectedCandidateId:
+                    type:
+                      - string
+                      - "null"
+                  selectedHeadSha:
+                    type:
+                      - string
+                      - "null"
+                  integrationId:
+                    type:
+                      - string
+                      - "null"
+                  version:
+                    format: uint64
+                    type: integer
+                    minimum: 0
+                  ownerId:
+                    type: string
+                  ownerLeaseExpiresAt:
+                    format: int64
+                    type: integer
+                  archiveStatus:
+                    enum:
+                      - pending
+                      - archiving
+                      - archived
+                      - failed
+                    type: string
+                  archiveError:
+                    type:
+                      - string
+                      - "null"
+                  error:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    format: int64
+                    type: integer
+                  updatedAt:
+                    format: int64
+                    type: integer
+                  candidates:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        candidateId:
+                          type: string
+                        index:
+                          format: uint32
+                          type: integer
+                          minimum: 0
+                        agent:
+                          additionalProperties: false
+                          properties:
+                            agentId:
+                              type: string
+                            provider:
+                              type:
+                                - string
+                                - "null"
+                            model:
+                              type:
+                                - string
+                                - "null"
+                          required:
+                            - agentId
+                            - model
+                            - provider
+                          type: object
+                        childSessionId:
+                          type: string
+                        workspaceBundleId:
+                          type:
+                            - string
+                            - "null"
+                        physicalRoot:
+                          type:
+                            - string
+                            - "null"
+                        changesetId:
+                          type:
+                            - string
+                            - "null"
+                        headSha:
+                          type:
+                            - string
+                            - "null"
+                        status:
+                          enum:
+                            - pending
+                            - running
+                            - succeeded
+                            - failed
+                            - cancelRequested
+                            - cancelled
+                            - recoveryRequired
+                          type: string
+                        hasChanges:
+                          type: boolean
+                        costUsd:
+                          format: double
+                          type:
+                            - number
+                            - "null"
+                        startedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        finishedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        error:
+                          type:
+                            - string
+                            - "null"
+                      required:
+                        - agent
+                        - candidateId
+                        - changesetId
+                        - childSessionId
+                        - costUsd
+                        - error
+                        - finishedAt
+                        - hasChanges
+                        - headSha
+                        - index
+                        - physicalRoot
+                        - startedAt
+                        - status
+                        - workspaceBundleId
+                      type: object
+                    type: array
+                required:
+                  - archiveError
+                  - archiveStatus
+                  - baseSha
+                  - budgetPolicy
+                  - candidates
+                  - checkoutHadUncommittedChanges
+                  - createdAt
+                  - error
+                  - groupId
+                  - integrationId
+                  - n
+                  - ownerId
+                  - ownerLeaseExpiresAt
+                  - phase
+                  - repoCommonDir
+                  - repositoryId
+                  - requestId
+                  - selectedCandidateId
+                  - selectedHeadSha
+                  - sourceRoot
+                  - targetIsNew
+                  - targetRef
+                  - teamRunId
+                  - updatedAt
+                  - version
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/best_of_n_cancel:
+    post:
+      operationId: internalRpcBestOfNCancel
+      tags:
+        - headless-rpc
+      summary: best_of_n_cancel (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+                  properties:
+                    groupId:
+                      type: string
+                      minLength: 1
+                    expectedVersion:
+                      type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                    ownerId:
+                      type: string
+                      minLength: 1
+                    leaseDurationMs:
+                      type: integer
+                      exclusiveMinimum: 0
+                      maximum: 300000
+                  required:
+                    - groupId
+                    - expectedVersion
+                    - ownerId
+                    - leaseDurationMs
+                  additionalProperties: false
+              required:
+                - input
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  groupId:
+                    type: string
+                  requestId:
+                    type: string
+                  repositoryId:
+                    type: string
+                  repoCommonDir:
+                    type: string
+                  sourceRoot:
+                    type: string
+                  baseSha:
+                    type: string
+                  checkoutHadUncommittedChanges:
+                    type: boolean
+                  targetRef:
+                    type: string
+                  targetIsNew:
+                    type: boolean
+                  n:
+                    format: uint32
+                    type: integer
+                    minimum: 0
+                  budgetPolicy:
+                    additionalProperties: false
+                    properties:
+                      maxCostUsd:
+                        format: double
+                        type:
+                          - number
+                          - "null"
+                      maxDurationMs:
+                        format: uint64
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                    required:
+                      - maxCostUsd
+                      - maxDurationMs
+                    type: object
+                  teamRunId:
+                    type: string
+                  phase:
+                    enum:
+                      - preparing
+                      - running
+                      - awaitingSelection
+                      - publishing
+                      - published
+                      - cancelling
+                      - cancelled
+                      - recoveryRequired
+                    type: string
+                  selectedCandidateId:
+                    type:
+                      - string
+                      - "null"
+                  selectedHeadSha:
+                    type:
+                      - string
+                      - "null"
+                  integrationId:
+                    type:
+                      - string
+                      - "null"
+                  version:
+                    format: uint64
+                    type: integer
+                    minimum: 0
+                  ownerId:
+                    type: string
+                  ownerLeaseExpiresAt:
+                    format: int64
+                    type: integer
+                  archiveStatus:
+                    enum:
+                      - pending
+                      - archiving
+                      - archived
+                      - failed
+                    type: string
+                  archiveError:
+                    type:
+                      - string
+                      - "null"
+                  error:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    format: int64
+                    type: integer
+                  updatedAt:
+                    format: int64
+                    type: integer
+                  candidates:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        candidateId:
+                          type: string
+                        index:
+                          format: uint32
+                          type: integer
+                          minimum: 0
+                        agent:
+                          additionalProperties: false
+                          properties:
+                            agentId:
+                              type: string
+                            provider:
+                              type:
+                                - string
+                                - "null"
+                            model:
+                              type:
+                                - string
+                                - "null"
+                          required:
+                            - agentId
+                            - model
+                            - provider
+                          type: object
+                        childSessionId:
+                          type: string
+                        workspaceBundleId:
+                          type:
+                            - string
+                            - "null"
+                        physicalRoot:
+                          type:
+                            - string
+                            - "null"
+                        changesetId:
+                          type:
+                            - string
+                            - "null"
+                        headSha:
+                          type:
+                            - string
+                            - "null"
+                        status:
+                          enum:
+                            - pending
+                            - running
+                            - succeeded
+                            - failed
+                            - cancelRequested
+                            - cancelled
+                            - recoveryRequired
+                          type: string
+                        hasChanges:
+                          type: boolean
+                        costUsd:
+                          format: double
+                          type:
+                            - number
+                            - "null"
+                        startedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        finishedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        error:
+                          type:
+                            - string
+                            - "null"
+                      required:
+                        - agent
+                        - candidateId
+                        - changesetId
+                        - childSessionId
+                        - costUsd
+                        - error
+                        - finishedAt
+                        - hasChanges
+                        - headSha
+                        - index
+                        - physicalRoot
+                        - startedAt
+                        - status
+                        - workspaceBundleId
+                      type: object
+                    type: array
+                required:
+                  - archiveError
+                  - archiveStatus
+                  - baseSha
+                  - budgetPolicy
+                  - candidates
+                  - checkoutHadUncommittedChanges
+                  - createdAt
+                  - error
+                  - groupId
+                  - integrationId
+                  - n
+                  - ownerId
+                  - ownerLeaseExpiresAt
+                  - phase
+                  - repoCommonDir
+                  - repositoryId
+                  - requestId
+                  - selectedCandidateId
+                  - selectedHeadSha
+                  - sourceRoot
+                  - targetIsNew
+                  - targetRef
+                  - teamRunId
+                  - updatedAt
+                  - version
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/best_of_n_candidate_progress:
+    post:
+      operationId: internalRpcBestOfNCandidateProgress
+      tags:
+        - headless-rpc
+      summary: best_of_n_candidate_progress (service.internal)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+                  properties:
+                    mutation:
+                      type: object
+                      properties:
+                        groupId:
+                          type: string
+                          minLength: 1
+                        expectedVersion:
+                          type: integer
+                          minimum: 0
+                          maximum: 9007199254740991
+                        ownerId:
+                          type: string
+                          minLength: 1
+                        leaseDurationMs:
+                          type: integer
+                          exclusiveMinimum: 0
+                          maximum: 300000
+                      required:
+                        - groupId
+                        - expectedVersion
+                        - ownerId
+                        - leaseDurationMs
+                      additionalProperties: false
+                    candidateId:
+                      type: string
+                      minLength: 1
+                    status:
+                      type: string
+                      enum:
+                        - pending
+                        - running
+                        - succeeded
+                        - failed
+                        - cancelRequested
+                        - cancelled
+                        - recoveryRequired
+                    workspaceBundleId:
+                      type:
+                        - string
+                        - "null"
+                    physicalRoot:
+                      type:
+                        - string
+                        - "null"
+                    changesetId:
+                      type:
+                        - string
+                        - "null"
+                    headSha:
+                      type:
+                        - string
+                        - "null"
+                    hasChanges:
+                      type: boolean
+                    costUsd:
+                      anyOf:
+                        - type: number
+                          minimum: 0
+                        - type: "null"
+                    error:
+                      type:
+                        - string
+                        - "null"
+                    teamRunId:
+                      type:
+                        - string
+                        - "null"
+                  required:
+                    - mutation
+                    - candidateId
+                    - status
+                    - hasChanges
+                  additionalProperties: false
+              required:
+                - input
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  groupId:
+                    type: string
+                  requestId:
+                    type: string
+                  repositoryId:
+                    type: string
+                  repoCommonDir:
+                    type: string
+                  sourceRoot:
+                    type: string
+                  baseSha:
+                    type: string
+                  checkoutHadUncommittedChanges:
+                    type: boolean
+                  targetRef:
+                    type: string
+                  targetIsNew:
+                    type: boolean
+                  n:
+                    format: uint32
+                    type: integer
+                    minimum: 0
+                  budgetPolicy:
+                    additionalProperties: false
+                    properties:
+                      maxCostUsd:
+                        format: double
+                        type:
+                          - number
+                          - "null"
+                      maxDurationMs:
+                        format: uint64
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                    required:
+                      - maxCostUsd
+                      - maxDurationMs
+                    type: object
+                  teamRunId:
+                    type: string
+                  phase:
+                    enum:
+                      - preparing
+                      - running
+                      - awaitingSelection
+                      - publishing
+                      - published
+                      - cancelling
+                      - cancelled
+                      - recoveryRequired
+                    type: string
+                  selectedCandidateId:
+                    type:
+                      - string
+                      - "null"
+                  selectedHeadSha:
+                    type:
+                      - string
+                      - "null"
+                  integrationId:
+                    type:
+                      - string
+                      - "null"
+                  version:
+                    format: uint64
+                    type: integer
+                    minimum: 0
+                  ownerId:
+                    type: string
+                  ownerLeaseExpiresAt:
+                    format: int64
+                    type: integer
+                  archiveStatus:
+                    enum:
+                      - pending
+                      - archiving
+                      - archived
+                      - failed
+                    type: string
+                  archiveError:
+                    type:
+                      - string
+                      - "null"
+                  error:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    format: int64
+                    type: integer
+                  updatedAt:
+                    format: int64
+                    type: integer
+                  candidates:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        candidateId:
+                          type: string
+                        index:
+                          format: uint32
+                          type: integer
+                          minimum: 0
+                        agent:
+                          additionalProperties: false
+                          properties:
+                            agentId:
+                              type: string
+                            provider:
+                              type:
+                                - string
+                                - "null"
+                            model:
+                              type:
+                                - string
+                                - "null"
+                          required:
+                            - agentId
+                            - model
+                            - provider
+                          type: object
+                        childSessionId:
+                          type: string
+                        workspaceBundleId:
+                          type:
+                            - string
+                            - "null"
+                        physicalRoot:
+                          type:
+                            - string
+                            - "null"
+                        changesetId:
+                          type:
+                            - string
+                            - "null"
+                        headSha:
+                          type:
+                            - string
+                            - "null"
+                        status:
+                          enum:
+                            - pending
+                            - running
+                            - succeeded
+                            - failed
+                            - cancelRequested
+                            - cancelled
+                            - recoveryRequired
+                          type: string
+                        hasChanges:
+                          type: boolean
+                        costUsd:
+                          format: double
+                          type:
+                            - number
+                            - "null"
+                        startedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        finishedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        error:
+                          type:
+                            - string
+                            - "null"
+                      required:
+                        - agent
+                        - candidateId
+                        - changesetId
+                        - childSessionId
+                        - costUsd
+                        - error
+                        - finishedAt
+                        - hasChanges
+                        - headSha
+                        - index
+                        - physicalRoot
+                        - startedAt
+                        - status
+                        - workspaceBundleId
+                      type: object
+                    type: array
+                required:
+                  - archiveError
+                  - archiveStatus
+                  - baseSha
+                  - budgetPolicy
+                  - candidates
+                  - checkoutHadUncommittedChanges
+                  - createdAt
+                  - error
+                  - groupId
+                  - integrationId
+                  - n
+                  - ownerId
+                  - ownerLeaseExpiresAt
+                  - phase
+                  - repoCommonDir
+                  - repositoryId
+                  - requestId
+                  - selectedCandidateId
+                  - selectedHeadSha
+                  - sourceRoot
+                  - targetIsNew
+                  - targetRef
+                  - teamRunId
+                  - updatedAt
+                  - version
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/best_of_n_get:
+    post:
+      operationId: internalRpcBestOfNGet
+      tags:
+        - headless-rpc
+      summary: best_of_n_get (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                groupId:
+                  type: string
+                  minLength: 1
+              required:
+                - groupId
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - additionalProperties: false
+                    properties:
+                      groupId:
+                        type: string
+                      requestId:
+                        type: string
+                      repositoryId:
+                        type: string
+                      repoCommonDir:
+                        type: string
+                      sourceRoot:
+                        type: string
+                      baseSha:
+                        type: string
+                      checkoutHadUncommittedChanges:
+                        type: boolean
+                      targetRef:
+                        type: string
+                      targetIsNew:
+                        type: boolean
+                      n:
+                        format: uint32
+                        type: integer
+                        minimum: 0
+                      budgetPolicy:
+                        additionalProperties: false
+                        properties:
+                          maxCostUsd:
+                            format: double
+                            type:
+                              - number
+                              - "null"
+                          maxDurationMs:
+                            format: uint64
+                            type:
+                              - integer
+                              - "null"
+                            minimum: 0
+                        required:
+                          - maxCostUsd
+                          - maxDurationMs
+                        type: object
+                      teamRunId:
+                        type: string
+                      phase:
+                        enum:
+                          - preparing
+                          - running
+                          - awaitingSelection
+                          - publishing
+                          - published
+                          - cancelling
+                          - cancelled
+                          - recoveryRequired
+                        type: string
+                      selectedCandidateId:
+                        type:
+                          - string
+                          - "null"
+                      selectedHeadSha:
+                        type:
+                          - string
+                          - "null"
+                      integrationId:
+                        type:
+                          - string
+                          - "null"
+                      version:
+                        format: uint64
+                        type: integer
+                        minimum: 0
+                      ownerId:
+                        type: string
+                      ownerLeaseExpiresAt:
+                        format: int64
+                        type: integer
+                      archiveStatus:
+                        enum:
+                          - pending
+                          - archiving
+                          - archived
+                          - failed
+                        type: string
+                      archiveError:
+                        type:
+                          - string
+                          - "null"
+                      error:
+                        type:
+                          - string
+                          - "null"
+                      createdAt:
+                        format: int64
+                        type: integer
+                      updatedAt:
+                        format: int64
+                        type: integer
+                      candidates:
+                        items:
+                          additionalProperties: false
+                          properties:
+                            candidateId:
+                              type: string
+                            index:
+                              format: uint32
+                              type: integer
+                              minimum: 0
+                            agent:
+                              additionalProperties: false
+                              properties:
+                                agentId:
+                                  type: string
+                                provider:
+                                  type:
+                                    - string
+                                    - "null"
+                                model:
+                                  type:
+                                    - string
+                                    - "null"
+                              required:
+                                - agentId
+                                - model
+                                - provider
+                              type: object
+                            childSessionId:
+                              type: string
+                            workspaceBundleId:
+                              type:
+                                - string
+                                - "null"
+                            physicalRoot:
+                              type:
+                                - string
+                                - "null"
+                            changesetId:
+                              type:
+                                - string
+                                - "null"
+                            headSha:
+                              type:
+                                - string
+                                - "null"
+                            status:
+                              enum:
+                                - pending
+                                - running
+                                - succeeded
+                                - failed
+                                - cancelRequested
+                                - cancelled
+                                - recoveryRequired
+                              type: string
+                            hasChanges:
+                              type: boolean
+                            costUsd:
+                              format: double
+                              type:
+                                - number
+                                - "null"
+                            startedAt:
+                              format: int64
+                              type:
+                                - integer
+                                - "null"
+                            finishedAt:
+                              format: int64
+                              type:
+                                - integer
+                                - "null"
+                            error:
+                              type:
+                                - string
+                                - "null"
+                          required:
+                            - agent
+                            - candidateId
+                            - changesetId
+                            - childSessionId
+                            - costUsd
+                            - error
+                            - finishedAt
+                            - hasChanges
+                            - headSha
+                            - index
+                            - physicalRoot
+                            - startedAt
+                            - status
+                            - workspaceBundleId
+                          type: object
+                        type: array
+                    required:
+                      - archiveError
+                      - archiveStatus
+                      - baseSha
+                      - budgetPolicy
+                      - candidates
+                      - checkoutHadUncommittedChanges
+                      - createdAt
+                      - error
+                      - groupId
+                      - integrationId
+                      - n
+                      - ownerId
+                      - ownerLeaseExpiresAt
+                      - phase
+                      - repoCommonDir
+                      - repositoryId
+                      - requestId
+                      - selectedCandidateId
+                      - selectedHeadSha
+                      - sourceRoot
+                      - targetIsNew
+                      - targetRef
+                      - teamRunId
+                      - updatedAt
+                      - version
+                    type: object
+                  - type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/best_of_n_list:
+    post:
+      operationId: internalRpcBestOfNList
+      tags:
+        - headless-rpc
+      summary: best_of_n_list (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  additionalProperties: false
+                  properties:
+                    groupId:
+                      type: string
+                    requestId:
+                      type: string
+                    repositoryId:
+                      type: string
+                    repoCommonDir:
+                      type: string
+                    sourceRoot:
+                      type: string
+                    baseSha:
+                      type: string
+                    checkoutHadUncommittedChanges:
+                      type: boolean
+                    targetRef:
+                      type: string
+                    targetIsNew:
+                      type: boolean
+                    n:
+                      format: uint32
+                      type: integer
+                      minimum: 0
+                    budgetPolicy:
+                      additionalProperties: false
+                      properties:
+                        maxCostUsd:
+                          format: double
+                          type:
+                            - number
+                            - "null"
+                        maxDurationMs:
+                          format: uint64
+                          type:
+                            - integer
+                            - "null"
+                          minimum: 0
+                      required:
+                        - maxCostUsd
+                        - maxDurationMs
+                      type: object
+                    teamRunId:
+                      type: string
+                    phase:
+                      enum:
+                        - preparing
+                        - running
+                        - awaitingSelection
+                        - publishing
+                        - published
+                        - cancelling
+                        - cancelled
+                        - recoveryRequired
+                      type: string
+                    selectedCandidateId:
+                      type:
+                        - string
+                        - "null"
+                    selectedHeadSha:
+                      type:
+                        - string
+                        - "null"
+                    integrationId:
+                      type:
+                        - string
+                        - "null"
+                    version:
+                      format: uint64
+                      type: integer
+                      minimum: 0
+                    ownerId:
+                      type: string
+                    ownerLeaseExpiresAt:
+                      format: int64
+                      type: integer
+                    archiveStatus:
+                      enum:
+                        - pending
+                        - archiving
+                        - archived
+                        - failed
+                      type: string
+                    archiveError:
+                      type:
+                        - string
+                        - "null"
+                    error:
+                      type:
+                        - string
+                        - "null"
+                    createdAt:
+                      format: int64
+                      type: integer
+                    updatedAt:
+                      format: int64
+                      type: integer
+                    candidates:
+                      items:
+                        additionalProperties: false
+                        properties:
+                          candidateId:
+                            type: string
+                          index:
+                            format: uint32
+                            type: integer
+                            minimum: 0
+                          agent:
+                            additionalProperties: false
+                            properties:
+                              agentId:
+                                type: string
+                              provider:
+                                type:
+                                  - string
+                                  - "null"
+                              model:
+                                type:
+                                  - string
+                                  - "null"
+                            required:
+                              - agentId
+                              - model
+                              - provider
+                            type: object
+                          childSessionId:
+                            type: string
+                          workspaceBundleId:
+                            type:
+                              - string
+                              - "null"
+                          physicalRoot:
+                            type:
+                              - string
+                              - "null"
+                          changesetId:
+                            type:
+                              - string
+                              - "null"
+                          headSha:
+                            type:
+                              - string
+                              - "null"
+                          status:
+                            enum:
+                              - pending
+                              - running
+                              - succeeded
+                              - failed
+                              - cancelRequested
+                              - cancelled
+                              - recoveryRequired
+                            type: string
+                          hasChanges:
+                            type: boolean
+                          costUsd:
+                            format: double
+                            type:
+                              - number
+                              - "null"
+                          startedAt:
+                            format: int64
+                            type:
+                              - integer
+                              - "null"
+                          finishedAt:
+                            format: int64
+                            type:
+                              - integer
+                              - "null"
+                          error:
+                            type:
+                              - string
+                              - "null"
+                        required:
+                          - agent
+                          - candidateId
+                          - changesetId
+                          - childSessionId
+                          - costUsd
+                          - error
+                          - finishedAt
+                          - hasChanges
+                          - headSha
+                          - index
+                          - physicalRoot
+                          - startedAt
+                          - status
+                          - workspaceBundleId
+                        type: object
+                      type: array
+                  required:
+                    - archiveError
+                    - archiveStatus
+                    - baseSha
+                    - budgetPolicy
+                    - candidates
+                    - checkoutHadUncommittedChanges
+                    - createdAt
+                    - error
+                    - groupId
+                    - integrationId
+                    - n
+                    - ownerId
+                    - ownerLeaseExpiresAt
+                    - phase
+                    - repoCommonDir
+                    - repositoryId
+                    - requestId
+                    - selectedCandidateId
+                    - selectedHeadSha
+                    - sourceRoot
+                    - targetIsNew
+                    - targetRef
+                    - teamRunId
+                    - updatedAt
+                    - version
+                  type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/best_of_n_recover:
+    post:
+      operationId: internalRpcBestOfNRecover
+      tags:
+        - headless-rpc
+      summary: best_of_n_recover (service.internal)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+                  properties:
+                    groupId:
+                      type: string
+                      minLength: 1
+                    expectedVersion:
+                      type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                    ownerId:
+                      type: string
+                      minLength: 1
+                    leaseDurationMs:
+                      type: integer
+                      exclusiveMinimum: 0
+                      maximum: 300000
+                  required:
+                    - groupId
+                    - expectedVersion
+                    - ownerId
+                    - leaseDurationMs
+                  additionalProperties: false
+              required:
+                - input
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  groupId:
+                    type: string
+                  requestId:
+                    type: string
+                  repositoryId:
+                    type: string
+                  repoCommonDir:
+                    type: string
+                  sourceRoot:
+                    type: string
+                  baseSha:
+                    type: string
+                  checkoutHadUncommittedChanges:
+                    type: boolean
+                  targetRef:
+                    type: string
+                  targetIsNew:
+                    type: boolean
+                  n:
+                    format: uint32
+                    type: integer
+                    minimum: 0
+                  budgetPolicy:
+                    additionalProperties: false
+                    properties:
+                      maxCostUsd:
+                        format: double
+                        type:
+                          - number
+                          - "null"
+                      maxDurationMs:
+                        format: uint64
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                    required:
+                      - maxCostUsd
+                      - maxDurationMs
+                    type: object
+                  teamRunId:
+                    type: string
+                  phase:
+                    enum:
+                      - preparing
+                      - running
+                      - awaitingSelection
+                      - publishing
+                      - published
+                      - cancelling
+                      - cancelled
+                      - recoveryRequired
+                    type: string
+                  selectedCandidateId:
+                    type:
+                      - string
+                      - "null"
+                  selectedHeadSha:
+                    type:
+                      - string
+                      - "null"
+                  integrationId:
+                    type:
+                      - string
+                      - "null"
+                  version:
+                    format: uint64
+                    type: integer
+                    minimum: 0
+                  ownerId:
+                    type: string
+                  ownerLeaseExpiresAt:
+                    format: int64
+                    type: integer
+                  archiveStatus:
+                    enum:
+                      - pending
+                      - archiving
+                      - archived
+                      - failed
+                    type: string
+                  archiveError:
+                    type:
+                      - string
+                      - "null"
+                  error:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    format: int64
+                    type: integer
+                  updatedAt:
+                    format: int64
+                    type: integer
+                  candidates:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        candidateId:
+                          type: string
+                        index:
+                          format: uint32
+                          type: integer
+                          minimum: 0
+                        agent:
+                          additionalProperties: false
+                          properties:
+                            agentId:
+                              type: string
+                            provider:
+                              type:
+                                - string
+                                - "null"
+                            model:
+                              type:
+                                - string
+                                - "null"
+                          required:
+                            - agentId
+                            - model
+                            - provider
+                          type: object
+                        childSessionId:
+                          type: string
+                        workspaceBundleId:
+                          type:
+                            - string
+                            - "null"
+                        physicalRoot:
+                          type:
+                            - string
+                            - "null"
+                        changesetId:
+                          type:
+                            - string
+                            - "null"
+                        headSha:
+                          type:
+                            - string
+                            - "null"
+                        status:
+                          enum:
+                            - pending
+                            - running
+                            - succeeded
+                            - failed
+                            - cancelRequested
+                            - cancelled
+                            - recoveryRequired
+                          type: string
+                        hasChanges:
+                          type: boolean
+                        costUsd:
+                          format: double
+                          type:
+                            - number
+                            - "null"
+                        startedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        finishedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        error:
+                          type:
+                            - string
+                            - "null"
+                      required:
+                        - agent
+                        - candidateId
+                        - changesetId
+                        - childSessionId
+                        - costUsd
+                        - error
+                        - finishedAt
+                        - hasChanges
+                        - headSha
+                        - index
+                        - physicalRoot
+                        - startedAt
+                        - status
+                        - workspaceBundleId
+                      type: object
+                    type: array
+                required:
+                  - archiveError
+                  - archiveStatus
+                  - baseSha
+                  - budgetPolicy
+                  - candidates
+                  - checkoutHadUncommittedChanges
+                  - createdAt
+                  - error
+                  - groupId
+                  - integrationId
+                  - n
+                  - ownerId
+                  - ownerLeaseExpiresAt
+                  - phase
+                  - repoCommonDir
+                  - repositoryId
+                  - requestId
+                  - selectedCandidateId
+                  - selectedHeadSha
+                  - sourceRoot
+                  - targetIsNew
+                  - targetRef
+                  - teamRunId
+                  - updatedAt
+                  - version
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/best_of_n_select:
+    post:
+      operationId: internalRpcBestOfNSelect
+      tags:
+        - headless-rpc
+      summary: best_of_n_select (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+                  properties:
+                    mutation:
+                      type: object
+                      properties:
+                        groupId:
+                          type: string
+                          minLength: 1
+                        expectedVersion:
+                          type: integer
+                          minimum: 0
+                          maximum: 9007199254740991
+                        ownerId:
+                          type: string
+                          minLength: 1
+                        leaseDurationMs:
+                          type: integer
+                          exclusiveMinimum: 0
+                          maximum: 300000
+                      required:
+                        - groupId
+                        - expectedVersion
+                        - ownerId
+                        - leaseDurationMs
+                      additionalProperties: false
+                    candidateId:
+                      type: string
+                      minLength: 1
+                    headSha:
+                      type: string
+                      minLength: 1
+                  required:
+                    - mutation
+                    - candidateId
+                    - headSha
+                  additionalProperties: false
+              required:
+                - input
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  groupId:
+                    type: string
+                  requestId:
+                    type: string
+                  repositoryId:
+                    type: string
+                  repoCommonDir:
+                    type: string
+                  sourceRoot:
+                    type: string
+                  baseSha:
+                    type: string
+                  checkoutHadUncommittedChanges:
+                    type: boolean
+                  targetRef:
+                    type: string
+                  targetIsNew:
+                    type: boolean
+                  n:
+                    format: uint32
+                    type: integer
+                    minimum: 0
+                  budgetPolicy:
+                    additionalProperties: false
+                    properties:
+                      maxCostUsd:
+                        format: double
+                        type:
+                          - number
+                          - "null"
+                      maxDurationMs:
+                        format: uint64
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                    required:
+                      - maxCostUsd
+                      - maxDurationMs
+                    type: object
+                  teamRunId:
+                    type: string
+                  phase:
+                    enum:
+                      - preparing
+                      - running
+                      - awaitingSelection
+                      - publishing
+                      - published
+                      - cancelling
+                      - cancelled
+                      - recoveryRequired
+                    type: string
+                  selectedCandidateId:
+                    type:
+                      - string
+                      - "null"
+                  selectedHeadSha:
+                    type:
+                      - string
+                      - "null"
+                  integrationId:
+                    type:
+                      - string
+                      - "null"
+                  version:
+                    format: uint64
+                    type: integer
+                    minimum: 0
+                  ownerId:
+                    type: string
+                  ownerLeaseExpiresAt:
+                    format: int64
+                    type: integer
+                  archiveStatus:
+                    enum:
+                      - pending
+                      - archiving
+                      - archived
+                      - failed
+                    type: string
+                  archiveError:
+                    type:
+                      - string
+                      - "null"
+                  error:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    format: int64
+                    type: integer
+                  updatedAt:
+                    format: int64
+                    type: integer
+                  candidates:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        candidateId:
+                          type: string
+                        index:
+                          format: uint32
+                          type: integer
+                          minimum: 0
+                        agent:
+                          additionalProperties: false
+                          properties:
+                            agentId:
+                              type: string
+                            provider:
+                              type:
+                                - string
+                                - "null"
+                            model:
+                              type:
+                                - string
+                                - "null"
+                          required:
+                            - agentId
+                            - model
+                            - provider
+                          type: object
+                        childSessionId:
+                          type: string
+                        workspaceBundleId:
+                          type:
+                            - string
+                            - "null"
+                        physicalRoot:
+                          type:
+                            - string
+                            - "null"
+                        changesetId:
+                          type:
+                            - string
+                            - "null"
+                        headSha:
+                          type:
+                            - string
+                            - "null"
+                        status:
+                          enum:
+                            - pending
+                            - running
+                            - succeeded
+                            - failed
+                            - cancelRequested
+                            - cancelled
+                            - recoveryRequired
+                          type: string
+                        hasChanges:
+                          type: boolean
+                        costUsd:
+                          format: double
+                          type:
+                            - number
+                            - "null"
+                        startedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        finishedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        error:
+                          type:
+                            - string
+                            - "null"
+                      required:
+                        - agent
+                        - candidateId
+                        - changesetId
+                        - childSessionId
+                        - costUsd
+                        - error
+                        - finishedAt
+                        - hasChanges
+                        - headSha
+                        - index
+                        - physicalRoot
+                        - startedAt
+                        - status
+                        - workspaceBundleId
+                      type: object
+                    type: array
+                required:
+                  - archiveError
+                  - archiveStatus
+                  - baseSha
+                  - budgetPolicy
+                  - candidates
+                  - checkoutHadUncommittedChanges
+                  - createdAt
+                  - error
+                  - groupId
+                  - integrationId
+                  - n
+                  - ownerId
+                  - ownerLeaseExpiresAt
+                  - phase
+                  - repoCommonDir
+                  - repositoryId
+                  - requestId
+                  - selectedCandidateId
+                  - selectedHeadSha
+                  - sourceRoot
+                  - targetIsNew
+                  - targetRef
+                  - teamRunId
+                  - updatedAt
+                  - version
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/best_of_n_start:
+    post:
+      operationId: internalRpcBestOfNStart
+      tags:
+        - headless-rpc
+      summary: best_of_n_start (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+                  properties:
+                    requestId:
+                      type: string
+                      minLength: 1
+                    repositoryId:
+                      type: string
+                      minLength: 1
+                    sourceRoot:
+                      type: string
+                      minLength: 1
+                    baseRef:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                        - type: "null"
+                    targetRef:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                        - type: "null"
+                    targetIsNew:
+                      type: boolean
+                    budgetPolicy:
+                      type: object
+                      properties:
+                        maxCostUsd:
+                          anyOf:
+                            - type: number
+                              exclusiveMinimum: 0
+                            - type: "null"
+                        maxDurationMs:
+                          anyOf:
+                            - type: integer
+                              exclusiveMinimum: 0
+                              maximum: 9007199254740991
+                            - type: "null"
+                      additionalProperties: false
+                    candidates:
+                      minItems: 2
+                      maxItems: 4
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          agentId:
+                            type: string
+                            minLength: 1
+                          provider:
+                            type:
+                              - string
+                              - "null"
+                          model:
+                            type:
+                              - string
+                              - "null"
+                        required:
+                          - agentId
+                        additionalProperties: false
+                    ownerId:
+                      type: string
+                      minLength: 1
+                    leaseDurationMs:
+                      type: integer
+                      exclusiveMinimum: 0
+                      maximum: 300000
+                  required:
+                    - requestId
+                    - repositoryId
+                    - sourceRoot
+                    - targetIsNew
+                    - budgetPolicy
+                    - candidates
+                    - ownerId
+                    - leaseDurationMs
+                  additionalProperties: false
+              required:
+                - input
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  groupId:
+                    type: string
+                  requestId:
+                    type: string
+                  repositoryId:
+                    type: string
+                  repoCommonDir:
+                    type: string
+                  sourceRoot:
+                    type: string
+                  baseSha:
+                    type: string
+                  checkoutHadUncommittedChanges:
+                    type: boolean
+                  targetRef:
+                    type: string
+                  targetIsNew:
+                    type: boolean
+                  n:
+                    format: uint32
+                    type: integer
+                    minimum: 0
+                  budgetPolicy:
+                    additionalProperties: false
+                    properties:
+                      maxCostUsd:
+                        format: double
+                        type:
+                          - number
+                          - "null"
+                      maxDurationMs:
+                        format: uint64
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                    required:
+                      - maxCostUsd
+                      - maxDurationMs
+                    type: object
+                  teamRunId:
+                    type: string
+                  phase:
+                    enum:
+                      - preparing
+                      - running
+                      - awaitingSelection
+                      - publishing
+                      - published
+                      - cancelling
+                      - cancelled
+                      - recoveryRequired
+                    type: string
+                  selectedCandidateId:
+                    type:
+                      - string
+                      - "null"
+                  selectedHeadSha:
+                    type:
+                      - string
+                      - "null"
+                  integrationId:
+                    type:
+                      - string
+                      - "null"
+                  version:
+                    format: uint64
+                    type: integer
+                    minimum: 0
+                  ownerId:
+                    type: string
+                  ownerLeaseExpiresAt:
+                    format: int64
+                    type: integer
+                  archiveStatus:
+                    enum:
+                      - pending
+                      - archiving
+                      - archived
+                      - failed
+                    type: string
+                  archiveError:
+                    type:
+                      - string
+                      - "null"
+                  error:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    format: int64
+                    type: integer
+                  updatedAt:
+                    format: int64
+                    type: integer
+                  candidates:
+                    items:
+                      additionalProperties: false
+                      properties:
+                        candidateId:
+                          type: string
+                        index:
+                          format: uint32
+                          type: integer
+                          minimum: 0
+                        agent:
+                          additionalProperties: false
+                          properties:
+                            agentId:
+                              type: string
+                            provider:
+                              type:
+                                - string
+                                - "null"
+                            model:
+                              type:
+                                - string
+                                - "null"
+                          required:
+                            - agentId
+                            - model
+                            - provider
+                          type: object
+                        childSessionId:
+                          type: string
+                        workspaceBundleId:
+                          type:
+                            - string
+                            - "null"
+                        physicalRoot:
+                          type:
+                            - string
+                            - "null"
+                        changesetId:
+                          type:
+                            - string
+                            - "null"
+                        headSha:
+                          type:
+                            - string
+                            - "null"
+                        status:
+                          enum:
+                            - pending
+                            - running
+                            - succeeded
+                            - failed
+                            - cancelRequested
+                            - cancelled
+                            - recoveryRequired
+                          type: string
+                        hasChanges:
+                          type: boolean
+                        costUsd:
+                          format: double
+                          type:
+                            - number
+                            - "null"
+                        startedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        finishedAt:
+                          format: int64
+                          type:
+                            - integer
+                            - "null"
+                        error:
+                          type:
+                            - string
+                            - "null"
+                      required:
+                        - agent
+                        - candidateId
+                        - changesetId
+                        - childSessionId
+                        - costUsd
+                        - error
+                        - finishedAt
+                        - hasChanges
+                        - headSha
+                        - index
+                        - physicalRoot
+                        - startedAt
+                        - status
+                        - workspaceBundleId
+                      type: object
+                    type: array
+                required:
+                  - archiveError
+                  - archiveStatus
+                  - baseSha
+                  - budgetPolicy
+                  - candidates
+                  - checkoutHadUncommittedChanges
+                  - createdAt
+                  - error
+                  - groupId
+                  - integrationId
+                  - n
+                  - ownerId
+                  - ownerLeaseExpiresAt
+                  - phase
+                  - repoCommonDir
+                  - repositoryId
+                  - requestId
+                  - selectedCandidateId
+                  - selectedHeadSha
+                  - sourceRoot
+                  - targetIsNew
+                  - targetRef
+                  - teamRunId
+                  - updatedAt
+                  - version
+                type: object
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/bot_console_read:
     post:
       operationId: internalRpcBotConsoleRead
@@ -155030,6 +158354,173 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/task_workspace_canonical_root:
+    post:
+      operationId: internalRpcTaskWorkspaceCanonicalRoot
+      tags:
+        - headless-rpc
+      summary: task_workspace_canonical_root (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                  minLength: 1
+              required:
+                - path
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: string
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/task_workspace_changeset_abandon:
     post:
       operationId: internalRpcTaskWorkspaceChangesetAbandon
@@ -194288,6 +197779,14 @@ components:
           - background_monitor_register_scheduled
           - backup_export
           - backup_import
+          - best_of_n_archive
+          - best_of_n_cancel
+          - best_of_n_candidate_progress
+          - best_of_n_get
+          - best_of_n_list
+          - best_of_n_recover
+          - best_of_n_select
+          - best_of_n_start
           - bot_console_read
           - bot_delivery_replay
           - bot_installation_mutate
@@ -194987,6 +198486,7 @@ components:
           - task_workspace_bundle_turn_begin
           - task_workspace_bundle_turn_get
           - task_workspace_bundle_turn_settle
+          - task_workspace_canonical_root
           - task_workspace_changeset_abandon
           - task_workspace_changeset_approve
           - task_workspace_changeset_capture
@@ -195399,10 +198899,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 883
-  generatedRequestSchemaCount: 883
+  internalCommandCount: 892
+  generatedRequestSchemaCount: 892
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 883
+  contractRequestSchemaCount: 892
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 883
+  generatedResponseSchemaCount: 892
   loopbackOnly: true

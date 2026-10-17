@@ -4,6 +4,7 @@
 //! install the same service and expose it through their existing command and
 //! Companion transport surfaces.
 
+mod best_of_n;
 mod bundle;
 mod changeset;
 mod code_result;
@@ -31,6 +32,8 @@ mod transfer;
 mod types;
 mod watcher;
 mod worker_cli;
+
+pub use best_of_n::*;
 
 pub use ports::{
     ExternalPortSubjectKind, PortLeaseSubject, WorkspacePortLeaseList, WorkspacePortLeaseStatus,

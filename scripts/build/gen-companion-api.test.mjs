@@ -189,6 +189,8 @@ test("classifies host commands into one stable domain", () => {
   assert.equal(classifyHostCommand("session_list"), "sessions")
   assert.equal(classifyHostCommand("agent_task_start"), "agents")
   assert.equal(classifyHostCommand("task_workspace_get"), "tasks")
+  assert.equal(classifyHostCommand("best_of_n_start"), "tasks")
+  assert.equal(classifyHostCommand("best_of_n_candidate_progress"), "tasks")
   assert.equal(classifyHostCommand("issue_apply_action"), "tasks")
   assert.equal(classifyHostCommand("workflow_create"), "automation")
   assert.equal(classifyHostCommand("connectors_health"), "connectors")

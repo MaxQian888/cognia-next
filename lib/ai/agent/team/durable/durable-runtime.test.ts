@@ -5,6 +5,7 @@ import { runEventJournal } from "@/lib/db/execution-runs"
 import type { AgentTeam, AgentTeamConfig } from "@/types/agent/agent-team"
 import {
   __resetDurableTeamCoordinatorForTesting,
+  appTeamPathPolicy,
   createDurableTeamCoordinator,
   durableTeamSpec,
   getDurableTeamCoordinator,
@@ -12,6 +13,42 @@ import {
   redactTeamTextForPersistence,
 } from "./durable-runtime"
 import * as runtimeDb from "@/lib/db/agent-team-runtime"
+
+const mockIsTauri = jest.fn(() => false)
+const mockCanonicalRoot = jest.fn()
+jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
+jest.mock("@/lib/task-workspace/user-action", () => ({
+  approvalAwareTransport: {
+    call: (command: string, input: unknown) => mockCanonicalRoot(command, input),
+  },
+}))
+
+describe("appTeamPathPolicy canonical workspace roots", () => {
+  afterEach(() => {
+    mockIsTauri.mockReturnValue(false)
+    mockCanonicalRoot.mockReset()
+  })
+
+  it("uses the Host canonical root authority for disk aliases", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCanonicalRoot.mockResolvedValue("/physical/repo")
+    await expect(appTeamPathPolicy.canonicalize!("/symlink/repo")).resolves.toBe("/physical/repo")
+    expect(mockCanonicalRoot).toHaveBeenCalledWith("task_workspace_canonical_root", {
+      path: "/symlink/repo",
+    })
+  })
+
+  it("fails closed if the Host cannot resolve a root", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCanonicalRoot.mockRejectedValue(new Error("canonical Host root unavailable"))
+    await expect(appTeamPathPolicy.canonicalize!("/missing")).rejects.toThrow("canonical Host root")
+  })
+
+  it("retains lexical browser-only paths when no Host filesystem exists", async () => {
+    await expect(appTeamPathPolicy.canonicalize!("/repo/../work")).resolves.toBe("/work")
+    expect(mockCanonicalRoot).not.toHaveBeenCalled()
+  })
+})
 
 // The coordinator's own behavior is covered against the memory store in
 // `@cognia/agent-orchestration` (coordinator.test.ts). This suite covers the

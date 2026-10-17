@@ -60,6 +60,15 @@ pub(super) const COMMANDS: &[&str] = &[
     "task_workspace_integration_analyze",
     "task_workspace_integration_get",
     "task_workspace_integration_list",
+    "task_workspace_canonical_root",
+    "best_of_n_start",
+    "best_of_n_get",
+    "best_of_n_list",
+    "best_of_n_cancel",
+    "best_of_n_select",
+    "best_of_n_archive",
+    "best_of_n_candidate_progress",
+    "best_of_n_recover",
     "task_workspace_changeset_capture",
     "task_workspace_changeset_mark_ready",
     "task_workspace_changeset_record_review",
@@ -872,6 +881,42 @@ pub(super) async fn dispatch(
                 .map_err(scm_command_error)
                 .and_then(to_json)
         }
+        "task_workspace_canonical_root" => {
+            let path = authorize_workspace_root(host, required(&args, "path")?)?;
+            crate::task_workspace::task_workspace_canonical_root(path).await.map_err(RpcError::internal).and_then(to_json)
+        }
+        "best_of_n_start" => {
+            let input: cognia_task_workspace::StartBestOfN = required(&args, "input")?;
+            crate::task_workspace::best_of_n_start(input).await.map_err(RpcError::internal).and_then(to_json)
+        }
+        "best_of_n_cancel" => {
+            let input: cognia_task_workspace::BestOfNMutation = required(&args, "input")?;
+            crate::task_workspace::best_of_n_cancel(input).await.map_err(RpcError::internal).and_then(to_json)
+        }
+        "best_of_n_archive" => {
+            let input: cognia_task_workspace::BestOfNMutation = required(&args, "input")?;
+            crate::task_workspace::best_of_n_archive(input).await.map_err(RpcError::internal).and_then(to_json)
+        }
+        "best_of_n_candidate_progress" => {
+            let input: cognia_task_workspace::BestOfNCandidateProgress = required(&args, "input")?;
+            crate::task_workspace::best_of_n_candidate_progress(input).await.map_err(RpcError::internal).and_then(to_json)
+        }
+        "best_of_n_recover" => {
+            let input: cognia_task_workspace::BestOfNMutation = required(&args, "input")?;
+            crate::task_workspace::best_of_n_recover(input).await.map_err(RpcError::internal).and_then(to_json)
+        }
+        "best_of_n_get" => {
+            let group_id: String = required(&args, "groupId")?;
+            crate::task_workspace::best_of_n_get(group_id).await.map_err(RpcError::internal).and_then(to_json)
+        }
+        "best_of_n_list" => {
+            crate::task_workspace::best_of_n_list().await.map_err(RpcError::internal).and_then(to_json)
+        }
+        // Authentication or automated approval cannot manufacture an interactive user.
+        "best_of_n_select" => Err((StatusCode::FORBIDDEN, Json(RpcError::new(
+            "best_of_n_interactive_user_required",
+            crate::task_workspace::best_of_n_remote_selection_error(),
+        )))),
         "task_workspace_integration_prepare" => {
             let input: cognia_task_workspace::PrepareIntegration = required(&args, "input")?;
             crate::task_workspace::task_workspace_integration_prepare(input)
@@ -1486,6 +1531,15 @@ pub(super) async fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn best_of_n_remote_selection_never_dispatches_caller_identity() {
+        let source = include_str!("filesystem.rs");
+        let arm = source.split("\"best_of_n_select\" =>").nth(1).unwrap().split("\n        \"").next().unwrap();
+        assert!(arm.contains("StatusCode::FORBIDDEN"));
+        assert!(!arm.contains("required(&args"));
+        assert!(!arm.contains("best_of_n_select("));
+    }
 
     #[test]
     fn workspace_write_conflict_preserves_current_hash_and_http_status() {

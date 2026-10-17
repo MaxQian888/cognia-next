@@ -23,6 +23,8 @@ export interface BeginDurableDispatchInput {
   repositoryId: string
   fileOwnership?: string[]
   runtime?: string
+  /** Independent attempts retain child recovery gates without parking sibling tasks. */
+  isolateFailure?: boolean
   now?: () => number
 }
 
@@ -134,6 +136,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         }
       })(),
       (async () => {
+        if (input.isolateFailure) return
         const run = await store.getRun(input.runId)
         if (run && ["running", "queued", "recovering"].includes(run.status)) {
           await store.updateRunIfCurrent(input.runId, run, {
@@ -186,6 +189,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
     if (persistenceAbort.signal.aborted) throw writeError
   }
   const parkRun = async (reason: string, at: number): Promise<void> => {
+    if (input.isolateFailure) return
     const run = await store.getRun(input.runId)
     if (!run || ["completed", "failed", "cancelled", "terminated"].includes(run.status)) return
     await store.updateRunIfCurrent(input.runId, run, {

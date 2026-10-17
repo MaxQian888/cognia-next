@@ -828,6 +828,11 @@ impl TaskWorkspaceService {
             .iter()
             .map(|id| self.integration_changeset(id))
             .collect::<Result<Vec<_>, _>>()?;
+        for changeset in &changesets {
+            if self.guard_best_of_n_changeset(changeset, &request.target_ref).map_err(IntegrationError::InvalidRequest)?.is_some() && (changesets.len() != 1 || request.on_conflict != IntegrationConflictPolicy::Stop) {
+                return Err(IntegrationError::InvalidRequest("best-of-N requires only the selected winner and stop on conflict".into()));
+            }
+        }
         let analysis = analyze_changesets(
             &changesets,
             Some(&request.target_ref),
@@ -1029,6 +1034,9 @@ impl TaskWorkspaceService {
             &updates,
             request.provisioning.as_ref(),
         )?;
+        for changeset in &changesets {
+            self.record_best_of_n_integration(changeset, &integration_id, false).map_err(IntegrationError::Store)?;
+        }
         let result = self.compose_integration(&mut run, &worktree, request.provisioning.as_ref());
         if let Err(error) = result {
             let admin = self.git_admin_lock(Path::new(&run.repo_common_dir));
@@ -1741,6 +1749,12 @@ impl TaskWorkspaceService {
         }
         run.error = None;
         self.save_progress(run, &previous, &updates)?;
+        if !rollback {
+            for item in &run.items {
+                let changeset = self.integration_changeset(&item.changeset_id)?;
+                self.record_best_of_n_integration(&changeset, &run.integration_id, true).map_err(IntegrationError::Store)?;
+            }
+        }
         self.finish_integration_provenance(run, result, rollback);
         Ok(())
     }
@@ -1774,6 +1788,11 @@ impl TaskWorkspaceService {
                 });
             }
             require_candidate(&run, candidate_sha)?;
+            for item in &run.items {
+                let changeset = self.integration_changeset(&item.changeset_id)?;
+                self.guard_best_of_n_changeset(&changeset, &run.target_ref)
+                    .map_err(IntegrationError::InvalidRequest)?;
+            }
             let required_checks = run
                 .required_checks
                 .iter()
@@ -4861,6 +4880,126 @@ mod tests {
                 fs::read(fixture.source.join("left.txt")).unwrap(),
                 original_file
             );
+        }
+    }
+    fn register_best_of_n_test_group(
+        fixture: &Fixture,
+        changeset: &AgentChangeset,
+        selected: bool,
+    ) -> crate::BestOfNGroup {
+        let mut group = fixture
+            .service
+            .best_of_n_start(crate::StartBestOfN {
+                request_id: "integration-guard".into(),
+                repository_id: "repo".into(),
+                source_root: fixture.source.to_string_lossy().into_owned(),
+                base_ref: None,
+                target_ref: Some("main".into()),
+                target_is_new: false,
+                budget_policy: crate::BestOfNBudgetPolicy {
+                    max_cost_usd: None,
+                    max_duration_ms: Some(600000),
+                },
+                candidates: (0..2)
+                    .map(|_| crate::BestOfNAgentDescriptor {
+                        agent_id: "test".into(),
+                        provider: None,
+                        model: None,
+                    })
+                    .collect(),
+                owner_id: "test".into(),
+                lease_duration_ms: 60000,
+            })
+            .unwrap();
+        group.candidates[0].child_session_id = changeset.session_id.clone().unwrap();
+        if selected {
+            group.candidates[0].changeset_id = Some(changeset.changeset_id.clone());
+            group.candidates[0].head_sha = Some(changeset.head_sha.clone());
+            group.candidates[0].has_changes = true;
+            group.candidates[0].status = crate::BestOfNCandidateStatus::Succeeded;
+            group.selected_candidate_id = Some(group.candidates[0].candidate_id.clone());
+            group.selected_head_sha = Some(changeset.head_sha.clone());
+            group.phase = crate::BestOfNPhase::Publishing;
+        }
+        let store = fixture.service.store.lock();
+        store
+            .connection
+            .execute(
+                "UPDATE best_of_n_groups SET payload=?1 WHERE group_id=?2",
+                rusqlite::params![serde_json::to_string(&group).unwrap(), group.group_id],
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "UPDATE best_of_n_candidates SET child_session_id=?1 WHERE candidate_id=?2",
+                rusqlite::params![changeset.session_id, group.candidates[0].candidate_id],
+            )
+            .unwrap();
+        group
+    }
+
+    #[test]
+    fn best_of_n_prepare_rejects_loser_even_before_changeset_progress_registration() {
+        let _ports = crate::ports::TestPortProbeGuard::vacant();
+        let fixture = Fixture::new();
+        let changeset = fixture.capture("loser", &[("left.txt", "loser\n")]);
+        register_best_of_n_test_group(&fixture, &changeset, false);
+        let result = fixture.service.prepare_integration(fixture.request(
+            &[&changeset],
+            IntegrationStrategy::Merge,
+            IntegrationConflictPolicy::Stop,
+        ));
+        assert!(
+            matches!(result, Err(IntegrationError::InvalidRequest(message)) if message.contains("best-of-N publish guard"))
+        );
+        assert!(fixture.service.list_integrations().unwrap().is_empty());
+    }
+
+    #[test]
+    fn best_of_n_publish_rechecks_winner_and_recorded_head() {
+        let _ports = crate::ports::TestPortProbeGuard::vacant();
+        for change_head in [false, true] {
+            let fixture = Fixture::new();
+            let changeset = fixture.capture("winner", &[("left.txt", "winner\n")]);
+            let group = register_best_of_n_test_group(&fixture, &changeset, true);
+            let run = fixture
+                .service
+                .prepare_integration(fixture.request(
+                    &[&changeset],
+                    IntegrationStrategy::Merge,
+                    IntegrationConflictPolicy::Stop,
+                ))
+                .unwrap();
+            let mut latest = fixture
+                .service
+                .best_of_n_get(&group.group_id)
+                .unwrap()
+                .unwrap();
+            if change_head {
+                latest.selected_head_sha = Some(group.base_sha);
+            } else {
+                latest.selected_candidate_id = None;
+            }
+            fixture
+                .service
+                .store
+                .lock()
+                .connection
+                .execute(
+                    "UPDATE best_of_n_groups SET payload=?1 WHERE group_id=?2",
+                    rusqlite::params![serde_json::to_string(&latest).unwrap(), latest.group_id],
+                )
+                .unwrap();
+            let result = fixture.service.publish_integration(
+                &run.integration_id,
+                run.candidate_sha.as_ref().unwrap(),
+                vec![],
+            );
+            assert!(
+                matches!(result, Err(IntegrationError::InvalidRequest(message)) if message.contains("best-of-N publish guard"))
+            );
+            assert_eq!(fixture.target(), run.expected_old_sha);
         }
     }
 }

@@ -19,6 +19,16 @@ function grant(fields: Partial<AgentCapabilityGrantV1> = {}): AgentCapabilityGra
 }
 
 describe("validateAgentCapabilityGrant", () => {
+  it("rejects invalid attempt budgets and never widens a composed budget", () => {
+    for (const maxBudgetUsd of [0, -1, NaN, Infinity]) {
+      expect(validateAgentCapabilityGrant(grant({ maxBudgetUsd })).ok).toBe(false)
+    }
+    expect(validateAgentCapabilityGrant(grant({ maxBudgetUsd: 0.25 })).ok).toBe(true)
+    expect(
+      mergeCapabilityGrants(grant({ maxBudgetUsd: 1 }), grant({ maxBudgetUsd: 8 })).maxBudgetUsd
+    ).toBe(1)
+    expect(mergeCapabilityGrants(grant(), grant({ maxBudgetUsd: 2 })).maxBudgetUsd).toBe(2)
+  })
   it("accepts a fully populated grant", () => {
     const result = validateAgentCapabilityGrant(
       grant({

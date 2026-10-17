@@ -28,6 +28,11 @@ use cognia_task_workspace::{
     ExternalPortSubjectKind, WorkspacePortLease, WorkspacePortLeaseList,
     WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
+use cognia_task_workspace::{
+    BestOfNCandidateProgress, BestOfNGroup, BestOfNMutation, StartBestOfN,
+};
+#[cfg(feature = "tauri-host")]
+use cognia_task_workspace::BestOfNSelect;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1215,6 +1220,162 @@ where
         })?
 }
 
+/// Resolve the physical directory used to arbitrate durable-team write leases.
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn task_workspace_canonical_root(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = std::fs::canonicalize(&path)
+            .map_err(|error| format!("workspace unavailable: {error}"))?;
+        if !root.is_dir() {
+            return Err("workspace root must be a directory".into());
+        }
+        Ok(root.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|error| format!("workspace resolution panicked: {error}"))?
+}
+
+/// Best-of-N runs share the Host's workspace ledger and blocking I/O boundary.
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn best_of_n_start(input: StartBestOfN) -> Result<BestOfNGroup, String> {
+    blocking(move |service| service.best_of_n_start(input)).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn best_of_n_get(group_id: String) -> Result<Option<BestOfNGroup>, String> {
+    blocking(move |service| service.best_of_n_get(&group_id)).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn best_of_n_list() -> Result<Vec<BestOfNGroup>, String> {
+    blocking(move |service| service.best_of_n_list()).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn best_of_n_cancel(input: BestOfNMutation) -> Result<BestOfNGroup, String> {
+    blocking(move |service| service.best_of_n_cancel(input)).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn best_of_n_archive(input: BestOfNMutation) -> Result<BestOfNGroup, String> {
+    blocking(move |service| service.best_of_n_archive(input)).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn best_of_n_recover(input: BestOfNMutation) -> Result<BestOfNGroup, String> {
+    blocking(move |service| service.best_of_n_recover(input)).await
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn best_of_n_candidate_progress(
+    input: BestOfNCandidateProgress,
+) -> Result<BestOfNGroup, String> {
+    blocking(move |service| service.best_of_n_candidate_progress(input)).await
+}
+
+/// Transport identity is supplied by the Host, never deserialized from args.
+/// Companion and unattended callers cannot turn an approval into a manual pick.
+pub fn best_of_n_remote_selection_error() -> String {
+    "best_of_n_interactive_user_required: select a candidate in the local interactive app".into()
+}
+
+#[cfg(feature = "tauri-host")]
+fn best_of_n_selection_ui_allowed(
+    label: &str,
+    url: &tauri::Url,
+    dev_url: Option<&tauri::Url>,
+) -> bool {
+    if label != "main" || !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    let packaged = url.port().is_none()
+        && ((url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+            || (matches!(url.scheme(), "http" | "https")
+                && url.host_str() == Some("tauri.localhost")));
+    let development = dev_url.is_some_and(|dev| {
+        matches!(url.scheme(), "http" | "https")
+            && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
+            && url.origin() == dev.origin()
+    });
+    packaged || development
+}
+
+#[cfg(any(feature = "tauri-host", test))]
+fn best_of_n_selection_confirmation(
+    group: &BestOfNGroup,
+    input: &BestOfNSelect,
+) -> Result<String, String> {
+    use cognia_task_workspace::{BestOfNCandidateStatus, BestOfNPhase};
+    if group.group_id != input.mutation.group_id
+        || group.version != input.mutation.expected_version
+        || group.owner_id != input.mutation.owner_id
+    {
+        return Err("best-of-N selection changed; refresh before confirming".into());
+    }
+    let candidate = group.candidates.iter().find(|candidate| {
+        candidate.candidate_id == input.candidate_id
+            && candidate.status == BestOfNCandidateStatus::Succeeded
+            && candidate.has_changes
+            && candidate.head_sha.as_deref() == Some(input.head_sha.as_str())
+    });
+    let candidate = candidate
+        .filter(|_| matches!(group.phase, BestOfNPhase::Running | BestOfNPhase::AwaitingSelection))
+        .ok_or("best-of-N candidate is not selectable at the requested head")?;
+    // Debug quoting prevents repository/agent names from injecting extra dialog lines.
+    Ok(format!(
+        "Choose candidate {} as the only result for this best-of-N group?\n\nAgent: {:?}\nRepository: {:?}\nHead: {:?}\n{}: {:?}\n\nRemaining attempts will stop. Nothing is pushed.",
+        candidate.index + 1,
+        candidate.agent.agent_id,
+        group.source_root,
+        input.head_sha,
+        if group.target_is_new { "New result branch" } else { "Existing branch to update" },
+        group.target_ref,
+    ))
+}
+
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn best_of_n_select(
+    webview: tauri::Webview,
+    input: BestOfNSelect,
+) -> Result<BestOfNGroup, String> {
+    use tauri::Manager;
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let url = webview.url().map_err(|error| error.to_string())?;
+    let dev_url = if cfg!(debug_assertions) {
+        webview.app_handle().config().build.dev_url.as_ref()
+    } else {
+        None
+    };
+    if !best_of_n_selection_ui_allowed(webview.label(), &url, dev_url) {
+        return Err(best_of_n_remote_selection_error());
+    }
+    let group = best_of_n_get(input.mutation.group_id.clone())
+        .await?
+        .ok_or("best-of-N group not found")?;
+    let confirmation = best_of_n_selection_confirmation(&group, &input)?;
+    // Frontend plugins share the main renderer. Its origin alone cannot prove a
+    // user action, so only this Host-owned native dialog grants selection authority.
+    // The subsequent CAS binds approval to the exact ledger version shown here.
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    webview.app_handle().dialog()
+        .message(confirmation)
+        .title("Select best-of-N result")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom("Select candidate".into(), "Cancel".into()))
+        .show(move |approved| { let _ = sender.send(approved); });
+    if !receiver.await.map_err(|_| "best-of-N selection confirmation was closed")? {
+        return Err("best-of-N selection was not confirmed by the user".into());
+    }
+    blocking(move |service| {
+        service.best_of_n_select(
+            input,
+            cognia_task_workspace::BestOfNSelectionOrigin::InteractiveUser,
+        )
+    })
+    .await
+}
+
 #[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn task_workspace_changeset_capture(
     input: CaptureChangeset,
@@ -2019,6 +2180,115 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn canonical_workspace_root_handles_non_git_roots_and_rejects_missing_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().to_string_lossy().into_owned();
+        assert_eq!(
+            super::task_workspace_canonical_root(path.clone())
+                .await
+                .unwrap(),
+            root.path().canonicalize().unwrap().to_string_lossy()
+        );
+        let file = root.path().join("file");
+        std::fs::write(&file, "text").unwrap();
+        assert!(
+            super::task_workspace_canonical_root(file.to_string_lossy().into_owned())
+                .await
+                .is_err()
+        );
+        assert!(
+            super::task_workspace_canonical_root(format!("{path}/missing"))
+                .await
+                .is_err()
+        );
+        #[cfg(unix)]
+        {
+            let alias = root.path().join("alias");
+            std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+            assert_eq!(
+                super::task_workspace_canonical_root(alias.to_string_lossy().into_owned())
+                    .await
+                    .unwrap(),
+                root.path().canonicalize().unwrap().to_string_lossy()
+            );
+        }
+    }
+
+    #[test]
+    fn best_of_n_selection_is_not_a_caller_supplied_origin() {
+        assert!(super::best_of_n_remote_selection_error()
+            .starts_with("best_of_n_interactive_user_required:"));
+        let source = include_str!("host_surface.rs");
+        let select = source
+            .split("pub async fn best_of_n_select(")
+            .nth(1)
+            .unwrap()
+            .split("\n}\n")
+            .next()
+            .unwrap();
+        assert!(select.contains("webview: tauri::Webview"));
+        assert!(select.contains("best_of_n_selection_ui_allowed"));
+        assert!(!select.contains("origin:"));
+        assert!(select.contains("best_of_n_selection_confirmation(&group, &input)?"));
+        assert!(select.contains(".show(move |approved|"));
+        assert!(select.find("receiver.await").unwrap() < select.find("service.best_of_n_select(").unwrap());
+    }
+
+    #[test]
+    fn best_of_n_native_confirmation_is_bound_to_authoritative_head_and_target() {
+        let group: super::BestOfNGroup = serde_json::from_value(serde_json::json!({
+            "groupId":"group", "requestId":"request", "repositoryId":"repo",
+            "repoCommonDir":"/repo/.git", "sourceRoot":"/repo", "baseSha":"base",
+            "checkoutHadUncommittedChanges":false, "targetRef":"refs/heads/result",
+            "targetIsNew":false, "n":2, "budgetPolicy":{"maxCostUsd":null,"maxDurationMs":null},
+            "teamRunId":"team", "phase":"awaitingSelection", "selectedCandidateId":null,
+            "selectedHeadSha":null, "integrationId":null, "version":7, "ownerId":"owner",
+            "ownerLeaseExpiresAt":1000, "archiveStatus":"pending", "archiveError":null,
+            "error":null, "createdAt":0, "updatedAt":0,
+            "candidates":[{"candidateId":"candidate", "index":0,
+                "agent":{"agentId":"agent\nspoofed", "provider":null, "model":null},
+                "childSessionId":"child", "workspaceBundleId":"bundle", "physicalRoot":"/attempt",
+                "changesetId":"changeset", "headSha":"head", "status":"succeeded",
+                "hasChanges":true, "costUsd":null, "startedAt":0, "finishedAt":1, "error":null}]
+        })).unwrap();
+        let input = super::BestOfNSelect {
+            mutation: super::BestOfNMutation {
+                group_id: "group".into(), expected_version: 7, owner_id: "owner".into(), lease_duration_ms: 60_000,
+            },
+            candidate_id: "candidate".into(), head_sha: "head".into(),
+        };
+        let text = super::best_of_n_selection_confirmation(&group, &input).unwrap();
+        assert!(text.contains("Existing branch to update: \"refs/heads/result\""));
+        assert!(text.contains("Head: \"head\""));
+        assert!(text.contains("agent\\nspoofed"));
+        assert!(!text.contains("agent\nspoofed"));
+        let mut stale = input.clone();
+        stale.mutation.expected_version -= 1;
+        assert!(super::best_of_n_selection_confirmation(&group, &stale).is_err());
+        stale = input.clone();
+        stale.head_sha = "different".into();
+        assert!(super::best_of_n_selection_confirmation(&group, &stale).is_err());
+        let mut unchanged = group;
+        unchanged.candidates[0].has_changes = false;
+        assert!(super::best_of_n_selection_confirmation(&unchanged, &input).is_err());
+    }
+
+    #[cfg(feature = "tauri-host")]
+    #[test]
+    fn best_of_n_selection_rejects_plugin_and_remote_webviews() {
+        let local = tauri::Url::parse("tauri://localhost/chat").unwrap();
+        assert!(super::best_of_n_selection_ui_allowed("main", &local, None));
+        assert!(!super::best_of_n_selection_ui_allowed(
+            "plugin", &local, None
+        ));
+        assert!(!super::best_of_n_selection_ui_allowed(
+            "main",
+            &tauri::Url::parse("https://example.com").unwrap(),
+            None
+        ));
+    }
+
     #[test]
     fn port_subject_commands_reject_registry_and_default_to_host_namespace() {
         assert!(serde_json::from_str::<super::ExternalPortSubjectKind>("\"registry\"").is_err());

@@ -24,7 +24,7 @@ path = "src/lib.rs"
 # watch a run through the `AppHandle` (`TauriResourceEventSink`). Off by
 # default so the crate builds and tests Tauri-free; `src-tauri` turns it on.
 default = []
-tauri-host = ["dep:tauri"]
+tauri-host = ["dep:tauri", "dep:tauri-plugin-dialog"]
 
 [dependencies]
 cognia-task-workspace = { path = "../cognia-task-workspace" }
@@ -43,7 +43,8 @@ cognia-core = { path = "../cognia-core", features = ["rt"] }
 # The git token this host keeps for a remote's git host (ADR-0224 A6).
 cognia-secrets = { path = "../cognia-secrets" }
 tauri = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["rt", "time"] }
+tauri-plugin-dialog = { version = "2", optional = true }
+tokio = { workspace = true, features = ["rt", "time", "sync"] }
 parking_lot.workspace = true
 schemars.workspace = true
 serde = { workspace = true, features = ["derive"] }

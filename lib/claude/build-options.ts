@@ -1548,6 +1548,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   }
   const grant = foldCapabilityGrants([...(ctx.capabilityGrants ?? []), ...asideGrants])
   if (grant?.maxTurns !== undefined) opts.maxTurns = grant.maxTurns
+  if (grant?.maxBudgetUsd !== undefined) opts.maxBudgetUsd = grant.maxBudgetUsd
 
   // --- Resolve skills: character.skillIds ∪ ephemeralSkillIds, minus session-disables.
   // Honour the per-skill `status` flag — disabled skills don't get appended,
@@ -4867,7 +4868,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // cost until the renderer-side turn/token budget catches it post-turn.
     const goalBudget = ctx.activeGoal.config?.maxBudgetUsd
     if (typeof goalBudget === "number" && goalBudget > 0) {
-      opts.maxBudgetUsd = goalBudget
+      opts.maxBudgetUsd = Math.min(opts.maxBudgetUsd ?? goalBudget, goalBudget)
     }
   }
 

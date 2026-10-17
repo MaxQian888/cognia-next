@@ -734,7 +734,7 @@ pub fn capture_changeset_core(
     existing: Option<&AgentChangeset>,
     now: i64,
 ) -> Result<AgentChangeset, ChangesetError> {
-    capture_changeset_with_overlay(workspace, request, run, existing, now, None)
+    capture_changeset_with_overlay(workspace, request, run, existing, now, None, None)
 }
 
 fn capture_changeset_with_overlay(
@@ -744,6 +744,7 @@ fn capture_changeset_with_overlay(
     existing: Option<&AgentChangeset>,
     now: i64,
     overlay: Option<&CaptureOverlay>,
+    frozen: Option<&(String, String)>,
 ) -> Result<AgentChangeset, ChangesetError> {
     if workspace.isolation_kind != IsolationKind::GitWorktree
         || workspace.workspace_id != request.workspace_id
@@ -772,20 +773,25 @@ fn capture_changeset_with_overlay(
             workspace.workspace_id.clone(),
         ));
     }
-    let target_ref = capture_target(
-        workspace,
-        request
-            .target_ref
-            .as_deref()
-            .or_else(|| existing.map(|old| old.target_ref.as_str())),
-    )?;
+    let target_ref = if let Some((target, _)) = frozen {
+        target.clone()
+    } else {
+        capture_target(
+            workspace,
+            request.target_ref.as_deref().or_else(|| existing.map(|old| old.target_ref.as_str())),
+        )?
+    };
     if workspace.base == WorkspaceBaseSpec::WorkingState && overlay.is_none() {
         return Err(ChangesetError::InvalidWorkspace(format!(
             "{} has no persisted working-state baseline",
             workspace.workspace_id
         )));
     }
-    let target = git_text(root, &["rev-parse", &format!("{target_ref}^{{commit}}")])?;
+    let target = if let Some((_, base)) = frozen {
+        base.clone()
+    } else {
+        git_text(root, &["rev-parse", &format!("{target_ref}^{{commit}}")])?
+    };
     let worktree_head = git_text(root, &["rev-parse", "HEAD^{commit}"])?;
     let original_base = git_text(root, &["merge-base", &target, &worktree_head])?;
     reject_sensitive_history(root, &original_base, &worktree_head)?;
@@ -1348,6 +1354,7 @@ impl crate::TaskWorkspaceService {
         } else {
             None
         };
+        let frozen = crate::best_of_n::frozen_capture(&store.connection, &workspace).map_err(ChangesetError::Store)?;
         let record = capture_changeset_with_overlay(
             &workspace,
             &request,
@@ -1355,6 +1362,7 @@ impl crate::TaskWorkspaceService {
             existing.as_ref(),
             now_ms(),
             overlay.as_ref(),
+            frozen.as_ref(),
         )?;
         if existing
             .as_ref()
@@ -2057,6 +2065,7 @@ mod tests {
                 None,
                 3,
                 Some(&overlay),
+                None,
             );
             if dirty {
                 assert_eq!(result, Err(ChangesetError::OverlayUnsupported));
@@ -2104,6 +2113,7 @@ mod tests {
             None,
             3,
             Some(&overlay),
+            None,
         )
         .unwrap();
         assert_eq!(record.files.len(), 1);
@@ -2125,7 +2135,8 @@ mod tests {
                 None,
                 None,
                 4,
-                Some(&overlay)
+                Some(&overlay),
+                None,
             ),
             Err(ChangesetError::OverlayConflict {
                 files: vec!["one.txt".into()]
@@ -3113,5 +3124,33 @@ mod tests {
         assert_eq!(value["changesetId"], "cs");
         assert_eq!(value["baseSha"], "base");
         assert!(value.get("changeset_id").is_none());
+    }
+    #[test]
+    fn best_of_n_capture_uses_frozen_base_before_result_branch_exists() {
+        let fixture = Fixture::new();
+        let frozen = (
+            "refs/heads/best-of-n/not-created".to_string(),
+            git_text(fixture.root(), &["rev-parse", "HEAD"]).unwrap(),
+        );
+        fs::write(fixture.root().join("one.txt"), "candidate\n").unwrap();
+        let record = capture_changeset_with_overlay(
+            &fixture.workspace,
+            &fixture.request(),
+            None,
+            None,
+            now_ms(),
+            None,
+            Some(&frozen),
+        )
+        .unwrap();
+        assert_eq!(record.target_ref, frozen.0);
+        assert_eq!(record.base_sha, frozen.1);
+        assert!(!git_output(
+            fixture.root(),
+            &["show-ref", "--verify", "--quiet", &record.target_ref]
+        )
+        .unwrap()
+        .status
+        .success());
     }
 }

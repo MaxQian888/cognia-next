@@ -5,6 +5,23 @@ description: How @cognia/agent-orchestration runs a durable Agent Team — the s
 
 # Orchestration
 
+## Independent best-of-N attempts
+
+`lib/best-of-n/service.ts` exposes `startBestOfN`, `recoverBestOfN` and
+`cancelBestOfN`. The Host workspace SQLite ledger owns idempotent allocation,
+the frozen commit SHA, candidate sessions and physical roots, budget, expiring
+owner lease, manual winner and archive progress. `core.ts` schedules exactly
+2–4 independent tasks; `runtime.ts` binds them to durable dispatch, session-owned
+bundles, ADR-0229 ports and changeset capture. It never sends a parent turn.
+
+Write leases use Host-canonicalized physical roots. The opt-in
+`isolateFailure` dispatch mode parks only the failing child. Recovery observes
+ledger evidence and never automatically replays uncertain writes. Capture,
+integration prepare and publish enforce the frozen-base/winner contract even
+through generic SCM callers. See [ADR-0230](/docs/adr/0230-best-of-n-attempts-share-a-frozen-base)
+for state and authorization rules. UI and public plugin/CLI entry points are
+later-phase work.
+
 `@cognia/agent-orchestration` is the host-independent core of the durable
 Agent Team. It has no dependencies. It owns the run records, the persistence
 rules, the coordinator (admission, fair scheduling, workspace leases,

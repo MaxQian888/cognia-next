@@ -606,7 +606,7 @@ const HOST_CATEGORIES = [
     title: "Tasks and workspaces",
     description: "Task lifecycle, resources, patches, runs, and workspace settlement.",
     skill: "cognia-host-tasks",
-    pattern: /^(task_|execution_|issue_)/,
+    pattern: /^(task_|execution_|issue_|best_of_n_)/,
   },
   {
     id: "automation",
@@ -705,6 +705,7 @@ const HOST_RESOURCE_ALIASES = [
   [/^(?:skill_|skills_)/, "skills"],
   [/^task_resource_/, "task-resources"],
   [/^task_workspace_/, "task-workspaces"],
+  [/^best_of_n_/, "best-of-n"],
   [/^(?:connector_|connectors_|adapter_)/, "connectors"],
   [/^(?:register_push_token|revoke_push_token|remote_notification_publish)$/, "notifications"],
   [/^(?:ensure_dir|ensure_dir_confined|default_export_dir|read_text_file|write_text_file|write_text_file_confined)$/, "files"],

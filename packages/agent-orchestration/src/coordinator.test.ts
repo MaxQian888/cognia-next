@@ -612,6 +612,143 @@ describe("durable AgentTeam coordinator", () => {
     expect(order).toEqual(["writer-1:start", "reader", "writer-1:end", "writer-2"])
   })
 
+  it("runs independent candidate workspaces concurrently without disjoint file ownership", async () => {
+    const coordinator = make()
+    await coordinator.prepareRun(spec(), "run-admission")
+    for (const id of ["one", "two"]) {
+      await coordinator.registerChild({
+        runId: "run-admission",
+        childRunId: id,
+        teammateId: id,
+        taskId: id,
+        repositoryId: "primary",
+        access: "write",
+        workspacePath: `/candidates/${id}`,
+      })
+    }
+    let release!: () => void
+    const first = coordinator.withWorkspaceLease(
+      { runId: "run-admission", repositoryId: "primary", access: "write", childRunId: "one" },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    await waitUntil(() => !!release)
+    const operation = jest.fn()
+    await coordinator.withWorkspaceLease(
+      { runId: "run-admission", repositoryId: "primary", access: "write", childRunId: "two" },
+      operation
+    )
+    expect(operation).toHaveBeenCalledTimes(1)
+    release()
+    await first
+  })
+
+  it("serializes canonical workspace aliases across different runs and repository ids", async () => {
+    const canonicalize = jest.fn(async () => "/physical")
+    const coordinator = make({ paths: { ...posixPaths, canonicalize } })
+    await coordinator.prepareRun(spec(), "one")
+    await coordinator.prepareRun(
+      spec({
+        repositories: [{ id: "alias", role: "primary", path: "/symlink", writable: true }],
+      }),
+      "two"
+    )
+    let release!: () => void
+    const first = coordinator.withWorkspaceLease(
+      { runId: "one", repositoryId: "primary", access: "write" },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    await waitUntil(() => !!release)
+    const operation = jest.fn()
+    const second = coordinator.withWorkspaceLease(
+      { runId: "two", repositoryId: "alias", access: "write" },
+      operation
+    )
+    await waitUntil(() => canonicalize.mock.calls.length === 2)
+    expect(operation).not.toHaveBeenCalled()
+    release()
+    await Promise.all([first, second])
+    expect(operation).toHaveBeenCalledTimes(1)
+    expect(canonicalize.mock.calls).toEqual([["/repo"], ["/symlink"]])
+  })
+
+  it("keeps legacy isolated disjoint ownership and exclusive writer modes mutually safe", async () => {
+    const coordinator = make()
+    await coordinator.prepareRun(spec({ writeMode: "isolated-parallel" }), "isolated")
+    await coordinator.prepareRun(spec(), "exclusive")
+    let release!: () => void
+    const first = coordinator.withWorkspaceLease(
+      { runId: "isolated", repositoryId: "primary", access: "write", fileOwnership: ["src/a"] },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    await waitUntil(() => !!release)
+    const disjoint = jest.fn()
+    await coordinator.withWorkspaceLease(
+      { runId: "isolated", repositoryId: "primary", access: "write", fileOwnership: ["src/b"] },
+      disjoint
+    )
+    expect(disjoint).toHaveBeenCalledTimes(1)
+    const exclusive = jest.fn()
+    const waiting = coordinator.withWorkspaceLease(
+      { runId: "exclusive", repositoryId: "primary", access: "write" },
+      exclusive
+    )
+    expect(exclusive).not.toHaveBeenCalled()
+    await expect(
+      coordinator.withWorkspaceLease(
+        { runId: "isolated", repositoryId: "primary", access: "write", fileOwnership: ["src/c"] },
+        jest.fn()
+      )
+    ).rejects.toThrow("overlaps")
+    release()
+    await Promise.all([first, waiting])
+    expect(exclusive).toHaveBeenCalledTimes(1)
+  })
+
+  it("compares absolute alias ownership against relative claims on the canonical root", async () => {
+    const coordinator = make({ paths: { ...posixPaths, canonicalize: async () => "/physical" } })
+    await coordinator.prepareRun(spec({ writeMode: "isolated-parallel" }), "isolated")
+    let release!: () => void
+    const request = { runId: "isolated", repositoryId: "primary", access: "write" as const }
+    const first = coordinator.withWorkspaceLease(
+      { ...request, fileOwnership: ["/repo/src"] },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    await waitUntil(() => !!release)
+    await expect(
+      coordinator.withWorkspaceLease({ ...request, fileOwnership: ["src/file.ts"] }, jest.fn())
+    ).rejects.toThrow("overlaps")
+    release()
+    await first
+  })
+
+  it("rejects invalid Host canonical roots and mismatched durable child identities", async () => {
+    const coordinator = make({ paths: { ...posixPaths, canonicalize: async () => "" } })
+    await coordinator.prepareRun(spec(), "run-admission")
+    const operation = jest.fn()
+    const request = { runId: "run-admission", repositoryId: "primary", access: "write" as const }
+    await expect(coordinator.withWorkspaceLease(request, operation)).rejects.toThrow("canonical")
+    await register(coordinator, "one")
+    await expect(
+      coordinator.withWorkspaceLease(
+        { ...request, repositoryId: "dep", childRunId: "one" },
+        operation
+      )
+    ).rejects.toThrow("does not match")
+    expect(operation).not.toHaveBeenCalled()
+  })
+
   it("delivers live steering and queues a durable fallback when live control fails", async () => {
     const coordinator = make({ now: () => 200 })
     await coordinator.prepareRun(spec(), "run-2")

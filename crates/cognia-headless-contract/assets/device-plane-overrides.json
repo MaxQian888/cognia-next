@@ -599,6 +599,304 @@
         "additionalProperties": false
       }
     },
+    "best_of_n_archive": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "groupId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expectedVersion": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "ownerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "leaseDurationMs": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 300000
+              }
+            },
+            "required": [
+              "groupId",
+              "expectedVersion",
+              "ownerId",
+              "leaseDurationMs"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "input",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "best_of_n_cancel": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "groupId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expectedVersion": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "ownerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "leaseDurationMs": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 300000
+              }
+            },
+            "required": [
+              "groupId",
+              "expectedVersion",
+              "ownerId",
+              "leaseDurationMs"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "input",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "best_of_n_select": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "mutation": {
+                "type": "object",
+                "properties": {
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "ownerId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "leaseDurationMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 300000
+                  }
+                },
+                "required": [
+                  "groupId",
+                  "expectedVersion",
+                  "ownerId",
+                  "leaseDurationMs"
+                ],
+                "additionalProperties": false
+              },
+              "candidateId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "headSha": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "mutation",
+              "candidateId",
+              "headSha"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "input",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "best_of_n_start": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "repositoryId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceRoot": {
+                "type": "string",
+                "minLength": 1
+              },
+              "baseRef": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "targetRef": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "targetIsNew": {
+                "type": "boolean"
+              },
+              "budgetPolicy": {
+                "type": "object",
+                "properties": {
+                  "maxCostUsd": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maxDurationMs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "candidates": {
+                "minItems": 2,
+                "maxItems": 4,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "agentId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "provider": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "model": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "agentId"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "ownerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "leaseDurationMs": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 300000
+              }
+            },
+            "required": [
+              "requestId",
+              "repositoryId",
+              "sourceRoot",
+              "targetIsNew",
+              "budgetPolicy",
+              "candidates",
+              "ownerId",
+              "leaseDurationMs"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "input",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
     "bot_trigger_set_armed": {
       "inputSchemaSource": "contract",
       "inputSchema": {

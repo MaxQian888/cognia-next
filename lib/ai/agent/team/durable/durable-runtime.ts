@@ -23,6 +23,7 @@ import { dexieTeamRunStore } from "@/lib/db/agent-team-runtime"
 import { createExecutionRun, getExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
 import { agentTeamExecutionRunId } from "@/lib/execution/agent-team-bridge"
 import { isPathWithinRoot, normalizeFsPath } from "@/lib/files/permissions"
+import { isTauri } from "@/lib/tauri"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type {
   AgentTeamCheckpoint,
@@ -91,6 +92,13 @@ export function redactTeamTextForPersistence(text: string): string | undefined {
 export const appTeamPathPolicy: TeamPathPolicy = {
   normalize: normalizeFsPath,
   isWithinRoot: isPathWithinRoot,
+  async canonicalize(path) {
+    // Browser-only runs have no Host filesystem. On desktop, resolve aliases
+    // on disk without requiring a Git checkout or allocating a port block.
+    if (!isTauri()) return normalizeFsPath(path)
+    const { approvalAwareTransport } = await import("@/lib/task-workspace/user-action")
+    return approvalAwareTransport.call<string>("task_workspace_canonical_root", { path })
+  },
 }
 
 export const fleetTeamRemoteSessions: TeamRemoteSessions = {

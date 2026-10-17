@@ -353,6 +353,13 @@ const workspaceProvisioning = z.object({
   include: stringArray.optional(),
 })
 
+const bestOfNMutation = z.object({
+  groupId: z.string().min(1),
+  expectedVersion: z.number().int().nonnegative(),
+  ownerId: z.string().min(1),
+  leaseDurationMs: z.number().int().positive().max(300_000),
+})
+
 const schemas = {
   fs_read_workspace_file_versioned: z.object({
     root: z.string(),
@@ -367,6 +374,45 @@ const schemas = {
     expectedSha256: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
     expectAbsent: z.boolean().optional(),
   }),
+  task_workspace_canonical_root: z.object({ path: z.string().min(1) }),
+  best_of_n_start: z.object({ input: z.object({
+    requestId: z.string().min(1),
+    repositoryId: z.string().min(1),
+    sourceRoot: z.string().min(1),
+    baseRef: z.string().min(1).nullable().optional(),
+    targetRef: z.string().min(1).nullable().optional(),
+    targetIsNew: z.boolean(),
+    budgetPolicy: z.object({
+      maxCostUsd: z.number().positive().nullable().optional(),
+      maxDurationMs: z.number().int().positive().nullable().optional(),
+    }),
+    candidates: z.array(z.object({ agentId: z.string().min(1), provider: z.string().nullable().optional(), model: z.string().nullable().optional() })).min(2).max(4),
+    ownerId: z.string().min(1),
+    leaseDurationMs: z.number().int().positive().max(300_000),
+  }) }),
+  best_of_n_get: z.object({ groupId: z.string().min(1) }),
+  best_of_n_list: emptyRequest,
+  best_of_n_cancel: z.object({ input: bestOfNMutation }),
+  best_of_n_archive: z.object({ input: bestOfNMutation }),
+  best_of_n_recover: z.object({ input: bestOfNMutation }),
+  best_of_n_select: z.object({ input: z.object({
+    mutation: bestOfNMutation,
+    candidateId: z.string().min(1),
+    headSha: z.string().min(1),
+  }) }),
+  best_of_n_candidate_progress: z.object({ input: z.object({
+    mutation: bestOfNMutation,
+    candidateId: z.string().min(1),
+    status: z.enum(["pending", "running", "succeeded", "failed", "cancelRequested", "cancelled", "recoveryRequired"]),
+    workspaceBundleId: z.string().nullable().optional(),
+    physicalRoot: z.string().nullable().optional(),
+    changesetId: z.string().nullable().optional(),
+    headSha: z.string().nullable().optional(),
+    hasChanges: z.boolean(),
+    costUsd: z.number().nonnegative().nullable().optional(),
+    error: z.string().nullable().optional(),
+    teamRunId: z.string().nullable().optional(),
+  }) }),
   task_workspace_changeset_get: changesetReference,
   task_workspace_changeset_list: z.object({
     filter: z.object({

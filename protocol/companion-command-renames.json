@@ -3590,6 +3590,33 @@
     "task_workspace_integration_list": {
       "to": "task.workspace.integration.query"
     },
+    "task_workspace_canonical_root": {
+      "to": "task.workspace.resolve_root"
+    },
+    "best_of_n_start": {
+      "to": "task.workspace.best_of_n.start"
+    },
+    "best_of_n_get": {
+      "to": "task.workspace.best_of_n.get"
+    },
+    "best_of_n_list": {
+      "to": "task.workspace.best_of_n.query"
+    },
+    "best_of_n_cancel": {
+      "to": "task.workspace.best_of_n.cancel"
+    },
+    "best_of_n_select": {
+      "to": "task.workspace.best_of_n.decide"
+    },
+    "best_of_n_archive": {
+      "to": "task.workspace.best_of_n.archive"
+    },
+    "best_of_n_candidate_progress": {
+      "to": "task.workspace.best_of_n.report_candidate"
+    },
+    "best_of_n_recover": {
+      "to": "task.workspace.best_of_n.restore"
+    },
     "task_workspace_integration_prepare": {
       "to": "task.workspace.integration.prepare"
     },
