@@ -229,6 +229,7 @@
     "0231-sandbox-snapshots-join-rootfs-and-workspace",
     "0232-a-long-run-shows-an-estimate-never-a-budget",
     "0233-a-managed-desktop-accepts-a-delivered-commit",
-    "0234-a-remote-desktop-is-a-provider-binding-brokered-by-the-host"
+    "0234-a-remote-desktop-is-a-provider-binding-brokered-by-the-host",
+    "0235-a-vscode-tunnel-installs-a-host-and-is-one-more-route-to-it"
   ]
 }
